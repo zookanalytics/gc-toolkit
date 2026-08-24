@@ -138,13 +138,14 @@ grep -q "REFUSING salvage" "$TMP/err" \
 # each write-bearing case references WORKTREE_SAFE, so a future edit that drops
 # the gate fails here rather than silently re-exposing the town repo.
 for marker in \
-  'REFUSING Case C salvage writes' \
-  'REFUSING Case D salvage writes' \
-  'Case B does not apply'; do
+  'REFUSING salvage writes'; do
   grep -qF "$marker" "$TOML" \
-    && ok "(H) salvage case gated: '$marker'" \
+    && ok "(H) salvage writes gated: '$marker'" \
     || bad "(H) missing WORKTREE_SAFE gate: '$marker'"
 done
+grep -qF 'if [ "$WORKTREE_SAFE" = "1" ]' "$TOML" \
+  && ok "(H2) the salvage block branches on WORKTREE_SAFE" \
+  || bad "(H2) the salvage block must branch on WORKTREE_SAFE"
 
 # Every `git add -A` in the formula must sit inside a WORKTREE_SAFE-gated block.
 # Cheap structural proxy: no `git add -A` may appear before the guard is defined.

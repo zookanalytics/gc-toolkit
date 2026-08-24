@@ -1,0 +1,190 @@
+# lifecycle.toml — the declared state space of the anchor lifecycle.
+# The anchor state is `status` x `merge_result`. This file is the single source
+# of truth: assets/scripts/lifecycle.sh embeds the same table as shell constants
+# (marked block `lifecycle-state-table`) and lifecycle.test.sh fails on drift.
+# Every metadata key the pack writes is enumerated in [metadata]; a key not
+# listed here is not pack state (docs/component-model.md §2-§3).
+
+[machine]
+# "unanchored" = merge_result ABSENT: not (or no longer) a merge anchor.
+states = [
+  "unanchored",
+  "pre_open_gate",
+  "pull_request",
+  "merged",
+  "abandoned",
+  "retargeted",
+  "blocked",
+  "refused_false_completion",
+]
+# States that also route the bead to a human (lifecycle.sh stamps
+# gc.routed_to=human in the same atomic update).
+human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"]
+# States whose legal status is closed; every other declared state is open.
+closed_states = ["merged"]
+
+# Legal status x merge_result combinations.
+[states.unanchored]
+status = "open|closed"
+meaning = "no merge_result recorded; not a merge anchor (or rejected back to the pool)"
+
+[states.pre_open_gate]
+status = "open"
+meaning = "branch pushed, gates armed, no PR yet"
+
+[states.pull_request]
+status = "open"
+meaning = "PR open, awaiting gates + merge"
+
+[states.merged]
+status = "closed"
+meaning = "landed; merged_sha recorded"
+
+[states.abandoned]
+status = "open"
+meaning = "PR closed unmerged externally; routed to human"
+
+[states.retargeted]
+status = "open"
+meaning = "PR base moved externally; routed to human"
+
+[states.blocked]
+status = "open"
+meaning = "recorded existing_pr unusable; routed to human"
+
+[states.refused_false_completion]
+status = "open"
+meaning = "no commits on branch; routed to human"
+
+# Transitions. Every edge names its writer; lifecycle.sh performs the write.
+# A self-edge (from == to) is always legal: an idempotent re-record.
+[[transition]]
+from = "unanchored"
+to = "pre_open_gate"
+writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh)"
+
+[[transition]]
+from = "unanchored"
+to = "pull_request"
+writer = "formulas/mol-refinery-patrol.toml merge-push, post-open path (via lifecycle.sh)"
+
+[[transition]]
+from = "unanchored"
+to = "blocked"
+writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable; via lifecycle.sh)"
+
+[[transition]]
+from = "unanchored"
+to = "refused_false_completion"
+writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle.sh)"
+
+[[transition]]
+from = "pre_open_gate"
+to = "pull_request"
+writer = "assets/scripts/pr-open.sh"
+
+[[transition]]
+from = "pre_open_gate"
+to = "unanchored"
+writer = "rejection: formulas/mol-refinery-patrol.toml or assets/scripts/signoff.sh"
+
+[[transition]]
+from = "pull_request"
+to = "merged"
+writer = "assets/scripts/merge.sh; assets/scripts/pr-facts.sh (out-of-band merge record)"
+
+[[transition]]
+from = "pull_request"
+to = "abandoned"
+writer = "assets/scripts/pr-facts.sh"
+
+[[transition]]
+from = "pull_request"
+to = "retargeted"
+writer = "assets/scripts/pr-facts.sh"
+
+[[transition]]
+from = "pull_request"
+to = "unanchored"
+writer = "rejection: formulas/mol-refinery-patrol.toml or assets/scripts/signoff.sh"
+
+[[transition]]
+from = "abandoned"
+to = "unanchored"
+writer = "human"
+
+[[transition]]
+from = "retargeted"
+to = "pull_request"
+writer = "human (base repaired; re-engage the merge queue)"
+
+[[transition]]
+from = "retargeted"
+to = "unanchored"
+writer = "human"
+
+[[transition]]
+from = "blocked"
+to = "unanchored"
+writer = "human"
+
+[[transition]]
+from = "refused_false_completion"
+to = "unanchored"
+writer = "human"
+
+[gates]
+# check_set: comma list of gate names on the anchor. Default stamped by
+# gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
+check_set_default = "codex"
+check_set_sentinel = "none"
+# check.<g> = <verb>@<oid>. green written only by signoff.sh; cleared/re-armed
+# only by the merge cadence. Merge requires every declared gate green@<live head>.
+marker_verbs = ["green", "fixable", "exception"]
+# `approval` as a check_set member is satisfied only by an external APPROVED
+# review at the live head, never by a check.approval marker.
+approval_member = "approval"
+
+# The metadata-key registry: every key the rewritten pack writes, grouped.
+[metadata.merge_identity]
+keys = [
+  "branch", "target", "merged_target", "merged_sha", "pr_url", "pr_number",
+  "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
+  "rejection_reason", "graduation", "blocked_reason", "work_dir",
+]
+
+[metadata.gates]
+keys = [
+  "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
+  "review_branch", "review_base", "reviewed_oid", "review_pool",
+  "source_review_bead", "task_kind", "dispatch_count",
+]
+
+[metadata.holds]
+keys = ["merge_hold", "rebase_hold", "tracking_only"]
+
+[metadata.human_surface]
+keys = [
+  "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.continuation_group",
+  "gc.origin", "escalation_key", "visit.recheck",
+]
+
+[metadata.deferred_dispatch]
+keys = [
+  "gc.dispatch_when_ready", "gc.dispatch_when_ready_args",
+  "gc.dispatch_when_ready_armed_by", "gc.dispatch_when_ready_armed_at",
+  "gc.dispatch_when_ready_reason",
+]
+
+[metadata.learning]
+keys = ["obs.*"]
+
+# Runtime-owned: documented here so readers know they exist; written by the
+# Gas City runtime, not by pack transitions. The pack stamps gc.routed_to only
+# as a routing decision (stamp-don't-sling, lifecycle.sh --route); the claim
+# semantics belong to the runtime.
+[metadata.runtime_owned]
+keys = [
+  "gc.routed_to", "gc.step_ref", "gc.root_bead_id", "gc.execution_routed_to",
+  "assignee", "gc.input_convoy_id", "gc.kind", "gc.outcome",
+]

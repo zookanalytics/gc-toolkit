@@ -17,7 +17,7 @@
 # had to widen for the leak to close.
 #
 # THE FIX, in two halves, both exercised here:
-#   - RECONCILE BY TITLE, not assignee (template-fragments, `patrol-wisp-reconcile`)
+#   - RECONCILE BY TITLE, not assignee (agents/witness/prompt.template.md, `patrol-wisp-reconcile`)
 #     so an orphaned wisp is visible and collectable.
 #   - GUARD THE POUR (formulas/mol-witness-patrol.toml, `patrol-wisp-pour`) so a
 #     failed assign rolls the pour back and refuses to burn the current wisp,
@@ -30,7 +30,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-FRAGMENT="$ROOT/template-fragments/layered-startup-discovery.template.md"
+PROMPT="$ROOT/agents/witness/prompt.template.md"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -52,19 +52,15 @@ extract() {
     f' "$2"
 }
 
-RECONCILE="$(extract patrol-wisp-reconcile "$FRAGMENT")"
+RECONCILE="$(extract patrol-wisp-reconcile "$PROMPT")"
 POUR="$(extract patrol-wisp-pour "$TOML")"
-FALLBACK="$(extract patrol-wisp-fallback "$FRAGMENT")"
 
 [ -n "$RECONCILE" ] \
   && ok "reconcile extracted between patrol-wisp-reconcile markers" \
-  || bad "reconcile extraction EMPTY — markers missing from $FRAGMENT"
+  || bad "reconcile extraction EMPTY — markers missing from $PROMPT"
 [ -n "$POUR" ] \
   && ok "pour guard extracted between patrol-wisp-pour markers" \
   || bad "pour extraction EMPTY — markers missing from $TOML"
-[ -n "$FALLBACK" ] \
-  && ok "no-idle-state fallback extracted between patrol-wisp-fallback markers" \
-  || bad "fallback extraction EMPTY — markers missing from $FRAGMENT"
 
 # --- Stub `gc`. --------------------------------------------------------------
 # Serves `gc bd list` from a fixture and records every `gc bd mol burn` /
@@ -124,7 +120,6 @@ chmod +x "$TMP/bin/gc"
 
 printf '%s\n' "$RECONCILE" > "$TMP/reconcile.sh"
 printf '%s\n' "$POUR"      > "$TMP/pour.sh"
-printf '%s\n' "$FALLBACK"  > "$TMP/fallback.sh"
 # The snippets are read as instructions by an agent, but they must still be
 # runnable shell — a syntax error ships a broken instruction.
 bash -n "$TMP/reconcile.sh" \
@@ -133,9 +128,6 @@ bash -n "$TMP/reconcile.sh" \
 bash -n "$TMP/pour.sh" \
   && ok "extracted pour guard is syntactically valid bash" \
   || bad "extracted pour guard failed bash -n"
-bash -n "$TMP/fallback.sh" \
-  && ok "extracted fallback is syntactically valid bash" \
-  || bad "extracted fallback failed bash -n"
 
 # run_reconcile <fixture-json> -> "<survivor>|<burned,ids>"
 run_reconcile() {
@@ -224,60 +216,13 @@ eq "$(run_pour 0 1 0)" "1||" \
 eq "$(run_pour 1 0 1)" "1|w-new|w-new" \
    "a failed rollback burn still exits non-zero (reconcile is the backstop)"
 
-# --- The no-idle-state fallback. ---------------------------------------------
-# Widening the OPEN_WISPS query off --assignee created a NEW hazard in this
-# block, which is why it is exercised here too: the queued wisp it inherits may
-# now be an unassigned ORPHAN. Burning the current wisp in favour of one that
-# never lands on a hook would stop the patrol loop dead — strictly worse than
-# the leak being fixed. The guard is to CLAIM the queued wisp first.
-# run_fallback <fixture-json> <current-wisp> [fail-id] [fail-all] -> "<burned>|<updated>"
-run_fallback() {
-  printf '%s' "$1" > "$TMP/fixture.json"
-  : > "$TMP/burned"; : > "$TMP/updated"
-  ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
-           GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="witness-1" \
-           GC_BEAD_ID="$2" GC_ASSIGN_FAILS_ID="${3:-}" GC_ASSIGN_FAILS="${4:-0}"
-    bash "$TMP/fallback.sh" >/dev/null 2>&1 ) || true
-  printf '%s|%s' \
-    "$(sort "$TMP/burned" | paste -sd, -)" "$(sort "$TMP/updated" | paste -sd, -)"
-}
-
-# THE HAZARD: an unassigned orphan is queued while a current wisp is running.
-# The fallback must CLAIM it before burning the current wisp — otherwise the
-# only surviving wisp belongs to nobody and the patrol loop stops.
-ORPHAN_QUEUED='[
-  {"id":"w-orph","status":"open","title":"mol-witness-patrol","assignee":""}
-]'
-eq "$(run_fallback "$ORPHAN_QUEUED" "w-cur")" "w-cur|w-orph" \
-   "REGRESSION: an orphaned queued wisp is CLAIMED before the current wisp is burned"
-
-# If that claim fails, the orphan must not be inherited: pour a fresh wisp
-# instead, so the loop survives even though the stray outlives this pass.
-eq "$(run_fallback "$ORPHAN_QUEUED" "w-cur" w-orph)" "w-cur|w-new,w-orph" \
-   "an unclaimable queued wisp is abandoned and a fresh one poured (loop survives)"
-
-# And when NO write can succeed, nothing burns the current wisp at all: the
-# replacement is rolled back and the patrol keeps the wisp it already has. The
-# invariant across all three arms is the same — never burn without a live,
-# assigned successor.
-eq "$(run_fallback "$ORPHAN_QUEUED" "w-cur" "" 1)" "w-new|w-new,w-orph" \
-   "with every write failing, the current wisp is NOT burned and the pour is rolled back"
-
-# Nothing queued and a current wisp running: pour, assign, then burn — the
-# ordinary cycle-recycle path, unchanged by this fix.
-eq "$(run_fallback '[]' "w-cur")" "w-cur|w-new" \
-   "with nothing queued, pours and assigns a replacement before burning the current wisp"
-
 # --- Static guard: no reconcile query may re-acquire an --assignee filter. ----
 # The doctor check (doctor/check-startup-discovery) already locks in
 # --include-infra and the title scope; this locks in the assignee-blindness that
 # closes tk-fj56a, in the same place and for the same reason.
 WITNESS_BLOCK=$(awk '
-  /\{\{ *define "layered-startup-discovery-witness" *\}\}/ {c=1; next}
-  c && /\{\{ *end *\}\}/ {c=0}
-  c' "$FRAGMENT" | awk '
   /^[[:space:]]*```/ {f = !f; next}
-  f')
+  f' "$PROMPT")
 SCOPED=$(printf '%s\n' "$WITNESS_BLOCK" \
   | grep -- "gc bd list" | grep -- "--type=molecule" | grep -c -- "--assignee" || true)
 eq "${SCOPED:-0}" "0" \

@@ -1,30 +1,18 @@
 #!/usr/bin/env bash
-# Hermetic test for the two mol-polecat-work `submit-and-exit` mirror deltas.
+# Hermetic test for mol-polecat-work's `submit-and-exit` contract.
 #
-# THE GUARDRAIL: `{{base_branch}}` answers "what did I branch FROM", never
-# "where does this land". Base's submit-and-exit spends it on the second
-# question and separately rebuilds the branch name from a template, and on a
-# rework child both misread the same way:
-#
-#   1. BRANCH GATE — a rework child filed by a REQUEST_CHANGES signoff carries
-#      metadata.branch = the reviewed branch, which workspace-setup step 3
-#      calls AUTHORITATIVE and checks out. Base's gate then demands
-#      `polecat/<bead-id>` and refuses to hand off the branch it just told the
-#      polecat to use. Obeying it forks the reviewed branch, orphans the
-#      pre-open review bead's review_branch pin, and offers the refinery a
-#      second branch to land independently of the first. The invariant that
-#      actually protects the handoff is CURRENT_BRANCH == metadata.branch;
-#      `polecat/<bead-id>` is only how FRESH work satisfies it.
-#
-#   2. TARGET RESOLVE — the signoff dispatch slings the rework child with
-#      `--var base_branch=<reviewed branch>` on purpose, so the worktree has
-#      the PR-only files (tk-qqgeo), while the child's metadata.target already
-#      names the real landing branch (REVIEW_BASE, normally main). Base writes
-#      base_branch over it, rendering target=<the branch being pushed> — a
-#      self-merge, and a strand indistinguishable from a missing merge target.
-#
-# Both defects shipped live: su-l74p, su-g805 and su-5l0q all stepped over the
-# gate and all kept target=main by hand, three rounds running (tk-3yj8g).
+# What it holds:
+#   1. BRANCH GATE — the invariant is CURRENT_BRANCH == metadata.branch;
+#      `polecat/<bead-id>` is only how FRESH work satisfies it. A rework
+#      child legitimately stands on the reviewed branch.
+#   2. TARGET RESOLVE — {{base_branch}} is "branch FROM", never "land INTO".
+#      A caller-set metadata.target wins; base_branch fills in only for
+#      fresh work; nothing resolvable fails closed (never a self-merge).
+#   3. ATOMIC HANDOFF — one gc bd update carries target + refinery assignee
+#      + cleared route + APPENDED notes; a partial handoff cannot ship.
+#   4. CHAIN CLOSE — six session-owned steps close forward via step-close.sh
+#      at BOTH terminal exits (handoff, and the auto_push=false halt), and
+#      workflow-finalize is never touched.
 #
 # This EXECUTES the real snippets extracted verbatim from the formula (between
 # the markers) against a fake `git`/`gc`, so the test cannot drift from the
@@ -258,30 +246,36 @@ eq "$(run_resolve polecat/tk-work main '{"target":""}')" \
    "0|main" \
    "empty-string metadata.target falls back to base_branch"
 
-# --- 3. Target consumption. ---------------------------------------------------
-# The write itself is the site that shipped the defect, so assert on what
-# reaches the bead: the resolved target, and --append-notes rather than the
-# --notes that silently erases the mayor's dispatch note (tk-6kf6r).
-run_consume() {
+# --- 3. The atomic handoff. -----------------------------------------------------
+# ONE gc bd update carries the whole transition — resolved target, refinery
+# assignee, cleared route, APPENDED notes — so a partial handoff cannot strand
+# the bead between writes, and --notes can never erase the dispatch note.
+# {{binding_prefix}} is substituted the way the materializer does; GC_RIG is
+# controlled per case.
+run_consume() { # <landing-target> [gc-rig]
   : > "$TMP/log"
-  printf '%s\n' "$CONSUME" > "$TMP/consume.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
   local rc=0
-  LANDING_TARGET="$1" FAKE_LOG="$TMP/log" bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  LANDING_TARGET="$1" GC_RIG="${2-}" FAKE_LOG="$TMP/log" bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 
-printf '%s\n' "$CONSUME" > "$TMP/consume.sh"
+printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
 bash -n "$TMP/consume.sh" \
-  && ok "extracted consumer is syntactically valid bash" \
-  || bad "extracted consumer failed bash -n"
+  && ok "extracted handoff is syntactically valid bash" \
+  || bad "extracted handoff failed bash -n"
 
 eq "$(run_consume main)" \
-   "0|UPDATE|tk-work --set-metadata target=main --append-notes Implemented: <brief summary>;" \
-   "writes the resolved target and APPENDS notes (never --notes)"
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "one atomic write: target + refinery assignee + cleared route + APPENDED notes"
 
 eq "$(run_consume integration/tk-c1)" \
-   "0|UPDATE|tk-work --set-metadata target=integration/tk-c1 --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=integration/tk-c1 --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
    "carries an integration-branch target through to the bead"
+
+eq "$(run_consume main myrig)" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "rig sessions get the rig-qualified refinery address"
 
 # A partial re-run that skips step 1b must not write target="". An empty
 # metadata value round-trips as set-but-empty and is not the same as absent,
@@ -292,24 +286,24 @@ eq "$(run_consume '')" \
 
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
-# the gate, and the consumer reads $LANDING_TARGET from the resolver. Run all
-# three in sequence exactly as the step does, on the rework shape that broke
-# base — the end-to-end case this whole mirror exists for.
+# the gate, and the handoff reads $LANDING_TARGET from the resolver. Run all
+# three in sequence exactly as the step does, on the rework shape — the
+# end-to-end case the gate + resolver exist for.
 : > "$TMP/log"
 printf '%s\n' "$GATE" > "$TMP/both.sh"
 printf '%s\n' "$RESOLVE" | sed "s|{{base_branch}}|polecat/su-uzy9.5|g" >> "$TMP/both.sh"
-printf '%s\n' "$CONSUME" >> "$TMP/both.sh"
+printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/both.sh"
 BOTH_RC=0
 FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":"main"}' \
-  FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
-eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape (base halted here)"
+  GC_RIG="" FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
+eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape"
 eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
    "composed run resolves the landing target to main, not to the pushed branch"
-# The only write is the target/notes handoff: metadata.branch already agreed,
-# so nothing rewrites it, and target lands on main rather than the self-merge.
+# The only write is the atomic handoff: metadata.branch already agreed, so
+# nothing rewrites it, and target lands on main rather than the self-merge.
 eq "$(tr '\n' ';' < "$TMP/log")" \
-   "UPDATE|tk-work --set-metadata target=main --append-notes Implemented: <brief summary>;" \
-   "composed run writes only the handoff, with target=main"
+   "UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "composed run writes only the atomic handoff, with target=main"
 
 # --- 5. Step-chain close. -----------------------------------------------------
 # The husk generator (tk-y389z, tk-zab6q): mol-polecat-work closed no step
@@ -456,36 +450,17 @@ eq "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')"
    "load-context" \
    "control: dependent-first closes only load-context (bd refuses blocked issues)"
 
-# The done sequence is written three times — the base prompt's two copies and
-# this formula's step — and the pack corrects the prompt copies with a
-# fragment. Two copies of the same shell block are exactly how the `--notes`
-# correction was defeated before (tk-t41dq), so require them byte-identical
-# rather than merely both present.
-FRAG="$ROOT/template-fragments/polecat-close-step-chain.template.md"
-if [ -f "$FRAG" ]; then
-  # The fragment carries the block in its one ```bash fence.
-  awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$FRAG" > "$TMP/frag-close.sh"
-  if diff -q "$TMP/frag-close.sh" "$TMP/close.sh" >/dev/null 2>&1; then
-    ok "prompt fragment ships the same chain-close block, byte for byte"
-  else
-    bad "prompt fragment and formula chain-close blocks have DRIFTED"
-    # `|| true`: diff exits 1 precisely when it has something to report, and
-    # under `set -euo pipefail` that status aborts the suite here — killing the
-    # summary line and every assertion after it. The failure is already
-    # recorded; this is only the detail.
-    diff "$TMP/frag-close.sh" "$TMP/close.sh" | sed 's/^/       /' || true
-  fi
-else
-  bad "template-fragments/polecat-close-step-chain.template.md is missing — the prompt copies of the done sequence still end at drain-ack"
-fi
+# The done sequence lives ONLY in this formula now (the native polecat prompt
+# points at it instead of duplicating it), so there is no prompt-fragment copy
+# to keep in sync. The one remaining copy is the halt arm's, pinned below.
 
 # --- 6. The auto_push=false halt exit. ----------------------------------------
 # There are two TERMINAL exits from submit-and-exit — the refinery handoff, and
 # this branch-ready halt — and only terminal exits close the chain. Every other
 # arm halts with the work resumable, where the open chain IS the recovery
 # mechanism. The first cut of this change closed the chain at the handoff and
-# left the halt arm a comment saying to run "step 8's block", four lines above
-# an `exit 0` that never reaches step 8 (tk-qkfwp7). An opt-out halt therefore
+# left the halt arm a comment saying to run "step 7's block", four lines above
+# an `exit 0` that never reaches step 7. An opt-out halt therefore
 # stranded exactly the husk the change exists to stop, and nothing here ran the
 # arm to notice. This section runs it.
 
@@ -535,16 +510,16 @@ case "$HALT" in
 esac
 
 # The two copies of the block must not drift. They cannot be one function: the
-# arm exits before step 8, and each fenced block is its own shell. So the halt
-# copy is step 8's, indented one level to sit inside the `if` — assert exactly
+# arm exits before step 7, and each fenced block is its own shell. So the halt
+# copy is step 7's, indented one level to sit inside the `if` — assert exactly
 # that, not merely that both are present. Two copies of one shell block is how
 # the --notes correction was defeated before (tk-t41dq).
 printf '%s\n' "$HALT_CLOSE" > "$TMP/halt-close.sh"
 sed 's/^/  /' "$TMP/close.sh" > "$TMP/close-indented.sh"
 if diff -q "$TMP/halt-close.sh" "$TMP/close-indented.sh" >/dev/null 2>&1; then
-  ok "halt arm ships step 8's chain-close block, byte for byte (+2 indent)"
+  ok "halt arm ships step 7's chain-close block, byte for byte (+2 indent)"
 else
-  bad "halt arm and step 8 chain-close blocks have DRIFTED"
+  bad "halt arm and step 7 chain-close blocks have DRIFTED"
   diff "$TMP/halt-close.sh" "$TMP/close-indented.sh" | sed 's/^/       /' || true
 fi
 

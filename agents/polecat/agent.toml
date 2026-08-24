@@ -1,0 +1,12 @@
+# polecat — the rig's worker pool. Claims routed work, runs mol-polecat-work
+# in a per-bead worktree, hands the pushed branch to the refinery, drains.
+scope = "rig"
+provider = "claude"
+wake_mode = "fresh"
+# Per-agent home; per-bead worktrees are created under it by workspace-setup.
+work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
+nudge = "Run gc hook --claim --json; it checks assigned work first, then routed pool work."
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 5

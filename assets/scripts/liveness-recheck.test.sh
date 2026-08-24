@@ -30,21 +30,19 @@
 #      bead on a signal it did not verify is worse than the staleness it fixes,
 #      because a hidden bead has no next pass that surfaces it.
 #
-#   2. THE WIRING that makes it fire. The formula's marked `visit-recheck-stamp`
-#      block is extracted from the RAW file and executed, so the stamps cannot
-#      drift from what an agent runs; the converse loop's claim-time hook is
-#      asserted to read `visit.recheck` as a PATH and run it, never to eval a
-#      command string. Without the stamps, a re-check would have to parse bead
-#      ids back out of prose — the exact fragility the survivor handoff removed
-#      one step upstream (bead tk-7uvm9).
-#
+#   2. THE WIRING that makes it fire. liveness-sweep.sh stamps the id lists
+#      and the visit.recheck PATH (covered by liveness-sweep.test.sh); here the
+#      converse loop's claim-time hook is asserted to read `visit.recheck` as a
+#      PATH and run it, never to eval a command string, and the stamp key /
+#      standing-kinds list are pinned against liveness-sweep.sh so the writer
+#      and the reader cannot drift apart.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no gh.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
-FORMULA="$ROOT/formulas/mol-liveness-sweep.toml"
+SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
 PROMPT="$ROOT/agents/converse/prompt.template.md"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -57,7 +55,7 @@ has() { grep -qF -- "$2" "$3" && ok "$1" || bad "$1" "missing: $2"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 [ -s "$SCRIPT" ]  || { echo "missing $SCRIPT" >&2; exit 1; }
-[ -s "$FORMULA" ] || { echo "missing $FORMULA" >&2; exit 1; }
+[ -s "$SWEEP" ]  || { echo "missing $SWEEP" >&2; exit 1; }
 [ -s "$PROMPT" ]  || { echo "missing $PROMPT" >&2; exit 1; }
 
 echo "── the script is shipped executable and syntactically valid ──"
@@ -238,80 +236,15 @@ printf 'FAIL\n' > "$STUB_VISIT"
     && bad "an unreadable visit exits non-zero" "exited 0" \
     || ok "an unreadable visit exits non-zero"
 
-# --- 4. the formula stamps what the re-check reads ---------------------------
-echo "── the formula's marked visit-recheck-stamp block ──"
-extract() { awk -v m="$1" '$0 ~ ("# >>> " m) {inb=1; next} $0 ~ ("# <<< " m) {inb=0} inb' "$2"; }
-extract visit-recheck-stamp "$FORMULA" > "$TMP/stamp.sh"
-[ -s "$TMP/stamp.sh" ] && ok "visit-recheck-stamp block present" \
-    || { bad "visit-recheck-stamp block present" "no marked block in $FORMULA"; }
-bash -n "$TMP/stamp.sh" && ok "visit-recheck-stamp: valid bash" \
-    || bad "visit-recheck-stamp: valid bash" "bash -n failed"
-# The block lives in a TOML """ string, so TOML eats escapes before an agent
-# sees them: a trailing backslash silently joins two lines. This test reads the
-# RAW file while the agent runs the PARSED string, so any backslash means the
-# two texts differ and this assertion stops pinning what actually runs. -F, not
-# a bracket class: `grep '[\]'` is a GNU extension that ugrep rejects outright,
-# which would make this check pass vacuously wherever grep is not GNU.
-grep -qF '\' "$TMP/stamp.sh" \
-    && bad "visit-recheck-stamp: no backslash (TOML would eat it)" "found a backslash" \
-    || ok "visit-recheck-stamp: no backslash (TOML would eat it)"
-python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' "$FORMULA" 2>/dev/null \
-    && ok "the formula still parses as TOML" || bad "the formula still parses as TOML" "tomllib rejected it"
-
-echo "── executing the block stamps the four keys the re-check and the hook read ──"
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
-if [ "$1" = "bd" ] && [ "$2" = "update" ]; then shift 2; printf '%s\n' "$@" >> "$STAMP_CAP"; fi
-exit 0
-GC
-chmod +x "$TMP/bin/gc"
-STAMP_CAP="$TMP/stamp-cap.txt"; export STAMP_CAP
-: > "$STAMP_CAP"
-# A rig root holding an executable copy, reached through the candidate search —
-# the importer case, where $GC_RIG_ROOT is a rig with no assets/ of its own.
-mkdir -p "$TMP/pack/assets/scripts" "$TMP/importer"
-cp "$SCRIPT" "$TMP/pack/assets/scripts/liveness-recheck.sh"
-chmod +x "$TMP/pack/assets/scripts/liveness-recheck.sh"
-(
-    cd "$TMP/importer" || exit 1
-    VISIT="tk-visit"; export VISIT
-    NEW='[{"id":"n-1"},{"id":"n-2"}]'; export NEW
-    CARRIED='[{"id":"c-1"}]'; export CARRIED
-    PASS_AT="2026-08-12T00:10:00Z"; export PASS_AT
-    GC_RIG_ROOT="$TMP/importer"; export GC_RIG_ROOT
-    GC_CITY_PATH="$TMP"; export GC_CITY_PATH
-    mkdir -p "$TMP/rigs"; ln -sfn "$TMP/pack" "$TMP/rigs/gc-toolkit"
-    # shellcheck disable=SC1090
-    . "$TMP/stamp.sh"
-)
-has "the stamp carries the new id list"     "sweep.new_ids=n-1,n-2"          "$STAMP_CAP"
-has "the stamp carries the carried id list" "sweep.carried_ids=c-1"          "$STAMP_CAP"
-has "the stamp carries the census cut"      "sweep.pass_at=2026-08-12T00:10:00Z" "$STAMP_CAP"
-has "the stamp carries the re-check path"   "visit.recheck=$TMP/rigs/gc-toolkit/assets/scripts/liveness-recheck.sh" "$STAMP_CAP"
-grep -qF -- "visit.recheck=$TMP/rigs/gc-toolkit/assets/scripts/liveness-recheck.sh tk-visit" "$STAMP_CAP" \
-    && bad "visit.recheck is a PATH, not a command string" "the stamp appended an argument — the hook runs it as an executable" \
-    || ok "visit.recheck is a PATH, not a command string"
-
-echo "── with no copy on any candidate root, the ids still ship and the gap is announced ──"
-: > "$STAMP_CAP"
-WARN="$(
-    cd "$TMP/importer" || exit 1
-    VISIT="tk-visit"; export VISIT
-    NEW='[{"id":"n-1"}]'; export NEW
-    CARRIED='[]'; export CARRIED
-    PASS_AT="2026-08-12T00:10:00Z"; export PASS_AT
-    GC_RIG_ROOT="$TMP/importer"; export GC_RIG_ROOT
-    GC_CITY_PATH="$TMP/nowhere"; export GC_CITY_PATH
-    # shellcheck disable=SC1090
-    . "$TMP/stamp.sh" 2>&1 >/dev/null
-)"
-has "the id lists are stamped even with no script found" "sweep.new_ids=n-1" "$STAMP_CAP"
-grep -qF "visit.recheck=" "$STAMP_CAP" \
-    && bad "no re-check path is invented when none was found" "stamped a path that does not exist" \
-    || ok "no re-check path is invented when none was found"
-printf '%s' "$WARN" | grep -q "no liveness-recheck.sh" \
-    && ok "the missing script is announced for the body" \
-    || bad "the missing script is announced for the body" "got: $WARN"
+# --- 4. the writer side: liveness-sweep.sh stamps what the re-check reads ----
+# The stamping behaviour itself is exercised end-to-end in
+# liveness-sweep.test.sh; here the key strings are pinned so writer and
+# reader cannot drift apart.
+echo "── liveness-sweep.sh stamps the keys this script reads ──"
+for key in sweep.new_ids sweep.carried_ids sweep.pass_at visit.recheck; do
+    grep -qF "$key=" "$SWEEP" && ok "the sweep stamps $key" \
+        || bad "the sweep stamps $key" "no $key= write in $SWEEP"
+done
 
 # --- 5. the claim-time hook in the converse loop -----------------------------
 # The stamp only matters if something runs it. The sitting is where the body is
@@ -326,8 +259,9 @@ has "the corrected census supersedes the body" "supersedes the body's lists" "$P
 
 # The seam between the two files is where this fix can rot without either side
 # looking wrong, so the hook is EXECUTED rather than grepped: the stamp key the
-# formula writes and the key the prompt reads have to be the same string, and a
+# sweep writes and the key the prompt reads have to be the same string, and a
 # text assertion on each file separately would not notice them drifting apart.
+extract() { awk -v m="$1" '$0 ~ ("# >>> " m) {inb=1; next} $0 ~ ("# <<< " m) {inb=0} inb' "$2"; }
 extract visit-recheck-hook "$PROMPT" | sed 's/^   //' > "$TMP/hook.sh"
 [ -s "$TMP/hook.sh" ] && ok "visit-recheck-hook block present in the converse prompt" \
     || bad "visit-recheck-hook block present in the converse prompt" "no marked block in $PROMPT"
@@ -338,10 +272,10 @@ bash -n "$TMP/hook.sh" && ok "visit-recheck-hook: valid bash" \
 # rather than asserted against a literal here: if this test spelled the key
 # itself, a rename in the formula plus a matching rename in the test would pass
 # while the converse hook silently read a key nobody writes any more.
-STAMP_KEY=$(sed -n 's/.*--set-metadata "\(visit\.[a-z_]*\)=.*/\1/p' "$TMP/stamp.sh" | head -1)
+STAMP_KEY=$(sed -n 's/.*"\(visit\.[a-z_]*\)=.*/\1/p' "$SWEEP" | head -1)
 HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$TMP/hook.sh" | head -1)
-[ -n "$STAMP_KEY" ] && ok "the stamp block writes a visit.* key" \
-    || bad "the stamp block writes a visit.* key" "found none in the marked block"
+[ -n "$STAMP_KEY" ] && ok "the sweep writes a visit.* key" \
+    || bad "the sweep writes a visit.* key" "found none in liveness-sweep.sh"
 eq "$HOOK_KEY" "$STAMP_KEY" "the key the sweep stamps is the key the sitting reads"
 
 cat > "$TMP/bin/gc" <<'GC'
@@ -381,17 +315,11 @@ echo "── the standing-record list agrees across the sweep and the re-check �
 # holds one the sweep is still filing, and either way the disagreement shows up
 # only as a bead a sitting cannot disposition.
 kinds_of() { sed -n 's/.*def standing_kinds: *\(\[[^]]*\]\);.*/\1/p' "$1" | head -1 | tr -d ' '; }
-F_KINDS="$(kinds_of "$FORMULA")"
+F_KINDS="$(kinds_of "$SWEEP")"
 [ -n "$F_KINDS" ] && ok "the sweep names a standing_kinds list" \
-    || bad "the sweep names a standing_kinds list" "no def standing_kinds in $FORMULA"
+    || bad "the sweep names a standing_kinds list" "no def standing_kinds in $SWEEP"
 eq "$(kinds_of "$SCRIPT")" "$F_KINDS" \
    "the standing records the sweep excludes are the ones the re-check holds"
-
-echo "── the formula documents why the body alone cannot be trusted ──"
-has "the classify step stamps the census cut" 'sweep.pass_at' "$FORMULA"
-has "the normalize step reads the cut back"   'sweep.pass_at"] // ""'  "$FORMULA"
-has "the body leads with the cut and the re-check" 'Census cut' "$FORMULA"
-has "the evidence is on the record"           'tk-gvas6' "$FORMULA"
 
 echo
 echo "liveness-recheck: $PASS passed, $FAIL failed"

@@ -36,21 +36,19 @@
 #      directory, which is the only way to see that.
 #
 #   5. THE SUBSET PROPERTY, which is the soundness argument itself. The precheck
-#      is only safe because its exclusions are a strict subset of the shipped
-#      classifier's, so its survivor set is a SUPERSET of the true candidate set
-#      and "zero locally" implies "zero really". Checked by running BOTH — the
-#      precheck's own filter and the `classify-candidates` block extracted
-#      verbatim from mol-liveness-sweep.toml — over one shared fixture, with a
-#      positive control so a passing run cannot mean "both sets were empty".
-#
+#      is only safe because its exclusions are a strict subset of the sweep's
+#      (liveness-sweep.sh), so its survivor set is a SUPERSET of the true
+#      candidate set and "zero locally" implies "zero really". Checked by
+#      running BOTH — the precheck's own filter and the sweep's marked classify
+#      block — over one shared fixture, with a positive control so a passing
+#      run cannot mean "both sets were empty".
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no agent.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-sweep-precheck.sh"
-FORMULA="$ROOT/formulas/mol-liveness-sweep.toml"
-ORDER="$ROOT/orders/liveness-sweep.toml"
+SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -63,7 +61,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esa
 
 [ -s "$SCRIPT" ] || { echo "missing $SCRIPT"; exit 1; }
 [ -x "$SCRIPT" ] || { echo "$SCRIPT is not executable"; exit 1; }
-[ -s "$FORMULA" ] || { echo "missing $FORMULA"; exit 1; }
+[ -s "$SWEEP" ]  || { echo "missing $SWEEP"; exit 1; }
 
 echo "── the script is valid shell ──"
 bash -n "$SCRIPT" && ok "liveness-sweep-precheck.sh: valid bash" \
@@ -186,11 +184,18 @@ STATE="$LIVENESS_SWEEP_STATE_DIR/testrig"
 # `$(...)` runs in a subshell, so the exit code — which is this script's entire
 # contract — would not survive the capture.
 OUT=""; RC=0
+# BASELINE_CSV, when set, is written into the per-rig state file — the delta
+# baseline liveness-sweep.sh keeps beside the cooldown stamp.
 run_precheck() { # run_precheck [args...] -> sets OUT and RC
     rm -rf "$LIVENESS_SWEEP_STATE_DIR"
+    if [ -n "${BASELINE_CSV:-}" ]; then
+        mkdir -p "$STATE"
+        printf '%s\n' "$BASELINE_CSV" > "$STATE/reported"
+    fi
     : > "$FIXDIR/reads"
     OUT="$("$SCRIPT" "$@" 2>&1)"; RC=$?
 }
+BASELINE_CSV="f-carried"
 survivors_of() { printf '%s\n' "$1" | sed -n 's/^  new: //p' | tr -d ' '; }
 
 # --- 1. the non-empty path: the pass runs ------------------------------------
@@ -259,9 +264,8 @@ echo "── a stable population is not news: survivors already in the baseline 
 # Every survivor is in sweep.reported, so the delta is empty even though the
 # census is not. This is the common case on a busy rig.
 jq 'map(select(.id == "f-carried" or .id == "f-plain"))' "$TMP/ready.bak" > "$FIX/ready.json"
-jq '(.[] | select(.id == "f-subject") | .metadata["sweep.reported"]) |= "f-carried,f-plain"' \
-   "$TMP/live.bak" > "$FIX/live.json"
-run_precheck
+cp "$TMP/live.bak" "$FIX/live.json"
+BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "carried-only survivors are not new — no agent session"
 has "$OUT" "local survivors 2 -> new 0" "the funnel shows the census, not just the delta"
 
@@ -273,9 +277,8 @@ eq "$RC" "0" "a live visit on the subject runs the pass"
 has "$OUT" "a visit is already live" "and says which condition fired"
 # A live visit on some OTHER subject must not block the skip — the condition is
 # about this sweep's subject, not about visits in general.
-jq '(.[] | select(.id == "f-subject") | .metadata["sweep.reported"]) |= "f-carried,f-plain"' \
-   "$TMP/live.bak" > "$FIX/live.json"
-run_precheck
+cp "$TMP/live.bak" "$FIX/live.json"
+BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
 # The su-ab9je shape at the SUBJECT level (bead tk-d6ddn). The sitting is live
@@ -286,11 +289,9 @@ eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 # same fixture shape, so the two cannot drift apart.
 echo "── a live visit named ONLY by its tracks edge still runs the pass ──"
 jq 'map(select(.id == "f-carried" or .id == "f-plain"))' "$TMP/ready.bak" > "$FIX/ready.json"
-jq '(.[] | select(.id == "f-subject") | .metadata["sweep.reported"]) |= "f-carried,f-plain"' \
-   "$TMP/live.bak" \
-  | jq '. + [{"id":"v-4","title":"visit: the sweep subject — stamp landed empty","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-4","depends_on_id":"f-subject","type":"tracks"}]}]' \
-  > "$TMP/live.visit2" && cp "$TMP/live.visit2" "$FIX/live.json"
-run_precheck
+jq '. + [{"id":"v-4","title":"visit: the sweep subject — stamp landed empty","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-4","depends_on_id":"f-subject","type":"tracks"}]}]' \
+   "$TMP/live.bak" > "$TMP/live.visit2" && cp "$TMP/live.visit2" "$FIX/live.json"
+BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "0" "a visit whose stamp is EMPTY still reads as live, via its tracks edge"
 has "$OUT" "a visit is already live" "and says which condition fired"
 
@@ -407,13 +408,18 @@ rm -rf "$LIVENESS_SWEEP_STATE_DIR"
     || ok "--dry-run does not stamp"
 # An unwritable state dir is the one condition that refuses to run: with no
 # cadence the check would dispatch a session every tick.
-rm -rf "$LIVENESS_SWEEP_STATE_DIR"
-mkdir -p "$TMP/nowrite"; : > "$TMP/nowrite/blocker"; chmod 500 "$TMP/nowrite"
-OUT="$(LIVENESS_SWEEP_STATE_DIR="$TMP/nowrite/state" "$SCRIPT" 2>&1)"; RC=$?
-chmod 700 "$TMP/nowrite"
-eq "$RC" "1" "an unwritable state dir refuses to run rather than storm"
-has "$OUT" "CANNOT WRITE the cooldown stamp" "and says exactly what is broken"
-has "$OUT" "the sweep is OFF" "and that the sweep is off until it is fixed"
+if [ "$(id -u)" -eq 0 ]; then
+    # root ignores directory modes, so the unwritable case cannot be staged.
+    ok "an unwritable state dir refuses to run rather than storm (skipped: running as root)"
+else
+    rm -rf "$LIVENESS_SWEEP_STATE_DIR"
+    mkdir -p "$TMP/nowrite"; : > "$TMP/nowrite/blocker"; chmod 500 "$TMP/nowrite"
+    OUT="$(LIVENESS_SWEEP_STATE_DIR="$TMP/nowrite/state" "$SCRIPT" 2>&1)"; RC=$?
+    chmod 700 "$TMP/nowrite"
+    eq "$RC" "1" "an unwritable state dir refuses to run rather than storm"
+    has "$OUT" "CANNOT WRITE the cooldown stamp" "and says exactly what is broken"
+    has "$OUT" "the sweep is OFF" "and that the sweep is off until it is fixed"
+fi
 
 echo "── the report survives the controller discarding stdout ──"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -492,35 +498,16 @@ rm -rf "$KEYS"
 eq "$(find "$KEYS/liveness-sweep" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')" "2" \
    "two rig roots ending in the same name keep separate windows"
 
-# --- 5. the order wiring -----------------------------------------------------
-echo "── the order is wired to this script, with one source for the cadence ──"
-if [ -s "$ORDER" ]; then
-    ORDER_TXT="$(cat "$ORDER")"
-    has "$ORDER_TXT" 'trigger = "condition"' "the order is condition-triggered"
-    has "$ORDER_TXT" "liveness-sweep-precheck.sh" "its check is this script"
-    has "$ORDER_TXT" 'formula = "mol-liveness-sweep"' "the formula is unchanged"
-    hasnt "$ORDER_TXT" "interval =" "no inert interval key — a condition trigger ignores it"
-    # check_timeout must exceed this script's own worst case, or a wedged store
-    # is killed mid-read and reads as not-due: a silent skip, the one outcome
-    # this whole design exists to prevent.
-    CT="$(printf '%s\n' "$ORDER_TXT" | sed -n 's/^check_timeout *= *"\([0-9]*\)s".*/\1/p')"
-    [ -n "$CT" ] && [ "$CT" -gt $((45 * 3)) ] \
-        && ok "check_timeout ${CT}s exceeds the script's worst case (3 reads x 45s)" \
-        || bad "check_timeout exceeds the script's worst case" "got '${CT:-unset}'s, need > 135s"
-else
-    bad "orders/liveness-sweep.toml exists" "missing"
-fi
-
 # --- 6. the subset property: the soundness argument, mechanically ------------
 # The precheck is safe ONLY because its exclusions are a strict subset of the
-# shipped classifier's. Run both over one fixture and assert containment. The
-# classifier half is EXTRACTED VERBATIM from the formula, so this cannot drift
-# from the instruction an agent actually runs.
+# sweep's. Run both over one fixture and assert containment. The classifier
+# half is the sweep's own marked classify block, extracted verbatim, so this
+# cannot drift from the code that actually runs.
 echo "── the precheck's survivors are a SUPERSET of the classifier's candidates ──"
 extract() { awk -v m="$1" '$0 ~ ("# >>> " m) {inb=1; next} $0 ~ ("# <<< " m) {inb=0} inb' "$2"; }
-extract classify-candidates "$FORMULA" > "$TMP/classify.sh"
-[ -s "$TMP/classify.sh" ] && ok "the formula still has a marked classify-candidates block" \
-    || bad "the formula still has a marked classify-candidates block" "extract found nothing"
+extract classify "$SWEEP" > "$TMP/classify.sh"
+[ -s "$TMP/classify.sh" ] && ok "liveness-sweep.sh still has a marked classify block" \
+    || bad "liveness-sweep.sh still has a marked classify block" "extract found nothing"
 
 # The comparison runs on a fixture with NO dependency edges ANYWHERE — not just
 # none on the candidates. That matters, and getting it wrong is what this
@@ -547,8 +534,10 @@ EDGES_LEFT="$(jq -s '[.[][] | .dependencies // [] | length] | add // 0' \
 eq "$EDGES_LEFT" "0" "precondition: the containment fixture has no edges, so the edge check is a no-op"
 
 FIXDIR="$CFIX"; export FIXDIR
-LIVE="$CFIX/live.json" READY="$CFIX/ready.json"
-export LIVE READY
+LIVE="$CFIX/live.json" READY="$CFIX/ready.json" ALIVE="$CFIX/alive.json"
+jq -s 'add' "$LIVE" "$CFIX/widen.json" > "$ALIVE"
+export LIVE READY ALIVE
+PROG=liveness-sweep
 # The classifier's two batched inputs. OPEN_PRS answers for the one PR-parked
 # bead in the fixture; WORKED for the one convoy-driven bead. Supplying them is
 # what makes this a real subset test: they are precisely the exclusions the
@@ -560,12 +549,13 @@ export LIVE READY
 OPEN_PRS='["https://github.com/zookanalytics/signal-loom/pull/521"]'
 # shellcheck disable=SC2089
 WORKED='["f-worked"]'
+HUSK_STEPS='[]'
 # shellcheck disable=SC2090
-export OPEN_PRS WORKED
+export OPEN_PRS WORKED HUSK_STEPS
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
-run_precheck --dry-run
+BASELINE_CSV="" run_precheck --dry-run
 PRE_IDS="$(survivors_of "$OUT")"
 
 # Positive control FIRST: a containment assertion over two empty sets passes

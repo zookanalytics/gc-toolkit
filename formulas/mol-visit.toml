@@ -56,13 +56,9 @@ gc bd dep add "$VISIT" {{subject}} --type=tracks
 ```
 
 The visit bead's body is the visit prompt; extend the `-d` body if {{visit}}
-alone under-specifies the visit. Stamp-don't-sling, one key per flag, and
-the POOL must be the rig-qualified exact-match form
-(docs/gascity-routing-model.md). Warm, the live group session vacuums the
-visit; cold, pool demand spawns one. `task_kind=visit` is the
-structural marker that makes a visit legible as engagement (to the
-board and to patrols) — note the witness's orphan recovery deliberately
-does NOT skip on it: a visit whose session died mid-hold SHOULD return to
-the pool, because respawn-and-reconstitute-from-the-record is the cold
-continuity path (specs/2026-08-fresh-start/spine-port.md, decision D4).
+alone under-specifies it. Stamp-don't-sling, one key per flag, and the POOL
+must be the rig-qualified exact-match form (docs/gascity-routing-model.md).
+Warm, the live group session vacuums the visit; cold, pool demand spawns
+one. `task_kind=visit` is the structural marker that makes a visit legible
+as engagement.
 """

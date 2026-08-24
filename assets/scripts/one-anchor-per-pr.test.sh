@@ -177,21 +177,16 @@ grep -q 'merge_result=' <<< "$REWORK_ARM" \
   && bad "(8) rework arm must NOT stamp merge_result (would mint a second anchor)" \
   || ok "(8) rework arm stamps no merge_result — \$WORK never enters the anchor class"
 
-# The signoff must link to the RESOLVED anchor, not unconditionally to $WORK:
-# the dispatch stamps anchor_bead from GATING_ANCHOR and the gate-dep BLOCKS it.
-grep -q -- '--set-metadata anchor_bead="\$GATING_ANCHOR"' "$TOML" \
-  && ok "(9) review dispatch stamps anchor_bead from the resolved GATING_ANCHOR" \
-  || bad "(9) review dispatch must stamp anchor_bead=\"\$GATING_ANCHOR\""
-grep -q -- '--blocks "\$GATING_ANCHOR"' "$TOML" \
-  && ok "(10) review gate-dep BLOCKS the resolved GATING_ANCHOR" \
-  || bad "(10) review gate-dep must block \"\$GATING_ANCHOR\""
+# Review dispatch moved to the cadence's gate-ensure; the formula's remaining
+# duty is that the transitions land on the right bead, checked below.
 
-# The gating transitions (both sub-states) must sit INSIDE the terminal markers,
-# downstream of the rework arm, so a rework hand-back can never reach them.
+# The gating transitions (both sub-states, written through lifecycle.sh) must
+# sit INSIDE the terminal markers, downstream of the rework arm, so a rework
+# hand-back can never reach them.
 T_START=$(grep -n '# >>> one-anchor-per-pr-terminal' "$TOML" | head -1 | cut -d: -f1)
 T_END=$(grep -n '# <<< one-anchor-per-pr-terminal' "$TOML" | head -1 | cut -d: -f1)
-PREOPEN_LINE=$(grep -n -- '--set-metadata merge_result=pre_open_gate' "$TOML" | head -1 | cut -d: -f1)
-POSTOPEN_LINE=$(grep -n -- '--set-metadata merge_result=pull_request' "$TOML" | head -1 | cut -d: -f1)
+PREOPEN_LINE=$(grep -n -- '--to pre_open_gate' "$TOML" | head -1 | cut -d: -f1)
+POSTOPEN_LINE=$(grep -n -- '--to pull_request' "$TOML" | head -1 | cut -d: -f1)
 { [ -n "$T_START" ] && [ -n "$T_END" ] && [ -n "$PREOPEN_LINE" ] && [ -n "$POSTOPEN_LINE" ] \
   && [ "$PREOPEN_LINE" -gt "$T_START" ] && [ "$PREOPEN_LINE" -lt "$T_END" ] \
   && [ "$POSTOPEN_LINE" -gt "$T_START" ] && [ "$POSTOPEN_LINE" -lt "$T_END" ]; } \

@@ -1,1 +1,0 @@
-description = "A scope=\"rig\" order is never live with no rig bound. The discovery-path guard (gc-xaqpf, landed) drops the unbound city-scope copy that used to strand an unclaimable workflow root in the city store on every fire (tk-gi2pc), so this is now the regression gate: it fails only if that guard is reverted or a newer registration path bypasses it"

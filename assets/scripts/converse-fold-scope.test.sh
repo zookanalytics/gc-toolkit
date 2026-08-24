@@ -6,9 +6,10 @@
 # The bug: the check keyed two per-visit decisions off the SHARED
 # gc.continuation_group. That assumes one subject == one topic, which is
 # false for a standing scope (task_kind=triage-subject), where the group
-# is a bucket carrying one visit per distinct item — the shape
-# assets/scripts/detect-stalled-workflows.sh files, one visit per
-# workflow root, each stamped stall_root=<root> under one subject.
+# is a bucket carrying one visit per distinct item — the root-scoped
+# stall-visit shape (one visit per workflow root, each stamped
+# stall_root=<root> under one subject), which liveness-sweep.sh's root
+# fold consumes.
 #
 # Two failures, both silent:
 #   1. LOSS — a sitting about workflow A folds into a live sitting about
@@ -33,7 +34,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
 PROMPT="$REPO/agents/converse/prompt.template.md"
-DETECT="$REPO/assets/scripts/detect-stalled-workflows.sh"
+SWEEP="$REPO/assets/scripts/liveness-sweep.sh"
 
 PASS=0
 FAIL=0
@@ -54,7 +55,7 @@ is() {
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got '$2', want '$3'"; fi
 }
 
-for f in "$PROMPT" "$DETECT"; do
+for f in "$PROMPT" "$SWEEP"; do
     [ -r "$f" ] || {
         printf 'converse-fold-scope: cannot read %s\n' "$f" >&2
         exit 1
@@ -209,10 +210,10 @@ have "the prompt reads an empty holder as HOLD, not as fold" \
     'When it is EMPTY the' "$PROMPT"
 
 echo "── the contract the block is written against ──"
-# stall_root is the producer's key. If the detector renames it, this test
-# fails here rather than the fold quietly widening back to the bucket.
-have "the stall detector still stamps stall_root on the visit" \
-    '--set-metadata "stall_root=$root"' "$DETECT"
+# stall_root is the shared key. If the sweep's root fold renames it, this
+# test fails here rather than the fold quietly widening back to the bucket.
+have "the liveness sweep still folds on the stall_root key" \
+    '.metadata.stall_root // empty' "$SWEEP"
 have "the fold rule cites its pattern bead" 'tk-ogsok' "$PROMPT"
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"

@@ -1,0 +1,1 @@
+description = "I4: every pull request has exactly one owning anchor — two or more OPEN beads carrying the same pr_url is an error, because the weakest check_set among the claimants would decide the merge and merge.sh's refuse-on-sight hold only fires when someone tries to land it"

@@ -1,0 +1,1 @@
+description = "I5: no bead is closed while its work is unlanded — a CLOSED bead carrying merge_result=pull_request or pre_open_gate is an error (the anchor left the merge queue without landing), and a closed merge_result=merged bead with no merged_sha recorded is a warning; ledger-only, no gh calls"

@@ -1,261 +1,107 @@
 #!/usr/bin/env bash
-# quota-park-nudge — resume agents parked at a provider quota banner.
-#
-# Bug tk-al95k. When a provider quota window closes mid-turn, the agent's turn
-# ENDS inside the block: the session stays alive (`state=active` — the
-# controller's liveness view sees nothing wrong), sits at an idle prompt under
-# the limit banner, and has no pending work and no timer of its own to drive it
-# when the window reopens. Observed twice — Claude session limits
-# (2026-07-22: 1h26m of dead time *after* the block expired, two rig witnesses,
-# so per-rig orphan recovery was down in both) and Codex usage limits
-# (2026-08-02: ~7h30m, two review polecats holding the gc-toolkit merge queue).
-# Both times a single `gc session nudge` recovered every agent within 20s.
-#
-# So: poll every live session's pane and nudge the ones showing a limit banner.
-#
-# Two rules the recurrences taught us:
-#
-#   1. Not provider-specific. One defect, two providers — the signature set
-#      covers both wordings and is overridable ($QUOTA_PARK_MATCH) for a
-#      provider we have not met yet.
-#   2. Do not gate recovery on the stated reset time. Quota can come back by a
-#      route no banner predicts: on 2026-08-02 the Codex banner said "Aug 8th"
-#      and was probably right about the natural window, but the operator
-#      triggered a manual reset on Aug 2 — sleeping until the parsed deadline
-#      would have kept those agents parked six extra days (bead correction,
-#      mayor, 2026-08-02T16:35Z). The banner time is a lower bound worth
-#      knowing, never an authority, so this polls instead of scheduling. Being
-#      early costs one no-op nudge; being late costs a day of throughput.
-#
-# A nudge is the only action taken. Killing a quota-parked agent is wrong: the
-# session is alive and correct, a fresh one hits the same block, and the
-# context is lost for nothing. This never files a warrant (see the same rule in
-# the deacon/witness patrols, which is where seven were filed against two live
-# agents during the 2026-08-02 recurrence).
-#
-# Those patrols hold their warrant back on THIS script's verdict, never on the
-# pane: `--status` below is the closed-field surface they read, and the reason
-# a banner an agent printed itself cannot switch off its own recovery.
-#
-# Runs as an exec order (no LLM, no agent, no wisp).
+# quota-park-nudge — resume agents parked at a provider quota banner
+# (bug tk-al95k: a quota window closing mid-turn ends the agent's turn; the
+# session stays state=active, idle under the banner, with nothing to wake it).
+# Job: poll every live session's pane; nudge the ones showing a limit banner.
+# A nudge is the ONLY action — never kill, never file a warrant. Two rules:
+# the signature set is provider-agnostic (extend via $QUOTA_PARK_MATCH), and
+# recovery never sleeps until the banner's stated reset time (a manual reset
+# can land early; being early costs one no-op nudge, being late costs a day).
+# Callers: the quota-park-nudge exec order (3m cadence); the deacon/witness
+# patrols read the closed-field `--status` surface below INSTEAD of the pane.
 # See docs/quota-park-recovery.md.
 set -euo pipefail
 
-# Lines of pane to capture, and how many of those are the CURRENT screen. A real
-# park ends with the banner: below it there is only TUI chrome (prompt box,
-# status line), 6-8 lines in both CLIs. Anything further up is history — an
-# agent that *mentioned* a limit and kept working, or a working indicator from a
-# turn that has already ended. Every classification — banner, citation, busy —
-# reads the tail window and nothing above it (see pane_tail). The capture stays
-# wider than that window on purpose: it is the outer bound on what one peek
-# costs, and it leaves TAIL_LINES room to be raised on a host with taller chrome
-# without also having to raise PEEK_LINES.
+# Pane lines captured, and the tail window that counts as the CURRENT screen
+# (a real park ends with the banner; anything above the tail is history).
 PEEK_LINES="${QUOTA_PARK_PEEK_LINES:-20}"
 TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 
-# Provider quota banners. Anchored on the durable phrase, not the apostrophe
-# (Claude and Codex both render "You've" with a typographic ' that a C-locale
-# `.` will not match) and not on the reset clause (per-provider format, and
-# per rule 2 nothing here acts on it).
-#   Claude: "You've hit your session limit · resets 10:10am (UTC)"
-#           "Claude usage limit reached · resets 3pm"
-#           "/usage-credits to finish what you're working on."
-#   Codex:  "You've hit your usage limit... try again at Aug 8th, 2026 7:56 PM"
-#
-# Every alternative is anchored to something only a PROVIDER says: the
-# user-possessive "your … limit", or a named provider/plan in front of it. The
-# subject is load-bearing — an earlier draft carried a bare
-# `(session|usage|rate) limit (reached|exceeded)`, which mechanically matches an
-# ordinary idle tool error like "Error: API rate limit exceeded". That pane is
-# not a quota park, and nudging it on the recovery cadence is noise against a
-# session that is working fine. A provider we have not met goes in
-# $QUOTA_PARK_MATCH (or extends this list) rather than back into a bare form.
-#
-# The reset-clause alternative carries the same possessive anchor for the same
-# reason, and it is the second time that lesson has been paid for: the bare
-# `limit will reset at` it replaces survived the round that tightened the other
-# subject-less alternative, and matched `Error: API rate limit will reset at
-# 18:00 UTC.` on an idle pane — a working session, nudged every cycle. A
-# provider saying it says "your … limit will reset at"; a tool error does not.
-# Nothing here reads the time itself (rule 2 above) — the clause is only ever
-# evidence that the line is a banner.
-#
-# The possessive is not enough on its own, which is the THIRD time this class
-# has been paid for: a tool error says "You have exceeded your API rate limit"
-# and "Your API rate limit will reset at 18:00 UTC" — both possessive, both
-# idle, neither a quota park, and both matched the bounded-gap form this
-# replaces (reproduced during review). So the NOUN the limit is named with
-# carries the anchor too: a provider block is on a session/usage/weekly/plan
-# (etc.) limit, a tool error is on a *rate* limit. The gap between "your" and
-# that noun is counted in WORDS rather than characters, which also gives the
-# noun a left word boundary for free — a character run lets a whitelisted noun
-# match the tail of an unrelated word.
-#
-# The named-provider alternative takes the same noun list, for the same reason
-# in its own direction: `Error: OpenAI API rate limit exceeded` carries a
-# provider name in front of an ordinary rate-limit error. The noun is optional
-# there and only there, because the plan-period subjects (`weekly limit
-# reached`) name the quota in the subject itself.
-#
-# The cost of the narrowing is a provider that says only "You've hit your
-# limit", with no noun at all: that goes in $QUOTA_PARK_MATCH, or adds its noun
-# to the three lists below. That is the deliberate trade — an unmatched banner
-# costs one un-nudged park, a matched tool error costs a working session nudged
-# on the recovery cadence forever.
-#
-# Held in a plain variable first: an ERE interval like {0,3} inside a
-# ${VAR:-default} would close the expansion at its own brace and silently ship
-# a truncated pattern. Kept as ONE single-quoted literal rather than composed
-# from a noun variable, because the suite reads this line out of the script to
-# assert the nudge text cannot match it; a composed pattern would extract as
-# an unexpanded `$VAR` and that assertion would pass vacuously.
+# Banner signatures — one ERE, alternatives per family (a new provider goes in
+# $QUOTA_PARK_MATCH rather than a bare form):
+#   family            anchor
+#   possessive        (hit|reached|exceeded) your <quota-noun> limit
+#   named-provider    (claude|codex|chatgpt|openai|anthropic|gemini|weekly|
+#                     5-hour|plan) [...] limit (reached|exceeded)
+#   usage-credits     /usage-credits
+#   reset-clause      your <quota-noun> limit will reset
+# Every alternative is anchored on something only a PROVIDER says — the
+# possessive plus a quota NOUN (session/usage/weekly/...), never a bare
+# "rate limit": a tool error ("Error: API rate limit exceeded", "Your API
+# rate limit will reset at ...") must not read as a park (paid for three
+# times). Word-counted gaps give the noun a left boundary. Held as ONE
+# single-quoted literal: the suite reads this line out of the script, and an
+# ERE interval inside ${VAR:-default} would close the expansion early.
 DEFAULT_MATCH='(hit|reached|exceeded) your ([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) (([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? )?limit (reached|exceeded)|/usage-credits|your ([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? limit will reset'
 MATCH_RE="${QUOTA_PARK_MATCH:-$DEFAULT_MATCH}"
 
-# Busy markers — an agent mid-turn is not parked, whatever its pane text says.
-# Both Claude Code and Codex print "esc to interrupt" while working, which is
-# also what keeps an agent *reading about* this bug from being flagged.
+# Busy markers — an agent mid-turn is not parked (both CLIs print "esc to
+# interrupt" while working).
 DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
 BUSY_RE="${QUOTA_PARK_BUSY:-$DEFAULT_BUSY}"
 
-# A *quoted* banner is a citation, not a banner. Found live on the first run of
-# this script: a conversation session had reported the Codex outage to the operator and
-# gone idle with `▎ "You've hit your usage limit… try again at Aug 8th"` still
-# on screen. Providers print their banner bare — never inside quotes, never
-# under a blockquote marker — so dropping such lines costs nothing and takes
-# out the whole class of agents that *write about* a quota block.
-# Alternation, not a bracket expression: a multibyte character inside [...] is
-# a byte set under a C locale, and the order's env is not guaranteed to be
-# UTF-8. Spelled out this way each marker matches as an exact sequence in both.
-#
-# The two halves are anchored differently on purpose. A double quote is a
-# citation marker ANYWHERE on the line: providers never print one, so its mere
-# presence is proof the line is a report about a banner. The single quote,
-# smart single quotes and the backtick cannot be treated that way — the
-# apostrophe inside "You've" and "you're" is the same character, and rejecting
-# it unanchored would drop every real Claude and Codex banner and switch this
-# order off entirely. So they count only as an OPENING DELIMITER: at the start
-# of the line, after leading whitespace and any blockquote marker. Found by
-# review: `'You've hit your usage limit'` and the backtick-quoted form both
-# survived the double-quote-only filter and read as parks, which is the same
-# live false positive quoting was added for, in a different set of quotes.
-# The typographic single quotes below are pattern DATA, not quoting: they are
-# what a terminal renders a report's quotes as, and matching them is the whole
-# point of this line. shellcheck reads them as a mistyped ASCII quote.
-# shellcheck disable=SC1112
+# A QUOTED banner is a citation, not a banner (an agent reporting the outage).
+# A double quote anywhere on the line marks a citation (providers never print
+# one); single/smart quotes and backticks count only as an OPENING delimiter
+# (the apostrophe in "You've" is the same character). Alternation, not a
+# bracket expression: multibyte chars in [...] are a byte set under C locale.
+# The typographic quotes below are pattern DATA, not quoting.
 CITATION_RE='^[[:space:]]*(>|\||▎|│|┃)*[[:space:]]*('\''|‘|’|`)|^[[:space:]]*(>|\||▎|│|┃)|"|“|”'
 
-# Retry pacing. First detection nudges immediately (an early reset is the case
-# we are optimizing for); subsequent attempts back off to the cap so a genuine
-# multi-day block does not nudge every cycle forever.
+# Retry pacing: first detection nudges immediately; later attempts back off
+# to the cap so a multi-day block does not nudge every cycle.
 BACKOFF_BASE="${QUOTA_PARK_BACKOFF_BASE:-120}"
 BACKOFF_CAP="${QUOTA_PARK_BACKOFF_CAP:-900}"
 
-# Tell a human once per episode if a block outlasts this (0 disables). Deduped
-# by state file: one mail per park, never one per cycle.
+# Tell a human once per episode if a block outlasts this (0 disables).
 ESCALATE_AFTER="${QUOTA_PARK_ESCALATE_AFTER:-7200}"
 ESCALATE_TO="${QUOTA_PARK_ESCALATE_TO:-mayor/}"
 
-# How long this order's own findings stay authoritative. The sweep runs every
-# 3m, so ten minutes is three missed cycles — past that, neither the heartbeat
-# nor an episode record is treated as evidence any more. Only the `--status`
-# surface reads this; the sweep itself has no use for it.
+# How long this order's findings stay authoritative for `--status` (the sweep
+# runs every 3m; ten minutes is three missed cycles).
 STALE_AFTER="${QUOTA_PARK_STALE_AFTER:-600}"
 
 # Aliases never nudged (ERE, matched against the session alias). Escape hatch.
 EXCLUDE_RE="${QUOTA_PARK_EXCLUDE:-}"
 
-# Wall-clock bounds. The order runner applies no timeout of its own, and every
-# probe here goes through the runtime (and, for the escalation, Dolt) — the two
-# layers most likely to be wedged during the incidents this order exists to
-# recover from. Unbounded, one hung `gc session peek` strands every session
-# BEHIND it in the sweep: the parked agents we most need to reach are exactly
-# the ones we would never inspect. CALL_TIMEOUT bounds each call so a wedged
-# one is skipped rather than fatal; SWEEP_BUDGET bounds the whole pass so a
-# city-sized session list of slow calls cannot overrun the next 3m cycle. 0
-# disables either bound.
+# Wall-clock bounds: CALL_TIMEOUT bounds each gc call (a wedged peek must not
+# strand the sessions behind it), SWEEP_BUDGET bounds the pass. 0 disables.
 CALL_TIMEOUT="${QUOTA_PARK_CALL_TIMEOUT:-15}"
 SWEEP_BUDGET="${QUOTA_PARK_SWEEP_BUDGET:-120}"
 
-# How long after CALL_TIMEOUT a call that ignored the timeout's SIGTERM gets
-# before SIGKILL. `timeout N` on its own is a SOFT bound: it signals, then waits
-# for a child that is free to ignore the signal — verified with `timeout 1 bash
-# -c 'trap "" TERM; sleep 5'`, which ran the full 5s. A hung `gc` is exactly the
-# process least likely to be in a state to handle a signal politely, so the
-# bound that is supposed to keep one wedged call from stranding the sweep is
-# precisely the one that can fail to. `timeout -k` adds the hard half; hosts
-# whose timeout(1) lacks it say so once per pass (see BOUND_MODE below) rather
-# than pretending to a bound they do not have.
+# SIGKILL delay after CALL_TIMEOUT: plain `timeout N` is a SOFT bound a child
+# may ignore; `timeout -k` adds the hard half (see BOUND_MODE).
 KILL_AFTER="${QUOTA_PARK_KILL_AFTER:-5}"
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
 DEFAULT_STATE_DIR="${DEFAULT_STATE_DIR:-${TMPDIR:-/tmp}/gc}/quota-park"
 STATE_DIR="${QUOTA_PARK_STATE_DIR:-$DEFAULT_STATE_DIR}"
-# Recorded, NOT exited on. Every file this order reads or writes lives here, so
-# a state dir it cannot create or write is the end of the sweep — but it is not
-# the end of the `--status` contract, and the two used to be the same line: a
-# bare `mkdir -p … || exit 0` ran before the `--status` branch below, so an
-# unwritable or uncreatable state dir made the surface exit 0 with NO OUTPUT AT
-# ALL. Reproduced during review with QUOTA_PARK_STATE_DIR pointed under a
-# regular file. A patrol parsing that silence finds no `quota_park=` field to
-# read; the closed-field surface exists precisely so there is always one, and
-# `unknown` is the answer for "this order can vouch for nothing" — a broken
-# state dir is the purest case of it. So the failure becomes a REASON the
-# surface can name (state-dir-unavailable) rather than an absence the caller
-# has to invent a default for.
-#
-# `-w` as well as the mkdir, because `mkdir -p` succeeds on a directory that
-# already exists and says nothing about whether we may write in it: an existing
-# but unwritable state dir fails every state write later, one silent file at a
-# time, having reported a clean start.
+# Recorded, NOT exited on: an unavailable state dir must still leave the
+# `--status` surface a field to answer (unknown/state-dir-unavailable), never
+# silence. `-w` too — mkdir -p succeeds on an existing unwritable dir.
 STATE_DIR_OK=1
 mkdir -p "$STATE_DIR" 2>/dev/null || STATE_DIR_OK=0
 { [ -d "$STATE_DIR" ] && [ -w "$STATE_DIR" ]; } || STATE_DIR_OK=0
 
-# This order's files that are NOT episode state: where the last pass stopped,
-# that a pass ran at all, and which sessions it actually classified. Every name
-# starts with a dot, which `safe_id` rejects — so no session can ever be given a
-# state file that collides with one, and the week-old prune below (safe_id AND a
-# state header) never touches them.
+# Non-episode files. Dot-prefixed on purpose: safe_id rejects a leading dot,
+# so no session's state file can collide and the prune never touches them.
 CURSOR_FILE="$STATE_DIR/.sweep-cursor"
 HEARTBEAT_FILE="$STATE_DIR/.heartbeat"
 COVERAGE_FILE="$STATE_DIR/.sweep-coverage"
 
 NOW="$(date +%s)"
 
-# The first line of every file this order writes, and the test every path that
-# reads one applies before treating the file as its own.
-#
-# Ownership used to be inferred from SHAPE — a `first_seen=` header, a
-# session-id-shaped name — and a shape is a guess, not a claim. A file that
-# happens to look like ours is then read as ours, in both directions, and both
-# were reproduced during review. Reading: a foreign file carrying plausible
-# `first_seen`/`last_seen`/`detector_class` fields makes `--status` answer
-# `quota_park=yes` for a session this order never classified — a warrant
-# suppressed on evidence it did not produce. Deleting: the same weak test is
-# what `owned_state_rm` and the week-old prune gate on, so a foreign file shaped
-# like state is destroyed by a routine sweep, which is the "deletes only files it
-# wrote" contract resting on a header anybody might have written.
-#
-# So the claim is made explicit and versioned instead. A file whose first line is
-# not exactly this is not this order's, whatever it looks like inside: not read
-# as an episode, not deleted, not pruned, not reported on. The version suffix is
-# what will let a future format change be told apart from a foreign file rather
-# than parsed as an older one of ours.
-#
-# What this is and is not. It is an ownership LABEL, not an authenticator, and it
-# closes the collision class: an unrelated component's state, a stray name, a
-# hand-edited leftover, a mis-set or shared QUOTA_PARK_STATE_DIR — every case
-# that has actually been hit here. It cannot stop something that can WRITE to
-# STATE_DIR from writing the marker too, and nothing at this layer can: such a
-# writer runs as the same user this order does. The honest boundary is that an
-# accident cannot forge ownership and a forgery has to be deliberate.
+# Ownership marker: the first line of every file this order writes, and the
+# test every read/delete/prune path applies before treating a file as its own
+# — shape (a header, an id-like name) is a guess, and both directions of
+# guessing wrong were reproduced (foreign state read as an episode; foreign
+# files deleted by the prune). A label, not an authenticator: an accident
+# cannot forge it, a forgery has to be deliberate.
 STATE_MAGIC='#quota-park-nudge-state-v1'
 
-# True for a file this order wrote: a regular file — never a symlink, directory,
-# or FIFO — whose first line is the marker. Every read, delete, prune and report
-# path goes through here, so no two of them can drift in what "ours" means.
+# True for a file this order wrote: a regular non-symlink file whose first
+# line is the marker. Every read, delete, prune and report path uses this.
 owned_file() {
     local first=""
     [ -f "$1" ] && [ ! -L "$1" ] || return 1
@@ -263,16 +109,8 @@ owned_file() {
     [ "$first" = "$STATE_MAGIC" ]
 }
 
-# Read one key out of a state file. Never `source` it — the file is keyed by a
-# session id and lives in a shared runtime dir.
-#
-# Only ever out of a file this order owns. STATE_DIR is shared (and an override),
-# so anything else there is somebody else's, and parsing it as episode state is
-# how a planted or coincidental file gets to drive this order's own decisions:
-# the backoff window, the once-per-episode escalation flag, the verdict
-# `--status` publishes. A file that fails `owned_file` — including a planted
-# symlink — reads as "no state", and the next write replaces the entry itself
-# rather than following it (see write_atomic).
+# Read one key out of an OWNED state file (never source it; a file that fails
+# owned_file — including a planted symlink — reads as "no state").
 state_get() {
     owned_file "$1" || return 0
     grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- || true
@@ -282,61 +120,19 @@ state_get() {
 # is fed to arithmetic, and `$(( ))` on garbage is fatal under `set -e`.
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 
-# True for a timestamp this order could have written: an integer, and not in the
-# FUTURE. Every timestamp persisted here is stamped from the running pass's own
-# clock, so one ahead of that clock is not a record of something that happened —
-# it is a corrupt field, a clock that went backwards, or a planted one. Being an
-# integer was never the whole contract, because each of these defeats a guard by
-# arithmetic alone, silently, and in the direction that stops recovery:
-#   last_try    a future value keeps `NOW - last_try` negative, so the backoff
-#               window never elapses and the parked session is never nudged
-#               again — recovery off for that session until the wall clock
-#               catches up, which for a typo'd year is never.
-#   first_seen  keeps `age` negative, so ESCALATE_AFTER is never reached and no
-#               human is told about a park that outlasts it. `--status` also
-#               publishes the negative age as `age_s`.
-#   last_run    a future heartbeat makes every subsequent `--status` read a
-#               stopped order as a fresh one, which is warrant suppression on a
-#               sweep that never ran.
-# Invalid falls back to the same default a missing field gets — start of
-# episode, never nudged, no heartbeat — which is the direction that recovers.
-#
-# The one cost lands on a host that can only bound calls softly (BOUND_MODE=1),
-# where a pass can overrun into the next one: the older pass reads the newer
-# pass's record as future-dated, discards it, and re-nudges a session that was
-# just handled. That is one extra resume message on a host already warned about,
-# and being early is the trade this order makes everywhere else too.
+# True for a timestamp this order could have written: an integer, not in the
+# FUTURE. A future last_try/first_seen/last_run each defeats a guard by
+# arithmetic alone, in the direction that stops recovery; invalid falls back
+# to the same default a missing field gets, which is the direction that
+# recovers.
 ts_valid() { num "${1:-}" && [ "$1" -le "$NOW" ]; }
 
-# Replace a file in STATE_DIR with what arrives on stdin, atomically, and never
-# by writing THROUGH whatever is already at the path.
-#
-# A plain `>` follows an existing symlink or FIFO. STATE_DIR is a shared runtime
-# directory whose location is an override, and every path under it is named by a
-# session id, so an entry planted there — by anything that can create a file
-# beside our state — would have this order writing wherever it points, as the
-# order's user, on every 3m sweep. A FIFO is worse than a wrong file: with no
-# reader the open blocks, and the sweep hangs where it is meant to be bounded.
-#
-# `mktemp` creates the temp file O_EXCL (so the write itself cannot be
-# redirected) and rename(2) replaces the destination ENTRY whatever type it is
-# (so the replace cannot be either, and a planted link is destroyed rather than
-# followed). The temp name is dot-prefixed and distinctive: `safe_id` rejects a
-# leading dot, so a temp file left by a killed pass can never be read back as an
-# episode, reported as a parked session, or pruned as one — the prune below
-# collects them by name instead, and reads the pass's timestamp out of that name
-# so it can age them without asking the filesystem (`stat` spells mtime
-# differently on GNU and BSD; `find -mtime` was the portability gap this closes).
-#
-# A DIRECTORY at the destination is the one type that must be refused rather
-# than replaced, and refusing it is what makes the failure visible at all: `mv
-# file dir` does not replace the directory, it moves the file INSIDE it (so does
-# `mv file symlink-to-dir` — hence `-d`, which follows the link). Left to `mv`,
-# a directory at a parked session's state path therefore SWALLOWS the episode
-# while reporting success: the state lands at `$STATE_DIR/<id>/.qpn-tmp.XXXXXX`
-# where nothing reads it, `--status` finds no episode, and the session that was
-# just nudged is published as clean. Reproduced during review. A refusal here is
-# what lets the caller withhold coverage and say so.
+# Replace a file in STATE_DIR atomically, never writing THROUGH what is there:
+# mktemp is O_EXCL and rename(2) replaces the entry, so a planted symlink or
+# FIFO is destroyed rather than followed (a FIFO would hang the sweep). A
+# DIRECTORY is refused — `mv file dir` moves the file INSIDE and would swallow
+# the episode while reporting success. Temp names are dot-prefixed and carry
+# the pass timestamp so the prune can age them without stat(1).
 write_atomic() {
     local dest="$1" tmp
     [ -d "$dest" ] && return 1
@@ -348,71 +144,30 @@ write_atomic() {
     return 1
 }
 
-# Write a file this order OWNS: the marker line, then stdin, atomically. Every
-# persisted file goes through here — episode state, cursor, heartbeat, coverage —
-# so none of them can be written without the claim that lets it be read back, and
-# a file that predates the marker (or was planted to look like one) is replaced
-# rather than merged with.
+# Write an OWNED file: the marker line, then stdin, atomically.
 write_owned() {
     { printf '%s\n' "$STATE_MAGIC"; cat; } | write_atomic "$1"
 }
 
-# One writer for an episode's state file, so the two paths that persist it —
-# inside the backoff window, and after a delivery attempt — cannot drift in
-# which counters they carry. Positional: path, first_seen, last_nudge, last_try,
-# attempts, unconfirmed, escalated, last_seen, detector_class.
-#
-# The last two are what make this file readable as a CLASSIFICATION and not only
-# as a retry ledger: `--status` answers the patrols out of them, and a record
-# nothing has confirmed since `last_seen` is reported as unknown rather than as a
-# park. Both are written on every pass that saw the session parked, so a state
-# file is never older than the sweep that last looked.
+# The one writer for an episode's state file. Positional: path, first_seen,
+# last_nudge, last_try, attempts, unconfirmed, escalated, last_seen,
+# detector_class — the last two make the file a CLASSIFICATION, not just a
+# retry ledger.
 write_state() {
     printf 'first_seen=%s\nlast_nudge=%s\nlast_try=%s\nattempts=%s\nunconfirmed=%s\nescalated=%s\nlast_seen=%s\ndetector_class=%s\n' \
         "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" | write_owned "$1"
 }
 
-# True for a session id safe to use as a filename AND as a command argument. The
-# id names a state file in a shared runtime directory, is pasted into the
-# operator instruction in the escalation mail, and is passed to `gc session
-# peek` / `gc session nudge`, so it must be a bare token: no separator, no
-# dot-segment, nothing that can leave STATE_DIR, and nothing that can be read as
-# an option. Runtime ids look like `lx-gsnfk`; an id that does not is not one,
-# and a session we cannot name safely is one we skip rather than guess at.
-# (`.*` rejects a leading dot, `*..*` any dot-segment, and `/` is absent from the
-# allowed set — together that is every route out of the dir.)
-#
-# `-*` is the argument half, and quoting does not cover it: a shell-quoted
-# argument is still parsed as an option by the command that receives it, so an
-# id like `-n` or `--help` reaches `gc session nudge` as a flag rather than as a
-# session. What that runs is the receiving CLI's business, not ours; refusing to
-# hand it over is.
+# True for a session id safe as a filename AND a command argument: no
+# separator, no dot-segment, no leading dot or dash (a quoted `-n` still
+# reaches `gc session nudge` as a flag). A session we cannot name safely is
+# skipped, not guessed at.
 safe_id() { case "${1:-}" in '' | *[!A-Za-z0-9._-]* | .* | -* | *..*) return 1 ;; *) return 0 ;; esac }
 
-# Delete an episode state file — but only one this order actually wrote.
-#
-# Every path that ends an episode deletes a file in a directory this order does
-# not own: STATE_DIR defaults inside the shared city runtime dir and is an
-# override besides, and a session id is not a rare shape for a filename. A plain
-# `rm -f "$STATE_DIR/$id"` therefore deletes whatever happens to sit at that
-# name — reproduced during review with an unrelated regular file at
-# `$STATE_DIR/lx-clean`, destroyed by a clean sweep. The narrow ownership model
-# the week-old prune already documents has to hold on the every-3-minutes paths
-# too, and this is that test in one place so the three callers cannot drift:
-# directly in STATE_DIR, a regular file and not a symlink, named like the ids we
-# write (`safe_id`), and carrying this order's own marker line (`owned_file`).
-#
-# Anything failing one of them is somebody else's file and is left alone. That
-# is deliberately not free: a foreign file at a live session's path keeps
-# `--status` answering `unknown` for it rather than `no`, since there is a file
-# there this order cannot read as an episode. Unknown is the safe direction —
-# the patrols fall back to their own judgment — and it is the honest one.
-#
-# The ownership test is `owned_file`'s marker, not the `first_seen=` header this
-# used to accept. A header is a shape, and shape is guessable: an unrelated
-# file that opens with that line — another component's key/value state, an
-# editor backup of one of ours — was deleted by a routine sweep on the strength
-# of it. See STATE_MAGIC.
+# Delete an episode state file — only one this order actually wrote: directly
+# in STATE_DIR, safe_id-named, carrying the marker. Anything else is somebody
+# else's and is left alone (the session then answers unknown/foreign-state,
+# the safe direction).
 owned_state_rm() {
     local path="$1" base
     owned_file "$path" || return 0
@@ -425,9 +180,8 @@ owned_state_rm() {
     rm -f "$path"
 }
 
-# How long ago this order last CLASSIFIED a session — reached a verdict on its
-# pane — as opposed to merely having run a pass in which that session existed.
-# Prints an age in seconds, or fails if there is no record. See write_coverage.
+# Age in seconds since this order last CLASSIFIED a session (not merely ran a
+# pass in which it existed); fails if there is no record. See write_coverage.
 covered_age() {
     local ts
     owned_file "$COVERAGE_FILE" || return 1
@@ -436,12 +190,8 @@ covered_age() {
     echo $((NOW - ts))
 }
 
-# Bound and flatten a display field before it is logged or mailed. Session
-# alias/session_name are mutable and agent-reachable, and they reach durable
-# mayor mail — the same channel detector_class exists to keep pane text out of.
-# Keeping the pane out while interpolating the alias raw just moves the hole one
-# field over: an alias is enough room for a line of forged operator context.
-# Allowlist to printable identifier characters, then truncate.
+# Bound and flatten a display field before logging/mailing: alias and
+# session_name are mutable, agent-reachable, and reach durable mayor mail.
 sanitize_display() {
     local s
     s="$(printf '%s' "${1:-}" | LC_ALL=C tr -c 'A-Za-z0-9._@:/ -' '?')"
@@ -464,52 +214,24 @@ duration() {
     if [ "$s" -lt 3600 ]; then echo "$((s / 60))m"; else echo "$((s / 3600))h$(( (s % 3600) / 60 ))m"; fi
 }
 
-# The CURRENT region of a pane: its tail window. Everything that classifies a
-# pane reads this and nothing above it — the busy test directly, the banner test
-# and the detector class through banner_candidates below.
-#
-# One function because the two tests have to agree on which lines are "now".
-# They did not: the busy marker was matched against the whole capture while the
-# banner was matched against the tail, so a pane holding an old `esc to
-# interrupt` up in its scrollback and a live quota banner at the bottom read as
-# BUSY — not parked, episode deleted, and `--status` vouching `no` for a session
-# that is genuinely blocked (reproduced during review). Scrollback is history for
-# the busy marker exactly as it is for the banner: both CLIs print their working
-# indicator in the live status line at the bottom of the screen, so a copy
-# further up is the record of a turn that has already ended.
+# The CURRENT region of a pane: its tail window. Banner, citation and busy
+# tests all read this and nothing above it — scrollback is history for every
+# one of them (a stale "esc to interrupt" above a live banner is not busy).
 pane_tail() {
     printf '%s\n' "$1" | tail -n "$TAIL_LINES"
 }
 
-# The lines of a pane a banner may legitimately sit on: the tail window, minus
-# citations. Both the park test and the detector class read the same set — a
-# second copy of this filter chain would drift out of agreement with the test
-# that decides whether a session is parked at all.
+# The lines a banner may legitimately sit on: the tail window minus citations
+# — the park test and the detector class must read the same set.
 banner_candidates() {
     pane_tail "$1" | grep -vE -- "$CITATION_RE" || true
 }
 
-# Which family of banner matched, as a label from a CLOSED set. This is the only
-# thing the escalation mail — or the `--status` surface the patrols read — says
-# about what was on screen.
-#
-# The pane is untrusted. It holds whatever the agent printed, and an agent can
-# print text shaped like an operator directive; mail is durable and the mayor
-# reads it as an authenticated channel. An excerpt of the pane in the body
-# therefore launders attacker-reachable text into that channel, which is what
-# the earlier version of this escalation did by mailing the last 8 lines. The
-# body now carries only alias, id, age, attempts, and this label — every one of
-# them from the session list or this script's own state file, and the two that
-# come from the session list are constrained before they are interpolated: the
-# id by safe_id, the alias by sanitize_display. Session display metadata is
-# mutable too, so keeping the pane out while pasting the alias raw would only
-# move the hole into a shorter field.
-#
-# Deliberately coarse, and independent of DEFAULT_MATCH's exact alternatives:
-# the label has to survive that pattern being extended or overridden, and
-# falling through to the generic form costs a human nothing. What it must never
-# do is emit a byte of pane text. Classified over only the lines that actually
-# matched, so an unrelated line in the tail cannot pick the label.
+# Which banner family matched, as a label from a CLOSED set — the only thing
+# the escalation mail or `--status` ever says about the screen. The pane is
+# untrusted agent output and mail is a durable authenticated channel, so not
+# one byte of pane text is emitted; the label survives MATCH_RE overrides by
+# being classified independently, over only the lines that matched.
 detector_class() {
     local lines
     lines="$(banner_candidates "$1" | grep -Ei -- "$MATCH_RE" || true)"
@@ -530,41 +252,15 @@ detector_class() {
     fi
 }
 
-# Every numeric knob is fed to `$(( ))`, to `[ -gt ]`, to `tail -n`, or to
-# `timeout` itself, so a non-numeric override (a stray "15s", an empty string
-# from a templated env) breaks quota recovery city-wide from a single typo in a
-# tuning knob. Fall back to the default instead — validated here, in one place
-# ahead of the sweep, because the failure is silent in a different way for each
-# knob and none of them announce it:
-#   BACKOFF_BASE/_CAP   -> `[: oops: integer expression expected` inside
-#                          backoff_for, whose non-zero rc reads as "window
-#                          elapsed" — backoff bypassed, every cycle nudges.
-#   ESCALATE_AFTER      -> the `-gt 0` guard errors, i.e. reads as disabled: no
-#                          human is ever told about a park that outlasts it.
-#   PEEK_LINES/TAIL_LINES -> `tail -n x` errors, banner_candidates yields
-#                          nothing, and NO session is ever detected as parked.
-# An earlier version validated only the two bounds below, which is how
-# QUOTA_PARK_BACKOFF_BASE=oops reached the arithmetic at all.
-#
-# Each knob also carries a FLOOR, because "is an integer" was never the whole
-# contract: zero is a perfectly good integer that quietly defeats recovery
-# everywhere it is not documented as an off switch. `TAIL_LINES=0` makes
-# `tail -n 0` print nothing, so no session is ever detected as parked;
-# `PEEK_LINES=0` empties every pane, which the sweep reads as unreadable;
-# `BACKOFF_BASE=0` or `BACKOFF_CAP=0` collapses the retry window to zero and
-# nudges every parked pane on every 3m sweep, forever. Zero is reserved as
-# "disable" for exactly the three knobs the docs say it is — CALL_TIMEOUT
-# (unbounded calls), SWEEP_BUDGET (no per-pass budget), ESCALATE_AFTER (never
-# mail a human) — and those keep floor 0. Everywhere else it is a typo with the
-# same blast radius as "oops", and is treated the same way.
+# Validate every numeric knob (a stray "15s" or empty override breaks a
+# different guard silently in each case), with a FLOOR: zero is reserved as
+# "disable" only for CALL_TIMEOUT / SWEEP_BUDGET / ESCALATE_AFTER; elsewhere
+# it defeats recovery (TAIL_LINES=0 detects nothing) and falls back too.
 num_min() { num "${1:-}" && [ "$1" -ge "$2" ]; }
 num_min "$CALL_TIMEOUT"   0 || CALL_TIMEOUT=15
 num_min "$SWEEP_BUDGET"   0 || SWEEP_BUDGET=120
-# Floor 1, same rule as the other knobs that do not document zero as an off
-# switch. `timeout -k 0` is accepted rather than rejected — it simply disables
-# the kill escalation — so a zero here silently restores the soft bound this
-# knob exists to close, on the one path where a wedged call strands the sweep.
-# Turning the bound off entirely is CALL_TIMEOUT=0's job, and it says so.
+# Floor 1: `timeout -k 0` silently restores the soft bound; turning the bound
+# off is CALL_TIMEOUT=0's job.
 num_min "$KILL_AFTER"     1 || KILL_AFTER=5
 num_min "$ESCALATE_AFTER" 0 || ESCALATE_AFTER=7200
 num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120

@@ -1,0 +1,396 @@
+#!/usr/bin/env bash
+# pr-facts — arm 4 of the merge cadence: record EXTERNAL facts about each open
+# pull_request anchor. No merge authority. Same enumeration and pinned identity
+# read as merge.sh; per anchor, in order: PR MERGED (out-of-band, or a record
+# that died after merge.sh landed it) -> lifecycle transition to merged;
+# CLOSED-unmerged -> abandoned + escalate.sh visit; base moved -> retargeted +
+# escalate (gate markers cleared: a review of the pre-retarget diff proves
+# nothing about the new base); CONFLICTING -> file ONE rework child per head to
+# the fix pool (dedup: an existing rework child naming this branch whose
+# rejection_reason names this head); gate green at a STALE head -> file one
+# re-review child per head to the review pool (dedup: a live review naming the
+# anchor, or one with review_branch=branch and reviewed_oid=<live head>);
+# hold-resolved retraction of our own blocked_reason; dismissal of our OWN
+# superseded CHANGES_REQUESTED (never a human's; signoff_dismissed recorded and
+# read back FIRST; skipped when native auto-merge is armed).
+# Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
+# (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
+set -u
+
+PROG="pr-facts"
+scrub() { tr -d '\000-\010\013\014\016-\037'; }
+SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
+ESCALATE="$SCRIPTS_DIR/escalate.sh"
+BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
+
+FIX_POOL=""; REVIEW_POOL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
+    --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+command -v gh >/dev/null 2>&1 || exit 0
+
+ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
+u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
+case "$u" in
+  git@github.com:*|https://github.com/*|ssh://git@github.com/*)
+    ORIGIN_HOST="github.com"
+    ORIGIN_REPO=$(printf '%s' "$u" | sed -e 's#^ssh://git@github.com/##' \
+      -e 's#^git@github.com:##' -e 's#^https://github.com/##' -e 's#\.git$##' -e 's#/*$##') ;;
+esac
+case "$ORIGIN_REPO" in */*/*|/*|*/) ORIGIN_REPO="" ;; */*) : ;; *) ORIGIN_REPO="" ;; esac
+if [ -z "$ORIGIN_REPO" ]; then
+  echo "$PROG: cannot resolve this checkout's origin repository; recording NOTHING this pass" >&2
+  exit 0
+fi
+ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
+gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
+SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
+
+url_repo_q() {
+  printf '%s' "${1:-}" \
+    | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p'
+}
+canon_pr_url() {
+  printf '%s' "${1:-}" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
+}
+is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
+
+LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+ALL_STATUSES="$LIVE_STATUSES,closed"
+
+bd_list() { # guarded array read; non-zero = "could not tell"
+  local raw rc
+  raw=$(gc bd list "$@" --limit=0 --json 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
+  raw=$(printf '%s' "$raw" | scrub)
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw"
+}
+escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups per subject+key
+  [ -x "$ESCALATE" ] || return 0
+  "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
+}
+
+ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
+  echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
+  exit 1
+}
+[ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
+
+recorded=0; flagged=0; reworked=0; regated=0; cleared=0; dismissed_n=0; skipped=0
+while IFS= read -r row; do
+  [ -n "${row:-}" ] || continue
+  id=$(printf '%s' "$row" | jq -r '.id // empty')
+  num=$(printf '%s' "$row" | jq -r '(.metadata.pr_number // "") | tostring')
+  [ -n "$id" ] || continue
+  case "$num" in ''|*[!0-9]*) skipped=$((skipped + 1)); continue ;; esac
+  branch=$(printf '%s' "$row" | jq -r '.metadata.branch // ""')
+  target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
+  prurl=$(printf '%s' "$row" | jq -r '.metadata.pr_url // ""')
+  checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
+  hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
+  rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
+  breason=$(printf '%s' "$row" | jq -r '.metadata.blocked_reason // ""')
+
+  # --- pinned identity read (same shape as merge.sh) ----------------------------
+  PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
+    --json state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url 2>/dev/null)
+  if [ -z "$PR_JSON" ]; then
+    echo "$PROG: PR#$num view failed; NOTHING recorded for $id (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  state=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
+  is_draft=$(printf '%s' "$PR_JSON" | jq -r '.isDraft // false')
+  base=$(printf '%s' "$PR_JSON" | jq -r '.baseRefName // ""')
+  head_ref=$(printf '%s' "$PR_JSON" | jq -r '.headRefName // ""')
+  head_oid=$(printf '%s' "$PR_JSON" | jq -r '.headRefOid // ""')
+  merge_state=$(printf '%s' "$PR_JSON" | jq -r '.mergeStateStatus // ""')
+  mergeable=$(printf '%s' "$PR_JSON" | jq -r '.mergeable // ""')
+  live_url=$(canon_pr_url "$(printf '%s' "$PR_JSON" | jq -r '.url // ""')")
+  head_repo=$(printf '%s' "$PR_JSON" | jq -r '
+    ((.headRepositoryOwner.login // "") | tostring) as $o
+    | ((.headRepository.name // "") | tostring) as $n
+    | if $o == "" or $n == "" then "" else $o + "/" + $n end' 2>/dev/null)
+  head_cross=$(printf '%s' "$PR_JSON" | jq -r 'if has("isCrossRepository") then (.isCrossRepository | tostring) else "" end' 2>/dev/null)
+  if [ "$(url_repo_q "$live_url")" != "$ORIGIN_REPO_Q" ] \
+     || { [ -n "$prurl" ] && [ "$(canon_pr_url "$prurl")" != "$live_url" ]; } \
+     || [ -z "$head_repo" ] || [ "$head_repo" != "$ORIGIN_REPO" ] || [ "$head_cross" != "false" ] \
+     || { [ -n "$branch" ] && [ "$head_ref" != "$branch" ]; }; then
+    echo "$PROG: PR#$num identity did not certify for $id (url/head/fork mismatch); NOTHING recorded" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  [ -n "$target" ] || target="$base"
+
+  # --- PR merged (out-of-band, or a died record): record it ----------------------
+  if [ "$state" = "MERGED" ]; then
+    merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
+      | scrub | jq -r '.mergeCommit.oid // ""')
+    if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
+         --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --append-notes "Merged to $target at $(printf '%.8s' "$merge_oid") (recorded by pr-facts)"; then
+      recorded=$((recorded + 1))
+      echo "$PROG: recorded $id — PR#$num is MERGED ($(printf '%.8s' "$merge_oid"))"
+    else
+      echo "$PROG: PR#$num is MERGED but the record failed for $id; retry next pass" >&2
+      skipped=$((skipped + 1))
+    fi
+    continue
+  fi
+
+  # --- PR closed unmerged: out-of-band close -> abandoned + visit ----------------
+  if [ "$state" = "CLOSED" ]; then
+    if "$LIFECYCLE" transition "$id" --to abandoned --expect pull_request \
+         --assignee "" \
+         --set "blocked_reason=PR#$num closed out-of-band without merging"; then
+      flagged=$((flagged + 1))
+      escalate "$id" "pr-abandoned.$num" \
+        "PR#$num ($live_url) was closed out-of-band without merging. The anchor is left OPEN, routed to human (merge_result=abandoned). Decide: rework it, or close it as not-planned."
+      echo "$PROG: $id — PR#$num closed out-of-band; abandoned, routed to human, escalated"
+    else
+      echo "$PROG: $id abandoned transition failed; retry next pass" >&2
+      skipped=$((skipped + 1))
+    fi
+    continue
+  fi
+  [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
+  [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
+
+  # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
+  rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
+  if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
+    UNSETS=()
+    while IFS= read -r g; do
+      [ -n "$g" ] && UNSETS+=(--unset "check.$g")
+    done <<GATES
+$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+GATES
+    if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
+         --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
+         --set "blocked_reason=PR#$num retargeted: base '$base' != expected target '$rec_target'"; then
+      flagged=$((flagged + 1))
+      escalate "$id" "pr-retargeted.$num" \
+        "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
+      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, gate markers cleared, escalated"
+    else
+      echo "$PROG: $id retargeted transition failed; retry next pass" >&2
+      skipped=$((skipped + 1))
+    fi
+    continue
+  fi
+
+  # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
+  if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
+    if is_held "$hold" || is_held "$rhold"; then
+      echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rebase dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
+    fix_branch="${head_ref:-$branch}"
+    if [ -z "$fix_branch" ] || [ -z "$FIX_POOL" ]; then
+      echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    # Dedup on branch+head via the child's own metadata (no bookkeeping key on
+    # the anchor): a child of ANY status whose rejection_reason names this head
+    # means this head was already routed; a LIVE child on the branch means a
+    # force-push is already owned — a second one would race it.
+    kids=$(bd_list --metadata-field branch="$fix_branch" --status="$ALL_STATUSES") || {
+      echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rebase dispatched (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    }
+    dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+      ($live | split(",")) as $ls
+      | [ .[] | select(.id != $id)
+          | select(((.metadata.merge_result // "") | tostring) == "")
+          | ((.status // "open") | ascii_downcase) as $st
+          | ((.metadata.rejection_reason // "") | tostring) as $rr
+          | select((($rr | contains("head " + $h)) and ($h != ""))
+                   or (($ls | index($st)) != null))
+          | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$dup" ]; then
+      echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child"
+      skipped=$((skipped + 1)); continue
+    fi
+    # Any rebase_hold on a bead naming this branch is an operator freeze.
+    frozen=$(printf '%s' "$kids" | jq -r '
+      [ .[] | ((.metadata.rebase_hold // "") | tostring | ascii_downcase) as $h
+        | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$frozen" ]; then
+      echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rebase dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
+    FIX=$(gc bd create "Rebase PR#$num onto $base: base rewritten, PR conflicts" -t task --json 2>/dev/null \
+      | jq -r '.id // empty' 2>/dev/null)
+    if [ -z "$FIX" ]; then
+      echo "$PROG: $id could not file the rebase child for PR#$num; retry next pass" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    gc bd update "$FIX" \
+      --set-metadata branch="$fix_branch" \
+      --set-metadata target="$base" \
+      --set-metadata rejection_reason="stale base at head $head_oid: PR#$num conflicts with '$base'. Rebase '$fix_branch' onto origin/$base, resolve, force-push with --force-with-lease. Do NOT open a new PR — this reworks PR#$num." \
+      --set-metadata merge_strategy=mr \
+      --set-metadata existing_pr="$live_url" \
+      --set-metadata pr_url="$live_url" \
+      --set-metadata pr_number="$num" \
+      --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
+      || echo "$PROG: WARN rebase $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
+    gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
+      || echo "$PROG: WARN could not attach rebase $FIX as a blocks-dep of $id" >&2
+    gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+    reworked=$((reworked + 1))
+    echo "$PROG: $id — PR#$num conflicts with '$base'; filed rebase $FIX routed to $FIX_POOL"
+    continue
+  fi
+
+  # --- hold-resolved retraction: only a reason THIS pass's arms wrote ------------
+  if [ -n "$breason" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$merge_state" != "DIRTY" ]; then
+    case "$breason" in
+      "PR#$num conflicts with base "*|"stale base at head "*)
+        gc bd update "$id" --unset-metadata blocked_reason >/dev/null 2>&1 || true
+        cleared=$((cleared + 1))
+        echo "$PROG: $id — PR#$num no longer conflicts; retracted the resolved blocked_reason" ;;
+    esac
+  fi
+
+  # --- gate green at a STALE head: one re-review child per head ------------------
+  stale_gate=""; stale_oid=""
+  if [ -n "$head_oid" ]; then
+    while IFS= read -r g; do
+      [ -n "$g" ] || continue
+      case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
+      m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
+      case "$m" in
+        green@*)
+          o="${m#green@}"
+          if [ -n "$o" ] && [ "$o" != "$head_oid" ]; then stale_gate="$g"; stale_oid="$o"; break; fi ;;
+      esac
+    done <<GATES
+$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+GATES
+  fi
+  if [ -n "$stale_gate" ]; then
+    if is_held "$hold"; then
+      echo "$PROG: $id — PR#$num check.$stale_gate stale but merge_hold set; no re-review dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
+    if [ -z "$REVIEW_POOL" ]; then
+      echo "$PROG: $id — PR#$num check.$stale_gate stale but no --review-pool; merge stays held" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    # Dedup per head: a live review naming this anchor, or any review child with
+    # review_branch=branch and reviewed_oid=<live head> (this arm's own stamp).
+    revs=$(bd_list --metadata-field anchor_bead="$id" --status="$LIVE_STATUSES") || {
+      echo "$PROG: $id — re-review dedup probe failed; no dispatch (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    }
+    live_rev=$(printf '%s' "$revs" | jq -r '
+      [ .[] | select(((.metadata.task_kind // "") | tostring) == "review") | .id ] | .[0] // empty' 2>/dev/null)
+    byhead=$(bd_list --metadata-field review_branch="${branch:-$head_ref}" --status="$ALL_STATUSES") || byhead="[]"
+    head_rev=$(printf '%s' "$byhead" | jq -r --arg h "$head_oid" '
+      [ .[] | select(((.metadata.reviewed_oid // "") | tostring) == $h) | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$live_rev" ] || [ -n "$head_rev" ]; then
+      skipped=$((skipped + 1)); continue
+    fi
+    NOTE="Stale-gate re-review: check.$stale_gate was green@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
+    body=""
+    [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$NOTE" 2>/dev/null) || body=""
+    if [ -n "$body" ]; then
+      RID=$(printf '%s' "$body" | gc bd create "Review PR#$num: re-review at live head" -t task --body-file - --json 2>/dev/null \
+        | jq -r '.id // empty' 2>/dev/null)
+    else
+      RID=$(gc bd create "Review PR#$num: re-review at live head" -t task --json 2>/dev/null \
+        | jq -r '.id // empty' 2>/dev/null)
+    fi
+    if [ -z "$RID" ]; then
+      echo "$PROG: $id could not file the re-review for PR#$num; retry next pass" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    gc bd update "$RID" \
+      --set-metadata task_kind=review \
+      --set-metadata check_name="$stale_gate" \
+      --set-metadata anchor_bead="$id" \
+      --set-metadata review_branch="${branch:-$head_ref}" \
+      --set-metadata review_base="$base" \
+      --set-metadata reviewed_oid="$head_oid" \
+      --set-metadata pr_url="$live_url" \
+      --set-metadata pr_number="$num" >/dev/null 2>&1
+    gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 || true
+    got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
+    if [ "$got" != "$id" ]; then
+      echo "$PROG: WARN re-review $RID did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    gc bd update "$RID" \
+      --set-metadata gc.routed_to="$REVIEW_POOL" \
+      --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
+    rgot=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+    if [ "$rgot" != "$REVIEW_POOL" ]; then
+      echo "$PROG: WARN re-review $RID route did not persist; retry next pass" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
+    regated=$((regated + 1))
+    echo "$PROG: $id — PR#$num check.$stale_gate green@$stale_oid is stale (live head $head_oid); filed re-review $RID routed to $REVIEW_POOL"
+    continue
+  fi
+
+  # --- dismiss our OWN superseded CHANGES_REQUESTED when the gate is green -------
+  # Only when every declared gate is green at the LIVE head but GitHub is still
+  # red on our own stale block. Never a human's review; skipped when native
+  # auto-merge is armed (the dismissal would hand GitHub the landing).
+  all_green=1
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
+    m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
+    [ "$m" = "green@$head_oid" ] || all_green=0
+  done <<GATES
+$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+GATES
+  rd=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
+  if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \
+     && [ -n "$SELF_LOGIN" ]; then
+    auto=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json autoMergeRequest 2>/dev/null \
+      | jq -r 'if (.autoMergeRequest // null) == null then "off" else "armed" end' 2>/dev/null)
+    if [ "$auto" != "off" ]; then
+      echo "$PROG: $id — PR#$num has a stale block of ours but native auto-merge is armed (or unreadable); not dismissing"
+      skipped=$((skipped + 1)); continue
+    fi
+    reviews=$(gh_api_origin --paginate "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100" \
+      --jq '.[]' 2>/dev/null) || reviews=""
+    stale_rid=$(printf '%s' "$reviews" | jq -sr --arg self "$SELF_LOGIN" --arg head "$head_oid" '
+      [ .[] | select((.user.login // "") == $self)
+        | select(.state == "CHANGES_REQUESTED")
+        | select((.commit_id // "") != $head) | (.id // empty) ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$stale_rid" ]; then
+      # Record signoff_dismissed FIRST and read it back: the marker arms the
+      # external-approval requirement, and a dismissal without it drops both the
+      # block and the requirement.
+      gc bd update "$id" --set-metadata signoff_dismissed="$stale_rid@$head_oid" >/dev/null 2>&1
+      got=$(gc bd show "$id" --json 2>/dev/null | scrub | jq -r '.[0].metadata.signoff_dismissed // empty')
+      if [ "$got" != "$stale_rid@$head_oid" ]; then
+        echo "$PROG: $id — signoff_dismissed marker did not persist; NOT dismissing review $stale_rid" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      if gh_api_origin -X PUT "repos/$ORIGIN_REPO/pulls/$num/reviews/$stale_rid/dismissals" \
+           -f message="Superseded: check gates are green at the live head $head_oid; this block was pinned to a commit that is no longer the head." >/dev/null 2>&1; then
+        dismissed_n=$((dismissed_n + 1))
+        echo "$PROG: $id — dismissed our own superseded CHANGES_REQUESTED (review $stale_rid) on PR#$num; signoff_dismissed recorded"
+      else
+        echo "$PROG: $id — dismissal of review $stale_rid failed; marker stays recorded, retry next pass" >&2
+        skipped=$((skipped + 1))
+      fi
+    fi
+  fi
+done <<ROWS_EOF
+$(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
+ROWS_EOF
+
+echo "$PROG: $recorded recorded, $flagged flagged-to-human, $reworked reworks filed, $regated re-reviews filed, $cleared holds retracted, $dismissed_n reviews dismissed, $skipped skipped"
+exit 0

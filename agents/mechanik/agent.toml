@@ -1,3 +1,5 @@
+# mechanik — city-scoped structural engineer (named singleton, always;
+# stanza in pack.toml). Dispatches pack edits to polecats; direct-edits city.toml.
 scope = "city"
 wake_mode = "fresh"
 work_dir = ".gc/agents/mechanik"
