@@ -45,7 +45,16 @@
 #
 #      within the ten lines above it. Those are the two halves of "covers the
 #      declared set, or declares its default", and a list that does neither is
-#      an ERROR.
+#      an ERROR. The declaration must also MATCH: `covers=` is compared to the
+#      set the reader actually keys on, so the comment cannot drift away from
+#      the line it sits above and keep the check green.
+#
+#      A reader is a logical construct, not a line. `case`/`esac` with one state
+#      per arm, a backslash-continued list, and a multi-line single-quoted jq
+#      program are each read as one unit — line-locally every arm of a case
+#      block names exactly ONE state, so scanning raw lines counted the whole
+#      construct as zero readers and reformatting a flagged reader was enough to
+#      bypass the invariant.
 #
 # WHY A KIND-SET PASSES WITHOUT A COMMENT. A reader keyed on a kind is not
 # hand-rolling anything: it is naming a partition this declaration owns, and it
@@ -185,6 +194,16 @@ rel() { printf '%s' "${1#"$dir"/}"; }
 # Every write in this pack is a literal (no `merge_result=$VAR` site exists), so
 # scanning literals is complete rather than a sample. A variable-valued write
 # would defeat that, and is reported rather than passed over in silence.
+#
+# The separator and the quote are both optional, and every form is ordinary:
+# `--set-metadata merge_result=merged` and `--set-metadata "merge_result=merged"`
+# appear side by side in this pack, and `--set-metadata=merge_result=merged` is
+# accepted by the same CLI. A scanner that saw only the bare form let a quoted
+# undeclared write ship while the summary line reported that every literal
+# written by pack code was declared — a check stating the opposite of the truth,
+# which is worse than no check at all.
+SQ_CHAR="'"
+WRITE_RE="--set-metadata[[:space:]=]+[\"$SQ_CHAR]?merge_result="
 undeclared=()
 written=""
 varwrite=()
@@ -194,7 +213,7 @@ while IFS= read -r f; do
         no="${ln%%:*}"; body="${ln#*:}"
         stripped="${body#"${body%%[![:space:]]*}"}"
         case "$stripped" in '#'*) continue ;; esac
-        lit=$(sed -E 's/.*--set-metadata[[:space:]]+merge_result=//; s/[^A-Za-z0-9_].*//' <<< "$body")
+        lit=$(sed -E "s/.*$WRITE_RE//; s/[^A-Za-z0-9_].*//" <<< "$body")
         if [ -z "$lit" ]; then
             varwrite+=("$(rel "$f"):$no: $(cut -c1-100 <<< "$stripped")")
             continue
@@ -204,7 +223,7 @@ while IFS= read -r f; do
         else
             undeclared+=("$(rel "$f"):$no: writes merge_result=$lit, which is not declared in $DECL_DOC")
         fi
-    done < <(grep -nE -- '--set-metadata[[:space:]]+merge_result=' "$f" 2>/dev/null)
+    done < <(grep -nE -- "$WRITE_RE" "$f" 2>/dev/null)
 done <<< "$FILES"
 
 unwritten=()
@@ -215,8 +234,8 @@ for s in $DECL_STATES; do
 done
 
 # --- 4. Readers --------------------------------------------------------------
-# A reader is a line that discriminates among two or more declared states. The
-# literals must sit in a VALUE position — quoted, a case/alternation pattern, or
+# A reader is a logical record — see logical_records below — that discriminates
+# among two or more declared states. The literals must sit in a VALUE position — quoted, a case/alternation pattern, or
 # a word in a `for X in ...` list — because these names are also ordinary
 # English ("merged", "blocked", "abandoned") and this pack's prose uses them on
 # nearly every page. Backticked prose is markup, not a value, and is skipped by
@@ -230,6 +249,74 @@ set_of() { # echoes the sorted, space-joined set matched on a line
 HANDOFF_SET=$(set_of "$HANDOFF")
 DISPOSITION_SET=$(set_of "$DISPOSITION")
 ALL_SET=$(set_of "$DECL_STATES")
+
+# A reader is not always one line. `case`/`esac` with one state per arm is the
+# most ordinary multi-state discriminator in shell, and line-locally every arm
+# names exactly ONE state — so the whole construct counted as ZERO readers and
+# passed in silence. Reformatting a flagged one-line reader into a case block
+# was enough to bypass the invariant. Multi-line jq programs and
+# backslash-continued lists split the same way.
+#
+# So the scan runs over LOGICAL records, not raw lines. Three groupings, each
+# decided by shell syntax rather than by a heuristic, so this cannot over-join
+# unrelated code:
+#
+#   backslash continuation   a line ending in a backslash continues the next.
+#   case ... esac            depth-counted; the record is attributed to the
+#                            `case` line, which is where a reader's declaration
+#                            comment belongs.
+#   NAME='...'               a single-quoted assignment. A single-quoted shell
+#                            string CANNOT contain a single quote, so the next
+#                            quote is exactly the terminator — this grouping is
+#                            exact, not a guess. The opener must be `NAME='` at
+#                            the start of the line, so an apostrophe inside an
+#                            ordinary double-quoted message ("don't") can never
+#                            open a region.
+#
+# Full-line comments are dropped before joining: prose inside a block naming
+# several states must not manufacture a reader out of a construct that reads
+# none.
+#
+# GROUP_CAP is a fail-safe, not a rule. An unbalanced `case` — one buried in a
+# heredoc, say — would otherwise swallow the rest of the file into a single
+# record and report it as one enormous reader. At the cap the group is flushed
+# and the grouping state reset, degrading to the old line-local behaviour for
+# that stretch rather than producing a confident wrong answer.
+GROUP_CAP=80
+
+logical_records() { # $1 = file; emits "<start-line>:<joined, comment-free body>"
+    awk -v SQ="$SQ_CHAR" -v CAP="$GROUP_CAP" '
+        function flush() { if (buf != "") print start ":" buf; buf = ""; start = 0; n = 0 }
+        {
+            raw = $0
+            t = raw; sub(/^[ \t]+/, "", t)
+            if (t ~ /^#/) next
+            if (start == 0) { start = NR; buf = t; n = 1 } else { buf = buf " " t; n++ }
+
+            nq = split(raw, parts, SQ) - 1
+            if (inq) {
+                if (nq > 0) inq = 0
+            } else if (t ~ ("^[A-Za-z_][A-Za-z0-9_]*=" SQ) && nq % 2 == 1) {
+                inq = 1
+            }
+
+            # `case` and `esac` must be the FIRST token of the line, and the
+            # opener must END with `in`. Anything looser matches English: this
+            # pack ships formulas whose markdown says "in the common case the
+            # two readings coincide", which under a substring test opens a
+            # phantom block that swallows the rest of the file. The check would
+            # then classify prose, and its answer would depend on wording.
+            if (t ~ /^case[ \t]/ && t ~ /[ \t]in[ \t]*(#|$)/) casedepth++
+            if (t ~ /^esac([^A-Za-z0-9_]|$)/ && casedepth > 0) casedepth--
+
+            cont = (raw ~ /\\$/)
+
+            if (n >= CAP) { inq = 0; casedepth = 0; cont = 0 }
+            if (!inq && casedepth == 0 && !cont) flush()
+        }
+        END { flush() }
+    ' "$1" 2>/dev/null
+}
 
 undeclared_reader=()
 bad_declaration=()
@@ -247,9 +334,9 @@ while IFS= read -r f; do
         found=""
         for s in $DECL_STATES; do
             hit=0
-            grep -qE "[\"']$s[\"']" <<< "$body" && hit=1
-            grep -qE "(^|[[:space:]|(])$s[|)]" <<< "$body" && hit=1
-            if [ "$isfor" -eq 1 ] && grep -qE "(^|[^A-Za-z0-9_])$s([^A-Za-z0-9_]|$)" <<< "$body"; then hit=1; fi
+            grep -qE "[\"']${s}[\"']" <<< "$body" && hit=1
+            grep -qE "(^|[[:space:]|(])${s}[|)]" <<< "$body" && hit=1
+            if [ "$isfor" -eq 1 ] && grep -qE "(^|[^A-Za-z0-9_])${s}([^A-Za-z0-9_]|$)" <<< "$body"; then hit=1; fi
             [ "$hit" -eq 1 ] && found="$found $s"
         done
         cnt=$(printf '%s\n' $found | grep -c . )
@@ -281,17 +368,35 @@ while IFS= read -r f; do
             continue
         fi
         badcov=""
+        covlist=""
         for c in $(tr ',' ' ' <<< "$covers"); do
             [ -n "$c" ] || continue
+            # `absent` is deliberately not a declared state (see the doc), and a
+            # reader may legitimately name it in covers=. It is never a literal
+            # the scan can match, so it takes no part in the comparison below.
             [ "$c" = "absent" ] && continue
             is_declared "$c" || badcov="$badcov $c"
+            covlist="$covlist $c"
         done
         if [ -n "$badcov" ]; then
             bad_declaration+=("$(rel "$f"):$no: the $MARKER declaration covers${badcov}, which $DECL_DOC does not declare")
             continue
         fi
+        # ...and the declaration must describe THIS reader. Checking only that
+        # the covered names are declared leaves the comment free to drift away
+        # from the line it sits above: a reader edited from {pre_open_gate,
+        # merged} to {pre_open_gate,blocked} keeps a stale but still well-formed
+        # covers= and the check stays green. That is exactly the silent
+        # hand-rolled-list drift this check exists to end, reintroduced inside
+        # its own escape hatch — and the escape hatch is the one place a
+        # reviewer is asked to trust a sentence instead of the code.
+        cov_set=$(printf '%s\n' $covlist | sort -u | paste -sd' ' -)
+        if [ "$cov_set" != "$got" ]; then
+            bad_declaration+=("$(rel "$f"):$no: the $MARKER declaration covers {${cov_set:-<empty>}} but this reader keys on {$got} — the comment has drifted from the line it describes")
+            continue
+        fi
         declared_readers=$((declared_readers + 1))
-    done < <(grep -nE "(^|[^A-Za-z0-9_])($ALT)([^A-Za-z0-9_]|$)" "$f" 2>/dev/null)
+    done < <(logical_records "$f" | grep -E "(^|[^A-Za-z0-9_])($ALT)([^A-Za-z0-9_]|$)" 2>/dev/null)
 done <<< "$FILES"
 
 # --- 5. Report ---------------------------------------------------------------

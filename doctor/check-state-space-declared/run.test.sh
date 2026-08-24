@@ -39,7 +39,29 @@
 #     These names are ordinary English ("merged", "blocked", "abandoned") and
 #     this pack's prose uses them on nearly every page, so a check that flagged
 #     them would be turned off within the day;
-#   * scope: tests, specs and generated/ are not writers or readers.
+#   * scope: tests, specs and generated/ are not writers or readers;
+#
+# and, from the pre-open review of this branch (tk-2ep3gw), the three ways the
+# first cut of the check reported green over code it had not actually held:
+#   * QUOTEDWRITE — the write scanner saw only the bare
+#     `--set-metadata merge_result=X`, so a quoted undeclared write shipped
+#     while the summary line said every literal written by pack code was
+#     declared. Every CLI spelling is now scanned, and each is pinned here
+#     together with its mirror, so widening the pattern cannot instead reject
+#     the declared writes;
+#   * COVERSDRIFT — `covers=` was only checked for naming DECLARED states, never
+#     for naming THIS reader's states, so the comment could drift from the line
+#     it describes and the check stayed green: the hand-rolled-list drift the
+#     check exists to end, reintroduced inside its own escape hatch. The set
+#     comparison is pinned, with mirrors for ordering, for an exactly-matching
+#     declaration, and for `absent`;
+#   * MULTILINE — reader detection was line-local, so a `case` block with one
+#     state per arm was invisible and reformatting a flagged reader bypassed the
+#     invariant. Grouping is pinned for case blocks, backslash continuations and
+#     multi-line single-quoted jq, along with the two ways grouping itself can
+#     go wrong: prose reading "so in the common case ... in" must NOT open a
+#     block (this pack ships exactly that sentence), and an unbalanced `case`
+#     must not swallow the rest of the file.
 #
 # No live city, Dolt, network, or beads — only a tmpdir and the check itself.
 set -uo pipefail
@@ -233,6 +255,172 @@ printf '%s\n' 'A pass writes `alpha_gate`, `beta_open` or `gamma_done` and moves
               'The words merged, blocked and abandoned are ordinary English here.' \
     > "$D/template-fragments/x.template.md"
 eq "$(rc_of "$D")" 0 "backticked prose and bare English are not readers"
+
+
+echo "# --- the write scanner sees every CLI spelling (P1, review tk-2ep3gw) ---"
+# The scanner matched only the bare `--set-metadata merge_result=X`. The quoted
+# form is just as ordinary and appears in this pack, and it slipped through
+# while the summary line reported that every literal written by pack code was
+# declared — the check stating the opposite of the truth.
+
+D=$(mkpack quotedwrite)
+code "$D" wq.sh '#!/usr/bin/env bash' 'gc bd update "$1" --set-metadata "merge_result=omega_new"'
+eq "$(rc_of "$D")" 2 "QUOTEDWRITE: a QUOTED undeclared write is an ERROR"
+OUT="$(run "$D")"
+has "$OUT" "UNDECLARED WRITE" "QUOTEDWRITE: labelled an undeclared write"
+has "$OUT" "wq.sh:2" "QUOTEDWRITE: reported at file and line"
+has "$OUT" "omega_new" "QUOTEDWRITE: and names the literal, with the quote stripped"
+
+D=$(mkpack squotedwrite)
+code "$D" ws.sh '#!/usr/bin/env bash' "gc bd update \"\$1\" --set-metadata 'merge_result=omega_sq'"
+eq "$(rc_of "$D")" 2 "QUOTEDWRITE: a single-quoted undeclared write is an ERROR too"
+has "$(run "$D")" "omega_sq" "QUOTEDWRITE: and names that literal"
+
+D=$(mkpack eqwrite)
+code "$D" we.sh '#!/usr/bin/env bash' 'gc bd update "$1" --set-metadata=merge_result=omega_eq'
+eq "$(rc_of "$D")" 2 "QUOTEDWRITE: the --set-metadata=k=v spelling is an ERROR too"
+has "$(run "$D")" "omega_eq" "QUOTEDWRITE: and names that literal"
+
+# The mirror: a DECLARED write in each spelling must still be accepted, or the
+# widened pattern would fail every pack file instead of none.
+D=$(mkpack quotedok)
+code "$D" wok.sh '#!/usr/bin/env bash' 'gc bd update "$1" --set-metadata "merge_result=alpha_gate"' \
+                                        "gc bd update \"\$1\" --set-metadata 'merge_result=gamma_done'" \
+                                        'gc bd update "$1" --set-metadata=merge_result=beta_open'
+eq "$(rc_of "$D")" 0 "QUOTEDWRITE: declared literals in every spelling still pass"
+
+echo "# --- covers= must describe THIS reader (P1, review tk-2ep3gw) -----------"
+# Validating only that the covered names are declared left the comment free to
+# drift from the line it sits above: edit the reader, keep the stale covers=,
+# and the check stays green — the hand-rolled-list drift the check exists to
+# end, reintroduced inside its own escape hatch.
+
+D=$(mkpack coversdrift)
+code "$D" drift.sh '#!/usr/bin/env bash' \
+    '# merge-result-reader: covers=beta_open,delta_void default=x' \
+    'case "$mr" in' \
+    '  alpha_gate|gamma_done) echo hi ;;' \
+    'esac'
+eq "$(rc_of "$D")" 2 "COVERSDRIFT: a declaration naming a different declared set is an ERROR"
+OUT="$(run "$D")"
+has "$OUT" "MALFORMED DECLARATION" "COVERSDRIFT: labelled a malformed declaration"
+has "$OUT" "has drifted from the line it describes" "COVERSDRIFT: and says the comment drifted"
+has "$OUT" "beta_open delta_void" "COVERSDRIFT: naming what the comment claims"
+has "$OUT" "alpha_gate gamma_done" "COVERSDRIFT: and what the reader actually keys on"
+
+D=$(mkpack coverspartial)
+code "$D" part.sh '#!/usr/bin/env bash' \
+    '# merge-result-reader: covers=alpha_gate default=x' \
+    "jq 'select(\$mr == \"alpha_gate\" or \$mr == \"gamma_done\")'"
+eq "$(rc_of "$D")" 2 "COVERSDRIFT: a declaration covering only SOME of the states it reads is an ERROR"
+
+# The mirror. Without it the equality check could tighten into rejecting every
+# declaration, and the escape hatch would be gone rather than fixed.
+D=$(mkpack coversexact)
+code "$D" exact.sh '#!/usr/bin/env bash' \
+    '# merge-result-reader: covers=alpha_gate,gamma_done default=x' \
+    "jq 'select(\$mr == \"alpha_gate\" or \$mr == \"gamma_done\")'"
+eq "$(rc_of "$D")" 0 "COVERSDRIFT: a declaration matching its reader exactly still passes"
+has "$(run "$D")" "1 with an explicit default" "COVERSDRIFT: and is counted as a declared reader"
+
+D=$(mkpack coversorder)
+code "$D" ord.sh '#!/usr/bin/env bash' \
+    '# merge-result-reader: covers=gamma_done,alpha_gate default=x' \
+    "jq 'select(\$mr == \"alpha_gate\" or \$mr == \"gamma_done\")'"
+eq "$(rc_of "$D")" 0 "COVERSDRIFT: covers= is compared as a SET, so order does not matter"
+
+D=$(mkpack coversabsent)
+code "$D" abs.sh '#!/usr/bin/env bash' \
+    '# merge-result-reader: covers=alpha_gate,gamma_done,absent default=x' \
+    "jq 'select(\$mr == \"alpha_gate\" or \$mr == \"gamma_done\")'"
+eq "$(rc_of "$D")" 0 "COVERSDRIFT: 'absent' is still tolerated in covers= — it is not a declared state and never a matchable literal"
+
+echo "# --- a reader is not always one line (P1, review tk-2ep3gw) -------------"
+# case/esac with one state per arm is the most ordinary multi-state
+# discriminator in shell, and line-locally every arm names exactly ONE state —
+# so the whole construct counted as ZERO readers and passed in silence.
+# Reformatting a flagged one-line reader into a case block bypassed the
+# invariant entirely.
+
+D=$(mkpack multicase)
+code "$D" mc.sh '#!/usr/bin/env bash' \
+    'case "$mr" in' \
+    '  alpha_gate) a ;;' \
+    '  gamma_done) b ;;' \
+    'esac'
+eq "$(rc_of "$D")" 2 "MULTILINE: a case block with one state per arm IS a reader"
+OUT="$(run "$D")"
+has "$OUT" "HAND-ROLLED READER" "MULTILINE: and is reported as hand-rolled"
+has "$OUT" "mc.sh:2" "MULTILINE: attributed to the case line, where its declaration belongs"
+has "$OUT" "alpha_gate gamma_done" "MULTILINE: naming the set the whole block keys on"
+
+D=$(mkpack multicasekind)
+code "$D" mk.sh '#!/usr/bin/env bash' \
+    'case "$mr" in' \
+    '  alpha_gate) a ;;' \
+    '  beta_open) b ;;' \
+    'esac'
+eq "$(rc_of "$D")" 0 "MULTILINE: a case block spanning exactly one kind-set passes"
+has "$(run "$D")" "1 reader(s) on a declared kind-set" "MULTILINE: and is counted once, not per arm"
+
+D=$(mkpack multicasedecl)
+code "$D" md.sh '#!/usr/bin/env bash' \
+    '# merge-result-reader: covers=alpha_gate,gamma_done default=x' \
+    'case "$mr" in' \
+    '  alpha_gate) a ;;' \
+    '  gamma_done) b ;;' \
+    'esac'
+eq "$(rc_of "$D")" 0 "MULTILINE: a declaration above the case line covers the whole block"
+
+D=$(mkpack multicont)
+code "$D" cont.sh '#!/usr/bin/env bash' \
+    'for s in alpha_gate \' \
+    '         gamma_done; do echo "$s"; done'
+eq "$(rc_of "$D")" 2 "MULTILINE: a backslash-continued list IS a reader"
+
+D=$(mkpack multijq)
+code "$D" mj.sh '#!/usr/bin/env bash' \
+    "PROG='" \
+    '  select($mr == "alpha_gate"' \
+    '      or $mr == "gamma_done")' \
+    "'" \
+    'jq "$PROG"'
+eq "$(rc_of "$D")" 2 "MULTILINE: a jq program split across lines inside a single-quoted assignment IS a reader"
+has "$(run "$D")" "mj.sh:2" "MULTILINE: attributed to the assignment that opens it"
+
+# --- and the grouping must not over-join ---------------------------------
+# Each of these passed BEFORE the multi-line fix too. They are here because the
+# fix is what could break them: a looser `case` test matches English, and this
+# pack ships formula prose reading "in the common case the two readings
+# coincide". Under a substring test that opens a phantom block which swallows
+# the rest of the file, and the check starts classifying prose — its answer
+# depending on wording rather than on code.
+D=$(mkpack prosecase)
+code "$D" pc.sh '#!/usr/bin/env bash' \
+    'echo "the wrapper tracks one member, so in the common case the two readings coincide"' \
+    'echo "alpha_gate"' \
+    'echo "gamma_done"'
+eq "$(rc_of "$D")" 0 "MULTILINE: prose saying 'case ... in' does NOT open a block"
+
+D=$(mkpack apostrophe)
+code "$D" ap.sh '#!/usr/bin/env bash' \
+    'echo "do not guess what it is"' \
+    'echo "alpha_gate"' \
+    'echo "gamma_done"'
+eq "$(rc_of "$D")" 0 "MULTILINE: an apostrophe in a double-quoted message does not open a quoted region"
+
+# The GROUP_CAP fail-safe. An unbalanced `case` — one buried in a heredoc, say
+# — would otherwise swallow the rest of the file into a single record and
+# report it as one enormous reader at line 1.
+D=$(mkpack runaway)
+{
+    echo '#!/usr/bin/env bash'
+    echo 'case "$x" in'
+    for i in $(seq 1 100); do echo "  filler_$i=1"; done
+    echo "jq 'select(\$mr == \"alpha_gate\" or \$mr == \"gamma_done\")'"
+} > "$D/assets/scripts/run.sh"
+eq "$(rc_of "$D")" 2 "MULTILINE: an unbalanced case does not swallow the file — the later reader is still found"
+hasnt "$(run "$D")" "run.sh:2:" "MULTILINE: and the finding is not attributed to the runaway opener"
 
 echo "# --- scope --------------------------------------------------------------"
 
