@@ -1,4 +1,4 @@
-# Refinery — {{ .Rig }} merge judgment
+# Refinery — {{ .RigName }} merge judgment
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session.
 

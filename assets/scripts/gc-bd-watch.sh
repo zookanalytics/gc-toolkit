@@ -1,67 +1,21 @@
 #!/bin/sh
 # gc-bd-watch.sh — emit meaningful bead-state updates as JSONL.
-#
-# Usage: gc-bd-watch <bead-id> [--timeout=DURATION]
-#
-# Designed to be spawned as a background process by an agent's
-# harness. Each stdout line is a self-contained JSON object; consumers
-# parse line-by-line and match on `"type":"status_change"` (or the
-# desired target status, e.g. `"to":"closed"`) to wake on real
-# transitions.
-#
-# Claude Code example:
-#   Monitor(command: "<this script> <bead>", description: "watching <bead>", persistent: true)
-#   Each emitted JSONL line is a notification; match on "type":"status_change".
-#
-# DURATION accepts any value timeout(1) understands (e.g. 30s, 5m, 24h).
-# Default: 24h. The watcher exits as soon as the bead reaches a terminal
-# status (closed), the timeout fires, or the harness kills the process.
-#
-# Output grammar (one JSON object per line):
-#   {"ts":"<rfc3339>","bead":"<id>","type":"watch_start","status":"<initial>"}
-#   {"ts":"<rfc3339>","bead":"<id>","type":"status_change","from":"<prior>","to":"<new>"}
-#   {"ts":"<rfc3339>","bead":"<id>","type":"watch_reconnect","attempt":<n>,"reason":"<retry-reason>"}
-#   {"ts":"<rfc3339>","bead":"<id>","type":"watch_end","reason":"<reason>"}
-#
-# watch_end reasons:
-#   closed                        — bead reached terminal status (closed)
-#   already_closed                — bead was already closed at startup
-#   timeout                       — timeout(1) wrapper fired or the total deadline expired
-#   killed                        — TERM/INT/HUP received
-#   startup_no_cursor             — gc events --seq did not return a usable cursor
-#   stream_ended_before_terminal  — event stream closed cleanly before the bead reached a terminal status (after exhausting reconnects)
-#   stream_error_<n>              — gc events --follow exited non-zero (n = exit code, after exhausting reconnects)
-#
-# Exit codes:
-#   0   terminal status reached (closed, already_closed)
-#   1   bead not found / startup error (incl. startup_no_cursor) / stream_ended_before_terminal / stream_error_<n>
-#   2   usage error
-#   124 timeout fired (also emits watch_end reason=timeout)
-#   143 SIGTERM received (also emits watch_end reason=killed)
-#
-# Stream-error resilience. `gc events --follow` can drop for transient
-# reasons (Dolt hiccup, connection blip, internal cursor issue) without
-# the bead itself being terminal. The watcher wraps producer + consumer
-# in a retry loop, advancing the resume cursor from each event's `.seq`
-# so transitions emitted during the hiccup are replayed on reconnect.
-# Each retry emits one `watch_reconnect` line and sleeps with exponential
-# backoff before respawning. The reconnect budget resets whenever the
-# stream makes forward progress (new `.seq`).
-#
-# Tunables (env vars):
-#   GC_BD_WATCH_MAX_RECONNECT     — max consecutive failed reconnects before giving up (default 5)
-#   GC_BD_WATCH_BACKOFF_INITIAL   — initial sleep between reconnects, in seconds; doubles per attempt (default 2)
-#
-# The total wall-clock budget is fixed at startup from --timeout — retries
-# do NOT reset it. Per-attempt timeouts are computed against the original
-# deadline, so an N-hour watch followed by reconnects is still bounded
-# by the original N hours.
-#
-# Noise filtering. `bead.updated` fires on every metadata write, label
-# change, and cache-reconcile pass — not just status changes. The script
-# tracks the prior status in-process and emits `status_change` only on a
-# real transition. Consumers' line-matches stay cheap.
-
+# Usage: gc-bd-watch <bead-id> [--timeout=DURATION]   (DURATION: timeout(1)
+# style, default 24h). Spawned as a background process by an agent harness;
+# each stdout line is one self-contained JSON object:
+#   {"ts","bead","type":"watch_start","status"}
+#   {"ts","bead","type":"status_change","from","to"}     <- match on this
+#   {"ts","bead","type":"watch_reconnect","attempt","reason"}
+#   {"ts","bead","type":"watch_end","reason"}
+# watch_end reasons: closed · already_closed · timeout · killed ·
+# startup_no_cursor · stream_ended_before_terminal · stream_error_<n>.
+# Exit: 0 terminal · 1 startup/stream failure · 2 usage · 124 timeout ·
+# 143 SIGTERM. Transient stream drops are retried with backoff, resuming
+# from each event's .seq so nothing is missed; the reconnect budget resets
+# on forward progress (tunables GC_BD_WATCH_MAX_RECONNECT /
+# GC_BD_WATCH_BACKOFF_INITIAL). The wall-clock budget is fixed at startup —
+# retries never extend it. bead.updated fires on every metadata write, so
+# status_change is emitted only on a real status transition.
 set -eu
 
 usage() {
@@ -98,9 +52,7 @@ done
 
 [ -n "$BEAD" ] || { usage; exit 2; }
 
-# Reconnect tunables. Validated below — bad values fall back to defaults
-# rather than fail at first arithmetic use, so a typo'd env var can't
-# silently kill a long watch.
+# Reconnect tunables; bad values fall back to defaults.
 MAX_RECONNECT="${GC_BD_WATCH_MAX_RECONNECT:-5}"
 BACKOFF_INITIAL="${GC_BD_WATCH_BACKOFF_INITIAL:-2}"
 printf '%s' "$MAX_RECONNECT"   | grep -Eq '^[0-9]+$' || MAX_RECONNECT=5
@@ -138,8 +90,7 @@ emit_end()    {
         '{ts:$ts,bead:$bead,type:"watch_end",reason:$reason}'
 }
 
-# State shared with the cleanup trap so signal handlers can tear down the
-# producer cleanly without leaking a zombie `gc events --follow` process.
+# Shared with the cleanup trap so it can tear down the producer.
 FIFO=""
 PRODUCER=""
 
@@ -159,22 +110,15 @@ on_kill() {
     emit_end killed || true
     exit 143
 }
-# EXIT runs cleanup unconditionally so a broken stdout consumer, a `set -e`
-# trip on a failing jq write, or any other unexpected exit path still tears
-# down the producer + FIFO. cleanup() is idempotent.
+# EXIT runs cleanup unconditionally; cleanup() is idempotent.
 trap cleanup EXIT
 trap on_kill TERM INT HUP
-# SIGPIPE: ignore. Stdout is the notification channel; if the consumer
-# disappears, jq's writes will fail with EPIPE rather than killing the
-# process via signal. set -e then exits the script and the EXIT trap
-# cleans up. The exit code will be non-zero (jq's write-error code),
-# which is the right signal: the watch ended abnormally.
+# SIGPIPE ignored: a vanished consumer surfaces as jq's EPIPE write error,
+# which set -e turns into an abnormal exit through the EXIT trap.
 trap '' PIPE
 
-# Snapshot the current event-stream cursor BEFORE reading the bead. Any
-# status transitions that race between the bd show below and the follow
-# stream are replayed from this cursor, so the watcher does not silently
-# miss a transition that happened during startup.
+# Cursor snapshot BEFORE the bd show: transitions racing startup are
+# replayed from it.
 CURSOR="$(gc events --seq 2>/dev/null || true)"
 
 INIT="$(gc bd show "$BEAD" --json 2>/dev/null | jq -r '.[0].status // empty' 2>/dev/null || true)"
@@ -190,13 +134,8 @@ if [ "$INIT" = "closed" ]; then
     exit 0
 fi
 
-# Cursor is the replay anchor for transitions that race against the
-# `gc bd show` above. Between the `gc events --seq` and the bd show,
-# the bead can transition; without `--after`, the follow stream starts
-# at the current head and silently misses anything that happened in
-# that startup window — exactly the lost-notification shape this
-# watcher exists to prevent. Fail loud on a missing cursor rather than
-# ship a watcher that can miss the window it was created for.
+# Fail loud on a missing cursor: without --after the stream starts at head
+# and silently misses the startup window.
 if ! printf '%s' "$CURSOR" | grep -Eq '^[0-9]+$'; then
     echo "gc-bd-watch: gc events --seq did not return a usable cursor; aborting" >&2
     emit_end startup_no_cursor
@@ -205,8 +144,7 @@ fi
 
 PRIOR="$INIT"
 
-# Wall-clock deadline. The per-attempt timeout is recomputed against this
-# deadline each retry, so retries do not extend the total budget.
+# Wall-clock deadline; per-attempt timeouts are computed against it.
 TIMEOUT_SECS="$(duration_to_seconds "$TIMEOUT")"
 if ! printf '%s' "$TIMEOUT_SECS" | grep -Eq '^[0-9]+$' || [ "$TIMEOUT_SECS" -le 0 ]; then
     echo "gc-bd-watch: could not parse --timeout=$TIMEOUT into seconds" >&2
@@ -214,12 +152,8 @@ if ! printf '%s' "$TIMEOUT_SECS" | grep -Eq '^[0-9]+$' || [ "$TIMEOUT_SECS" -le 
 fi
 DEADLINE_TS=$(( $(date +%s) + TIMEOUT_SECS ))
 
-# Retry loop. Each iteration spawns one producer + drains its fifo. If
-# the producer dies before the bead reaches a terminal status, we emit
-# a `watch_reconnect` event, sleep with exponential backoff, and respawn
-# at the most recently observed `seq` so transitions emitted during the
-# hiccup are replayed. The attempts budget resets whenever the stream
-# makes forward progress (cursor advances).
+# Retry loop: one producer + fifo per attempt; respawn at the last seen
+# seq after a drop.
 LAST_CURSOR="$CURSOR"
 ATTEMPTS=0
 BACKOFF="$BACKOFF_INITIAL"
@@ -233,31 +167,25 @@ while : ; do
         break
     fi
 
-    # Per-attempt fifo. A fresh fifo per attempt avoids any chance of
-    # straggling writes from the prior (killed) producer being read as
-    # the next attempt's first line.
+    # Fresh fifo per attempt: no straggling writes from a killed producer.
     FIFO=$(mktemp -u -t gc-bd-watch.XXXXXX) || {
         echo "gc-bd-watch: failed to allocate fifo path" >&2
         exit 1
     }
     mkfifo "$FIFO"
 
-    # --type isn't repeatable; subscribe to all events for this bead and
-    # filter type in the loop. The payload-match restricts to one bead-id,
-    # so the stream is already narrow.
+    # --type isn't repeatable; filter type in the loop (payload-match
+    # already narrows to one bead).
     timeout "${REMAINING}s" gc events --follow --after "$LAST_CURSOR" --payload-match "bead.id=$BEAD" \
         > "$FIFO" 2>/dev/null &
     PRODUCER=$!
 
-    # Consume from the fifo. `read` returns non-zero on EOF, which is how
-    # we detect the producer (or its wrapping timeout) exited.
+    # read returns non-zero on EOF = producer exited.
     ATTEMPT_REASON=""
     while IFS= read -r LINE; do
         [ -n "$LINE" ] || continue
-        # Advance the resume cursor on every event we see. Reset the
-        # reconnect budget on real forward progress — five consecutive
-        # failures with no event in between is the persistent-outage
-        # signal we want to catch; a hiccup mid-watch is not.
+        # Advance the cursor on every event; forward progress resets the
+        # reconnect budget.
         SEQ="$(printf '%s\n' "$LINE" | jq -r '.seq // empty' 2>/dev/null || true)"
         if [ -n "$SEQ" ] && printf '%s' "$SEQ" | grep -Eq '^[0-9]+$' && [ "$SEQ" != "$LAST_CURSOR" ]; then
             LAST_CURSOR="$SEQ"
@@ -280,18 +208,9 @@ while : ; do
         fi
     done <"$FIFO"
 
-    # Per-attempt teardown. Reap PRODUCER before clearing the variable
-    # so the EXIT trap doesn't see an empty PRODUCER and leak the
-    # `timeout ... gc events --follow` process for the rest of the
-    # global timeout budget (default 24h). Two paths:
-    #   - ATTEMPT_REASON empty: consumer hit EOF on the fifo, so the
-    #     producer already exited; `wait` collects its status so we
-    #     can classify the failure mode.
-    #   - ATTEMPT_REASON set (terminal event consumed): producer is
-    #     still alive — `gc events --follow` keeps streaming until
-    #     timeout(1) fires or we kill it. Kill, then reap.
-    # `|| PRODUCER_EXIT=$?` keeps set -e from short-circuiting on
-    # non-zero wait status — we explicitly want to inspect it.
+    # Teardown: reap PRODUCER before clearing it (or the EXIT trap leaks
+    # the follow process). EOF = producer already exited, wait classifies
+    # it; a terminal event = producer still alive, kill then reap.
     if [ -z "$ATTEMPT_REASON" ]; then
         PRODUCER_EXIT=0
         wait "$PRODUCER" 2>/dev/null || PRODUCER_EXIT=$?
@@ -314,17 +233,14 @@ while : ; do
             break
             ;;
         timeout)
-            # Per-attempt timeout is set to the remaining global budget,
-            # so 124 here means the whole watch timed out.
+            # The per-attempt bound IS the remaining global budget.
             EXIT_REASON="timeout"
             break
             ;;
         stream_error_*|stream_ended_before_terminal)
             ATTEMPTS=$(( ATTEMPTS + 1 ))
             if [ "$ATTEMPTS" -ge "$MAX_RECONNECT" ]; then
-                # Persistent failure: preserve the existing terminal
-                # reasons so consumers keying on `stream_error_<n>` keep
-                # working.
+                # Persistent failure keeps the per-attempt reason.
                 EXIT_REASON="$ATTEMPT_REASON"
                 break
             fi

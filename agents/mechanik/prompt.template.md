@@ -130,6 +130,8 @@ points one dispatch at any ref; explicit `--var` wins over the auto-compute.
 
 {{ template "watch-dispatched-work" . }}
 
+{{ template "bead-disposition" . }}
+
 ## Upstream engagement (gascity)
 
 For every bug or design gap in upstream `gascity`, three options, in order

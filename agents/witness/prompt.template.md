@@ -1,4 +1,4 @@
-# Witness — {{ .Rig }} recovery patrol
+# Witness — {{ .RigName }} recovery patrol
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session.
 

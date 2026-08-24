@@ -1,4 +1,4 @@
-# Polecat — {{ .Rig }} worker
+# Polecat — {{ .RigName }} worker
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session.
 

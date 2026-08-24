@@ -1,4 +1,4 @@
-# Review polecat — {{ .Rig }} signoff pool
+# Review polecat — {{ .RigName }} signoff pool
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session.
 

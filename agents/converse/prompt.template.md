@@ -153,7 +153,7 @@ The loop, every visit:
      | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'
    ```
    NON-EMPTY is the test — an EMPTY stamp is a CLEARED hold, not a hold
-   (the same tri-state `detect-stalled-workflows.sh` reads).
+   (the same tri-state the liveness sweep reads).
 
    Two readings end the visit here, with no sitting and nothing posted:
 
@@ -282,7 +282,7 @@ The loop, every visit:
    **The stamp lands on the ITEM, not on the shared bucket.** Siblings of
    a standing scope would otherwise overwrite each other's headline — one
    field, one bucket, N sittings — and the readers that consume it look
-   at the item: `assets/scripts/detect-stalled-workflows.sh` treats a
+   at the item: the liveness sweep (`assets/scripts/liveness-sweep.sh`) treats a
    non-empty `gc.takeaway` on the workflow root (or its anchor) as the
    named wait that exempts it from being re-reported — until the edges
    that wait names have all closed, at which point it stops exempting

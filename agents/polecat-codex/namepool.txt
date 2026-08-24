@@ -1,4 +1,4 @@
-# Alien franchise crew — distinct from gastown.polecat (Mad Max) so codex
+# Alien franchise crew — distinct from the polecat namepool (Mad Max) so codex
 # pool members are visually identifiable in `gc session list` and tmux.
 ripley
 hicks

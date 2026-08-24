@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # quota-park-nudge — resume agents parked at a provider quota banner
-# (bug tk-al95k: a quota window closing mid-turn ends the agent's turn; the
-# session stays state=active, idle under the banner, with nothing to wake it).
+# (tk-al95k: a quota window closing mid-turn leaves the session state=active,
+# idle under the banner, with nothing to wake it).
 # Job: poll every live session's pane; nudge the ones showing a limit banner.
-# A nudge is the ONLY action — never kill, never file a warrant. Two rules:
-# the signature set is provider-agnostic (extend via $QUOTA_PARK_MATCH), and
-# recovery never sleeps until the banner's stated reset time (a manual reset
-# can land early; being early costs one no-op nudge, being late costs a day).
+# A nudge is the ONLY action — never kill, never file a warrant. Signatures
+# are provider-agnostic (extend via $QUOTA_PARK_MATCH); recovery polls rather
+# than sleeping until the banner's stated reset (a manual reset lands early).
 # Callers: the quota-park-nudge exec order (3m cadence); the deacon/witness
-# patrols read the closed-field `--status` surface below INSTEAD of the pane.
+# patrols read the closed-field `--status` surface INSTEAD of the pane.
 # See docs/quota-park-recovery.md.
 set -euo pipefail
 
@@ -17,21 +16,17 @@ set -euo pipefail
 PEEK_LINES="${QUOTA_PARK_PEEK_LINES:-20}"
 TAIL_LINES="${QUOTA_PARK_TAIL_LINES:-12}"
 
-# Banner signatures — one ERE, alternatives per family (a new provider goes in
-# $QUOTA_PARK_MATCH rather than a bare form):
-#   family            anchor
-#   possessive        (hit|reached|exceeded) your <quota-noun> limit
-#   named-provider    (claude|codex|chatgpt|openai|anthropic|gemini|weekly|
-#                     5-hour|plan) [...] limit (reached|exceeded)
-#   usage-credits     /usage-credits
-#   reset-clause      your <quota-noun> limit will reset
-# Every alternative is anchored on something only a PROVIDER says — the
-# possessive plus a quota NOUN (session/usage/weekly/...), never a bare
-# "rate limit": a tool error ("Error: API rate limit exceeded", "Your API
-# rate limit will reset at ...") must not read as a park (paid for three
-# times). Word-counted gaps give the noun a left boundary. Held as ONE
-# single-quoted literal: the suite reads this line out of the script, and an
-# ERE interval inside ${VAR:-default} would close the expansion early.
+# Banner signatures — one ERE, alternatives per family:
+#   possessive      (hit|reached|exceeded) your <quota-noun> limit
+#   named-provider  (claude|codex|chatgpt|openai|anthropic|gemini|weekly|
+#                   5-hour|plan) [...] limit (reached|exceeded)
+#   usage-credits   /usage-credits
+#   reset-clause    your <quota-noun> limit will reset
+# Every alternative anchors on something only a PROVIDER says — possessive +
+# quota NOUN, never a bare "rate limit" (a tool error must not read as a
+# park). New providers go in $QUOTA_PARK_MATCH. Held as ONE single-quoted
+# literal: the suite reads this line out of the script, and an ERE interval
+# inside ${VAR:-default} would close the expansion early.
 DEFAULT_MATCH='(hit|reached|exceeded) your ([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? limit|(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) (([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? )?limit (reached|exceeded)|/usage-credits|your ([a-z0-9()./-]+ ){0,3}(session|usage|weekly|monthly|daily|hourly|5-hour|plan|subscription|quota|credit|message)s? limit will reset'
 MATCH_RE="${QUOTA_PARK_MATCH:-$DEFAULT_MATCH}"
 
@@ -40,12 +35,10 @@ MATCH_RE="${QUOTA_PARK_MATCH:-$DEFAULT_MATCH}"
 DEFAULT_BUSY='esc to interrupt|ctrl.{0,2}c to (stop|interrupt)'
 BUSY_RE="${QUOTA_PARK_BUSY:-$DEFAULT_BUSY}"
 
-# A QUOTED banner is a citation, not a banner (an agent reporting the outage).
-# A double quote anywhere on the line marks a citation (providers never print
-# one); single/smart quotes and backticks count only as an OPENING delimiter
-# (the apostrophe in "You've" is the same character). Alternation, not a
-# bracket expression: multibyte chars in [...] are a byte set under C locale.
-# The typographic quotes below are pattern DATA, not quoting.
+# A QUOTED banner is a citation, not a banner: a double quote anywhere marks
+# one (providers never print any); single/smart quotes and backticks count
+# only as an OPENING delimiter (the apostrophe in "You've" is that character).
+# Alternation, not a bracket class (multibyte in [...] is a byte set under C).
 CITATION_RE='^[[:space:]]*(>|\||▎|│|┃)*[[:space:]]*('\''|‘|’|`)|^[[:space:]]*(>|\||▎|│|┃)|"|“|”'
 
 # Retry pacing: first detection nudges immediately; later attempts back off
@@ -92,12 +85,9 @@ COVERAGE_FILE="$STATE_DIR/.sweep-coverage"
 
 NOW="$(date +%s)"
 
-# Ownership marker: the first line of every file this order writes, and the
-# test every read/delete/prune path applies before treating a file as its own
-# — shape (a header, an id-like name) is a guess, and both directions of
-# guessing wrong were reproduced (foreign state read as an episode; foreign
-# files deleted by the prune). A label, not an authenticator: an accident
-# cannot forge it, a forgery has to be deliberate.
+# Ownership marker: first line of every file this order writes; every
+# read/delete/prune path tests it before treating a file as its own (shape is
+# a guess). A label, not an authenticator.
 STATE_MAGIC='#quota-park-nudge-state-v1'
 
 # True for a file this order wrote: a regular non-symlink file whose first
@@ -127,12 +117,10 @@ num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
 # recovers.
 ts_valid() { num "${1:-}" && [ "$1" -le "$NOW" ]; }
 
-# Replace a file in STATE_DIR atomically, never writing THROUGH what is there:
-# mktemp is O_EXCL and rename(2) replaces the entry, so a planted symlink or
-# FIFO is destroyed rather than followed (a FIFO would hang the sweep). A
-# DIRECTORY is refused — `mv file dir` moves the file INSIDE and would swallow
-# the episode while reporting success. Temp names are dot-prefixed and carry
-# the pass timestamp so the prune can age them without stat(1).
+# Replace a file in STATE_DIR atomically, never writing THROUGH what is
+# there (a planted symlink/FIFO is replaced, not followed); a DIRECTORY is
+# refused — `mv file dir` would swallow the episode while reporting success.
+# Temp names are dot-prefixed and carry the pass timestamp for the prune.
 write_atomic() {
     local dest="$1" tmp
     [ -d "$dest" ] && return 1
@@ -250,10 +238,8 @@ detector_class() {
     fi
 }
 
-# Validate every numeric knob (a stray "15s" or empty override breaks a
-# different guard silently in each case), with a FLOOR: zero is reserved as
-# "disable" only for CALL_TIMEOUT / SWEEP_BUDGET / ESCALATE_AFTER; elsewhere
-# it defeats recovery (TAIL_LINES=0 detects nothing) and falls back too.
+# Validate every numeric knob (a stray "15s" breaks a different guard
+# silently in each case); zero means "disable" only where documented.
 num_min() { num "${1:-}" && [ "$1" -ge "$2" ]; }
 num_min "$CALL_TIMEOUT"   0 || CALL_TIMEOUT=15
 num_min "$SWEEP_BUDGET"   0 || SWEEP_BUDGET=120
@@ -267,18 +253,14 @@ num_min "$PEEK_LINES"     1 || PEEK_LINES=20
 num_min "$TAIL_LINES"     1 || TAIL_LINES=12
 num_min "$STALE_AFTER"    1 || STALE_AFTER=600
 
-# --- The status surface -------------------------------------------------------
-#   quota-park-nudge.sh --status [<session-id>]
-# What the patrols read INSTEAD of peeking a pane: pane text is agent output,
-# so a "saw a banner, hold the warrant" rule would hand every agent an off
-# switch for its own recovery. The classification stays here and reaches the
-# patrols only as CLOSED fields — yes/no/unknown, a detector_class label, a
-# reason from a fixed set, integers from this order's own state. `unknown` is
-# NOT folded into `no`: with no recent evidence about THAT session the patrol
-# takes its normal warrant path. reasons: no-recent-sweep, not-swept,
-# stale-episode, unsafe-session-id, foreign-state, state-dir-unavailable.
-# `no` has to be earned per session (the coverage record), because a
-# budget-deferred pass writes a fresh heartbeat without peeking its tail.
+# --- The status surface: quota-park-nudge.sh --status [<session-id>] ---------
+# What the patrols read INSTEAD of peeking a pane (pane text is agent output;
+# reading it directly would hand every agent an off switch for its own
+# recovery). CLOSED fields only: yes/no/unknown, a detector_class label, a
+# reason from {no-recent-sweep, not-swept, stale-episode, unsafe-session-id,
+# foreign-state, state-dir-unavailable}, integers from this order's state.
+# `unknown` is never folded into `no`, and `no` is earned per session (the
+# coverage record) — a budget-deferred pass heartbeats without peeking.
 
 # The no-evidence line, SAME shape as a full one — a short line is how a
 # missing field silently becomes whatever default the reader assumed.
@@ -425,12 +407,10 @@ if command -v timeout >/dev/null 2>&1; then
     if timeout -k 1 1 true >/dev/null 2>&1; then BOUND_MODE=2; else BOUND_MODE=1; fi
 fi
 
-# Every gc call goes through here. Guarantees: (1) a bound, HARD where the
-# host allows (a wedged gc is the process least likely to service SIGTERM);
-# expiry is a non-zero rc (124, or 128+n when the kill lands) that falls into
-# the caller's existing failure branch. (2) stdin CLOSED — the session loop
-# reads its work list on fd 0, and a child that consumed it would silently
-# truncate the sweep. No timeout(1) degrades to an unbounded call.
+# Every gc call goes through here: (1) a bound, HARD (`timeout -k`) where
+# the host allows — expiry is a non-zero rc (124 / 128+n) handled by the
+# caller's failure branch; (2) stdin CLOSED — the session loop reads its work
+# list on fd 0. No timeout(1) degrades to an unbounded call.
 run_bounded() {
     if [ "$CALL_TIMEOUT" -le 0 ] || [ "$BOUND_MODE" -eq 0 ]; then
         "$@" </dev/null

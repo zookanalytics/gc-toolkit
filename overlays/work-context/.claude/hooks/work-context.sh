@@ -1,55 +1,18 @@
 #!/bin/sh
 # work-context.sh — deliver the work bead's own description into the polecat's
-# context, deterministically, at the moment the bead is claimed (tk-osf13).
-#
-# THE BUG. A filer who writes a real spec into a bead's description has no
-# guarantee the worker ever reads it. `mol-polecat-work` (+ `mol-polecat-base`,
-# both upstream in the gastown pack, not editable from here) reads the work bead
-# five times and every read is jq-filtered to metadata alone — work_dir, branch,
-# rejection_reason, prepare_mode, auto_push. The description reaches the worker at
-# exactly one site: the `load-context` step's prose `gc bd show "$WORK_BEAD_ID"`.
-# That is an instruction, and it is delivered *once*, in the first step:
-#
-#   * the `implement` step — the step that consumes the requirements — never
-#     re-reads the bead. It says "do the actual implementation work" and derives
-#     WORK_BEAD_ID only to name it in commits and mail;
-#   * graph.v2 materializes each step as its own bead, so a session that is
-#     respawned mid-workflow and claims `implement` directly never ran
-#     `load-context` and never saw the description at all.
-#
-# Both paths degrade silently to title-only: the worker implements against a
-# one-line title, and nothing downstream can tell the spec was never delivered,
-# because no record survives that it existed. `gc sling` even advertises the
-# defect as settled fact ("bead <id>'s description is not carried into the
-# formula's rendered context — pass --var context_path=..."), and that advice is
-# inert for this formula family: mol-* declares neither var. See
-# specs/tk-osf13/description-delivery.md for the full derivation, and the
-# gascity-side bead it files for the sling note.
-#
-# THE FIX. A Claude `PostToolUse` hook on Bash. It fires after every claim the
-# polecat makes, resolves the claimed bead to its work bead, and injects the
-# description as `additionalContext`. The harness runs it regardless of LLM
-# state, so delivery no longer depends on the model choosing to re-read a bead
-# it was told about one step earlier — the failure mode the pack has already
-# been bitten by twice (tk-g8pfg's soft "apply cycle-recycle" prose,
-# tk-t41dq's `--notes` done sequence). Remedy in code, not in instructions.
-#
-# WHY PostToolUse. It is the only event that can fire *after* the claim inside
-# the same turn, and a polecat's whole workflow is usually one turn: SessionStart
-# and the first UserPromptSubmit both run before `gc hook --claim` has named a
-# bead, so neither can see the work bead. Confirmed supported by the running
-# client (2.1.231 carries `hookEventName:"PostToolUse",additionalContext:`).
+# context, deterministically, at the moment the bead is claimed. The formula
+# reads the bead jq-filtered to metadata, and a mid-workflow respawn never
+# runs load-context, so without this hook the spec silently degrades to
+# title-only. Runs as a Claude `PostToolUse` hook on Bash: after every claim
+# it resolves the claimed bead to its work bead and injects the description
+# as `additionalContext`. Full derivation: specs/tk-osf13/.
 #
 # Invariants:
-#   * ALWAYS exit 0. A hook that fails must never block the polecat's tool call.
-#   * stdout is either a single JSON object or empty — never prose, or the
-#     client parses a stray value as a hook decision. Diagnostics: nowhere.
-#     Delivery is best-effort; the `load-context` instruction stays the
-#     fallback, exactly as it works today.
-#   * Idempotent per (session, work bead): the description is injected once, not
-#     re-paid on every subsequent step claim in the same session.
-#   * The common case is NOT a claim (every other Bash call) and must stay
-#     cheap: one jq over the payload, then exit.
+#   * ALWAYS exit 0 — never block the polecat's tool call.
+#   * stdout is a single JSON object or empty — never prose.
+#   * Idempotent per (session, work bead); best-effort — the load-context
+#     instruction stays the fallback.
+#   * The common case (not a claim) stays cheap: one jq, then exit.
 
 set -u
 export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
@@ -63,7 +26,7 @@ template="${GC_TEMPLATE:-}"
 [ -n "$template" ] || exit 0
 case "${template##*.}" in
   polecat) : ;;
-  *) exit 0 ;; # refinery/witness/deacon/mayor/converse — not a work-bead worker
+  *) exit 0 ;; # refinery/witness/deacon/mechanik/converse — not a work-bead worker
 esac
 
 command -v jq >/dev/null 2>&1 || exit 0

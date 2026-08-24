@@ -1,45 +1,19 @@
 #!/bin/sh
 # cycle-recycle.sh — deterministic proactive context recycle for patrol agents.
-#
-# Runs as a Claude Code `Stop` hook (fires at the end of every turn). Because
-# the harness runs the hook regardless of LLM state, the recycle is genuinely
-# enforced — unlike the soft "Apply cycle-recycle" prose that used to live in
-# the patrol formulas, which degraded exactly as context filled (the bug this
-# fixes, tk-g8pfg: the fuller the context, the less reliably the model ran the
-# end-of-wisp check, so context climbed and the check was skipped harder).
-#
-# Self-gates to the three long-running patrol roles (witness, deacon, refinery)
-# and no-ops for every other agent (ephemeral polecats, converse sessions,
-# mayor, mechanik) so a focused worker is never recycled mid-task.
-#
-# When the agent's measured input_tokens crosses 200K — an absolute
-# work-product threshold (= 20% of a 1M window; a 200K-window agent would fire
-# at its own compaction edge), see docs/cycle-recycle.md
-# for the full rationale — it writes a durable HANDOFF mail (`gc handoff`) and
-# triggers a restart (`gc session reset`).
-#
-# pour-next-before-burn on the hook path: a generic Stop hook fires at a turn
-# boundary that may be mid-wisp and cannot reliably reconstruct the patrol
-# formula's pour vars (binding_prefix, target_branch, rig_name,
-# default_merge_strategy) — those live in the agent's own prompt, not in env.
-# So the inheriting session re-establishes its wisp via its Tier-2/3
-# startup-adopt path (the acceptance-named resume mechanism), which pours/adopts
-# with the correct vars. The trigger token count is carried in the HANDOFF body
-# so the new session has context before it re-derives its wisp.
+# Runs as a Claude Code `Stop` hook (every turn boundary), so the recycle is
+# enforced regardless of LLM state. Self-gates to witness | deacon | refinery;
+# no-ops for everyone else. Over an absolute 200K input-token threshold (read
+# from the supervisor API) it writes a durable HANDOFF (`gc handoff`) and
+# triggers a restart (`gc session reset`); the inheriting session re-adopts
+# its wisp via its startup reconcile. Policy: docs/cycle-recycle.md.
 #
 # Invariants:
-#   * NEVER prompt the operator (heartbeat-no-consent-ui): the threshold IS the
-#     directive. No AskUserQuestion / consent UI at the boundary.
-#   * ALWAYS exit 0 so the Stop event is never blocked, and keep stdout empty
-#     (all diagnostics to stderr) so Claude never parses a stray block decision.
-#   * Under threshold is the common path and must stay cheap: one bounded curl.
-#   * Over threshold, DEFER (never force) the recycle while an operator is
-#     attached or the refinery is mid git-op; uncertain -> skip. PreCompact
-#     stays the net for any deferred turn.
-#
-# If the supervisor API is unreachable or input_tokens is unknown, the check
-# skips silently — Claude's PreCompact hook remains the reactive safety net at
-# the model's own compaction edge. No fallback heuristic.
+#   * NEVER prompt the operator (heartbeat-no-consent-ui).
+#   * ALWAYS exit 0; stdout stays empty (diagnostics to stderr).
+#   * Under threshold (the common path) stays cheap: one bounded curl.
+#   * Over threshold, DEFER while an operator is attached or the refinery is
+#     mid git-op; uncertain -> skip. PreCompact stays the reactive net, as it
+#     is when the API is unreachable or input_tokens unknown.
 
 set -u
 export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
