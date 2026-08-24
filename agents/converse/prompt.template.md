@@ -100,19 +100,40 @@ The loop, every visit:
    Before prepping, resolve what this sitting is about and who holds it:
    ```bash
    # >>> visit-fold-check
-   ITEM=$(gc bd show "$VISIT" --json \
-     | tr -d '[:cntrl:]' | jq -r '.[0].metadata.stall_root // ""')
+   V=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]')
+   ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
+   # The claim reports the gc.continuation_group STAMP, and that stamp lands
+   # EMPTY on a minority of visits while the `tracks` edge filed alongside it
+   # still carries the subject (tk-tu5g3). Recover it from the edge before
+   # using it as a filter — both predicates below key on it.
+   if [ -z "$SUBJECT" ]; then
+     SUBJECT=$(printf '%s' "$V" | jq -r '
+       [ ((.[0].dependencies // [])[]?
+           | select((((.type // .dependency_type // "") | tostring))=="tracks")
+           | ((.depends_on_id // .id // "") | tostring)) ]
+       | map(select(. != "")) | .[0] // ""')
+   fi
    ITEM="${ITEM:-$SUBJECT}"
-   HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
-     | tr -d '[:cntrl:]' \
-     | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
-         [ .[]
-           | select((.metadata.task_kind // "")=="visit")
-           | select((.metadata["gc.continuation_group"] // "")==$s)
-           | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
-           | select((.assignee // "")!="")
-           | .id ]
-         + [$v] | unique | .[0]')
+   if [ -z "$SUBJECT" ]; then
+     # Neither recording resolved. With an empty $s BOTH predicates below
+     # degenerate to "matches every empty-group visit" — and stall_root is
+     # empty on those too, so it falls back to $s and matches as well. The
+     # lowest-id tiebreak would then pick a winner across UNRELATED subjects
+     # and fold this sitting into one about something else, losing it with
+     # nothing to say a decision was ever made. You are the holder.
+     HOLDER="$VISIT"
+   else
+     HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
+       | tr -d '[:cntrl:]' \
+       | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
+           [ .[]
+             | select((.metadata.task_kind // "")=="visit")
+             | select((.metadata["gc.continuation_group"] // "")==$s)
+             | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
+             | select((.assignee // "")!="")
+             | .id ]
+           + [$v] | unique | .[0]')
+   fi
    # <<< visit-fold-check
    ```
    **Fold only when `$HOLDER` is another visit's id** — then append
@@ -133,8 +154,19 @@ The loop, every visit:
    with ZERO sittings — recorded live as su-331y (workflow su-ykfw) and
    su-s1if (workflow su-vc8n) under group su-vehr. Lowest id holds, so
    the outcome is one sitting rather than none.
+
+   And both halves rest on `$SUBJECT` being known, which is why the block
+   refuses to fold when it is not. The claim reports the
+   `gc.continuation_group` STAMP, and that stamp lands empty on a minority
+   of visits — 7 of the 74 ever filed when this was written, including both
+   visits in_progress city-wide that day (tk-tu5g3). With an empty subject
+   the two filters stop discriminating and the tiebreak turns into a
+   coin-toss across unrelated topics, which is the ZERO-SITTINGS outcome it
+   was added to prevent, arriving by the other door. The `tracks` edge is
+   the visit's second recording of its own subject and has held where the
+   stamp did not (su-ab9je); when even that is missing, you hold.
    `assets/scripts/converse-fold-scope.test.sh` runs this block against
-   both shapes; keep them in step.
+   every one of those shapes; keep them in step.
 2. **Re-check the premise.** A visit can sit for days before anyone
    claims it, and the condition that justified filing it routinely dies
    in the meantime. Test the VISIT's own premise against live state

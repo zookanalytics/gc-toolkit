@@ -92,11 +92,16 @@ chmod +x "$BIN/gc"
 # An empty <item> writes NO stall_root key at all: absent is the ordinary
 # subject-is-the-topic shape, and it must behave differently from a stall
 # visit rather than collapsing to the same branch.
+# A 5th argument writes the `tracks` edge a visit is filed with alongside its
+# stamp. It is the visit's SECOND recording of its own subject, and the one that
+# has held where the stamp did not (su-ab9je) — so it is what the empty-group
+# cases below recover from.
 visit() {
-    jq -nc --arg id "$1" --arg g "$2" --arg i "$3" --arg a "$4" \
+    jq -nc --arg id "$1" --arg g "$2" --arg i "$3" --arg a "$4" --arg t "${5:-}" \
         '{id:$id, assignee:$a,
           metadata:({"task_kind":"visit","gc.continuation_group":$g}
-                    + (if $i == "" then {} else {"stall_root":$i} end))}'
+                    + (if $i == "" then {} else {"stall_root":$i} end))}
+         + (if $t == "" then {} else {dependencies:[{id:$t, dependency_type:"tracks"}]} end)'
 }
 # fixture <visit-json>... — write list.json plus a show-<id>.json per visit.
 fixture() {
@@ -142,6 +147,21 @@ legacy_holds() {
     jq --arg s "$1" '[.[] | select((.metadata.task_kind // "") == "visit")
         | select((.metadata["gc.continuation_group"] // "") == $s)
         | select(.assignee != "")] | length' "$FIXDIR/list.json"
+}
+
+# legacy_holder <visit> <subject> — what the PRE-FIX block resolved, reproduced
+# exactly: no tracks-edge recovery, no empty-subject refusal. Present for the
+# same reason as legacy_holds — to prove each empty-group fixture below really
+# does reproduce the defect rather than being a shape the old rule handled.
+legacy_holder() {
+    _lh_i=$(jq -r '.[0].metadata.stall_root // ""' "$FIXDIR/show-$1.json" 2>/dev/null)
+    [ -n "$_lh_i" ] || _lh_i="$2"
+    jq -r --arg s "$2" --arg i "$_lh_i" --arg v "$1" '
+        [ .[] | select((.metadata.task_kind // "")=="visit")
+          | select((.metadata["gc.continuation_group"] // "")==$s)
+          | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
+          | select((.assignee // "")!="") | .id ]
+        + [$v] | unique | .[0]' "$FIXDIR/list.json" 2>/dev/null
 }
 
 BLOCK="$(extract_block)"
@@ -196,6 +216,51 @@ is "a held visit of another group is not a holder, same item or not" \
     "$(holder v-two sub)" "v-two"
 fixture "$(visit v-one sub r-alpha sess-1)"
 is "a lone sitting holds" "$(holder v-one sub)" "v-one"
+
+echo "── an EMPTY continuation group never folds across subjects ──"
+# tk-tu5g3. The claim reports the gc.continuation_group STAMP, and that stamp
+# lands empty on a minority of visits — 7 of the 74 ever filed when this was
+# written, across three different filers, including BOTH visits in_progress
+# city-wide on 2026-08-24. With an empty $SUBJECT both filters above stop
+# discriminating: every empty-group visit matches the first, and stall_root is
+# empty on those too so it falls back to $s and matches the second. The
+# lowest-id tiebreak then picks a winner across UNRELATED topics — the
+# ZERO-SITTINGS outcome it was added to prevent, arriving by the other door,
+# and strictly worse than the guard merely failing open.
+
+# The live shape: two in_progress visits, both stamped empty, about different
+# subjects. Neither may fold into the other.
+fixture "$(visit v-two '' '' sess-2)" "$(visit v-one '' '' sess-1)"
+is "positive control: the pre-fix rule folded v-two into an unrelated v-one" \
+    "$(legacy_holder v-two '')" "v-one"
+is "an unresolvable subject holds its own sitting (v-two)" "$(holder v-two '')" "v-two"
+is "…and so does the other one (v-one)" "$(holder v-one '')" "v-one"
+
+# The recovery: the stamp is empty but the tracks edge carries the subject, so
+# the block resolves it and ordinary scoping applies again — same subject, so
+# the lowest id still holds and the higher still folds.
+fixture "$(visit v-two '' '' sess-2 sub)" "$(visit v-one sub '' sess-1)"
+is "an empty stamp is recovered from the tracks edge" "$(holder v-two '')" "v-one"
+
+# …and recovery must not fold ACROSS subjects: same empty stamp, edge naming a
+# different subject, so v-one is not v-two's holder.
+fixture "$(visit v-two '' '' sess-2 other)" "$(visit v-one sub '' sess-1)"
+is "a recovered subject still scopes the fold" "$(holder v-two '')" "v-two"
+
+# The item still comes from the visit's own stall_root once the subject is
+# recovered — recovery must not flatten the per-visit target back to the bucket.
+fixture "$(visit v-two '' r-beta sess-2 sub)" "$(visit v-one sub r-alpha sess-1)"
+out="$(run_block v-two '')"
+is "a recovered subject keeps the per-visit item" "$(field "$out" ITEM)" "r-beta"
+is "…and siblings about different items still do not fold" "$(field "$out" HOLDER)" "v-two"
+
+# Neither recording present: nothing can scope the fold, so it must not happen.
+fixture "$(visit v-two '' '' sess-2)" "$(visit v-one '' '' sess-1)"
+is "with no stamp and no edge the block refuses to fold at all" \
+    "$(holder v-two '')" "v-two"
+have "the prompt says an unresolvable subject holds" \
+    'You are the holder.' "$PROMPT"
+have "the fold rule cites the empty-stamp bead" 'tk-tu5g3' "$PROMPT"
 
 echo "── an unreadable listing never folds ──"
 # Fail-safe direction. A listing that did not read cannot prove another

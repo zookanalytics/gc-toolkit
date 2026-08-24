@@ -142,6 +142,46 @@ fi
 
 GROUP=$(printf '%s' "$CLAIM" | jq -r '.continuation_group // ""' 2>/dev/null || printf '')
 
+# ── The stamp is not the only recording, and it is the flaky one (tk-tu5g3) ──
+# `gc hook --claim` reports the visit's `gc.continuation_group` STAMP, and that
+# stamp lands EMPTY on a minority of visits: 7 of the 74 ever filed when this was
+# written, across three different filers (the helm board picker, the liveness
+# sweep's batch visits, and detect-parked-dispositions), including BOTH visits
+# in_progress city-wide on 2026-08-24.
+#
+# An empty group does not merely lose the comparison below. It takes the
+# deliberate fallback in the next paragraph — "cannot be proven foreign, so work
+# it" — and turns it from a rare benign case into the failure case, silently
+# disabling this guard in BOTH directions for exactly the turn it exists to
+# catch: a second, unrelated visit vacuumed onto a live sitting (tk-msfmu). The
+# guard is present, passing, and inert.
+#
+# A visit records its subject TWICE — this stamp, and a `tracks` edge filed
+# alongside it in the same `gc-helm.sh` gate-visit block — and the edge has held
+# where the stamp did not (su-ab9je, 2026-08-20: "the stamp landed EMPTY while
+# the edge carried the subject"). detect-parked-dispositions.sh reads the union
+# for this reason already; this is that same fallback in the other consumer.
+#
+# SCOPED TO VISITS on purpose. `tracks` is not a visit-only edge — a convoy
+# tracks its members — so resolving it for any claimed bead could invent a group
+# for something that never had one and release a turn that was this session's to
+# work. `task_kind=visit` is what makes the edge mean "the subject of this turn".
+#
+# This is a fallback in the consumer, not a fix for the writer: whatever leaves
+# the stamp empty (tk-ax6y4 / tk-vxw40, the non-atomic create-then-stamp) is
+# still there, and a visit carrying neither recording still resolves to the
+# pre-existing behaviour below.
+if [ -z "$GROUP" ]; then
+    GROUP=$(gc bd show "$BEAD" --json 2>/dev/null | tr -d '\000-\037' \
+        | jq -r 'if type == "array" then (.[0] // {}) else {} end
+                 | select(((.metadata // {}).task_kind // "") == "visit")
+                 | [ ((.dependencies // [])[]?
+                       | select((((.type // .dependency_type // "") | tostring)) == "tracks")
+                       | ((.depends_on_id // .id // "") | tostring)) ]
+                 | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf '')
+    [ -n "$GROUP" ] && echo "$PROG: the claim reported no continuation group for $BEAD; recovered '$GROUP' from its tracks edge" >&2
+fi
+
 # Work it when the groups match, when this is the session's first claim, or
 # when either side has no group to compare. The unknown cases resolve to WORK
 # on purpose: releasing a turn this session cannot prove is foreign would be a
