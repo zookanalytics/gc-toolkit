@@ -38,9 +38,9 @@ prompt-template authoring or any single agent's role behavior.
 | Variant | Configured by | Singleton? | Auto-spawned? | Routed work? | Examples |
 |---|---|---|---|---|---|
 | **Named singleton — `on_demand`** | `[[named_session]] mode = "on_demand"` | yes (per scope) | on first nudge or pre-assigned work | no — Tier 3 skipped | refinery, gascity-keeper |
-| **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | mayor, deacon, boot, witness, mechanik (gc-toolkit) |
+| **Named singleton — `always`** | `[[named_session]] mode = "always"` | yes (per scope) | yes, kept alive | no — Tier 3 skipped | deacon, witness, mechanik (gc-toolkit) |
 | **Patrol (overlay)** | named singleton + patrol-cycle prompt (4-tier startup, pour-before-burn) | yes — runs as the underlying named singleton | yes, as underlying named | no — Tier 3 skipped; patrol wisps are produced, not consumed via routed queue | deacon, witness, refinery |
-| **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, dog |
+| **Pool worker** | `min_active_sessions`/`max_active_sessions`, optional `scale_check` | no, N instances | yes, scaled by demand | yes — Tier 3 fires for `ephemeral` origin | polecat, polecat-codex |
 | **Deterministic worker (no prompt loop)** | `prompt_mode = "none"` + `start_command` + `max_active_sessions`; no `[[named_session]]` | in effect — capped at `max_active_sessions = 1` | yes, demand-scaled from zero | yes — but through its own serve-loop query, not the hook tiers | control-dispatcher (bundled core pack) |
 | **Manual** | `gc session new <template>` | no — just a session_origin | no — operator initiates | depends on the agent's variant | any template invoked this way |
 
@@ -229,8 +229,7 @@ expansion:
   QualifiedName is `<rig>/<binding>.<identity>` (e.g.,
   `gc-toolkit/gc-toolkit.witness`).
 - **City-scoped** (`scope = "city"`): Dir is `""`, so QualifiedName
-  is just `<binding>.<identity>` (e.g., `gc-toolkit.mechanik`,
-  `gc-toolkit.mayor`).
+  is just `<binding>.<identity>` (e.g., `gc-toolkit.mechanik`).
 - **Unscoped** (`scope` omitted): you get *both* of the above from
   the one stanza — a city identity `<binding>.<identity>` plus a
   `<rig>/<binding>.<identity>` per rig. "At most one canonical
@@ -422,12 +421,11 @@ lane breakdown.
 
 ### Examples in the wild
 
-From the gastown pack's `pack.toml` (`github.com/gastownhall/gascity-packs`,
-imported via `rigs/gascity/examples/gastown/pack.toml`):
+From a pack's `pack.toml`:
 
 ```toml
 [[named_session]]
-template = "mayor"
+template = "mechanik"
 scope = "city"
 mode = "always"
 
@@ -693,19 +691,12 @@ work wins:
 4. **Fresh pour** — only when 1-3 are empty. Create a new patrol
    wisp and claim it `in_progress`.
 
-This shape is enforced at pack-validate time by
-`doctor/check-startup-discovery/`; if `gc doctor` flags an agent's
-startup-discovery block as missing tier 2 or 3, expect
-missed-MERGE_READY-style stalls. The reference implementation is a
-single shared fragment in this pack —
-`template-fragments/layered-startup-discovery.template.md` — which
-defines four named blocks,
-`layered-startup-discovery-{boot,deacon,refinery,witness}`, appended
-to those agents' prompts via `inject_fragments_append` in
-`pack.toml`. There are no per-agent patrol prompt templates to read:
-this pack ships none, and the gastown base prompts of the same name
-carry no tier structure. The check inspects each block's region
-separately.
+In this pack the shape lives in each patrol prompt's own
+startup-adopt section (wisp queries with `--include-infra`,
+title-keyed adopt-before-pour) — the native agent prompts under
+`agents/` carry it directly; there is no shared
+startup-discovery fragment. If an agent's startup-discovery block is
+missing tier 2 or 3, expect missed-MERGE_READY-style stalls.
 
 Only refinery and deacon are held to the full walk. The other two
 consumers share the fragment for its ephemeral-awareness rules
@@ -1224,14 +1215,14 @@ against no predicate — is spawned straight back, fresh, on a new
 epoch. The config loader flags the pairing rather than rejecting it —
 `IsAlwaysFreshWakeModeWarning` (`internal/config/config.go`), *"use
 only for a deliberate restart-per-cycle actor"* — and in gc-toolkit
-the mayor, deacon, mechanik and every witness run it.
+the deacon, mechanik and every witness run it.
 
 A queued nudge is stamped with the target's session id **and** its
 epoch, so any nudge that outlives one recycle meets a moved fence at
 delivery. Against a patrol agent that is the *normal* case, not a
 race: a deacon cycling every few minutes turns "queued a moment ago"
 into "queued an epoch ago" routinely — measured 2026-08-08, four of
-boot's five nudges to `gc-toolkit.deacon` over 14 days died this way.
+five nudges to `gc-toolkit.deacon` over 14 days died this way.
 What happens at the fence is not uniform, and the difference matters:
 
 - **Same-session epoch drift is retargeted onto the live
@@ -1359,7 +1350,7 @@ so the rule above and the running code cannot drift apart silently.
 
 One thing narrows the exposure without closing it: **bare does not imply
 a mismatch.** City-scoped singletons
-(`gc-toolkit.mayor`, `gc-toolkit.deacon`) carry bare aliases too — but
+(`gc-toolkit.mechanik`, `gc-toolkit.deacon`) carry bare aliases too — but
 *their* assignees are written bare as well, so the exact lookup hits.
 The hazard is the mismatch between the two sides, not bareness.
 

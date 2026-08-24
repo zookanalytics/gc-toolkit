@@ -226,7 +226,7 @@ the alert model rather than duplicating them.
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
 bead that already exists — `mol-first-reaction` files one after reacting,
-`detect-stalled-workflows.sh` files one on a stall, `gc-helm.sh open` files one
+`liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
 agent on topic X," where X has no bead yet. That affordance existed under the
 retired `-thread` model (a keystroke, any moment) and was not carried across
@@ -329,7 +329,7 @@ conspired:
 1. it parks the board row (`gather_meta_anchors` emits `kind:"parked"`,
    floored at `LOW`, because a conversation that reached a takeaway wants
    nothing and only has to stay findable); and
-2. it **mutes the stall detector** — `detect-stalled-workflows.sh` reads a
+2. it **mutes the stall detector** — the liveness sweep reads a
    takeaway on a root or its anchor as a wait a human named and owns.
 
 So the one automation in the city that files visits was silenced by the exact
@@ -341,9 +341,10 @@ audit's headline sat in a merged file, untold.
 
 Two changes close that (tk-2cyxo), and they are deliberately separate:
 
-- **The push.** `assets/scripts/detect-parked-dispositions.sh`, a step of the
-  witness patrol, files one visit back to the converse pool when a **parked,
-  operator-origin** subject's routed work has **all landed**. It goes through
+- **The push.** The liveness sweep (`assets/scripts/liveness-sweep.sh`,
+  which absorbed the parked-disposition detector) files one visit back to the
+  converse pool when a **parked, operator-origin** subject's routed work has
+  **all landed**. It goes through
   `gc-helm.sh open`, so it inherits the canonical `gate-visit` block and the
   one-open-visit-per-subject gate rather than re-deriving them. It writes
   exactly one key — `disposition_flagged`, the sorted id set of the work that
@@ -351,7 +352,7 @@ Two changes close that (tk-2cyxo), and they are deliberately separate:
   clears the takeaway**: that stamp is the record of what the sitting
   concluded, and the visit is additive.
 - **The un-mute.** A takeaway whose recorded wait has *fully closed* no longer
-  exempts a workflow from `detect-stalled-workflows.sh`. One carve-out, not a
+  exempts a workflow from the stall detection in `liveness-sweep.sh`. One carve-out, not a
   removal: `triage.hold` still mutes unconditionally, because it names its wait
   in prose with no edge to discharge. The predicate lives once, in the sweep
   (`--wait-spent <bead-id>`), and the detector asks it — a mirrored predicate in

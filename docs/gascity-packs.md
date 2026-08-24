@@ -309,191 +309,20 @@ artifact**, so future upstream fixes to it are masked.
   before adding any formula, fragment, or script. Five artifacts are the
   deliberate exception, listed below.
 
-### 7a. The deliberate mirrors, and what to preserve when reconciling them
+### 7a. Mirrors of base artifacts (historical)
 
-Five gc-toolkit artifacts *do* shadow a gastown base artifact of the same name.
-Each carries a local delta that base does not, so each has to be re-reconciled
-by hand whenever base advances. **The delta is the reason the mirror exists** —
-a reconciliation that takes base's version wholesale silently restores the
-defect the mirror was written to close, and in every case below the restored
-defect is one that reports nothing when it fires.
-
-- **`assets/scripts/worktree-setup.sh`** — base + a whitespace-safe
-  branch-create argv. Base built the worktree-add invocation as an unquoted
-  command string, splitting rig/worktree paths containing whitespace; the mirror
-  builds argv via `set --` instead. Native gc-toolkit `polecat-codex` /
-  `_polecat-gemini` agents reference
-  `{{.ConfigDir}}/assets/scripts/worktree-setup.sh`, and `ConfigDir` does not
-  fall through to imported packs.
-
-- **`formulas/mol-deacon-patrol.toml`** — base + cycle-recycle + `gc doctor
-  --json` deltas (validated 2026-05-27), plus the dolt-health manifest-mtime
-  backup verification (tk-hef7t, 2026-08-01). Base keys its backup verdict off
-  `backups.dolt_stale`, which renders absent backup data as `dolt_stale=false`
-  and so reads false-clean straight through a TOTAL backup outage. The mirror
-  verifies manifest mtime on disk instead (Step 2a) and reads the backup dog's
-  failure mail as a second channel (Step 2b). Preserve both — do not restore a
-  `dolt_stale`-keyed threshold row. Step 2a carries **six** load-bearing arms,
-  and dropping any one restores a false-clean path:
-  1. the scan is driven by `databases[].name` (`EXPECTED_DBS`), **not** by a
-     walk of `$BACKUP_ROOT/*/` — a database with no backup dir at all is
-     invisible to a dir-walk and would emit no verdict;
-  2. missing/empty `$BACKUP_ROOT` and an empty database list are explicit
-     FLAG-ROOT findings that NAME the affected databases;
-  3. the RECHECK grace window keeps a normal in-flight sync from flagging, but
-     is bypassed once the manifest is itself stale (a run in flight cannot
-     explain a 40 h-old manifest);
-  4. backup dirs with no live database are INFO/advisory, never a verdict;
-  5. the loop seeds `newest` with the manifest so an equal-second
-     manifest/chunk mtime tie resolves to the manifest (tk-40mlc) — `stat`
-     reports whole seconds and Dolt commits the manifest LAST, so a tie is a
-     fast healthy sync; only a STRICTLY newer file is torn;
-  6. the directory scan's exit status is captured and checked, and an
-     enumeration that fails (or returns nothing while the manifest is readable)
-     is RECHECK/FLAG, never OK — the seed in (5) makes an unreadable directory
-     with a fresh manifest look healthy otherwise.
-
-  `assets/scripts/dolt-backup-manifest-check.test.sh` executes the shipped Step
-  2a snippet and asserts over the shipped step text; run it after any
-  reconciliation of this formula.
-
-- **`formulas/mol-polecat-work.toml`** — base + three `submit-and-exit`
-  deltas. Deltas 1 and 2 stop the step from spending `{{base_branch}}` on a
-  question it does not answer (tk-3yj8g, 2026-08-17); delta 3 closes the step
-  chain (tk-zab6q, 2026-08-23). `{{base_branch}}` is *what the worktree was
-  poured from*; `metadata.target` is *where the work lands*. On a rework child
-  those are deliberately different — the signoff dispatch slings the child with
-  `--var base_branch=<the reviewed branch>` so the worktree has the PR-only
-  files (tk-qqgeo), while `metadata.target` already holds `REVIEW_BASE`. Base
-  conflates them twice over, and both misreads fire on the same bead:
-  1. **Branch gate (step 1).** Base rebuilds the branch name as
-     `polecat/<bead-id>` and fails closed on a mismatch — unreachable for a
-     rework child, whose `metadata.branch` names the reviewed branch and whose
-     `workspace-setup` step 3 calls that value AUTHORITATIVE and checks it out.
-     The mirror gates on the invariant the handoff actually needs,
-     `CURRENT_BRANCH == metadata.branch`, and keeps the `polecat/<bead-id>`
-     rule for the fresh-work case where `metadata.branch` is unset — so the
-     skipped-workspace-setup case base was written to catch is still caught.
-     Obeying base here is worse than stalling: cutting `polecat/<bead-id>` from
-     the reviewed branch forks it, orphans the pre-open review bead's
-     `review_branch` pin, and offers the refinery a second branch to land
-     independently of the unopened PR for the first.
-  2. **Target resolution (new step 1b).** Base writes
-     `--set-metadata target={{base_branch}}` at two sites, rendering
-     `target=<the branch being pushed>` on a rework — a self-merge, and a
-     strand indistinguishable from a missing merge target. The mirror resolves
-     `$LANDING_TARGET` once, before the push: a caller-set `metadata.target`
-     always wins, `base_branch` fills in only for fresh work, and a bead that
-     can name neither halts with nothing pushed. Both consumers (the
-     `auto_push=false` halt arm and the step-5 handoff) read that one variable
-     so they cannot disagree.
-
-  3. **Step-chain close (new step 8, and step 3's halt arm).** Neither base
-     nor the mirror closed a single step bead, and a graph.v2 step advances
-     only by closing its own. Every completed run therefore left all seven
-     steps open; the drain released their assignee while `gc.routed_to` still
-     pointed at the polecat pool, so `load-context` — the one step nothing
-     blocks — went ready and claimable, and the finished run was re-offered as
-     new work. At the census that filed this, 490 of 746 open beads in the
-     store were husk chains, roughly doubling in 31 hours (tk-y389z,
-     tk-zab6q). The mirror closes the six steps the session owns through
-     `assets/scripts/step-close.sh`, which resolves each bead from the
-     `(assignee, gc.step_ref)` pair rather than from `$GC_TRIGGER_BEAD_ID`
-     (tk-niu2f). Three things about it are load-bearing and are asserted by
-     the test:
-     - **It ships at both terminal exits.** `submit-and-exit` ends the session
-       for good in two places — the step-8 refinery handoff, and the step-3
-       `auto_push=false` branch-ready halt — and a chain left open at either
-       one is the same husk. The halt arm therefore carries its own copy of the
-       block, because its `exit 0` never reaches step 8 and each fenced block
-       is its own shell, so a shared function would be out of scope. The test
-       runs the arm end to end and asserts the ordering — bead parked, six
-       steps closed, then drain — and pins the copy byte-identical to step 8's
-       (tk-qkfwp7). Every *other* arm in the step halts with the work
-       resumable, and there the open chain is the recovery mechanism; those
-       deliberately do not close.
-     - **The order is forward, and `bd` enforces it** — `load-context` first,
-       `submit-and-exit` last. Each step is blocked by the one before it and
-       `bd` refuses to close a blocked issue, so the chain can only unwind
-       from the unblocked end. Dependent-first was tried first and closes
-       exactly one bead while reporting five refusals; the test keeps that
-       reversed loop as a control. The cost of the forward order is that
-       closing a step briefly makes the next one ready — bounded, not removed,
-       by the steps staying assigned to the session for the whole loop and by
-       the loop running only after the work is out of reach of a mistaken
-       claim — after the refinery handoff at step 8, after the branch-ready
-       bead write in the halt arm.
-     - **`workflow-finalize` is not ours.** It is routed to
-       `core.control-dispatcher`, whose finalizer closes the workflow root and
-       then force-closes any member still open. `submit-and-exit` closes last
-       and is that step's only blocker, so finishing the loop arms this as a
-       backstop for whatever the loop could not close.
-
-     Note `gc.session_affinity` does not protect any of this: it is an
-     advisory marker no routing path reads. It is the assignee, not the
-     affinity marker, that keeps a ready step out of the pool.
-
-  The mirror also writes `--append-notes` at both sites where base writes
-  `--notes`. That is not a new opinion — `template-fragments/` already tells
-  every polecat to make exactly that substitution in this step, because
-  `--notes` REPLACES and silently erases the mayor's dispatch note at the
-  moment the bead reaches the refinery (tk-6kf6r). The formula now says it
-  where the polecat reads it.
-
-  Preserve all three. `assets/scripts/submit-branch-gate.test.sh` executes the
-  shipped snippets (extracted between the `submit-branch-gate`,
-  `submit-target-resolve` and `submit-target-consume` markers) across the
-  fresh, rework, detached-HEAD and malformed-work-order shapes; run it after
-  any reconciliation of this formula.
-  Take extra care here: this is the formula *every polecat in the city* runs,
-  and per §8 a directory-imported pack is live from the working tree, so a
-  half-finished edit at this path is deployed before any PR merges.
-
-- **`formulas/mol-refinery-patrol.toml`** — base + `default_merge_strategy` +
-  `auto_ff_rig_main` + `check_set` (merge-gate check-set, retiring `review_gate`
-  + `signoff_head`) + protected-branch auto-promote + integration-branch INFO
-  deltas, plus the pre-existing-failure dedup probe (tk-277aj, 2026-08-10). Base
-  tells `handle-failures` to dedup with `bd list --search`, which is not a flag
-  — `bd` rejects it on stderr with an EMPTY stdout, the step reads that as "no
-  duplicate", and every patrol hitting a pre-existing target failure files
-  another P1 for it. The mirror probes with the real flag (`--title-contains`),
-  shape-validates the result so an unreadable `bd` cannot masquerade as "no
-  match", and reuses one `FAIL_TOKEN` for both the probe and the filed title so
-  consecutive patrols actually match. Preserve all three.
-  `assets/scripts/preexisting-failure-dedup.test.sh` executes the shipped
-  snippet; run it after any reconciliation of this formula.
-
-- **`formulas/mol-witness-patrol.toml`** — base + cycle-recycle + snake_case
-  session-list jq + `.work_dir` metadata + completed-workflow quiesce step
-  (tk-p9ji9) + stranded-branch recovery step (tk-f69ay) deltas. The
-  stranded-branch step is a whole extra link in the patrol chain, so a
-  reconciliation that takes base's step list wholesale drops it **and** rewires
-  `check-refinery` back onto `recover-orphaned-beads`. Preserve both: the step
-  itself and `needs = ["recover-stranded-branches"]` on `check-refinery`. It
-  covers the case base has no detector for — work that is committed and PUSHED,
-  so every salvage case correctly reports "nothing at risk", while the bead is
-  unassigned, unrouted and carries no PR, so no other pass can see it either.
-  `doctor/check-stranded-branch-recovery` guards the wiring and
-  `assets/scripts/recover-stranded-branches.test.sh` the behavior; run it after
-  any reconciliation of this formula.
-
-**Keep this list narrow.** Adding an entry means the rig takes on the cost of
-re-reconciling that artifact every time base advances, forever.
-
-**Reconciling a mirror.** Diff the local copy against the base pack's copy,
-decide which base advances to fold in, re-apply the local deltas above, run the
-named test for that artifact, and commit.
-
-**No automated guard.** `gc-toolkit:check-base-artifact-collision` used to
-enforce this section mechanically — ERROR on an un-allowlisted basename
-collision, ERROR on a `{{ define "name" }}` in `template-fragments/` whose name
-also exists in base (the template engine resolves defines by name, not by file,
-so a redefined block silently replaces the base block at render time), and WARN
-when base advanced past a frozen snapshot of an allowlisted mirror. It was
-retired on 2026-08-15 (tk-3w7p7): it could not locate the base pack under the
-import-cache model and had reported `skipped` on every run for roughly two
-months, and its reconnection path was a `gc import path` subcommand that was
-never merged. Auditing this section is a human step until something replaces it.
+Under the pre-rewrite gastown import, five gc-toolkit artifacts deliberately
+shadowed a gastown base artifact of the same name, each carrying a local
+delta that had to be re-reconciled by hand whenever base advanced. The
+native roster ended that: gc-toolkit imports no base pack, every agent,
+formula, and script here is authored in this pack under its own name, and
+there is nothing left to reconcile. The rule of §7 still stands — check a
+new artifact's basename against any pack the importing city composes with
+before adding it — and one residue survives as doctrine: the template
+engine resolves `{{ define "name" }}` blocks by name, not by file, so a
+fragment define whose name exists in another imported pack silently
+replaces that pack's block at render time. Never reuse a define name you
+did not coin.
 
 ## 8. A directory-imported pack is live from the **working tree**, not from a merge
 
@@ -517,13 +346,13 @@ both at once:
   there. Every git-side check reports success while the live pack is older:
   `git ls-tree origin/main`, the anchor's `merge_result` / `merged_sha`, the PR
   state. `reconcile-rig-checkouts` ff-s each checkout forward on a 15m cooldown
-  ([rig-checkout-reconciler.md](rig-checkout-reconciler.md)), so the window is
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md), *Adjacent order*), so the window is
   usually minutes — but it is open exactly when you go to confirm the landing.
 - **An untracked draft shadows the committed artifact** — a file authored in
   place at the destination path and never committed is still sitting there
   after the merge, and it is what the pack reads. It also blocks its own
   repair: `git merge --ff-only` refuses to clobber untracked files, so the
-  reconciler cannot advance the checkout and escalates to the mayor instead,
+  reconciler cannot advance the checkout and files an escalation visit instead,
   leaving the rig behind *and* holding the stale draft. The general form is
   worth stating plainly — because the working tree is the deployment, an
   untracked file **is** a deployed artifact, committed or not.

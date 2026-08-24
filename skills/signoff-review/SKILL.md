@@ -6,32 +6,24 @@ description: Use when you hold a dispatched review bead — metadata.task_kind=r
 # Signoff Review
 
 The method for a dispatched signoff review. One reviewer — you — pins a
-commit, reads its diff, runs its tests, and records a verdict the gate
-consumes.
+commit, reads its diff, runs its tests, and hands one verdict to
+`signoff.sh`, the single writer of gate verdicts.
 
 > **Only with a review bead in hand.** This is the method for a
 > *dispatched* signoff: a bead whose `metadata.task_kind` is `review`,
 > carrying `review_branch` or `pr_number`. Checking over your own work
-> before handoff is your formula's self-review step, not this. The
-> matching engine may surface this skill on near-matches; this guardrail
-> is the second line of defense.
+> before handoff is your formula's self-review step, not this.
 
-Reviewing is a property of the **step**, not of the agent. Any polecat
-may be handed a review, under any provider. Nothing here assumes which
-one you are.
+Reviewing is a property of the **step**, not of the agent. Nothing here
+assumes which agent you are.
 
 ## One agent. No fan-out.
 
-**You are the reviewer.** Read the diff yourself, run the tests
-yourself, write the verdict yourself.
-
-Do **not** spawn subagents, persona reviewers ("security reviewer",
-"architecture reviewer", …), or any parallel review pass. Do not
-delegate the diff read or the test run to anything.
-
-This prohibition is the point of the skill, not a performance note. If
-you find yourself reaching for a subagent, stop — the answer is to read
-the code.
+**You are the reviewer.** Read the diff yourself, run the tests yourself,
+write the verdict yourself. Do **not** spawn subagents, persona reviewers,
+or any parallel review pass. This prohibition is the point of the skill: if
+you find yourself reaching for a subagent, stop — the answer is to read the
+code.
 
 ## 1. Pin what you are reviewing
 
@@ -44,20 +36,16 @@ PR=$(printf     '%s' "$M" | jq -r '.pr_number     // empty')
 PR_URL=$(printf '%s' "$M" | jq -r '.pr_url        // empty')
 ```
 
-Two shapes, discriminated by which of those is set:
-
-- **PRE-OPEN** (`review_branch`, no `pr_number`) — no PR exists yet.
-  Your verdict decides whether it opens at all.
-- **POST-OPEN** (`pr_number`) — the PR is published and held on your
-  signoff.
-
-Either way, pin the exact commit before you read anything:
+Two shapes, discriminated by which of those is set: **PRE-OPEN**
+(`review_branch`, no `pr_number` — your verdict decides whether the PR
+opens at all) and **POST-OPEN** (`pr_number` — the PR is published and held
+on your signoff). Either way, pin the exact commit before you read
+anything:
 
 ```bash
 if [ -n "$PR" ]; then
-  # POST-OPEN: the PR is authoritative for both ends of the range — but a
-  # number names a pull request only inside one repository on one host, so
-  # pin both from the bead's own pr_url before asking gh anything.
+  # POST-OPEN: a number names a PR only inside one repository on one host,
+  # so pin both from the bead's own pr_url before asking gh anything.
   PR_REPO_Q=$(printf '%s' "$PR_URL" \
     | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p')
   [ -n "$PR_REPO_Q" ] || { echo "post-open review bead has no parseable pr_url: refusing to resolve PR#$PR from ambient gh context" >&2; exit 1; }
@@ -67,8 +55,8 @@ if [ -n "$PR" ]; then
   BRANCH=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName -q .headRefName)
   BASE=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json baseRefName -q .baseRefName)
 elif [ -z "$BASE" ]; then
-  # PRE-OPEN, no review_base — a malformed or older review bead. Resolve
-  # the anchor's landing target; do not assume main.
+  # PRE-OPEN, no review_base — resolve the anchor's landing target; never
+  # assume main.
   ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
   [ -n "$ANCHOR" ] && BASE=$(gc bd show "$ANCHOR" --json | jq -r '.[0].metadata.target // empty')
   [ -n "$BASE" ] || { echo "no review_base, no anchor target: refusing to guess a base" >&2; exit 1; }
@@ -78,37 +66,23 @@ git fetch origin "$BASE" "$BRANCH"
 REVIEWED_OID=$(git rev-parse "origin/$BRANCH")
 ```
 
-Carry all three forms of that pin for the rest of the review:
-`--repo "$PR_REPO_Q"` on every `gh pr` call, and `--hostname "$PR_HOST"`
-plus an explicit `repos/$PR_REPO/...` path on every `gh api` call.
-`PR_REPO_Q` is host-qualified (`<host>/<owner>/<repo>`) because that is
-what `--repo` wants — a hostless pin gets completed from `$GH_HOST` and
-can name a different host's identically-named repository. A REST path
-carries `<owner>/<repo>` and no host, so `--hostname` is what pins the
-other half.
+Carry the pin on every call: `--repo "$PR_REPO_Q"` for `gh pr`,
+`--hostname "$PR_HOST"` plus explicit `repos/$PR_REPO/...` paths for
+`gh api`. A bare number resolves from ambient gh context (worktree remote,
+`$GH_REPO`, `$GH_HOST`), and every repository has a PR with the number you
+were handed — an unpinned read reviews one PR and gates another. Fail
+closed: an unparseable `pr_url` on a post-open bead is a malformed bead;
+refusing costs one re-dispatch, guessing posts a review on someone else's
+work.
 
-A bare number is resolved from whatever repository gh infers — your
-worktree's remote, `$GH_REPO`, `$GH_HOST` — and the bead you are holding
-was dispatched by a pass that may have been nowhere near this checkout.
-Every repository has a pull request with the number you were handed. Get
-this wrong and you read one PR's diff,
-post the verdict on a stranger's PR of the same number, and hand the done
-sequence an OID that was never this PR's head — the anchor gets stamped
-from a verdict about the wrong object while the PR you were meant to gate
-stays ungated. So it fails closed: an unparseable `pr_url` on a post-open
-bead is a malformed bead, and refusing costs one re-dispatch, while
-guessing costs a review posted on someone else's work.
+**Never fall back to `main`.** A convoy child lands on
+`integration/<convoy-id>`; diffing it against `main` reviews a diff the
+branch never made. If neither `review_base` nor the anchor's `target`
+resolves, the bead is malformed — escalate it, don't pick a base for it.
 
-Never fall back to `main`. A convoy child lands on
-`integration/<convoy-id>`, and diffing it against `main` shows you
-every commit the integration branch already carries — a diff the branch
-never made, reviewed as if it had. If neither `review_base` nor the
-anchor's `target` resolves, the bead is malformed: escalate it rather
-than pick a base for it.
-
-The diff you read, the tests you run, and the OID you stamp are all that
-one commit. The head can advance while you review; a verdict recorded
-against a head you never read certifies unreviewed code.
+The diff you read, the tests you run, and the OID you hand off are all
+that one commit. A verdict recorded against a head you never read
+certifies unreviewed code.
 
 ## 2. Read the diff
 
@@ -117,23 +91,17 @@ git diff --stat "origin/$BASE...$REVIEWED_OID"
 git diff       "origin/$BASE...$REVIEWED_OID"
 ```
 
-Three dots — compare against the merge-base, so you review what the
-branch changed rather than what the base moved on underneath it.
-
-Read the whole diff. A large one gets read in chunks, not sampled, and
-the chunks are still yours.
-
-Read the intent too: the anchor bead (`metadata.anchor_bead`), the PR or
-branch description, and any refinery context note on the review bead —
-which round this is and what earlier rounds found tells you where to
-look hardest.
+Three dots — compare against the merge-base, so you review what the branch
+changed rather than what the base moved on underneath it. Read the whole
+diff; a large one gets read in chunks, not sampled. Read the intent too:
+the anchor bead (`metadata.anchor_bead`), the PR or branch description, and
+any context note on the review bead — which round this is and what earlier
+rounds found tells you where to look hardest.
 
 ## 3. Run the tests at the pinned commit
 
-Your session already has a gascity-managed worktree, but it is on some
-other checkout — not the commit under review. Pin `REVIEWED_OID` in a
-throwaway detached worktree so the tests run against exactly what you
-reviewed, disturbing nothing else:
+Pin `REVIEWED_OID` in a throwaway detached worktree so the tests run
+against exactly what you reviewed:
 
 ```bash
 REVIEW_WT=$(mktemp -d "/tmp/gc-review-$BEAD.XXXXXX")
@@ -141,48 +109,45 @@ git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
 cd "$REVIEW_WT"
 ```
 
-Run the suites the diff touches — the changed files' own tests, plus
-whatever exercises the changed code path. Record actual pass/fail
-counts; they go in the verdict.
+Run the suites the diff touches — the changed files' own tests plus
+whatever exercises the changed code path. Record actual pass/fail counts;
+they go in the verdict.
 
 ```bash
 cd - >/dev/null && git worktree remove --force "$REVIEW_WT"
 ```
 
-A failing suite is not automatically a finding: check whether it fails
-on the base too. A pre-existing failure belongs in the verdict as
-context, not as this branch's defect.
+A failing suite is not automatically a finding: check whether it fails on
+the base too. A pre-existing failure belongs in the verdict as context, not
+as this branch's defect.
 
 ## 4. What to check
 
-- **Intent** — does it do what the anchor bead asked? Deviations are
-  fine when they are better; flag them either way so the author can
-  confirm they were meant.
+- **Intent** — does it do what the anchor bead asked? Deviations are fine
+  when they are better; flag them either way.
 - **Correctness** — bugs, reachable edge cases, error handling, the
   failure mode nobody wrote a test for.
-- **Contract** — does it break a caller, a stored format, a metadata
-  key, or a script that greps for the old shape? Go find the *other*
-  call sites of anything it changed. The recurring defect class here is
-  a predicate fixed in one copy and left stale in two.
+- **Contract** — does it break a caller, a stored format, a metadata key,
+  or a script that greps for the old shape? Find the *other* call sites of
+  anything it changed; the recurring defect class is a predicate fixed in
+  one copy and left stale in two.
 - **Testing** — do the tests exercise real behavior, is the new path
   covered, does a regression pin the bug that was fixed?
-- **Readiness** — back-compat and migration, fail-closed where
-  fail-closed was intended, docs that the change just made false.
+- **Readiness** — back-compat and migration, fail-closed where fail-closed
+  was intended, docs the change just made false.
 
 ## 5. Calibrate severity
 
-- **P0** — broken or unsafe as merged: data loss, a merge that bypasses
-  a gate, a crash on the normal path.
+- **P0** — broken or unsafe as merged: data loss, a merge that bypasses a
+  gate, a crash on the normal path.
 - **P1** — a real defect that will bite: wrong behavior on a reachable
-  input, a fail-open where fail-closed was intended, an unhandled
-  identity or ordering hazard.
-- **P2** — worth fixing, not worth blocking: a narrow hazard, a test
-  gap, a clarity problem.
+  input, a fail-open where fail-closed was intended.
+- **P2** — worth fixing, not worth blocking: a narrow hazard, a test gap,
+  a clarity problem.
 
-Grade honestly. Not everything is P0. A P2 inflated to P1 costs a whole
-rework round; a P1 discounted to P2 merges the bug. When you can't tell
-whether something is reachable, say what you checked and grade on what
-you know.
+Grade honestly. A P2 inflated to P1 costs a whole rework round; a P1
+discounted to P2 merges the bug. When you can't tell whether something is
+reachable, say what you checked and grade on what you know.
 
 Every finding carries **file:line**, what is wrong, why it matters, and
 what would fix it. A finding without a location isn't actionable, and
@@ -192,21 +157,15 @@ what would fix it. A finding without a location isn't actionable, and
 
 Exactly one:
 
-- **COMMENT** — no P0 and no P1. The signoff passes; remaining P2s ride
-  along as non-blocking notes.
-- **REQUEST_CHANGES** — at least one P0 or P1, each with its required
-  fix.
+- **approve** — no P0 and no P1. The signoff passes; remaining P2s ride
+  along as non-blocking notes. This is never a GitHub approval — the city
+  does not approve PRs; approval is external and human.
+- **request-changes** — at least one P0 or P1, each with its required fix.
 
-COMMENT *is* the pass. It is never an approval — the city does not
-approve PRs; approval is external and human. Never run
-`gh pr review --approve`.
-
-Record it in this shape, as `VERDICT_BODY`. Keep the bare word in
-`VERDICT` (`COMMENT` or `REQUEST_CHANGES`) as well — the done sequence
-switches on that word, and the body is what gets posted or noted.
+Write the verdict body in this shape:
 
 ```
-VERDICT: <COMMENT|REQUEST_CHANGES>
+VERDICT: <approve|request-changes>
 Reviewed branch: <branch>
 Reviewed base:   <base>
 Reviewed commit: <REVIEWED_OID>
@@ -218,78 +177,28 @@ Findings: <P0/P1/P2 — each with file:line, impact, and the fix>
 Verification: <suite -> N passed, M failed, run at the reviewed commit>
 ```
 
-Say what you did **not** check. An honest coverage line is worth more
-than an implied "I read everything".
+Say what you did **not** check — an honest coverage line is worth more
+than an implied "I read everything". Write it **self-contained**: pre-open,
+it is replayed verbatim as the opening PR comment.
 
-## 7. Hand the verdict off
+## 7. Hand the verdict off — one call
 
-Two things are yours: the **verdict**, and the **`REVIEWED_OID` you
-pinned in step 1**. Never approve, and never re-derive the head.
-
-**POST-OPEN — re-check the head before you post.** GitHub attaches a
-review to whatever head is live when you submit it, and the done
-sequence stamps the gate at that attached commit. If the head advanced
-while you were reading, posting now certifies a commit you never read:
-
-```bash
-HEAD_NOW=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid)
-if [ "$HEAD_NOW" != "$REVIEWED_OID" ]; then
-  echo "head moved $REVIEWED_OID -> $HEAD_NOW: post nothing, stamp nothing" >&2
-  exit 1
-fi
-
-gh pr review "$PR" --repo "$PR_REPO_Q" --comment         --body "$VERDICT_BODY"   # pass
-gh pr review "$PR" --repo "$PR_REPO_Q" --request-changes --body "$VERDICT_BODY"   # changes
-```
-
-A moved head is not a finding and not a failure — it is a different
-commit. Re-pin `REVIEWED_OID` at the new head, redo steps 2–6, and post
-against that. What you must not do is post the verdict you already have.
-
-The window between that check and the submission is narrow, not zero, so
-confirm where the review actually landed — GitHub records it on the
-review itself:
+`signoff.sh` owns every mechanic past your judgment: posting the artifact
+(`gh pr review --comment` post-open; bead notes with `reviewed_oid`
+pre-open), stamping `check.<g>=green@<oid>` with read-back, filing and
+slinging one rework child on request-changes, enforcing the round cap, and
+refusing a head that moved past your pin. Run it exactly once:
 
 ```bash
-ME=$(gh api --hostname "$PR_HOST" user -q .login)
-gh api --hostname "$PR_HOST" --paginate \
-    "repos/$PR_REPO/pulls/$PR/reviews?per_page=100" --jq '.[]' \
-  | jq -rs --arg me "$ME" \
-      '[.[] | select(.user.login == $me)] | sort_by(.submitted_at) | last | .commit_id'
+"$PACK_DIR/assets/scripts/signoff.sh" \
+  --review-bead "$BEAD" \
+  --verdict <approve|request-changes> \
+  --reviewed-oid "$REVIEWED_OID" \
+  --body "$VERDICT_BODY"
 ```
 
-Both calls are pinned for the same reason the rest are: an account name is
-host-scoped, so an unpinned `gh api user` under a drifted `$GH_HOST` names
-an account that never wrote any of these reviews, and the filter then
-matches nothing. Paginate, too — GitHub pages this endpoint, and a PR that
-has taken a few rounds is exactly the one whose newest review sits past the
-first page, so an unpaginated read `last`s an *older* review of yours and
-reports a mismatch that never happened.
-
-If that is not `REVIEWED_OID`, your verdict attached to a commit you did
-not read. Say so, and re-review at the new head — do not hand that OID
-on as though you had reviewed it.
-
-**PRE-OPEN — nothing to post.** There is no PR. Record the verdict in
-the review bead's notes, and stamp the commit you pinned:
-
-```bash
-gc bd update "$BEAD" --set-metadata reviewed_oid="$REVIEWED_OID" \
-  --append-notes "$VERDICT_BODY"
-```
-
-`--append-notes`, never `--notes`, which replaces. This field has a
-second writer: when the done sequence cannot record the gate marker it
-appends the "gate unrecorded" diagnostic to these same notes and
-re-offers this same bead, so a replacing write on the retry erases the
-only record of why the previous round failed.
-
-The refinery replays those notes verbatim when it opens the PR, so write
-a **self-contained** verdict — one that reads correctly as an opening PR
-comment, not as a diff against the entry above it.
-
-Everything past this point — which marker lands on the anchor, how a
-rework child is filed, when the review bead closes — belongs to the
-**non-impl done sequence** in your prompt. That is its source of truth;
-this skill does not restate it. Follow it exactly, and hand it the OID
-you pinned.
+Do not post the review yourself, do not touch `check.*`, and never run
+`gh pr review --approve`. If `signoff.sh` reports the head moved, that is
+not a failure — it is a different commit: re-pin at the new head, redo
+steps 2–6, and call it again with the new OID. What you must not do is
+hand it the verdict you already have.

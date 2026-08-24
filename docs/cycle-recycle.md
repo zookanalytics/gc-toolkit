@@ -34,7 +34,7 @@ At the end of every turn the hook, in order:
 1. **Self-gates to patrol roles.** It derives the role from the trailing
    component of `GC_AGENT` and proceeds only for `witness`, `deacon`, and
    `refinery`. Every other agent — ephemeral polecats, converse sessions,
-   mayor, mechanik — is a no-op, so a focused worker is never recycled
+   mechanik — is a no-op, so a focused worker is never recycled
    mid-task.
 2. **Measures context** by reading `input_tokens` for the agent from the
    supervisor API (`GC_API_URL`, default `http://127.0.0.1:8372`).

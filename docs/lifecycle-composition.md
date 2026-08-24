@@ -9,7 +9,7 @@ The pack runs three lifecycles, and each already has exactly one owner:
 
 | Flow | Owner |
 |---|---|
-| bead | [work-bead-state-machine.md](work-bead-state-machine.md) |
+| bead | [state-machine.md](state-machine.md) |
 | PR | [refinery-merge-cadence.md](refinery-merge-cadence.md) |
 | visit | [gascity-human-engagement.md](gascity-human-engagement.md) |
 
@@ -97,9 +97,9 @@ status in the first place. A re-derived answer routes around a stale stored one.
 **The join point is the bead closing, not the PR merging.** This is what makes
 the PR lifecycle composable at all: the refinery is the single writer of merged
 truth, and it closes a bead only after verifying the merge actually carried the
-work (see [work-bead-state-machine.md](work-bead-state-machine.md), *Merge: one
-writer of merged-truth*). So `closed` is the one signal that means *landed and
-verified*, and the waiting side keys on it. A waiting party that watched
+work (see [state-machine.md](state-machine.md), *The merge condition*). So
+`closed` is the one signal that means *landed and verified*, and the waiting
+side keys on it. A waiting party that watched
 GitHub directly would be reading a different, earlier fact.
 
 **Fail quiet, in the direction of not acting.** A blocker counts as landed only
@@ -126,8 +126,8 @@ The intended shape is `tk-2cyxo` (in flight):
   idempotent; the actor cannot depend on anyone opening a board.
 - **Scoped to operator-origin subjects** — the set where a human has a standing
   expectation of an answer.
-- **A carve-out, not a removal.** A takeaway normally mutes the stall detector
-  (`assets/scripts/detect-stalled-workflows.sh`), and that rule is correct in
+- **A carve-out, not a removal.** A takeaway normally mutes the liveness
+  sweep's stall reporting (`assets/scripts/liveness-sweep.sh`), and that rule is correct in
   general: a takeaway means a human named the wait and owns it. It is wrong in
   exactly one case — a takeaway whose waiting set has *fully closed*, where the
   named wait has ended. Carve out that case; leave every other suppression

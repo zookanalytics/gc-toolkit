@@ -57,7 +57,7 @@ before filing, and the distiller checks again before counting.
 
 Four producers file the same bead contract:
 
-1. **Self-report.** Working agents (polecat, mayor, mechanik, converse)
+1. **Self-report.** Working agents (polecat, mechanik, converse)
    carry the `file-feedback-observations` fragment: when a turn brings
    corrective feedback about standing behavior, the agent fixes the
    instance first, then files one observation bead with

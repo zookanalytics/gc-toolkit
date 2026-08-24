@@ -479,10 +479,10 @@ does.
 directly gets `gc.routed_to` written directly —
 `gc bd update <bead> --set-metadata gc.routed_to=<pool>` — and is never
 slung. The generated path does exactly that and calls `gc sling` nowhere:
-`check-set-heal.sh` stamps the review bead's other fields first and
-writes `gc.routed_to` last, in its own call, for the reason its comment
-gives — "`gc.routed_to` is what makes the bead claimable"
-(`assets/scripts/check-set-heal.sh:355-357`, stamp at `:393`). Where a
+`gate-ensure.sh` stamps the review bead's other fields first and
+writes `gc.routed_to` last, in its own call — `gc.routed_to` is what
+makes the bead claimable, so it is written only once everything else the
+claimant will read is in place. Where a
 sling is wanted anyway, `--no-formula` ("suppress default formula (route
 raw bead)", `rigs/gascity/cmd/gc/cmd_sling.go:153`; mutually exclusive
 with `--formula` and `--on` at `:159-160`) restores Lane 1's contract on
@@ -935,7 +935,7 @@ So for the route values the delivery lanes actually write — always a
 collapse a slot suffix on write (Lane 1) — "is this bead claimable?"
 and "does this bead create pool demand?" have the same answer, and you
 should not model them as two predicates that happen to agree.
-[work-bead-state-machine.md](work-bead-state-machine.md) relies on
+[state-machine.md](state-machine.md) relies on
 exactly this when it detaches a gating bead from both queues in one
 move (`assignee=""` **and** `gc.routed_to=""`) — and on the **read**
 side that move is safe unconditionally, because an empty route matches
@@ -1296,7 +1296,7 @@ Two combinations are idiomatic, and they differ in intent:
 - **`assignee=""` + `gc.routed_to=""`, status still `open`** — detached
   from both queues while still counting as unlanded work. This is the
   gating pattern in
-  [work-bead-state-machine.md](work-bead-state-machine.md). Written as
+  [state-machine.md](state-machine.md). Written as
   one `bd update`, it is a recipe for a bead nobody holds; the next
   subsection is why, and what to write instead against a held one.
 - **Clear `gc.routed_to` *and* set `status=blocked`** — the
