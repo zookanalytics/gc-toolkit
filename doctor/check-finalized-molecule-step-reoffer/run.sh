@@ -101,12 +101,22 @@ run_bounded() {
 # which reads as an unexplained detail row in doctor output. Print nothing.
 print_lines() { [ "$#" -eq 0 ] || printf '%s\n' "$@"; }
 
-# Bead descriptions and notes carry control characters that make jq abort
-# mid-parse, which would otherwise cost us a whole store. Everything below 0x20
-# except the newline goes — a literal TAB is invalid inside a JSON string just
-# like the rest, and it also clears the 0x1F these rows are joined on, so no
-# payload byte can pose as a field separator.
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# bd emits stray control characters inside a bead's title, description or notes,
+# and a single one aborts the whole jq parse (tk-6kf6r) — the cost is a whole
+# store, not one bead. Delete every C0 byte except LF. A sub-0x20 byte is invalid
+# inside a JSON string, so a raw one is always corruption to drop and never
+# payload: a TAB or CR that is genuine bead content arrives ESCAPED (\t, \r), two
+# printable characters a byte filter cannot touch. TAB and CR are deleted with the
+# rest rather than spared as JSON whitespace, because a single tab-indented note
+# would otherwise abort the parse and blind a caller to an entire store — and
+# nothing here splits on either, since rows are joined on US (0x1F), which this
+# also deletes so no payload byte can pose as a separator. LF is spared alone: it
+# is the one C0 byte bd actually emits, as pretty-print whitespace between tokens.
+# ONE definition, copied verbatim into every host, the markers included —
+# assets/scripts/control-char-scrub.test.sh fails on any copy that drifts.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 # Parse an ISO-8601 instant to epoch seconds. GNU first, BSD/macOS second.
 # Prints nothing and returns 1 when neither can read it — the caller then
@@ -174,7 +184,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
         continue
     fi
 
-    steps=$(printf '%s' "$steps_raw" | strip_ctl)
+    steps=$(printf '%s' "$steps_raw" | scrub)
 
     root_ids=$(printf '%s' "$steps" | jq -r '
         [ .[]? | (.metadata["gc.root_bead_id"] // "" | tostring)
@@ -207,7 +217,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
             chunk_failed="rc=$rc"
             return 1
         fi
-        out=$(printf '%s' "$out" | strip_ctl)
+        out=$(printf '%s' "$out" | scrub)
         # `bd show` answers an ARRAY when at least one id resolves, but an
         # OBJECT — {"error":"no issues found matching the provided IDs"} — when
         # NONE of them does, at rc=0 either way. Adding an object to an array is

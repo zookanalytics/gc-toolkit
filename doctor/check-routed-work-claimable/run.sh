@@ -115,14 +115,22 @@ run_bounded() {
 # which reads as an unexplained detail row in doctor output. Print nothing.
 print_lines() { [ "$#" -eq 0 ] || printf '%s\n' "$@"; }
 
-# Bead notes and titles can carry control characters that make jq abort mid-parse,
-# which would otherwise cost us a whole store. Everything below 0x20 except the
-# newline goes, which is wider than the usual pack idiom: a literal TAB is
-# invalid inside a JSON string just like the rest, and it also clears the 0x1F
-# this check joins its rows on, so no payload byte can pose as a field separator.
-# Nothing here reads free text — only ids and route strings — so there is no
-# payload to preserve.
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# bd emits stray control characters inside a bead's title, description or notes,
+# and a single one aborts the whole jq parse (tk-6kf6r) — the cost is a whole
+# store, not one bead. Delete every C0 byte except LF. A sub-0x20 byte is invalid
+# inside a JSON string, so a raw one is always corruption to drop and never
+# payload: a TAB or CR that is genuine bead content arrives ESCAPED (\t, \r), two
+# printable characters a byte filter cannot touch. TAB and CR are deleted with the
+# rest rather than spared as JSON whitespace, because a single tab-indented note
+# would otherwise abort the parse and blind a caller to an entire store — and
+# nothing here splits on either, since rows are joined on US (0x1F), which this
+# also deletes so no payload byte can pose as a separator. LF is spared alone: it
+# is the one C0 byte bd actually emits, as pretty-print whitespace between tokens.
+# ONE definition, copied verbatim into every host, the markers included —
+# assets/scripts/control-char-scrub.test.sh fails on any copy that drifts.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 # ---------------------------------------------------------------------------
 # The live route-target universe. Unreadable is a WARNING, never a pass: with no
@@ -215,7 +223,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
         continue
     fi
 
-    rows=$(printf '%s' "$beads_raw" | strip_ctl | jq -r \
+    rows=$(printf '%s' "$beads_raw" | scrub | jq -r \
         --argjson ids "$identities" \
         --argjson sentinels "$SENTINEL_ROUTES" \
         --arg qualifier "$qualifier" '
@@ -256,7 +264,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
         # blank column and shift every field after it left, reporting the
         # candidate list in the repair slot. US is not IFS whitespace, so empty
         # fields survive in place. Nothing can smuggle one into a field either —
-        # strip_ctl has already deleted every raw 0x1F from the payload, the two
+        # scrub has already deleted every raw 0x1F from the payload, the two
         # routes are JSON-escaped, and the id and candidate list are flattened
         # below.
         | [ $class,

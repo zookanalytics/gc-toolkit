@@ -113,9 +113,22 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; exit 1; }
 
-# bd emits stray control characters often enough to break jq (a single one kills
-# the whole parse). Strip them, sparing TAB (\011) and NEWLINE (\012).
-strip_ctrl() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# bd emits stray control characters inside a bead's title, description or notes,
+# and a single one aborts the whole jq parse (tk-6kf6r) — the cost is a whole
+# store, not one bead. Delete every C0 byte except LF. A sub-0x20 byte is invalid
+# inside a JSON string, so a raw one is always corruption to drop and never
+# payload: a TAB or CR that is genuine bead content arrives ESCAPED (\t, \r), two
+# printable characters a byte filter cannot touch. TAB and CR are deleted with the
+# rest rather than spared as JSON whitespace, because a single tab-indented note
+# would otherwise abort the parse and blind a caller to an entire store — and
+# nothing here splits on either, since rows are joined on US (0x1F), which this
+# also deletes so no payload byte can pose as a separator. LF is spared alone: it
+# is the one C0 byte bd actually emits, as pretty-print whitespace between tokens.
+# ONE definition, copied verbatim into every host, the markers included —
+# assets/scripts/control-char-scrub.test.sh fails on any copy that drifts.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 # Split a list on commas AND any whitespace, drop empties, keep first-seen order.
 split_ids() {
@@ -135,7 +148,7 @@ if [ -n "$VISIT" ] && [ -n "$IDS_ARG" ]; then
 fi
 
 if [ -n "$VISIT" ]; then
-    VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | strip_ctrl)
+    VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | scrub)
     if ! printf '%s' "$VISIT_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
         echo "liveness-recheck: cannot read visit $VISIT — nothing re-checked" >&2
         exit 1
@@ -187,7 +200,7 @@ CARRIED_JSON=$(to_json_array "$CARRIED_IDS")
 # through argv would meet ARG_MAX as a truncation rather than an error.
 BEADFILE=$(mktemp)
 trap 'rm -f "$BEADFILE"' EXIT
-gc bd list --id "$ID_CSV" --all --brief --json --limit=0 2>/dev/null | strip_ctrl > "$BEADFILE"
+gc bd list --id "$ID_CSV" --all --brief --json --limit=0 2>/dev/null | scrub > "$BEADFILE"
 if ! jq -e 'type == "array"' "$BEADFILE" >/dev/null 2>&1; then
     echo "liveness-recheck: the batched bead read FAILED — no census printed." >&2
     echo "  (gc bd list --id … --all --brief --json --limit=0 returned no JSON array; a bd" >&2
@@ -199,7 +212,7 @@ fi
 
 # --- read 2: the ready set (best-effort, never load-bearing) ------------------
 READY_STATE=verified
-READY_RAW=$(gc bd ready --unassigned --limit=0 --json 2>/dev/null | strip_ctrl)
+READY_RAW=$(gc bd ready --unassigned --limit=0 --json 2>/dev/null | scrub)
 if printf '%s' "$READY_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
     READY_JSON=$(printf '%s' "$READY_RAW" | jq -c '[.[].id]')
 else

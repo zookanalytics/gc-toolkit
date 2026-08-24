@@ -364,18 +364,31 @@ else
     bounded() { "$@"; }
 fi
 
-# bd emits stray control characters often enough to break jq (a single one kills
-# the whole parse). Strip them, sparing TAB (\011) and NEWLINE (\012).
-strip_ctrl() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# bd emits stray control characters inside a bead's title, description or notes,
+# and a single one aborts the whole jq parse (tk-6kf6r) — the cost is a whole
+# store, not one bead. Delete every C0 byte except LF. A sub-0x20 byte is invalid
+# inside a JSON string, so a raw one is always corruption to drop and never
+# payload: a TAB or CR that is genuine bead content arrives ESCAPED (\t, \r), two
+# printable characters a byte filter cannot touch. TAB and CR are deleted with the
+# rest rather than spared as JSON whitespace, because a single tab-indented note
+# would otherwise abort the parse and blind a caller to an entire store — and
+# nothing here splits on either, since rows are joined on US (0x1F), which this
+# also deletes so no payload byte can pose as a separator. LF is spared alone: it
+# is the one C0 byte bd actually emits, as pretty-print whitespace between tokens.
+# ONE definition, copied verbatim into every host, the markers included —
+# assets/scripts/control-char-scrub.test.sh fails on any copy that drifts.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 bd_read() { # bd_read <outfile> <subcommand> <flags...>
     local out="$1"; shift
     local rc
     if [ -n "$DB" ]; then
-        bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | strip_ctrl > "$out"
+        bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | scrub > "$out"
         rc=$?
     else
-        bounded gc bd "$@" 2>/dev/null | strip_ctrl > "$out"
+        bounded gc bd "$@" 2>/dev/null | scrub > "$out"
         rc=$?
     fi
     # BOTH halves are required, and the status is the half that cannot be
@@ -388,7 +401,7 @@ bd_read() { # bd_read <outfile> <subcommand> <flags...>
     # script must never take: an unreadable probe excludes nothing, so a read
     # that did not demonstrably succeed can never be eligible for SKIP.
     # `set -o pipefail` is in force (see the top of the file), so $rc is the
-    # bounded `gc bd` call's own failure or timeout, not merely strip_ctrl's.
+    # bounded `gc bd` call's own failure or timeout, not merely scrub's.
     LAST_READ_ERR=""
     if [ "$rc" -ne 0 ]; then
         LAST_READ_ERR="the call failed or timed out, rc=$rc"

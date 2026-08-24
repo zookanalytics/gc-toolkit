@@ -254,7 +254,7 @@ hasnt "$OUT" "NOT checked" "escaping them does not cost us the store"
 # Written as a JSON \u escape, which is the only form that can actually reach
 # us: bd emits JSON, where a raw sub-0x20 byte is invalid, so a route stored
 # with a control character comes back escaped. (A raw byte would be deleted by
-# strip_ctl before jq ever parsed it, and would test nothing.)
+# scrub before jq ever parsed it, and would test nothing.)
 store alpha "$(bead p-3 '\u0001alpha/pack.refinery')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a control-character-padded live identity is an ERROR"
