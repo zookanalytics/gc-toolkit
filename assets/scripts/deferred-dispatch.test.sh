@@ -397,7 +397,7 @@ has "$(meta w-old gc.dispatch_when_ready_reason)" "auto-armed by dispatch-feeder
 out="$("$SUT" reconcile 2>&1)"
 eq "$(slings)" "1" "FEEDARM: reconcile slings the bead the feeder armed"
 eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool w-old" "FEEDARM: to the target the feeder recorded"
-eq "$(meta w-old gc.auto_armed_by)" "dispatch-feeder" "FEEDARM: reconcile clears the arm but LEAVES the feeder's marker — that marker is the cap's only accounting"
+eq "$(meta w-old gc.auto_armed_by)" "dispatch-feeder" "FEEDARM: reconcile clears the arm but LEAVES the feeder's marker — without it a dispatched bead would vanish from the cap"
 
 # --- FEEDRESERVE: the cap counts committed work, not pending arms -------------
 # The case that explains why the feeder keeps a marker of its own instead of
@@ -412,10 +412,77 @@ eq "$rc" 0 "FEEDRESERVE: being at cap is not an error"
 eq "$(meta w-next gc.dispatch_when_ready)" "<absent>" "FEEDRESERVE: a dispatched bead whose arm was already consumed STILL holds its slot"
 has "$out" "at cap" "FEEDRESERVE: the pass says it is at cap"
 
+
+# --- FEEDSTALL: a reservation is an ATTEMPT, not committed work -------------
+# Reported P1 on review bead tk-ib2yl2. The two writes that place a bead in the
+# pipeline — stamping the marker and calling arm — cannot be atomic, and the
+# first cut counted the marker ALONE as committed work. A pass interrupted
+# between them left a bead holding a slot forever: the budget gate returns
+# before candidates are enumerated, so the reservation this file called
+# "self-healing" was never revisited. At MAX_IN_FLIGHT=1 — the value the order
+# file recommends for leaving room for hand-slung work — one interrupted pass
+# wedged the feeder permanently, and it printed "at cap, arming nothing this
+# pass" and exited 0 every tick while doing it. A silent stall that reports
+# healthy is the failure this whole mechanism exists to end.
+echo "# feeder: stranded reservations"
+strand() { # a bead wearing the marker and NOTHING else — the crash state
+    printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","created_at":"%s","labels":[],"metadata":{"gc.auto_armed_by":"dispatch-feeder","gc.auto_armed_at":"t"},"notes":"","_ready":true}' "$1" "$2"
+}
+
+store "[$(strand w-stranded 2026-01-01T00:00:00Z), $(cand w-next 2026-02-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"; rc=$?
+eq "$rc" 0 "FEEDSTALL: a pass over a stranded reservation is not an error"
+eq "$(meta w-stranded gc.dispatch_when_ready)" "rig/pool" "FEEDSTALL: the stranded reservation is RE-ARMED, not left holding a slot"
+hasnt "$out" "at cap" "FEEDSTALL: and the pass does not report itself at cap"
+
+# The stall was permanent, so one pass is not proof. Run it again: the re-armed
+# bead now holds the only slot legitimately, and the pass says so.
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"
+has "$out" "at cap" "FEEDSTALL: the NEXT pass is at cap, because the re-armed bead now genuinely holds it"
+eq "$(meta w-next gc.dispatch_when_ready)" "<absent>" "FEEDSTALL: and the cap still binds — the fix did not simply disable it"
+
+# Every shape that IS committed work must still hold its slot, or the fix would
+# have traded a stall for an uncapped feeder. These are the three kinds of
+# evidence, one case each.
+store "[{\"id\":\"w-armed\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\",\"gc.dispatch_when_ready\":\"rig/pool\"},\"notes\":\"\",\"_ready\":false}, $(cand w-next 2026-02-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"
+eq "$(meta w-next gc.dispatch_when_ready)" "<absent>" "FEEDSTALL: an ARMED bead holds its slot"
+
+store "[{\"id\":\"w-routed\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\",\"gc.routed_to\":\"rig/pool\"},\"notes\":\"\",\"_ready\":true}, $(cand w-next 2026-02-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"
+eq "$(meta w-next gc.dispatch_when_ready)" "<absent>" "FEEDSTALL: a DISPATCHED bead holds its slot (its arm was consumed by reconcile)"
+
+store "[{\"id\":\"w-held\",\"status\":\"open\",\"assignee\":\"rig/gc-toolkit.refinery\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\"},\"notes\":\"\",\"_ready\":false}, $(cand w-next 2026-02-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"
+eq "$(meta w-next gc.dispatch_when_ready)" "<absent>" "FEEDSTALL: a bead HELD BY AN ASSIGNEE holds its slot (handed on to the refinery)"
+
+# The end-to-end shape of the incident: a real interrupted pass, not a
+# hand-written fixture. Kill the arm so mark_reserved lands and the arm never
+# does, then prove the next pass recovers on its own at MAX_IN_FLIGHT=1.
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+KILLARM="$TMP/killarm.sh"
+printf '#!/usr/bin/env bash\nexit 9\n' > "$KILLARM"; chmod +x "$KILLARM"
+DISPATCH_FEEDER_ARM_TOOL="$KILLARM" DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed >/dev/null 2>&1
+# rollback releases the marker on a clean failure, so re-strand it by hand to
+# model the case rollback cannot cover: the process dying outright.
+"$BIN/bd" update w-1 --set-metadata gc.auto_armed_by=dispatch-feeder --set-metadata gc.auto_armed_at=t >/dev/null 2>&1
+eq "$(meta w-1 gc.auto_armed_by)" "dispatch-feeder" "FEEDSTALL: (fixture) the bead is left mid-reservation, as a killed pass would leave it"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDSTALL: (fixture) with nothing armed"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"; rc=$?
+eq "$rc" 0 "FEEDSTALL: the pass after a killed one succeeds"
+eq "$(meta w-1 gc.dispatch_when_ready)" "rig/pool" "FEEDSTALL: and the killed pass's bead reaches the pipeline after all"
+
+# status must NAME what holds each slot. "At cap" with nothing to point at is
+# what made the stranded reservation invisible for as long as it lasted.
+store "[{\"id\":\"w-routed\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\",\"gc.routed_to\":\"rig/pool\"},\"notes\":\"\",\"_ready\":false}]"
+out="$("$FEEDER" status 2>&1)"
+has "$out" "w-routed" "FEEDSTALL: status names the bead holding the slot"
+has "$out" "dispatched" "FEEDSTALL: and says what is holding it"
+
 # --- FEEDCAP: the in-flight cap binds ----------------------------------------
-store "[{\"id\":\"w-a\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\"},\"notes\":\"\",\"_ready\":false}, $(cand w-b 2026-02-01T00:00:00Z), $(cand w-c 2026-03-01T00:00:00Z)]"
+store "[{\"id\":\"w-a\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\",\"gc.dispatch_when_ready\":\"rig/pool\"},\"notes\":\"\",\"_ready\":false}, $(cand w-b 2026-02-01T00:00:00Z), $(cand w-c 2026-03-01T00:00:00Z)]"
 out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=2 DISPATCH_FEEDER_MAX_PER_TICK=9 feed)"
-eq "$(armedcount)" "1" "FEEDCAP: one slot free means exactly one arm, whatever the per-tick cap allows"
+eq "$(armedcount)" "2" "FEEDCAP: one slot free means exactly one NEW arm, whatever the per-tick cap allows (w-a's own arm is the other)"
 eq "$(meta w-b gc.dispatch_when_ready)" "rig/pool" "FEEDCAP: and it is the oldest candidate"
 
 # A CLOSED auto-armed bead is finished work and must free its slot, or the
@@ -761,6 +828,14 @@ else
 
     mkpack; sed -i 's|gc.auto_armed_by|gc.dispatch_when_ready|g' "$PK/assets/scripts/dispatch-feeder.sh"
     eq "$(check_rc)" 2 "ERROR when the cap counts the arm key reconcile clears instead of the feeder's own marker"
+
+    # ...and the other direction: the marker ALONE must not count either. A pass
+    # interrupted between the marker write and the arm otherwise holds a slot
+    # forever, and the stall is silent — "at cap", exit 0, every tick (tk-ib2yl2).
+    # The substitution hits only the COUNTING predicate: the status helper spells
+    # the same key without the trailing paren.
+    mkpack; sed -i 's|gc\.dispatch_when_ready"\] // "") != "")|gc.other_key"] // "") != "")|' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the in-flight count drops its commitment-evidence test (a stranded reservation would hold a slot forever)"
 
     mkpack; sed -i 's|DISPATCH_FEEDER_MAX_IN_FLIGHT|UNCAPPED|g' "$PK/assets/scripts/dispatch-feeder.sh"
     eq "$(check_rc)" 2 "ERROR when the in-flight cap is gone from the script"

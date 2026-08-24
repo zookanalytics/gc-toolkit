@@ -177,11 +177,36 @@ can never commit more work than the pool can execute; four rigs × 2 = 8
 city-wide, which is the ceiling that already exists. Raising it above the
 pool size only builds a queue of armed beads waiting for a polecat.
 
-The in-flight count is taken from the feeder's own `gc.auto_armed_by`
-marker, **not** from `gc.dispatch_when_ready`. It has to be: `reconcile`
-clears the arm keys the instant it slings, so counting those would drop
-every dispatched bead out of the tally within one 2-minute tick and the cap
-would bind on nothing.
+The in-flight count needs the feeder's own `gc.auto_armed_by` marker, and
+needs more than it. Both halves are load-bearing, and each one alone is a
+different bug:
+
+- The marker is **necessary** because `reconcile` clears the arm keys the
+  instant it slings. Counting `gc.dispatch_when_ready` instead would drop
+  every dispatched bead out of the tally within one 2-minute tick, and the
+  cap would bind on nothing.
+- The marker is **not sufficient**, because it is stamped *before* the arm.
+  The two writes cannot be atomic, so a pass interrupted between them
+  leaves a bead wearing the marker with nothing armed. Counting that as
+  committed work made it hold a slot forever: the budget gate returns
+  before candidates are enumerated, so the reservation was never revisited.
+  At `MAX_IN_FLIGHT = 1` — the value recommended just above for leaving
+  room for hand-slung work — one interrupted pass wedged the feeder
+  permanently, printing `at cap, arming nothing this pass` and exiting 0
+  every tick while it did. A silent stall that reports healthy is the exact
+  failure this whole mechanism exists to end, so it must not be how the
+  mechanism itself fails.
+
+So a bead counts only with **evidence that something was committed**: still
+armed, or routed by the sling, or held by an assignee. With the marker
+written first, the two rules give the cap both properties it needs —
+reserve-first means no committed bead can lack the marker, so the cap
+cannot leak; evidence-to-count means no uncommitted bead can hold a slot,
+so the cap cannot stall. A stranded reservation is simply not counted,
+stays a candidate, and is re-armed on the next pass.
+
+`dispatch-feeder.sh status` names the beads holding the slots and what
+holds each one, which is the question "at cap" on its own cannot answer.
 
 The three knobs are `[order.env]` defaults in `orders/dispatch-feeder.toml`,
 overridden from `city.toml` without a pack change — the same surface the

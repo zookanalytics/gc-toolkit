@@ -151,6 +151,18 @@ else
     grep -q 'gc.auto_armed_by' "$feeder" \
         || errors+=("dispatch-feeder.sh: the gc.auto_armed_by marker is gone — if the cap counts gc.dispatch_when_ready instead, reconcile clears that key on dispatch and every in-flight bead leaves the tally within one tick, so the cap binds on nothing")
 
+    # ...and the marker alone must NOT count. It is stamped BEFORE the arm, so a
+    # pass interrupted between the two writes leaves a bead wearing the marker
+    # with nothing armed. Counting that as committed work made it hold a slot
+    # forever — the budget gate returns before candidates are enumerated, so the
+    # reservation was never revisited, and at MAX_IN_FLIGHT=1 (the value the
+    # order file recommends for leaving room for hand-slung work) one interrupted
+    # pass wedged the feeder permanently while printing "at cap" and exiting 0.
+    # A silent stall reporting healthy is the failure this mechanism exists to
+    # end, so it must not be how the mechanism itself fails (review tk-ib2yl2).
+    grep -qF 'select( (($m["gc.dispatch_when_ready"] // "") != "")' "$feeder" \
+        || errors+=("dispatch-feeder.sh: the in-flight count no longer requires EVIDENCE of committed work (armed, routed, or assigned) — counting the reservation marker alone lets a pass interrupted between the marker write and the arm hold a slot forever, and at MAX_IN_FLIGHT=1 that wedges the feeder permanently while it reports 'at cap' and exits 0")
+
     # Fail closed, both reads, and for different reasons. An unreadable
     # candidate listing that prints "0 armed" is indistinguishable from a quiet
     # board — the same disappearing-queue failure the reconcile half guards.
@@ -224,6 +236,8 @@ else
         || errors+=("deferred-dispatch.test.sh: no per-tick-cap case — the backstop against a cold start emptying the queue in one pass is unproven")
     grep -q 'FEEDRESERVE' "$feeder_test" \
         || errors+=("deferred-dispatch.test.sh: no consumed-arm case — that a dispatched bead still holds its slot after reconcile cleared its arm is unproven, and getting it wrong makes the cap bind on nothing")
+    grep -q 'FEEDSTALL' "$feeder_test" \
+        || errors+=("deferred-dispatch.test.sh: no stranded-reservation case — that a pass interrupted between the marker write and the arm does NOT hold a slot forever is unproven, and that stall is silent: the feeder reports 'at cap' and exits 0 every tick while doing nothing (review tk-ib2yl2)")
     grep -q 'FEEDOFF' "$feeder_test" \
         || errors+=("deferred-dispatch.test.sh: no disabled case — that the operator's off switch stops auto-arming AND leaves hand-written arms alone is unproven")
     grep -q 'FEEDEXCL' "$feeder_test" \

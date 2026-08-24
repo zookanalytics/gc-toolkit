@@ -173,13 +173,35 @@ strip_ctl() { tr -d '\000-\010\013\014\016-\037'; }
 
 # How many beads this feeder has auto-armed that have not finished.
 #
-# `--all` then filter on status in jq, rather than narrowing server-side with
-# an explicit `--status open,in_progress,...`: this number is a SAFETY bound,
-# and an enumerated status list fails OPEN. Anything not closed is in flight —
-# open, in_progress, blocked, deferred alike, plus any status bd grows later —
-# and a status missing from a hand-written list would silently drop beads out
-# of the tally and let the pass arm past the cap. A blocked auto-armed bead is
-# still capacity this feeder committed.
+# THE MARKER RECORDS AN ATTEMPT, NOT A COMMITMENT. The two writes that place a
+# bead in the pipeline — stamping `gc.auto_armed_by` and calling `arm` — cannot
+# be atomic, so a bead can wear the marker while nothing was ever armed. Counting
+# the marker alone made that stranded bead consume capacity forever, and the
+# `budget <= 0` gate in cmd_feed returns BEFORE candidates are enumerated, so the
+# reservation this file once called "self-healing" was never revisited. At
+# DISPATCH_FEEDER_MAX_IN_FLIGHT=1 — the value the order file recommends for
+# leaving room for hand-slung work — a single interrupted pass wedged the feeder
+# permanently, and it reported "at cap, arming nothing this pass" and exited 0
+# every tick while doing so. A silent stall that reports healthy is the exact
+# failure this whole mechanism exists to end, so it must not be how the mechanism
+# itself fails.
+#
+# So a bead counts only with EVIDENCE that something was actually committed:
+# still armed, or routed by the sling, or held by an assignee. Paired with
+# stamping the marker BEFORE the arm, that gives the cap both halves it needs:
+#
+#   reserve-first        no committed bead can lack the marker  -> cap cannot leak
+#   evidence-to-count    no uncommitted bead can hold a slot    -> cap cannot stall
+#
+# A stranded reservation is then simply not counted, stays a candidate, and is
+# re-armed on the next pass, which re-stamps the marker idempotently.
+#
+# `--all` then filter in jq, rather than narrowing server-side with an explicit
+# `--status open,in_progress,...`: this number is a SAFETY bound, and an
+# enumerated status list fails OPEN. Anything not closed is in flight — open,
+# in_progress, blocked, deferred alike, plus any status bd grows later — and a
+# status missing from a hand-written list would silently drop beads out of the
+# tally and let the pass arm past the cap.
 #
 # The accepted cost is that the marker outlives the work, so this listing grows
 # by roughly (arms per day) rows per day and is never pruned. At the shipped
@@ -187,14 +209,41 @@ strip_ctl() { tr -d '\000-\010\013\014\016-\037'; }
 # minutes, so the growth is affordable for a long time, and the alternative —
 # pruning the marker on close — would need a writer that runs when a bead
 # closes, which does not exist. Fail-closed accounting is worth the read.
+INFLIGHT_JQ='
+    [ .[]
+      | . as $b
+      | (.metadata // {}) as $m
+      | select(($b.status // "") != "closed")
+      | select( (($m["gc.dispatch_when_ready"] // "") != "")
+             or (($m["gc.routed_to"] // "") != "")
+             or (($m["gc.execution_routed_to"] // "") != "")
+             or (($b.assignee // "") != "") ) ]'
+
 inflight_count() { # -> count on stdout, rc 1 if it could not be determined
     local raw n
     raw="$(bd_ list --has-metadata-key "$K_AUTO_BY" --all --json --limit 0 2>/dev/null)" || return 1
     [ -n "$raw" ] || return 1
     printf '%s' "$raw" | strip_ctl | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-    n="$(printf '%s' "$raw" | strip_ctl | jq -r '[ .[] | select((.status // "") != "closed") ] | length' 2>/dev/null)" || return 1
+    n="$(printf '%s' "$raw" | strip_ctl | jq -r "$INFLIGHT_JQ | length" 2>/dev/null)" || return 1
     positive_int "$n" || return 1
     printf '%s' "$n"
+}
+
+inflight_rows() { # -> "<id>\t<what holds the slot>" per in-flight bead, rc 1 on a read failure
+    local raw
+    raw="$(bd_ list --has-metadata-key "$K_AUTO_BY" --all --json --limit 0 2>/dev/null)" || return 1
+    [ -n "$raw" ] || return 1
+    printf '%s' "$raw" | strip_ctl | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+    printf '%s' "$raw" | strip_ctl | jq -r "$INFLIGHT_JQ"'
+        | .[]
+        | . as $b
+        | (.metadata // {}) as $m
+        | [ $b.id,
+            ( if ($m["gc.dispatch_when_ready"] // "") != "" then "armed, awaiting the reconcile pass"
+              elif (($m["gc.routed_to"] // "") != "") or (($m["gc.execution_routed_to"] // "") != "") then "dispatched"
+              else "held by " + ($b.assignee // "?") end ) ]
+        | @tsv' 2>/dev/null || return 1
+    return 0
 }
 
 # Candidates: ready, unrouted, unheld, un-armed implementation work, oldest
@@ -267,7 +316,7 @@ candidate_rows() { # writes "<id>\t<created_at>\t<type>" oldest-first to $1
 }
 
 # --- feed --------------------------------------------------------------------
-mark_reserved() { # id -> rc.  Stamped BEFORE the arm; see cmd_feed.
+mark_reserved() { # id -> rc.  Stamped BEFORE the arm; see cmd_feed and inflight_count.
     bd_ update "$1" \
         --set-metadata "$K_AUTO_BY=$PROG" \
         --set-metadata "$K_AUTO_AT=$(now_utc)" >/dev/null 2>&1
@@ -362,13 +411,18 @@ cmd_feed() {
         fi
 
         # Reserve the slot BEFORE arming. The two writes cannot be atomic, so
-        # the order decides which way a crash between them fails. Reserving
-        # first over-counts (a slot held by a bead that never got armed);
-        # arming first under-counts (an armed bead invisible to the cap, which
-        # is the cap leaking). A safety bound must fail toward being too
-        # tight, and the over-count is self-healing: the bead is still ready,
-        # still unrouted and still un-armed, so the next pass finds it as a
-        # candidate again and arms it, and the re-stamp is idempotent.
+        # the order decides which way a crash between them fails, and arming
+        # first would leave a committed bead with no marker — a slot the cap
+        # cannot see, which is the cap leaking.
+        #
+        # Reserving first is only safe because inflight_count does NOT treat
+        # this marker alone as committed work. It once did, and a crash here
+        # left a bead holding a slot forever: the budget gate above returns
+        # before candidates are enumerated, so the reservation was never
+        # revisited and at MAX_IN_FLIGHT=1 one interrupted pass wedged the
+        # feeder permanently while reporting "at cap" and exiting 0. With the
+        # evidence test in place the stranded bead is not counted, is still a
+        # candidate, and is re-armed next pass — the re-stamp is idempotent.
         if ! mark_reserved "$id"; then
             echo "$PROG: WARN could not reserve a slot on $id — skipping it rather than arming past the cap" >&2
             failed=$((failed + 1)); consec_fail=$((consec_fail + 1))
@@ -421,7 +475,18 @@ cmd_status() {
     local in_flight
     in_flight="$(inflight_count)" || {
         echo "$PROG: could not read the in-flight count" >&2; return 1; }
-    echo "$PROG: $in_flight auto-armed bead(s) in flight"
+    echo "$PROG: $in_flight auto-armed bead(s) in flight, of $MAX_IN_FLIGHT"
+    # Name them. "At cap" with nothing to point at is what made the stranded
+    # reservation above invisible for as long as it lasted; an operator asking
+    # why the queue is not draining needs to see which beads hold the slots.
+    if [ "$in_flight" != "0" ]; then
+        local irows; irows="$(mktemp_tracked)" || { echo "$PROG: status: mktemp failed" >&2; return 1; }
+        inflight_rows > "$irows" || { echo "$PROG: could not list the in-flight beads" >&2; return 1; }
+        while IFS=$'\t' read -r iid iwhy; do
+            [ -n "${iid:-}" ] || continue
+            printf '  %-14s %s\n' "$iid" "$iwhy"
+        done < "$irows"
+    fi
 
     local rows; rows="$(mktemp_tracked)" || { echo "$PROG: status: mktemp failed" >&2; return 1; }
     candidate_rows "$rows" || { echo "$PROG: could not enumerate ready work" >&2; return 1; }
