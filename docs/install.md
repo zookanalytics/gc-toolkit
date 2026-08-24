@@ -279,6 +279,7 @@ failures:
 | `config-refs` | An import `source` path doesn't exist | Verify paths under `[rigs.imports.*]` |
 | `pre-start-scripts` | An imported pack's script path doesn't resolve | Confirm the pack materialized; run `gc import install` for remote imports |
 | `skill-collision` | Two packs ship a skill with the same name | `gc skill list --agent <name>` to identify; agent-scoped variant wins |
+| `check-seed-audit-current` | A prompt fragment moved without `generated/seed-audit/` being regenerated, or the pre-commit hook that regenerates it is not wired in this checkout | `assets/scripts/render-seed-audit.sh && git add generated/seed-audit`; wire the hook once with `assets/scripts/render-seed-audit.sh --install-hook` |
 
 Run `gc doctor --verbose` for details on any failed check; `gc doctor
 --fix` applies the canonical remediation where one exists.

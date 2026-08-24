@@ -77,6 +77,41 @@ reference — remote imports, opt-in sub-packs (`gascity-keeper`),
 `[[rigs.patches]]` fragment wiring, per-rig overrides, and `gc
 doctor` verification.
 
+## Developing this pack
+
+Run once per clone, so the generated seed audit stays in step with the
+fragments it renders:
+
+```bash
+assets/scripts/render-seed-audit.sh --install-hook
+```
+
+That sets `core.hooksPath = assets/hooks`, which wires
+`assets/hooks/pre-commit`. The hook regenerates `generated/seed-audit/` only on
+a commit that touches the renderer's input set — `agents/`,
+`template-fragments/`, `formulas/`, `packs/`, `pack.toml`, or
+`assets/scripts/render-seed-audit.sh` itself, which carries the synthetic city
+the prompts render against; every other commit pays a single `git diff --cached`
+and exits.
+
+`generated/seed-audit/` is the artifact it maintains: the full standing prompt
+of every agent this pack configures and the compiled recipe of every formula it
+exposes, one file per scenario, with per-scenario byte and token counts in
+`INDEX.md`. It is a rendered mirror of things tracked elsewhere in this repo,
+not documentation anybody keeps current by hand — which is why it sits under
+`generated/` rather than `docs/`. Nothing in that tier is hand-edited; an edit
+to it survives until the next render and no longer. `.gitattributes` marks the
+whole tier `linguist-generated`, so a one-line fragment change arrives for
+review as that one line instead of as the 45-file re-render it also produced.
+
+`gc doctor` reports it when the hook is not wired, and
+`doctor/check-seed-audit-current` fails when a prompt input moved without the
+artifact moving with it. For certainty rather than the cheap digest comparison:
+
+```bash
+assets/scripts/render-seed-audit.sh --check
+```
+
 ## Relationship to gastown
 
 gc-toolkit does **not** extend or augment gastown. Gastown is an *example pack*

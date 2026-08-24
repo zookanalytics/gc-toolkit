@@ -92,10 +92,23 @@ CMD_SHAPE='^[[:space:]]*(gc[[:space:]]+bd|bd|\[)[[:space:]]'
 # under docs/ are NOT excluded: those state what is true now, and docs/
 # gascity-packs.md §4 prescribing the broken idiom is how it reached four
 # formulas in the first place.
+#
+# generated/: the machine-written tier. Everything under it is emitted by a
+# script in this pack from sources this check already scans, and that property
+# belongs to the TIER rather than to any one tree — so the rule is written once
+# here and a second generated artifact inherits it without another case arm.
+# Two things follow from a file being generated. It reports duplicates: whatever
+# this check would find there, it already finds in the source the render read.
+# And the findings it adds are unfixable in place —
+# `generated/seed-audit/formulas/mol-shutdown-dance.md` carries a `bd close
+# "$GC_BEAD_ID"` line from the builtin `core` pack, which this repo does not own,
+# and editing the artifact only survives until the next render. Excluding the
+# tier keeps the check pointed at files somebody can actually change (tk-yhwfv.3).
 is_excluded() {
     case "$1" in
         */base-snapshots/*) return 0 ;;
         */specs/*) return 0 ;;
+        */generated/*) return 0 ;;
         *) return 1 ;;
     esac
 }

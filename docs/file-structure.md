@@ -65,9 +65,21 @@ a closed bead doesn't change the truth-status of its docs, because
 those docs were *always* historical record. There is nothing to
 archive.
 
+### Not a tier: `generated/`
+
+`generated/` holds machine-written artifacts — trees a script in this repo
+emits from sources tracked elsewhere in it, regenerated on commit and never
+hand-edited. It is named here because it sits beside `docs/` and `specs/` at
+the repo root, not because it is a third tier. Nothing under it is a document
+anybody writes, so neither filing rule reaches it and neither tier's obligation
+applies: a central doc must be kept true, a local doc must be preserved as
+written, and a generated file is neither kept nor preserved — it is re-emitted,
+and the way to change one is to change its source. Filing a document there is
+always wrong.
+
 ## Directory Structure
 
-Both at the repo root. **Not** `docs/specs/`.
+The two tiers, both at the repo root. **Not** `docs/specs/`.
 
 ```
 <repo-root>/
@@ -75,13 +87,15 @@ Both at the repo root. **Not** `docs/specs/`.
 │   ├── file-structure.md
 │   ├── principles.md
 │   └── …
-└── specs/                 local, bead-keyed, historical
-    ├── tk-yiwfz/
-    │   ├── decisions.md
-    │   └── synthesis.md   (this file)
-    └── tk-foo/
-        ├── spec.md
-        └── plan.md
+├── specs/                 local, bead-keyed, historical
+│   ├── tk-yiwfz/
+│   │   ├── decisions.md
+│   │   └── synthesis.md   (this file)
+│   └── tk-foo/
+│       ├── spec.md
+│       └── plan.md
+└── generated/             machine-written, neither tier (above)
+    └── seed-audit/
 ```
 
 `specs/` matches the per-feature-directory convention used by
