@@ -1512,11 +1512,10 @@ grep -q "no -k" "$TMP/status30b" \
 fi
 
 # --- Run 31: the surface and its doc speak the same language. ----------------
-# The patrol-formula consumer checks that used to sit here asserted prose in
-# mol-deacon-patrol.toml / mol-witness-patrol.toml; the rewrite rebuilt those
-# formulas and the quota_park consumer wiring is theirs to re-land — until it
-# does, the closed-field surface itself stays pinned below and the doc is the
-# contract of record.
+# The rewrite rebuilt mol-deacon-patrol.toml / mol-witness-patrol.toml and
+# the quota_park consumer wiring is theirs to re-land; until it does, the
+# closed-field surface itself stays pinned below and the doc is the contract
+# of record.
 DOC="$ORDER_ROOT/docs/quota-park-recovery.md"
 # The doc documents every reason the surface can emit, so a human reading a
 # status line can look one up.

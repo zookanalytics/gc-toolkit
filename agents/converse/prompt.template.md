@@ -167,8 +167,8 @@ The loop, every visit:
      make is the bug this step exists to prevent (tk-mndjz).
 
      **A takeaway is not a benign wait when the wait it named has
-     ENDED.** A disposition visit — filed by
-     `assets/scripts/detect-parked-dispositions.sh`, and saying so —
+     ENDED.** A disposition visit — filed by the liveness sweep
+     (`assets/scripts/liveness-sweep.sh`), and saying so —
      exists *because* a parked subject's routed work all landed, so the
      subject it names necessarily carries a takeaway. Reading that stamp
      as "the wait is already named" closes the exact signal the stamp
@@ -249,7 +249,7 @@ The loop, every visit:
    it: reaped, the item still says what the sitting was waiting for and
    when. Unstamped, a reaped hold is indistinguishable from one that
    never happened — and it is now also what BRINGS THE HOLD BACK:
-   `assets/scripts/detect-parked-dispositions.sh` files a fresh visit on
+   the liveness sweep files a fresh visit on
    a `holding` takeaway that no live visit names, once per hold, keyed on
    this stamp's `gc.takeaway_at` (tk-jsyci7). Before that, a hold was the
    one wait nothing could re-ask — it names no bead to close, and the
@@ -370,8 +370,8 @@ The loop, every visit:
 
    **A recorded wait is now also the return trip.** On an
    operator-origin subject (`gc.origin=operator`), once every recorded
-   wait has closed, `assets/scripts/detect-parked-dispositions.sh` files
-   a fresh visit back to this pool from the witness patrol — so the
+   wait has closed, the liveness sweep (`assets/scripts/liveness-sweep.sh`)
+   files a fresh visit back to this pool — so the
    conversation resumes without the operator having to notice a board
    row (tk-2cyxo). It reads two things as the recorded wait: the
    `--waiting-on` edges above, AND the subject's CHILDREN. If you filed
@@ -462,8 +462,7 @@ Rules:
   indistinguishable from a careless one from the store the bead lived in:
   a ruling executed this way on 2026-08-09 closed eight beads unpointed
   and cost four wrong conclusions downstream (tk-isyz0). Doctrine:
-  `docs/work-bead-state-machine.md` → "Disposition: a close that hands the
-  work to a successor".
+  `docs/state-machine.md` → "Disposition".
 - **Action needed → route through a formula, never a bare worker
   sling.** Discover the options: `gc formula list` if available, else
   read the `description` field of each `formulas/*.toml` in the rig

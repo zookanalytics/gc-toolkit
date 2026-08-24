@@ -17,8 +17,7 @@ helps the operator see at a glance what the session is on.
 > conversation and let the operator decide.
 >
 > The convention side of self-renaming — canonicals rotating as focus
-> shifts — is documented in the `canonical-self-rename` template
-> fragment, not gated by this skill.
+> shifts — lives in each agent's own prompt, not gated by this skill.
 
 ## Detect the form
 
@@ -170,6 +169,5 @@ Use a human-meaningful reference (a `<repo> PR #N` form or
 topic/verb-noun phrase) — a bare bead ID gives nothing to scan.
 
 The rotation is a single `gc session rename` per focus shift, run by
-the agent itself (not the operator). See the
-`canonical-self-rename` template fragment for the trigger and the
-cadence.
+the agent itself (not the operator); each agent's prompt states the
+trigger and the cadence.

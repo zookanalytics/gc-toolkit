@@ -1,56 +1,20 @@
 #!/usr/bin/env bash
-# gc-helm-build.sh — build the Helm backend binary, OUT OF BAND from the service.
-#
-# This is the only thing in the tree that builds helm-svc. The service launcher
-# (gc-helm-svc.sh) execs whatever binary this leaves behind and builds nothing.
-#
-# WHY THE SPLIT EXISTS. The launcher used to build inline and then exec. That
-# cannot be made to work, and the numbers are not close:
-#
-#   * the supervisor gives a proxy_process 5s to answer its health probe
-#     (proxyProcessReadyTimeout, gascity internal/workspacesvc/proxy_process.go)
-#   * a WARM build of this module takes ~12.5s; a COLD one took 2m29s measured
-#     on 2026-08-22 (161MB binary, ~170 deps, 1.3G of build cache)
-#
-# So a build inside the start path never finishes inside the window — not on a
-# slow day, ever. What follows is not a race but a certainty: waitReady's
-# deadline fires, the supervisor calls stopProcessGroup() on the whole group,
-# and the build dies with it. The next start begins again from wherever the
-# cache got to, and is killed at 5s again.
-#
-# That loop left fingerprints. On 2026-08-22 this service's bin/ held 2,677
-# zero-byte .helm-svc.build.XXXXXX staging files laid down between 08-19 05:51
-# and 08-22 02:40 — one per killed start, each a `mktemp` that never reached its
-# `mv` or its `rm -f` because the kill landed mid-compile. Zero-byte because the
-# linker writes the output last and the build never got that far.
-#
-# Building here instead means the start path is an exec: nothing to race the
-# readiness probe, nothing for the readiness kill to destroy, and a build that
-# is allowed to take the two and a half minutes it actually needs.
-#
-# Staleness is an ordinary artifact-older-than-sources dependency — `find
-# -newer`, the same question make asks — not a probe of the binary's behaviour.
-#
+# gc-helm-build.sh — build the Helm backend binary, OUT OF BAND from the
+# service. The only thing in the tree that builds helm-svc; the launcher
+# (gc-helm-svc.sh) execs what this leaves behind and builds nothing — the
+# supervisor gives a proxy_process 5s to answer its health probe, and this
+# module builds in ~12.5s warm / 2m29s cold, so an in-start-path build is
+# always killed mid-compile (2,677 stranded staging files proved it).
 # Usage:
 #   gc-helm-build.sh              build iff the binary is missing or stale
-#   gc-helm-build.sh --deploy     the order's mode: do nothing unless the helm
-#                                 service is registered in this city; build iff
-#                                 stale; restart the service iff a published
-#                                 binary is not yet being served — including one
-#                                 an earlier run published but could not restart
-#                                 onto
-#
-# Exit: 0 = the binary is current AND serving (built now, or already fresh, or
-#           this city does not run helm); 1 = a build was needed and failed, in
-#           which case the previously-built binary is left exactly as it was —
-#           or, in --deploy mode, the restart onto a published binary failed, in
-#           which case the next run retries it.
-#
-# Env honoured: GC_SERVICE_STATE_ROOT (binary cache location; the supervisor
-# sets it, and it wins when present), GC_CITY_ROOT / GC_CITY (used to derive
-# that location when it is not), GC_GO_BIN (override the go toolchain),
-# GC_HELM_GOTMP (build-scratch root), GC_HELM_SERVICE_NAME (default "helm"),
-# GC_HELM_GC_BIN (override the gc binary used to locate and restart the service).
+#   gc-helm-build.sh --deploy     order mode: skip cities without the helm
+#                                 service; build iff stale; restart onto a
+#                                 published binary not yet serving
+# Staleness is an ordinary artifact-older-than-sources check (find -newer).
+# Exit: 0 current and serving (or nothing to do) · 1 build/restart failed
+# (the previous binary is left exactly as it was) · 2 usage.
+# Env: GC_SERVICE_STATE_ROOT / GC_CITY_ROOT / GC_CITY (state root), GC_GO_BIN,
+# GC_HELM_GOTMP, GC_HELM_SERVICE_NAME, GC_HELM_GC_BIN. Caller: orders/helm-build.
 set -euo pipefail
 
 DEPLOY=0
@@ -66,34 +30,20 @@ MOD="$(cd "$HERE/../../services/helm" && pwd)"
 SERVICE_NAME="${GC_HELM_SERVICE_NAME:-helm}"
 GC_BIN="${GC_HELM_GC_BIN:-gc}"
 
-# Ask the city about the service once, and get two answers out of it: whether
-# this city runs helm at all, and — authoritatively — where its state root is.
-#
-# The listing reports `service_name` (not `name`) plus `city_path` and a
-# `state_root` that is relative to it. Reading the real path beats reproducing
-# gascity's StateRootOrDefault() here and hoping the two stay in step.
-#
-# A `gc service list` that errors is NOT taken as "not registered": that would
-# silently stop deploying on any transient CLI failure, which is the class of
-# silent stall this bead exists to end. Only a successful listing that omits the
-# service is proof of absence.
+# One `gc service list` answers two questions: does this city run helm, and
+# where is its state root (authoritative — beats reproducing
+# StateRootOrDefault). Only a SUCCESSFUL listing that omits the service is
+# proof of absence; an erroring one must not silently stop deploys.
 SERVICES=""
 if SERVICES="$("$GC_BIN" service list --json 2>/dev/null)"; then
-    # Distinguish "jq ran and found nothing" from "jq could not run". `jq -e`
-    # exits 1 for a false result and something else entirely for a missing
-    # binary, a parse error or a bad filter. Collapsing those into "absent"
-    # would be the same silent-stall bug the failed-listing arm below avoids:
-    # one missing dependency and the order deploys nothing, forever, quietly.
+    # jq -e: 1 = found nothing; anything else = jq could not run (not absent).
     set +e
     printf '%s' "$SERVICES" | jq -e --arg n "$SERVICE_NAME" \
         '[.services[]? | select((.service_name // .name) == $n)] | length > 0' >/dev/null 2>&1
     _q_rc=$?
     set -e
     if [ "$_q_rc" -eq 1 ]; then
-        # The city was asked and does not run helm. In --deploy mode this order
-        # ships everywhere but only some cities declare the service, and
-        # building a 161MB binary for one that will never run it is pure waste.
-        # A hand-run build is not gated: someone asking for a build means it.
+        # This city does not run helm; a hand-run build is not gated.
         if [ "$DEPLOY" -eq 1 ]; then
             echo "gc-helm-build: no '$SERVICE_NAME' service in this city; nothing to deploy"
             exit 0
@@ -110,10 +60,8 @@ else
     fi
 fi
 
-# Where the built binary lives. The supervisor exports GC_SERVICE_STATE_ROOT
-# when it launches the service, but this script runs from an order, which does
-# not — so take the path the city just reported, and fall back to deriving it
-# only when there was no listing to read (a hand-run outside a live city).
+# State root: GC_SERVICE_STATE_ROOT wins, else the city's reported path,
+# else derived (hand runs outside a live city).
 STATE_ROOT=""
 if [ -n "${GC_SERVICE_STATE_ROOT:-}" ]; then
     STATE_ROOT="$GC_SERVICE_STATE_ROOT"
@@ -134,8 +82,7 @@ elif [ -n "${GC_CITY_ROOT:-}" ]; then
 elif [ -n "${GC_CITY:-}" ]; then
     STATE_ROOT="$GC_CITY/.gc/services/$SERVICE_NAME"
 else
-    # Walk up from the module looking for the city's runtime dir. Covers a
-    # human running this straight out of a rig checkout with no order env.
+    # Walk up from the module looking for the city runtime dir.
     probe="$MOD"
     while [ "$probe" != "/" ]; do
         if [ -d "$probe/.gc/services" ]; then
@@ -154,41 +101,24 @@ BIN_DIR="$STATE_ROOT/bin"
 BIN="$BIN_DIR/helm-svc"
 mkdir -p "$BIN_DIR"
 
-# Present while a published binary has nothing running on it yet; removed only
-# by a restart that succeeded. See restart_service() for why that fact has to
-# outlive the run that created it.
+# Present while a published binary has nothing running on it; removed only
+# by a restart that succeeded (see restart_service).
 RESTART_PENDING="$STATE_ROOT/restart-pending"
 
-# Resolve a Go toolchain: explicit override, then PATH, then the conventional
-# system install (an order's PATH may not include Go).
+# Go toolchain: override, PATH, then the conventional system install.
 GO="${GC_GO_BIN:-}"
 if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
 fi
 
-# Sources that end up inside the binary: Go files, the module's dependency
-# manifests, plus the built web bundle, which is compiled in by go:embed
-# (services/helm/web/embed.go). A bundle-only change has to rebuild too, or the
-# mount keeps serving the SPA that was embedded at the last Go edit.
-#
-# go.mod and go.sum are listed EXPLICITLY because `-name '*.go'` does not match
-# them — they end in .mod/.sum. Without them a dependency-only bump touches no
-# file this predicate inspects, so the stale binary keeps serving as if the bump
-# never landed. That is not hypothetical: helm-svc served a blind board for days
-# on a beads pin whose schema support the city had migrated past, and the fix
-# looked like it had not landed because this find never saw go.mod (tk-ohdex).
-#
-# node_modules is pruned — nothing there is built from, and walking it costs
-# more than the rest of the module together.
+# Build inputs: *.go, go.mod/go.sum (explicit — `-name '*.go'` misses them,
+# and a dependency-only bump must still rebuild, tk-ohdex), and web/dist
+# (go:embed). node_modules pruned.
 newer_than_binary() {
     find "$MOD" -name node_modules -prune -o \( -name '*.go' -o -name go.mod -o -name go.sum -o -path "$MOD/web/dist/*" \) -newer "$BIN" -print -quit 2>/dev/null
 }
 
-# Does a pid still hold a slot on the process table? Used to tell a build's
-# live scratch dir from one a killed build stranded. /proc is authoritative
-# where it exists; `kill -0` is the portable fallback, and while it cannot
-# distinguish "gone" from "not ours", every build here runs as the same user,
-# so the distinction never arises.
+# Is the pid alive? Tells a live scratch dir from a stranded one.
 pid_alive() {
     if [ -d /proc ]; then
         [ -e "/proc/$1" ]
@@ -197,41 +127,25 @@ pid_alive() {
     fi
 }
 
-# Restart the service onto the published binary, and clear the pending marker
-# only if the restart actually returned success.
-#
-# WHY THAT FACT HAS TO OUTLIVE THE RUN. "Published" and "serving" are different
-# things, and only the first is visible on disk. A run that builds, renames the
-# new binary into place and then fails to restart — a refused restart, this
-# order's 900s SIGTERM landing in between, a machine that goes down — leaves a
-# binary NEWER than every source with the old process still holding the old
-# inode. The staleness predicate can never see that state: nothing is stale, so
-# every later tick takes the up-to-date branch and exits 0 before reaching the
-# restart, and the old code serves indefinitely. That is the same "landed but
-# inert" failure this script exists to end, reached through a transient restart
-# failure instead of a missing build. The marker is what carries the unfinished
-# restart into the next run, which is the only thing that can still finish it.
+# Restart onto the published binary; clear the pending marker only on
+# success. "Published" and "serving" differ, and only the first is on disk:
+# a failed restart leaves a binary newer than every source, so no later tick
+# would ever be stale — the marker is what carries the unfinished restart to
+# the next run.
 restart_service() {
     echo "gc-helm-build: restarting service '$SERVICE_NAME'"
     if ! "$GC_BIN" service restart "$SERVICE_NAME"; then
         echo "gc-helm-build: 'gc service restart $SERVICE_NAME' failed; the new binary is published but not yet serving" >&2
         return 1
     fi
-    # Success is the only thing that clears it. If the clear itself fails, the
-    # next run restarts a service that did not need it — wasteful, and said out
-    # loud — which is the right side to err on: the alternative is discarding
-    # the record of a restart that has not happened.
+    # Only success clears it; a failed clear costs one redundant restart.
     rm -f -- "$RESTART_PENDING" 2>/dev/null \
         || echo "gc-helm-build: could not clear $RESTART_PENDING; the next run will restart again" >&2
     return 0
 }
 
-# Reclaim the staging files the inline-build era stranded in $BIN_DIR, and any
-# this script itself loses to a kill. `mktemp` publishes the name before the
-# build writes a byte, so anything interrupted between the two leaves one
-# behind; 2,677 had accumulated by 2026-08-22. An hour is far longer than the
-# 2m29s cold build that is the slowest thing that can legitimately hold one, so
-# no build in flight — this one or a concurrent one — can be swept.
+# Reclaim stranded staging files; an hour is far past the slowest build, so
+# nothing in flight can be swept.
 find "$BIN_DIR" -maxdepth 1 -type f -name '.helm-svc.build.*' -mmin +60 -delete 2>/dev/null || true
 
 # Build when the binary is missing or any source file is newer than it.
@@ -242,11 +156,8 @@ elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 0 ]; then
-    # Current is not the same as serving. If an earlier run published this
-    # binary and never got a restart onto it, the marker is still here — and
-    # because nothing is stale any more, this branch is the only one any later
-    # run can reach. Retrying here is what stops a transient restart failure
-    # from becoming a permanent one.
+    # Current is not serving: an unrestarted publish leaves its marker, and
+    # this branch is the only one a later run can reach.
     if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
         echo "gc-helm-build: $BIN is up to date but not yet serving; retrying the restart"
         restart_service || exit 1
@@ -256,36 +167,14 @@ if [ "$need_build" -eq 0 ]; then
     exit 0
 fi
 
-# Keep the Go linker's and cgo's scratch off /tmp. /tmp is a size-capped tmpfs
-# shared by the whole fleet; the linker maps its output object under $TMPDIR
-# (and cgo's gcc ignores $GOTMPDIR), so a build left on the default /tmp leaks a
-# multi-hundred-MB go-link dir on every failed link. Pin both to a root-fs path,
-# per the Build Cache Conventions in gascity AGENTS.md. GOCACHE is deliberately
-# NOT set: its default (~/.cache/go-build) is the correct warm on-disk cache and
-# must not be redirected — it is what keeps a rebuild at ~12s instead of 2m29s.
+# Keep linker/cgo scratch off the size-capped shared /tmp; GOCACHE stays at
+# its default (~/.cache/go-build) — it is what keeps rebuilds at ~12s.
 GOTMP="${GC_HELM_GOTMP:-/var/tmp/gotmp}"
 mkdir -p "$GOTMP"
 
-# Bound $GOTMP. Nothing outside this script ever deletes from it, and a build
-# that dies before its own cleanup runs — OOM kill, SIGKILL, ENOSPC — strands a
-# ~300MB go-link dir here permanently. Unlike the /tmp tmpfs this scratch was
-# moved off, /var/tmp survives reboot and sits on the root filesystem, the same
-# device as the Dolt journal, so the leak is monotonic and lands on the data
-# plane: one post-reboot rebuild storm stranded 222 dirs (33G) and filled the
-# root fs (tk-m18ml).
-#
-# Two sweeps, because the two kinds of debris carry different evidence:
-#
-#   * run.<pid> whose pid is gone was stranded by a killed build. Reclaim it on
-#     sight — that storm deposited its 33G inside four hours, so an age
-#     threshold alone would still have been waiting when the disk filled.
-#   * anything else still here a day later is un-owned: the pre-fix
-#     go-link-*/go-build* backlog, or a run dir whose pid was recycled. A day is
-#     orders of magnitude longer than a helm-svc build, so no build in flight
-#     can match.
-#
-# Neither sweep can take a concurrent build's scratch: that dir is fresh AND its
-# pid is alive.
+# Bound $GOTMP (a killed build strands ~300MB per go-link dir on the root
+# fs — 33G once, tk-m18ml): reclaim dead-pid run.<pid> dirs on sight, and
+# anything else a day old. A concurrent build's scratch is fresh AND alive.
 for gotmp_entry in "$GOTMP"/run.*; do
     [ -d "$gotmp_entry" ] || continue          # no match: the glob itself
     gotmp_pid="${gotmp_entry##*/run.}"
@@ -295,16 +184,9 @@ for gotmp_entry in "$GOTMP"/run.*; do
 done
 find "$GOTMP" -mindepth 1 -maxdepth 1 -mmin +1440 -exec rm -rf -- {} + 2>/dev/null || true
 
-# Build in scratch this invocation owns: it is what makes the sweep above able
-# to tell stranded from live, and it is deleted below whichever way the build
-# goes.
-#
-# Every step of the hygiene degrades rather than fails. `set -e` is live here,
-# so an unguarded mkdir would abort the script — and the case where it aborts is
-# a full disk, precisely when finishing the build (or reporting honestly why it
-# could not) is what matters. Falling back to the shared root is no worse than
-# before this bounding existed, and the sweeps above still reclaim what lands
-# there.
+# Build in scratch this invocation owns; every hygiene step degrades rather
+# than fails (an unguarded mkdir under set -e would abort on the full disk
+# where finishing matters most).
 GOTMP_RUN="$GOTMP/run.$$"
 GOTMP_RUN_OWNED=0
 rm -rf -- "$GOTMP_RUN" 2>/dev/null || true   # a recycled pid inherits nothing
@@ -315,11 +197,8 @@ else
     GOTMP_RUN="$GOTMP"
 fi
 
-# One trap covers every exit path, including a SIGTERM from an order that hits
-# its timeout. It drops this invocation's scratch (only when we own it — on the
-# degraded path $GOTMP_RUN *is* $GOTMP, and removing that would take every
-# concurrent build's scratch with it) and the staging file, which otherwise
-# becomes another of the 2,677.
+# One trap for every exit path: drop owned scratch (never the shared root on
+# the degraded path) and the staging file.
 cleanup() {
     [ "$GOTMP_RUN_OWNED" -eq 1 ] && rm -rf -- "$GOTMP_RUN" 2>/dev/null
     [ -n "${BIN_TMP:-}" ] && rm -f -- "$BIN_TMP" 2>/dev/null
@@ -329,14 +208,9 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-# Publish a freshly built binary to $BIN only via an atomic rename from a
-# scratch file beside it. Building `-o "$BIN"` in place would let a failed link
-# truncate the live cached binary, and a zero-byte or half-written file is still
-# executable enough for the launcher's `-x` test to pass, so the exec would die
-# with "Exec format error" and re-arm the supervisor's restart backoff. The
-# scratch sits in $BIN_DIR (same filesystem as $BIN) so the rename is atomic;
-# renaming over a running binary is safe on Linux (the old inode lives on for
-# the running exec), unlike an in-place `-o` that truncates it.
+# Publish only via atomic rename from a scratch file beside $BIN: an
+# in-place -o could truncate the live binary into a half-written file that
+# still passes the launcher's -x test.
 build_ok=0
 BIN_TMP=""
 echo "gc-helm-build: building $MOD -> $BIN"
@@ -348,10 +222,7 @@ if BIN_TMP="$(mktemp "$BIN_DIR/.helm-svc.build.XXXXXX" 2>/dev/null)"; then
 fi
 
 if [ "$build_ok" -eq 0 ]; then
-    # $BIN was never touched, so whatever was being served before is still
-    # being served. Say so loudly and exit non-zero: this runs from an order,
-    # not the start path, so failing here costs a log line and a retry next
-    # tick rather than a crash-restart storm.
+    # $BIN was never touched; failing here costs a log line and a retry.
     echo "gc-helm-build: BUILD FAILED; $BIN left unchanged" >&2
     printf 'failed %s\n' "$(date -u +%FT%TZ)" > "$STATE_ROOT/build-status" 2>/dev/null || true
     exit 1
@@ -360,18 +231,12 @@ fi
 printf 'ok %s\n' "$(date -u +%FT%TZ)" > "$STATE_ROOT/build-status" 2>/dev/null || true
 echo "gc-helm-build: built $BIN"
 
-# Record the unfinished half — a binary published with nothing running on it —
-# BEFORE attempting the restart, so that whatever stops this run between the two
-# leaves the evidence for the next one. It also makes a hand-run build (no
-# --deploy, which restarts nothing by design) reach the service on the next
-# tick, instead of sitting inert until someone happens to edit a source again.
+# Record the unfinished half BEFORE the restart, so whatever stops this run
+# leaves the evidence; it also carries a hand-run build to the next tick.
 printf 'published %s\n' "$(date -u +%FT%TZ)" > "$RESTART_PENDING" 2>/dev/null \
     || echo "gc-helm-build: could not write $RESTART_PENDING; a failed restart will not be retried" >&2
 
-# Build and restart are one step on purpose. A new binary that nothing restarts
-# onto is the defect this replaced: three commits touching services/helm landed
-# on 2026-08-22 and all three were inert in the served board because the process
-# had been up 14h55m on an older artifact.
+# Build and restart are one step: a binary nothing restarts onto is inert.
 if [ "$DEPLOY" -eq 1 ]; then
     restart_service || exit 1
 fi

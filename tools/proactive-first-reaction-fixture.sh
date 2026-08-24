@@ -344,10 +344,8 @@ has "card · Decision needed"                    "Decision needed"         "$F"
 # Surfaces as advanced: it flags the bead onto the board.
 has "formula flags the bead onto the board"     "gc-helm.sh"         "$F"
 # There is no longer a `flag` verb to assert: gc-helm.sh's verbs are
-# open/react/takeaway/board, and raising the hand folded into `takeaway …
-# --release` (see the three assertions below). The assertion that used to sit
-# here looked for "flag {{issue}}" and had been red since that fold — a stale
-# expectation, not a finding.
+# open/react/takeaway/board; raising the hand is `takeaway … --release`
+# (see the three assertions below).
 # Never closes the target work bead.
 has "formula forbids closing the target"        "gc bd close"             "$F"
 # The release is folded into `takeaway … --release` (one Dolt write), so there is

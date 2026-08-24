@@ -12,7 +12,7 @@
 set -euo pipefail
 
 DEACON="${BOOT_HEALTH_DEACON:-gc-toolkit.deacon}"
-REPORT_TO="${BOOT_HEALTH_REPORT_TO:-mayor/}"
+REPORT_TO="${BOOT_HEALTH_REPORT_TO:-human}"
 
 # Thresholds. WISP_FRESH is ~2.6-3 observed deacon cycles of margin (a wisp is
 # already event_timeout old when its cycle starts; max healthy age is a full

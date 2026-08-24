@@ -12,7 +12,7 @@
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
 # writes only the canonical gc.-prefixed pair.
 # Callers: converse dispositions, operator re-homes.
-# Doctrine: docs/work-bead-state-machine.md "Disposition". Test: bead-rehome.test.sh.
+# Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""

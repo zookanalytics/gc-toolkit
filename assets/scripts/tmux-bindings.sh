@@ -29,15 +29,10 @@ CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --city-path $(sq "$CITY_PATH")"
 
-# Helm — the sibling of prefix+S. prefix+S answers "what's
-# running"; prefix+b answers "what needs me": a ranked cross-rig board of
-# OPEN anchors (epics, floating and unowned convoys, decisions, human-routed
-# beads, parked beads — six kinds; see gc-helm.sh). Pick a row and it files a
-# VISIT on that bead, which a converse session holds for you. Phase 3 of the
-# Bead-Universe Operating Model (bead tk-qkags; v1 design Key Component 4,
-# specs/bead-universe/design-doc.md) — but the pick-a-row action is governed
-# by v2 (specs/tk-h9pq5/design-doc.md), which retired v1's per-bead resident
-# host that this binding used to resume. See tmux-pick-helm.sh.
+# Helm — the sibling of prefix+S. prefix+S answers "what's running";
+# prefix+b answers "what needs me": the ranked cross-rig board rendered from
+# `helm-svc board --json`. Pick a row and it files a VISIT on that bead,
+# which a converse session holds for you. See tmux-pick-helm.sh.
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
 # Operator-origin visit intake — type a message, get a durable, routed
@@ -52,7 +47,7 @@ gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # the operator is typing, and a foreground `run-shell` would hold tmux's
 # command queue — the whole server — open for that entire time. Nothing is
 # lost by backgrounding it now that the handler reads its message from a
-# per-press draft file instead of one shared paste buffer, which is what the
-# foreground read used to be ordering against. That draft is also what
+# per-press draft file instead of one shared paste buffer, so presses never
+# order against each other. That draft is also what
 # survives a failed intake (tk-w4dp4). See tmux-visit-prompt.sh.
 gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"

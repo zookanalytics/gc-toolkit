@@ -165,9 +165,8 @@ Reference docs under `{{ .ConfigDir }}/docs/`:
   Consult before guessing at config syntax or CLI flags.
 - **gascity-local-patching.md** — the process for carrying local fixes
   against `gascity` ahead of upstream.
-- **tmux-pick-session.md** (at
-  `{{ .ConfigDir }}/assets/scripts/tmux-pick-session.md`) — the session
-  picker; consult before reasoning about session lifecycle or titling.
+- **assets/scripts/tmux-pick-session.sh** — the session picker; read its
+  header before reasoning about session lifecycle or titling.
 
 Gascity-rig-specific doctrine (rebase conventions, refinery rebase
 handling) ships with the opt-in `packs/gascity-keeper/` sub-pack; a

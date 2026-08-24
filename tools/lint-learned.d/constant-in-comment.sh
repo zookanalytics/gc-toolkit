@@ -108,11 +108,14 @@ for f in "$@"; do
 
             # Isolate the comment portion: text after the LEFTMOST comment
             # leader, or a block-comment continuation line (leading `*`).
+            # A leader only counts at line start or after whitespace — a `#`
+            # or `//` mid-token (sed delimiters, URLs) is not a comment.
             comment=""
             best=${#line}
             for l in '#' '//' '/*' '<!--'; do
                 pre="${line%%"$l"*}"
-                if [ "$pre" != "$line" ] && [ "${#pre}" -lt "$best" ]; then
+                if [ "$pre" != "$line" ] && [ "${#pre}" -lt "$best" ] \
+                   && { [ -z "$pre" ] || [[ "$pre" =~ [[:space:]]$ ]]; }; then
                     best="${#pre}"
                     comment="${line:$((best + ${#l}))}"
                 fi

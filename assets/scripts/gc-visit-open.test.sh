@@ -51,9 +51,9 @@
 #               same thing to a human and cannot be selected on: it has drifted
 #               across script generations and a --desc-contains sweep for it
 #               matches beads that merely quote it. That key is what
-#               detect-parked-dispositions.sh reads to decide whether a parked
-#               subject is owed a visit back once its routed work lands
-#               (tk-2cyxo), so a missing stamp costs the return trip silently.
+#               a parked-disposition sweep selects on to decide whether a
+#               parked subject is owed a visit back once its routed work
+#               lands (tk-2cyxo), so a missing stamp costs the return trip.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -273,10 +273,10 @@ eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
 # The description sentence ("Operator-origin intake, filed by …") is for a human
 # to read; it is not a predicate. It has already drifted across two script
 # generations plus one an agent typed by hand, and a --desc-contains sweep for it
-# matches beads that merely QUOTE it. gc.origin=operator is what
-# detect-parked-dispositions.sh selects on to decide whether a parked subject is
-# owed a visit back once its routed work lands — without it that sweep cannot see
-# the subject at all, which is the defect tk-2cyxo closes.
+# matches beads that merely QUOTE it. gc.origin=operator is the key a
+# parked-disposition sweep selects on to decide whether a parked subject is
+# owed a visit back once its routed work lands — without it such a sweep
+# cannot see the subject at all (tk-2cyxo).
 run disabled "why is dolt wedging under load"
 has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
   "(ORIGIN) the created subject is stamped with the key the sweep reads, in its own rig's ledger"

@@ -412,6 +412,10 @@ present "$STATE/bin/.helm-svc.build.FRESH1" \
 # way through to a reported failure with the previously-built binary intact —
 # rather than dying mid-hygiene, which is the state that would leave a
 # half-swept scratch root and no diagnostic at all.
+if [ "$(id -u)" -eq 0 ]; then
+    # root ignores directory modes, so the unwritable scratch cannot be staged.
+    ok "(DEGRADE) skipped (running as root; chmod cannot make the scratch unwritable)"
+else
 fixture
 cache_binary
 touch_source
@@ -431,6 +435,7 @@ present "$GOTMP/run.$DEAD_PID" "(DEGRADE) a failed dead-pid sweep is swallowed, 
 run_svc --socket /run/helm.sock
 eq "$RC" 0 "(DEGRADE) the service still starts — the launcher does not depend on the build"
 has "$OUT" "cached-binary ran:" "(DEGRADE) on the binary the last good build left"
+fi
 
 # --- case: the listing's state_root is authoritative -------------------------
 # The order has no GC_SERVICE_STATE_ROOT — only the supervisor's own spawn does.

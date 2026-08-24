@@ -1,64 +1,18 @@
 #!/bin/sh
 # tmux-keeper-toggle.sh — pin / unpin the gascity-keeper from the `S` picker.
-# Companion: tmux-pick-session.sh (the picker that renders the toggle entry).
-#
-# Why this exists
-# ---------------
-# The gascity-keeper is the operator's single front-door for the forked
-# upstream repos (gastownhall/gascity). It runs `on_demand` on purpose:
-# whether it is up is itself useful signal — "up" means the operator is in
-# upstream-engagement mode (a rebase/sync is hot), "down" means they are
-# not. But on_demand carries a navigation cost: a drained keeper has no
-# tmux pane, so it cannot be reached or revived through the picker's normal
-# "switch to a live pane" flow. `gc session wake` does not hold it up (it
-# drains again moments later — the "no-wake-reason" you see in the logs)
-# and `attach` drops on detach. The durable primitive is `gc session pin`,
-# which materializes the canonical session and holds it until
-# `gc session unpin`.
-#
-# This script is the single owner of (a) keeper pin-state detection and (b)
-# the pin/unpin action. tmux-pick-session.sh calls `state` to label its
-# fixed menu entry and runs `toggle` when that entry is selected, so there
-# is exactly one copy of the pin/unpin logic (no duplication across the two).
-#
-# Pin-state model
-# ---------------
-# "up" == the keeper session bead's `metadata.pin_awake` is true — the real
-# durable pin, NOT tmux liveness. The two diverge: an on_demand keeper
-# materializes for ANY durable wake reason (most commonly work on its
-# hook), so a live pane does not imply a pin. Labelling from liveness (as
-# this script originally did, tk-oe5bc3) showed "unpin" for a
-# working-but-unpinned keeper, where toggling would tear down a hold the
-# operator never placed — or no-op confusingly (tk-7qczss).
-#
-# pin_awake lives only on the keeper's session bead in HQ beads — neither
-# the `gc session list --json` rows nor the picker's supervisor sessions
-# API expose pin state (verified 2026-06-03) — so the read is a real
-# gc/beads round-trip: ONE `gc session list --json` call to resolve the
-# canonical session bead ID by Alias, then one `gc bd show <id>` for
-# `metadata.pin_awake`. (If a future gc exposes pin state in the
-# session-list row, fold the read back into that single call.) Both calls
-# are wall-clock bounded so a slow or wedged beads backend cannot stall
-# the caller: on any failure/timeout `state` reports "unknown" — the
-# picker renders a neutral label instead of stalling or guessing, and
-# `toggle` refuses to act rather than flip the wrong way. A keeper that
-# has never been materialized has no session row and reads as "down"
-# (unpinned). `…-adhoc-<id>` ad-hoc sessions carry their own distinct
-# aliases, so the exact Alias match keeps excluding them — only the
-# canonical session is the front-door.
-#
 # Usage: tmux-keeper-toggle.sh [--city-path <path>] [state|toggle]
-#   state    print "up" (pinned), "down" (unpinned), or "unknown" (beads
-#            slow/unreachable — caller must not guess)
-#   toggle   pin when down, unpin when up, refuse when unknown; confirm
-#            via `tmux display-message` (default action when none given)
-#
-# Needs jq (to parse the gc JSON) and coreutils timeout(1) for the bounds;
-# degrades to an unbounded read where timeout is missing (gc-bd-watch.sh
-# already assumes timeout(1), so this is not a new dependency).
-#
-# Invoked from the picker menu with `run-shell -b` so a slow `gc session pin`
-# can never freeze the tmux server (same pattern as tmux-visit-prompt.sh).
+#   state    print "up" (pinned) | "down" (unpinned) | "unknown" (beads slow
+#            or unreachable — caller must not guess)
+#   toggle   pin when down, unpin when up, refuse when unknown (default)
+# The on_demand keeper has no pane when drained, so the picker needs this
+# standalone surface; `gc session pin` is the durable hold (wake drains
+# again, attach drops on detach). Single owner of pin-state detection AND
+# the toggle, so the picker cannot drift from it. "up" is the session bead's
+# metadata.pin_awake — the real durable pin, NOT tmux liveness (a keeper
+# materialized by hooked work is up-but-unpinned, tk-oe5bc3/tk-7qczss); the
+# read is one bounded `gc session list --json` (alias → bead id) plus one
+# bounded `gc bd show`. Invoked with run-shell -b so a slow pin can never
+# freeze tmux. Needs jq; degrades to unbounded reads without timeout(1).
 set -eu
 
 # The keeper's QualifiedName (the alias shown in `gc session list`).
@@ -74,17 +28,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Same socket-aware wrapper the picker uses. Under `run-shell` GC_TMUX_SOCKET
-# is usually unset, so this falls back to bare `tmux`, which targets the
-# server that ran us via $TMUX — the correct city server in both the
-# picker's `state` call and the menu's `toggle` invocation.
+# Socket-aware wrapper; bare tmux targets the server that ran us via $TMUX.
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-# `gc session` scoped to the picker's baked-in city. The binding fires from
-# tmux's bare env (no GC_CITY), so --city makes resolution deterministic;
-# when no city path was threaded through we let gc fall back to its own
-# cwd walk-up (best effort). Used for the pin/unpin actions, which are
-# deliberately NOT bounded — they do real work and run backgrounded.
+# gc session scoped to the baked-in city; pin/unpin are deliberately NOT
+# bounded (real work, backgrounded).
 gc_session() {
     if [ -n "$CITY_PATH" ]; then
         gc session "$@" --city "$CITY_PATH"
@@ -93,10 +41,8 @@ gc_session() {
     fi
 }
 
-# bounded_gc <seconds> <gc args…> — a read-only gc call with the city
-# threaded and a hard wall-clock bound. timeout(1) execs a binary, so the
-# gc_session shell function can't sit under it; this inlines the same
-# --city threading instead.
+# bounded_gc <seconds> <gc args…> — a bounded read-only gc call (timeout
+# execs a binary, so the shell function above cannot sit under it).
 bounded_gc() {
     bound="$1"; shift
     if command -v timeout >/dev/null 2>&1; then
@@ -107,12 +53,9 @@ bounded_gc() {
     fi
 }
 
-# keeper_pin_state <per-call-bound-seconds> — print up | down | unknown.
-# Two bounded gc calls, short-circuiting to "unknown" on the first
-# failure, so a wedged backend costs at most one bound before the caller
-# gets its answer. jq -r prints both the JSON boolean true and the string
-# "true" as `true`, so the comparison below covers either representation
-# of pin_awake; an absent field prints `null` and reads as unpinned.
+# keeper_pin_state <bound-secs> — up | down | unknown; short-circuits to
+# unknown on the first failed call. jq -r renders boolean and string true
+# alike; absent prints null and reads as unpinned.
 keeper_pin_state() {
     bound="$1"
     rows=$(bounded_gc "$bound" session list --json 2>/dev/null) \
@@ -131,23 +74,15 @@ keeper_pin_state() {
 }
 
 if [ "$ACTION" = "state" ]; then
-    # Picker render path: 3s per-call bound. Measured healthy-but-busy
-    # latency is ~1.0-1.8s per call, so 2s would flip the label to the
-    # neutral fallback on systems that are merely loaded; 3s keeps the
-    # label truthful there while a wedged beads backend still costs the
-    # picker only one bound (the read short-circuits to "unknown" on the
-    # first failed call) before the neutral label renders.
+    # 3s per call: healthy-but-busy is ~1.0-1.8s, so 2s would go neutral
+    # under mere load.
     keeper_pin_state 3
     exit 0
 fi
 
-# toggle — flip the durable pin based on real pin state. Generous 10s
-# per-call bound: this path runs backgrounded (`run-shell -b`), so staying
-# usable under Dolt load beats answering fast. Report the outcome on the
-# status line; surface pin/unpin failures (e.g. a hard suspend hold that
-# pin can't clear) verbatim so the operator can act on them. When the pin
-# state cannot be determined, do nothing — flipping blind could tear down
-# a hold the operator placed, or pin what they meant to unpin.
+# toggle — 10s per-call bound (backgrounded; usable under load beats fast).
+# Failures are surfaced verbatim; unknown state does nothing — flipping
+# blind could tear down a hold the operator placed.
 case "$(keeper_pin_state 10)" in
 up)
     if OUT=$(gc_session unpin "$KEEPER_ALIAS" 2>&1); then

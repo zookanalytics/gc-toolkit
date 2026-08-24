@@ -4,7 +4,7 @@
 #
 # The defect: a rework child processed through the mr flow was stamped
 # merge_result=pull_request like a first handoff, becoming a SECOND gating
-# anchor for the same PR. Because merge-skill.sh validates each anchor
+# anchor for the same PR. Because merge.sh validates each anchor
 # independently, the PR's effective gate became its WEAKEST anchor — the
 # rework anchor carried no check_set, so a CLEAN PR merged with the real
 # anchor's codex gate red. And because the in-flight-rework hold excludes
@@ -15,8 +15,8 @@
 # gating anchor (merge_result=pull_request or pre_open_gate on the same
 # branch). If so, the hand-back is a rework: the review anchors to the
 # EXISTING anchor and $WORK closes as landed-on-branch — never minting a
-# second anchor. (merge-skill.sh independently HOLDS any PR claimed by >1 open
-# anchor — legacy pairs — covered by merge-skill.test.sh case 12.)
+# second anchor. (merge.sh independently HOLDS any PR claimed by >1 open
+# anchor; doctor/check-one-anchor-per-pr asserts it structurally.)
 #
 # This EXECUTES the real resolve snippet extracted verbatim from the formula
 # (between the one-anchor-per-pr-resolve markers) against a fake `gc`, so it

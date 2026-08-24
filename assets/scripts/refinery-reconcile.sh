@@ -97,8 +97,8 @@ run_pass() { # <label> <script> [args...]
   return "$rc"
 }
 
-# (1) gate-ensure: rc=3 is a designed hold of merge.sh for this pass — an
-# approval-gated queue must not raise order.failed every 60s over it.
+# (1) gate-ensure: its unsafe rc is a designed hold of merge.sh for this
+# pass — an approval-gated queue must not raise order.failed every 60s over it.
 GATE_UNSAFE_RC=3
 MERGE_HELD=0
 gate_rc=0

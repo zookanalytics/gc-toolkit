@@ -166,3 +166,14 @@ sequenceDiagram
   gate-ensure sees a declared gate that is neither green at the live head nor
   in flight and dispatches one review bead (stamp first, then dispatch, read
   the route back).
+
+## Disposition
+
+A close that hands the work to a successor must say so from the store the
+bead lived in: `assets/scripts/bead-rehome.sh` closes the bead with
+`gc.superseded_by` + `gc.superseded_by_store` (and stamps the inverse
+`gc.supersedes*` on the successor), so a sound re-home and a careless false
+close are distinguishable on read. The read side searches every store before
+concluding a close was false. Consumers: the mechanik/converse close paths
+(`template-fragments/bead-disposition.template.md`) and any patrol judging a
+closed bead.

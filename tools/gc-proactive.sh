@@ -1,100 +1,20 @@
 #!/usr/bin/env bash
-# gc-proactive.sh — the proactive-via-slung-mol engine. Phase 4 of the
-# Bead-Universe Operating Model (specs/bead-universe/design-doc.md —
-# Key Components 5-6, Phase 4). That design is v1, superseded in part by
-# specs/tk-h9pq5/design-doc.md (v2): v2 replaced the binding and lifecycle
-# and left Phase 4 standing, so v1 still governs this tool — read its
-# supersession banner before citing the rest of it.
-#
-# "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
-# slung at a bead: a cheap first reaction (read the body → articulate /
-# research → write a first-reaction CARD to the bead notes → file a visit
-# on the bead) so the human arrives at *advanced* work. This
-# tool is the budget-and-trigger layer around that sling. It owns no new
-# lifecycle — it assembles `gc sling`, `gc bd ready`, `gc session list`, and
-# the Phase-3 Helm (assets/scripts/gc-helm.sh).
-#
-# ── The two triggers (operator refinement on tk-3d0uh) ───────────────
-# The proactive trigger has TWO forms, and this tool serves both:
-#
-#   1. PER-BEAD / opt-in / board-initiated — `sling <bead>`: an operator,
-#      the board picker, or a one-shot at create/decomposition routes a
-#      single bead for a first reaction. Also covers `metadata.gc.proactive=1`
-#      as a per-bead opt-in flag.
-#   2. PROCESS-SCAN — `scan [--sling]`: a polecat-pool-shaped scan for beads
-#      "able to be updated" (open, ready, unassigned, not yet reacted) that
-#      applies a first reaction to each. Same "how do I move this forward?"
-#      loop the polecat demand-scan runs, but it ADVANCES rather than
-#      implements. NOT a resident loop — it is a process you run (operator,
-#      a patrol/cron, or the pool's own demand probe).
-#
-# ── Default-disabled: auto-spawn is OFF unless opted in ──────────────
-# `demand` (the work_query, mirrored here) emits [] unless GC_PROACTIVE_ENABLED
-# is truthy — the conservative default. See the GC_PROACTIVE_ENABLED tunable.
-#
-# ── The budget (design Key Component 5; "budget sessions, not bytes") ─
-# Two independent clamps, because proactive fan-out spends whole sessions
-# against a fragile shared Dolt:
-#
-#   • POOL CAP — the dedicated proactive pool (agents/proactive/agent.toml)
-#     is `max_active_sessions = 2`, so proactive can never starve impl work
-#     (the impl polecat pool keeps its own 5 slots). That cap lives in the
-#     agent config; this tool does not re-implement it.
-#   • CITY-WIDE SESSION CAP — `demand` (the proactive pool's work_query)
-#     SHEDS — emits `[]`, so the reconciler spawns nothing — when the count
-#     of active city sessions is at/over GC_PROACTIVE_CITY_CAP (~8-16 band,
-#     default 20). This is the design's "reconciler clamp": the reconciler
-#     runs work_query to decide whether to spawn, and an empty result means
-#     "no demand." Proactive is the FIRST thing to shed under session
-#     pressure (design degraded mode "proactive sheds first") because only
-#     the proactive pool's work_query consults this clamp — impl pools are
-#     untouched.
-#
-# ── The security invariant (design Key Component 6) ──────────────────
-# Any code-producing proactive output takes the codex-gated `mr` merge
-# path, NEVER `direct`. `sling` bakes `--merge mr` in and HARD-REFUSES a
-# `direct` override (set GC_PROACTIVE_MERGE=local for the local-only path;
-# `direct` is rejected outright). The city already defaults
-# default_merge_strategy="mr" (city.toml) — this tool makes the proactive
-# path fail closed rather than relying on that default.
-#
-# Side effects: `scan` (without --sling) and `demand` are READ-ONLY.
-# `scan --sling` and `sling` route work via `gc sling` (and may surface a
-# bead). Nothing here closes or merges anything.
-#
-# Tunables (env):
-#   GC_PROACTIVE_ENABLED       master switch for demand-driven AUTO-SPAWN.
-#                              Default-disabled: unanswered ⇒ `demand` emits []
-#                              (no auto-spawn). Truthy (1/true/yes/on) opts in.
-#                              Gates auto-spawn ONLY — manual sling/scan ignore
-#                              it. Resolved env-first, then from the target
-#                              pool's city config — see "Tunable resolution".
-#   GC_PROACTIVE_POOL          proactive pool agent name. A bare base name
-#                              (default "gc-toolkit.proactive") is rig-
-#                              qualified to "<GC_RIG>/<base>" — the form the
-#                              rig-scoped pool is addressed by (agent.toml
-#                              watches {{.Rig}}/gc-toolkit.proactive, and
-#                              `gc sling` rejects a bare agent name). Pass an
-#                              already-qualified "<rig>/<base>" to override.
-#   GC_PROACTIVE_CITY_CAP      city-wide active-session ceiling for the
-#                              shed clamp (default 20; operator-tunable in
-#                              the design's 8-16 band). Resolved env-first,
-#                              then from the target pool's city config — see
-#                              "Tunable resolution".
-#   GC_PROACTIVE_MERGE         merge strategy for slung output (default
-#                              "mr"; "local" allowed; "direct" REFUSED).
-#   GC_PROACTIVE_SCAN_LIMIT    max candidates scan/--sling considers
-#                              (default 20).
-#   GC_PROACTIVE_FIXTURE       test hook: a directory of canned data
-#                              (sessions.json, ready.json, scan.json). When
-#                              set, the tool reads these instead of calling
-#                              gc/bd, so the gate fixture is hermetic. The
-#                              one exception is `sling --dry-run`, which
-#                              still shells out to `gc sling -n` so the gate
-#                              can prove the real command shape; set
-#                              GC_PROACTIVE_FIXTURE to make `sling` echo the
-#                              resolved command instead (no gc call).
-
+# gc-proactive.sh — the proactive-via-slung-mol engine (Bead-Universe Phase 4;
+# v1 design specs/bead-universe/design-doc.md, still governing this tool).
+# "Proactive" is NOT a resident loop: it is mol-first-reaction slung at a
+# bead (read body → write a first-reaction CARD → file a visit) so the human
+# arrives at advanced work. This tool is the budget-and-trigger layer:
+#   demand [<pool>]      pool work_query — routed beads, or [] when auto-spawn
+#                        is disabled (the default) or the city is at the cap
+#   scan [--json|--sling] find movable-forward / opt-in beads; --sling reacts
+#   sling <bead> [--nudge] [-n]  sling a first reaction (mr path, hard-refuses
+#                        --merge direct — the security invariant)
+#   cap · deliverable    clamp state; "would a sling be picked up?" (exit 0/1)
+# Two clamps: the pool's own max_active_sessions (agents/proactive/agent.toml)
+# and the city-wide GC_PROACTIVE_CITY_CAP shed. Tunables resolve env-first,
+# then the pool's city config (helm-svc carries no env — tk-hscs0):
+# GC_PROACTIVE_ENABLED / _POOL / _CITY_CAP / _MERGE / _SCAN_LIMIT / _FIXTURE
+# (test hook: canned sessions/ready/scan/config .json instead of gc calls).
 set -euo pipefail
 
 PROG="${0##*/}"
@@ -114,16 +34,10 @@ FORMULA="mol-first-reaction"
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 
-# resolve_pool_target [override] -> the RIG-QUALIFIED pool target.
-# The proactive pool is rig-scoped: agents/proactive/agent.toml watches
-# `{{.Rig}}/gc-toolkit.proactive` and `gc sling` only resolves agents by their
-# qualified `<rig>/<base>` name (a bare base is an unknown agent), so both the
-# sling target and the `gc.routed_to` demand filter MUST carry the rig prefix.
-# We DERIVE it from GC_RIG (matching the done-sequence's
-# ${GC_RIG:+$GC_RIG/}gc-toolkit.refinery idiom). If the configured target is
-# already qualified (contains '/'), it is used verbatim; otherwise we fail
-# CLOSED when GC_RIG is unset rather than silently emitting an unroutable bare
-# name — the bug this guards against.
+# resolve_pool_target [override] -> the RIG-QUALIFIED pool target. The pool
+# is rig-scoped and gc sling rejects a bare agent name, so a bare base is
+# qualified from GC_RIG — failing CLOSED when GC_RIG is unset rather than
+# emitting an unroutable name.
 resolve_pool_target() {
     local base="${1:-}"
     [ -n "$base" ] || base="$POOL_BASE"
@@ -139,17 +53,10 @@ resolve_pool_target() {
     esac
 }
 
-# rig_beads_db -> this rig's `.beads` dir, to pin `gc bd --db` for parity with
-# the Helm (assets/scripts/gc-helm.sh resolves the rig path from
-# `gc rig list`/GC_RIG, then `$path/.beads`). We pin --db because bare `bd` (and
-# `gc bd` without --db) resolves `.beads` by walking UP from cwd — but the
-# proactive work_dir is a git worktree where `.beads` is gitignored, so the
-# up-walk overshoots to the HQ `lx` ledger (the wrong store) and demand comes
-# back empty. Echoes the path, or nothing when it cannot resolve (no GC_RIG, or
-# no `.beads` at the path); callers then fall back to a bare `gc bd ready`, which
-# still routes through GasCity (gc resolves the rig from GC_RIG/cwd) rather than
-# the `bd` binary. Only reached on the live path (the FIXTURE branches return
-# first), so the gate stays hermetic.
+# rig_beads_db -> this rig's .beads dir, to pin gc bd --db: an unpinned
+# up-walk from a worktree (where .beads is gitignored) overshoots to the HQ
+# ledger and demand comes back empty. Empty when unresolvable; callers fall
+# back to a bare gc bd ready.
 rig_beads_db() {
     [ -n "${GC_RIG:-}" ] || return 0
     local path
@@ -160,70 +67,28 @@ rig_beads_db() {
     return 0
 }
 
-# board_rank — re-rank a JSON array of beads (stdin) by the Helm's
-# PRIORITY weight so the scarce proactive slots (pool max 2 + city cap) go to
-# the highest-weight work, not merely the oldest. We reuse the board's priority
-# component verbatim — assets/scripts/gc-helm.sh prio_w = max(0, 4 - p),
-# i.e. P0->4 … P4->0, null->1 — and keep oldest-first as the in-band tiebreaker
-# so a priority band still drains fairly. The board's other two weight terms
-# (subtree size + cross-rig refs) are deliberately OMITTED: each needs a query
-# per bead, too costly for a work_query/scan that runs against the shared Dolt.
-# This same ranking is mirrored inline in agents/proactive/agent.toml's
-# work_query (the real reconciler clamp); keep the two in sync.
+# board_rank — re-rank (stdin JSON array) by the board's priority weight
+# (prio_w = max(0, 4-p), null->1), oldest-first within a band. Mirrored
+# inline in agents/proactive/agent.toml's work_query; keep the two in sync.
 board_rank() {
     jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end);
         sort_by(-(prio_w(.priority)), (.created_at // ""))'
 }
 
 # ---------------------------------------------------------------------------
-# Tunable resolution — the process env first, then the pool's CITY CONFIG.
+# Tunable resolution: process env first, then the pool's resolved city config
+# (the same [agent.env] the reconciler injects), then the default. Needed
+# because helm-svc — the caller that must ask deliverable — structurally
+# carries no GC_PROACTIVE_* env (tk-hscs0). One config read at most, only for
+# a tunable the env left unanswered; fails SOFT in every direction.
 # ---------------------------------------------------------------------------
-# GC_PROACTIVE_ENABLED and GC_PROACTIVE_CITY_CAP are declared in city.toml on
-# the proactive pool itself ([[rigs.overrides]] agent = "proactive", then
-# [rigs.overrides.env]). The reconciler reads them from there and injects them
-# into work_query/scale_check and into the pool's own sessions — so every
-# CONSUMER of the decision sees them. Nothing else does.
-#
-# The decision is made on the PRODUCER side, in a process that gets no such
-# injection. `deliverable` is called by assets/scripts/gc-visit-open.sh, whose
-# primary caller is the helm service (services/helm/internal/server/open.go);
-# helm-svc's process env carries no GC_PROACTIVE_* and structurally cannot — a
-# [[service]] block has no env field at all (gascity internal/config/service.go:
-# ServiceProcessConfig is {Command, HealthPath}). Reading the env alone made the
-# gate answer "disabled" to the one caller that has to ask, so every visit the
-# board opened was filed with no framing card, for as long as the switch was on
-# (tk-hscs0).
-#
-# So resolve each tunable the way the reconciler effectively does:
-#
-#   1. the PROCESS ENV when set — an explicit operator override, and what an
-#      already-injected caller (a proactive session, work_query) carries;
-#   2. otherwise the RESOLVED CITY CONFIG for the pool this run targets — the
-#      same [agent.env] the reconciler injects from;
-#   3. otherwise the built-in default.
-#
-# Step 2 costs one `gc config show --json` (~0.3s), taken at most once per run
-# and only for a tunable the env left unanswered, so an injected caller pays
-# nothing. It fails SOFT in every direction: an unreachable city, an
-# unparsable document, an unknown pool, or a non-numeric cap all leave the
-# env/default answer standing, which is exactly the pre-existing behavior.
 
-# pool_config_env -> the target pool's resolved [agent.env] as a JSON object,
-# or `{}` when it cannot be read. In fixture mode the raw `gc config show
-# --json` document is read from $GC_PROACTIVE_FIXTURE/config.json (absent = no
-# config layer at all), so the target derivation and the extraction below are
-# the SAME code the live path runs — the fixture stubs the source, not the
-# logic.
-#
-# The config keys an agent by its own bare name plus the rig dir it belongs to
-# (Name = "proactive", Dir = "<rig>"), while the pool TARGET is the qualified
-# import form "<rig>/<binding>.<agent-base>". Strip both wrappers to look it up.
+# pool_config_env -> the target pool's resolved [agent.env] as JSON, or {}.
+# Config keys agents by bare Name + rig Dir; strip the target's wrappers.
 pool_config_env() {
     local target rig base raw out
     target=""
-    # resolve_pool_target `die`s when it cannot rig-qualify. That is fatal for a
-    # sling and merely unanswerable here, so absorb it in the subshell and fall
-    # back to "no config layer".
+    # resolve_pool_target dies when unqualifiable; absorb it here.
     target="$(resolve_pool_target 2>/dev/null)" || target=""
     [ -n "$target" ] || { printf '{}'; return 0; }
     rig="${target%%/*}"
@@ -248,9 +113,7 @@ pool_config_env() {
     printf '%s' "$out"
 }
 
-# resolve_tunables — fill PROACTIVE_ENABLED / CITY_CAP from the pool's city
-# config for whichever of the two the process env did not answer. Exactly one
-# config read, or none at all when the env answered both.
+# resolve_tunables — fill whichever of the two the process env left unset.
 resolve_tunables() {
     if [ -n "$PROACTIVE_ENABLED" ] && [ -n "${GC_PROACTIVE_CITY_CAP:-}" ]; then
         return 0
@@ -336,39 +199,15 @@ cmd_cap() {
 
 # ---------------------------------------------------------------------------
 # deliverable — "if I sling right now, will anything ever pick it up?"
+# Sling is fire-and-forget and both clamps are outside it (a shed and a
+# disabled pool both return 0), so a caller that needs the reaction's OUTPUT
+# must ask BEFORE it slings. Reuses the same clamp reads, so a third caller
+# cannot drift. Exit 0 yes; 1 no, stdout names which clamp said no.
 # ---------------------------------------------------------------------------
-# `sling` is fire-and-forget: it routes a bead to the proactive pool and the
-# REACTION happens later, in a session the reconciler decides to spawn. Both
-# clamps that decide that spawn are OUTSIDE the sling, and neither reports back:
-#
-#   * at the city cap, `sling` itself logs "proactive sheds" and returns 0 —
-#     success and no-op are the same exit status; and
-#   * with auto-spawn disabled (the DEFAULT — GC_PROACTIVE_ENABLED unset), the
-#     sling succeeds outright and the bead simply sits routed forever, because
-#     work_query/scale_check both emit "no demand" and nothing is ever spawned.
-#
-# So a caller that depends on the reaction's OUTPUT — notably the visit
-# assets/scripts/gc-visit-open.sh hands the operator, which mol-first-reaction's
-# advance-and-drain step is what actually files — cannot learn from `sling`
-# whether it got anything. It must ask BEFORE it slings and take its own path
-# when the answer is no. That is the whole job of this verb.
-#
-# It re-uses `proactive_auto_enabled` and `at_cap` rather than restating either
-# clamp, so the third caller cannot drift from the two copies that already have
-# to be kept in sync (this file and agents/proactive/agent.toml).
-#
-# Read-only. Exit 0 = a slung reaction will be picked up; 1 = it will not, and
-# stdout names which clamp said no (the two need different operator moves:
-# set GC_PROACTIVE_ENABLED, versus wait for city load to fall).
 cmd_deliverable() {
     if ! proactive_auto_enabled; then
-        # Name the pool whose config was consulted, so "disabled" is
-        # actionable. Capture in two steps: `resolve_pool_target` reports an
-        # unqualifiable target through `die`, and `die` EXITS — inside `$( )`
-        # that terminates the substitution's subshell outright, so an inline
-        # `|| printf <fallback>` never runs and the %s lands empty ("AND in 's
-        # city config"). Absorbing the failure into the assignment is the same
-        # idiom `pool_config_env` uses for the same reason.
+        # Name the consulted pool; capture in two steps (die exits the
+        # substitution subshell, so an inline fallback never runs).
         local why_target=""
         why_target="$(resolve_pool_target 2>/dev/null)" || why_target=""
         [ -n "$why_target" ] || why_target="the proactive pool, which could not be named because GC_RIG is unset"
@@ -393,15 +232,9 @@ cmd_deliverable() {
 # emit the standard pool demand (ready, unassigned, routed-to-us beads).
 # ---------------------------------------------------------------------------
 
-# proactive_auto_enabled -> true iff auto-spawn is opted in. Reads the RESOLVED
-# tunable (env, else the pool's city config — see "Tunable resolution"), never
-# the raw env, so the answer does not depend on which process asks.
-#
-# The truthy set is mirrored inline in agents/proactive/agent.toml's work_query
-# and scale_check (the real reconciler clamp); keep the three in sync
-# (gate-asserted). Those two copies read the env directly and correctly: the
-# reconciler injects the pool's [agent.env] into them, so the env IS the config
-# there. This resolution exists for every caller that gets no such injection.
+# proactive_auto_enabled -> true iff auto-spawn is opted in (the RESOLVED
+# tunable). Truthy set mirrored in agents/proactive/agent.toml's work_query
+# and scale_check; keep the three in sync (gate-asserted).
 proactive_auto_enabled() {
     case "$PROACTIVE_ENABLED" in
         1|true|yes|on) return 0 ;;
@@ -575,16 +408,11 @@ cmd_sling() {
     local target
     target="$(resolve_pool_target)"
 
-    # Build the sling argv. The target is rig-qualified (resolve_pool_target)
-    # so `gc sling` resolves the rig-scoped pool agent rather than rejecting a
-    # bare name; --on attaches the mol-first-reaction workflow to the existing
-    # bead and routes THAT bead to the pool (the pool's work_query selects on
-    # the bead's gc.routed_to, not on the workflow root); --merge pins the
-    # path; --reassign hands a human-held bead to the pool cleanly.
+    # --on attaches the workflow to the existing bead and routes THAT bead;
+    # --merge pins the path; --reassign hands a human-held bead over cleanly.
     #
-    # --on is load-bearing and must not be dropped: the proactive pool declares
-    # no default_sling_formula of its own and inherits agent_defaults'
-    # "mol-polecat-work", so a plain sling would pour the wrong formula.
+    # --on is load-bearing: without it the pool inherits agent_defaults'
+    # mol-polecat-work and pours the wrong formula.
     set -- "$target" "$bead" --on "$FORMULA" --merge "$MERGE" --reassign
     [ -n "$nudge" ] && set -- "$@" --nudge
 

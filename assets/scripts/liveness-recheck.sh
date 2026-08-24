@@ -3,7 +3,7 @@
 # time (bead tk-gvas6: 60% of one body was wrong on arrival). Two batched
 # bead reads re-derive every listed id's class and print a corrected census.
 # Bead state only — no network: a merge_result marker is FLAGGED for the
-# sitting, never used to drop a bead, and every failure path leaves a bead
+# sitting (never grounds for dropping a bead), and every failure path leaves a bead
 # VISIBLE (a failed batched read prints NO census; a failed ready read skips
 # the not-ready rule and says `unverified`; an unreturned id gets its own
 # `unreadable` bucket, counted into the live agenda).

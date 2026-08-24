@@ -245,7 +245,17 @@ FINDING=$(printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.name=="<check
 "$SCRIPTS/escalate.sh" --subject <this wisp or the tracking bead> --key "doctor-<check-name>" --message "$FINDING"
 ```
 State what the dedup found — bead ids on a match, the stores and terms
-searched on a miss. Close this step after the sweep."""
+searched on a miss.
+
+Two adjacent duties, same cadence:
+- Closing a bead that names a doctor finding? Close it through
+  `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
+  ledger cannot say "fixed" while the check still fires.
+- Quota-parked sessions: read `$SCRIPTS/quota-park-nudge.sh --status`
+  (closed-field surface) instead of session panes; escalate any session it
+  reports `escalated=1`.
+
+Close this step after the sweep."""
 
 [[steps]]
 id = "next-iteration"
