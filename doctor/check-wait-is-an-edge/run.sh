@@ -191,7 +191,27 @@ def verbs: "(waiting on|waits on|waiting for|blocked on|blocked by|awaiting|awai
 # (su-02g, tk-1co) against 1,008 at five. A 4-character floor reads more
 # naturally and would have silently skipped those two — the kind of blind spot
 # that only shows up as a finding that never appears.
-def idpat: "((?:" + $prefixes + ")-[a-z0-9][a-z0-9.]{2,})";
+def idbare: "(?:" + $prefixes + ")-[a-z0-9][a-z0-9.]{2,}";
+def idpat: "(" + idbare + ")";
+# EVERY id in the wait phrase, not just the first. `scan` resumes after the end
+# of each match, so a single verb followed by a LIST produced exactly one pair:
+# for `blocked by tk-good and tk-bad1`, the verb was consumed by the first id
+# and nothing was left to re-trigger the alternation, so tk-bad1 was never
+# emitted at all. Once the first id in a list carries an edge the check printed
+# a clean city and exited 0 while every later target in the same sentence went
+# unexamined — a false NEGATIVE, which is the one failure mode this check exists
+# to remove (tk-9vbeim P1, reproduced against a fake ledger).
+#
+# The continuation is SEPARATOR-GATED rather than a wider character window. A
+# bigger `{0,N}` bound would sweep in ids from unrelated prose later in the same
+# sentence and report waits nobody wrote; requiring list glue — a comma,
+# semicolon, ampersand, slash, `and`, `or`, `plus`, in any run — matches how a
+# list is actually written and stops at the first word that is not one. So
+# `blocked by tk-aaa, tk-bbb, and tk-ccc` yields three, while `blocked by
+# tk-aaa and then we shipped tk-bbb later` still yields one. The verbs stay
+# word-bounded for the same reason they already were.
+def glue: "(?:[ \\t]*(?:,|;|&|/|\\band\\b|\\bor\\b|\\bplus\\b))+[ \\t]*";
+def tail: "((?:" + glue + idbare + ")*)";
 .[]?
 | . as $b
 | ($b.id // "" | tostring) as $src
@@ -199,17 +219,24 @@ def idpat: "((?:" + $prefixes + ")-[a-z0-9][a-z0-9.]{2,})";
     + [ ($b.metadata // {} | to_entries[]
          | select(.key | test("(?i)reason|blocked")) | (.value | tostring)) ]
   ) as $prose
+| ( [ ($b.dependencies // [])[] | ((.depends_on_id // .id) // "")
+      | select(. != "") ] | join(",") ) as $srcedges
 | $prose[]
-| [ scan("(?i)\\b" + verbs + "\\b[^.\n]{0,40}?\\b" + idpat) ]
+| [ scan("(?i)\\b" + verbs + "\\b[^.\n]{0,40}?\\b" + idpat + tail) ]
 | .[]?
+| . as $m
+# $m is [verb, first-id, trailing-list]. The trailing group is glue+id repeats,
+# so re-scanning it with the bare pattern yields the rest of the list in order.
+| ( [ $m[1] ] + ( ($m[2] // "") | [ scan(idbare) ] ) )
+| .[]
 # A sentence-final period is swallowed by the id pattern, which has to admit
 # dots for hierarchical ids like tk-yhwfv.3 — so "awaiting tk-8rm3q." yields
 # "tk-8rm3q.", which resolves to nothing and would be reported as a wait on a
 # bead that does not exist. Trailing dots are stripped; interior ones are kept.
-| [ $src, (.[0] | ascii_downcase), (.[1] | sub("\\.+$"; "")),
-    ([ ($b.dependencies // [])[] | ((.depends_on_id // .id) // "")
-       | select(. != "") ] | join(",")) ]
-| select(.[2] != $src and .[2] != "")
+# Applied per id, because any member of a list can end the sentence.
+| sub("\\.+$"; "") as $cand
+| select($cand != $src and $cand != "")
+| [ $src, ($m[0] | ascii_downcase), $cand, $srcedges ]
 | join("\u001f")
 '
 
@@ -248,6 +275,36 @@ PREFIX_MAP=$(printf '%s' "$rigs_raw" \
     | jq -r '.rigs[]? | select((.path // "") != "")
              | (.prefix // "") as $p | select($p | test("^[a-z]{1,8}$"))
              | [$p, (.path + "/.beads")] | join("\u001f")' 2>/dev/null)
+
+# The roster's own NAMES, which are the things most likely to be mistaken for
+# ids without being any. A rig called `gc-toolkit` and an agent called
+# `gc-toolkit.furiosa` both match the `<prefix>-<tail>` shape exactly — `gc-` is
+# gascity's prefix and `toolkit` is a legal tail — so the scan cannot help
+# proposing them, and the live run reported both as unresolved wait notes.
+#
+# Resolution already stops them being ERRORS; this stops them being NOISE, which
+# is the other way a check gets ignored. It is applied ONLY to candidates that
+# resolved to no bead in any store, so it can never hide a real one: were
+# `gc-toolkit` actually minted as a bead somewhere it would resolve, be judged
+# on its edges like anything else, and never reach this filter.
+RIG_NAMES=$(printf '%s' "$rigs_raw" \
+    | jq -r '.rigs[]? | (.name // "") | select(. != "")' 2>/dev/null)
+
+# A candidate is a known identifier when it IS a rig name, or is one of that
+# rig's dotted agent/session names.
+is_known_identifier() { # is_known_identifier <candidate>
+    local c="$1" n
+    [ -n "$RIG_NAMES" ] || return 1
+    while IFS= read -r n; do
+        [ -n "$n" ] || continue
+        [ "$c" = "$n" ] && return 0
+        # $n is quoted, so any glob character inside a rig name stays literal.
+        case "$c" in "$n".*) return 0 ;; esac
+    done <<RIGNAME_EOF
+$RIG_NAMES
+RIGNAME_EOF
+    return 1
+}
 
 if [ -z "$PREFIXES" ]; then
     # Without the prefix set the scan cannot tell a bead id from a hyphenated
@@ -480,6 +537,9 @@ PFX_EOF
             unedged)
                 errors+=("$label/$src: prose says \"$verb $cand\" ($cand is $status) but no dependency edge records it, so no query can answer whether this is still waiting. Add the edge (I1).") ;;
             unresolved)
+                # A rig or agent name that merely shares the id SHAPE is not a
+                # wait naming a missing bead; it is a sentence naming a place.
+                is_known_identifier "$cand" && continue
                 notes+=("$label/$src: prose says \"$verb $cand\" but $cand resolves to no bead in any store this city knows — a wait naming something that does not exist, or an id whose prefix belongs to no rig here") ;;
         esac
     done <<VERDICT_EOF

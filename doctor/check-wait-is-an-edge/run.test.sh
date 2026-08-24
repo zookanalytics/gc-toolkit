@@ -270,12 +270,15 @@ eq "$RC" "0" "(CLOSEDSRC) a CLOSED bead's prose is not judged"
 
 echo "── the shapes that must be reported, but as notes ──"
 
-# (RIGNAME) a rig or agent name shares a real prefix and can only be rejected
-# by resolution. It is noted, never counted as a violation.
+# (UNRESOLVED) a candidate that resolves to no bead anywhere. The check cannot
+# tell a typo from a wait on something never minted, so it says so and does not
+# count it as a violation. Rig and agent names are a SEPARATE case handled
+# further down — they resolve to nothing too, but the roster proves what they
+# are, so they are dropped rather than noted.
 store "$(bead tk-9src1 open 'held by tk-7nope3 per the dispatch')"
-run rigname
-eq "$RC" "0" "(RIGNAME) an unresolvable candidate is not an ERROR"
-has "$OUT" "resolves to no bead" "(RIGNAME) …but is reported as a note"
+run unresolved_note
+eq "$RC" "0" "(UNRESOLVED) an unresolvable candidate is not an ERROR"
+has "$OUT" "resolves to no bead" "(UNRESOLVED) …but is reported as a note"
 
 # (TRAILINGDOT) the id pattern must admit dots for hierarchical ids, so a
 # sentence-final period gets swallowed unless it is stripped.
@@ -481,6 +484,110 @@ store "$(bead tk-9src1 open 'awaiting tk-8tgt2 before the rebase')" \
       "$(bead tk-8tgt2 open 'x')"
 run boundary_suffix
 eq "$RC" "2" "(BOUNDARY-SUFFIX) 'awaiting <id>' still matches with boundaries on"
+
+echo "── every id in a wait phrase, not just the first (tk-9vbeim P1) ──"
+
+# `scan` resumes after each match, so one verb followed by a LIST used to yield
+# exactly one pair: the verb was consumed by the first id and nothing was left
+# to re-trigger the alternation. Once that first target carried an edge the
+# whole sentence read as satisfied and the check exited 0 — every later name in
+# it unexamined. A false negative is the one failure mode this check exists to
+# remove, so the list cases are pinned here.
+
+# (LIST) the reviewer's reproduction: first listed target edged, second not.
+one_rig
+store "$(bead tk-9src1 open 'blocked by tk-8tgt2 and tk-7tgt3 before release' tk-8tgt2 list)" \
+      "$(bead tk-8tgt2 open 'edged, so not a finding')" \
+      "$(bead tk-7tgt3 open 'named in the same breath, with no edge at all')"
+run list_second_unedged
+eq "$RC" "2" "(LIST) an edged first target does not absolve the second"
+has "$OUT" "tk-7tgt3" "(LIST) …the unedged second target is named"
+hasnt "$OUT" "tk-8tgt2 is open" "(LIST) …and the edged first target is not reported"
+
+# (LIST-OK) both listed targets edged — the sentence really is satisfied.
+store "$(bead tk-9src1 open 'blocked by tk-8tgt2 and tk-7tgt3 before release' tk-8tgt2 list \
+         | jq -c '.dependencies += [{type:"blocks", depends_on_id:"tk-7tgt3"}]')" \
+      "$(bead tk-8tgt2 open 'x')" \
+      "$(bead tk-7tgt3 open 'y')"
+run list_both_edged
+eq "$RC" "0" "(LIST-OK) every listed target edged is not a finding"
+
+# (LIST-MID) three items with `, ... , and`, and it is the MIDDLE one that is
+# unedged — so neither the first-id nor a last-id shortcut would catch it.
+store "$(bead tk-9src1 open 'blocked by tk-8tgt2, tk-7tgt3, and tk-6tgt4 land' tk-8tgt2 list \
+         | jq -c '.dependencies += [{type:"blocks", depends_on_id:"tk-6tgt4"}]')" \
+      "$(bead tk-8tgt2 open 'x')" \
+      "$(bead tk-7tgt3 open 'the middle one, unedged')" \
+      "$(bead tk-6tgt4 open 'z')"
+run list_middle_unedged
+eq "$RC" "2" "(LIST-MID) the middle item of a three-item list is judged too"
+has "$OUT" "tk-7tgt3" "(LIST-MID) …and it is the one named"
+
+# (LIST-SEP) the other separators a list is actually written with.
+store "$(bead tk-9src1 open 'waiting on tk-8tgt2 / tk-7tgt3; tk-6tgt4')" \
+      "$(bead tk-8tgt2 open 'x')" "$(bead tk-7tgt3 open 'y')" "$(bead tk-6tgt4 open 'z')"
+run list_separators
+eq "$RC" "2" "(LIST-SEP) slash and semicolon join a list too"
+has "$OUT" "tk-7tgt3" "(LIST-SEP) …second item judged"
+has "$OUT" "tk-6tgt4" "(LIST-SEP) …third item judged"
+
+# (LIST-PROSE) the counter-case, and the reason the continuation is gated on
+# list glue rather than a wider character window. `and then we shipped X` is
+# narrative, not a second blocker; widening the bound instead would have
+# reported a wait nobody wrote.
+store "$(bead tk-9src1 open 'blocked by tk-8tgt2 and then we shipped tk-7tgt3 late' tk-8tgt2 list)" \
+      "$(bead tk-8tgt2 open 'x')" \
+      "$(bead tk-7tgt3 open 'mentioned in passing, not waited on')"
+run list_prose_not_a_list
+eq "$RC" "0" "(LIST-PROSE) narrative after a wait is not a second blocker"
+hasnt "$OUT" "tk-7tgt3" "(LIST-PROSE) …and the passing mention is not named"
+
+echo "── rig and agent names are not missing beads (tk-9vbeim P2) ──"
+
+# A rig called `gc-toolkit` and an agent called `gc-toolkit.furiosa` match the
+# `<prefix>-<tail>` id shape exactly — `gc-` is a real prefix and `toolkit` is a
+# legal tail — so the scan proposes them and resolution finds nothing. That kept
+# them out of the ERROR arms but left them in the output as unresolved notes,
+# which is the other way a check gets ignored.
+
+# A roster whose own rig name looks like a `gc-` id, so the candidate the scan
+# proposes is a NAME rather than a bead.
+mkdir -p "$TMP/rig/.beads"
+cat > "$FIX/rigs.json" <<RIGEOF
+{"rigs":[{"name":"gc-toolkit","path":"$TMP/rig","prefix":"tk","hq":false},
+         {"name":"gascity","path":"$TMP/gcrig","prefix":"gc","hq":false}]}
+RIGEOF
+mkdir -p "$TMP/gcrig/.beads"
+: > "$FIX/all-gcrig.json"; echo '[]' > "$FIX/all-gcrig.json"
+
+store "$(bead tk-9src1 open 'held by gc-toolkit while the pool drains')"
+run rigname_note
+eq "$RC" "0" "(RIGNAME) a wait naming a rig is not a finding"
+hasnt "$OUT" "gc-toolkit" "(RIGNAME) …and is not left as an unresolved note either"
+
+store "$(bead tk-9src1 open 'held by gc-toolkit.furiosa until it drains')"
+run agentname_note
+eq "$RC" "0" "(AGENTNAME) a wait naming an agent session is not a finding"
+hasnt "$OUT" "furiosa" "(AGENTNAME) …and is not left as an unresolved note either"
+
+# The control that keeps the suppression honest: a `gc-` candidate that is NOT
+# a roster name and resolves nowhere is still reported. Suppressing by shape
+# rather than by roster membership would have silenced this too.
+store "$(bead tk-9src1 open 'blocked by gc-9nosuch until it lands')"
+run unresolved_still_noted
+eq "$RC" "0" "(RIGNAME-CONTROL) an unresolved non-identifier is still not an error"
+has "$OUT" "gc-9nosuch" "(RIGNAME-CONTROL) …but it IS still reported as a note"
+
+# ...and a candidate that shares a rig name's spelling but genuinely resolves is
+# judged on its edges like anything else — the filter only ever sees candidates
+# that resolved to nothing.
+store_in gcrig "$(bead gc-toolkit open 'a real bead that happens to be named like the rig')"
+store "$(bead tk-9src1 open 'held by gc-toolkit while the pool drains')"
+run rigname_but_real
+eq "$RC" "2" "(RIGNAME-REAL) a rig-shaped name that IS a bead is judged, not suppressed"
+has "$OUT" "gc-toolkit" "(RIGNAME-REAL) …and is named as an unedged wait"
+rm -f "$FIX/all-gcrig.json"
+one_rig
 
 echo "── the quiet path ──"
 store "$(bead tk-1aaa1 open 'plain work, no waits')" "$(bead tk-2bbb2 open 'also plain')"
