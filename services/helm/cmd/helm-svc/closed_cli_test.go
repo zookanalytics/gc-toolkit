@@ -10,14 +10,14 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/closed"
 )
 
-func closedRow(visit, subject, title, outcome, takeaway string, at time.Time) closed.Row {
-	return closed.Row{
+func closedRow(visit, subject, title, outcome, takeaway string, at time.Time) closed.Disposition {
+	return closed.Disposition{
 		Rig: "gc-toolkit", Visit: visit, ClosedAt: at, Outcome: outcome,
 		Subject: subject, SubjectTitle: title, Takeaway: takeaway,
 	}
 }
 
-func renderClosed(rows []closed.Row, limit int) string {
+func renderClosed(rows []closed.Disposition, limit int) string {
 	now := time.Date(2026, 8, 24, 6, 0, 0, 0, time.UTC)
 	var buf bytes.Buffer
 	renderClosedTable(&buf, closed.Build(closed.Input{
@@ -89,11 +89,11 @@ func TestParseClosedArgs(t *testing.T) {
 // make every row invisible to a `jq '.[]'` while still parsing cleanly.
 func TestClosedJSONIsABareArray(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	rows := []closed.Row{closedRow("tk-v", "tk-s", "t", "routed", "why", time.Now().UTC())}
+	rows := []closed.Disposition{closedRow("tk-v", "tk-s", "t", "routed", "why", time.Now().UTC())}
 	if rc := renderClosedJSON(&out, &errBuf, rows); rc != boardExitOK {
 		t.Fatalf("rc = %d", rc)
 	}
-	var arr []closed.Row
+	var arr []closed.Disposition
 	if err := json.Unmarshal(out.Bytes(), &arr); err != nil {
 		t.Fatalf("not an array: %v (%s)", err, out.String())
 	}
@@ -131,7 +131,7 @@ func TestClosedTableSaysAQuietWindowIsQuiet(t *testing.T) {
 // whose record is incomplete.
 func TestClosedTableRendersIncompleteRows(t *testing.T) {
 	now := time.Date(2026, 8, 24, 5, 0, 0, 0, time.UTC)
-	out := renderClosed([]closed.Row{closedRow("tk-bare", "", "", "", "", now)}, 0)
+	out := renderClosed([]closed.Disposition{closedRow("tk-bare", "", "", "", "", now)}, 0)
 	if !strings.Contains(out, "(unlinked)") {
 		t.Errorf("a subject-less visit must render as (unlinked):\n%s", out)
 	}
@@ -146,7 +146,7 @@ func TestClosedTableRendersIncompleteRows(t *testing.T) {
 // operator cannot tell which decision belongs to which.
 func TestClosedTableIDsStayDistinct(t *testing.T) {
 	now := time.Date(2026, 8, 24, 5, 0, 0, 0, time.UTC)
-	rows := []closed.Row{
+	rows := []closed.Disposition{
 		closedRow("tk-v1", "sl-kg9z6.4.1", "one", "routed", "a", now),
 		closedRow("tk-v2", "sl-kg9z6.4.2", "two", "routed", "b", now.Add(-time.Minute)),
 		closedRow("tk-v3", "sl-kg9z6.4.9", "nine", "routed", "c", now.Add(-2*time.Minute)),
@@ -165,7 +165,7 @@ func TestClosedTableIDsStayDistinct(t *testing.T) {
 func TestClosedTableBoundsProse(t *testing.T) {
 	now := time.Date(2026, 8, 24, 5, 0, 0, 0, time.UTC)
 	long := strings.Repeat("x", 900)
-	out := renderClosed([]closed.Row{closedRow("tk-v", "tk-s", long, "routed", long, now)}, 0)
+	out := renderClosed([]closed.Disposition{closedRow("tk-v", "tk-s", long, "routed", long, now)}, 0)
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "tk-s") && len([]rune(line)) > 200 {
 			t.Errorf("row is %d runes; the prose columns are unbounded", len([]rune(line)))
@@ -180,7 +180,7 @@ func TestClosedTableBoundsProse(t *testing.T) {
 // quiet lie about the window.
 func TestClosedTableSaysWhatItHid(t *testing.T) {
 	now := time.Date(2026, 8, 24, 5, 0, 0, 0, time.UTC)
-	var rows []closed.Row
+	var rows []closed.Disposition
 	for i := range 10 {
 		rows = append(rows, closedRow("tk-v"+string(rune('a'+i)), "tk-s", "t", "routed", "w", now.Add(-time.Duration(i)*time.Minute)))
 	}
@@ -197,7 +197,7 @@ func TestClosedTableSaysWhatItHid(t *testing.T) {
 // hours, and an operator comparing two glances needs the absolute instant.
 func TestClosedTableStatesTheWindow(t *testing.T) {
 	now := time.Date(2026, 8, 24, 5, 0, 0, 0, time.UTC)
-	out := renderClosed([]closed.Row{closedRow("tk-v", "tk-s", "t", "routed", "w", now)}, 0)
+	out := renderClosed([]closed.Disposition{closedRow("tk-v", "tk-s", "t", "routed", "w", now)}, 0)
 	if !strings.Contains(out, "2026-08-23T06:00:00Z") {
 		t.Errorf("the cutoff instant is not stated:\n%s", out)
 	}

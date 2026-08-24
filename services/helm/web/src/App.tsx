@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ClosedPanel } from './closed';
 import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
@@ -228,6 +229,12 @@ export function App() {
           </table>
         </section>
       )}
+
+      {/* What was decided, beneath what needs deciding. Collapsed by default:
+          the board answers "what needs me now", which is the question the
+          operator opens this page to ask, and an always-expanded history would
+          push it down the page. */}
+      <ClosedPanel />
 
       {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
           not a wiring limit. The city still runs a single ttyd, but its attach

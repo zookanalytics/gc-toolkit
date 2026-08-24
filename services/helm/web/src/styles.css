@@ -294,3 +294,33 @@ tr.drilled {
   font-size: 0.875rem;
   margin: 0.5rem 0 0;
 }
+
+/* ── what was decided (the closed-dispositions panel) ──────────────── */
+/* Visually quieter than the attention table on purpose: this is history, and
+   history must not compete with the rows that want something done. */
+.closed {
+  margin-top: 2rem;
+  border-top: 1px solid var(--rule, #333);
+  padding-top: 1rem;
+}
+
+.closed-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.closed-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+.closed-controls .window.active {
+  font-weight: 700;
+  text-decoration: underline;
+}

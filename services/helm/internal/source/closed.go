@@ -31,7 +31,7 @@ import (
 // must never invent. So every read failure, including a subject lookup that
 // would only have blanked a title, aborts and returns an error.
 type ClosedSource interface {
-	GatherClosed(ctx context.Context, cutoff time.Time) ([]closed.Row, error)
+	GatherClosed(ctx context.Context, cutoff time.Time) ([]closed.Disposition, error)
 }
 
 // visitFilter selects the closed visit beads of one window.
@@ -60,13 +60,13 @@ func visitFilter(cutoff time.Time) beads.IssueFilter {
 // gather on every glance, so a short TTL is free there; this answers an EXPLICIT
 // window, and a cached answer would be the previous `--since` — a different
 // question, returned without saying so.
-func (s *BeadsSource) GatherClosed(ctx context.Context, cutoff time.Time) ([]closed.Row, error) {
+func (s *BeadsSource) GatherClosed(ctx context.Context, cutoff time.Time) ([]closed.Disposition, error) {
 	rigs, err := s.rigs()
 	if err != nil {
 		return nil, err
 	}
 
-	var rows []closed.Row
+	var rows []closed.Disposition
 	for _, r := range rigs {
 		st, err := s.store(ctx, r)
 		if err != nil {
@@ -80,7 +80,7 @@ func (s *BeadsSource) GatherClosed(ctx context.Context, cutoff time.Time) ([]clo
 			if iss == nil {
 				continue
 			}
-			rows = append(rows, closed.Row{
+			rows = append(rows, closed.Disposition{
 				Rig:      r.name,
 				Visit:    iss.ID,
 				ClosedAt: closedAt(iss),
@@ -144,7 +144,7 @@ func subjectOf(iss *beads.Issue) string {
 // subject id whose prefix names no rig, both render as a blank title with
 // nothing said. An id set is a SQL IN list, so asking a rig about ids it does
 // not have costs a scan of a set bounded by the window, not a store dump.
-func (s *BeadsSource) resolveSubjects(ctx context.Context, rigs []rigRef, rows []closed.Row) error {
+func (s *BeadsSource) resolveSubjects(ctx context.Context, rigs []rigRef, rows []closed.Disposition) error {
 	want := map[string]bool{}
 	for _, row := range rows {
 		if row.Subject != "" {

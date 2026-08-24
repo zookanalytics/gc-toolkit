@@ -21,11 +21,11 @@ type closedFake struct {
 	fakeSource
 	calls  atomic.Int32
 	cutoff atomic.Pointer[time.Time]
-	rows   []closed.Row
+	rows   []closed.Disposition
 	err    error
 }
 
-func (c *closedFake) GatherClosed(_ context.Context, cutoff time.Time) ([]closed.Row, error) {
+func (c *closedFake) GatherClosed(_ context.Context, cutoff time.Time) ([]closed.Disposition, error) {
 	c.calls.Add(1)
 	cp := cutoff
 	c.cutoff.Store(&cp)
@@ -38,7 +38,7 @@ func (c *closedFake) GatherClosed(_ context.Context, cutoff time.Time) ([]closed
 func newClosedFake() *closedFake {
 	return &closedFake{
 		fakeSource: fakeSource{result: &source.Result{}},
-		rows: []closed.Row{
+		rows: []closed.Disposition{
 			{Rig: "gc-toolkit", Visit: "tk-v1", ClosedAt: time.Date(2026, 8, 24, 4, 0, 0, 0, time.UTC),
 				Outcome: "routed", Subject: "tk-s", SubjectTitle: "a subject", Takeaway: "routed — work is out"},
 		},
@@ -64,7 +64,7 @@ func TestClosedServesTheEnvelope(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	var got closed.View
+	var got closed.Dispositions
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v (body %s)", err, rr.Body.String())
 	}

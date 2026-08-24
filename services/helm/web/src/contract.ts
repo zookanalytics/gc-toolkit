@@ -134,3 +134,61 @@ export interface Board {
   partial?: boolean;
   partial_errors?: string[];
 }
+
+/**
+ * Disposition is one closed sitting, as `<mount>/helm/closed` returns it: a
+ * visit that ended inside the window, the subject it tracked, and the two facts
+ * sign-off stamped on them.
+ *
+ * The board is open-only by construction, so a subject whose sitting concluded
+ * LEAVES it and nothing afterwards says what was decided. This is that answer.
+ *
+ * Rows are per VISIT, not per subject: a subject with three sittings that
+ * closed in the window is three decisions and three rows. Collapsing them would
+ * keep only the last, and the earlier sittings are exactly the ones no other
+ * surface still shows.
+ */
+export interface Disposition {
+  rig: string;
+  /** The visit bead's id. */
+  visit: string;
+  /** RFC 3339. */
+  closed_at: string;
+  /** `gc.outcome` off the closed visit — routed / moot / ruled / disposed / …. Empty when sign-off stamped none. */
+  outcome: string;
+  /** The bead the visit tracked. Empty when it named none; render it as unlinked rather than dropping the row. */
+  subject: string;
+  /** The subject's own title. Empty when the subject carries none. */
+  subject_title: string;
+  /** `gc.takeaway` off the SUBJECT — the ≤140-char headline, i.e. the why. */
+  takeaway: string;
+}
+
+/**
+ * Dispositions is the envelope returned at `<mount>/helm/closed`. Rows arrive
+ * newest-first; `total` is the count before any row cap.
+ *
+ * There is deliberately no `partial` field, unlike {@link Board}. A board
+ * missing a rig is still a true statement about the rigs it read, but a short
+ * disposition list is not: an answer quietly omitting a wedged rig's sittings
+ * is indistinguishable from a genuinely quiet window, so the service returns
+ * 502 instead of an incomplete list.
+ */
+export interface Dispositions {
+  /** RFC 3339. */
+  generated_at: string;
+  /** The window as the caller spelled it — "24h", "7d". Echoed back so a client can show what it asked for. */
+  since: string;
+  /** RFC 3339: the instant the window opens. `since` alone does not say WHICH 24 hours. */
+  cutoff: string;
+  total: number;
+  /**
+   * In practice always an array: a nil Go slice would marshal as `null`, but
+   * the builder coerces an empty window to `[]` precisely so a consumer
+   * counting rows reads 0 rather than failing. The `| null` is the type the
+   * Go declaration permits, not a state this route produces — so narrow it
+   * (`view.rows ?? []`) to satisfy the compiler, and do NOT read `null` as
+   * meaning anything different from an empty window.
+   */
+  rows: Disposition[] | null;
+}

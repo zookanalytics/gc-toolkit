@@ -46,15 +46,15 @@ const DefaultSince = 24 * time.Hour
 // window wide enough to overflow it is a window worth narrowing.
 const DefaultMaxRows = 50
 
-// Row is one disposition: a visit that closed inside the window, the subject it
-// tracked, and the two facts sign-off stamped.
+// Disposition is one closed sitting: a visit that ended inside the window, the
+// subject it tracked, and the two facts sign-off stamped.
 //
 // FIELD NAMES ARE THE WIRE CONTRACT for both renderers — `helm-svc closed
 // --json` emits these objects directly and the SPA mirrors them. Subject and
 // SubjectTitle are both carried because an id alone is not readable and a title
 // alone is not resolvable; the operator needs to recognise the row AND be able
 // to go to it.
-type Row struct {
+type Disposition struct {
 	Rig      string    `json:"rig"`
 	Visit    string    `json:"visit"`
 	ClosedAt time.Time `json:"closed_at"`
@@ -68,9 +68,9 @@ type Row struct {
 	Takeaway     string `json:"takeaway"`
 }
 
-// View is the envelope the HTTP route serves, mirroring board.Board's shape so
+// Dispositions is the envelope the HTTP route serves, mirroring board.Board's shape so
 // a consumer of one can read the other without learning a second convention.
-// The CLI emits View.Rows as a bare array instead, exactly as `helm-svc board
+// The CLI emits Dispositions.Rows as a bare array instead, exactly as `helm-svc board
 // --json` emits tiles rather than the envelope.
 //
 // Cutoff rides the wire beside Since because "the last 24h" is ambiguous about
@@ -84,34 +84,34 @@ type Row struct {
 // that quietly omits a wedged rig's dispositions is indistinguishable from a
 // genuinely quiet window. So a gather that cannot read everything it was asked
 // for returns an ERROR and renders nothing; see [source.ClosedSource].
-type View struct {
+type Dispositions struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	Since       string    `json:"since"`
 	Cutoff      time.Time `json:"cutoff"`
 	// Total is the row count BEFORE the cap, so a capped list can say how much
 	// it is not showing.
-	Total int   `json:"total"`
-	Rows  []Row `json:"rows"`
+	Total int           `json:"total"`
+	Rows  []Disposition `json:"rows"`
 }
 
 // Input is one Build call's arguments. It is a struct rather than a parameter
 // list because the two renderers must pass the same five things and a
 // positional call of that width invites a silent transposition.
 type Input struct {
-	Rows   []Row
+	Rows   []Disposition
 	Now    time.Time
 	Since  string
 	Cutoff time.Time
 	Limit  int // 0 = uncapped
 }
 
-// Build orders the rows newest-first, caps them, and wraps them in a View.
+// Build orders the rows newest-first, caps them, and wraps them in the envelope.
 //
 // It never drops a row for being incomplete. A closed visit is terminal whether
 // or not sign-off stamped an outcome on it, and dropping the unstamped ones
 // would hide exactly the dispositions whose record is worth seeing.
-func Build(in Input) View {
-	rows := make([]Row, len(in.Rows))
+func Build(in Input) Dispositions {
+	rows := make([]Disposition, len(in.Rows))
 	copy(rows, in.Rows)
 	sortRows(rows)
 
@@ -122,9 +122,9 @@ func Build(in Input) View {
 	if rows == nil {
 		// `[]`, never `null`: a consumer running `jq 'length'` over this must
 		// read an empty window as empty, not as an error.
-		rows = []Row{}
+		rows = []Disposition{}
 	}
-	return View{
+	return Dispositions{
 		GeneratedAt: in.Now,
 		Since:       in.Since,
 		Cutoff:      in.Cutoff,
@@ -137,7 +137,7 @@ func Build(in Input) View {
 // of visits closed in the same second renders in a stable order — without it
 // two glances at an unchanged store could disagree about the row order, which
 // reads as movement that did not happen.
-func sortRows(rows []Row) {
+func sortRows(rows []Disposition) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if !rows[i].ClosedAt.Equal(rows[j].ClosedAt) {
 			return rows[i].ClosedAt.After(rows[j].ClosedAt)

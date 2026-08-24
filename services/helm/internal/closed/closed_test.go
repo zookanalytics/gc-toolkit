@@ -60,8 +60,8 @@ func TestParseSinceRefusesNearMisses(t *testing.T) {
 	}
 }
 
-func row(visit string, at time.Time) Row {
-	return Row{Rig: "gc-toolkit", Visit: visit, ClosedAt: at, Outcome: "routed", Subject: "tk-s"}
+func row(visit string, at time.Time) Disposition {
+	return Disposition{Rig: "gc-toolkit", Visit: visit, ClosedAt: at, Outcome: "routed", Subject: "tk-s"}
 }
 
 // TestBuildOrdersNewestFirst pins the order and its tie-break. Without the
@@ -70,7 +70,7 @@ func row(visit string, at time.Time) Row {
 func TestBuildOrdersNewestFirst(t *testing.T) {
 	base := time.Date(2026, 8, 24, 4, 0, 0, 0, time.UTC)
 	v := Build(Input{
-		Rows: []Row{
+		Rows: []Disposition{
 			row("tk-b", base),
 			row("tk-old", base.Add(-2*time.Hour)),
 			row("tk-a", base), // same second as tk-b
@@ -93,7 +93,7 @@ func TestBuildOrdersNewestFirst(t *testing.T) {
 // list can say how much it is not showing rather than looking complete.
 func TestBuildCapReportsWhatItHid(t *testing.T) {
 	base := time.Date(2026, 8, 24, 4, 0, 0, 0, time.UTC)
-	var rows []Row
+	var rows []Disposition
 	for i := range 10 {
 		rows = append(rows, row("tk-"+string(rune('a'+i)), base.Add(-time.Duration(i)*time.Minute)))
 	}
@@ -130,7 +130,7 @@ func TestBuildEmptyIsAnArray(t *testing.T) {
 func TestBuildDoesNotDropIncompleteRows(t *testing.T) {
 	base := time.Now().UTC()
 	v := Build(Input{
-		Rows: []Row{
+		Rows: []Disposition{
 			{Visit: "tk-bare", ClosedAt: base}, // no outcome, no subject, no title
 			row("tk-full", base.Add(-time.Minute)),
 		},
@@ -148,7 +148,7 @@ func TestBuildDoesNotDropIncompleteRows(t *testing.T) {
 // would reorder a gather result the caller may still be holding.
 func TestBuildCopiesItsInput(t *testing.T) {
 	base := time.Now().UTC()
-	in := []Row{row("tk-old", base.Add(-time.Hour)), row("tk-new", base)}
+	in := []Disposition{row("tk-old", base.Add(-time.Hour)), row("tk-new", base)}
 	Build(Input{Rows: in, Now: base})
 	if in[0].Visit != "tk-old" {
 		t.Errorf("Build reordered its caller's slice: %+v", in)

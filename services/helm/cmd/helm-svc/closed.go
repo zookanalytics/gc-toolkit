@@ -178,9 +178,9 @@ func runClosed(args []string, stdout, stderr io.Writer) int {
 // renderClosedJSON writes the bare rows array — the gc-helm.sh `closed --json`
 // contract, and the same array-not-envelope choice `helm-svc board --json`
 // makes.
-func renderClosedJSON(stdout, stderr io.Writer, rows []closed.Row) int {
+func renderClosedJSON(stdout, stderr io.Writer, rows []closed.Disposition) int {
 	if rows == nil {
-		rows = []closed.Row{}
+		rows = []closed.Disposition{}
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetEscapeHTML(false)
@@ -210,7 +210,7 @@ const (
 )
 
 // renderClosedTable writes the human view: newest first, one row per visit.
-func renderClosedTable(w io.Writer, v closed.View) {
+func renderClosedTable(w io.Writer, v closed.Dispositions) {
 	if v.Total == 0 {
 		fmt.Fprintf(w, "No visit reached a disposition in the last %s (window opens %s).\n",
 			v.Since, v.Cutoff.Format(time.RFC3339))
@@ -253,14 +253,14 @@ func renderClosedTable(w io.Writer, v closed.View) {
 // subjectCell is the subject id, or the marker for a visit that named none. A
 // visit with neither a tracks edge nor a continuation-group stamp is still a
 // disposition that happened, so it earns a row that says what it is missing.
-func subjectCell(r closed.Row) string {
+func subjectCell(r closed.Disposition) string {
 	if r.Subject == "" {
 		return "(unlinked)"
 	}
 	return r.Subject
 }
 
-func outcomeCell(r closed.Row) string { return dash(r.Outcome) }
+func outcomeCell(r closed.Disposition) string { return dash(r.Outcome) }
 
 // dash renders an empty cell as an em-dash, so a blank column reads as "this
 // row has none" rather than as a rendering fault.
@@ -275,7 +275,7 @@ func dash(s string) string {
 // separately for the same reason the two renderers do: generics could merge
 // them, but a shared type parameter would be the only thing tying two otherwise
 // independent views together.
-func closedColWidth(floor int, rows []closed.Row, value func(closed.Row) string) int {
+func closedColWidth(floor int, rows []closed.Disposition, value func(closed.Disposition) string) int {
 	w := floor
 	for _, r := range rows {
 		if n := len([]rune(value(r))) + 1; n > w {

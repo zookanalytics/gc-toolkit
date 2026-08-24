@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/closed"
 )
 
 // updateFixture rewrites the committed fixture instead of comparing against it:
@@ -50,12 +51,27 @@ const (
 	modelPath    = "../internal/board/model.go"
 )
 
-// wireRoot is the one type the service serializes: the body of GET <mount>/helm.
-// Everything reachable from it is part of the contract and must be mirrored;
-// everything else (board.Anchor, board.Child — gather-side inputs to BuildBoard)
-// is not. Adding a nested struct to the envelope automatically pulls it into
-// these checks.
-var wireRoot = reflect.TypeOf(board.Board{})
+// wireRoots are the types the service serializes: the body of GET <mount>/helm
+// and of GET <mount>/helm/closed. Everything reachable from either is part of
+// the contract and must be mirrored; everything else (board.Anchor,
+// board.Child — gather-side inputs to BuildBoard) is not. Adding a nested
+// struct to an envelope automatically pulls it into these checks, and adding a
+// ROUTE means adding its envelope here — otherwise the new surface is mirrored
+// by hand with nothing checking it, which is the exact gap this file exists to
+// close.
+var wireRoots = []reflect.Type{
+	reflect.TypeOf(board.Board{}),
+	reflect.TypeOf(closed.Dispositions{}),
+}
+
+// rootNames renders the roots for an error message.
+func rootNames() string {
+	names := make([]string, 0, len(wireRoots))
+	for _, r := range wireRoots {
+		names = append(names, r.Name())
+	}
+	return strings.Join(names, " / ")
+}
 
 var timeType = reflect.TypeOf(time.Time{})
 
@@ -96,7 +112,9 @@ func wireStructs(t *testing.T) map[string]reflect.Type {
 			}
 		}
 	}
-	walk(wireRoot)
+	for _, r := range wireRoots {
+		walk(r)
+	}
 	return out
 }
 
@@ -236,7 +254,7 @@ func mustWireStruct(t *testing.T, name string) reflect.Type {
 	t.Helper()
 	gt, ok := wireStructs(t)[name]
 	if !ok {
-		t.Fatalf("board.%s is no longer reachable from board.%s — the wire contract changed shape, so this test needs rewriting, not deleting", name, wireRoot.Name())
+		t.Fatalf("%s is no longer reachable from %s — the wire contract changed shape, so this test needs rewriting, not deleting", name, rootNames())
 	}
 	return gt
 }
@@ -341,14 +359,14 @@ func TestContractParity(t *testing.T) {
 	// way this file rots.
 	for name := range structs {
 		if _, ok := ifaces[name]; !ok {
-			t.Errorf("%s declares no `export interface %s`, but board.%s crosses the wire. Mirror it.", contractPath, name, name)
+			t.Errorf("%s declares no `export interface %s`, but %s crosses the wire. Mirror it.", contractPath, name, name)
 		}
 	}
 	for name := range ifaces {
 		if _, ok := structs[name]; !ok {
-			t.Errorf("%s declares `export interface %s`, which mirrors no Go type reachable from board.%s. "+
+			t.Errorf("%s declares `export interface %s`, which mirrors no Go type reachable from %s. "+
 				"contract.ts is the wire only — move UI-only types to the component that needs them.",
-				contractPath, name, wireRoot.Name())
+				contractPath, name, rootNames())
 		}
 	}
 
