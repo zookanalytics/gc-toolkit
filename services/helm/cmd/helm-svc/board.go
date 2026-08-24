@@ -27,14 +27,18 @@ import (
 // WHY IT DOES NOT CALL THE SERVICE. `prefix+b` has to work when helm-svc is
 // down — that is most of the point of having a CLI — so this gathers directly
 // through internal/source rather than curling the sidecar. There is no daemon
-// and no cache: a cold run pays the full gather every time, which is the honest
-// cost and is still well inside the bash board's.
+// and no cache here: a cold run pays the full gather every time, which is the
+// honest cost of not depending on anything. The cheap layer for a repeat glance
+// lives one level up, in assets/scripts/gc-helm.sh, which caches this
+// subcommand's rendered OUTPUT for 45s — that is the only place that can tell a
+// repeat glance from a first one, and it is what the tmux picker hits.
 //
 // THE --json CONTRACT. The output is a ranked JSON ARRAY of tiles, not the
 // service's {generated_at,total,tiles} envelope, because that array is what
-// gc-helm.sh emits and what assets/scripts/tmux-pick-helm.sh consumes. Field
-// parity with the bash board is pinned by contract_parity_test.go in this
-// package.
+// assets/scripts/tmux-pick-helm.sh consumes — through gc-helm.sh, which since
+// tk-clvkf6 renders it by running this. There is no longer a second board to be
+// at parity WITH; what board_cli_test.go pins is this renderer's own contract,
+// including the six fields the picker dereferences.
 
 const boardUsage = `Usage:
   helm-svc board [--json] [--limit=N] [--timeout=SECONDS]

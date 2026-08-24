@@ -1194,7 +1194,7 @@ helm_svc_bin() {
     return 0
 }
 
-# run_helm_svc <verb> <cache-slot> [args…] — the whole of both verbs.
+# run_helm_svc <verb> [args…] — the whole of both verbs.
 #
 # THE CACHE IS THIS SCRIPT'S, NOT THE SERVICE'S, and it caches RENDERED BYTES
 # rather than a gather. helm-svc's CLI path is deliberately daemonless and
@@ -1219,7 +1219,6 @@ helm_svc_bin() {
 # at a prompt 40 seconds earlier would silently give the picker two rows.
 run_helm_svc() {
     _rhs_verb="$1"; shift
-    _rhs_slot="$1"; shift
 
     _rhs_refresh=0
     # Rotate argv: pop from the front, push back what helm-svc should see.
@@ -1245,7 +1244,7 @@ run_helm_svc() {
     # "--limit3"). The verb stays readable in the name so the cache directory
     # can be understood at a glance and bust_cache's glob stays obvious.
     _rhs_key=$(printf '%s\n' "$@" | cksum | cut -d' ' -f1)
-    _rhs_cache="$CACHE_DIR/render1-$_city_key.$_rhs_slot.$_rhs_key"
+    _rhs_cache="$CACHE_DIR/render1-$_city_key.$_rhs_verb.$_rhs_key"
 
     _rhs_now=$(date -u +%s)
 
@@ -1268,12 +1267,12 @@ run_helm_svc() {
         # this script — knows whether a nine-minute-old board is good enough.
         if [ -f "$_rhs_cache" ]; then
             _rhs_age=$(cache_age "$_rhs_cache" "$_rhs_now")
-            echo "$PROG: helm-svc is not built — replaying a $_rhs_verb cached ${_rhs_age}s ago. Build it: assets/scripts/gc-helm-build.sh" >&2
+            echo "$PROG: helm-svc is not built — replaying a \`$_rhs_verb\` cached ${_rhs_age}s ago. Build it: assets/scripts/gc-helm-build.sh" >&2
             tail -n +2 "$_rhs_cache"
             return 0
         fi
         cat >&2 <<MSG
-$PROG: the $_rhs_verb is served by helm-svc and no binary is built, so there is
+$PROG: \`$_rhs_verb\` is served by helm-svc and no binary is built, so there is
 nothing to render and nothing cached to replay.
   build now: assets/scripts/gc-helm-build.sh
   automatic: the 'helm-build' order (orders/helm-build.toml)
@@ -1331,8 +1330,8 @@ cache_age() {
     printf '%s' "$(( $2 - _ca_ts ))"
 }
 
-cmd_board()  { run_helm_svc board  board  "$@"; }
-cmd_closed() { run_helm_svc closed closed "$@"; }
+cmd_board()  { run_helm_svc board  "$@"; }
+cmd_closed() { run_helm_svc closed "$@"; }
 
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in

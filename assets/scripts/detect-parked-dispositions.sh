@@ -5,7 +5,8 @@
 # THE GAP THIS FILLS. A `gc.takeaway` stamp does three unrelated jobs at once, and
 # two of them conspire:
 #
-#   1. it parks the board row — `gather_meta_anchors` in gc-helm.sh emits
+#   1. it parks the board row — the board's metadata-keyed gather
+#      (services/helm/internal/source/beads.go, metadataAnchors) emits
 #      kind:"parked", floored at LOW, because a conversation that reached a
 #      takeaway wants nothing and only has to stay FINDABLE;
 #   2. it MUTES the stall detector — detect-stalled-workflows.sh treats a takeaway
