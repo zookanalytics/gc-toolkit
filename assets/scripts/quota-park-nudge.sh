@@ -237,10 +237,8 @@ detector_class() {
     lines="$(banner_candidates "$1" | grep -Ei -- "$MATCH_RE" || true)"
     if [ -n "${QUOTA_PARK_MATCH:-}" ]; then
         echo "custom-match"
-    # Here-strings, never `printf ... | grep -qEi` pipelines (tk-zfjg9): `grep -q`
-    # exits at its first match and SIGPIPEs the writer, which `pipefail` promotes
-    # to 141 — so a matched line reads as unmatched and the label falls through to
-    # the generic form, decided by nothing but how much text followed the match.
+    # Here-strings, never pipes into grep -q (tk-zfjg9: SIGPIPE + pipefail
+    # makes a matched line read unmatched).
     elif grep -qEi -- 'your [a-z0-9 -]{0,24}limit' <<< "$lines"; then
         echo "possessive-limit"
     elif grep -qEi -- '(claude|codex|chatgpt|openai|anthropic|gemini|weekly|5-hour|plan) [a-z0-9 -]{0,16}limit' <<< "$lines"; then
@@ -293,29 +291,16 @@ status_line() {
     local id="$1" path="$STATE_DIR/$1"
     local first_seen last_seen attempts unconfirmed escalated dclass verdict age seen_age human
     local cov_age reason=-
-    # Timestamps are validated as timestamps, not merely as integers: a
-    # future-dated `last_seen` would otherwise pass `num`, make `seen_age`
-    # negative, and publish a park nothing has confirmed as a live one. See
-    # ts_valid.
+    # Timestamps validated as timestamps (see ts_valid), not merely integers.
     first_seen="$(state_get "$path" first_seen)";   ts_valid "$first_seen" || first_seen=0
     last_seen="$(state_get "$path" last_seen)";     ts_valid "$last_seen"  || last_seen=0
     attempts="$(state_get "$path" attempts)";       num "$attempts"    || attempts=0
     unconfirmed="$(state_get "$path" unconfirmed)"; num "$unconfirmed" || unconfirmed=0
-    # A 0/1 flag on the way out, and `unconfirmed` maps to 1. The third state is
-    # real but it is this script's own bookkeeping: an escalation whose bound
-    # expired must not be resent, and from that moment on this script BEHAVES as
-    # though the human was mailed. The consumers — mol-deacon-patrol,
-    # mol-witness-patrol, docs/quota-park-recovery.md — define only `escalated=1`
-    # ("a human has been mailed; stop deferring in silence"), and nothing anywhere
-    # defines `unconfirmed`. Publishing a value no consumer handles is how a park
-    # that outlasts ESCALATE_AFTER keeps getting deferred down an undefined path
-    # forever, so the surface answers in the vocabulary its readers have. The
-    # distinction stays where it is acted on, in the state file.
+    # A 0/1 flag on the way out; `unconfirmed` maps to 1 — consumers define
+    # only escalated=1, and the distinction stays in the state file.
     escalated="$(state_get "$path" escalated)"
     case "$escalated" in 1 | unconfirmed) escalated=1 ;; *) escalated=0 ;; esac
-    # Constrained to the closed set on the way OUT as well as on the way in: a
-    # state file written by an older version, or edited by hand, must not be able
-    # to put arbitrary text on a line a patrol agent reads.
+    # Constrained to the closed set on the way OUT too (hand edits, old versions).
     dclass="$(state_get "$path" detector_class)"
     case "$dclass" in
         possessive-limit | named-provider-limit | usage-credits | provider-limit | custom-match) ;;
@@ -335,33 +320,14 @@ status_line() {
                 verdict=yes
             fi
         else
-            # Something is at this session's state path and it is not ours: a
-            # foreign file, a directory, a planted symlink. It is NOT an episode
-            # — reading one out of it is how a file this order never wrote gets
-            # to answer `quota_park=yes` and suppress a warrant — and it is not
-            # the clean "no episode here" case either, because this order cannot
-            # remove it to complete that verdict (owned_state_rm leaves it, by
-            # design). Its own reason, rather than the `stale-episode` this used
-            # to fall through to, which says an episode exists and nothing has
-            # confirmed it lately — neither half of which is true here.
+            # Something not ours at this session's state path: not an episode, and not
+            # the clean no-episode case either — its own reason.
             verdict=unknown; reason=foreign-state
         fi
     else
-        # No episode for this session. That is only evidence of "not parked" if
-        # this order actually LOOKED at the session recently, and a fresh
-        # heartbeat does not say that: a pass that runs out of SWEEP_BUDGET
-        # defers its whole tail WITHOUT peeking it and still writes a heartbeat
-        # at the end. Read off the heartbeat alone, every deferred session
-        # answers `no` — a verdict about a pane nobody read, handed to a patrol
-        # as grounds to take the normal warrant path against a session this order
-        # never inspected. Which is the failure it exists to prevent, arriving
-        # through the surface that was meant to prevent it.
-        #
-        # So the not-parked answer is conditional on a per-session sighting, the
-        # same way the parked answer is conditional on `last_seen`. One record
-        # covers every way a session goes uninspected: budget-deferred, an
-        # unreadable pane, an id the sweep refused, a session that is attached or
-        # simply not in the active list.
+        # No episode. Only evidence of "not parked" if this order actually LOOKED
+        # recently — a budget-deferred pass writes a fresh heartbeat without
+        # peeking its tail, so `no` is conditional on the per-session coverage.
         cov_age="$(covered_age "$id")" || cov_age=-1
         if [ "$cov_age" -ge 0 ] && [ "$cov_age" -lt "$STALE_AFTER" ]; then
             verdict=no                      # looked at it recently, no episode
@@ -375,21 +341,8 @@ status_line() {
 
 status_report() {
     local want="${1:-}" hb path base
-    # Nothing to read and nothing to enumerate: the heartbeat, the coverage
-    # record and every episode live in a directory this pass could not create or
-    # cannot write. Answered in the surface's own vocabulary rather than by
-    # exiting silently — see STATE_DIR_OK above. The header is still printed, so
-    # the shape a consumer parses does not change with the failure, and the
-    # enumerating form (no id) gets the same single `session=-` line: an empty
-    # enumeration would say "no episodes are being tracked", which is a claim
-    # about the city, not about this order's ability to look.
-    #
-    # The id is still validated before it is echoed. This branch runs BEFORE the
-    # `safe_id` gate further down, and the requested id is caller-supplied: a
-    # patrol passes whatever the session list gave it, and session metadata is
-    # mutable. An id this order would refuse to name a file with is one it will
-    # not put on the surface either, whatever else has failed — the closed-field
-    # contract does not lapse because the state dir did.
+    # State dir unavailable: answer in the surface's own vocabulary, same
+    # shape, id still validated before it is echoed (caller-supplied).
     if [ "$STATE_DIR_OK" != "1" ]; then
         printf 'heartbeat_age=-1\nheartbeat_fresh=0\nstale_after=%s\n' "$STALE_AFTER"
         if [ -n "$want" ] && safe_id "$want"; then
@@ -399,18 +352,14 @@ status_report() {
         fi
         return 0
     fi
-    # ts_valid, not num: a heartbeat dated in the future would otherwise read as
-    # fresh forever, and a fresh heartbeat is the precondition for every verdict
-    # below — a stopped order would go on vouching for the whole city.
+    # ts_valid, not num: a future-dated heartbeat would read fresh forever.
     hb="$(state_get "$HEARTBEAT_FILE" last_run)"; ts_valid "$hb" || hb=0
     HB_AGE=-1; [ "$hb" -gt 0 ] && HB_AGE=$((NOW - hb))
     HB_FRESH=0
     if [ "$hb" -gt 0 ] && [ "$HB_AGE" -lt "$STALE_AFTER" ]; then HB_FRESH=1; fi
     printf 'heartbeat_age=%s\nheartbeat_fresh=%s\nstale_after=%s\n' "$HB_AGE" "$HB_FRESH" "$STALE_AFTER"
     if [ -n "$want" ]; then
-        # An id this order would refuse to write state for is one it will not read
-        # state for either — same test, same reason, and the caller gets the same
-        # `unknown` it gets for anything else this order cannot speak to.
+        # An id this order refuses to write state for is not read either.
         if ! safe_id "$want"; then
             status_unknown - unsafe-session-id
             return 0
@@ -418,11 +367,7 @@ status_report() {
         status_line "$want"
         return 0
     fi
-    # No id: every episode this order is currently tracking. Same ownership test
-    # the prune and the removal paths use, so a foreign file dropped in the
-    # directory is not listed as a parked session — asked about BY id it answers
-    # `unknown`/`foreign-state`, but it is not one of this order's episodes and
-    # does not belong in an enumeration of them.
+    # No id: enumerate owned episodes only (a foreign file is not one).
     for path in "$STATE_DIR"/*; do
         owned_file "$path" || continue
         base="${path##*/}"
@@ -453,20 +398,15 @@ fi
 # that keeps recovery working.
 valid_ere() {
     local rc=0
-    # Zero bytes of input by redirect, not by `printf '' |` (tk-zfjg9). Nothing
-    # can SIGPIPE here — printf is finished before grep reads — but the pipe form
-    # is the shape the doctor check bans outright, and an exception list is a
-    # worse guard than a rule with none. `< /dev/null` is the same empty input:
-    # no line ever matches, so rc is 1 for a valid ERE and 2 for a malformed one,
-    # which is exactly what the caller reads.
+    # Empty input by redirect, never a pipe into grep -q (tk-zfjg9): rc 1 =
+    # valid ERE, 2 = malformed.
     grep -Eq -- "${1:-}" </dev/null >/dev/null 2>&1 || rc=$?
     [ "$rc" -le 1 ]
 }
 if ! valid_ere "$MATCH_RE"; then
     echo "quota-park-nudge: QUOTA_PARK_MATCH is not a valid ERE — using the default detector"
     MATCH_RE="$DEFAULT_MATCH"
-    # detector_class labels a match `custom-match` from the presence of the
-    # override; having fallen back, we are not using one.
+    # Fallen back, so detector_class must not label matches custom-match.
     unset QUOTA_PARK_MATCH
 fi
 if ! valid_ere "$BUSY_RE"; then
@@ -552,9 +492,7 @@ write_coverage() {
     if owned_file "$COVERAGE_FILE"; then
         prior="$(cat "$COVERAGE_FILE" 2>/dev/null || true)"
     fi
-    # The marker line carried in from `prior` is dropped by the same filter that
-    # drops any other malformed record (it is one field, not two) and written
-    # back fresh by write_owned.
+    # The carried-in marker line is one field, so the filter drops it.
     printf '%s%s\n' "$covered_now" "$prior" \
         | awk -v cutoff="$cutoff" \
             'NF == 2 && $2 ~ /^[0-9]+$/ && $2 + 0 >= cutoff + 0 && !seen[$1]++ { print $1, $2 }' \
@@ -579,10 +517,7 @@ sessions=$(run_bounded gc session list --json 2>/dev/null \
 cursor="$(state_get "$CURSOR_FILE" session)"
 safe_id "$cursor" || cursor=""
 if [ -n "$cursor" ]; then
-    # Matched against the id FIELD, never as a substring: ids can be prefixes of
-    # one another and the alias column holds arbitrary text. `-v` is safe here
-    # because safe_id has already excluded the backslash that awk's own variable
-    # assignment would otherwise re-interpret.
+    # Matched against the id FIELD, never as a substring.
     cursor_at="$(printf '%s\n' "$sessions" | awk -F'\t' -v c="$cursor" '$1 == c { print NR; exit }')"
     session_count="$(printf '%s\n' "$sessions" | awk 'END { print NR }')"
     if num "$cursor_at" && num "$session_count" && [ "$cursor_at" -lt "$session_count" ]; then
@@ -593,31 +528,19 @@ fi
 
 while IFS=$'\t' read -r id alias; do
     [ -n "${id:-}" ] || continue
-    # An id we cannot safely use as a filename is one we do not touch at all —
-    # not peeked, not nudged, no state written. Counted, not silent: a session
-    # this order refuses to inspect is a gap in city-wide coverage.
+    # An id we cannot safely name is not touched at all; counted, not silent.
     if ! safe_id "$id"; then rejected=$((rejected + 1)); continue; fi
-    # Out of budget: leave the rest for the next cycle (3m away) rather than
-    # overlapping it. Counted so the summary says so instead of silently
-    # reporting a short sweep as a complete one.
+    # Out of budget: defer the rest to the next cycle, counted.
     if sweep_expired; then skipped=$((skipped + 1)); continue; fi
-    # Attempted, as far as the cursor is concerned, from here — before the peek,
-    # not after it. The peek is the call that hangs, and a session whose peek ate
-    # the rest of the budget is precisely the one the next pass must start after.
+    # Cursor-attempted BEFORE the peek — the peek is the call that hangs.
     last_attempted="$id"
-    # Everything downstream that prints, logs, or mails the alias uses this
-    # bounded form; the raw field is not referenced again.
+    # Every downstream print/log/mail uses the bounded alias.
     alias="$(sanitize_display "${alias:-$id}")"
     state="$STATE_DIR/$id"
     checked=$((checked + 1))
 
-    # A peek that fails, times out, or returns nothing tells us nothing about
-    # the pane — and the not-parked branch below DELETES the episode state. Read
-    # as "clean", a transient runtime failure resets the backoff and the
-    # once-per-episode escalation flag, so a block that has run for six hours
-    # looks freshly detected on the next cycle and starts nudging from attempt 1
-    # again. Only a successful peek may end an episode. Leave the state alone
-    # and try again in 3m.
+    # A failed/empty peek proves nothing, and the clean branch DELETES the
+    # episode — only a successful peek may end one. Keep state; retry in 3m.
     peek_rc=0
     pane=$(run_bounded gc session peek "$id" --lines "$PEEK_LINES" 2>/dev/null) || peek_rc=$?
     if [ "$peek_rc" -ne 0 ] || [ -z "$pane" ]; then
@@ -626,32 +549,12 @@ while IFS=$'\t' read -r id alias; do
         continue
     fi
 
-    # The pane was read, so this session gets a verdict below whichever branch it
-    # takes. Whether this pass may VOUCH for it — the record `--status` needs
-    # before it answers `no` — is decided per branch: for a clean or excluded
-    # session the verdict is "no episode" and removing the file completes it, so
-    # the vouch goes with the removal; for a parked one the verdict lives IN the
-    # state file, so it waits on that write landing (write_state_vouched).
-    # Nothing is vouched before the unreadable branch above: a peek that failed
-    # classified nothing.
+    # Pane read: a verdict follows. Whether this pass may VOUCH is per branch.
 
-    # Parked = a bare provider banner at the bottom of an idle pane. Busy,
-    # cited, or scrolled-up all mean not parked. Clearing the state file is what
-    # ends an episode: a recovered agent starts the next block from attempt 1.
-    #
-    # Both halves read the same current region (pane_tail): a busy marker up in
-    # the scrollback is a finished turn, not a running one, and letting it veto
-    # a live banner below it is how a genuinely parked session gets vouched for
-    # as clean.
-    #
-    # Redirected from a process substitution, never `pane_tail ... | grep -qEi`
-    # (tk-zfjg9). `grep -q` exits at its first match and SIGPIPEs the writer,
-    # which `pipefail` promotes to the pipeline's status — and here that lands on
-    # the FAIL-OPEN side: a 141 from the banner half negates to true, so a session
-    # that IS parked has its state file removed and is vouched for as clean. A
-    # process substitution keeps the writer's death out of the status entirely, so
-    # only grep's own answer decides. A pane tail is exactly the payload size the
-    # race needs.
+    # Parked = a bare banner in the tail of an idle pane; busy/cited/scrolled-up
+    # are not parked, and clearing the state file is what ends an episode.
+    # Process substitutions, never pipes into grep -q (tk-zfjg9): a SIGPIPE'd
+    # writer under pipefail would land on the FAIL-OPEN side here.
     if grep -qEi -- "$BUSY_RE" < <(pane_tail "$pane") \
         || ! grep -qEi -- "$MATCH_RE" < <(banner_candidates "$pane"); then
         owned_state_rm "$state"
@@ -660,88 +563,52 @@ while IFS=$'\t' read -r id alias; do
     fi
 
     parked=$((parked + 1))
-    # An excluded alias is one this order does not act on AT ALL: no nudge, and no
-    # state file either, so `--status` reports it as `no` and the patrols fall
-    # back to their own judgment instead of deferring to a recovery that was
-    # switched off for this session. Counted as parked in the summary, because it
-    # is — the escape hatch suppresses the action, not the observation.
-    # Here-string, not a pipeline — see the tk-zfjg9 note on detector_class.
+    # Excluded alias: observed (counted parked) but not acted on — no nudge and
+    # no state file, so --status answers `no` and the patrols use their own
+    # judgment. An episode from BEFORE the exclusion goes with it.
     if [ -n "$EXCLUDE_RE" ] && grep -qEi -- "$EXCLUDE_RE" <<< "$alias"; then
-        # Any episode from BEFORE the exclusion goes with it. An alias can be
-        # added to QUOTA_PARK_EXCLUDE while a park is already being tracked, and
-        # a state file left behind then keeps answering for a session this order
-        # has stopped acting on: `yes` while the last sighting is still fresh —
-        # a patrol deferring its warrant to a recovery that is switched off for
-        # exactly that session — and `unknown` afterwards. Neither is the
-        # contract above. `no` is, and that needs the file gone.
         owned_state_rm "$state"
         vouch "$id"
         echo "quota-park-nudge: $alias parked (excluded, not nudged)"
         continue
     fi
 
-    # Classified once per parked session, from the closed set, and persisted with
-    # the episode: this is what the status surface hands a patrol, and — with the
-    # escalation mail — the only thing anywhere outside this script that says
-    # anything about what was on the screen.
+    # Classified once per parked session, from the closed set.
     dclass="$(detector_class "$pane")"
 
-    # Missing, non-numeric, or dated in the FUTURE reads back as "start of
-    # episode" — a truncated state file (crash mid-write) must not abort the
-    # sweep for every session after this one, and losing an episode's counters
-    # only costs one nudge. A future timestamp is invalid for the reason
-    # ts_valid gives: it cannot be a record of anything this order did, and each
-    # of these fields defeats a different guard while it stands.
+    # Missing/garbage/future fields read back as start-of-episode defaults — a
+    # truncated state file must not abort the sweep, and each future timestamp
+    # defeats a different guard (see ts_valid).
     first_seen="$(state_get "$state" first_seen)"; ts_valid "$first_seen" || first_seen="$NOW"
     last_nudge="$(state_get "$state" last_nudge)"; ts_valid "$last_nudge" || last_nudge=0
     attempts="$(state_get "$state" attempts)";     num "$attempts"   || attempts=0
-    # Deliveries we could not confirm, kept apart from the ones we could: see
-    # the nudge branches below. Absent from a state file an older version wrote,
-    # which reads as zero — the same as a fresh episode.
+    # Deliveries we could not confirm, kept apart from confirmed ones.
     unconfirmed="$(state_get "$state" unconfirmed)"; num "$unconfirmed" || unconfirmed=0
-    # Pacing keys on the last delivery ATTEMPT, not the last confirmed one.
-    # Falls back to last_nudge so a state file from before this field existed
-    # still paces on its confirmed nudge instead of reading as never-tried.
+    # Pacing keys on the last delivery ATTEMPT; falls back to last_nudge.
     last_try="$(state_get "$state" last_try)"; ts_valid "$last_try" || last_try="$last_nudge"
-    # Normalized to the same closed set on the way IN that status_line applies on
-    # the way out, because the escalation test below is `[ -z "$escalated" ]`:
-    # only `1` (a mail we saw sent) and `unconfirmed` (one whose bound expired
-    # mid-send) mean "already escalated", and ANY other non-empty value would
-    # read as escalated and suppress the mail for the rest of the episode. A
-    # persisted `escalated=0` is the obvious case — it says NOT escalated and
-    # means the opposite — but so does any leftover from a hand edit or a
-    # version that spelled the field differently. Suppressed silently, and for
-    # exactly the multi-hour park the escalation exists to report.
+    # Normalized on the way IN: only `1` and `unconfirmed` mean escalated —
+    # any other leftover value would silently suppress the mail forever.
     escalated="$(state_get "$state" escalated)"
     case "$escalated" in 1 | unconfirmed) ;; *) escalated="" ;; esac
     age=$((NOW - first_seen))
     tries=$((attempts + unconfirmed))
 
     if [ "$tries" -gt 0 ] && [ $((NOW - last_try)) -lt "$(backoff_for "$tries")" ]; then
-        # Still blocked, still inside the backoff window — say nothing, wait. The
-        # sighting is still recorded: a session nobody nudges this cycle is one
-        # this pass nonetheless confirmed parked, and `--status` reads last_seen.
+        # Inside the backoff window: say nothing, but still record the sighting.
         write_state_vouched "$state" "$first_seen" "$last_nudge" "$last_try" "$attempts" "$unconfirmed" "$escalated" "$NOW" "$dclass" || true
         continue
     fi
 
     # The nudge text deliberately avoids every phrase in MATCH_RE: it lands in
-    # the same pane we read next cycle, and a self-matching message would keep
-    # the episode alive forever after the agent recovered.
+    # the pane we read next cycle.
     msg="Provider block may have cleared after $(duration "$age") — resume: re-check your hook (gc hook --claim --json) or continue your patrol loop. If still blocked, ignore this; it repeats until you are back."
-    # `--delivery immediate` because the default (wait-idle) hands the message
-    # to the runtime's idle detector — the same layer that already believes a
-    # parked session is fine. We read the pane; we know it is idle.
+    # --delivery immediate: the default idle detector already believes a parked
+    # session is fine.
     nudge_rc=0
     run_bounded gc session nudge --delivery immediate "$id" "$msg" >/dev/null 2>&1 || nudge_rc=$?
-    # Fall back to the plain form ONLY for the case the fallback exists for: an
-    # older gc that rejects the flag, which fails fast with a usage error. A
-    # bound that expired (`timeout` exits 124) or a signalled call (>=128) is
-    # NOT that case — the runtime may already have accepted the first nudge and
-    # simply not answered in time, so retrying delivers two resume messages into
-    # one pane and leaves `attempts` undercounting what the agent received.
-    # There, record a failed nudge and let the next cycle retry under the
-    # backoff, which is the pacing we want for a still-blocked session anyway.
+    # Fall back to the plain form ONLY on a fast usage error (older gc). A
+    # timeout/signal is NOT that case — the nudge may already have landed, and
+    # a retry would deliver two resume messages.
     if [ "$nudge_rc" -ne 0 ] && [ "$nudge_rc" -ne 124 ] && [ "$nudge_rc" -lt 128 ]; then
         nudge_rc=0
         run_bounded gc session nudge "$id" "$msg" >/dev/null 2>&1 || nudge_rc=$?
@@ -752,37 +619,22 @@ while IFS=$'\t' read -r id alias; do
         attempts=$((attempts + 1))
         echo "quota-park-nudge: nudged $alias ($id), parked $(duration "$age"), attempt $((attempts + unconfirmed))"
     elif [ "$nudge_rc" -eq 124 ] || [ "$nudge_rc" -ge 128 ]; then
-        # AMBIGUOUS, and paced as an attempt anyway. The bound expired (or the
-        # call was signalled) on a nudge the runtime may already have accepted —
-        # the same window the fallback above refuses to retry into. Refusing the
-        # immediate retry but leaving the counters untouched only moves the
-        # duplicate one cycle out: `attempts` stays 0, the backoff test below
-        # reads the session as never nudged, and the next 3m pass sends a second
-        # resume message into the same pane. So an unconfirmed delivery advances
-        # the pacing (last_try, and the doubling exponent via `tries`) while
-        # never claiming a delivery we did not see land — `attempts`, the count
-        # the escalation reports to a human, still means "confirmed".
+        # AMBIGUOUS: paced as an attempt (advances last_try and the backoff
+        # exponent) without claiming a delivery we did not see land.
         unconfirmed=$((unconfirmed + 1))
         last_try="$NOW"
         unconfirmed_now=$((unconfirmed_now + 1))
         echo "quota-park-nudge: nudge UNCONFIRMED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age"), paced as attempt $((attempts + unconfirmed))"
     else
-        # A fast rejection: nothing was delivered, so nothing is paced. The next
-        # cycle retries in 3m, which is what we want for a transient runtime
-        # error — unlike the ambiguous case, a retry here cannot duplicate.
+        # Fast rejection: nothing delivered, nothing paced; retry in 3m.
         echo "quota-park-nudge: nudge FAILED (rc=$nudge_rc) for $alias ($id), parked $(duration "$age")"
     fi
 
     unconf_note=""
     [ "$unconfirmed" -gt 0 ] && unconf_note=" (plus $unconfirmed unconfirmed)"
-    # Any escalation marker at all suppresses the next one — `1` for a delivery we
-    # saw complete, `unconfirmed` for one whose bound expired mid-send. Not
-    # `!= "1"`: that reads an unconfirmed escalation as never sent and mails the
-    # mayor again for the same park.
+    # Any escalation marker suppresses the next one (1 or unconfirmed).
     if [ "$ESCALATE_AFTER" -gt 0 ] && [ -z "$escalated" ] && [ "$age" -ge "$ESCALATE_AFTER" ]; then
-        # No pane text in the body — see detector_class. The label stands in for
-        # the excerpt the earlier version mailed: it says which banner family
-        # matched without quoting a pane the agent controls.
+        # No pane text in the body — see detector_class.
         mail_rc=0
         run_bounded gc mail send "$ESCALATE_TO" -s "Possible quota park: $alias for $(duration "$age") [HIGH]" \
             -m "$alias ($id) has shown a provider limit banner for $(duration "$age") and has not resumed after $attempts nudge(s)$unconf_note.
@@ -807,20 +659,12 @@ and this mail is a durable artifact. Read it directly with: gc session peek $id"
         if [ "$mail_rc" -eq 0 ]; then
             escalated=1
         elif [ "$mail_rc" -eq 124 ] || [ "$mail_rc" -ge 128 ]; then
-            # AMBIGUOUS, and recorded as sent — the same rule the nudge branch
-            # above follows, for the same reason and one layer deeper. `gc mail
-            # send` writes durable mail through Dolt, so a bound that expires
-            # after the write is committed leaves a mail in the mayor's inbox that
-            # this script never heard about. Left empty, the next eligible pass
-            # sends a second one for the same episode, and it does that during
-            # exactly the slow-runtime incident this order is meant to tolerate.
-            # `unconfirmed` says both things at once: something may well have been
-            # delivered, and we did not see it land.
+            # AMBIGUOUS: recorded as sent — mail is durable, and a bound expiring
+            # after the Dolt commit would otherwise mail the mayor twice per park.
             escalated=unconfirmed
             echo "quota-park-nudge: escalation mail UNCONFIRMED (rc=$mail_rc) for $alias ($id) — not resent this episode"
         else
-            # A fast rejection, delivered nothing. Retried next cycle, and it
-            # cannot duplicate — again mirroring the nudge branch.
+            # Fast rejection: retried next cycle; cannot duplicate.
             echo "quota-park-nudge: escalation mail FAILED (rc=$mail_rc) for $alias ($id) — retries next cycle"
         fi
     fi
@@ -858,19 +702,11 @@ owned_state_age() {
 prune_stale_state() {
     local path base stamp
     for path in "$STATE_DIR"/* "$STATE_DIR"/.*; do
-        # An unmatched glob arrives as its own literal pattern, and `.` / `..`
-        # arrive from the second one; -f drops all three.
+        # -f drops the unmatched-glob literal and . / .. from the second glob.
         [ -f "$path" ] && [ ! -L "$path" ] || continue
         base="${path##*/}"
-        # This order's own abandoned temp files — a pass killed between `mktemp`
-        # and the rename in write_atomic. Unmistakably ours by name, so they are
-        # collected here rather than accumulating in the runtime directory
-        # forever; `safe_id` would otherwise skip them for their leading dot,
-        # which is the same property that keeps them out of `--status`. The name
-        # carries the pass's own timestamp, so they age without a `stat`: a temp
-        # file a CONCURRENT pass is writing right now must not be removed out
-        # from under its rename, and one whose stamp is unreadable is left for a
-        # later pass rather than guessed at.
+        # This order's own abandoned temp files (a pass killed mid-write), aged
+        # from the timestamp in the name; a concurrent pass's fresh temp survives.
         case "$base" in
             .qpn-tmp.*)
                 stamp="${base#.qpn-tmp.}"; stamp="${stamp%%.*}"
@@ -897,10 +733,7 @@ deferred=""
 [ "$skipped" -gt 0 ] && deferred=", $skipped deferred (sweep budget ${SWEEP_BUDGET}s)"
 unconf=""
 [ "$unconfirmed_now" -gt 0 ] && unconf=", $unconfirmed_now unconfirmed (bound expired mid-delivery)"
-# A session detected and acted on whose verdict did not persist. Named here for
-# the same reason as the rest: it is coverage this pass did not achieve, and a
-# sweep that could not record what it found must not read as one that found
-# nothing.
+# Coverage this pass did not achieve is named too.
 statefail=""
 [ "$state_failed" -gt 0 ] && statefail=", $state_failed state write failed (not vouched for)"
 echo "quota-park-nudge: $checked checked, $parked parked, $nudged nudged$unconf$unread$unsafe$deferred$statefail"

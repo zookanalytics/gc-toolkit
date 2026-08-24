@@ -1,62 +1,11 @@
-# feedback distiller — turn pending feedback observations into reviewed
-# prompt-update proposals. Learning-system phase 2; design
-# specs/2026-08-learning-system/implementation-design.md §3, rulings
-# specs/2026-08-learning-system/decisions.md D5–D7.
-#
-# Fires the mol-feedback-distiller formula on a 24h cooldown. One fire = one
-# run: a polecat gates on pending observation volume/urgency, reads
-# observation beads cross-rig, judges them with the learning-distill rubric
-# (D6: judgment over counters), clusters evidence onto pattern beads, runs
-# the retirement questions over adopted rules, and files zero-or-a-few
-# change-unit `prompt-update` beads through the same pool worker
-# (mol-polecat-work) → refinery pipeline as the doc-keeper audits; every
-# resulting PR is operator-merged (D3).
-#
-# ── The 24h timer is a HEARTBEAT, not the cadence (D7) ─────────────────
-# The operator ruling is that distillation cadence tracks the number of
-# pending learning beads, not the calendar — but the `gc order` rail only
-# offers time-based cooldown triggers. So this order is the
-# mol-triage-recurrence restraint pattern: a cheap daily fire wakes the
-# formula, and the formula's OWN first step is the cadence. It judges the
-# pending observations only when they reach distill_min_pending, or any
-# pending one is operator-endorsed / an explicit standing directive (those
-# never wait on volume), or the oldest pending exceeds distill_max_age_days;
-# otherwise it logs "gated: N pending, none urgent, oldest Xd" and judges
-# nothing. Effective cadence therefore scales with feedback volume — a heavy
-# week distills daily, a quiet month distills once. Do not "fix" a quiet order
-# by shortening this interval; tune the formula's gate vars instead.
-#
-# The gate scopes the JUDGING of observations, not the run. A gated fire still
-# runs the retirement questions over the adopted rules — that pass is
-# unconditional by specification ("every run", in the formula's step 2 and in
-# skills/learning-distill/SKILL.md), and a quiet city is exactly when it earns
-# its keep, since "still binding?" asks about rules with no recent evidence.
-# A gated fire stamps nothing, so its pending observations still open the next
-# gate.
-#
-# ── Enablement / scope / pool / pool-wake ──────────────────────────────
-# Identical to the doc-keeper orders and explained in full in
-# orders/doc-keeper-drift-audit.toml. In short: enablement IS the pack being
-# imported (this file ships in the pack's orders/ layer — importing
-# gc-toolkit = live, not imported = inert; no config flag). Rig-scoped with
-# a BARE pool so the wisp lands in, and is claimed from, each importing
-# rig's own polecat store (a rig-qualified pool would strand the wisp in
-# every importer that is not gc-toolkit itself). The formula is graph.v2
-# (`[requires] formula_compiler = ">=2.0.0"`), so its compiled root is
-# Ready-visible and pool-routed WITHOUT a top-level `phase = "vapor"` — do
-# not add vapor — and must merge before/with this order so a fire does not
-# fail "formula not found".
-#
-# ── Home-rig gate: importers no-op by design ───────────────────────────
-# Every importing rig fires this order, but prompt updates are edits to the
-# pack repo itself, authorable only from the pack's home rig. All three of the
-# formula's steps re-derive the same gate and no-op cleanly wherever
-# $REPO/pack.toml is not gc-toolkit's own (name = "gc-toolkit") — each carries
-# it rather than one step force-closing the others, and only the last one
-# drains, so an importer's daily fire is one cheap idempotent session, not an
-# error and not a second spawn. Importing rigs still participate: their
-# agents FILE observations locally (capture is rig-local, D5); this home-rig
-# run reads those stores cross-rig at distill time.
+# feedback-distiller — turn pending observations into reviewed prompt-update
+# proposals. The 24h timer is a HEARTBEAT, not the cadence (D7): the formula's
+# own first step gates judging on pending volume / urgency / age — do not
+# "fix" a quiet order by shortening this interval; tune the formula's gate
+# vars. A gated fire still runs the retirement pass over adopted rules (that
+# pass is unconditional). Home-rig-gated inside the formula: importers' daily
+# fire is one cheap idempotent no-op session. Rig-scoped, BARE pool (same
+# rationale as feedback-miner).
 [order]
 description = "learning: distill pending feedback observations; file prompt-update / retirement beads (judging gated on volume or urgency; the retirement pass runs every fire)"
 formula = "mol-feedback-distiller"

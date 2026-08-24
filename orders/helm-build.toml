@@ -1,37 +1,9 @@
 # helm-build — keep the served helm binary current with services/helm.
-#
-# The helm service is a proxy_process whose launcher only exec's a prebuilt
-# binary (assets/scripts/gc-helm-svc.sh). Something has to build that binary,
-# and it cannot be the launcher: the supervisor allows a proxy_process 5s to
-# answer its health probe, while a warm build of this module takes ~12.5s and a
-# cold one 2m29s (measured 2026-08-22, 161MB, ~170 deps). A build started in the
-# start path is always killed by the readiness timeout.
-#
-# So the build runs here instead, and build-and-restart is ONE step. Splitting
-# them is the other half of the defect this replaced: on 2026-08-22 the helm
-# process had been up 14h55m on a binary built at 02:40 while three commits
-# touching services/helm had landed after it — including the fix for "a binary
-# behind the stores serves a blind board", undeployed for exactly the reason it
-# described.
-#
-# Staleness is an ordinary artifact-older-than-sources test (`find -newer`), so
-# a tick with nothing to do costs one `find` and exits. Nothing is rebuilt on a
-# timer, and the order is a no-op in cities that do not declare a helm service.
-#
-# timeout is 900s against a 300s exec default: a genuinely cold build measured
-# 2m29s, and the whole point of moving the build here is that it is allowed to
-# finish. Being killed by THIS deadline would recreate, one level up, the
-# interrupted-build pathology the split exists to end.
-#
-# scope = "city" because the helm service is declared city-scoped; the script
-# self-locates its module from its own path and takes the service state root
-# from `gc service list --json` (city_path + state_root).
-#
-# Known edge, deliberately not guarded: `find -newer` is a make-style
-# dependency, so a source file with a FUTURE mtime — clock skew, a bad checkout
-# — reads as permanently newer and every tick would rebuild and restart. The
-# remedy is to fix the mtime, exactly as it would be for make. A rate limiter
-# here would be the bespoke staleness machinery this change exists to remove.
+# The service launcher only exec's a prebuilt binary (a build cannot fit the
+# 5s readiness probe), so the build runs here and build-and-restart is ONE
+# step. Staleness is `find -newer`; a tick with nothing to do costs one find.
+# timeout 900s: a cold build measured 2m29s and must be allowed to finish.
+# No-op in cities that declare no helm service.
 [order]
 description = "Build the helm binary when services/helm is newer than it, and restart the service onto the result"
 trigger = "cooldown"
