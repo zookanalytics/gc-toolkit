@@ -62,6 +62,22 @@
 #        abandons the check and discards every finding it had collected)
 #   (33) a failing `mktemp -d` refuses the scan rather than sweeping zero rows
 #        and reporting the green summary  [the tk-lslk2 false-empty vector]
+#   (34) THE FORK KEY SET (tk-p47n3f). merge-skill.sh and reconcile-merged-prs.sh
+#        treat `fork_pr`/`fork_pr_url` as first-class PR keys, and the fork-sync
+#        flow stamps NO pr_number at all, so a check keyed on pr_number alone
+#        reports OK over exactly the violation it exists to find:
+#        (34a) a bare fork_pr over an OPEN PR -> ERROR, against this rig origin
+#        (34b) fork_pr_url only, no number key anywhere -> ERROR
+#        (34c) a fork_pr_url naming ANOTHER repository is repository-qualified
+#              exactly as a pr_url is: MERGED there is NOT flagged, even with
+#              the same number open HERE
+#        (34d) ...and a fork_pr qualified by a foreign fork_pr_url that is OPEN
+#              there is reported against THAT repository
+#        (34e) a bead naming two DIFFERENT PRs under pr_number and fork_pr is
+#              judged on both — neither reference is deduped away
+#        (34f) a LIVE fork_pr-keyed anchor acquits the spent closed predecessor
+#              naming the same PR (the narrow lookup would have flagged it)
+#        (34g) ...but the two families naming the SAME PR are ONE reference
 #   (INV) detect-only: no fix.sh ships next to run.sh (a sibling fix.sh would
 #        auto-opt this check into `gc doctor --fix`)
 set -u
@@ -105,8 +121,9 @@ STUB
 cat > "$TMP/bin/bd" <<'STUB'
 #!/usr/bin/env bash
 # Two shapes of `list` reach here and must not share a fixture: the CLOSED
-# candidate scans (--status closed --has-metadata-key pr_url|pr_number) and the
-# live-anchor lookup (--status=<live list> --has-metadata-key merge_result).
+# candidate scans (--status closed --has-metadata-key
+# pr_url|pr_number|fork_pr|fork_pr_url) and the live-anchor lookup
+# (--status=<live list> --has-metadata-key merge_result).
 # One fixture for both would answer "is this PR already anchored?" with the
 # candidate list itself.
 D="${GC_STUB_DIR:?}"
@@ -196,7 +213,7 @@ mkrig() {
         '.rigs += [{name:$n, path:$p, suspended:$s}]')
 }
 
-# closed <rig> <key: pr_url|pr_number> <json-array>
+# closed <rig> <key: pr_url|pr_number|fork_pr|fork_pr_url> <json-array>
 closed() { printf '%s' "$3" > "$D/closed-$2-$1.json"; }
 # live <rig> <json-array>
 live()   { printf '%s' "$2" > "$D/live-$1.json"; }
@@ -246,6 +263,19 @@ foreign_bead() {
                  merge_result:"pull_request", pr_url:$u}}'
 }
 
+# fork_bead <id> <fork_pr|-> <merge_result|""> [fork_pr_url]
+# The fork-sync shape: fork_pr / fork_pr_url and NO pr_number at all. `-` omits
+# the number key, leaving fork_pr_url as the only thing naming a PR.
+fork_bead() {
+    local id="$1" n="$2" mr="${3:-}" u="${4:-}"
+    jq -nc --arg id "$id" --arg n "$n" --arg mr "$mr" --arg u "$u" '
+      {id:$id, status:"closed", assignee:"alpha/gc-toolkit.refinery",
+       metadata: ({branch:("polecat/" + $id)}
+                  + (if $n == "-" then {} else {fork_pr:$n} end)
+                  + (if $u == "" then {} else {fork_pr_url:$u} end)
+                  + (if $mr == "" then {} else {merge_result:$mr} end))}'
+}
+
 # ---------------------------------------------------------------------------
 # (1) Clean city — closed anchors, none of their PRs open.
 # ---------------------------------------------------------------------------
@@ -256,7 +286,7 @@ prs github.com/acme/alpha '[]'
 run_check
 eq "$RC" 0 "(1) clean city exits 0"
 has "OK: no closed bead claims unlanded work" "$OUT" "(1) green summary"
-has "2 anchor-shaped candidate(s), 0 with a still-open PR" "$OUT" "(1) summary states what was scanned"
+has "2 anchor-shaped candidate PR reference(s), 0 with a still-open PR" "$OUT" "(1) summary states what was scanned"
 
 # ---------------------------------------------------------------------------
 # (2)(3)(4) The three non-terminal spellings, each over an OPEN PR.
@@ -309,7 +339,7 @@ hasnt "a-ab" "$OUT" "(8) anchor_bead excludes"
 hasnt "a-sa" "$OUT" "(8) source_anchor_bead excludes"
 hasnt "a-sr" "$OUT" "(8) source_review_bead excludes"
 hasnt "a-rt" "$OUT" "(9) a surviving gc.routed_to excludes"
-has "0 anchor-shaped candidate(s)" "$OUT" "(7) they never even become candidates"
+has "0 anchor-shaped candidate PR reference(s)" "$OUT" "(7) they never even become candidates"
 
 # ---------------------------------------------------------------------------
 # (10)(11)(12) Shapes that reach the classifier and are noted, not flagged.
@@ -657,7 +687,7 @@ mkrig beta  "git@github.com:acme/beta.git"
 run_check
 has "rigs/alpha/.beads" "$D/calls.log" "(31) alpha's store is read by explicit --db"
 has "rigs/beta/.beads" "$D/calls.log" "(31) beta's store is read by explicit --db"
-eq "$(grep -c -- '--db' "$D/calls.log")" "4" "(31) exactly two key scans per rig, each --db pinned"
+eq "$(grep -c -- '--db' "$D/calls.log")" "8" "(31) exactly four key scans per rig, each --db pinned"
 
 # ---------------------------------------------------------------------------
 # (32) The wall-clock budget. A zero budget means every rig is past it, so the
@@ -703,6 +733,109 @@ RC=$?
 eq "$RC" 1 "(33) a failing mktemp refuses the scan"
 has "refusing to scan" "$OUT" "(33) and says so rather than sweeping silently"
 hasnt "OK: no closed bead" "$OUT" "(33) it never reads as clean"
+
+# ---------------------------------------------------------------------------
+# (34) THE FORK KEY SET. `pr_number`/`pr_url` is what the refinery stamps, but
+# the fork-sync flow stamps `fork_pr`/`fork_pr_url` and no pr_number at all —
+# merge-skill.sh (PR_NUM_JQ, PR_SELF_JQ) and reconcile-merged-prs.sh (pr_refs)
+# both read all three keys, and reconcile-merged-prs.test.sh already carries a
+# closed fork_pr-keyed anchor over an open PR. Read narrowly, every case below
+# is invisible: the store scan never enumerates the bead, so no later stage can
+# recover it, and the check reports OK over a live violation (tk-p47n3f).
+# ---------------------------------------------------------------------------
+# (34a) A bare fork_pr, no URL of any kind -> resolves against this rig origin.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+closed alpha fork_pr "[$(fork_bead a-fk 42 pull_request)]"
+prs github.com/acme/alpha '[{"number":42}]'
+run_check
+eq "$RC" 2 "(34a) a fork_pr-keyed closed anchor over an open PR is an error"
+has "alpha/a-fk: CLOSED over OPEN github.com/acme/alpha#42" "$OUT" "(34a) named against this rig own repository"
+
+# (34b) fork_pr_url and nothing else — no number key anywhere on the bead.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+closed alpha fork_pr_url "[$(fork_bead a-fu - pull_request https://github.com/acme/alpha/pull/43)]"
+prs github.com/acme/alpha '[{"number":43}]'
+run_check
+eq "$RC" 2 "(34b) a fork_pr_url-keyed closed anchor over an open PR is an error"
+has "alpha/a-fu: CLOSED over OPEN github.com/acme/alpha#43" "$OUT" "(34b) the number is parsed out of fork_pr_url"
+
+# (34c) A fork_pr_url naming ANOTHER repository is repository-qualified exactly
+# as a pr_url is. MERGED there, and #10 open HERE, must stay clean — matching
+# this rig same-numbered PR would be answering about a stranger.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+closed alpha fork_pr_url "[$(fork_bead a-fx - pull_request https://github.com/other/repo/pull/10)]"
+prs github.com/acme/alpha '[{"number":10}]'
+prstate github.com/other/repo 10 MERGED
+run_check
+eq "$RC" 0 "(34c) a foreign fork_pr_url that merged is not flagged"
+hasnt "a-fx" "$OUT" "(34c) and is not named"
+# A "not flagged" assertion passes for free against a script that never
+# enumerated the bead. Pin that it WAS scanned and DID become a candidate, so
+# this case can only pass by way of the per-repository read.
+has "1 closed PR-referencing bead(s) scanned, 1 anchor-shaped candidate PR reference(s), 0 with a still-open PR" "$OUT" "(34c) and the clean verdict came from reading that repository, not from never scanning the bead"
+
+# (34d) ...and the number key qualified by that same foreign URL is read there
+# too: fork_pr places its repository from fork_pr_url, never from origin.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+closed alpha fork_pr "[$(fork_bead a-fy 10 pull_request https://github.com/other/repo/pull/10)]"
+prs github.com/acme/alpha '[{"number":10}]'
+prstate github.com/other/repo 10 OPEN
+run_check
+eq "$RC" 2 "(34d) a fork_pr in another repository, open there, is an error"
+has "CLOSED over OPEN github.com/other/repo#10" "$OUT" "(34d) reported against the repository fork_pr_url names"
+hasnt "acme/alpha#10" "$OUT" "(34d) not against this rig same-numbered PR"
+
+# (34e) One bead, two DIFFERENT PRs under two keys. It is closed over both, so
+# both are judged; a projection yielding one pair per bead drops whichever key
+# it did not prefer, and a survivor set deduped on the bead id alone drops the
+# second reference after the fact. Fixtured under both keys because a live `bd`
+# returns such a bead from both scans.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+TWOKEY=$(jq -nc '{id:"a-two", status:"closed", assignee:"alpha/gc-toolkit.refinery",
+                  metadata:{pr_number:"50", fork_pr:"51", branch:"polecat/a-two",
+                            merge_result:"pull_request"}}')
+closed alpha pr_number "[$TWOKEY]"
+closed alpha fork_pr   "[$TWOKEY]"
+prs github.com/acme/alpha '[{"number":50},{"number":51}]'
+run_check
+eq "$RC" 2 "(34e) a bead naming two open PRs errors"
+has "github.com/acme/alpha#50" "$OUT" "(34e) the pr_number reference is judged"
+has "github.com/acme/alpha#51" "$OUT" "(34e) and so is the fork_pr one"
+eq "$(grep -c 'ERROR:' "$OUT")" 2 "(34e) both references are reported, neither deduped away"
+
+# (34f) The live-owner half. A LIVE fork_pr-keyed anchor IS the bead the merge
+# path sees holding this PR, so the closed one is a spent predecessor. Looked
+# up on pr_number alone the live owner is invisible and the predecessor is
+# flagged — a false positive on a perfectly tracked PR.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+closed alpha fork_pr "[$(fork_bead a-old 60 pull_request)]"
+live alpha '[{"id":"a-live", "status":"open", "metadata":{"fork_pr":"60", "merge_result":"pull_request"}}]'
+prs github.com/acme/alpha '[{"number":60}]'
+run_check
+eq "$RC" 0 "(34f) a live fork_pr-keyed anchor acquits the closed predecessor"
+has "alpha/a-live is live and carries a merge_result for the same PR" "$OUT" "(34f) and the note names the anchor"
+has "already anchored by a live bead" "$OUT" "(34f) counted in the summary"
+
+# (34g) ...but the two families naming the SAME PR are ONE reference, not two.
+# A bead carrying pr_number and fork_pr with the same value is the ordinary
+# belt-and-braces shape, and reporting it twice would read as two violations.
+reset
+mkrig alpha "git@github.com:acme/alpha.git"
+SAMEKEY=$(jq -nc '{id:"a-same", status:"closed", assignee:"alpha/gc-toolkit.refinery",
+                   metadata:{pr_number:"70", fork_pr:"70", branch:"polecat/a-same",
+                             merge_result:"pull_request"}}')
+closed alpha pr_number "[$SAMEKEY]"
+closed alpha fork_pr   "[$SAMEKEY]"
+prs github.com/acme/alpha '[{"number":70}]'
+run_check
+eq "$RC" 2 "(34g) one PR named under both keys still errors"
+eq "$(grep -c 'ERROR:' "$OUT")" 1 "(34g) exactly once — the two keys are one reference, not two violations"
 
 # ---------------------------------------------------------------------------
 # (INV) Detect only — a sibling fix.sh would auto-opt this into `gc doctor --fix`.

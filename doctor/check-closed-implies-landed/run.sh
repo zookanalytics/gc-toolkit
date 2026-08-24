@@ -71,17 +71,37 @@
 #     the ledger. It is also the healer's own allow-list, which keeps the two
 #     surfaces reporting on one set. Each row says which spelling it wore.
 #
-#   * it names a pull request (`pr_number`, else a `/pull/<n>` in `pr_url`),
-#     and
+#   * it names a pull request under ANY of the keys a bead uses for one, and
 #   * that PR is still OPEN.
 #
+#     THE KEY SET IS THE MERGE PATH'S, not `pr_number` alone. `pr_number` /
+#     `pr_url` is what the refinery stamps, but the fork-sync flow records
+#     `fork_pr` / `fork_pr_url` and NO pr_number at all — merge-skill.sh says
+#     so outright (`PR_NUM_JQ`, `PR_SELF_JQ`) and reconcile-merged-prs.sh reads
+#     the same three keys (`pr_refs`). Keyed on pr_number alone, a CLOSED
+#     `merge_result=pull_request` anchor wearing only the fork spelling is
+#     never scanned, and this check reports OK with exactly the violation it
+#     exists to find sitting in the ledger; the same narrow projection would
+#     also miss a LIVE fork-keyed owner and flag a spent predecessor the merge
+#     path knows is anchored. Reading the same keys is what keeps the observer
+#     and the passes it observes talking about one set of beads (tk-p47n3f).
+#
+#     Both spellings are read as ONE key family each: the number is the
+#     explicit key (`pr_number`, `fork_pr`) when set, else the `/pull/<n>` in
+#     that family's URL (`pr_url`, `fork_pr_url`). A bead naming two different
+#     PRs under two keys yields a row for each — dropping either would be the
+#     same blind spot in miniature.
+#
 #     A pull number is unique only WITHIN a repository, so which repository is
-#     resolved per bead — from the `pr_url` when it parses, else this rig's own
-#     origin — and never assumed. The bulk `gh pr list` answers for this rig's
-#     origin; a bead naming ANOTHER repository (a normal shape: a bead filed in
-#     one rig's store tracking work that lands in a different repo) gets one
-#     targeted `gh pr view` against the repository it names, capped, with the
-#     remainder reported UNDETERMINED.
+#     resolved per REFERENCE — from that family's URL when it parses, else this
+#     rig's own origin — and never assumed. A `fork_pr_url` naming another
+#     repository is therefore repository-qualified exactly as a `pr_url` is,
+#     which is the whole reason the fork keys can be widened into safely. The
+#     bulk `gh pr list` answers for this rig's origin; a reference naming
+#     ANOTHER repository (a normal shape: a bead filed in one rig's store
+#     tracking work that lands in a different repo) gets one targeted
+#     `gh pr view` against the repository it names, capped, with the remainder
+#     reported UNDETERMINED.
 #
 # WHAT IS NOT FLAGGED — each exclusion is the healer's, kept deliberately in
 # step with it so a red verdict here always names something a repair pass would
@@ -116,6 +136,10 @@
 # (905 beads on this rig — every anchor closed since merge_result existed).
 # The LEDGER is read first because it is local and cheap; `gh` is a network
 # round trip and is reached ONLY for a rig that produced candidates at all.
+# Four key scans per store rather than two, because the key set above has four
+# members; the two fork keys are worn by a handful of beads city-wide
+# (reconcile-merged-prs.sh says the same of its own fork_pr_url scan), so they
+# add two cheap local reads and essentially no rows.
 # The live-anchor lookup is one more query, made only for a rig with survivors
 # — which on a healthy city is none. The per-PR cross-repository reads are the
 # one input not bounded by construction, so they carry an explicit cap.
@@ -223,28 +247,51 @@ rows_file() {
 }
 
 # ---------------------------------------------------------------------------
-# THE PR-NUMBER AND REPOSITORY PROJECTION, shared by both ledger scans.
+# THE PR-REFERENCE PROJECTION, shared by both ledger scans.
 #
 # A bead names its PR by NUMBER, and a number is unique only WITHIN a
-# repository. So every row resolves both halves in the ONE jq program that
-# builds it: the number from `pr_number`, else parsed out of `pr_url`; the
-# repository from `pr_url` when it parses, else this rig's own origin. Resolving
-# the repository in a later per-row pass would drop rows whose jq failed, and a
-# dropped row is not merely unreported — the ambiguity guard below is a
-# WHOLE-SET property, so losing one of two candidates for a PR makes the
-# survivor look unambiguous.
+# repository. So every reference resolves both halves in the ONE jq program
+# that builds it. Resolving the repository in a later per-row pass would drop
+# rows whose jq failed, and a dropped row is not merely unreported — the
+# ambiguity guard below is a WHOLE-SET property, so losing one of two
+# candidates for a PR makes the survivor look unambiguous.
+#
+# TWO KEY FAMILIES, read the same way. `pr_number`/`pr_url` is the refinery's
+# spelling; `fork_pr`/`fork_pr_url` is the fork-sync flow's, and it comes with
+# no pr_number at all. Within a family the number is the explicit key when set,
+# else the `/pull/<n>` in that family's URL, and the repository is that URL
+# when it parses, else this rig's own origin. The same three keys
+# merge-skill.sh's `PR_NUM_JQ`/`PR_SELF_JQ` and reconcile-merged-prs.sh's
+# `pr_refs` read; those are standalone by design, so this is duplicated rather
+# than sourced. Keep them in step.
+#
+# A LIST, not a single pair: a bead naming two different PRs under two keys is
+# closed over both, and collapsing it to one would be the same blind spot the
+# fork keys were added to close. Identical references across the families
+# collapse to one row, which is the ordinary case (a bead carrying pr_number
+# and a matching pr_url).
+#
+# The number is NOT filtered to digits here, unlike reconcile's `pr_refs`. That
+# filter belongs to a matcher; this is a resolver, and a bead whose number key
+# holds something unreadable must still surface — as a foreign read that fails
+# and WARNS — rather than vanish from the candidate set.
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC2016  # a jq program: $m and $originq are jq bindings, not shell
 PR_IDENT_JQ='
-def pr_num($m):
-  (($m.pr_url // "") | tostring) as $u
-  | if (($m.pr_number // "") | tostring) != "" then (($m.pr_number) | tostring)
-    else ([$u | capture("/pull/(?<n>[0-9]+)")] | .[0]
-          | if . == null then "" else .n end) end;
-def pr_repo($m; $originq):
-  (($m.pr_url // "") | tostring) as $u
+def pr_fam($num; $url; $originq):
+  ($url | tostring) as $u
+  | (($num // "") | tostring) as $explicit
+  | (if $explicit != "" then $explicit
+     else ([$u | capture("/pull/(?<n>[0-9]+)")] | .[0]
+           | if . == null then "" else .n end) end) as $n
   | ([$u | capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<rp>[^/]+/[^/]+)/pull/[0-9]")] | .[0]) as $c
-  | if $c != null then ($c.h + "/" + $c.rp) else $originq end;
+  | if $n == "" then []
+    else [ { n: $n,
+             r: (if $c != null then ($c.h + "/" + $c.rp) else $originq end) } ] end;
+def pr_refs($m; $originq):
+  ( pr_fam($m.pr_number; ($m.pr_url // ""); $originq)
+  + pr_fam($m.fork_pr;   ($m.fork_pr_url // ""); $originq) )
+  | unique;
 '
 
 # ---------------------------------------------------------------------------
@@ -344,9 +391,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # scan, and the ambiguity guard below is a whole-set property that cannot
     # see a duplicate it never scanned.
     # -----------------------------------------------------------------------
+    # EVERY key a bead names a PR with, not pr_number alone — the fork-sync
+    # shape carries fork_pr/fork_pr_url and nothing else, so a scan keyed on
+    # the refinery's spelling never enumerates it at all and no later widening
+    # of the projection could recover it.
     closed_raw=""
     scan_ok=1
-    for key in pr_url pr_number; do
+    for key in pr_url pr_number fork_pr fork_pr_url; do
         # `--db` pins the store explicitly. An ambient BEADS_DIR pins the
         # caller's OWN rig, so a doctor run from inside one rig would otherwise
         # read that rig's ledger once per rig and report its beads under every
@@ -384,6 +435,9 @@ $raw"
     # applied to metadata, minus the open-PR intersection which needs the
     # network read below.
     # -----------------------------------------------------------------------
+    # Everything from here to the closing quote is a SINGLE-quoted shell
+    # string, so no comment inside it may contain an apostrophe — one would end
+    # the string and the rest of the program would be read as shell.
     cands=$(printf '%s\n' "$closed_raw" | strip_ctl | jq -s -c --arg originq "$origin_q" "
       $PR_IDENT_JQ"'
       # An operator hold, read the way merge-skill.sh reads it: set and not one
@@ -410,12 +464,14 @@ $raw"
       | select((($m.source_anchor_bead // "") | tostring) == "")
       # A surviving pool route. Not a spent anchor.
       | select((($m["gc.routed_to"] // "") | tostring) == "")
-      | pr_num($m) as $n
-      | select($n != "")
+      # One row per PR REFERENCE. A bead naming two PRs under two keys is
+      # closed over both, and each is judged against the state of the PR it
+      # actually names.
+      | pr_refs($m; $originq)[] as $ref
       | {
           id:       (($b.id // "?") | tostring),
-          num:      $n,
-          repo:     pr_repo($m; $originq),
+          num:      $ref.n,
+          repo:     $ref.r,
           mr:       $mr,
           branch:   (($m.branch // "") | tostring),
           assignee: ((($b.assignee // "") | tostring) | ascii_downcase),
@@ -444,7 +500,7 @@ $raw"
     # the opposite.
     # -----------------------------------------------------------------------
     if ! command -v gh >/dev/null 2>&1; then
-        warnings+=("$label: \`gh\` is not on PATH, so no PR's state could be read — $n_cands closed candidate(s) in $rig_path/.beads were NOT checked")
+        warnings+=("$label: \`gh\` is not on PATH, so no PR's state could be read — $n_cands closed candidate PR reference(s) in $rig_path/.beads were NOT checked")
         continue
     fi
 
@@ -452,7 +508,7 @@ $raw"
     pr_rc=$?
     if [ "$pr_rc" -ne 0 ] || [ -z "$pr_raw" ] \
        || ! printf '%s' "$pr_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        warnings+=("$label: the open-PR enumeration for '$origin_q' did not return a readable result (rc=$pr_rc, timeout ${BOUND}s) — $n_cands closed candidate(s) were NOT checked; a closed bead can only be flagged against a PR confirmed OPEN")
+        warnings+=("$label: the open-PR enumeration for '$origin_q' did not return a readable result (rc=$pr_rc, timeout ${BOUND}s) — $n_cands closed candidate PR reference(s) were NOT checked; a closed bead can only be flagged against a PR confirmed OPEN")
         continue
     fi
 
@@ -488,7 +544,7 @@ $raw"
         n_foreign=$(printf '%s\n' "$foreign_rows" | grep -c . 2>/dev/null) || n_foreign=0
         foreign_file=$(rows_file foreign "$foreign_rows") || foreign_file=""
         if [ -z "$foreign_file" ]; then
-            warnings+=("$label: $n_foreign closed candidate(s) naming another repository could not be written to a scratch file — whether they landed is UNDETERMINED")
+            warnings+=("$label: $n_foreign closed candidate PR reference(s) naming another repository could not be written to a scratch file — whether they landed is UNDETERMINED")
         else
             fseen=0
             while IFS= read -r frow; do
@@ -513,7 +569,7 @@ $frow"
             done < "$foreign_file"
             rm -f "$foreign_file"
             if [ "$fseen" -ne "$n_foreign" ]; then
-                warnings+=("$label: read only $fseen of $n_foreign cross-repository candidate(s) — the enumeration did not complete, so the rest were NOT checked")
+                warnings+=("$label: read only $fseen of $n_foreign cross-repository candidate PR reference(s) — the enumeration did not complete, so the rest were NOT checked")
             fi
         fi
     fi
@@ -534,8 +590,11 @@ $frow"
         select(.repo == $originq) | . as $c | select($open | index($c.num))' 2>/dev/null)
     local_rc=$?
 
+    # Deduped on the whole REFERENCE, not the bead id: one bead can hold a
+    # local reference and a foreign one, and `unique_by(.id)` would silently
+    # drop whichever sorted second — including the open PR that is the finding.
     surv=$(printf '%s\n%s\n' "$local_surv" "$foreign_open" | jq -s -c '
-        unique_by(.id) as $s
+        unique_by([.id, .repo, .num]) as $s
         | $s[]
         | . as $c
         | . + { dup: ([ $s[]
@@ -543,7 +602,7 @@ $frow"
                         | select(.num == $c.num and .repo == $c.repo) ] | length > 0) }' 2>/dev/null)
     surv_rc=$?
     if [ "$local_rc" -ne 0 ] || [ "$surv_rc" -ne 0 ]; then
-        warnings+=("$label: the open-PR intersection over $n_cands closed candidate(s) failed — this store was NOT checked")
+        warnings+=("$label: the open-PR intersection over $n_cands closed candidate PR reference(s) failed — this store was NOT checked")
         continue
     fi
 
@@ -579,17 +638,19 @@ $frow"
           $PR_IDENT_JQ"'
           .[]? | . as $b | (($b.metadata // {})) as $m
           | select((($m.merge_result // "") | tostring | gsub("[[:space:]]"; "")) != "")
-          | pr_num($m) as $n
-          | select($n != "")
+          # Every key it names a PR with. A live fork_pr-keyed anchor IS the
+          # owner the merge path sees, so reading only pr_number here would
+          # flag its spent predecessor as unanchored.
+          | pr_refs($m; $originq)[] as $ref
           # REPOSITORY and number together: a pull number is unique only within
           # a repository, so a live anchor on some OTHER repository #10 must
           # not acquit a violation on ours.
-          | (pr_repo($m; $originq) + "#" + $n) + " " + (($b.id // "?") | tostring)' 2>/dev/null) || anchored_known=0
+          | ($ref.r + "#" + $ref.n) + " " + (($b.id // "?") | tostring)' 2>/dev/null) || anchored_known=0
     fi
 
     surv_file=$(rows_file survivors "$surv") || surv_file=""
     if [ -z "$surv_file" ]; then
-        warnings+=("$label: $n_surv closed candidate(s) with an OPEN PR could not be written to a scratch file for classification — reported as undetermined rather than dropped")
+        warnings+=("$label: $n_surv closed candidate PR reference(s) with an OPEN PR could not be written to a scratch file for classification — reported as undetermined rather than dropped")
         continue
     fi
 
@@ -681,7 +742,7 @@ $frow"
     # Reporting the remainder as clean is exactly the fail-open this check
     # exists to remove.
     if [ "$surv_seen" -ne "$n_surv" ]; then
-        warnings+=("$label: classified only $surv_seen of $n_surv closed candidate(s) with an OPEN PR — the enumeration did not complete, so the rest were NOT checked")
+        warnings+=("$label: classified only $surv_seen of $n_surv closed candidate PR reference(s) with an OPEN PR — the enumeration did not complete, so the rest were NOT checked")
     fi
 done < "$rig_file"
 rm -f "$rig_file"
@@ -719,7 +780,7 @@ if [ "$n_warn" -gt 0 ]; then
     exit 1
 fi
 
-summary="OK: no closed bead claims unlanded work — $rigs_checked rig(s) checked, $closed_scanned closed PR-referencing bead(s) scanned, $candidates anchor-shaped candidate(s), $open_pr_hits with a still-open PR, 0 unlanded"
+summary="OK: no closed bead claims unlanded work — $rigs_checked rig(s) checked, $closed_scanned closed PR-referencing bead(s) scanned, $candidates anchor-shaped candidate PR reference(s), $open_pr_hits with a still-open PR, 0 unlanded"
 [ "$anchored_live" -gt 0 ] && summary="$summary ($anchored_live already anchored by a live bead)"
 [ "$no_branch" -gt 0 ] && summary="$summary ($no_branch branchless, not a landing claim)"
 [ "$rigs_skipped" -gt 0 ] && summary="$summary ($rigs_skipped suspended rig(s) skipped)"
