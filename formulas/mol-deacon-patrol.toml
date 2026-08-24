@@ -1,7 +1,7 @@
 description = """
 Deacon patrol loop. Poured as a root-only wisp on startup:
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}'
+  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var escalation_cooldown='{{escalation_cooldown}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: check inbox, run town-wide coordination
@@ -46,7 +46,7 @@ between patrol cycles.
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-deacon-patrol"
-version = 18
+version = 19
 
 [vars]
 [vars.binding_prefix]
@@ -56,6 +56,10 @@ default = ""
 [vars.event_timeout]
 description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep — the harness blocks a standalone sleep, and a blocked wait is not a slow patrol, it is NO pacing at all. Raised 60 -> 600 (tk-2qa85), together with the next-iteration defect that made the old value dead letter: the pour forwarded only binding_prefix, and a --root-only pour materializes no defaults, so from cycle 2 this var arrived unrendered and there was no interval left to honour. The deacon was 17.9% of all city model calls over 24h (6,273 of 34,983). 600 is the harness ceiling on a single bounded wait call, not a preference — see the same note on mol-witness-patrol. This value reaches the loop ONLY through the startup pour, which reads it from this default via `gc formula show`; city.toml [rigs].formula_vars cannot override it, because mergeRigFormulaVars preserves an explicit --var."
 default = "600"
+
+[vars.escalation_cooldown]
+description = "Seconds before an UNCHANGED finding may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h. The deacon sent NINE identical HIGH escalations for one already-tracked finding in a day (2026-08-02, lx-9d6me) and a mayor nudge asking it to stop did not stop it, which is why the bound is code and not prose. Like event_timeout, this value reaches the loop ONLY through the pour: a --root-only wisp materializes no defaults, so if next-iteration stops forwarding it, cycle 2 receives the literal {{escalation_cooldown}} — escalation-gate.sh detects that unsubstituted form and falls back to its own 86400s default rather than failing, so the degradation is safe but silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
+default = "86400"
 
 [[steps]]
 id = "check-inbox"
@@ -689,12 +693,111 @@ the operator's inbox, and draining it here hides the outage from them.
 
 **Step 3: React to alerts**
 
+**Escalation discipline — every mail in this step goes through the gate.**
+
+The conditions below are re-derived from live state on every patrol cycle, and
+they stay true for as long as the thing is broken. So the deacon mailed the
+mayor again, and again: on 2026-08-02 it sent NINE identical HIGH escalations
+for ONE already-tracked finding (lx-9d6me) in a single day — lx-wisp-zpf4p,
+h5bh9, br7jp, czs3b, ssui3, vrjp7, dbi56, 4v4zz, 48x69 — differing only in an
+age that ticked up. A mayor nudge asking it to stop did not stop it. That is
+the whole reason this is a gate and not a paragraph asking you to remember.
+
+**The cost is burial, not volume.** In the middle of those nine, this same
+step emitted `dolt-noms-size: lx 2.24 GB, largest of 5` — a third independent
+symptom of the same root cause and the most useful datapoint of the cycle. It
+sat between duplicates and was nearly lost. Confirmed still live on
+2026-08-24: 26 messages in one mayor cycle, ~6 of them re-escalations of
+already-tracked findings, dolt-noms-size again among them.
+
+`escalation-gate.sh` mails the first time, then stays quiet until `--state`
+changes or the cooldown elapses. It suppresses REPETITION, never news. But it
+keys its stamp on a BEAD, and a deacon finding is about a database or a doctor
+check, not a bead — which is why it could not be used here before and the
+deacon went on mailing bare. `finding-anchor.sh` supplies the missing anchor:
+it returns the one open bead tracking this finding, minting it if there is
+none. Compose the two:
+
+```bash
+# >>> deacon-escalation-wiring
+SCRIPTS_DIR=""
+for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  if [ -x "$cand/escalation-gate.sh" ] && [ -x "$cand/finding-anchor.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+done
+if [ -n "$SCRIPTS_DIR" ]; then
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "<finding-name>" --title "<tracker title>" --body "$BODY")
+  if [ -n "$ANCHOR" ]; then
+    if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon --state "<the failure CLASS>" --cooldown "{{escalation_cooldown}}" --subject "<subject>" --body "$BODY"; then
+      echo "deacon: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
+    fi
+  else
+    echo "deacon: finding-anchor could not resolve an anchor for <finding-name>; NOT mailing unbounded. Next cycle retries." >&2
+  fi
+else
+  gc mail send mayor/ -s "<subject>" -m "$BODY" || echo "deacon: fallback 'gc mail send' failed; next cycle retries." >&2
+fi
+# <<< deacon-escalation-wiring
+```
+
+**`--kind deacon`, always.** The gate's default kind is `witness`, and one
+anchor + kind = one open escalation. Sharing a kind with another role would
+let whichever got there first MUTE the other. The kind names the sending
+ROLE, never the topic — splitting "backup" and "doctor" into separate kinds
+just restores the storm one framing at a time.
+
+**`--state` is the failure CLASS, never the age.** This is the trap that
+recreates the storm while looking correctly gated. A Step 2a line reads
+`manifest is 40h old`; next cycle it reads `41h old`. Put that line in the
+fingerprint and every single cycle is a "state changed" — the gate re-mails
+forever and you have rebuilt the nine mails with extra steps. The same is true
+of any monotonic value: a byte count, a commit count, an uptime, the anchor's
+own `updated_at`. Fingerprint what would make this a DIFFERENT SITUATION:
+
+| finding | `--state` | NOT |
+|---|---|---|
+| Step 2a `FLAG` | the verdict class — `no-backup-dir`, `no-manifest`, `newer-file`, `stale-manifest`, `scan-failed` | the manifest age in hours |
+| Step 2a `FLAG-ROOT` | `missing` or `empty` | the database-name list |
+| server unreachable | `unreachable` | the retry count or elapsed time |
+| doctor finding | the finding's `.status` and `.severity` | its `.message`, which carries live numbers |
+
+That matches what the bead asked for: escalate again when severity crosses a
+threshold or the condition clears and returns, not on every tick while it
+persists.
+
+**The finding name is a single token, taken verbatim — never composed from
+prose.** `finding-anchor.sh` looks the tracker up by an exact metadata match
+for a reason: `bd search` matches a CONTIGUOUS SUBSTRING, not tokens, so
+`bd search "backup freshness"` returns NOTHING for a bead titled
+`bd-backup-freshness`. Two patrol wisps (lx-wisp-rxmg, lx-wisp-qwjr) declared
+that finding untracked on exactly that miss while two beads tracking it were
+open, and a duplicate (gc-woe2r) was filed before anyone noticed. Pass the
+finding's own name — `dolt-noms-size`, `bd-backup-freshness` — or, for a
+per-database verdict, `<check>:<db>` such as `dolt-backup-manifest:lx`.
+
+**A non-zero exit is NOT a licence to mail anyway.** It means one thing: the
+escalation could not be bounded (unreadable anchor, unwritable stamp). Mailing
+past that is the unbounded storm. Log it, keep patrolling, let the next cycle
+retry. A rig that has not synced the scripts falls back to mailing directly —
+the old behavior, not a dropped escalation.
+
+**Keep the resolution loop in the SAME shell as the send.** Each tool call is
+a fresh shell, so a `SCRIPTS_DIR` resolved in an earlier call is gone, and an
+empty one expands to `/escalation-gate.sh` — which fails and sends nothing, a
+silent mute that is worse than the storm.
+
+
 **Server down (CRITICAL):** `server.reachable == false` — either no
 process is listening on the port, or a process is listening but not
 answering SQL (wedged goroutines, migration lock, saturated pool).
+Gated like everything else in this step — a server that is down stays down,
+and re-mailing it every cycle buries the diagnostics that would fix it:
 ```bash
-gc mail send mayor/ -s "ESCALATION: Dolt server unreachable [CRITICAL]" \\
-  -m "gc dolt health reports server.reachable=false"
+BODY="gc dolt health reports server.reachable=false"
+ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" dolt-server-unreachable \\
+  --title "dolt server unreachable" --body "$BODY")
+[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+  --state unreachable --cooldown "{{escalation_cooldown}}" \\
+  --subject "ESCALATION: Dolt server unreachable [CRITICAL]" --body "$BODY"
 ```
 
 **Commit bloat (commits > 50k in any DB):**
@@ -725,27 +828,68 @@ gc session nudge dog/ "Backup needed: <the Step 2a FLAG line, verbatim>"
 ```
 If the same database is still flagged on the next rotation, the dog's own
 retries are not clearing it. Escalate — unattended, this is silent data
-loss on a ledger nobody can restore:
+loss on a ledger nobody can restore. **One gated call per flagged database**,
+never one mail for the set: a set fingerprint changes when a fourth database
+joins three, so the whole set re-mails and the three unchanged ones are
+re-escalated for the fourth's sake. Per-database anchors also namespace
+themselves for free.
+
+`CLASS` below is the verdict class, not the line — see "`--state` is the
+failure CLASS, never the age". Derive it from the FLAG's own wording; the age
+in hours must not reach `--state`, or this re-mails every cycle.
+
+**The arm order is load-bearing.** Two Step 2a verdicts report a scan failure
+*and* a manifest problem in one line ("backup directory scan failed (...) and
+there is no manifest", "... and the manifest is 40h old"), so a `no manifest`
+or `manifest is ... old` arm placed first swallows them and a read failure
+gets fingerprinted as an ordinary stale manifest — the two then mute each
+other. Match the most specific cause first. `$DB` is the flagged database name
+from the verdict, and `$FLAG_LINE` is that verdict line entire:
 ```bash
-gc mail send mayor/ -s "ESCALATION: <db> has no restorable backup [HIGH]" \\
-  -m "<the Step 2a FLAG line, verbatim>. Backup dog retries not clearing."
+BODY="$FLAG_LINE
+Backup dog retries not clearing."
+case "$FLAG_LINE" in
+  *"scan failed"*)                     CLASS=scan-failed ;;
+  *"no backup directory"*)             CLASS=no-backup-dir ;;
+  *"uploaded but never committed"*)    CLASS=newer-file ;;
+  *"no manifest"*)                     CLASS=no-manifest ;;
+  *"manifest is"*"old"*)               CLASS=stale-manifest ;;
+  *)                                   CLASS=flagged ;;
+esac
+ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "dolt-backup-manifest:$DB" \\
+  --title "$DB has no restorable backup" --body "$BODY")
+[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+  --state "$CLASS" --cooldown "{{escalation_cooldown}}" \\
+  --subject "ESCALATION: $DB has no restorable backup [HIGH]" --body "$BODY"
 ```
-"Still flagged on the next rotation" is answered by your own escalation
-trail, not by memory: that mail is the durable record. Before escalating,
-check whether this database was already escalated:
-```bash
-gc mail inbox mayor/ | grep -F "no restorable backup"
-```
-A prior hit for the same database means the retries have had a full cycle
-and have not cleared it — escalate again and say so.
+**Do not hand-check "was this already escalated".** The old instruction here
+was to `grep` the mayor's inbox for a prior mail and, on a hit, "escalate
+again and say so" — which licensed the storm rather than bounding it, read a
+mailbox this agent does not own, and raced the mayor archiving it. The gate's
+stamp on the anchor is the durable record now, and it is the same place
+`check.<gate>=green@<oid>` already lives. A `SUPPRESSED` line on stdout means
+the mayor has already been told; it is a correct outcome, not a failure, and
+not a reason to mail.
 
 **No backup root, or an empty one (`FLAG-ROOT`):** the most severe state
 this step can report — *no* database has a restorable backup, so the whole
 Step 2a verdict set is missing rather than clean. Escalate immediately with
-the database names the verdict lists; do not nudge the dog and move on:
+the database names the verdict lists; do not nudge the dog and move on.
+`--state` is the root's failure shape — NOT the database-name list, which
+grows as rigs are added and would re-mail the same outage for each new one:
 ```bash
-gc mail send mayor/ -s "ESCALATION: no Dolt backups exist at all [CRITICAL]" \\
-  -m "Backup root <path> missing/empty. NO restorable backup for: <db names>."
+case "$FLAG_ROOT_LINE" in
+  *"listed no databases"*)  ROOT_CLASS=no-databases ;;
+  *"no backup root at"*)    ROOT_CLASS=missing ;;
+  *"is empty"*)             ROOT_CLASS=empty ;;
+  *)                        ROOT_CLASS=flag-root ;;
+esac
+BODY="$FLAG_ROOT_LINE"
+ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" dolt-backup-root \\
+  --title "no Dolt backup root — nothing is restorable" --body "$BODY")
+[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+  --state "$ROOT_CLASS" --cooldown "{{escalation_cooldown}}" \\
+  --subject "ESCALATION: no Dolt backups exist at all [CRITICAL]" --body "$BODY"
 ```
 
 **Indeterminate (`RECHECK`):** a sync may be in flight. Re-run the Step 2a
@@ -842,18 +986,35 @@ contract, and that must break this step visibly: silently, it converts
 the patrol into a duplicate-escalation generator, because an empty
 finding set and an empty dedupe result both read as "nothing to see".
 
+Both branches are gated, for the same reason the findings below are: a
+`gc doctor` that times out at the 300s bound times out on every cycle, so an
+ungated mail here is a storm about the storm-detector. `--state` is the return
+code (a small enum) and the drifted key list — both stable while the breakage
+lasts, both genuinely different when it changes shape:
 ```bash
 if [ "$DOCTOR_RC" != 0 ] && [ "$DOCTOR_RC" != 1 ]; then
-  gc mail send mayor/ -s "DOCTOR: gc doctor --json did not complete [HIGH]" -m "rc=$DOCTOR_RC at a 300s bound (124 = the bound fired), payload empty or partial. NOT reporting clean."
+  BODY="rc=$DOCTOR_RC at a 300s bound (124 = the bound fired), payload empty or partial. NOT reporting clean."
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" doctor-run-incomplete \\
+    --title "gc doctor --json does not complete" --body "$BODY")
+  [ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+    --state "rc=$DOCTOR_RC" --cooldown "{{escalation_cooldown}}" \\
+    --subject "DOCTOR: gc doctor --json did not complete [HIGH]" --body "$BODY"
 elif ! printf '%s' "$DOCTOR_JSON" | jq -e 'has("results")' >/dev/null 2>&1; then
   KEYS=$(printf '%s' "$DOCTOR_JSON" | jq -c 'keys' 2>/dev/null)
   [ -n "$KEYS" ] || KEYS="unparseable (payload is not JSON)"
-  gc mail send mayor/ -s "DOCTOR: --json schema drift, no .results key [HIGH]" -m "Top-level keys: $KEYS. Findings moved or the payload is not JSON; the findings filter is now blind and this step reports clean regardless of city state."
+  BODY="Top-level keys: $KEYS. Findings moved or the payload is not JSON; the findings filter is now blind and this step reports clean regardless of city state."
+  ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" doctor-json-schema-drift \\
+    --title "gc doctor --json has no .results key" --body "$BODY")
+  [ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+    --state "$KEYS" --cooldown "{{escalation_cooldown}}" \\
+    --subject "DOCTOR: --json schema drift, no .results key [HIGH]" --body "$BODY"
 fi
 ```
 
 Either branch is a **failed** health scan, not a clean one. Do not run
-the findings filter on a payload you could not validate.
+the findings filter on a payload you could not validate. Gating changes which
+CYCLE mails, never whether the scan is treated as failed: a `SUPPRESSED` here
+still means the payload is bad and the step still reports NOT clean.
 
 **Before escalating "`gc doctor --json` emits invalid JSON", rule out
 your own capture — this non-bug has been re-filed 6+ times.** The check
@@ -970,38 +1131,70 @@ finding untracked, also search the distinctive nouns from its `.message`
 and `.details[]` (a path, a bead id, a check it cites), and search
 description text as well as titles (`--desc-contains "<term>"`).
 
-An **open** match means the finding is tracked: do not escalate it, note
-it as already-tracked with the bead id. A **closed** match (`--status
-all`) is context rather than suppression — the finding recurred after
-someone closed it, which belongs in the escalation.
+An **open** match means the finding is tracked: note it as already-tracked
+with the bead id. A **closed** match (`--status all`) is context rather than
+suppression — the finding recurred after someone closed it, which belongs in
+the escalation.
 
-**Do not re-escalate what you already escalated.** Your own escalation
-trail is the durable record and it surfaces in the same search: HQ holds
-your prior `DOCTOR: ...` mail beads, which is why the
-`census-owner-liveness` search above also returns `lx-wisp-wu2tl`, an
-earlier escalation of that same finding. If a finding's only matches are
-your own prior escalations, it has already been raised — do not send it
-again unless the finding materially changed, and if you do, say
-"re-reporting, previously escalated as <id>".
+**This search is CONTEXT FOR THE BODY. It is not what decides whether you
+mail.** It cannot be, and the measurement is what settles it: `bd search`
+matches a CONTIGUOUS SUBSTRING of title/description, not tokens. In
+rigs/gascity, `bd search "backup freshness"` returns NOTHING for a bead whose
+title says `bd-backup-freshness`, and `bd search "embedded-store backup"`
+returns nothing for a title reading `embedded-store',`. Two patrol wisps
+(lx-wisp-rxmg, lx-wisp-qwjr) declared `bd-backup-freshness` untracked on
+exactly that miss while gc-b1n7a AND gc-ltbm5 were open — gc-ltbm5 being
+itself a stop-re-escalating tracker filed for this purpose — and a duplicate
+(gc-woe2r) was filed on the false signal before anyone caught it. A dedupe
+that reports "no open bead in any store matches" in good faith, and is wrong,
+is worse than no dedupe: it launders a duplicate as a verified new finding.
+
+**What decides whether you mail is the gate**, keyed on an exact metadata
+match for the check's own name. Use the wiring from the dolt-health step's
+"Escalation discipline", with `--key doctor_check` so the anchor converges on
+the SAME bead `doctor-finding-gate.sh` mints and reads at close time rather
+than forking a second tracker for one check:
+```bash
+CHECK=<the .results[].name you are about to escalate>
+finding=$(printf '%s' "$DOCTOR_JSON" | jq -c --arg c "$CHECK" '.results[] | select(.name==$c)')
+STATE=$(printf '%s' "$finding" | jq -r '[.status, (.severity // "-")] | join("/")')
+ANCHOR=$("$SCRIPTS_DIR/finding-anchor.sh" "$CHECK" --key doctor_check \\
+  --title "doctor check $CHECK is firing" --body "$finding")
+[ -n "$ANCHOR" ] && "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$ANCHOR" --kind deacon \\
+  --state "$STATE" --cooldown "{{escalation_cooldown}}" \\
+  --subject "DOCTOR: $CHECK" --body "$finding"
+```
+`--state` is the finding's `.status` and `.severity`, NOT its `.message`. The
+message carries live numbers — `dolt-noms-size: lx 2.24 GB, largest of 5` —
+and a fingerprint containing a number that drifts every cycle is a gate that
+re-mails every cycle. Severity crossing a band is the material change worth
+re-reporting; a byte count ticking up is not.
+
+That finding is the reason this matters. On 2026-08-02 `dolt-noms-size` was a
+third independent symptom of the lx root cause and the most useful datapoint
+of the cycle, and it arrived between nine duplicate backup escalations and was
+nearly lost. On 2026-08-24 it was buried again, in a 26-message cycle of which
+~6 were re-escalations of already-tracked findings.
 
 **For simple findings:** Act directly (e.g., stale lock files, temp
 directory cleanup, broken worktrees via `gc doctor --fix`).
 
-**For complex findings:** Escalate to mayor. Forward the offending
-check object verbatim (it includes `name`, `status`, `severity`,
-`message`, and any `details` / `fix_hint`) so the mayor sees the same
-machine-readable context —
-from the payload you already captured, not a fresh 4-minute run:
-```bash
-finding=$(printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.name=="<check>")')
-gc mail send mayor/ -s "DOCTOR: <finding>" -m "$finding"
-```
+**For complex findings:** Escalate to mayor **through the gate above**, never
+with a bare `gc mail send`. Forward the offending check object verbatim (it
+includes `name`, `status`, `severity`, `message`, and any `details` /
+`fix_hint`) so the mayor sees the same machine-readable context — from the
+payload you already captured, not a fresh 4-minute run. That is what `--body
+"$finding"` in the gated call above sends.
 
-State what the dedupe found, not just what the check said: the bead ids
-when there are matches, and "no open bead in any store matches <name> or
-<terms searched>" when there are none. An unqualified "not tracked by any
-open bead" backed by `bd list` is the claim that cost three mayor
-round-trips — if you did not run the city-wide search, do not make it.
+State what the search found, not just what the check said: the bead ids when
+there are matches, and when there are none, say which terms you searched
+rather than claiming absence. An unqualified "not tracked by any open bead" is
+the claim that cost three mayor round-trips, and the substring behaviour above
+is why it cannot be made from a search alone.
+
+A `SUPPRESSED` line from the gate means the mayor has already been told about
+this finding and nothing material has changed. That is a correct outcome, not
+a failure, and not a reason to mail.
 
 Close this step after check."""
 
@@ -1022,7 +1215,7 @@ Handle any urgent messages that arrived during patrol. Archive the rest.
 
 **2. Pour next iteration BEFORE burning:**
 ```bash
-NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id')
+NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var escalation_cooldown='{{escalation_cooldown}}' --json | jq -r '.new_epic_id')
 gc bd update "$NEXT" --assignee=$GC_AGENT
 ```
 

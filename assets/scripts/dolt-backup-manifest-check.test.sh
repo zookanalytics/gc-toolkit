@@ -146,11 +146,25 @@ else
         ok "Step 3 backup alerts demand no class-specific 'newer file' field"
     fi
 
-    # Both of them — the dog nudge and the mayor escalation.
-    if [ "$(grep -c 'verbatim' <<< "$ALERT_LINES" || true)" -ge 2 ]; then
-        ok "both Step 3 backup alerts carry the Step 2a verdict line verbatim"
+    # Both of them — the dog nudge and the mayor escalation. They carry the
+    # verdict by two different mechanisms and each is checked on its own terms:
+    # the nudge is a prose template that says "verbatim", while the escalation
+    # is real shell and carries the line by variable (tk-mvc72 put it behind
+    # escalation-gate.sh, which needs a `$BODY`). Counting the word "verbatim"
+    # across both, as this used to, tests the WORDING rather than the
+    # requirement — and would fail the stronger of the two constructions, since
+    # `$FLAG_LINE` cannot drift from the verdict the way a retyped template can.
+    if grep -qE 'Backup needed:.*verbatim' <<< "$ALERT_LINES"; then
+        ok "the Step 3 dog nudge carries the Step 2a verdict line verbatim"
     else
-        bad "Step 3 backup alerts do not both carry the verdict line: $ALERT_LINES"
+        bad "the Step 3 dog nudge no longer carries the verdict line: $ALERT_LINES"
+    fi
+
+    # The escalation body must BE the verdict line, not a re-description of it.
+    if grep -qE '^BODY="\$FLAG_LINE$' <<< "$STEP"; then
+        ok "the Step 3 mayor escalation body is built from the Step 2a verdict line"
+    else
+        bad "the Step 3 mayor escalation body is not built from \$FLAG_LINE"
     fi
 fi
 

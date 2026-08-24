@@ -1,7 +1,7 @@
 Formula: mol-deacon-patrol
 Description: Deacon patrol loop. Poured as a root-only wisp on startup:
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}'
+  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var escalation_cooldown='{{escalation_cooldown}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: check inbox, run town-wide coordination
@@ -48,6 +48,7 @@ Read each step's description before acting — Config values override defaults.
 
 Variables:
   {{binding_prefix}}: Import binding prefix for gastown agent identities, including trailing dot when bound. (default=)
+  {{escalation_cooldown}}: Seconds before an UNCHANGED finding may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h. The deacon sent NINE identical HIGH escalations for one already-tracked finding in a day (2026-08-02, lx-9d6me) and a mayor nudge asking it to stop did not stop it, which is why the bound is code and not prose. Like event_timeout, this value reaches the loop ONLY through the pour: a --root-only wisp materializes no defaults, so if next-iteration stops forwarding it, cycle 2 receives the literal {{escalation_cooldown}} — escalation-gate.sh detects that unsubstituted form and falls back to its own 86400s default rather than failing, so the degradation is safe but silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier. (default=86400)
   {{event_timeout}}: Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep — the harness blocks a standalone sleep, and a blocked wait is not a slow patrol, it is NO pacing at all. Raised 60 -> 600 (tk-2qa85), together with the next-iteration defect that made the old value dead letter: the pour forwarded only binding_prefix, and a --root-only pour materializes no defaults, so from cycle 2 this var arrived unrendered and there was no interval left to honour. The deacon was 17.9% of all city model calls over 24h (6,273 of 34,983). 600 is the harness ceiling on a single bounded wait call, not a preference — see the same note on mol-witness-patrol. This value reaches the loop ONLY through the startup pour, which reads it from this default via `gc formula show`; city.toml [rigs].formula_vars cannot override it, because mergeRigFormulaVars preserves an explicit --var. (default=600)
 
 Steps (8):
