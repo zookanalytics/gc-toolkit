@@ -87,6 +87,18 @@ case "${1:-}" in
     if [ "$ready" = "1" ] && [ -n "$id" ]; then
       echo "Error: validation failed: --ready cannot filter on IDFilter (--id)" >&2; exit 1
     fi
+    # Selective failures. The feeder makes two DIFFERENT reads with different
+    # consequences — the candidate listing (--ready) and the in-flight count
+    # (--has-metadata-key ... --all) — and reading either as empty is its own
+    # distinct bug. A single blunt STUB_BD_LIST_FAIL cannot tell them apart,
+    # and the in-flight one is the dangerous half: read as 0 it does not
+    # under-report, it hands the pass a full budget.
+    if [ -n "${STUB_BD_FAIL_READY:-}" ] && [ "$ready" = "1" ]; then
+      echo "bd: simulated ready-listing failure" >&2; exit 1
+    fi
+    if [ -n "${STUB_BD_FAIL_METAKEY:-}" ] && [ -n "$key" ] && [ "$ready" = "0" ]; then
+      echo "bd: simulated metadata-key listing failure" >&2; exit 1
+    fi
     jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" '
       [ .[]
         | select($k == "" or (.metadata | has($k)))
@@ -334,6 +346,295 @@ eq "$(meta b-1 gc.dispatch_when_ready_reason)" "<absent>" "disarm clears the rea
 has "$(notes b-1)" "keep me" "disarm appends to notes rather than replacing"
 has "$(notes b-1)" "superseded" "disarm records why"
 
+
+# --- THE FEEDER --------------------------------------------------------------
+# The input half (tk-ku1uvv). Everything above this line was already true on
+# 2026-08-24 and the queue still did not move: `arm` worked, `reconcile` worked,
+# and NOTHING EVER CALLED ARM. 252 ready work beads sat unrouted, 51 of them
+# over 30 days old, while `list` correctly reported an empty owed-queue. The
+# machine ran; the hopper was empty.
+#
+# So the feeder is tested HERE, in the suite that already owns this mechanism,
+# rather than in a dispatch-feeder.test.sh of its own: this pack has no test
+# discovery, suites are invoked by name, and the feeder cannot be reasoned
+# about apart from the arm it calls. Several cases below run the REAL
+# deferred-dispatch.sh as the feeder's arm tool, which is the point — a feeder
+# that stopped being a caller of `arm` would be a second dispatch path, and
+# that is the one thing it must never become.
+echo "# feeder"
+FEEDER="$HERE/dispatch-feeder.sh"
+[ -x "$FEEDER" ] || chmod +x "$FEEDER" 2>/dev/null
+export DISPATCH_FEEDER_TARGET="rig/pool"
+
+feed() { "$FEEDER" feed "$@" 2>&1; }
+armedcount() { jq -r '[ .[] | select(.metadata["gc.dispatch_when_ready"] != null) ] | length' "$STUB_STORE"; }
+# A plain candidate: ready, open, unassigned, no machinery markers.
+cand() { printf '{"id":"%s","status":"open","assignee":"","issue_type":"%s","created_at":"%s","labels":[],"metadata":{},"notes":"","_ready":true}' "$1" "${3:-task}" "$2"; }
+
+# --- FEEDOLDEST: the 31d+ tail drains, it does not starve ---------------------
+# The whole reason the queue had a 123-day-old head is that nothing was working
+# it. A feeder that took the newest ready bead, or the highest priority, would
+# leave exactly the beads that motivated this file untouched forever.
+store "[$(cand w-new 2026-08-20T00:00:00Z), $(cand w-old 2026-04-23T00:00:00Z bug), $(cand w-mid 2026-06-01T00:00:00Z)]"
+out="$(feed)"; rc=$?
+eq "$rc" 0 "FEEDOLDEST: a clean pass exits 0"
+eq "$(meta w-old gc.dispatch_when_ready)" "rig/pool" "FEEDOLDEST: the OLDEST candidate is armed"
+eq "$(meta w-mid gc.dispatch_when_ready)" "<absent>" "FEEDOLDEST: the middle one is not"
+eq "$(meta w-new gc.dispatch_when_ready)" "<absent>" "FEEDOLDEST: the newest one is not"
+has "$out" "armed w-old" "FEEDOLDEST: the pass says which bead it armed"
+
+# --- FEEDARM: a caller of arm, never a second dispatch path -------------------
+# Calling `gc sling` from the feeder would bypass BOTH fail-closed layers that
+# already exist — arm's refusals (closed, already dispatched, no target) and
+# reconcile's (held, already routed) — and re-implement a dispatcher that is
+# already written and already tested above.
+eq "$(slings)" "0" "FEEDARM: the feeder never slings — it arms, and reconcile slings"
+eq "$(meta w-old gc.auto_armed_by)" "dispatch-feeder" "FEEDARM: the feeder stamps its own reservation marker"
+has "$(meta w-old gc.auto_armed_at)" "T" "FEEDARM: and when it did so"
+has "$(meta w-old gc.dispatch_when_ready_reason)" "auto-armed by dispatch-feeder" "FEEDARM: the arm records that a feeder placed it, not a human"
+# ...and the record it wrote is one the SHIPPED reconcile pass actually performs.
+# This is the end-to-end claim: feeder -> arm -> reconcile -> sling.
+out="$("$SUT" reconcile 2>&1)"
+eq "$(slings)" "1" "FEEDARM: reconcile slings the bead the feeder armed"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool w-old" "FEEDARM: to the target the feeder recorded"
+eq "$(meta w-old gc.auto_armed_by)" "dispatch-feeder" "FEEDARM: reconcile clears the arm but LEAVES the feeder's marker — that marker is the cap's only accounting"
+
+# --- FEEDRESERVE: the cap counts committed work, not pending arms -------------
+# The case that explains why the feeder keeps a marker of its own instead of
+# counting gc.dispatch_when_ready. Reconcile CLEARS that key the instant it
+# slings, so counting it would show every dispatched bead leaving the tally
+# within one 2m tick and the cap would bind on nothing — the feeder would keep
+# arming into a pool that is already full, which is the unbounded feeder this
+# design exists to not be.
+store "[{\"id\":\"w-gone\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\",\"gc.routed_to\":\"rig/pool\"},\"notes\":\"\",\"_ready\":true}, $(cand w-next 2026-02-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"; rc=$?
+eq "$rc" 0 "FEEDRESERVE: being at cap is not an error"
+eq "$(meta w-next gc.dispatch_when_ready)" "<absent>" "FEEDRESERVE: a dispatched bead whose arm was already consumed STILL holds its slot"
+has "$out" "at cap" "FEEDRESERVE: the pass says it is at cap"
+
+# --- FEEDCAP: the in-flight cap binds ----------------------------------------
+store "[{\"id\":\"w-a\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\"},\"notes\":\"\",\"_ready\":false}, $(cand w-b 2026-02-01T00:00:00Z), $(cand w-c 2026-03-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=2 DISPATCH_FEEDER_MAX_PER_TICK=9 feed)"
+eq "$(armedcount)" "1" "FEEDCAP: one slot free means exactly one arm, whatever the per-tick cap allows"
+eq "$(meta w-b gc.dispatch_when_ready)" "rig/pool" "FEEDCAP: and it is the oldest candidate"
+
+# A CLOSED auto-armed bead is finished work and must free its slot, or the
+# feeder arms once per rig and then stops forever.
+store "[{\"id\":\"w-done\",\"status\":\"closed\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-01-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.auto_armed_by\":\"dispatch-feeder\"},\"notes\":\"\",\"_ready\":false}, $(cand w-b 2026-02-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=1 feed)"
+eq "$(meta w-b gc.dispatch_when_ready)" "rig/pool" "FEEDCAP: a CLOSED auto-armed bead releases its slot"
+
+# --- FEEDTICK: the per-tick cap is a separate bound ---------------------------
+# The backstop against a cold start emptying half a 252-deep queue into the
+# pool in a single pass, even with the in-flight cap raised.
+store "[$(cand w-1 2026-01-01T00:00:00Z), $(cand w-2 2026-02-01T00:00:00Z), $(cand w-3 2026-03-01T00:00:00Z), $(cand w-4 2026-04-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=99 DISPATCH_FEEDER_MAX_PER_TICK=2 feed)"
+eq "$(armedcount)" "2" "FEEDTICK: at most MAX_PER_TICK arms per pass, however many slots are free"
+eq "$(meta w-1 gc.dispatch_when_ready)" "rig/pool" "FEEDTICK: oldest first within the tick budget"
+eq "$(meta w-2 gc.dispatch_when_ready)" "rig/pool" "FEEDTICK: then the next oldest"
+eq "$(meta w-3 gc.dispatch_when_ready)" "<absent>" "FEEDTICK: and no further"
+
+# --- FEEDOFF: the operator's off switch --------------------------------------
+# Acceptance criterion from the bead: turning the flag off stops all
+# auto-arming AND leaves hand-slung work unaffected.
+store "[$(cand w-1 2026-01-01T00:00:00Z), {\"id\":\"w-hand\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"created_at\":\"2026-02-01T00:00:00Z\",\"labels\":[],\"metadata\":{\"gc.dispatch_when_ready\":\"rig/other\",\"gc.dispatch_when_ready_args\":\"[]\"},\"notes\":\"\",\"_ready\":true}]"
+out="$(DISPATCH_FEEDER_ENABLED=0 feed)"; rc=$?
+eq "$rc" 0 "FEEDOFF: a disabled feeder is not an error"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDOFF: disabled arms nothing"
+eq "$(meta w-hand gc.dispatch_when_ready)" "rig/other" "FEEDOFF: a hand-written arm is left completely alone"
+has "$out" "disabled" "FEEDOFF: the pass says it is disabled rather than reporting an empty queue"
+for v in false FALSE no off 0; do
+    store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+    DISPATCH_FEEDER_ENABLED="$v" feed >/dev/null 2>&1
+    eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDOFF: DISPATCH_FEEDER_ENABLED=$v also disables"
+done
+# ...and the mirror. Without these the refusal above could widen to swallow the
+# on-values and every rig would go quiet with the flag apparently set to on.
+for v in 1 true TRUE yes on; do
+    store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+    DISPATCH_FEEDER_ENABLED="$v" feed >/dev/null 2>&1
+    eq "$(meta w-1 gc.dispatch_when_ready)" "rig/pool" "FEEDOFF: DISPATCH_FEEDER_ENABLED=$v still ARMS"
+done
+
+# --- FEEDEXCL: everything that must not be auto-slung ------------------------
+# Each of these was measured in the live gc-toolkit ready listing on 2026-08-24
+# (330 ready beads, 188 excluded). The step-bead case is the one that matters
+# most: 67 of the 330 were formula STEP beads, and arming one pours a workflow
+# onto a bead that is already inside a workflow.
+store '[
+ {"id":"x-epic","status":"open","assignee":"","issue_type":"epic","created_at":"2026-01-01T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":true},
+ {"id":"x-convoy","status":"open","assignee":"","issue_type":"convoy","created_at":"2026-01-02T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":true},
+ {"id":"x-spec","status":"open","assignee":"","issue_type":"spec","created_at":"2026-01-03T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":true},
+ {"id":"x-step","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-04T00:00:00Z","labels":[],"metadata":{"gc.step_ref":"mol-polecat-work.implement"},"notes":"","_ready":true},
+ {"id":"x-stepid","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-05T00:00:00Z","labels":[],"metadata":{"gc.step_id":"mol-polecat-work.implement"},"notes":"","_ready":true},
+ {"id":"x-root","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-06T00:00:00Z","labels":[],"metadata":{"gc.root_bead_id":"r-1"},"notes":"","_ready":true},
+ {"id":"x-kind","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-07T00:00:00Z","labels":[],"metadata":{"gc.kind":"scope-check"},"notes":"","_ready":true},
+ {"id":"x-routed","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-08T00:00:00Z","labels":[],"metadata":{"gc.routed_to":"rig/pool"},"notes":"","_ready":true},
+ {"id":"x-exec","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-09T00:00:00Z","labels":[],"metadata":{"gc.execution_routed_to":"rig/pool"},"notes":"","_ready":true},
+ {"id":"x-armed","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-10T00:00:00Z","labels":[],"metadata":{"gc.dispatch_when_ready":"rig/other"},"notes":"","_ready":true},
+ {"id":"x-takeaway","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-11T00:00:00Z","labels":[],"metadata":{"gc.takeaway":"next sitting"},"notes":"","_ready":true},
+ {"id":"x-hold","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-12T00:00:00Z","labels":[],"metadata":{"triage.hold":"operator"},"notes":"","_ready":true},
+ {"id":"x-assigned","status":"open","assignee":"rig/somebody","issue_type":"task","created_at":"2026-01-13T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":true},
+ {"id":"x-kind2","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-14T00:00:00Z","labels":[],"metadata":{"task_kind":"review"},"notes":"","_ready":true},
+ {"id":"x-kind3","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-15T00:00:00Z","labels":[],"metadata":{"task_kind":"invented-next-month"},"notes":"","_ready":true},
+ {"id":"x-label","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-16T00:00:00Z","labels":["hold:mayor"],"metadata":{},"notes":"","_ready":true},
+ {"id":"x-blocked","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-17T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":false},
+ {"id":"y-ok","status":"open","assignee":"","issue_type":"task","created_at":"2026-01-18T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":true},
+ {"id":"y-impl","status":"open","assignee":"","issue_type":"bug","created_at":"2026-01-19T00:00:00Z","labels":[],"metadata":{"task_kind":"implementation"},"notes":"","_ready":true}]'
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=9 DISPATCH_FEEDER_MAX_PER_TICK=9 feed)"
+eq "$(armedcount)" "3" "FEEDEXCL: only the real candidates are armed (2 fresh + the pre-existing hand arm)"
+eq "$(meta y-ok gc.dispatch_when_ready)" "rig/pool" "FEEDEXCL: ordinary ready work IS armed"
+eq "$(meta y-impl gc.dispatch_when_ready)" "rig/pool" "FEEDEXCL: task_kind=implementation is ordinary work"
+eq "$(meta x-armed gc.dispatch_when_ready)" "rig/other" "FEEDEXCL: an already-armed bead keeps its original target"
+for x in x-epic x-convoy x-spec x-step x-stepid x-root x-kind x-routed x-exec x-takeaway x-hold x-assigned x-kind2 x-kind3 x-label x-blocked; do
+    eq "$(meta $x gc.auto_armed_by)" "<absent>" "FEEDEXCL: $x is excluded"
+done
+
+# --- FEEDBLIND: an unreadable queue is not an empty queue ---------------------
+# The failure this whole mechanism exists against, from the input side. A
+# feeder that cannot see the queue and prints "0 armed" is indistinguishable
+# from one with nothing to do — and "nothing was ready" being a lie nobody
+# could detect is precisely how 252 beads aged out.
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(STUB_BD_FAIL_READY=1 feed)"; rc=$?
+eq "$rc" 1 "FEEDBLIND: an unreadable candidate listing exits non-zero"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDBLIND: and arms nothing"
+has "$out" "NOT treating this as an empty queue" "FEEDBLIND: and says it could not see"
+hasnt "$out" "0 armed" "FEEDBLIND: and does NOT print a healthy-looking summary"
+
+# --- FEEDCOUNT: an unreadable cap is not a free cap ---------------------------
+# The dangerous half. An unreadable candidate listing under-delivers; an
+# unreadable IN-FLIGHT count read as 0 hands the pass a full budget and blows
+# the cap, which turns this file into the spend incident it was written to
+# avoid. It must refuse, not proceed.
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(STUB_BD_FAIL_METAKEY=1 feed)"; rc=$?
+eq "$rc" 1 "FEEDCOUNT: an unreadable in-flight count exits non-zero"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDCOUNT: and arms NOTHING — it is not read as 'zero in flight'"
+has "$out" "blow the cap" "FEEDCOUNT: and says why refusing is the safe answer"
+
+# --- FEEDBADCAP: a cap that cannot be parsed is not a cap ---------------------
+# The first thing anyone does with these knobs is lower them. A typo silently
+# restoring the default would be indistinguishable from the override working.
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT=two feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: a non-numeric in-flight cap is a usage error"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDBADCAP: and nothing is armed under an unparseable cap"
+out="$(DISPATCH_FEEDER_MAX_PER_TICK=-1 feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: a non-numeric per-tick cap is a usage error too"
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_TARGET= feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: an empty target refuses rather than arming a dispatch with no destination"
+eq "$(meta w-1 gc.auto_armed_by)" "<absent>" "FEEDBADCAP: and reserves nothing under an empty target"
+# Every knob is read with ${VAR-default}, never ${VAR:-default}: the colon form
+# silently restores the default on an explicitly-empty override, which reads
+# exactly like the override working. These three cases are what keep it that
+# way — under the colon form each of them passes as a no-op instead.
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_IN_FLIGHT= feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: an EMPTY in-flight cap refuses instead of silently restoring the default"
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_MAX_PER_TICK= feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: an EMPTY per-tick cap refuses too"
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_ENABLED=maybe feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: an unrecognised enable flag refuses rather than guessing"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDBADCAP: and arms nothing while it is unreadable"
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_ENABLED= feed)"; rc=$?
+eq "$rc" 2 "FEEDBADCAP: an EMPTY enable flag is not silently 'on'"
+
+# --- FEEDROLLBACK: a failed arm releases the slot it reserved ----------------
+# The reservation is written BEFORE the arm, so the cap can never leak. The
+# price is that a refused arm must give the slot back, or a bead that is not
+# ours holds capacity until it closes. `arm` refuses beads that were closed or
+# dispatched between our listing and the call, so this path is ordinary, not
+# exotic.
+FAILARM="$TMP/failarm.sh"
+printf '#!/usr/bin/env bash\nexit 9\n' > "$FAILARM"; chmod +x "$FAILARM"
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_ARM_TOOL="$FAILARM" feed)"; rc=$?
+eq "$rc" 1 "FEEDROLLBACK: a failed arm makes the pass exit non-zero"
+eq "$(meta w-1 gc.auto_armed_by)" "<absent>" "FEEDROLLBACK: the reserved slot is released"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDROLLBACK: and nothing is armed"
+has "$out" "slot released" "FEEDROLLBACK: the release is reported"
+
+# A refusal does NOT spend the budget — the next candidate is tried, because a
+# refusal here is a race (arm refuses closed/in_progress/routed beads, all of
+# which also drop out of the next ready listing) and not a durable state.
+store "[$(cand w-1 2026-01-01T00:00:00Z), $(cand w-2 2026-02-01T00:00:00Z)]"
+FLAKYARM="$TMP/flakyarm.sh"
+printf '#!/usr/bin/env bash\nfor a in "$@"; do [ "$a" = "w-1" ] && exit 9; done\nexec %s "$@"\n' "$SUT" > "$FLAKYARM"
+chmod +x "$FLAKYARM"
+out="$(DISPATCH_FEEDER_ARM_TOOL="$FLAKYARM" feed)"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDROLLBACK: the refused candidate is not armed"
+eq "$(meta w-1 gc.auto_armed_by)" "<absent>" "FEEDROLLBACK: and gives its slot back"
+eq "$(meta w-2 gc.dispatch_when_ready)" "rig/pool" "FEEDROLLBACK: a refusal does not spend the budget — the next candidate is still armed"
+
+# ...but "try the next one" must be BOUNDED. A systemic failure (bd writes
+# failing, a store read-only mid-migration) would otherwise have one pass
+# attempt all 145 candidates at three writes each and run into the order
+# timeout, so the pass is killed instead of reporting what it found.
+store "[$(cand w-1 2026-01-01T00:00:00Z), $(cand w-2 2026-02-01T00:00:00Z), $(cand w-3 2026-03-01T00:00:00Z), $(cand w-4 2026-04-01T00:00:00Z), $(cand w-5 2026-05-01T00:00:00Z), $(cand w-6 2026-06-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_ARM_TOOL="$FAILARM" DISPATCH_FEEDER_MAX_IN_FLIGHT=9 DISPATCH_FEEDER_MAX_PER_TICK=9 feed)"; rc=$?
+eq "$rc" 1 "FEEDROLLBACK: a wholly broken arm makes the pass exit non-zero"
+has "$out" "consecutive failures" "FEEDROLLBACK: and stops rather than grinding the whole queue into the order timeout"
+eq "$(printf '%s' "$out" | grep -c 'slot released')" "3" "FEEDROLLBACK: it stops after MAX_CONSEC_FAIL attempts, not after all six candidates"
+
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(DISPATCH_FEEDER_ARM_TOOL="$TMP/nope.sh" feed)"; rc=$?
+eq "$rc" 2 "FEEDROLLBACK: a missing arm tool refuses the whole pass"
+eq "$(meta w-1 gc.auto_armed_by)" "<absent>" "FEEDROLLBACK: with no second dispatch path to fall back on"
+has "$out" "no second dispatch path" "FEEDROLLBACK: and says so"
+
+# --- FEEDQUIET: the guards above did not strand the ordinary case ------------
+# Every refusal added above is a chance to break the empty-board pass, which is
+# the pass that runs most of the time.
+store '[{"id":"x-only","status":"open","assignee":"","issue_type":"epic","created_at":"2026-01-01T00:00:00Z","labels":[],"metadata":{},"notes":"","_ready":true}]'
+out="$(feed)"; rc=$?
+eq "$rc" 0 "FEEDQUIET: a store with no candidates still passes"
+has "$out" "0 armed" "FEEDQUIET: and reports an honest empty pass"
+eq "$(armedcount)" "0" "FEEDQUIET: and arms nothing"
+
+store '[]'
+out="$(feed)"; rc=$?
+eq "$rc" 0 "FEEDQUIET: a completely empty store passes"
+
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$("$FEEDER" status 2>&1)"; rc=$?
+eq "$rc" 0 "FEEDQUIET: status exits 0"
+has "$out" "1 candidate(s) ready" "FEEDQUIET: status reports the queue depth"
+has "$out" "0 auto-armed bead(s) in flight" "FEEDQUIET: status reports the cap accounting"
+eq "$(meta w-1 gc.auto_armed_by)" "<absent>" "FEEDQUIET: status writes nothing"
+out="$(STUB_BD_FAIL_METAKEY=1 "$FEEDER" status 2>&1)"; rc=$?
+eq "$rc" 1 "FEEDQUIET: status also fails loudly on an unreadable store"
+
+# --- FEEDDRY: --dry-run reports without writing ------------------------------
+store "[$(cand w-1 2026-01-01T00:00:00Z)]"
+out="$(feed --dry-run)"; rc=$?
+eq "$rc" 0 "FEEDDRY: dry-run exits 0"
+has "$out" "DRY-RUN would arm w-1" "FEEDDRY: dry-run names what it would arm"
+eq "$(meta w-1 gc.auto_armed_by)" "<absent>" "FEEDDRY: dry-run reserves nothing"
+eq "$(meta w-1 gc.dispatch_when_ready)" "<absent>" "FEEDDRY: dry-run arms nothing"
+
+# --- positive control over the shipped feeder cadence ------------------------
+# The script is only half of the input side: without the order nothing calls it
+# and the hopper stays empty, which is the exact state this bead measured.
+echo "# shipped feeder order"
+FORDER="$ROOT/orders/dispatch-feeder.toml"
+[ -s "$FORDER" ] && ok "orders/dispatch-feeder.toml ships" || bad "orders/dispatch-feeder.toml is missing"
+fo="$(cat "$FORDER" 2>/dev/null)"
+has "$fo" 'trigger = "cooldown"' "the feeder order is cooldown-triggered"
+has "$fo" 'scope = "rig"' "the feeder order is rig-scoped (its in-flight cap is a PER-RIG cap)"
+has "$fo" 'dispatch-feeder.sh feed' "the feeder order runs the feed verb"
+has "$fo" 'DISPATCH_FEEDER_MAX_IN_FLIGHT' "the in-flight cap is declared in [order.env] where an operator can override it"
+has "$fo" 'DISPATCH_FEEDER_ENABLED' "the enable flag is declared in [order.env]"
+if grep -qE '^[[:space:]]*(no_work_gate|idempotent)' "$FORDER"; then
+    bad "the feeder order opts out of single-flight (no_work_gate/idempotent) — two concurrent passes would each spend the same budget"
+else
+    ok "the feeder order does not opt out of single-flight"
+fi
+
 # --- positive control over the shipped cadence -------------------------------
 # The arm is only half the mechanism: without the order nothing consumes these
 # records and the hold is stranded one layer down instead of in an agent's head.
@@ -371,7 +672,10 @@ else
         rm -rf "$PK"; mkdir -p "$PK/assets/scripts" "$PK/orders" "$PK/doctor"
         cp -r "$ROOT/doctor/check-deferred-dispatch-wired" "$PK/doctor/"
         cp "$ROOT/assets/scripts/deferred-dispatch.sh" "$PK/assets/scripts/"
+        cp "$ROOT/assets/scripts/dispatch-feeder.sh" "$PK/assets/scripts/"
+        cp "$ROOT/assets/scripts/deferred-dispatch.test.sh" "$PK/assets/scripts/"
         cp "$ROOT/orders/deferred-dispatch.toml" "$PK/orders/"
+        cp "$ROOT/orders/dispatch-feeder.toml" "$PK/orders/"
     }
     check_rc() { GC_PACK_DIR="$PK" "$PK/doctor/check-deferred-dispatch-wired/run.sh" >/dev/null 2>&1; echo $?; }
 
@@ -403,6 +707,78 @@ else
 
     mkpack; sed -i 's|^scope = \"rig\"|scope = \"city\"|' "$PK/orders/deferred-dispatch.toml"
     eq "$(check_rc)" 2 "ERROR when the order stops being rig-scoped"
+
+    # --- and the same, for the FEEDER half ---------------------------------
+    # Each mutation below is a way the input side comes apart while every other
+    # part of the mechanism keeps reporting healthy — which is precisely the
+    # state tk-ku1uvv measured: arm worked, reconcile worked, 252 beads aged
+    # out. A guard that has never been seen to fire is not a guard.
+    mkpack; rm -f "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the feeder script is missing (arm/reconcile with an empty hopper)"
+
+    mkpack; rm -f "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the feeder order is missing (nothing calls the feeder)"
+
+    mkpack; chmod -x "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the feeder script is not executable"
+
+    mkpack; sed -i 's|dispatch-feeder.sh feed|dispatch-feeder.sh status|' "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the feeder order runs a verb other than feed"
+
+    mkpack; sed -i 's|assets/scripts/dispatch-feeder.sh feed|assets/scripts/renamed.sh feed|' "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the feeder exec path drifts off the shipped script"
+
+    mkpack; sed -i 's|^scope = \"rig\"|scope = \"city\"|' "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the feeder order stops being rig-scoped (one budget across every store)"
+
+    mkpack; sed -i 's|^timeout = \"180s\"|timeout = \"900s\"|' "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the feeder timeout is not below order-tracking-sweep's stale-after"
+
+    mkpack; printf 'idempotent = true\n' >> "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the feeder order opts out of single-flight (two passes, one budget spent twice)"
+
+    mkpack; sed -i 's|^DISPATCH_FEEDER_MAX_IN_FLIGHT|# DISPATCH_FEEDER_MAX_IN_FLIGHT|' "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when the in-flight cap is no longer declared where city.toml can override it"
+
+    mkpack; sed -i 's|^\[order.env\]|[order.notenv]|' "$PK/orders/dispatch-feeder.toml"
+    eq "$(check_rc)" 2 "ERROR when [order.env] is gone (tuning tooling spend becomes a pack change)"
+
+    # The defining constraint, from both directions.
+    mkpack; sed -i 's|"$ARM_TOOL" arm |gc sling |' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the feeder slings directly instead of arming (a second dispatch path)"
+
+    # ...and the check must survive the script EXPLAINING that constraint. The
+    # first cut of this guard grepped the whole file and failed the correct
+    # script on its own header comment.
+    mkpack; printf '\n# Note: calling gc sling from here would bypass both fail-closed layers.\n' >> "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 0 "OK when 'gc sling' appears only in a comment — the guard reads code, not prose"
+
+    mkpack; sed -i 's|sort_by((.created_at|sort_by((.priority|' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when candidates stop being ordered oldest-first (the 31d+ tail starves)"
+
+    mkpack; sed -i 's|--ready|--READYX|g' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the feeder stops asking bd for readiness"
+
+    mkpack; sed -i 's|gc.auto_armed_by|gc.dispatch_when_ready|g' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the cap counts the arm key reconcile clears instead of the feeder's own marker"
+
+    mkpack; sed -i 's|DISPATCH_FEEDER_MAX_IN_FLIGHT|UNCAPPED|g' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the in-flight cap is gone from the script"
+
+    mkpack; sed -i 's|NOT treating this as an empty queue|no work|' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when an unreadable candidate listing stops failing loudly"
+
+    mkpack; sed -i 's|blow the cap|proceed anyway|' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when an unreadable in-flight count stops refusing"
+
+    mkpack; sed -i 's|^    feed)   cmd_feed|    feedX)   cmd_feed|' "$PK/assets/scripts/dispatch-feeder.sh"
+    eq "$(check_rc)" 2 "ERROR when the feed verb is gone"
+
+    mkpack; sed -i 's|FEEDOLDEST|XXOLDEST|g' "$PK/assets/scripts/deferred-dispatch.test.sh"
+    eq "$(check_rc)" 2 "ERROR when the oldest-first regression case is dropped"
+
+    mkpack; sed -i 's|FEEDCOUNT|XXCOUNT|g' "$PK/assets/scripts/deferred-dispatch.test.sh"
+    eq "$(check_rc)" 2 "ERROR when the unreadable-cap regression case is dropped"
 fi
 
 echo

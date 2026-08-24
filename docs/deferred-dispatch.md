@@ -1,6 +1,6 @@
 ---
 name: Deferred dispatch
-description: How to record a dispatch that must wait for other work, so the waiting lives on the bead instead of in an agent's context. Read it when you want to sling something whose blockers have not closed yet.
+description: How a dispatch that must wait for other work is recorded, performed, and fed — so the waiting lives on the bead instead of in an agent's context, and ready work is converted into a dispatch by something rather than by nobody. Read it when you want to sling something whose blockers have not closed yet, or when you are asking why ready work is not being picked up.
 ---
 
 # Deferred dispatch
@@ -27,8 +27,9 @@ acts on, and nothing anywhere knows a dispatch was owed.
 ## Scope
 
 **Mandate.** How a dispatch that must wait for other work is recorded,
-where that record lives, and what performs it — the durable form of "not
-yet" in this city's dispatch path.
+where that record lives, what performs it, and what feeds it — the durable
+form of "not yet" in this city's dispatch path, and the bounded converter
+that turns ready work into a dispatch so the path has an input.
 
 **Boundaries.** *Why* a dependency edge does not gate a formula dispatch,
 and which record each delivery lane routes, belong to the routing
@@ -106,11 +107,124 @@ zero-count summary — for a dispatcher, "I could not see the queue" and
 "nothing was owed" reading alike is the same disappearing hold this
 machinery exists to remove.
 
-`doctor/check-deferred-dispatch-wired` asserts both halves ship and that
-the order's `exec` still reaches the script's `reconcile` verb. Ship the
-arm without the cadence and `arm` still succeeds, still writes a
-well-formed record, and nothing ever performs it — the same invisible
-hold, one layer down.
+`doctor/check-deferred-dispatch-wired` asserts all three halves ship —
+the arm/reconcile script, this order, and the feeder below — and that each
+order's `exec` still reaches the verb it is supposed to run. Ship the arm
+without the cadence and `arm` still succeeds, still writes a well-formed
+record, and nothing ever performs it — the same invisible hold, one layer
+down. Ship both without a feeder and nothing ever arms anything, which is
+the state the next section describes.
+
+## What feeds it
+
+For most of this mechanism's life, nothing did.
+
+`arm` shipped. `reconcile` shipped. Both worked. And every call to `arm`
+had to come from an agent that decided to make one — which meant that in
+practice, almost none were made. Measured in the gc-toolkit store on
+2026-08-24: **252 ready work beads, all unrouted; 147 of them older than a
+week; 51 older than 30 days; the oldest 123 days.** `deferred-dispatch.sh
+list` reported "no pending dispatches in this store" the whole time, and it
+was telling the truth — nothing was owed, because nothing had ever armed
+anything. `core.control-dispatcher` and the polecat pools were ACTIVE on
+all four rigs throughout. This was never a dead actor. It was an unfed
+input: the machine ran, and the hopper was empty.
+
+That failure is invisible from inside the mechanism. Every component
+reports healthy, and a queue nobody feeds is indistinguishable from a queue
+with nothing owed — the same silence this whole design exists to remove,
+one layer further up.
+
+`orders/dispatch-feeder.toml` is the input half. Every 10 minutes, per rig,
+`assets/scripts/dispatch-feeder.sh feed`:
+
+- selects ready work through **`bd list --ready`** — beads' own predicate,
+  the same read `reconcile` makes, never a private copy of the blocking
+  rules;
+- excludes what must not be auto-slung: epics and convoys, specs, decisions
+  and events, graph.v2 step beads and descriptor beads, anything already
+  routed or already armed, anything carrying `gc.takeaway` or `triage.hold`
+  or a `hold:*` label, anything with an assignee, and any `task_kind` other
+  than `implementation` — a deny-by-default allow-list, so a kind invented
+  next month is not auto-slingable by accident. Against the live 330-bead
+  ready listing that removed 188 and left 142;
+- orders what survives **oldest-created first**, so the 31d+ tail drains
+  rather than starving behind every fresh arrival;
+- and calls **`deferred-dispatch.sh arm`** — the shipped verb, not a second
+  dispatch path.
+
+That last point is the design, not a detail. Arming rather than slinging
+keeps two existing fail-closed layers in the path: `arm` refuses a bead that
+is closed or already dispatched, and `reconcile` refuses to sling one that
+is held or already routed. A feeder that slung for itself would bypass both
+and re-implement a dispatcher that is already written and already tested.
+`doctor/check-deferred-dispatch-wired` asserts the feeder calls `arm` and
+never slings directly.
+
+### Bounded by construction
+
+An unbounded feeder over a 252-deep queue is a spend incident, not a fix.
+Two caps, both enforced in the script rather than asked of a caller:
+
+| Knob | Default | What it bounds |
+|---|---|---|
+| `DISPATCH_FEEDER_ENABLED` | `1` | The whole pass. `0`/`false`/`no`/`off` arms nothing and says so. |
+| `DISPATCH_FEEDER_MAX_IN_FLIGHT` | `2` | Beads this feeder has auto-armed that are still open, **per rig**. |
+| `DISPATCH_FEEDER_MAX_PER_TICK` | `1` | Arms one pass may write, whatever the in-flight cap allows. |
+
+`MAX_IN_FLIGHT = 2` matches the polecat pool ceiling of 2/rig, so the feeder
+can never commit more work than the pool can execute; four rigs × 2 = 8
+city-wide, which is the ceiling that already exists. Raising it above the
+pool size only builds a queue of armed beads waiting for a polecat.
+
+The in-flight count is taken from the feeder's own `gc.auto_armed_by`
+marker, **not** from `gc.dispatch_when_ready`. It has to be: `reconcile`
+clears the arm keys the instant it slings, so counting those would drop
+every dispatched bead out of the tally within one 2-minute tick and the cap
+would bind on nothing.
+
+The three knobs are `[order.env]` defaults in `orders/dispatch-feeder.toml`,
+overridden from `city.toml` without a pack change — the same surface the
+2026-08-20..23 tooling-spend controls used:
+
+```toml
+[[orders.overrides]]
+name = "dispatch-feeder"
+rig  = "*"                       # or a single rig name
+[orders.overrides.env]
+DISPATCH_FEEDER_MAX_IN_FLIGHT = "1"
+```
+
+and the hard off switch, which stops all auto-arming and leaves hand-slung
+work and hand-written arms completely unaffected:
+
+```toml
+[[orders.overrides]]
+name = "dispatch-feeder"
+rig  = "*"
+enabled = false
+```
+
+To see the accounting without writing anything:
+
+```bash
+"$PACK_DIR/assets/scripts/dispatch-feeder.sh" status
+"$PACK_DIR/assets/scripts/dispatch-feeder.sh" feed --dry-run
+```
+
+### It fails closed, twice, for two different reasons
+
+An unreadable **candidate listing** exits non-zero and says so, rather than
+printing a zero summary — that summary would read exactly like a board with
+nothing ready, which is how 252 beads aged out unnoticed.
+
+An unreadable **in-flight count** also exits non-zero, and this one matters
+more. Read as zero it does not merely under-report: it hands the pass a full
+budget and defeats the cap. That is the single way this feeder becomes the
+spend incident it was written to avoid, so it refuses rather than guesses.
+The same rule covers the knobs themselves — an unparseable or empty cap, or
+an enable flag that is neither on nor off, refuses the pass instead of
+silently restoring a default the operator believes they overrode.
 
 ## What this does not do
 

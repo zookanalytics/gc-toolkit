@@ -1,0 +1,95 @@
+# dispatch-feeder — the input half of deferred dispatch: turn ready work into
+# an armed dispatch, so the pipeline that already exists has something to
+# perform.
+#
+# WHY THIS ORDER EXISTS (tk-ku1uvv). orders/deferred-dispatch.toml consumes
+# armed dispatches, and `deferred-dispatch.sh arm` writes them. Both halves
+# shipped and worked. NOTHING EVER CALLED ARM. Measured in the gc-toolkit store
+# on 2026-08-24: 252 ready work beads, all unrouted, 147 of them older than a
+# week, 51 older than 30 days, the oldest 123 days —  while
+# `deferred-dispatch.sh list` reported "no pending dispatches in this store"
+# and the dispatcher and polecat pools were ACTIVE on all four rigs. Not a dead
+# actor: an unfed input. The machine ran; the hopper was empty.
+#
+# Operator ruling (tk-jr8rw, recorded standing as tk-nv0z5m): "why are we
+# asking to fund? We are a city intended to get work done, if it needs to be
+# slung, sling it."
+#
+# A FEEDER, NOT A SECOND DISPATCH PATH. The script calls
+# `deferred-dispatch.sh arm`; orders/deferred-dispatch.toml still does the
+# slinging. Arming rather than slinging keeps two existing fail-closed layers
+# in the path — `arm` refuses a closed or already-dispatched bead, and
+# reconcile refuses to sling one that is held or already routed — instead of
+# re-implementing a dispatcher that is already written and already tested.
+# doctor/check-deferred-dispatch-wired asserts the feeder calls `arm` and never
+# `gc sling`.
+#
+# EXEC, not a formula: the pass is two `bd list` reads, a sort, and a call to a
+# shipped script. There is no judgment in it, so it needs no LLM and no wisp.
+#
+# `scope = "rig"` — one registration per importing rig, each against its own
+# store, and each with its OWN in-flight cap. That is what makes the bound
+# below a per-rig bound. The dispatcher's open-tracking gate keys on
+# ScopedName() (`dispatch-feeder:rig:<rig>`), so a pass still in flight
+# suppresses the next tick for that rig only and two arming writers can never
+# race the same bead. No `no_work_gate` and no `idempotent`: both opt out of
+# that single-flight guarantee, and two concurrent passes would each read the
+# same in-flight count and each spend the same budget — the one way the cap
+# below can be defeated from outside the script.
+#
+# `interval` is 10m, deliberately slower than deferred-dispatch's 2m. The
+# binding constraint here is the in-flight cap, not the clock: with a full
+# queue the feeder arms only when a slot frees, and a polecat work item
+# occupies its slot for tens of minutes at least. A faster tick would not drain
+# the queue faster, it would only re-read it more often.
+#
+# `timeout` must stay below `order-tracking-sweep`'s `--stale-after` (10m in
+# core): that sweep closes a tracking bead it judges stale, and an un-gated
+# tracking bead is a second arming writer. 180s covers a pass that enumerates a
+# few hundred ready beads and still leaves a wide margin.
+[order]
+description = "Dispatch feeder: arm the oldest ready, unrouted, unheld work beads for deferred dispatch, bounded by a per-rig in-flight cap"
+trigger = "cooldown"
+interval = "10m"
+timeout = "180s"
+exec = "$PACK_DIR/assets/scripts/dispatch-feeder.sh feed"
+scope = "rig"
+
+# The spend knobs. These are the pack's defaults; an operator changes them from
+# city.toml WITHOUT a pack change, the same way the 2026-08-20..23 tooling-spend
+# controls were applied:
+#
+#     [[orders.overrides]]
+#     name = "dispatch-feeder"
+#     rig  = "gc-toolkit"          # or rig = "*" for every instance
+#     [orders.overrides.env]
+#     DISPATCH_FEEDER_MAX_IN_FLIGHT = "1"
+#
+# and the hard off switch, which stops all auto-arming and leaves hand-slung
+# work and hand-written arms completely unaffected:
+#
+#     [[orders.overrides]]
+#     name = "dispatch-feeder"
+#     rig  = "*"
+#     enabled = false
+#
+# (`enabled = false` is the cleaner off switch of the two — it stops the order
+# from firing at all. DISPATCH_FEEDER_ENABLED = "0" is the in-script equivalent
+# for a rig where you want the pass to keep running and reporting while it arms
+# nothing.)
+[order.env]
+# Master switch. "0" / "false" / "no" / "off" arms nothing and says so.
+DISPATCH_FEEDER_ENABLED = "1"
+# How many beads this feeder may have auto-armed and still open at once, in
+# THIS rig. 2 matches the polecat pool ceiling of 2/rig, so the feeder can
+# never commit more work than the pool can execute; four rigs x 2 = 8 city-wide,
+# which is the ceiling that already exists. Raising this above the pool size
+# just builds a queue of armed beads waiting for a polecat. Lowering it to 1 is
+# the knob to reach for if auto-armed work is crowding hand-slung work out of
+# the pool: it leaves a slot generally free, at the cost of halving the drain
+# rate.
+DISPATCH_FEEDER_MAX_IN_FLIGHT = "2"
+# How many arms a single pass may write, whatever the in-flight cap allows. The
+# backstop against a cold start emptying half a 252-deep queue into the pool in
+# one tick.
+DISPATCH_FEEDER_MAX_PER_TICK = "1"
