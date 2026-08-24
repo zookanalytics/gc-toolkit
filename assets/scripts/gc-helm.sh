@@ -994,8 +994,8 @@ cmd_open() {
     # the tracks edge the gate-visit block files with it — and only the edge has
     # proved reliable: on su-ab9je (shutupandlisten, 2026-08-20, bead tk-d6ddn)
     # the stamp landed EMPTY while the edge carried the subject. This guard is
-    # the operator's front door, so keying it on the stamp alone means `gc helm
-    # open` cheerfully files the duplicate the guard exists to prevent. Match on
+    # the operator's front door, so keying it on the stamp alone means
+    # `gc-helm open` cheerfully files the duplicate the guard exists to prevent. Match on
     # EITHER recording. `gc bd list` renders the edge as .type + .depends_on_id
     # (`gc bd show` names the same edge .dependency_type + .id).
     #
