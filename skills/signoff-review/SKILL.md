@@ -128,6 +128,100 @@ branch description, and any refinery context note on the review bead —
 which round this is and what earlier rounds found tells you where to
 look hardest.
 
+### Documents-only branches are reviewed as designs, not as code
+
+Everything from §3 down is calibrated for code. Before applying it, check
+whether this branch contains any code at all:
+
+```bash
+# >>> review-mode-classify
+# Executed verbatim as a regression by assets/scripts/review-dispatch-body.test.sh.
+# Keep it self-contained: the test extracts these lines between the markers and
+# runs them against a fake `git`, so it cannot drift from what you are told here.
+FILES=$(git diff --name-only "origin/$BASE...$REVIEWED_OID")
+if [ -z "$FILES" ]; then
+  echo "empty diff at $REVIEWED_OID: nothing to review" >&2; exit 1
+elif printf '%s\n' "$FILES" | grep -qvE '^(specs|docs)/.*\.md$'; then
+  MODE=code
+else
+  MODE=design
+fi
+# <<< review-mode-classify
+```
+
+`MODE=design` means every changed path is Markdown under `specs/` or
+`docs/`: the deliverable is a document and there is nothing executable on
+the branch. One script, one config, one fixture alongside it makes it
+`MODE=code` and the rest of this skill applies unchanged. The test reads
+as "is any path *not* a document", so it fails toward `code`, the
+stricter mode.
+
+A code diff has a bounded review surface: does this code do what it
+claims. A design document has no such bound. A reviewer reading a
+700-line concurrency design can always find one more reachable
+interleaving, one more platform fact the design did not anticipate — and
+each one, graded on the §5 scale, is "wrong behavior on a reachable
+input", which is a P1, which blocks. That loop has no terminus.
+signal-loom's `sl-kg9z6.1.1` ran **seven** rounds on a branch of one file
+and zero code. Every round found something genuinely new and real; the
+implementation bead it blocked sat idle 33 hours.
+
+So under `MODE=design`, two things change.
+
+**What still blocks** (P0/P1 → REQUEST_CHANGES) — defects that live in
+the document and can only be fixed in the document:
+
+- **Self-contradiction.** Two rules it states cannot both hold.
+- **A false claim about what exists.** It describes current behavior, an
+  API, a schema, or a constraint that the repo does not have. Cite the
+  code you checked.
+- **A missing decision.** The question the document exists to settle is
+  not settled — an enumerated case with no stated outcome, a named
+  invariant with no mechanism.
+
+**What does not block** — record it, do not gate on it:
+
+- **An implementation discovery.** A fact about the runtime, library, or
+  platform that the design did not anticipate and that an implementer
+  meets in the first afternoon and settles with a test: *"scheduled
+  actions run at most once"*, *"cancel cannot stop a job that already
+  started"*, *"that predicate needs an index"*. True, worth writing
+  down, and not resolvable in prose — a document has no compiler and no
+  test to adjudicate it.
+- **One more interleaving, ordering, or edge case** the design does not
+  enumerate. A design's enumeration is never complete. If the missing
+  case changes the design's *shape*, it is a missing decision above; if
+  it is one more instance of a hazard the design already names and
+  handles, it is this.
+
+Grade those **P2** and put them on **the implementation bead** rather
+than into a rework of the document — that is where an implementer will
+meet them and where a test can settle them:
+
+```bash
+ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
+IMPL=$(gc bd dep list "$ANCHOR" --direction=up -t blocks --json \
+  | jq -r '[.[].id] | if length == 1 then .[0] else empty end')
+```
+
+The implementation bead is the one the design anchor **blocks**, so
+`--direction=up -t blocks` — which excludes the rework children
+(`parent-child`) and the convoy trackers (`tracks`) that also point at
+the anchor. If exactly one bead resolves, append the finding to it with
+`--append-notes` and say in your verdict that you did. If none or several
+resolve, leave the finding in the verdict body under a
+`CARRY TO IMPLEMENTATION:` heading and name the ambiguity — a finding
+parked in a verdict is recoverable, one appended to the wrong bead is
+not.
+
+This is a rule about a finding's **class, not its round number**: it
+applies on round 1, and needs no round counting. It is deliberately not
+"a lower convergence cap for design branches" — the cap's terminal action
+is to stop dispatching and route to a human, so capping a design branch
+sooner spends operator attention *earlier* instead of saving it. That is
+the observed failure: on `sl-kg9z6.1.1` the cap fired at round 3 and the
+remaining four rounds ran on hand-authorized re-gates.
+
 ## 3. Run the tests at the pinned commit
 
 Your session already has a gascity-managed worktree, but it is on some
@@ -153,6 +247,15 @@ A failing suite is not automatically a finding: check whether it fails
 on the base too. A pre-existing failure belongs in the verdict as
 context, not as this branch's defect.
 
+Under `MODE=design` there is no suite: the branch ships no executable
+code, so there is nothing for a test run to tell you. Do not invent one,
+and do not run the repo's full suite to have a number to report — it
+exercises the base, not the branch. Run what actually applies to prose —
+a formatter check, `git diff --check` — and say plainly in the
+Verification line that no unit suite ran *because the branch changes only
+documents*. An honest "not applicable, and here is why" is worth more
+than a green count from a suite the diff never touched.
+
 ## 4. What to check
 
 - **Intent** — does it do what the anchor bead asked? Deviations are
@@ -169,6 +272,12 @@ context, not as this branch's defect.
 - **Readiness** — back-compat and migration, fail-closed where
   fail-closed was intended, docs that the change just made false.
 
+Under `MODE=design` (§2), **Contract**, **Testing** and **Readiness** have
+nothing to bind to — there is no caller, no suite, and no migration. What
+carries over is **Intent** (does the document settle what the anchor asked
+it to settle) and a prose form of **Correctness**: is it consistent with
+itself, and true about the code it describes.
+
 ## 5. Calibrate severity
 
 - **P0** — broken or unsafe as merged: data loss, a merge that bypasses
@@ -183,6 +292,13 @@ Grade honestly. Not everything is P0. A P2 inflated to P1 costs a whole
 rework round; a P1 discounted to P2 merges the bug. When you can't tell
 whether something is reachable, say what you checked and grade on what
 you know.
+
+On a documents-only branch (`MODE=design`, §2) apply the design grading
+*before* this scale. Several findings that are P1 by the wording above —
+a reachable interleaving, an unhandled ordering hazard — are P2
+implementation notes there, because the document is not where they get
+resolved. The blocking set shrinks to the three defect classes §2 lists;
+it does not become empty.
 
 Every finding carries **file:line**, what is wrong, why it matters, and
 what would fix it. A finding without a location isn't actionable, and

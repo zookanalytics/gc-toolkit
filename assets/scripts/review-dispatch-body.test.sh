@@ -207,6 +207,83 @@ if [ -r "$REAL_SKILL" ]; then
   else
     ok "(REALSKILL) real skill present; opening line changed — text-inlining covered by (INLINE)"
   fi
+
+  # --- (DESIGNMODE) the design-document mode reaches the dispatched reviewer ---
+  # tk-10521: a documents-only branch used to be graded by the code scale, where
+  # every further reachable interleaving is a P1 and therefore blocks. That loop
+  # has no terminus — signal-loom's sl-kg9z6.1.1 took 7 rounds on one .md file
+  # and zero code. The rule that ends it is only worth anything if it actually
+  # arrives in the review bead, so assert it in the GENERATED BODY, not just in
+  # the skill file.
+  hasF "$TMP/real.out" 'Documents-only branches are reviewed as designs, not as code' \
+    "(DESIGNMODE) the dispatched body carries the design-mode section"
+  hasF "$TMP/real.out" 'MODE=design' "(DESIGNMODE) the body names the design mode"
+  hasF "$TMP/real.out" 'An implementation discovery.' \
+    "(DESIGNMODE) the body carries the non-blocking finding class"
+  hasF "$TMP/real.out" '--direction=up -t blocks' \
+    "(DESIGNMODE) the body says how to resolve the implementation bead"
+  hasF "$TMP/real.out" 'CARRY TO IMPLEMENTATION:' \
+    "(DESIGNMODE) the body gives the fallback when the impl bead is ambiguous"
+
+  # --- (CLASSIFY) execute the shipped classifier against a fake git ------------
+  # The snippet between the markers IS what the reviewer is told to run, so run
+  # exactly that — extracted, not retyped. A retyped copy proves nothing.
+  awk '/# >>> review-mode-classify/{f=1;next} /# <<< review-mode-classify/{f=0} f' \
+    "$REAL_SKILL" > "$TMP/classify.sh"
+  if [ -s "$TMP/classify.sh" ]; then
+    ok "(CLASSIFY) extracted the review-mode-classify snippet from the skill"
+    echo 'echo "$MODE"' >> "$TMP/classify.sh"
+    mkdir -p "$TMP/cbin"
+    cat > "$TMP/cbin/git" <<'GITSTUB'
+#!/usr/bin/env bash
+# Only shape asserted: `git diff --name-only <base>...<oid>`.
+[ "$1" = "diff" ] || { echo "unexpected git subcommand: $1" >&2; exit 3; }
+case " $* " in *" --name-only "*) ;; *) echo "classifier must ask for --name-only" >&2; exit 3 ;; esac
+case " $* " in *"..."*) ;; *) echo "classifier must use the 3-dot merge-base range" >&2; exit 3 ;; esac
+printf '%s' "${FAKE_FILES-}"
+[ -n "${FAKE_FILES-}" ] && echo
+exit 0
+GITSTUB
+    chmod +x "$TMP/cbin/git"
+
+    classify() {
+      FAKE_FILES="$1" BASE=main REVIEWED_OID=deadbeef \
+        PATH="$TMP/cbin:$PATH" bash "$TMP/classify.sh" 2>/dev/null || echo "REFUSED"
+    }
+    cls() {
+      local got
+      got="$(classify "$1")"
+      [ "$got" = "$2" ] && ok "(CLASSIFY) $3 -> $got" \
+                        || bad "(CLASSIFY) $3 (got '$got' want '$2')"
+    }
+
+    # design: every path is markdown under specs/ or docs/.
+    cls 'specs/sl-kg9z6.1.1/queued-turn.md' design 'the cited real case, one spec .md'
+    cls 'docs/architecture.md'              design 'a docs/ .md'
+    cls 'specs/a/b.md
+docs/c.md'                                  design 'several nested docs'
+
+    # code: the mode must fail toward the STRICTER reading. One non-document
+    # path anywhere in the diff is enough, in any position.
+    cls 'specs/a.md
+assets/scripts/x.sh'                        code   'spec plus one script'
+    cls 'assets/scripts/x.sh
+specs/a.md'                                 code   'the script listed first'
+    cls 'formulas/mol-x.toml
+specs/a.md
+docs/b.md'                                  code   'many docs plus one toml'
+    cls 'assets/scripts/x.sh'               code   'code only'
+    cls 'specs/a.txt'                       code   'under specs/ but not markdown'
+    cls 'assets/scripts/docs.md'            code   'markdown outside specs|docs'
+    cls 'docsy/a.md'                        code   'the near-miss prefix docsy/'
+    cls 'specs/a.md.bak'                    code   '.md not at end of path'
+    cls 'README.md'                         code   'a root .md is not specs|docs'
+
+    # An empty diff is not a design branch: there is nothing to review at all.
+    cls '' REFUSED 'an empty diff refuses rather than defaulting to design'
+  else
+    bad "(CLASSIFY) could not extract review-mode-classify from the skill (markers removed?)"
+  fi
 else
   ok "(REALSKILL) skipped: skills/signoff-review/SKILL.md not in this pack yet (tk-wghh1)"
 fi
