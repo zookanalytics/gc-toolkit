@@ -399,998 +399,227 @@ TRIM="$(printf '%s\n' "$GATE" | grep -vE '^\s*#' | grep -E 'text=|text:0:|cut -c
   || bad "(CAPNOTRIM) the gate silently shortens the takeaway: $TRIM"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ANCHOR GATHER — the argv boundary (tk-hgmob)
+# THE THIN RENDERER — what this script does AROUND helm-svc (tk-clvkf6)
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# THE BUG: gather_anchors() passed the FULL child listing — every child's
-# description and notes — across the argv boundary as `jq --argjson ch`. Linux
-# caps a SINGLE argv string at MAX_ARG_STRLEN = 131072 B, independent of the far
-# larger ARG_MAX (2 MB here), which the "Argument list too long" wording invites
-# you to blame. One bead's accumulated notes is enough to cross it: live epic
-# sl-zi5z had TWO children carrying 158 KB between them.
+# WHAT LEFT, AND WHY NOTHING IS UNGUARDED BY ITS LEAVING. Everything between
+# here and the summary used to drive the board's own gather, rank and render
+# through the GC_HELM_FIXTURE hook: the argv boundary (tk-hgmob), the in-flight
+# join, the metadata-keyed kinds, the render-side liveness re-check, the row
+# cap, the NEEDS clip. That code is gone from this file — the board is
+# services/helm now — and its assertions went WITH the code rather than being
+# deleted: internal/board/derive_test.go covers the model, and
+# cmd/helm-svc/board_cli_test.go covers the render, the cap and the flags,
+# against the implementation that actually runs.
 #
-# Why it was SILENT: jq never execs, so nothing is appended to $ANCHORS. The
-# existing guards at the -raw queries check QUERY validity, and the query was
-# fine — so the gather was judged clean and the board CACHED AND RENDERED AS
-# COMPLETE with the epic simply missing. The stderr line scrolls away.
+# One of those cases earned a Go home by name. (VISITEDGE) proved a visit whose
+# gc.continuation_group stamp landed EMPTY is still gathered through its
+# `tracks` edge — the behaviour the Go gather did NOT have, which is how the
+# same anchor could read held here and unheld there. It is now
+# TestSubjectOfPrefersTracksEdge in internal/source.
 #
-# THE FIX (both halves, one diff):
-#   1. project to {id,status,assignee} through a PIPE before the argv hop, so
-#      the payload re-bases on child COUNT (~50 B/child) not note volume;
-#   2. guard the render with `|| gather_mark`, so a future failure at this step
-#      refuses the cache instead of silently shipping a short board.
-#
-# These run the REAL script with a board-path `gc` stub, same as above.
+# WHAT IS TESTED HERE is the part that is genuinely this script's: which flags
+# it forwards, what it caches and under what key, and how it behaves when
+# helm-svc fails or is not built at all. The stub below stands in for the
+# binary via GC_HELM_SVC_BIN, so none of this needs a built helm-svc, a live
+# city or Dolt.
 
-GTMP="$TMP/gather"
-mkdir -p "$GTMP/bin" "$GTMP/rig/.beads"
+TH="$TMP/thin"
+mkdir -p "$TH"
 
-cat > "$GTMP/bin/gc" <<'GCB'
+# The stub records every invocation and prints something identifiable. Its
+# output is deliberately a function of its ARGV, so a cache slot serving the
+# wrong caller's answer is visible in the assertion rather than inferred.
+cat > "$TH/helm-svc" <<'STUB'
 #!/usr/bin/env bash
-# Board-path stub: just enough of the gather surface for gather_anchors().
-args="$*"
-case "$1 ${2:-}" in
-  "rig list")    jq -n --arg p "$FAKE_RIG_PATH" '{rigs:[{name:"gc-toolkit",path:$p,prefix:"tk"}]}' ;;
-  "convoy list")  printf '{"convoys":[]}\n' ;;
-  "session list") printf '{"sessions":[]}\n' ;;
-  "bd show")      printf '[]\n' ;;
-  "bd list")
-    case "$args" in
-      *--parent*)          cat "$FAKE_CHILDREN" ;;
-      *"--type epic"*)     cat "$FAKE_EPICS" ;;
-      *"--type decision"*) printf '[]\n' ;;
-      *)  # the open+in_progress listing, which is also what gather_visits reads
-          if [ -n "${FAKE_OPEN:-}" ] && [ -f "${FAKE_OPEN:-}" ]; then cat "$FAKE_OPEN"
-          else printf '[]\n'; fi ;;
-    esac ;;
-esac
+printf '%s\n' "$*" >> "$STUB_CALLS"
+[ -n "${STUB_STDERR:-}" ] && printf '%s\n' "$STUB_STDERR" >&2
+[ -n "${STUB_RC:-}" ] && [ "${STUB_RC}" != "0" ] && { printf 'STUB-OUT %s\n' "$*"; exit "$STUB_RC"; }
+printf 'STUB-OUT %s\n' "$*"
 exit 0
-GCB
-chmod +x "$GTMP/bin/gc"
+STUB
+chmod +x "$TH/helm-svc"
 
-printf '[{"id":"tk-epic1","title":"epic one","priority":1,"updated_at":"2026-08-20T00:00:00Z","metadata":{}}]\n' \
-  > "$GTMP/epics.json"
-
-# run_board <children-file> <case-tag> -> sets BRC / BOUT / BERR / BCACHE_N
-run_board() {
-    local kids="$1" run="$GTMP/run-$2"
-    rm -rf "$run"; mkdir -p "$run"
-    BRC=0
-    BOUT="$(env PATH="$GTMP/bin:$PATH" TMPDIR="$run" \
-                FAKE_RIG_PATH="$GTMP/rig" FAKE_EPICS="$GTMP/epics.json" FAKE_CHILDREN="$kids" \
-                FAKE_OPEN="${FAKE_OPEN:-}" \
+# thin <case-tag> [args…] -> sets TRC / TOUT / TERR / TCALLS
+# Each case gets its own TMPDIR, so one case's cache cannot answer another's.
+# GC_CITY_PATH is pinned because it keys the cache file name.
+thin() {
+    local tag="$1"; shift
+    local run="$TH/run-$tag"
+    mkdir -p "$run"
+    TRC=0
+    TOUT="$(env TMPDIR="$run" GC_CITY_PATH=/fake/city \
+                GC_HELM_SVC_BIN="${THIN_BIN-$TH/helm-svc}" \
+                STUB_CALLS="$run/calls" STUB_RC="${STUB_RC:-0}" STUB_STDERR="${STUB_STDERR:-}" \
                 GC_HELM_FIXTURE= \
-                sh "$SCRIPT" board --json --refresh 2>"$run/err")" || BRC=$?
-    BERR="$(cat "$run/err" 2>/dev/null || true)"
-    # Any cache the run decided to persist lands under TMPDIR/gc-helm-cache.<uid>.
-    # Format-AGNOSTIC glob: the cache file name carries its format and changes
-    # with it, and every assertion below expects ZERO — so a glob pinned to one
-    # format would go on passing while matching nothing.
-    BCACHE_N="$(find "$run" -name 'board*.ndjson' 2>/dev/null | wc -l | tr -d ' ')"
+                sh "$SCRIPT" "$@" 2>"$run/err")" || TRC=$?
+    TERR="$(cat "$run/err" 2>/dev/null || true)"
+    TCALLS="$(cat "$run/calls" 2>/dev/null || true)"
+    TSLOTS="$(find "$run" -name 'render1-*' 2>/dev/null | wc -l | tr -d ' ')"
 }
 
-# --- (ARGVCAP) the live sl-zi5z shape: 158 KB of child NOTES, two children. ----
-# Old code: jq is never exec'd, the anchor is dropped, the board renders without
-# it and exit 0. Fixed code: the notes never reach argv, so the row survives.
-head -c 150000 /dev/zero | tr '\0' 'x' > "$GTMP/big.txt"
-jq -n --rawfile big "$GTMP/big.txt" \
-  '[{id:"tk-c1",status:"open",assignee:"gc-toolkit__polecat-lx-aaa",description:$big,notes:$big},
-    {id:"tk-c2",status:"closed",assignee:null,description:"short",notes:"short"}]' \
-  > "$GTMP/children-fat.json"
+# --- (DELEGATE) the verbs reach helm-svc's matching subcommand ---------------
+thin delegate-board --limit=7
+eq "$TRC" "0" "(DELEGATE) board exits 0 (err: ${TERR:-none})"
+eq "$TCALLS" "board --limit=7" "(DELEGATE) board forwards its flags to \`helm-svc board\`"
+eq "$TOUT" "STUB-OUT board --limit=7" "(DELEGATE) …and hands back helm-svc's bytes unaltered"
 
-run_board "$GTMP/children-fat.json" fat
-eq "$BRC" "0" "(ARGVCAP) board exits 0 with a 158 KB child payload"
-printf '%s' "$BOUT" | jq -e 'any(.[]?; .id=="tk-epic1")' >/dev/null 2>&1 \
-  && ok "(ARGVCAP) the epic anchor still renders when a child's notes exceed MAX_ARG_STRLEN" \
-  || bad "(ARGVCAP) epic anchor VANISHED from the board (the tk-hgmob bug)"
-grep -qi 'argument list too long' <<< "$BERR" \
-  && bad "(ARGVCAP) still hitting the argv cap: $BERR" \
-  || ok "(ARGVCAP) no 'Argument list too long' on the gather"
+thin delegate-closed closed --since 7d --json
+eq "$TCALLS" "closed --since 7d --json" "(DELEGATE) closed forwards to \`helm-svc closed\`, flag order intact"
 
-# --- (PROJSHAPE) the projection is output-identical to the old inline filter. --
-# The render used to build children as [$ch[] | {id,status,assignee}]; it now
-# receives that projection ready-made. The board does not emit `children`
-# verbatim — it emits the ROLL-UP derived from it, which is the stronger check:
-# these four counts can only come out right if all THREE projected fields
-# arrived intact. m_total/n_closed/open need id+status; `assigned` needs
-# assignee, and only tk-c1 has one.
-rollup() { printf '%s' "$BOUT" | jq -r --arg k "$1" 'first(.[]? | select(.id=="tk-epic1")) | .[$k]' 2>/dev/null || true; }
-eq "$(rollup m_total)"  "2" "(PROJSHAPE) roll-up counts both children (id survived)"
-eq "$(rollup n_closed)" "1" "(PROJSHAPE) the closed child is counted closed (status survived)"
-eq "$(rollup open)"     "1" "(PROJSHAPE) the open child is counted open (status survived)"
-eq "$(rollup assigned)" "1" "(PROJSHAPE) the assigned child is counted assigned (assignee survived)"
+# The no-verb form is the back-compat path the tmux picker uses.
+thin delegate-bare --json
+eq "$TCALLS" "board --json" "(DELEGATE) a bare flag still means board"
 
-# --- (PROJGUARD) a VALID array whose elements are not objects. ----------------
-# The -raw guard passes (it is a real array), so this reaches the projection and
-# nothing else can catch it. Old code: the same failure happened inside the
-# unguarded render — board rendered short, exit 0, and CACHED. Fixed: marked.
-printf '[1,2,3]\n' > "$GTMP/children-bad.json"
-run_board "$GTMP/children-bad.json" bad
-eq "$BRC" "3" "(PROJGUARD) a projection failure exits 3 (gather refused), not 0"
-grep -q 'gather failed' <<< "$BERR" \
-  && ok "(PROJGUARD) the run says the gather failed" || bad "(PROJGUARD) no gather-failed line (err: $BERR)"
-grep -q 'children-project@tk-epic1' <<< "$BERR" \
-  && ok "(PROJGUARD) the mark names the projection step and the epic" \
-  || bad "(PROJGUARD) expected children-project@tk-epic1 in: $BERR"
-eq "$BCACHE_N" "0" "(PROJGUARD) nothing cached — no false short board served for the TTL"
+# --- (PASSTHRU) helm-svc owns validation, and its exit code is ours ----------
+# The script must not grow a second flag parser: an unknown flag is helm-svc's
+# to refuse, and its refusal has to arrive unchanged. A wrapper that validated
+# separately would be a second surface to keep equal — the exact duplication
+# this change removes.
+STUB_RC=2 thin passthru-usage --nonsense
+eq "$TRC" "2" "(PASSTHRU) a usage failure keeps helm-svc's exit code"
+eq "$TCALLS" "board --nonsense" "(PASSTHRU) …and the flag reached helm-svc rather than being pre-judged"
 
-# --- (RENDERGUARD) force a failure at the render itself. ----------------------
-# This is the acceptance case for fix 2: even projected, ~3000 children exceed
-# MAX_ARG_STRLEN, so jq cannot exec at the render step. That step used to have no
-# `|| gather_mark` at all, which is exactly why the bug was invisible.
-jq -n '[range(3000) | {id:("tk-c"+(.|tostring)), status:"open",
-                       assignee:"gc-toolkit__polecat-lx-aaaaaaa"}]' > "$GTMP/children-many.json"
-run_board "$GTMP/children-many.json" many
-eq "$BRC" "3" "(RENDERGUARD) a render that cannot exec exits 3 instead of shipping a short board"
-grep -q 'anchor@tk-epic1' <<< "$BERR" \
-  && ok "(RENDERGUARD) the render step is gather_mark'ed by name" \
-  || bad "(RENDERGUARD) expected anchor@tk-epic1 in: $BERR"
-eq "$BCACHE_N" "0" "(RENDERGUARD) nothing cached on a render failure"
+STUB_RC=3 STUB_STDERR="gather failed: dolt wedged" thin passthru-gather
+eq "$TRC" "3" "(PASSTHRU) a failed gather exits 3"
+eq "$TOUT" "" "(PASSTHRU) …renders NOTHING (a short board is worse than none)"
+case "$TERR" in *"dolt wedged"*) ok "(PASSTHRU) …and helm-svc's reason reaches the operator" ;;
+                *) bad "(PASSTHRU) helm-svc's stderr was swallowed: $TERR" ;; esac
+eq "$TSLOTS" "0" "(PASSTHRU) …and a failed run is never cached"
 
-# --- (HEADROOM) the fix re-bases growth on child COUNT, not note volume. ------
-# 400 children is far past the note-driven failure the bug produced, and well
-# inside the new bound — it must render clean.
-jq -n '[range(400) | {id:("tk-h"+(.|tostring)), status:"open", assignee:"a",
-                      description:"x", notes:"y"}]' > "$GTMP/children-400.json"
-run_board "$GTMP/children-400.json" many400
-eq "$BRC" "0" "(HEADROOM) 400 children render clean"
-eq "$(printf '%s' "$BOUT" | jq -r 'first(.[]? | select(.id=="tk-epic1")) | .m_total' 2>/dev/null || true)" \
-   "400" "(HEADROOM) all 400 children survive the roll-up"
+# --- (CACHEHIT) a repeat glance costs nothing --------------------------------
+# The reason the cache exists at all: helm-svc's CLI path is daemonless and
+# pays a full gather (~6s on the live city) every run, and the tmux picker
+# re-opens the board on every glance.
+CRUN="$TH/run-cachehit"
+mkdir -p "$CRUN"
+cachehit() {
+    env TMPDIR="$CRUN" GC_CITY_PATH=/fake/city GC_HELM_SVC_BIN="$TH/helm-svc" \
+        STUB_CALLS="$CRUN/calls" GC_HELM_FIXTURE= sh "$SCRIPT" "$@" 2>/dev/null
+}
+: > "$CRUN/calls"
+A1="$(cachehit --json --limit=36)"
+A2="$(cachehit --json --limit=36)"
+eq "$(wc -l < "$CRUN/calls" | tr -d ' ')" "1" "(CACHEHIT) an identical second glance does not re-run helm-svc"
+eq "$A2" "$A1" "(CACHEHIT) …and replays the same bytes"
 
-# --- (VISITEDGE) a live visit whose group stamp landed EMPTY (bead tk-d6ddn) --
-# gather_visits feeds $held, and $held is the ONLY thing keeping an anchor that
-# is already in conversation out of the stranded band. A visit records its
-# subject twice — the gc.continuation_group stamp and the tracks edge filed with
-# it — and su-ab9je (shutupandlisten, 2026-08-20) proved the stamp can land
-# EMPTY while the edge is intact. Read on the stamp alone that anchor bands HIGH
-# and the board tells the operator to open a visit that already exists.
-#
-# These run through the REAL gather (GC_HELM_FIXTURE is cleared by run_board),
-# so gather_open's listing IS the visits listing — the stub serves both from
-# $FAKE_OPEN.
-printf '[{"id":"tk-c1","status":"open","assignee":null},{"id":"tk-c2","status":"closed","assignee":null}]\n' \
-  > "$GTMP/children-stranded.json"
+# --- (CACHEKEY) the slot is keyed by the WHOLE argv --------------------------
+# The live case this guards: tmux-pick-helm.sh runs `--json --limit=36`, so a
+# `--limit=2` typed at a prompt inside the TTL must not hand the picker two
+# rows. A verb-only key would do exactly that — and silently, because the
+# answer is well-formed JSON either way.
+B1="$(cachehit --json --limit=2)"
+eq "$(wc -l < "$CRUN/calls" | tr -d ' ')" "2" "(CACHEKEY) a different --limit is a different question, so helm-svc runs again"
+eq "$B1" "STUB-OUT board --json --limit=2" "(CACHEKEY) …and the answer matches the flags THIS caller passed"
+eq "$(cachehit --json --limit=36)" "$A1" "(CACHEKEY) …while the first question still replays its own answer"
+eq "$(wc -l < "$CRUN/calls" | tr -d ' ')" "2" "(CACHEKEY) …from cache, without a third run"
 
-# Positive control FIRST: with the stamp populated the anchor is held. Without
-# this a broken stub would make the real case below "pass" by gathering nothing.
-cat > "$GTMP/open-stamped.json" <<'JSON'
-[{"id":"tk-v1","title":"visit: tk-epic1","metadata":{"task_kind":"visit","gc.continuation_group":"tk-epic1"}}]
-JSON
-FAKE_OPEN="$GTMP/open-stamped.json" run_board "$GTMP/children-stranded.json" visit-stamped
-held_of() { printf '%s' "$BOUT" | jq -r --arg k "$1" 'first(.[]? | select(.id=="tk-epic1")) | .[$k]' 2>/dev/null || true; }
-eq "$BRC" "0" "(VISITEDGE) control: the board renders with a stamped visit in the gather"
-eq "$(held_of held)" "true" "(VISITEDGE) control: a visit naming the anchor by its STAMP is gathered"
-eq "$(held_of stranded)" "false" "(VISITEDGE) control: an anchor in conversation is not stranded"
+# The table and the JSON are different representations of the same question and
+# must not share a slot either.
+T1="$(cachehit --limit=36)"
+eq "$T1" "STUB-OUT board --limit=36" "(CACHEKEY) the table does not read the --json slot"
 
-# A visit with NO visit at all: the anchor really is stranded. This is what
-# makes the assertion below mean something — it pins that `held` tracks the
-# gather rather than being true for every anchor.
-printf '[]\n' > "$GTMP/open-novisit.json"
-FAKE_OPEN="$GTMP/open-novisit.json" run_board "$GTMP/children-stranded.json" visit-none
-eq "$(held_of held)" "false" "(VISITEDGE) control: no visit at all → not held"
-eq "$(held_of stranded)" "true" "(VISITEDGE) control: and the anchor bands as stranded"
+# --- (REFRESH) the cache-control flags are ours, not helm-svc's --------------
+: > "$CRUN/calls"
+R1="$(cachehit --json --limit=36 --refresh)"
+eq "$(wc -l < "$CRUN/calls" | tr -d ' ')" "1" "(REFRESH) --refresh re-runs helm-svc despite a fresh cache"
+eq "$R1" "STUB-OUT board --json --limit=36" "(REFRESH) …and is NOT forwarded (helm-svc has no cache to bust)"
+: > "$CRUN/calls"
+N1="$(cachehit --json --limit=36 --no-cache)"
+eq "$(wc -l < "$CRUN/calls" | tr -d ' ')" "1" "(REFRESH) --no-cache is a synonym"
+eq "$N1" "STUB-OUT board --json --limit=36" "(REFRESH) …and is not forwarded either"
 
-# The regression: stamp EMPTY, tracks edge intact — the su-ab9je shape. Rendered
-# in the `gc bd list` key pair (.type + .depends_on_id), which is what this
-# listing emits; `gc bd show` names the same edge .dependency_type + .id.
-cat > "$GTMP/open-edge.json" <<'JSON'
-[{"id":"tk-v2","title":"visit: tk-epic1","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"tk-v2","depends_on_id":"tk-epic1","type":"tracks"}]}]
-JSON
-FAKE_OPEN="$GTMP/open-edge.json" run_board "$GTMP/children-stranded.json" visit-edge
-eq "$(held_of held)" "true" \
-   "(VISITEDGE) a visit whose stamp is EMPTY is still gathered, via its tracks edge"
-eq "$(held_of stranded)" "false" \
-   "(VISITEDGE) so the anchor already in conversation is not banded stranded"
+# --- (BUSTED) a write invalidates what the next glance would replay ----------
+# Every write verb changes what the board says — `open` files a visit (the held
+# glyph), `takeaway` sets the NEEDS sentence — so a cache that outlived the
+# write would show the operator their own action having no effect.
+BRUN="$TH/run-bust"
+mkdir -p "$BRUN/bin"
+cp "$TMP/bin/gc" "$BRUN/bin/gc" 2>/dev/null || true
+: > "$BRUN/calls"
+env TMPDIR="$BRUN" GC_CITY_PATH=/fake/city GC_HELM_SVC_BIN="$TH/helm-svc" \
+    STUB_CALLS="$BRUN/calls" GC_HELM_FIXTURE= sh "$SCRIPT" --json >/dev/null 2>&1
+BEFORE="$(find "$BRUN" -name 'render1-*' | wc -l | tr -d ' ')"
+env PATH="$BRUN/bin:$PATH" TMPDIR="$BRUN" GC_CITY_PATH=/fake/city \
+    GC_HELM_FIXTURE= sh "$SCRIPT" takeaway A-PARKED "busting the cache" >/dev/null 2>&1 || true
+AFTER="$(find "$BRUN" -name 'render1-*' | wc -l | tr -d ' ')"
+eq "$BEFORE" "1" "(BUSTED) control: the glance left a cached slot"
+eq "$AFTER"  "0" "(BUSTED) a takeaway write drops it, so the next glance re-renders"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SCENARIO 3 — the board reads work-bead status, so live work reads as stranded
-#              (tk-fkeft), and metadata-owned beads never reach the board at all
-#
-# THE BUG (a). `gc sling` pours a graph.v2 molecule and routes its STEP beads.
-# The work bead itself keeps status=open / assignee=null from dispatch until the
-# refinery closes it — the in-flight state lives on the WORKFLOW. The board
-# counted only children with status=in_progress, so a polecat five minutes into
-# an implementation was byte-for-byte identical, in bead state, to a bead nobody
-# had ever touched, and its parent epic rendered
-#   "N open · 0 in-progress (stranded) / decomposed, idle — assign or visit"
-# i.e. an instruction to intervene in work that is already moving. Ten of the
-# eleven HIGH rows on the live board read that way when this was filed.
-#
-# THE FIX: join the work bead to any LIVE workflow over it, by the canonical
-# walk (root -> gc.input_convoy_id -> the convoy's single tracked member), and
-# count a covered child as moving.
-#
-# WHY LIVENESS IS THE WHOLE GAME, and why (HUSK) below is the load-bearing case:
-# nothing finalizes a graph.v2 chain after its session drains, so every completed
-# workflow leaves an open husk root behind and they pile up (18 open roots in
-# one rig when this was written; 17 of them dead). Joining on root EXISTENCE
-# would flip all 17 husks to "in flight" — trading a false stall for a false
-# all-clear, which is the worse lie on a board whose job is to say what needs a
-# human. So a root counts only while a session it is stamped with is live.
-#
-# THE BUG (b). The gather admitted three anchor kinds, all selected by issue
-# TYPE — epic, decision, convoy. An ordinary task/bug the operator owns could
-# not appear no matter its state, and invisible also means unresumable. Two
-# metadata-keyed kinds are added, mirroring the Go helm service (tk-2v08m):
-# `human` (gc.routed_to=human, ELEVATED) and `parked` (gc.takeaway present, LOW).
-#
-# Covered:
-#   (INFLIGHT)  a live workflow over an unclaimed child -> parent NOT stranded
-#   (HUSK)      a DEAD-session workflow -> parent still stranded (no false green)
-#   (CLAIMED)   the pre-existing claimed+live-owner path still counts as moving
-#   (IDLEHEAD)  a workflow-covered child drops out of open_heads
-#   (ONEMEMBER) a convoy resolving to != 1 member is refused, not guessed
-#   (HUMAN)     gc.routed_to=human gathers as kind `human`, band ELEVATED
-#   (PARKED)    gc.takeaway gathers as kind `parked`, band LOW
-#   (EXCLUDE)   an EPIC carrying a takeaway stays kind `epic` — gathered once
-#   (FLOOR)     a parked row never outranks a stranded epic
-#
-# THE BUG (c) — tk-2plde. A sitting that ROUTES work out of a subject recorded
-# the wait as prose inside gc.takeaway, and nothing ever re-read it. So
-# "holding — awaiting X" and "nothing further needed here" were mechanically the
-# same row, both LOW, forever: tk-yps55 sat parked for 29 hours after its work
-# merged and cost a whole sitting to discover it was finished. The wait is now a
-# `blocks` EDGE, and the board re-derives — per render, storing nothing —
-# whether it has been discharged.
-#
-#   (DISPO)     every blocker closed -> ELEVATED, "blocker landed", and the
-#               STALE takeaway is replaced as the NEEDS answer
-#   (LIVEHOLD)  a blocker still open -> LOW, and the frontier counts it
-#   (BAREPARK)  a parked row with NO edges renders exactly as it did before
-#   (FAILCLOSE) a blocker the store cannot resolve counts as OPEN, never as
-#               landed — a false "go dispose of this" is the costly direction
-#
-# THE BUG (d) — tk-b3rga. A `decision` and a `human` row are banded by what they
-# ARE, and what they are never changes while the bead is open. So the row asked
-# for the operator on the day it was filed and went on asking after they
-# answered it: seven of the 24 ELEVATED rows on the 2026-08-23 board carried a
-# takeaway recording their own ruling, one of them (tk-z130v) for thirty days,
-# and converse never closes a subject by contract so nothing else could retire
-# them. Same derivation shape as (c) — per render, storing nothing — pointed the
-# other way: DOWN out of the band rather than up out of the floor.
-#
-#   (RULED)     takeaway + every wait landed -> LOW, "ruled — takeaway
-#               recorded" / "ruled — close or extend", on both kinds
-#   (RULEHOLD)  takeaway + a wait still OPEN -> band unchanged. Without the
-#               waiting edges now gathered for these kinds this clause would be
-#               vacuous, so it is what proves them wired
-#   (RULEKIDS)  a ruled row that DECOMPOSED is banded by its roll-up — a ruling
-#               must not become a new way to hide stranded children (tk-a9k0l)
-#   (RULETWIN)  the `parked` twin of a ruled human bead must not hand the band
-#               straight back through the dedup
-# ══════════════════════════════════════════════════════════════════════════════
-
-ITMP="$TMP/inflight"
-mkdir -p "$ITMP/bin" "$ITMP/rig/.beads"
-
-# Two epics. e-LIVE's child is carried by a live workflow; e-HUSK's child is
-# carried by a workflow whose session is gone. Both children are open with NO
-# assignee — the shape the old board could not tell apart.
-cat > "$ITMP/epics.json" <<'J'
-[
- {"id":"tk-eLIVE","title":"live epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
- {"id":"tk-eHUSK","title":"husk epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
- {"id":"tk-eCLAIM","title":"claimed epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
- {"id":"tk-eMANY","title":"many-member epic","priority":1,"updated_at":"2026-08-21T00:00:00Z","metadata":{}},
- {"id":"tk-eTAKE","title":"epic that carries a takeaway","priority":1,"updated_at":"2026-08-21T00:00:00Z",
-  "metadata":{"gc.takeaway":"an epic may carry one of these too"}}
-]
-J
-
-cat > "$ITMP/kids-eLIVE.json"  <<'J'
-[{"id":"tk-wLIVE","status":"open","assignee":null},{"id":"tk-done1","status":"closed","assignee":null}]
-J
-cat > "$ITMP/kids-eHUSK.json"  <<'J'
-[{"id":"tk-wHUSK","status":"open","assignee":null},{"id":"tk-done2","status":"closed","assignee":null}]
-J
-# Claimed by a live session the old way — must keep counting as moving.
-cat > "$ITMP/kids-eCLAIM.json" <<'J'
-[{"id":"tk-wCLAIM","status":"in_progress","assignee":"gc-toolkit__polecat-lx-live"},{"id":"tk-done3","status":"closed","assignee":null}]
-J
-cat > "$ITMP/kids-eMANY.json"  <<'J'
-[{"id":"tk-wMANY","status":"open","assignee":null},{"id":"tk-done4","status":"closed","assignee":null}]
-J
-cat > "$ITMP/kids-eTAKE.json"  <<'J'
-[{"id":"tk-done5","status":"closed","assignee":null}]
-J
-
-# The shared per-rig open-bead snapshot: workflow roots, their steps, and the
-# two metadata-owned beads. root-MANY's convoy resolves to TWO members, which
-# the fail-closed one-member gate must refuse rather than guess at.
-cat > "$ITMP/open.json" <<'J'
-[
- {"id":"tk-rLIVE","status":"in_progress","assignee":null,"issue_type":"task","title":"wf live","priority":3,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"cv-LIVE","gc.session_name":"gc-toolkit__polecat-lx-live"}},
- {"id":"tk-rHUSK","status":"open","assignee":null,"issue_type":"task","title":"wf husk","priority":3,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"cv-HUSK","gc.session_name":"gc-toolkit__polecat-lx-gone"}},
- {"id":"tk-rMANY","status":"open","assignee":null,"issue_type":"task","title":"wf many","priority":3,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.kind":"workflow","gc.input_convoy_id":"cv-MANY","gc.session_name":"gc-toolkit__polecat-lx-live"}},
- {"id":"tk-sSTEP","status":"open","assignee":null,"issue_type":"task","title":"a step","priority":3,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.root_bead_id":"tk-rLIVE","gc.step_ref":"mol-polecat-work.implement","gc.session_name":"gc-toolkit__polecat-lx-live"}},
- {"id":"tk-human","status":"open","assignee":null,"issue_type":"bug","title":"the operator owns this","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human"}},
- {"id":"tk-parked","status":"open","assignee":null,"issue_type":"task","title":"a parked conversation","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"nothing further needed here"}},
- {"id":"tk-eTAKE","status":"open","assignee":null,"issue_type":"epic","title":"epic that carries a takeaway","priority":1,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"an epic may carry one of these too"}},
- {"id":"tk-dHUMAN","status":"open","assignee":null,"issue_type":"decision","title":"decision routed to human","priority":1,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human"}},
- {"id":"tk-both","status":"open","assignee":null,"issue_type":"task","title":"routed to the operator AND parked","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"parked, and still owed to the operator"}},
- {"id":"tk-pdone","status":"open","assignee":null,"issue_type":"task","title":"routed, and the work has landed","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"routed — tk-blkC slung. Nothing further needed here."},
-  "dependencies":[{"issue_id":"tk-pdone","depends_on_id":"tk-blkC","type":"blocks"}]},
- {"id":"tk-phold","status":"open","assignee":null,"issue_type":"task","title":"routed, and the work is still in flight","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"holding — awaiting tk-blkO"},
-  "dependencies":[{"issue_id":"tk-phold","depends_on_id":"tk-blkO","type":"blocks"},
-                  {"issue_id":"tk-phold","depends_on_id":"cv-LIVE","type":"tracks"}]},
- {"id":"tk-punk","status":"open","assignee":null,"issue_type":"task","title":"waiting on a bead this store cannot resolve","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"holding — awaiting sl-9999 over in another rig"},
-  "dependencies":[{"issue_id":"tk-punk","depends_on_id":"sl-9999","type":"blocks"}]},
- {"id":"tk-pkids","status":"open","assignee":null,"issue_type":"task","title":"parked, and the work it routed is its own child","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"routed — next sitting when the findings land"}},
- {"id":"tk-pmove","status":"open","assignee":null,"issue_type":"task","title":"parked, and a child is being worked right now","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"routed — implementation in flight"}},
- {"id":"tk-pdone2","status":"open","assignee":null,"issue_type":"task","title":"parked, and every child has closed","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.takeaway":"routed — next sitting when the findings land"}},
- {"id":"tk-hkids","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and decomposed","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human"}},
- {"id":"tk-hRULED","status":"open","assignee":null,"issue_type":"bug","title":"routed to the operator, and answered","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — design settled; tk-blkC slung"},
-  "dependencies":[{"issue_id":"tk-hRULED","depends_on_id":"tk-blkC","type":"blocks"}]},
- {"id":"tk-hRKIDS","status":"open","assignee":null,"issue_type":"bug","title":"answered, but its own child is stranded","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — the follow-up is filed under this bead"},
-  "dependencies":[{"issue_id":"tk-hRKIDS","depends_on_id":"tk-blkC","type":"blocks"}]},
- {"id":"tk-hRDONE","status":"open","assignee":null,"issue_type":"bug","title":"answered, decomposed, and every child closed","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — all of it landed"},
-  "dependencies":[{"issue_id":"tk-hRDONE","depends_on_id":"tk-blkC","type":"blocks"}]},
- {"id":"tk-hHOLD","status":"open","assignee":null,"issue_type":"bug","title":"answered, but the routed work is still open","priority":2,
-  "updated_at":"2026-08-21T00:00:00Z","description":"",
-  "metadata":{"gc.routed_to":"human","gc.takeaway":"ruled — tk-blkO slung, landing next"},
-  "dependencies":[{"issue_id":"tk-hHOLD","depends_on_id":"tk-blkO","type":"blocks"}]}
-]
-J
-
-# What `bd show <anchor ids> --include-dependents` answers with: the children
-# of the metadata-keyed anchors, at ALL statuses, so n_closed is a real count.
-# tk-pkids also carries a `tracks` dependent — the edge a convoy files, which
-# points at the same bead and is NOT a child. Filtering to `parent-child` is
-# the only thing that keeps it out of the roll-up.
-cat > "$ITMP/dependents.json" <<'J'
-[
- {"id":"tk-pkids","dependents":[
-   {"id":"tk-kOPEN","status":"open","assignee":null,"dependency_type":"parent-child"},
-   {"id":"tk-kDONE","status":"closed","assignee":null,"dependency_type":"parent-child"},
-   {"id":"cv-TRACK","status":"in_progress","assignee":null,"dependency_type":"tracks"}]},
- {"id":"tk-pmove","dependents":[
-   {"id":"tk-kMOVE","status":"in_progress","assignee":"gc-toolkit__polecat-lx-live","dependency_type":"parent-child"}]},
- {"id":"tk-pdone2","dependents":[
-   {"id":"tk-kDONE1","status":"closed","assignee":null,"dependency_type":"parent-child"},
-   {"id":"tk-kDONE2","status":"closed","assignee":null,"dependency_type":"parent-child"}]},
- {"id":"tk-hkids","dependents":[
-   {"id":"tk-kHUM","status":"open","assignee":null,"dependency_type":"parent-child"}]},
- {"id":"tk-hRKIDS","dependents":[
-   {"id":"tk-kRULE","status":"open","assignee":null,"dependency_type":"parent-child"}]},
- {"id":"tk-hRDONE","dependents":[
-   {"id":"tk-kRD1","status":"closed","assignee":null,"dependency_type":"parent-child"},
-   {"id":"tk-kRD2","status":"closed","assignee":null,"dependency_type":"parent-child"}]}
-]
-J
-
-# What `bd show <blocker-ids>` answers with. tk-blkC has closed; tk-blkO has
-# not; sl-9999 is deliberately ABSENT — the shape a cross-store or `external:`
-# reference produces, which must read as still-waiting rather than as landed.
-cat > "$ITMP/blockers.json" <<'J'
-[
- {"id":"tk-blkC","status":"closed","title":"the routed fix","metadata":{}},
- {"id":"tk-blkO","status":"open","title":"the routed fix, still in flight","metadata":{}}
-]
-J
-
-cat > "$ITMP/decisions.json" <<'J'
-[{"id":"tk-dHUMAN","title":"decision routed to human","priority":1,"updated_at":"2026-08-21T00:00:00Z",
-  "metadata":{"gc.routed_to":"human"}},
- {"id":"tk-dRULED","title":"a decision that has been answered","priority":1,"updated_at":"2026-07-01T00:00:00Z",
-  "metadata":{"gc.takeaway":"ROUTED: excise the fork; tk-blkC slung"},
-  "dependencies":[{"issue_id":"tk-dRULED","depends_on_id":"tk-blkC","type":"blocks"}]},
- {"id":"tk-dHOLD","title":"answered, but the routed work is still open","priority":1,"updated_at":"2026-08-21T00:00:00Z",
-  "metadata":{"gc.takeaway":"answered NO — real bug is elsewhere, routed tk-blkO"},
-  "dependencies":[{"issue_id":"tk-dHOLD","depends_on_id":"tk-blkO","type":"blocks"}]}]
-J
-
-# lx-live is active; lx-gone is ABSENT from the list entirely (the dead shape).
-cat > "$ITMP/sessions.json" <<'J'
-{"sessions":[{"session_name":"gc-toolkit__polecat-lx-live","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}
-J
-
-cat > "$ITMP/bin/gc" <<'GCI'
-#!/usr/bin/env bash
-args="$*"
-case "$1 ${2:-}" in
-  "rig list")     jq -n --arg p "$FAKE_RIG_PATH" '{rigs:[{name:"gc-toolkit",path:$p,prefix:"tk"}]}' ;;
-  "convoy list")  printf '{"convoys":[]}\n' ;;
-  "session list") cat "$FAKE_SESSIONS" ;;
-  "bd show")
-    # Two batched `bd show` calls ride the board path, told apart by their
-    # flags: gather_meta_anchors asks for --include-dependents (the children
-    # roll-up of the metadata-keyed kinds), resolve_waiting_status asks for the
-    # DISTINCT blocker ids of a rig with no such flag. Everything else is
-    # unrelated and keeps answering empty.
-    case "$args" in
-      *--include-dependents*) cat "$FAKE_DEPENDENTS" ;;
-      *tk-blk*|*sl-9999*)     cat "$FAKE_BLOCKERS" ;;
-      *)                      printf '[]\n' ;;
-    esac ;;
-  "convoy status")
-    case "$3" in
-      cv-LIVE) jq -n '{children:[{id:"tk-wLIVE"}]}' ;;
-      cv-HUSK) jq -n '{children:[{id:"tk-wHUSK"}]}' ;;
-      # Two members: a shape the join does not understand. It must make NO
-      # claim about movement rather than pick one.
-      cv-MANY) jq -n '{children:[{id:"tk-wMANY"},{id:"tk-extra"}]}' ;;
-      *)       printf '{"children":[]}\n' ;;
-    esac ;;
-  "bd list")
-    case "$args" in
-      *"--parent tk-eLIVE"*)  cat "$FAKE_DIR/kids-eLIVE.json" ;;
-      *"--parent tk-eHUSK"*)  cat "$FAKE_DIR/kids-eHUSK.json" ;;
-      *"--parent tk-eCLAIM"*) cat "$FAKE_DIR/kids-eCLAIM.json" ;;
-      *"--parent tk-eMANY"*)  cat "$FAKE_DIR/kids-eMANY.json" ;;
-      *"--parent tk-eTAKE"*)  cat "$FAKE_DIR/kids-eTAKE.json" ;;
-      *"--type epic"*)        cat "$FAKE_EPICS" ;;
-      *"--type decision"*)    cat "$FAKE_DIR/decisions.json" ;;
-      *)                      cat "$FAKE_OPEN" ;;   # the shared snapshot
-    esac ;;
-esac
-exit 0
-GCI
-chmod +x "$ITMP/bin/gc"
-
-IRUN="$ITMP/run"; mkdir -p "$IRUN"
-IRC=0
-IOUT="$(env PATH="$ITMP/bin:$PATH" TMPDIR="$IRUN" \
-            FAKE_RIG_PATH="$ITMP/rig" FAKE_EPICS="$ITMP/epics.json" \
-            FAKE_OPEN="$ITMP/open.json" FAKE_SESSIONS="$ITMP/sessions.json" \
-            FAKE_DIR="$ITMP" FAKE_BLOCKERS="$ITMP/blockers.json" \
-            FAKE_DEPENDENTS="$ITMP/dependents.json" GC_HELM_FIXTURE= \
-            sh "$SCRIPT" board --json --refresh --limit=0 2>"$IRUN/err")" || IRC=$?
-IERR="$(cat "$IRUN/err" 2>/dev/null || true)"
-eq "$IRC" "0" "(SCENARIO3) board renders (err: ${IERR:-none})"
-
-# row <id> <field>
-row() { printf '%s' "$IOUT" | jq -r --arg i "$1" --arg k "$2" \
-        'first(.[]? | select(.id==$i)) | .[$k] | if .==null then "null" else tostring end' 2>/dev/null || true; }
-
-# --- (INFLIGHT) the defect itself -------------------------------------------
-eq "$(row tk-eLIVE stranded)"        "false"  "(INFLIGHT) a live workflow over an unclaimed child clears stranded"
-eq "$(row tk-eLIVE in_progress_live)" "1"     "(INFLIGHT) the covered child counts as moving"
-eq "$(row tk-eLIVE in_flight)"       "1"      "(INFLIGHT) it is attributed to the workflow, not to a claim"
-eq "$(row tk-eLIVE in_progress)"     "0"      "(INFLIGHT) and the raw status count is still honestly zero"
-eq "$(row tk-eLIVE severity)"        "NORMAL" "(INFLIGHT) the row leaves the HIGH attention band"
-printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eLIVE")).frontier | test("1 in flight")' >/dev/null 2>&1 \
-  && ok "(INFLIGHT) the frontier says in flight, not '0 in-progress (stranded)'" \
-  || bad "(INFLIGHT) frontier still reads: $(row tk-eLIVE frontier)"
-
-# --- (HUSK) the load-bearing guard ------------------------------------------
-# 17 of 18 open roots in the live rig were husks when this was written. If root
-# existence alone counted, every one of them would render a false all-clear.
-eq "$(row tk-eHUSK stranded)"         "true" "(HUSK) a dead-session workflow does NOT clear stranded"
-eq "$(row tk-eHUSK in_flight)"        "0"    "(HUSK) the husk contributes no in-flight movement"
-eq "$(row tk-eHUSK severity)"         "HIGH" "(HUSK) the row stays in the attention band"
-eq "$(row tk-eHUSK in_progress_dead)" "0"    "(HUSK) an unclaimed child is not a dead OWNER either"
-
-# --- (CLAIMED) the pre-existing path is untouched ---------------------------
-eq "$(row tk-eCLAIM stranded)"         "false" "(CLAIMED) claimed + live owner still counts as moving"
-eq "$(row tk-eCLAIM in_progress_live)" "1"     "(CLAIMED) counted once"
-eq "$(row tk-eCLAIM in_flight)"        "0"     "(CLAIMED) and attributed to the claim, not a workflow"
-
-# --- (IDLEHEAD) covered work is not an idle head ----------------------------
-printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eLIVE")).open_heads | index("tk-wLIVE") == null' >/dev/null 2>&1 \
-  && ok "(IDLEHEAD) a workflow-covered child drops out of open_heads" \
-  || bad "(IDLEHEAD) tk-wLIVE still listed as an idle head"
-printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-eHUSK")).open_heads | index("tk-wHUSK") != null' >/dev/null 2>&1 \
-  && ok "(IDLEHEAD) a husk-covered child REMAINS an idle head" \
-  || bad "(IDLEHEAD) tk-wHUSK wrongly dropped from open_heads"
-
-# --- (ONEMEMBER) fail closed on a shape the walk does not understand --------
-eq "$(row tk-eMANY stranded)" "true" "(ONEMEMBER) a convoy with 2 tracked members makes no movement claim"
-eq "$(row tk-eMANY in_flight)" "0"   "(ONEMEMBER) nothing is guessed from the ambiguous convoy"
-
-# --- (HUMAN) / (PARKED) the metadata-keyed kinds ----------------------------
-eq "$(row tk-human kind)"     "human"    "(HUMAN) gc.routed_to=human reaches the board at all"
-eq "$(row tk-human severity)" "ELEVATED" "(HUMAN) banded with the other human-gated rows"
-eq "$(row tk-parked kind)"     "parked"  "(PARKED) a takeaway-bearing bead is findable"
-eq "$(row tk-parked severity)" "LOW"     "(PARKED) floored — it wants nothing, it just has to be findable"
-
-# --- (DISPO) the defect tk-2plde is about ------------------------------------
-# The subject routed work out of a sitting and the work has since closed. The
-# takeaway is FROZEN at dispatch time — it still says "nothing further needed
-# here" — so the row has to be promoted by the EDGE, not by re-reading prose.
-eq "$(row tk-pdone severity)" "ELEVATED" "(DISPO) a parked row whose blocker landed leaves the LOW floor"
-eq "$(row tk-pdone disposition_due)" "true" "(DISPO) …and says so structurally, not just in a phrase"
-eq "$(row tk-pdone frontier)" "parked · blocker landed" "(DISPO) the frontier names what changed"
-eq "$(row tk-pdone needs)" "blocker landed — dispose or resume" \
-   "(DISPO) the STALE takeaway is not the answer for this row"
-eq "$(row tk-pdone waiting_on)" '["tk-blkC"]' "(DISPO) the wait is on the wire as an id, not as prose"
-eq "$(row tk-pdone waiting_on_open)" '[]' "(DISPO) nothing outstanding"
-# The takeaway itself is still carried — the row is promoted, not censored.
-printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-pdone")).takeaway | test("Nothing further needed")' >/dev/null 2>&1 \
-  && ok "(DISPO) the takeaway stays on the wire for anyone reading the row" \
-  || bad "(DISPO) the takeaway was dropped: $(row tk-pdone takeaway)"
-
-# --- (LIVEHOLD) the case that must stay quiet --------------------------------
-# A genuine hold: the work it is waiting on is still open. Promoting this would
-# reintroduce the noise the LOW floor exists to prevent.
-eq "$(row tk-phold severity)" "LOW" "(LIVEHOLD) a hold whose work is still in flight stays floored"
-eq "$(row tk-phold disposition_due)" "false" "(LIVEHOLD) …and owes no disposition"
-eq "$(row tk-phold frontier)" "parked · waiting on 1" "(LIVEHOLD) the frontier counts what is outstanding"
-eq "$(row tk-phold needs)" "holding — awaiting tk-blkO" "(LIVEHOLD) its takeaway still answers for it"
-eq "$(row tk-phold waiting_on)" '["tk-blkO"]' "(LIVEHOLD) only blocks edges count — a tracks edge is not a wait"
-
-# --- (BAREPARK) every parked row in the city today ---------------------------
-# No edges have been written yet, so this is the shape the change must leave
-# byte-identical or it is a regression dressed as a feature.
-eq "$(row tk-parked disposition_due)" "false" "(BAREPARK) no edges is not a discharged wait"
-eq "$(row tk-parked frontier)" "conversation parked — takeaway recorded" \
-   "(BAREPARK) an edgeless parked row renders exactly as before"
-eq "$(row tk-parked waiting_on)" '[]' "(BAREPARK) the field is an empty ARRAY, never null (jq/Go parity)"
-eq "$(row tk-parked m_total)" "0" "(BAREPARK) a childless parked row still rolls up nothing"
-eq "$(row tk-parked severity)" "LOW" "(BAREPARK) …and keeps the floor"
-
-# --- (PKIDS) the defect tk-a9k0l is about ------------------------------------
-# The canonical converse shape: the sitting filed the work it routed as a CHILD
-# of the subject. That work can never be a `waiting_on` edge — `bd` refuses a
-# parent→descendant `blocks` edge (tk-2cyxo) — so `children` is the ONLY
-# relation that can see it. The gather used to hardcode `children:[]`, which
-# reported zero children AND, because a plain bead reaches the board only
-# through its parent's roll-up, deleted the open child from every surface.
-eq "$(row tk-pkids kind)"     "parked" "(PKIDS) it is still a parked conversation"
-eq "$(row tk-pkids m_total)"  "2"      "(PKIDS) its children are counted, not hardcoded away"
-eq "$(row tk-pkids n_closed)" "1"      "(PKIDS) …at all statuses, so n_closed is real"
-eq "$(row tk-pkids open)"     "1"      "(PKIDS) …and the open frontier is visible"
-eq "$(row tk-pkids open_heads)" '["tk-kOPEN"]' "(PKIDS) the open child is nameable from the row"
-eq "$(row tk-pkids severity)" "HIGH"   "(PKIDS) the LOW floor does not survive open work under it"
-eq "$(row tk-pkids stranded)" "true"   "(PKIDS) …because the frontier is genuinely stranded"
-eq "$(row tk-pkids frontier)" "1 open · 0 in flight (stranded)" \
-   "(PKIDS) and the frontier explains the band it was given"
-# A convoy files a `tracks` edge that points at the same bead. It is a
-# membership edge, not a child, and counting it would inflate every roll-up.
-# cv-TRACK is in_progress on purpose: drop the `parent-child` filter and this
-# row reads m_total=3 with one in-progress child, so the assertion can only
-# pass while the filter is there.
-eq "$(row tk-pkids in_progress)" "0" "(TRACKSEDGE) a tracks dependent is not a child"
-
-# --- (PMOVE) the same row, with the work actually moving ---------------------
-eq "$(row tk-pmove severity)" "NORMAL" "(PMOVE) a parked subject whose child is being worked is active, not floored"
-eq "$(row tk-pmove frontier)" "1 open · 1 in flight" "(PMOVE) …and says what is moving"
-
-# --- (PALLDONE) the state tk-2cyxo has to be able to see ---------------------
-# Every child closed. The band is LOW either way, so this is not about ranking:
-# it is about the row being able to SAY that the work it routed has landed.
-# Before the fix "never decomposed" and "decomposed, all landed" were the same
-# m_total=0 row, and no sweep could tell them apart.
-eq "$(row tk-pdone2 m_total)"  "2"    "(PALLDONE) a finished roll-up is still reported"
-eq "$(row tk-pdone2 n_closed)" "2"    "(PALLDONE) …and reads as complete"
-eq "$(row tk-pdone2 complete)" "true" "(PALLDONE) …structurally, not just in a phrase"
-eq "$(row tk-pdone2 severity)" "LOW"  "(PALLDONE) promoting this row is tk-2cyxo's call, not this one's"
-eq "$(row tk-pdone2 frontier)" "all 2 closed · 0 open" "(PALLDONE) the frontier stops claiming it wants nothing"
-
-# --- (HKIDS) the same hole on the other metadata-keyed kind ------------------
-eq "$(row tk-hkids m_total)"  "1"        "(HKIDS) a human-routed bead rolls up its children too"
-eq "$(row tk-hkids severity)" "ELEVATED" "(HKIDS) …and its band still comes from the marker, not the counts"
-
-# --- (PRANK) the floor was the thing hiding it ------------------------------
-PK_SCORE="$(row tk-pkids rank_score)"; BARE_SCORE="$(row tk-parked rank_score)"
-case "${PK_SCORE}${BARE_SCORE}" in
-  ''|*[!0-9]*) bad "(PRANK) a rank_score is missing or non-numeric (pkids='$PK_SCORE' bare='$BARE_SCORE')" ;;
-  *) [ "$PK_SCORE" -gt "$BARE_SCORE" ] \
-       && ok "(PRANK) a decomposed parked row outranks a floored one ($PK_SCORE > $BARE_SCORE)" \
-       || bad "(PRANK) the decomposed row is still floored ($PK_SCORE <= $BARE_SCORE)" ;;
-esac
-
-# --- (FAILCLOSE) the direction to be wrong in --------------------------------
-# sl-9999 is absent from the blocker read — a cross-store id, an `external:`
-# ref, or a query that died. Reading absence as "closed" would tell the operator
-# to dispose of a subject whose work is still in flight.
-eq "$(row tk-punk disposition_due)" "false" "(FAILCLOSE) an unresolvable blocker never reads as landed"
-eq "$(row tk-punk severity)" "LOW" "(FAILCLOSE) …so the row keeps its pre-fix band"
-eq "$(row tk-punk waiting_on_open)" '["sl-9999"]' "(FAILCLOSE) …and it is still counted outstanding"
-
-# --- (RULED) the defect tk-b3rga is about ------------------------------------
-# The row was ANSWERED and went on demanding the operator anyway, because the
-# band came from the kind and the kind never changes. tk-dRULED is the shape of
-# tk-z130v: ruled on 2026-07-01 against a fixture clock in August, so it is also
-# the proof that a stood-down row is not re-elevated by the staleness bump.
-eq "$(row tk-dRULED severity)" "LOW" "(RULED) an answered decision leaves the attention band"
-eq "$(row tk-dRULED frontier)" "ruled — takeaway recorded" "(RULED) the frontier says the row was answered"
-eq "$(row tk-dRULED needs)" "ruled — close or extend" "(RULED) …and NEEDS names the disposition it now wants"
-eq "$(row tk-dRULED waiting_on)" '["tk-blkC"]' "(RULED) the decision gather carries its blocks edges at all"
-eq "$(row tk-dRULED waiting_on_open)" '[]' "(RULED) …and nothing is outstanding"
-# The ruling itself is not censored — it is still on the wire for the reader.
-printf '%s' "$IOUT" | jq -e 'first(.[]?|select(.id=="tk-dRULED")).takeaway | test("excise the fork")' >/dev/null 2>&1 \
-  && ok "(RULED) the takeaway survives the stand-down" \
-  || bad "(RULED) the takeaway was dropped: $(row tk-dRULED takeaway)"
-# LOW is not stale-bumped; NORMAL would be, and tk-z130v would be back tomorrow.
-STALE_D="$(row tk-dRULED stale_days)"
-case "$STALE_D" in
-  ''|*[!0-9]*) bad "(RULED) stale_days is missing or non-numeric ('$STALE_D')" ;;
-  *) [ "$STALE_D" -gt 14 ] \
-       && ok "(RULED) …and it is genuinely stale ($STALE_D days), so the band is holding it down" \
-       || bad "(RULED) the fixture is not stale enough to prove the bump does not fire ($STALE_D days)" ;;
-esac
-# The same state on the other human-gated kind.
-eq "$(row tk-hRULED severity)" "LOW" "(RULED) a human-routed bead stands down the same way"
-eq "$(row tk-hRULED needs)" "ruled — close or extend" "(RULED) …with the same disposition phrase"
-
-# --- (RULEHOLD) the guard that keeps the rule honest -------------------------
-# "Answered" is not "answered and the work landed". A decision whose
-# `--waiting-on` work is still open has not finished being a decision. This is
-# also the only assertion that can fail if the waiting edges stop being
-# gathered for these kinds — without them the clause is vacuously true and
-# every answered row stands down whether or not its work landed.
-eq "$(row tk-dHOLD severity)" "ELEVATED" "(RULEHOLD) a live wait keeps the row in the band"
-eq "$(row tk-dHOLD frontier)" "human-gated decision" "(RULEHOLD) …and its frontier is unchanged"
-eq "$(row tk-dHOLD waiting_on_open)" '["tk-blkO"]' "(RULEHOLD) the outstanding blocker is named"
-eq "$(row tk-dHOLD needs)" "answered NO — real bug is elsewhere, routed tk-blkO" \
-   "(RULEHOLD) its takeaway still answers for it"
-# The same guard on the human kind — and the ONLY assertion in this suite that
-# can see whether the META gather still reads waiting edges for `human`. Nothing
-# else can: every other human fixture here has its waits already discharged, so
-# dropping the edges leaves waiting_on_open empty either way and the rows stand
-# down for the wrong reason. Here the edge is what holds the row up.
-eq "$(row tk-hHOLD severity)" "ELEVATED" "(RULEHOLD) a human row whose routed work is open keeps its band"
-eq "$(row tk-hHOLD waiting_on)" '["tk-blkO"]' "(RULEHOLD) …because the meta gather carries its blocks edges"
-eq "$(row tk-hHOLD waiting_on_open)" '["tk-blkO"]' "(RULEHOLD) …and the blocker is still outstanding"
-eq "$(row tk-hHOLD frontier)" "routed to the operator — no agent will take it" \
-   "(RULEHOLD) …so its frontier is unchanged too"
-# And the unanswered rows are untouched: no takeaway, no stand-down.
-eq "$(row tk-human severity)" "ELEVATED" "(RULEHOLD) an unanswered human row keeps its band"
-eq "$(row tk-dHUMAN severity)" "ELEVATED" "(RULEHOLD) …and so does an unanswered decision"
-
-# --- (RULEKIDS) a ruling is not a new way to hide open work ------------------
-# The tk-a9k0l lesson, one kind over: "answered" is a claim about the BEAD, and
-# open work hanging under it falsifies the claim. A ruled row that DECOMPOSED is
-# banded by its roll-up like any other anchor.
-eq "$(row tk-hRKIDS severity)" "HIGH" "(RULEKIDS) a stranded child outranks the ruling"
-eq "$(row tk-hRKIDS stranded)" "true" "(RULEKIDS) …structurally, not just in a phrase"
-eq "$(row tk-hRKIDS frontier)" "1 open · 0 in flight (stranded)" \
-   "(RULEKIDS) the frontier reports the roll-up, not the ruling"
-eq "$(row tk-hRKIDS needs)" "ruled — the follow-up is filed under this bead" \
-   "(RULEKIDS) NEEDS falls back to the takeaway, never to a bare close-or-extend"
-
-# --- (RULETWIN) the dedup would hand the band straight back ------------------
-# A bead carrying BOTH gc.routed_to=human and gc.takeaway is gathered once per
-# marker, and the dedup keeps the HIGHER band. So the `parked` twin of a
-# stood-down row must stand down with it: with a discharged wait the twin would
-# otherwise be promoted by the disposition rule and win, on every row this fix
-# was written for. tk-hRDONE decomposed with all children closed — the shape of
-# sl-kg9z6.1.2 — because the childless twin is already caught one branch above.
-eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-hRDONE")]|length')" "1" \
-   "(RULETWIN) the doubly-marked bead still renders exactly once"
-eq "$(row tk-hRDONE severity)" "LOW" "(RULETWIN) …and the twin does not re-elevate it"
-eq "$(row tk-hRDONE disposition_due)" "false" \
-   "(RULETWIN) a human-gated subject owes its disposition through the ruled row"
-eq "$(row tk-hRDONE m_total)" "2" "(RULETWIN) the roll-up is still reported"
-# tk-2plde intact: a parked row that is NOT human-gated keeps its promotion.
-eq "$(row tk-pdone severity)" "ELEVATED" "(RULETWIN) a plain parked row still leaves the floor"
-eq "$(row tk-pdone disposition_due)" "true" "(RULETWIN) …and still says so"
-
-# --- (EXCLUDE) the typed kinds are not re-gathered by metadata --------------
-eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-eTAKE")]|length')" "1" \
-   "(EXCLUDE) an epic carrying a takeaway appears exactly once"
-eq "$(row tk-eTAKE kind)" "epic" "(EXCLUDE) …and stays kind epic, not parked"
-eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-dHUMAN")]|length')" "1" \
-   "(EXCLUDE) a decision routed to human appears exactly once"
-eq "$(row tk-dHUMAN kind)" "decision" "(EXCLUDE) …and stays kind decision, not human"
-
-eq "$(printf '%s' "$IOUT" | jq -r '[.[]?|select(.id=="tk-both")]|length')" "1" \
-   "(BOTH) …and renders exactly once after dedup"
-eq "$(row tk-both kind)"     "human"    "(BOTH) the human reading wins the row"
-# SUPERSEDED by tk-b3rga, deliberately. This row used to assert ELEVATED — "an
-# owed-to-the-operator bead is not floored by its takeaway" — which is exactly
-# the behaviour the operator ruled against on 2026-08-23: a takeaway on a
-# human-gated bead RECORDS the answer, and a row that keeps demanding an
-# operator who already answered it is the single largest false contributor to
-# the board. tk-both carries a takeaway and no outstanding wait, which is the
-# same shape as tk-z130v — the thirty-day regression case the rule is named for.
-eq "$(row tk-both severity)" "LOW"       "(BOTH) an answered bead stands down, whichever marker gathered it"
-
-# --- (FLOOR) a parked row never competes with real attention ----------------
-# Guard the comparison on both scores being REAL numbers first. Defaulting a
-# missing score to 0 would let this pass when the parked row does not exist at
-# all — which is precisely the state before the fix, so the assertion would
-# have certified the bug as compliant.
-PARKED_SCORE="$(row tk-parked rank_score)"; HUSK_SCORE="$(row tk-eHUSK rank_score)"
-case "${PARKED_SCORE}${HUSK_SCORE}" in
-  ''|*[!0-9]*) bad "(FLOOR) a rank_score is missing or non-numeric (parked='$PARKED_SCORE' husk='$HUSK_SCORE')" ;;
-  *) [ "$PARKED_SCORE" -lt "$HUSK_SCORE" ] \
-       && ok "(FLOOR) parked ranks below a stranded epic ($PARKED_SCORE < $HUSK_SCORE)" \
-       || bad "(FLOOR) parked outranked a stranded epic ($PARKED_SCORE >= $HUSK_SCORE)" ;;
-esac
-
-# --- (MAPGATHER) the gather-side filter, asserted on its own output ----------
-# The two liveness checks (gather-side, render-side) each mask the other under
-# a single end-to-end assertion: mutate either one alone and the board still
-# reads correctly, because the other still refuses the husk. So each is pinned
-# by a test that can only see THAT layer. Here: the map the gather produced,
-# read straight off the cache it wrote. A dead root must never have had its
-# convoy resolved at all.
-ICACHE="$(find "$IRUN" -name 'board2-*.ndjson' 2>/dev/null | head -1)"
-if [ -n "$ICACHE" ] && [ -s "$ICACHE" ]; then
-    IMAP="$(sed -n '3p' "$ICACHE")"
-    printf '%s' "$IMAP" | jq -e 'has("tk-wLIVE")' >/dev/null 2>&1 \
-      && ok "(MAPGATHER) the live workflow's member is in the in-flight map" \
-      || bad "(MAPGATHER) tk-wLIVE missing from the map: $IMAP"
-    printf '%s' "$IMAP" | jq -e 'has("tk-wHUSK") | not' >/dev/null 2>&1 \
-      && ok "(MAPGATHER) the dead workflow's convoy was never resolved" \
-      || bad "(MAPGATHER) a husk reached the in-flight map: $IMAP"
-    printf '%s' "$IMAP" | jq -e 'has("tk-wMANY") | not' >/dev/null 2>&1 \
-      && ok "(MAPGATHER) the ambiguous convoy was never resolved" \
-      || bad "(MAPGATHER) a 2-member convoy reached the map: $IMAP"
-
-    # (EXCLGATHER) the type exclusion, asserted where it happens. Counting rows
-    # in the RENDERED board cannot see it: the render dedups by id, so a
-    # doubly-gathered epic collapses back to one row and the assertion passes
-    # whether or not the exclusion ran. The gathered anchor set is lines 4.. of
-    # the same cache, before any dedup.
-    GATHERED="$(tail -n +4 "$ICACHE" 2>/dev/null | jq -s -c '.' 2>/dev/null || printf '[]')"
-    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-eTAKE")]|length')" "1" \
-       "(EXCLGATHER) an epic carrying a takeaway is gathered ONCE, not also as parked"
-    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-dHUMAN")]|length')" "1" \
-       "(EXCLGATHER) a decision routed to human is gathered ONCE, not also as human"
-    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-parked")]|length')" "1" \
-       "(EXCLGATHER) …while a non-typed bead still gathers exactly once"
-    # (BOTH) a bead carrying BOTH markers is emitted twice ON PURPOSE — the two
-    # kinds are independent claims — and the render's id-dedup collapses it to
-    # the higher band. Asserted on both sides of that dedup, because each half
-    # is invisible from the other: the gather count cannot see which band won,
-    # and the rendered row cannot see that two were produced.
-    eq "$(printf '%s' "$GATHERED" | jq -r '[.[]|select(.id=="tk-both")]|length')" "2" \
-       "(BOTH) a bead with both markers is gathered under both kinds"
-else
-    bad "(MAPGATHER) no cache written — cannot inspect the gathered map"
+# --- (DEGRADE) no binary is a build that has not run, not a dead city --------
+DRUN="$TH/run-degrade"
+mkdir -p "$DRUN"
+env TMPDIR="$DRUN" GC_CITY_PATH=/fake/city GC_HELM_SVC_BIN="$TH/helm-svc" \
+    STUB_CALLS="$DRUN/calls" GC_HELM_FIXTURE= sh "$SCRIPT" --json >/dev/null 2>&1
+# Age the stamp past the TTL, so a replay cannot be mistaken for a cache HIT.
+DSLOT="$(find "$DRUN" -name 'render1-*' | head -1)"
+if [ -n "$DSLOT" ]; then
+    DTS="$(head -n1 "$DSLOT")"
+    { printf '%s\n' "$((DTS - 600))"; tail -n +2 "$DSLOT"; } > "$DSLOT.aged" && mv "$DSLOT.aged" "$DSLOT"
 fi
+DRC=0
+DOUT="$(env TMPDIR="$DRUN" GC_CITY_PATH=/fake/city GC_HELM_SVC_BIN=/nonexistent \
+            GC_HELM_SERVICE_NAME=no-such-service GC_CITY= GC_CITY_ROOT= \
+            GC_HELM_FIXTURE= sh "$SCRIPT" --json 2>"$DRUN/err")" || DRC=$?
+DERR="$(cat "$DRUN/err")"
+eq "$DRC" "0" "(DEGRADE) a stale cache is served rather than nothing"
+eq "$DOUT" "STUB-OUT board --json" "(DEGRADE) …with the bytes intact"
+case "$DERR" in *"not built"*replaying*) ok "(DEGRADE) …and the replay says so on stderr" ;;
+                *) bad "(DEGRADE) a stale replay was silent: $DERR" ;; esac
+# The age is asserted as a NUMBER, not as the exact 600 the stamp was moved
+# back by: a second ticking over between writing the cache and reading it makes
+# that 601, and a test that fails on the clock teaches everyone to re-run it.
+# What has to hold is that an age is stated at all — the reader, not this
+# script, decides whether a ten-minute-old board is good enough.
+if printf '%s' "$DERR" | grep -qE 'cached [0-9]+s ago'; then
+    ok "(DEGRADE) …naming the age, so the reader judges it"
+else
+    bad "(DEGRADE) the banner did not state the age: $DERR"
+fi
+# The banner must not corrupt the contract it is warning about.
+printf '%s' "$DOUT" | grep -q 'not built' \
+  && bad "(DEGRADE) the banner leaked into stdout, corrupting --json" \
+  || ok "(DEGRADE) the banner is on stderr, so --json stays parseable"
 
-# --- (NMCOL) the human table, where the operator actually reads it -----------
-# The N/M cell printed "—" for every human/parked row by KIND. That is right
-# for a row with no roll-up and a lie over a real child set — and the table is
-# the surface the operator glances at, so the JSON being correct is not enough.
-ITAB="$(env PATH="$ITMP/bin:$PATH" TMPDIR="$IRUN" \
-            FAKE_RIG_PATH="$ITMP/rig" FAKE_EPICS="$ITMP/epics.json" \
-            FAKE_OPEN="$ITMP/open.json" FAKE_SESSIONS="$ITMP/sessions.json" \
-            FAKE_DIR="$ITMP" FAKE_BLOCKERS="$ITMP/blockers.json" \
-            FAKE_DEPENDENTS="$ITMP/dependents.json" GC_HELM_FIXTURE= \
-            sh "$SCRIPT" board --refresh --limit=0 2>/dev/null)" || true
-# The held glyph is a bare space on an unheld row, so the column index shifts
-# by one under awk's whitespace splitting. Find the ID cell instead (it is
-# field 1 or 2, and rpad never truncates it) and step three fields to N/M:
-# ID, RIG, KIND, N/M.
-tabcell() { printf '%s' "$ITAB" | awk -v id="$1" '{for(i=1;i<=2;i++) if($i==id){print $(i+3); exit}}'; }
-[ -n "$ITAB" ] && ok "(NMCOL) the human table rendered" || bad "(NMCOL) the human table did not render"
-eq "$(tabcell tk-pkids)"  "1/2" "(NMCOL) a decomposed parked row prints its real count"
-eq "$(tabcell tk-parked)" "—"   "(NMCOL) …while a childless one still prints —"
-eq "$(tabcell tk-hkids)"  "0/1" "(NMCOL) the same on a human-routed row"
-eq "$(tabcell tk-dHUMAN)" "—"   "(NMCOL) a decision never has a roll-up to print"
+# --- (NOBIN) nothing to render and nothing to replay -------------------------
+NRUN="$TH/run-nobin"
+mkdir -p "$NRUN"
+NRC=0
+NOUT="$(env TMPDIR="$NRUN" GC_CITY_PATH=/fake/city GC_HELM_SVC_BIN=/nonexistent \
+             GC_HELM_SERVICE_NAME=no-such-service GC_CITY= GC_CITY_ROOT= \
+             GC_HELM_FIXTURE= sh "$SCRIPT" --json 2>"$NRUN/err")" || NRC=$?
+NERR="$(cat "$NRUN/err")"
+eq "$NRC" "3" "(NOBIN) no binary and no cache exits 3"
+eq "$NOUT" "" "(NOBIN) …and renders nothing"
+case "$NERR" in *gc-helm-build.sh*) ok "(NOBIN) …and names the build that fixes it" ;;
+                *) bad "(NOBIN) the message does not say how to recover: $NERR" ;; esac
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SCENARIO 4 — the RENDER-side liveness re-check, isolated (tk-fkeft)
-#
-# The map is CACHED (45s) but session state is not: it is re-read every glance
-# precisely so a polecat that drained mid-TTL stops counting as movement at
-# once. That re-check is the correctness guarantee — the gather-side filter is
-# an optimisation that bounds convoy reads — and scenario 3 cannot see it,
-# because there the gather has already dropped the dead root before the render
-# ever runs.
-#
-# So drive the render directly through GC_HELM_FIXTURE with a map that CONTAINS
-# both a live-session entry and dead-session ones. Only liveness separates them.
-# ══════════════════════════════════════════════════════════════════════════════
+# --- (HELPHERE) -h is answered by this script, which knows every verb --------
+# helm-svc's own usage covers one subcommand; a caller typing `gc-helm --help`
+# is asking about open/react/takeaway too.
+HRUN="$TH/run-help"
+mkdir -p "$HRUN"
+: > "$HRUN/calls"
+HERR="$(env TMPDIR="$HRUN" GC_CITY_PATH=/fake/city GC_HELM_SVC_BIN="$TH/helm-svc" \
+             STUB_CALLS="$HRUN/calls" GC_HELM_FIXTURE= sh "$SCRIPT" --help 2>&1 >/dev/null || true)"
+eq "$(cat "$HRUN/calls" 2>/dev/null | wc -l | tr -d ' ')" "0" "(HELPHERE) --help does not shell out to helm-svc"
+case "$HERR" in *takeaway*) ok "(HELPHERE) …and documents the write verbs helm-svc knows nothing about" ;;
+                *) bad "(HELPHERE) usage lost the write verbs: $HERR" ;; esac
+case "$HERR" in *closed*) ok "(HELPHERE) …and the closed verb" ;;
+                *) bad "(HELPHERE) usage does not mention closed" ;; esac
 
-FTMP="$TMP/fixture"; mkdir -p "$FTMP/fx" "$FTMP/bin" "$FTMP/run"
-cat > "$FTMP/fx/anchors.ndjson" <<'J'
-{"id":"tk-fLIVE","title":"live","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-fw1","status":"open","assignee":null}]}
-{"id":"tk-fGONE","title":"absent owner","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-fw2","status":"open","assignee":null}]}
-{"id":"tk-fARCH","title":"archived owner","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-fw3","status":"open","assignee":null}]}
-J
-printf '[]\n' > "$FTMP/fx/visits.json"
-# All three children ARE in the map. tk-fw1's session is active; tk-fw2's is
-# absent from the session list entirely; tk-fw3's is archived.
-cat > "$FTMP/fx/inflight.json" <<'J'
-{"tk-fw1":["sess-alive"],"tk-fw2":["sess-absent"],"tk-fw3":["sess-archived"]}
-J
-cat > "$FTMP/fx/sessions.json" <<'J'
-{"sessions":[{"session_name":"sess-alive","alias":"a","state":"active"},
-             {"session_name":"sess-archived","alias":"b","state":"archived"}]}
-J
-cat > "$FTMP/bin/gc" <<'GCF'
-#!/usr/bin/env bash
-case "$1 ${2:-}" in
-  "rig list") jq -n '{rigs:[{name:"gc-toolkit",path:"/nonexistent",prefix:"tk"}]}' ;;
-  *)          printf '[]\n' ;;
-esac
-exit 0
-GCF
-chmod +x "$FTMP/bin/gc"
-
-FRC=0
-FOUT="$(env PATH="$FTMP/bin:$PATH" TMPDIR="$FTMP/run" GC_HELM_FIXTURE="$FTMP/fx" \
-            sh "$SCRIPT" board --json --limit=0 2>"$FTMP/err")" || FRC=$?
-eq "$FRC" "0" "(SCENARIO4) fixture board renders (err: $(cat "$FTMP/err" 2>/dev/null || true))"
-frow() { printf '%s' "$FOUT" | jq -r --arg i "$1" --arg k "$2" \
-         'first(.[]? | select(.id==$i)) | .[$k] | if .==null then "null" else tostring end' 2>/dev/null || true; }
-
-eq "$(frow tk-fLIVE stranded)"  "false" "(RENDERLIVE) a mapped child with an ACTIVE session counts as moving"
-eq "$(frow tk-fLIVE in_flight)" "1"     "(RENDERLIVE) …and is attributed to the workflow"
-eq "$(frow tk-fGONE stranded)"  "true"  "(RENDERLIVE) a mapped child whose session is ABSENT does not count"
-eq "$(frow tk-fGONE in_flight)" "0"     "(RENDERLIVE) …and contributes no in-flight movement"
-eq "$(frow tk-fARCH stranded)"  "true"  "(RENDERLIVE) a mapped child whose session is ARCHIVED does not count"
-eq "$(frow tk-fARCH in_flight)" "0"     "(RENDERLIVE) …and contributes no in-flight movement either"
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SCENARIO 5 — the row cap must not re-hide what the parked kind surfaces
-#
-# Parked is band-floored to LOW, so it sorts LAST. Under one shared cap it is
-# therefore the first thing trimmed — and the operator's own surface asks for
-# 36 rows (tmux-pick-helm.sh:64) against a board whose attention bands alone
-# fill most of that. Measured on the live city while this was written: at
-# --limit=36 under a shared cap, 0 of 17 parked rows survived. A bead added to
-# the gather so it could be FOUND would have been absent from the only board
-# the operator reads — defect (b) fixed in the gather and undone in the cap.
-#
-# So parked draws on its own budget. Attention rows keep the whole of --limit.
-# ══════════════════════════════════════════════════════════════════════════════
-
-CTMP="$TMP/cap"; mkdir -p "$CTMP/fx" "$CTMP/bin" "$CTMP/run"
-# 5 stranded epics (attention, HIGH) + 8 parked beads.
-{
-  for i in 1 2 3 4 5; do
-    printf '{"id":"tk-cap-e%s","title":"epic %s","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[{"id":"tk-cap-k%s","status":"open","assignee":null}]}\n' "$i" "$i" "$i"
-  done
-  for i in 1 2 3 4 5 6 7 8; do
-    printf '{"id":"tk-cap-p%s","title":"parked %s","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"a takeaway","takeaway_at":"","takeaway_by":"converse","children":[]}\n' "$i" "$i"
-  done
-} > "$CTMP/fx/anchors.ndjson"
-printf '[]\n' > "$CTMP/fx/visits.json"
-printf '{}\n'  > "$CTMP/fx/inflight.json"
-printf '{"sessions":[]}\n' > "$CTMP/fx/sessions.json"
-cp "$FTMP/bin/gc" "$CTMP/bin/gc"
-
-# cap_run <limit> <max_parked> -> COUT
-cap_run() {
-    COUT="$(env PATH="$CTMP/bin:$PATH" TMPDIR="$CTMP/run" GC_HELM_FIXTURE="$CTMP/fx" \
-                GC_HELM_MAX_PARKED="$2" \
-                sh "$SCRIPT" board --json --limit="$1" 2>/dev/null || printf '[]')"
-}
-ckind() { printf '%s' "$COUT" | jq -r --arg k "$1" '[.[]?|select(.kind==$k)]|length' 2>/dev/null || echo 0; }
-
-# --limit=3 with a parked budget of 2: attention keeps its FULL 3.
-cap_run 3 2
-eq "$(ckind epic)"   "3" "(CAPSPLIT) attention rows get the whole of --limit, undiminished by parked"
-eq "$(ckind parked)" "2" "(CAPSPLIT) parked rows draw on their own budget"
-eq "$(printf '%s' "$COUT" | jq -r 'length')" "5" "(CAPSPLIT) the board is attention + parked, not one shared cap"
-
-# The regression this guards: a parked budget of 0 is the old shared-cap shape.
-cap_run 3 0
-eq "$(ckind epic)"   "3" "(CAPSPLIT) …attention unaffected when parked is budgeted to zero"
-eq "$(ckind parked)" "0" "(CAPSPLIT) …and parked can still be switched off explicitly"
-
-# Ranking is preserved across the merge: every attention row outranks every
-# parked row, so the re-merged array is still globally rank-ordered.
-cap_run 5 8
-printf '%s' "$COUT" | jq -e '[.[].rank_score] as $r | $r == ($r | sort | reverse)' >/dev/null 2>&1 \
-  && ok "(CAPSPLIT) the merged board is still sorted by rank_score" \
-  || bad "(CAPSPLIT) merge broke the global rank order"
-eq "$(printf '%s' "$COUT" | jq -r '[.[]?|select(.kind=="epic")]|length')" "5" "(CAPSPLIT) all 5 attention rows at limit=5"
-eq "$(printf '%s' "$COUT" | jq -r '[.[]?|select(.kind=="parked")]|length')" "8" "(CAPSPLIT) all 8 parked rows at a budget of 8"
-
-# --limit=0 means ALL, both kinds, regardless of the parked budget.
-cap_run 0 2
-eq "$(printf '%s' "$COUT" | jq -r 'length')" "13" "(CAPSPLIT) --limit=0 is uncapped for both kinds"
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SCENARIO 6 — the NEEDS cell is bounded in the TABLE and whole on the WIRE
-#
-# The write gate (scenario 1) is the cure; this is the backstop. 22 oversized
-# takeaways are already stored, nothing re-renders a stamp, and a paragraph in
-# NEEDS is not a wide cell — NEEDS is the last column, so the row simply wraps
-# over every row below it and the table stops being one.
-#
-# The two halves must be pinned separately because each hides the other under a
-# single assertion: clip the derived model instead of the cell and the table
-# still looks right while `--json` quietly loses text; leave the table alone and
-# the wire still looks right. So: same board, rendered both ways.
-#
-#   (CLIP)      an oversized takeaway renders as exactly 140 chars ending in …
-#   (CLIPROW)   …so the whole rendered row is bounded — the defect itself,
-#               since a 490-column row is what wraps over the rows below it
-#   (CLIPFITS)  a conforming 140-char takeaway renders in FULL, no ellipsis
-#   (CLIPPHRASE) a deterministic state phrase is untouched
-#   (CLIPWIRE)  --json still carries the whole string, in `needs` AND `takeaway`
-# ══════════════════════════════════════════════════════════════════════════════
-
-NTMP="$TMP/needs"; mkdir -p "$NTMP/fx" "$NTMP/bin" "$NTMP/run"
-# Filler is Z: it appears in no id, rig, severity, kind or frontier on this
-# board, so "everything from the first Z" is exactly the NEEDS cell.
-Z400="$(printf 'Z%.0s' {1..400})"
-Z140="$(printf 'Z%.0s' {1..140})"
-{
-  printf '{"id":"tk-clip-long","title":"paragraph takeaway","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"%s","takeaway_at":"","takeaway_by":"converse","children":[]}\n' "$Z400"
-  printf '{"id":"tk-clip-fits","title":"conforming takeaway","kind":"parked","source":"parked","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"%s","takeaway_at":"","takeaway_by":"converse","children":[]}\n' "$Z140"
-  printf '{"id":"tk-clip-plain","title":"no takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":1,"updated_at":"2026-08-21T00:00:00Z","description":"","progress":null,"takeaway":"","takeaway_at":"","takeaway_by":"","children":[]}\n'
-} > "$NTMP/fx/anchors.ndjson"
-printf '[]\n' > "$NTMP/fx/visits.json"
-printf '{}\n'  > "$NTMP/fx/inflight.json"
-printf '{"sessions":[]}\n' > "$NTMP/fx/sessions.json"
-cp "$FTMP/bin/gc" "$NTMP/bin/gc"
-
-nboard() {
-    env PATH="$NTMP/bin:$PATH" TMPDIR="$NTMP/run" GC_HELM_FIXTURE="$NTMP/fx" \
-        sh "$SCRIPT" board --limit=0 "$@" 2>"$NTMP/err"
-}
-NTAB="$(nboard || true)"
-NJSON="$(nboard --json || printf '[]')"
-# The NEEDS cell of a row: nothing to its left on this board contains a Z.
-ncell() { grep -- "$1" <<< "$NTAB" | head -1 | sed 's/^[^Z]*//' || true; }
-nlen()  { printf '%s' "$1" | jq -Rsr 'length' 2>/dev/null || printf 'ERR'; }
-
-LONGCELL="$(ncell tk-clip-long)"
-eq "$(nlen "$LONGCELL")" "140" "(CLIP) an oversized takeaway is bounded to 140 chars in the table"
-case "$LONGCELL" in
-  *…) ok "(CLIP) …and the cut is marked, so a clipped cell says it was clipped" ;;
-  *)  bad "(CLIP) the cell was cut with no ellipsis: '${LONGCELL: -20}'" ;;
-esac
-# The defect is measured on the WHOLE row, not the cell: this row printed 490
-# columns before the bound, which is three wrapped lines on a wide terminal and
-# five on a normal one. The fixed columns ahead of NEEDS come to 90 here, so a
-# bounded row lands at 230; 240 leaves room for the id/rig columns to size
-# themselves without turning this into a layout assertion.
-NROWLEN="$(nlen "$(grep -- 'tk-clip-long' <<< "$NTAB" | head -1 || true)")"
-case "$NROWLEN" in
-  ''|*[!0-9]*) bad "(CLIPROW) could not measure the rendered row (got '$NROWLEN')" ;;
-  *) [ "$NROWLEN" -le 240 ] \
-       && ok "(CLIPROW) the whole rendered row is bounded ($NROWLEN columns)" \
-       || bad "(CLIPROW) the row is $NROWLEN columns — it wraps over the rows below it" ;;
-esac
-eq "$(grep -c -- 'tk-clip-long' <<< "$NTAB" || true)" "1" \
-   "(CLIPROW) …and the bound does not split it into two lines"
-
-eq "$(nlen "$(ncell tk-clip-fits)")" "140" \
-   "(CLIPFITS) a conforming 140-char takeaway renders in full"
-case "$(ncell tk-clip-fits)" in
-  *…) bad "(CLIPFITS) a conforming headline was clipped anyway" ;;
-  *)  ok "(CLIPFITS) …and is not marked as clipped, because it was not" ;;
-esac
-
-grep -q 'no children — decompose or assign' < <(grep -- 'tk-clip-plain' <<< "$NTAB") \
-  && ok "(CLIPPHRASE) a deterministic state phrase is untouched" \
-  || bad "(CLIPPHRASE) the state phrase changed: $(grep -- 'tk-clip-plain' <<< "$NTAB" || true)"
-
-# (CLIPWIRE) the bound is a DISPLAY guard. Applying it to the model would make
-# the table pass and silently truncate every consumer of the contract.
-nfield() { printf '%s' "$NJSON" | jq -r --arg i "$1" --arg k "$2" \
-           'first(.[]?|select(.id==$i)) | .[$k] // "" | length' 2>/dev/null || printf 'ERR'; }
-eq "$(nfield tk-clip-long needs)"    "400" "(CLIPWIRE) --json keeps the whole NEEDS string"
-eq "$(nfield tk-clip-long takeaway)" "400" "(CLIPWIRE) …and the whole takeaway beside it"
+# --- (NOGATHER) the duplicate really is gone ---------------------------------
+# A static guard, because the failure it catches is someone re-adding a "just
+# this one field" gather here rather than in the model — which is how the two
+# boards diverged the first time.
+for fn in gather_anchors gather_open_beads gather_visits gather_meta_anchors gather_inflight resolve_waiting_status; do
+    if grep -qE "^$fn\(\)" "$SCRIPT"; then
+        bad "(NOGATHER) $fn() is back in gc-helm.sh — the board belongs to services/helm"
+    else
+        ok "(NOGATHER) $fn() is gone"
+    fi
+done
 
 echo ""
-echo "gc-helm takeaway --release quiesce + anchor-gather argv boundary + in-flight/metadata kinds: $PASS passed, $FAIL failed"
+echo "gc-helm takeaway --release quiesce + the thin renderer over helm-svc: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

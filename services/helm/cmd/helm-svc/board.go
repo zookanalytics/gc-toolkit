@@ -171,9 +171,9 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 
 	limit := opts.limit
 	if limit < 0 {
-		limit = board.DefaultMaxRows
+		limit = intEnv("GC_HELM_MAX_ROWS", board.DefaultMaxRows)
 	}
-	shown := board.CapRows(b.Tiles, limit, board.DefaultMaxParked)
+	shown := board.CapRows(b.Tiles, limit, intEnv("GC_HELM_MAX_PARKED", board.DefaultMaxParked))
 
 	if opts.json {
 		return renderJSON(stdout, stderr, shown)
@@ -342,6 +342,30 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
+}
+
+// intEnv reads a non-negative integer from the environment, falling back to def.
+//
+// GC_HELM_MAX_ROWS and GC_HELM_MAX_PARKED are gc-helm.sh's documented knobs and
+// they have to keep working now that it renders through this binary rather than
+// computing its own board — a thin renderer that silently dropped two
+// environment variables would be exactly the quiet behaviour change the
+// consolidation is supposed to make impossible.
+//
+// A bad value degrades to the default rather than to zero, matching
+// durationEnv and gc-helm.sh's own `case "$MAX_ROWS" in *[!0-9]*` guard: zero
+// is meaningful here (uncapped for rows, no parked budget at all), so a typo
+// coerced to it would silently change the board's size.
+func intEnv(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return def
+	}
+	return n
 }
 
 // boardMain is the os.Exit-calling wrapper main() dispatches to.

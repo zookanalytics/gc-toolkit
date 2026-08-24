@@ -25,13 +25,28 @@ import (
 // exactly as it does in gc-helm.sh's snapshot.
 var liveStatuses = []beads.Status{beads.StatusOpen, beads.StatusInProgress}
 
-// visitSubjects returns the anchor ids that an open visit bead names in its
-// gc.continuation_group — the conversation-is-held fact behind Tile.Held.
+// visitSubjects returns the anchor ids that an open visit bead names — the
+// conversation-is-held fact behind Tile.Held.
+//
+// THE SUBJECT COMES OFF THE `tracks` EDGE FIRST and the gc.continuation_group
+// stamp only as a fallback, which is why the query hydrates dependencies. Both
+// are written by the same visit-opener call and they do not always both land:
+// on su-ab9je (2026-08-20, bead tk-d6ddn) the stamp landed EMPTY while the edge
+// carried the subject. Re-measured 2026-08-24 over gc-toolkit's last seven days
+// — 49 closed visits, 49 with the edge, 44 with the stamp.
+//
+// This read used to consult the stamp ALONE, while gc-helm.sh's gather_visits
+// read both, so the same anchor could show held on the bash board and unheld
+// here — the "fixed on one board, not the other" class this service's
+// consolidation exists to end. It matters more than a glyph: a held anchor is
+// never stranded, so a missed visit promotes a conversation that is actively
+// being had to HIGH and tells the operator to go attend to it.
 func (s *BeadsSource) visitSubjects(ctx context.Context, st beadStore, r rigRef, g *gatherState) []string {
 	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
-		Statuses:       liveStatuses,
-		MetadataFields: map[string]string{"task_kind": "visit"},
-		SkipWisps:      true,
+		Statuses:            liveStatuses,
+		MetadataFields:      map[string]string{"task_kind": "visit"},
+		SkipWisps:           true,
+		IncludeDependencies: true,
 	})
 	if err != nil {
 		g.note(true, []string{"visits@" + r.name + ": " + err.Error()})
@@ -42,7 +57,7 @@ func (s *BeadsSource) visitSubjects(ctx context.Context, st beadStore, r rigRef,
 		if iss == nil {
 			continue
 		}
-		if subj := decodeMetadata(iss.Metadata)["gc.continuation_group"]; subj != "" {
+		if subj := subjectOf(iss); subj != "" {
 			out = append(out, subj)
 		}
 	}

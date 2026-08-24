@@ -1,12 +1,15 @@
-// Command helm-svc has TWO entry points over ONE board:
+// Command helm-svc has THREE entry points over ONE gather:
 //
 //	helm-svc            the Attention Canvas backend sidecar (default; `serve`)
 //	helm-svc board      the terminal board — the CLI VIEW of the same data
+//	helm-svc closed     the dispositions the open-only board drops
 //
-// They share the gather (internal/source) and the ranking (internal/board)
-// rather than reimplementing either, which is the whole point: a fix to the
-// board is a fix to both views. Keeping them in one binary also keeps them from
-// going stale independently — see the comment atop board.go.
+// They share the gather (internal/source) and the derivations (internal/board,
+// internal/closed) rather than reimplementing any of them, which is the whole
+// point: a fix to the board is a fix to every view of it. Keeping them in one
+// binary also keeps them from going stale independently — see the comment atop
+// board.go. `assets/scripts/gc-helm.sh` is a thin renderer over these
+// subcommands rather than a fourth implementation.
 //
 // As the sidecar, it runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
@@ -72,6 +75,9 @@ func main() {
 		case "board":
 			boardMain(os.Args[2:])
 			return
+		case "closed":
+			closedMain(os.Args[2:])
+			return
 		case "serve":
 			os.Args = append(os.Args[:1], os.Args[2:]...)
 		case "-h", "--help", "help":
@@ -87,11 +93,12 @@ func main() {
 }
 
 const topUsage = `Usage:
-  helm-svc [serve]        run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
-  helm-svc board [flags]  render the cross-rig attention board in the terminal
+  helm-svc [serve]         run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
+  helm-svc board [flags]   render the cross-rig attention board in the terminal
+  helm-svc closed [flags]  render what reached a disposition in a window, and why
 
-Both views share one gather and one ranking. Run "helm-svc board --help" for
-the board's flags.
+Every view shares one gather with the dashboard rather than reimplementing it.
+Run "helm-svc board --help" or "helm-svc closed --help" for their flags.
 `
 
 func serve() {

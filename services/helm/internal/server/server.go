@@ -79,17 +79,19 @@ func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
 }
 
 // Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
+// GET /helm/closed serves the dispositions the open-only board drops;
 // GET /healthz is the liveness probe (no gather); POST /helm/open files a visit
 // on a bead. With [WithSPA] the bare mount also serves the app shell to
 // browsers, and its assets beneath.
 //
-// /helm/open is registered as its own exact pattern, which ServeMux prefers
-// over the "/" catch-all — so it reaches [Server.handleOpen] rather than the
-// SPA handler, whatever the bundle does with unknown paths.
+// /helm/closed and /helm/open are registered as their own exact patterns, which
+// ServeMux prefers over the "/" catch-all — so they reach their handlers rather
+// than the SPA handler, whatever the bundle does with unknown paths.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/helm", s.handleBoard)
+	mux.HandleFunc("/helm/closed", s.handleClosed)
 	mux.HandleFunc("/helm/open", s.handleOpen)
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
