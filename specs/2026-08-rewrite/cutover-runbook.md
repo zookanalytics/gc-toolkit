@@ -112,6 +112,35 @@ says OPERATOR is their decision, not yours. Work the steps in order.
       deduped situation key) to gate-ensure's exec-stamp-only reach once
       live-city step/convoy semantics can be probed; stub-based tests cannot
       pin that probe.
+   9. I1 DOCTOR CHECK (carried from PR #469, whose diff targets the old
+      doctor): check-wait-is-an-edge — assert every wait is a graph edge,
+      not a metadata string (component-model I1). Rebuild in the new doctor
+      layout (`doctor/check-state-space` is the model); I1 and I9 are the
+      only component-model invariants without a check in this tree.
+   10. ONE SCRUBBER (carried from PR #461): the tree still carries ~22
+       inline `tr -d` control-character scrub definitions across
+       assets/scripts and tools; consolidate to one shared helper with one
+       byte set, and a lint-learned detector to hold it.
+   11. WORK FEEDER (carried from PR #464): nothing converts ready beads
+       into dispatches (252 ready unrouted, oldest 123d, at last count).
+       Fold this evidence into bead 1 (review-gates/triage) — the feeder is
+       a triage-design decision, not a bolt-on arm.
+   12. PLAN-TO-BEADS PIPELINE (carried from PR #455): a merged plan's
+       targets do not reliably become beads (the consolidation plan dropped
+       its largest target silently). Decide the mechanism that makes a
+       landed plan's target list a filing checklist.
+   13. NON-CODE GATE CALIBRATION (carried from PR #454): spec/design beads
+       ride the code merge gate with a code-calibrated round cap. The
+       mechanism exists (per-anchor check_set `none`/`approval`,
+       GC_MAX_REVIEW_ROUNDS); write the doctrine/default that applies it to
+       non-code beads.
+
+   Superseded open PRs: when the operator confirms this branch has landed,
+   close the open zook-bot PRs it obsoletes, each with a one-line comment
+   naming the disposition — superseded by the rewrite (#447, #448, #449,
+   #450, #456, #458, #459, #460, #462, #463, #467) or re-filed as the bead
+   above (#454, #455, #461, #464, #469). PRs #457, #466, #468 carry their
+   own dispositions from the pre-landing verification pass.
 
 ## Failure handling
 
