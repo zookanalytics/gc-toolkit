@@ -138,9 +138,15 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    Superseded open PRs: when the operator confirms this branch has landed,
    close the open zook-bot PRs it obsoletes, each with a one-line comment
    naming the disposition — superseded by the rewrite (#447, #448, #449,
-   #450, #456, #458, #459, #460, #462, #463, #467) or re-filed as the bead
-   above (#454, #455, #461, #464, #469). PRs #457, #466, #468 carry their
-   own dispositions from the pre-landing verification pass.
+   #450, #456, #458, #459, #460, #462, #463, #467), re-filed as the bead
+   above (#454, #455, #461, #464, #469), or carried onto this branch
+   directly (#466 and #468: the continuation-group writer/reader guards;
+   #457: doctor/check-pour-text-current). The gc-na313/PR#159 anchor-close
+   incident is likewise carried: the close decision left the agent surface
+   in the rewrite, and this branch adds the lifecycle.sh close/terminal
+   pairing guard, the sanctioned `lifecycle.sh reopen` repair, and the I4
+   anchor-shape filter — the reopened gc-na313 needs no further repair
+   beyond landing this.
 
 ## Failure handling
 
