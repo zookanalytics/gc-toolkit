@@ -87,10 +87,12 @@ description: The operator's rulings on the nine attention items from the rewrite
      [metadata.warrant] registry group, escalate.sh on every stop path;
      the dead session's beads flow into existing witness orphan recovery
      (no healer reappears). ~15-40 cheap calls per episode vs. one
-     operator interrupt + stalled WIP. **OPERATOR DECISION:** reintroduce
-     at cutover, or evidence-first (tripwire: recurring wedged-agent
-     visits in the first live week), or accept the human-wait as a priced
-     trade.
+     operator interrupt + stalled WIP. **DECIDED (2026-08-24): (a)
+     reintroduce at cutover — implemented in this change** (`agents/dog/`,
+     `formulas/mol-dog-shutdown-dance.toml`,
+     `assets/scripts/dance-probe.sh`, `[metadata.warrant]` in
+     `lifecycle/lifecycle.toml`, warrant filing wired into the
+     deacon/witness patrols; boot-health stays report-only).
   Residue (cosmetic, clean opportunistically): `tmux-pick-session.sh` still
   filters `dog`; `docs/gascity-agents.md`/`gascity-packs.md` still list dog
   in the gastown roster tables (they document the runtime/gastown, so

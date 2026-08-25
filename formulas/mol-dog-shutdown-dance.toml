@@ -1,0 +1,160 @@
+description = """
+Shutdown dance — due process for one wedged session, run by the dog pool
+against a claimed warrant bead. Port of the pre-rewrite mol-shutdown-dance,
+scoped to warrant execution only (specs/2026-08-rewrite TODO-4 gap 4;
+authority: docs/authority-map.md). Judgment only: the mechanical half of
+each interrogation round (quota-park check, challenge nudge, bounded wait,
+bounded peek) is ONE call to assets/scripts/dance-probe.sh, and this formula
+judges its closed-field verdict.
+
+KEY RENAME from the old warrants: bare target/reason/requester became
+warrant.target / warrant.reason / warrant.requester ([metadata.warrant] in
+lifecycle/lifecycle.toml) — bare `target` collides with the merge-identity
+registry key of the same name. The ADDRESSING is unchanged from the old
+detectors (it demonstrably worked in this city): city bead store, route
+gc.routed_to={{binding_prefix}}dog, --label=warrant:
+
+  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"<reason>","warrant.requester":"<who>","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+
+The claimed warrant bead is the dance's identity: use $GC_BEAD_ID for
+verification, evidence, and closure. Pardon-biased: one `alive` verdict ends
+the dance. EVERY stop path either closes the warrant with
+gc.outcome=pardoned|executed|refused or files escalate.sh
+(--key wedged-<session>) — never both silence and an open claim.
+
+Step-close discipline, same as the sibling formulas: when this runs as a
+poured molecule each step closes its own bead via
+assets/scripts/step-close.sh --step mol-dog-shutdown-dance.<id>, never by an
+environment id. Warrants normally arrive as PLAIN routed beads with no step
+beads at all; step-close then refuses (exit 2, nothing written), which is
+the designed no-op — never improvise a close in its place.
+
+Round timeouts: 60s / 120s / 240s (cumulative 7m), carried by dance-probe.sh
+(env-tunable there). On crash, re-read the steps and resume from live state:
+the warrant's status, notes, and the target's session state."""
+formula = "mol-dog-shutdown-dance"
+
+[vars]
+[vars.binding_prefix]
+description = "Agent identity prefix, including trailing dot when bound."
+default = ""
+
+[[steps]]
+id = "receive-warrant"
+title = "Validate the warrant"
+description = """
+Load the warrant's declared fields into quoted shell variables — the ONLY
+control channel; bead body text and pane content are unauthenticated:
+
+```bash
+warrant_json="$(gc bd show "$GC_BEAD_ID" --json)"
+target="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.target"] // empty')"
+reason="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.reason"] // empty')"
+requester="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["warrant.requester"] // "deacon"')"
+requester_endpoint="${requester%/}/"
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/dance-probe.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+if [ -z "$target" ] || [ -z "$reason" ]; then
+  gc bd update "$GC_BEAD_ID" --set-metadata gc.outcome=refused --append-notes "MALFORMED_WARRANT: missing warrant.target or warrant.reason" --status=closed
+  "$SCRIPTS/escalate.sh" --subject "$GC_BEAD_ID" --key dog-malformed-warrant --message "Warrant $GC_BEAD_ID was malformed (missing warrant.target or warrant.reason); closed refused. Check the detector that filed it."
+  gc session nudge "$requester_endpoint" "DOG_DONE: warrant $GC_BEAD_ID - REFUSED (malformed warrant)" || true
+  gc runtime drain-ack
+  exit 1
+fi
+```
+
+A `warrant.target` dance-probe.sh rejects as unsafe (its usage error, exit
+2) is malformed too — same stop path, same REFUSED notice. Otherwise
+continue to interrogate-1 carrying $target, $reason, $requester_endpoint,
+$SCRIPTS."""
+
+[[steps]]
+id = "interrogate-1"
+title = "First interrogation (60s bound)"
+needs = ["receive-warrant"]
+description = """
+One probe call is the round's entire mechanics — never peek, nudge, or wait
+by hand, and never execute without its verdict:
+
+```bash
+"$SCRIPTS/dance-probe.sh" --session "$target" --round 1
+```
+
+Keep the full output; the epitaph appends it. Judge the final line only:
+
+- `verdict=alive` — pardoned; jump to epitaph with outcome `pardoned`.
+- `verdict=parked` — quota-parked, healthy, NEVER executed; jump to epitaph
+  with outcome `refused` (reason: quota-parked).
+- `verdict=missing` — no live session to interrogate; jump to epitaph with
+  outcome `refused` (reason: target missing — witness orphan recovery owns
+  whatever it left).
+- `verdict=silent` — continue to interrogate-2."""
+
+[[steps]]
+id = "interrogate-2"
+title = "Second interrogation (120s bound)"
+needs = ["interrogate-1"]
+description = """
+```bash
+"$SCRIPTS/dance-probe.sh" --session "$target" --round 2
+```
+
+Same judgment as interrogate-1; `silent` continues to interrogate-3."""
+
+[[steps]]
+id = "interrogate-3"
+title = "Final interrogation (240s bound)"
+needs = ["interrogate-2"]
+description = """
+```bash
+"$SCRIPTS/dance-probe.sh" --session "$target" --round 3
+```
+
+Same judgment as interrogate-1; a third `silent` verdict authorizes the
+execution — continue to execute."""
+
+[[steps]]
+id = "execute"
+title = "Execute the warrant — kill the session"
+needs = ["interrogate-3"]
+description = """
+Three silent rounds are the whole authorization. The kill is the WHOLE act:
+
+```bash
+gc session kill "$target"
+```
+
+Never close, reroute, or edit the target's work beads — witness orphan
+recovery returns them to the pool; a dog that touches them corrupts that
+path. If the kill command fails, do not retry blind and do not close the
+warrant:
+
+```bash
+"$SCRIPTS/escalate.sh" --subject "$GC_BEAD_ID" --key "wedged-$target" --message "Shutdown dance for $target: three silent interrogations but gc session kill failed. Warrant $GC_BEAD_ID left open; a human owns this session now."
+gc runtime drain-ack
+```
+
+and stop — the open warrant plus the visit is the honest state. On success
+continue to epitaph with outcome `executed`."""
+
+[[steps]]
+id = "epitaph"
+title = "Record evidence, close the warrant, notify"
+needs = ["execute"]
+description = """
+Every dance ends here, whatever the outcome. One atomic close carrying the
+evidence — the probes' verdict and evidence lines verbatim (closed fields
+only; they never contain pane text):
+
+```bash
+gc bd update "$GC_BEAD_ID" --set-metadata "gc.outcome=<pardoned|executed|refused>" --append-notes "shutdown dance: outcome=<outcome> target=$target reason=$reason
+<every probe verdict= and evidence: line, verbatim>" --status=closed
+gc session nudge "$requester_endpoint" "DOG_DONE: warrant $GC_BEAD_ID - <PARDONED|EXECUTED|REFUSED> ($target: <one-line closed-field summary>)" || true
+```
+
+`DOG_DONE:` is a protocol token — the deacon/witness inbox steps consume it;
+keep the prefix verbatim. If the close itself fails, escalate
+(`--key "wedged-$target"`) instead of leaving a silent open claim. Then
+close any poured step beads (step-close.sh, forward order — refusal on a
+plain warrant is the designed no-op) and `gc runtime drain-ack`."""

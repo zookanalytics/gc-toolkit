@@ -4,7 +4,8 @@
 # Usage: tmux-pick-session.sh [--all] [--city-path <path>]
 #
 # Default filter hides polecat-*, control-dispatcher, deacon, witness,
-# dog, boot. The currently-attached session is always shown.
+# dog (the warrant-executor pool — short-lived, rarely worth attaching),
+# boot. The currently-attached session is always shown.
 # --all disables the filter; toggle from inside the menu via [.].
 # --city-path is the absolute path of the city this binding belongs
 # to — baked in by tmux-bindings.sh at install time so the API URL is

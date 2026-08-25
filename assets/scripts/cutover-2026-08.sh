@@ -4,7 +4,7 @@
 # Job: `sweep` performs the ledger surgery the old system left behind, per rig —
 # strip deleted healer-bookkeeping keys from open beads, retire pre-rewrite
 # graph.v2 molecules (their poured formula text calls deleted scripts), and
-# repair historical closed beads — so check-state-space and
+# repair pre-cutover closed beads — so check-state-space and
 # check-closed-implies-landed pass. `verify` runs the post-restart checks:
 # helm build freshness, doctor, order registration, seed-audit note.
 # DEFAULT IS DRY-RUN: sweep reports what would change; --apply writes, every
@@ -201,7 +201,7 @@ sweep() {
       fi
     done
 
-    # --- (c) repair historical closed-bead state (check-closed-implies-landed)
+    # --- (c) repair pre-cutover closed-bead state (check-closed-implies-landed)
     local closed_raw origin mr num prurl pjson state oid
     origin=$(origin_of "$rig_path")
     if ! closed_raw=$(bd_list --status closed --has-metadata-key merge_result); then

@@ -2,8 +2,10 @@
 # a threshold), replacing the always-on `boot` watchdog session. REPORT-ONLY:
 # it observes and reports to a human; it does not nudge the deacon (a nudge
 # forces a full context reload and delivery to a fresh-wake singleton is
-# unreliable) and it files no warrants. Interval 2m against a deacon whose own
-# backoff caps at 300s, so it never fires before several full deacon cycles.
+# unreliable) and it files no warrants. The dog pool exists again, but
+# boot-health deliberately does not file warrants: a false nudge-death
+# diagnosis must not kill a healthy deacon. Interval 2m against a deacon whose
+# own backoff caps at 300s, so it never fires before several full deacon cycles.
 [order]
 description = "Detect a wedged deacon mechanically and report it; no nudge, no warrant"
 trigger = "cooldown"

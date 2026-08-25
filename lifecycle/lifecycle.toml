@@ -176,6 +176,14 @@ keys = [
   "sweep.*", "triage.*", "stall_root",
 ]
 
+# Warrant beads (label=warrant, routed to the dog pool): the due-process kill
+# request a patrol detector files against a live-but-wedged session
+# (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
+# the pre-rewrite bare target/reason/requester — bare `target` collides with
+# the merge_identity key above.
+[metadata.warrant]
+keys = ["warrant.target", "warrant.reason", "warrant.requester"]
+
 [metadata.deferred_dispatch]
 keys = [
   "gc.dispatch_when_ready", "gc.dispatch_when_ready_args",

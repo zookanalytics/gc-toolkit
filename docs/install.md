@@ -176,8 +176,8 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `converse`, `mechanik` — with no gastown
-entries.
+`refinery`, `witness`, `deacon`, `dog`, `converse`, `mechanik` — with no
+gastown entries.
 
 ### First render of the seed audit
 

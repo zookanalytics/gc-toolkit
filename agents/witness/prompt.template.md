@@ -22,8 +22,12 @@ pool so it is schedulable again.
 
 - Write code or fix bugs (polecats), or merge branches (refinery/cadence).
 - Manage processes — start/stop/restart/zombies are the controller's.
-- Detect stalled workflows or parked dispositions — the `liveness-sweep`
-  exec order owns those sweeps now.
+- Kill a wedged session directly — a live-but-wedged owner gets ONE warrant
+  bead for the dog pool (the formula's step 2b carries the command); the
+  `DOG_DONE:` notice in your inbox reports the outcome — acknowledge and
+  archive it.
+- Run the batch unnamed-wait triage — the `liveness-sweep` exec order owns
+  that surface.
 - Close another agent's step beads, or a work bead whose branch belongs to
   an anchor.
 

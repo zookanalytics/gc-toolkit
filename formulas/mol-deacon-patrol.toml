@@ -35,7 +35,9 @@ description = """
 gc mail inbox
 ```
 Handle what you can directly; anything needing a human becomes a visit via
-escalate.sh. Archive processed messages — inbox near-empty after this step.
+escalate.sh. A `DOG_DONE:` notice is a completed shutdown dance on a
+warrant — note the outcome (the closed warrant carries the evidence) and
+archive. Archive processed messages — inbox near-empty after this step.
 Close it and proceed."""
 
 [[steps]]
@@ -255,9 +257,23 @@ Two adjacent duties, same cadence:
 - Closing a bead that names a doctor finding? Close it through
   `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
   ledger cannot say "fixed" while the check still fires.
-- Quota-parked sessions: read `$SCRIPTS/quota-park-nudge.sh --status`
-  (closed-field surface) instead of session panes; escalate any session it
-  reports `escalated=1`.
+- Stuck sessions: read `$SCRIPTS/quota-park-nudge.sh --status`
+  (closed-field surface) instead of session panes. `quota_park=yes` is a
+  healthy park — never a warrant. A session it reports `escalated=1`
+  (nudging exhausted), or a live infrastructure session whose patrol wisp
+  is stale past the freshness you already treat as wedged, is
+  live-but-wedged: file ONE warrant for the dog pool — never kill directly,
+  and skip if an open warrant already names the target:
+  ```bash
+  OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
+  if [ -z "$OPEN_WARRANT" ]; then
+    gc bd create --type=task --title="Stuck: <rig>/<role>" --metadata '{"warrant.target":"<session>","warrant.reason":"<what is stale and for how long>","warrant.requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+  fi
+  ```
+  The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
+  pardon-or-execute, DOG_DONE notice back); its probe re-checks the
+  quota-park surface, so a race with a fresh park still cannot execute a
+  parked session.
 
 Close this step after the sweep."""
 

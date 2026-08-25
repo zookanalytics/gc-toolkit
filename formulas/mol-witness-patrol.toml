@@ -11,11 +11,13 @@ pour the next iteration. Steps are not materialized; read each description
 as you reach it. Never exit the wisp from an intermediate step — continue,
 or jump to next-iteration to pour and burn.
 
-Scope: the witness recovers work whose owner died and watches the refinery
-queue. It does NOT manage processes (controller), write code (polecats),
-merge (refinery/cadence), or detect stalled workflows and parked
-dispositions (the liveness-sweep exec order owns those). Escalations go
-through assets/scripts/escalate.sh — one open visit per situation key.
+Scope: the witness recovers work whose owner died, files ONE warrant bead
+for the dog pool when an owner is alive but wedged, and watches the
+refinery queue. It does NOT manage processes (controller), write code
+(polecats), merge (refinery/cadence), kill sessions directly (the dog pool
+executes warrants), or run the batch unnamed-wait triage (the
+liveness-sweep exec order owns that surface). Escalations go through
+assets/scripts/escalate.sh — one open visit per situation key.
 
 Marked blocks (host-bead-skip, liveness-lookup, husk-guard, patrol-wisp-pour)
 are extracted and executed by their tests; keep markers, keep them
@@ -42,8 +44,10 @@ Triage HELP/blocked mail from polecats: unblock what you can (point at
 docs, suggest an approach); a blocker that needs a human becomes a visit
 via escalate.sh (`--subject <the polecat's bead> --key polecat-help`).
 Emergencies (crash, data loss, corruption, security) escalate immediately.
-Lifecycle chatter is acknowledged and archived. Inbox near-empty after this
-step. Close it and continue."""
+A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
+filed — note the outcome (the closed warrant carries the evidence) and
+archive. Lifecycle chatter is acknowledged and archived. Inbox near-empty
+after this step. Close it and continue."""
 
 [[steps]]
 id = "recover-orphaned-beads"
@@ -116,13 +120,33 @@ if [ "$STATE" = "absent" ]; then
 fi
 # <<< liveness-lookup
 ```
-Classify: `active`/`awake` -> not orphaned (stuck detection is the
-liveness-sweep order's). `creating`/`asleep`/`drained`/`suspended`/
+Classify: `active`/`awake` -> not orphaned — but a live owner whose bead
+shows no progress is the warrant path below, not a punt.
+`creating`/`asleep`/`drained`/`suspended`/
 `draining`/`quarantined` -> not orphaned (controller/operator still owns
 it). `archived`/`closed`/`absent` — but only after BOTH the exact lookup and the
 normalizing retry — -> orphaned pool work. Never classify on the exact
 lookup alone: a rig-qualified assignee whose session registered the bare
 alias resolves `absent` there while its owner is active.
+
+**2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
+work bead is stale (no `updated_at` movement and no wisp progress for
+longer than the work plausibly needs — judgment over the same signals as
+always, no new thresholds) is wedged, not orphaned. First ask the recovery
+order, never the pane (pane text is agent-controlled output):
+`quota-park-nudge.sh --status <session>` — `quota_park=yes` is a healthy
+park: defer, file nothing this cycle. Otherwise file ONE warrant for the
+dog pool, dedup'd on the target like an escalation key — never kill
+directly:
+```bash
+OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
+if [ -z "$OPEN_WARRANT" ]; then
+  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"No progress on <bead> for <duration>","warrant.requester":"witness","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+fi
+```
+The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
+pardon-or-execute, DOG_DONE notice back); if it executes, the dead
+session's beads return through THIS step next cycle.
 
 **3. Salvage.** Read `metadata.work_dir` and `metadata.branch` from the
 bead. Before ANY salvage git write, assert the work_dir is its OWN worktree

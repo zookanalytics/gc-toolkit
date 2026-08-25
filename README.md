@@ -29,6 +29,7 @@ All agents are native to this pack — no gastown import.
 | `refinery` | patrol | merge judgment: rejection, blocked/refused calls; the mechanical cadence runs as an order |
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
+| `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
 | `converse` | conversation role | holds subject conversations, claims visits |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | default-disabled first-reaction pass |

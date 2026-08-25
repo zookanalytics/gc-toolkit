@@ -104,9 +104,11 @@ performer; the full transition table with writers is
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying — are handled by exactly two reactive paths: `pr-facts.sh` (an
-arm of the cadence) records PR events and files a visit, and the witness patrol
-recovers work orphaned by dead sessions. There is no healer category: writers
+session dying — are handled by exactly three reactive paths: `pr-facts.sh` (an
+arm of the cadence) records PR events and files a visit, the witness patrol
+recovers work orphaned by dead sessions, and the `dog` pool — warrant
+executor: due-process recovery of wedged sessions; demand-scaled 0→2
+([authority-map.md](authority-map.md)). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
 

@@ -2,9 +2,9 @@
 # boot-health — is the deacon stuck? Three mechanical reads, no LLM, no action.
 # REPORT-ONLY BY DESIGN (2026-08-08 audit): nudging an idle deacon costs more
 # than a boot cycle (~84k tokens), 4 of 5 nudges never landed (session fence
-# mismatch on a fresh-wake session), and a failed nudge would let
-# mol-shutdown-dance kill a healthy deacon — so escalation is a mail to a
-# human, once per episode. Bugs lx-llzfk, lx-ody8m; see orders/boot-health.toml.
+# mismatch on a fresh-wake session), and a failed nudge would let the shutdown
+# dance kill a healthy deacon — the dog pool exists, but boot-health
+# deliberately files no warrants. See orders/boot-health.toml.
 # PRECEDENCE (tk-uz3de): the patrol-wisp age measures WORK COMPLETED and wins;
 # the pane (busy marker, movement hash with digits normalized out — timers
 # advance on their own) is a FALLBACK, consulted only when the wisp ledger
