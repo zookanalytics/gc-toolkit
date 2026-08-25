@@ -8,10 +8,10 @@
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
-# SURVIVAL RULE 1: the nudge names the CLAIMER script, never the raw
-# `gc hook --claim` (the scoped claim lives in converse-claim.sh).
-# SURVIVAL RULE 2: never empty — an empty nudge wakes a session that then
-# does nothing. Keep it at peer length; fixes go in the prompt or a script.
+# Two constraints on editing the nudge: it must name converse-claim.sh (the
+# claimer — the scoped claim lives there, never the raw `gc hook --claim`),
+# and it must never be empty (a CLI agent needs typed text to start a turn).
+# Keep it at peer length; fixes go in the prompt or a script.
 nudge = "Run assets/scripts/converse-claim.sh; work the visit it returns."
 # Bounds how long an unattended HELD sitting survives; open visits outlive
 # sessions either way (recovery reconstitutes from the record).
