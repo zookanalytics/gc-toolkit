@@ -93,6 +93,31 @@ else
         || errors+=("polecat-close-step-chain does not mention --steps-only — the duplicate-dispatch case parks a molecule whose anchor belongs to a live owner, and without it an agent will either hand-park or take the owner's claim")
     grep -qi 'never closed\|closes nothing\|not run the close loop' "$frag" \
         || errors+=("polecat-close-step-chain does not say that a held run closes NO step — the fragment's own close loop is directly above it, and applying it to a hold is the permanently-unsweepable footgun")
+
+    # The instruction must honour the writer's exit status. hold-dispatch.sh
+    # exits 1 on a PARTIAL park (a write did not land, or a step is held by
+    # another session) and 2 when it refuses; both mean delivery keys are still
+    # live somewhere in the molecule. A snippet that runs the writer and then
+    # drains on the next line regardless reintroduces the exact defect the
+    # writer was built to report — the session dies with the chain still
+    # offerable, and the only evidence is a stderr line nobody reads. In the
+    # shell shape an agent actually runs, a non-zero command does NOT stop the
+    # next one, so the gate has to be spelled out in the prompt or it does not
+    # exist. Scoped to the hold snippet: read from the invocation to the drain
+    # it guards, so an unrelated `||` elsewhere in the fragment cannot satisfy
+    # this and prose about the gate cannot satisfy it either.
+    hold_drain=$(awk '
+        /^[[:space:]]*"\$HD" --bead/ { seen = 1 }
+        seen                          { print }
+        seen && /drain-ack/           { exit }
+    ' "$frag")
+    if [ -z "$hold_drain" ]; then
+        errors+=("polecat-close-step-chain no longer invokes \"\$HD\" --bead — the hold path lost its call to the one writer that parks anchor+molecule")
+    elif ! grep -q 'drain-ack' <<< "$hold_drain"; then
+        errors+=("polecat-close-step-chain invokes hold-dispatch.sh but never reaches gc runtime drain-ack — the hold path must still end the session, gated on the park having landed")
+    elif ! grep -qE '\|\||&&' <<< "$hold_drain"; then
+        errors+=("polecat-close-step-chain drains unconditionally after hold-dispatch.sh — a partial park (exit 1: a write did not land, or a foreign-held step) would drain the session with step delivery pins still live, which is the re-offer this mechanism exists to prevent")
+    fi
 fi
 
 # --- the fragment actually reaches the polecat -------------------------------

@@ -105,6 +105,50 @@ sed -i 's/never closed/xx/g; s/closes nothing/xx/g; s/not run the close loop/xx/
   "$D/template-fragments/polecat-close-step-chain.template.md"
 breaks "(MAYCLOSE) the prompt stops saying a held run closes nothing" "$D" "closes NO step"
 
+# --- the hold path must honour the writer's exit status -----------------------
+# The defect this guards is not hypothetical: the fragment shipped for one round
+# invoking hold-dispatch.sh and draining on the very next line, so a partial park
+# still killed the session with step delivery pins live. Each case below puts the
+# snippet back into a broken shape and requires the check to say so.
+
+# Restores the pre-fix shape exactly: run the writer, then drain regardless.
+D=$(fixture ungateddrain)
+F="$D/template-fragments/polecat-close-step-chain.template.md"
+awk '
+  /^[[:space:]]*"\$HD" --bead/ { print "\"$HD\" --bead <work-bead> --reason \"<why>\""; drop = 1; next }
+  drop && /drain-ack/           { drop = 0 }
+  drop                          { next }
+                                { print }
+' "$F" > "$F.new" && mv "$F.new" "$F"
+breaks "(UNGATEDDRAIN) the hold path drains without checking the writer" "$D" "drains unconditionally"
+
+# The gate is only meaningful while the drain is still there to gate. A snippet
+# that parks and never ends the session is a different broken hold, not a fixed one.
+D=$(fixture nodrain)
+sed -i '/^gc runtime drain-ack/d' "$D/template-fragments/polecat-close-step-chain.template.md"
+breaks "(NODRAIN) the hold path stops ending the session" "$D" "never reaches gc runtime drain-ack"
+
+# And the region the gate is asserted over has to be anchored on a real call.
+D=$(fixture nohdcall)
+# shellcheck disable=SC2016  # matches the LITERAL text "$HD" in the fragment; expanding it here would match nothing
+sed -i '/^[[:space:]]*"\$HD" --bead/d' "$D/template-fragments/polecat-close-step-chain.template.md"
+breaks "(NOHDCALL) the hold path stops invoking the writer" "$D" "lost its call"
+
+# Prose ABOUT the gate must not satisfy it — only the code shape counts. The
+# fragment explains the hazard at length directly beneath the snippet, and a
+# check that reads the explanation would pass the very regression above.
+D=$(fixture prosegate)
+F="$D/template-fragments/polecat-close-step-chain.template.md"
+awk '
+  /^[[:space:]]*"\$HD" --bead/ { print "\"$HD\" --bead <work-bead> --reason \"<why>\""; drop = 1; next }
+  drop && /drain-ack/           { drop = 0 }
+  drop                          { next }
+                                { print }
+' "$F" > "$F.new" && mv "$F.new" "$F"
+# shellcheck disable=SC2016  # the backticks are markdown around a literal ||; running them is the hazard the quoting avoids
+printf '\nAlways gate the drain: use `||` so a failed park cannot reach drain-ack.\n' >> "$F"
+breaks "(PROSEGATE) prose about the gate does not stand in for the gate" "$D" "drains unconditionally"
+
 # --- the fragment must actually reach a prompt --------------------------------
 D=$(fixture uninjected)
 sed -i 's/"polecat-close-step-chain"/"something-else"/g' "$D/pack.toml"

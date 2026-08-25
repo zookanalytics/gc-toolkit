@@ -81,7 +81,8 @@ for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 
   [ -x "$c/assets/scripts/hold-dispatch.sh" ] && { HD="$c/assets/scripts/hold-dispatch.sh"; break; }
 done
 : "${HD:?hold-dispatch.sh not found in the pack; do NOT hand-park — clearing only the anchor's route leaves the molecule re-offering itself forever (tk-oqseh6)}"
-"$HD" --bead <work-bead> --reason "<why you are holding, in full — this is the only record>"
+"$HD" --bead <work-bead> --reason "<why you are holding, in full — this is the only record>" \
+  || { echo "hold-dispatch exited non-zero — the molecule is NOT parked; do NOT drain" >&2; exit 1; }
 gc runtime drain-ack
 ```
 
@@ -93,6 +94,16 @@ step reads as "being driven step by step" and becomes permanently unsweepable
 (`specs/tk-8m8d4` guard 2). Pass `--steps-only` when the anchor belongs to
 somebody else and only your molecule is dead; the duplicate-dispatch refusal in
 `load-context` is exactly that case.
+
+**The drain is gated on that exit status, and the gate is not decoration.**
+`hold-dispatch.sh` exits `1` when a write did not land and `2` when it refused
+outright, and a partial park is the case it is reporting: a step whose delivery
+keys are still set, or one another session still holds. Drain through that and
+the session dies with those pins live — which is the re-offer this whole
+mechanism exists to prevent, now with nothing but stderr to say so. A non-zero
+line does not stop the next one in the shell an agent actually runs, so the
+`||` has to be written down. `doctor/check-hold-dispatch-wired` fails if this
+snippet ever drains unconditionally again.
 
 **Do not run the close loop above on this path.** A held run closes nothing.
 Regression test: `assets/scripts/hold-dispatch.test.sh` (hermetic; stubs `gc`
