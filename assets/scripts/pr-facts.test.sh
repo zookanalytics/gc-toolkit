@@ -4,7 +4,8 @@
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
 # cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds veto, unstamped orphans adopted); stale-gate -> one
-# re-review child per head (dedup, route read-back, fix_target_pool stamped);
+# re-review child per head, carrying mol-review via gc sling --on (dedup,
+# pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
 set -uo pipefail
@@ -118,9 +119,10 @@ has "$out" "recording merged_sha=unverified:PR#24" "the degraded record is loud"
 eq "$(meta F1b merged_sha)" "unverified:PR#24" "merged_sha is never empty"
 eq "$(bstatus F1b)" "closed" "the anchor still closed"
 
-echo "# stale gate -> one re-review child per head"
+echo "# stale gate -> one re-review child per head, carrying mol-review"
 store "[$(anchor F9 18 ',"check.codex":"green@sha-OLD"')]"
 printf '%s' "$(prview 18 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_18.json"
+: > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "filed re-review new-2 routed to $REV" "a re-review child was filed"
 eq "$(meta new-2 task_kind)" "review" "re-review carries task_kind=review"
@@ -129,7 +131,9 @@ eq "$(meta new-2 anchor_bead)" "F9" "re-review links the anchor"
 eq "$(meta new-2 review_branch)" "polecat/x18" "re-review carries review_branch"
 eq "$(meta new-2 reviewed_oid)" "sha-18" "re-review pins the live head (the dedup key, and signoff's verdict binding)"
 eq "$(meta new-2 fix_target_pool)" "$FIX" "re-review carries the derived fix pool for the rework path"
-eq "$(meta new-2 'gc.routed_to')" "$REV" "re-review routed to the review pool"
+eq "$(meta new-2 review_pool)" "$REV" "re-review carries the durable review_pool copy"
+has "$(cat "$STUB_GC_LOG")" "sling $REV new-2 --on mol-review" "the review formula is attached by an explicit gc sling --on"
+eq "$(meta new-2 'gc.execution_routed_to')" "$REV" "the pour stamped gc.execution_routed_to (the dispatch read-back)"
 grep -qxF "new-2|blocks|F9" "$STUB_DEPS" && ok "re-review blocks the anchor" || bad "re-review blocks edge missing"
 
 echo "# …dedup on second pass"

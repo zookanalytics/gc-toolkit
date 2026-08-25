@@ -63,9 +63,9 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 
 ### What the import brings in
 
-- **The roster** — worker pool (`polecat`), review pool (`polecat-codex`),
-  patrols (`refinery`, `witness`, `deacon`), conversation role (`converse`),
-  and `proactive` (default-disabled).
+- **The roster** — worker pools (`polecat`, and `polecat-codex` on the
+  codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
+  role (`converse`), and `proactive` (always-on, 2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`.
@@ -74,7 +74,7 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
   `boot-health`, `quota-park-nudge`, `helm-build`, and the feedback
   miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
-  `gc-toolkit.signoff-review`, `gc-toolkit.session-title`, …).
+  `gc-toolkit.session-title`, …).
 - **Doctor checks** — the nine structural checks verified below.
 
 ---

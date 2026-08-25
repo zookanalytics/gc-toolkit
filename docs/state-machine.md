@@ -118,7 +118,9 @@ city's own account. **`signoff.sh` is the single writer of gate verdicts**
 re-arms markers staled by a head move. A head move stales every verb at once,
 so a fixed branch re-evaluates fresh with no manual reset.
 
-The dispatch pins `reviewed_oid=<live head>` on the review bead, and
+The review bead carries the `mol-review` formula (attached at dispatch via
+`gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
+`reviewed_oid=<live head>` on the review bead, and
 `signoff.sh` binds its verdict to that pinned commit (an explicit
 `--reviewed-oid` outranks it; the live head is only a last-resort fallback) —
 so a push between dispatch and verdict stamps green at the *reviewed* commit
@@ -179,8 +181,8 @@ sequenceDiagram
   Idempotent per head — re-runs never duplicate children.
 - **Re-gate on head move**: any new commit stales every head-bound marker;
   gate-ensure sees a declared gate that is neither green at the live head nor
-  in flight and dispatches one review bead (stamp first, then dispatch, read
-  the route back).
+  in flight and dispatches one review bead (stamp first, then attach
+  `mol-review` via `gc sling --on`, read the pour back).
 
 ## Disposition
 

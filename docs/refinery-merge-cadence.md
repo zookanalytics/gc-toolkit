@@ -45,7 +45,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    non-empty `check_set` (the default is stamped when absent; the `none`
    sentinel is respected), and every declared gate is *raisable*: marker green
    at the live head, or a live routed review bead in flight, else dispatch one
-   (stamp first, then dispatch; read the route back). **rc=3 is the designed
+   (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
+   back). **rc=3 is the designed
    interlock**: it holds `merge.sh` for this pass — an anchor whose gates are
    not yet satisfiable must not be mergeable on the same tick — and is
    reported without failing the order.
@@ -62,8 +63,8 @@ the cadence — the arms run whether or not any refinery session is awake.
 4. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head), gate
-   green at a stale head (one re-review child per head), hold-resolved
-   retraction.
+   green at a stale head (one re-review child per head, carrying
+   `mol-review`), hold-resolved retraction.
 5. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

@@ -27,6 +27,7 @@ harness_init() {
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
+  export STUB_SLING_FAIL=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
@@ -66,7 +67,34 @@ case "$sub" in
     exit 0 ;;
   session) printf '%s\n' "gc session $*" >> "${STUB_SESSION_LOG:?}"; exit 0 ;;
   mail) exit 0 ;;
-  sling) exit 0 ;;
+  sling)
+    # Emulate the graph.v2 pour on the store: retire gc.routed_to and stamp
+    # gc.execution_routed_to=<target>. STUB_SLING_FAIL exits 1 with no writes;
+    # STUB_DROP_KEYS="<bead>:gc.execution_routed_to" models a pour whose exec
+    # stamp dropped. Invocations land in STUB_GC_LOG like every gc call.
+    [ -n "${STUB_SLING_FAIL:-}" ] && { echo "gc: simulated sling failure" >&2; exit 1; }
+    target=""; bead=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --rig|--on) shift ;;
+        --*) : ;;
+        *) if [ -z "$target" ]; then target="$1"; elif [ -z "$bead" ]; then bead="$1"; fi ;;
+      esac
+      shift || true
+    done
+    [ -n "$bead" ] || exit 0
+    drops=""
+    for pair in ${STUB_DROP_KEYS:-}; do
+      case "$pair" in "$bead:"*) drops="${pair#*:}" ;; esac
+    done
+    tmp="$(mktemp)"; cp "$S" "$tmp"
+    jq -c --arg id "$bead" 'map(if .id == $id then (.metadata |= del(.["gc.routed_to"])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+    case ",$drops," in
+      *",gc.execution_routed_to,"*) : ;;
+      *) jq -c --arg id "$bead" --arg t "$target" 'map(if .id == $id then .metadata["gc.execution_routed_to"] = $t else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+    esac
+    mv "$tmp" "$S"
+    exit 0 ;;
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac

@@ -9,10 +9,10 @@
 # the fix pool (dedup: an existing rework child naming this branch whose
 # rejection_reason names this head; a created-but-unstamped orphan is adopted
 # by its deterministic title, never twinned); gate green at a STALE head ->
-# file one re-review child per head to the review pool (dedup: a live review
-# naming the anchor, or one with review_branch=branch and reviewed_oid=<live
-# head>; same orphan adoption), stamped with fix_target_pool for the rework
-# path; dismissal of our OWN superseded CHANGES_REQUESTED (never a human's;
+# file one re-review child per head to the review pool, carrying mol-review
+# via gc sling --on (dedup: a live review naming the anchor, or one with
+# review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
+# stamped with fix_target_pool for the rework path; dismissal of our OWN superseded CHANGES_REQUESTED (never a human's;
 # signoff_dismissed recorded and read back FIRST; skipped when native
 # auto-merge is armed). A merged record never carries an empty merged_sha —
 # an unreadable mergeCommit records merged_sha=unverified:PR#<n>, loudly.
@@ -349,6 +349,7 @@ GATES
       --set-metadata reviewed_oid="$head_oid" \
       --set-metadata pr_url="$live_url" \
       --set-metadata pr_number="$num" \
+      --set-metadata review_pool="$REVIEW_POOL" \
       ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
     gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 || true
     got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
@@ -356,12 +357,12 @@ GATES
       echo "$PROG: WARN re-review $RID did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    gc bd update "$RID" \
-      --set-metadata gc.routed_to="$REVIEW_POOL" \
-      --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
-    rgot=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+    # One sling, no retry (a re-pour mints a second workflow root); the pour
+    # retires gc.routed_to and stamps gc.execution_routed_to — the read-back.
+    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on mol-review >/dev/null 2>&1
+    rgot=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.execution_routed_to"] // empty')
     if [ "$rgot" != "$REVIEW_POOL" ]; then
-      echo "$PROG: WARN re-review $RID route did not persist; retry next pass" >&2
+      echo "$PROG: WARN re-review $RID pour did not read back; retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
     gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true

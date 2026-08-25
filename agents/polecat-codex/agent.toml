@@ -1,14 +1,14 @@
-# polecat-codex — the review pool, backed by the Codex CLI provider. Claims
-# routed review beads (task_kind=review) and delivers one verdict each via
-# signoff.sh. Prompt is native (prompt.template.md); it does not share the
-# worker polecat's prompt.
+# polecat-codex — the rig's worker pool on the codex provider. Same doctrine
+# and prompt shape as agents/polecat; the merge cadence routes review beads
+# (carrying mol-review) here via REVIEW_POOL, but any bead-with-formula is
+# claimable.
 scope = "rig"
 provider = "codex"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
-nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+nudge = "Run gc hook --claim --json; it checks assigned work first, then routed pool work."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0
-# Two concurrent reviews per rig is plenty; reviews are short-lived.
+# Pool sizing, not review policy: two concurrent sessions per rig.
 max_active_sessions = 2

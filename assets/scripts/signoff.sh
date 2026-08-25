@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # signoff.sh — the single writer of gate verdicts (component-model I7: one
 # audited writer for check.<gate> markers). Run once by the review agent after
-# skills/signoff-review produced a verdict:
+# mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
 #              [--notes-file <path>] [--reviewed-oid <oid>]
 # approve: post the artifact (gh pr review --comment post-open; review-bead
@@ -10,7 +10,7 @@
 # clear the marker and file ONE routed rework child — or, at the round cap,
 # stamp check.<name>=exception@<head> and route the anchor to a human instead.
 # The city never approves its own PRs: nothing here ever passes --approve.
-# Callers: the polecat-codex review prompt.
+# Callers: mol-review's verdict-and-drain step (the reviewing polecat).
 # Exit: 0 recorded · 1 refused, nothing written · 2 a write did not read back
 #       (the review bead is left open so the gate stays owed).
 set -uo pipefail

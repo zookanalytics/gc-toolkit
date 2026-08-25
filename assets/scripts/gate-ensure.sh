@@ -4,15 +4,15 @@
 # (empty/absent -> stamp the declared default; a list or the `none` opt-out is
 # left alone), then ensure every declared, non-green gate is RAISABLE: marker
 # green at the live branch head, a live routed/claimed review bead in flight,
-# or a fresh dispatch — stamp first (fail-closed), review bead body from
-# review-dispatch-body.sh, metadata + blocks edge + direct gc.routed_to stamp
-# (stamp-don't-sling: a bare sling would be hijacked by default_sling_formula),
-# anchor link and route read back before the dispatch is counted. The dispatch
-# pins reviewed_oid=<live head> so signoff.sh binds the verdict to the commit
-# the review was dispatched for, and stamps fix_target_pool so a
-# request-changes rework routes to the driver-derived pool. Before creating, a
-# title probe adopts a created-but-unstamped orphan from a prior failed stamp
-# instead of minting a twin every pass.
+# or a fresh dispatch — stamp metadata + blocks edge first (fail-closed),
+# review bead body from review-dispatch-body.sh, then attach the review
+# formula and route in one call — gc sling <review-pool> <bead> --on
+# mol-review — counting the dispatch only after the pour's
+# gc.execution_routed_to reads back. The dispatch pins reviewed_oid=<live
+# head> (signoff.sh binds the verdict to it) and fix_target_pool (the rework
+# route). A title probe adopts a created-but-unstamped orphan instead of
+# minting a twin; a sling is never retried in-pass (a re-pour mints a second
+# workflow root — held-for-retry instead).
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 ok (a dispatch failure leaves the gate armed and merge HELD);
 # 3 = a gating anchor could not be made safe (unreadable enumeration, or a
@@ -24,6 +24,7 @@ UNSAFE_RC=3
 scrub() { tr -d '\000-\010\013\014\016-\037'; }
 
 DEFAULT_CHECK_SET="codex"
+REVIEW_FORMULA="mol-review"
 REVIEW_POOL=""
 FIX_POOL=""
 while [ $# -gt 0 ]; do
@@ -77,9 +78,10 @@ bd_list() {
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # A live review bead already owed to <anchor> for gate <g>? Echoes its id.
-# Routed or claimed counts (a claim consumes gc.routed_to); an open, unclaimed,
-# unrouted one is stranded — echoed with a "stranded " tag for the route repair.
-# Non-zero = the ledger could not answer; the caller holds the dispatch.
+# Poured (gc.execution_routed_to), routed, or claimed counts; an open,
+# unclaimed, unrouted, unpoured one is stranded — echoed with a "stranded "
+# tag for the repair arm. Non-zero = the ledger could not answer; the caller
+# holds the dispatch.
 inflight_review() { # <anchor-id> <gate>
   local raw
   raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
@@ -88,26 +90,31 @@ inflight_review() { # <anchor-id> <gate>
       | select(((.metadata.task_kind // "") | tostring) == "review")
       | select(((.metadata.check_name // "") | tostring) == $g)
       | . + {reach: (((((.metadata["gc.routed_to"] // "") | tostring) != "")
+                      or ((((.metadata["gc.execution_routed_to"]) // "") | tostring) != "")
                       or (((.assignee // "") | tostring) != "")))} ]
     | sort_by(if .reach then 0 else 1 end)
     | (.[0] // empty)
     | (if .reach then .id else ("stranded " + .id) end)' 2>/dev/null
 }
 
-read_route() { # <bead-id> -> "review_pool|gc.routed_to|assignee"
-  gc bd show "$1" --json 2>/dev/null | scrub \
-    | jq -r '.[0] | [(.metadata.review_pool // ""),
-                     (.metadata["gc.routed_to"] // ""),
-                     (.assignee // "")] | join("|")' 2>/dev/null
+# The pour retires gc.routed_to and stamps gc.execution_routed_to in its
+# place; that stamp is the dispatch read-back.
+pour_ok() { # <bead-id> <pool>
+  local got
+  got=$(gc bd show "$1" --json 2>/dev/null | scrub \
+    | jq -r '.[0].metadata["gc.execution_routed_to"] // empty' 2>/dev/null)
+  [ "$got" = "${2:-}" ]
 }
 
-route_ok() { # <triple> <pool>
-  local state="${1:-}" pool="${2:-}" p r a
-  [ -n "$state" ] || return 1
-  IFS='|' read -r p r a <<< "$state"
-  [ "$p" = "$pool" ] || return 1
-  [ -n "$a" ] || [ "$r" = "$pool" ] || return 1
-  return 0
+# Count the tracking convoys over a bead: >0 means a poured workflow already
+# drives it and a second pour would mint a second root. Non-zero rc = the
+# probe could not answer.
+tracking_convoys() { # <bead-id>
+  local raw
+  raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw" | jq -r '[ .[] | select((.issue_type // .type // "") == "convoy") ] | length' 2>/dev/null
 }
 
 meta_of() { # <row-json> <key>
@@ -200,17 +207,27 @@ while IFS= read -r row; do
     if [ -n "$FOUND" ]; then
       case "$FOUND" in
         "stranded "*)
-          # A review that lost its route is inert, not in flight: re-offer it.
+          # A review with no route, no pour and no claim is inert — unless a
+          # tracking convoy shows a pour already drives it (exec stamp
+          # dropped): then a re-pour would mint a second workflow root, so it
+          # counts as in flight. Only a never-poured one is re-slung.
           rid="${FOUND#stranded }"
           [ -n "$REVIEW_POOL" ] || { skipped=$((skipped + 1)); continue; }
-          gc bd update "$rid" --set-metadata gc.routed_to="$REVIEW_POOL" \
-            --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
-          if route_ok "$(read_route "$rid")" "$REVIEW_POOL"; then
+          if ! convoys=$(tracking_convoys "$rid"); then
+            echo "$PROG: $id stranded review $rid convoy probe unreadable; no re-pour (merge stays held, retry next pass)" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          if [ "${convoys:-0}" -gt 0 ] 2>/dev/null; then
+            echo "$PROG: $id gate '$g' review $rid is convoy-tracked (a pour already drives it); counted in flight, no re-pour"
+            continue
+          fi
+          gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" >/dev/null 2>&1
+          if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
             dispatched=$((dispatched + 1))
-            echo "$PROG: $id gate '$g' had a STRANDED review $rid (open, unclaimed, unrouted); re-routed to $REVIEW_POOL"
+            echo "$PROG: $id gate '$g' had a STRANDED review $rid (open, unclaimed, unrouted, never poured); re-slung to $REVIEW_POOL with $REVIEW_FORMULA"
           else
-            echo "$PROG: $id stranded review $rid re-route to $REVIEW_POOL did not verify; merge stays held, retry next pass" >&2
+            echo "$PROG: $id stranded review $rid re-sling to $REVIEW_POOL did not read back; merge stays held, retry next pass" >&2
             skipped=$((skipped + 1))
           fi ;;
         *) : ;;  # live review in flight — it will raise the gate
@@ -252,7 +269,7 @@ while IFS= read -r row; do
           | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
       else
-        echo "$PROG: WARN review method unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
+        echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
         RID=$(gc bd create "$RID_TITLE $title" -t task --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
       fi
@@ -269,27 +286,24 @@ while IFS= read -r row; do
       --set-metadata anchor_bead="$id" \
       --set-metadata review_branch="$branch" \
       --set-metadata review_base="$target" \
+      --set-metadata review_pool="$REVIEW_POOL" \
       ${head:+--set-metadata reviewed_oid="$head"} \
       ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
     gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 \
       || echo "$PROG: WARN could not attach review $RID as a blocks-dep of $id (anchor_bead persists the link)" >&2
     # The anchor link is what lets the signoff find the gate to stamp; verify it
-    # BEFORE routing, or a claimed half-stamped review can never discharge.
+    # BEFORE the pour, or a claimed half-stamped review can never discharge.
     got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
     if [ "$got" != "$id" ]; then
-      echo "$PROG: WARN review $RID did not record anchor_bead=$id; not routed, merge stays held, retry next pass" >&2
+      echo "$PROG: WARN review $RID did not record anchor_bead=$id; not slung, merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
-    gc bd update "$RID" \
-      --set-metadata gc.routed_to="$REVIEW_POOL" \
-      --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
-    if ! route_ok "$(read_route "$RID")" "$REVIEW_POOL"; then
-      gc bd update "$RID" \
-        --set-metadata gc.routed_to="$REVIEW_POOL" \
-        --set-metadata review_pool="$REVIEW_POOL" >/dev/null 2>&1
-    fi
-    if ! route_ok "$(read_route "$RID")" "$REVIEW_POOL"; then
-      echo "$PROG: WARN review $RID route to $REVIEW_POOL did not verify; dispatch NOT counted, merge stays held, retry next pass" >&2
+    # One sling, no retry: a re-pour mints a second workflow root. A pour that
+    # does not read back is held; the next pass's stranded arm probes for its
+    # tracking convoy before deciding to re-sling.
+    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" >/dev/null 2>&1
+    if ! pour_ok "$RID" "$REVIEW_POOL"; then
+      echo "$PROG: WARN review $RID pour did not read back; dispatch NOT counted, merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
     gc bd update "$id" --set-metadata dispatch_count="$((dcount + 1))" >/dev/null 2>&1 || true

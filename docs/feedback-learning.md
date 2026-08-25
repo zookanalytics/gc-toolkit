@@ -154,10 +154,9 @@ Each fragment holds at most **15 bullets**. A promotion into one of these
 always-injected fragments must clear the two promotion gates above (source
 diversity, remedy class). A promotion that would exceed the cap must also
 name the bullet it displaces — the weakest incumbent goes in the same PR,
-or the promotion does not file. The polecat
-fragment is wired in both `pack.toml` (polecat patch) and
-`agents/polecat-codex/agent.toml` `inject_fragments`; the two lists are
-hand-synced.
+or the promotion does not file. The polecat fragment is injected by both
+polecat prompts (`agents/polecat` and `agents/polecat-codex` both render
+`{{ template "learned-conventions-polecat" . }}`).
 
 ## Retirement and hardening
 
