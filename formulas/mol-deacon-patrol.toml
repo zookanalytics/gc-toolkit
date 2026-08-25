@@ -200,6 +200,10 @@ done
 "$SCRIPTS/escalate.sh" --subject <this wisp or the tracking bead> --key dolt-backup-<db> --message "<the Step 2 FLAG line, verbatim>"
 # server unreachable: --key dolt-server-unreachable (CRITICAL)
 # FLAG-ROOT:          --key dolt-backup-root (names every affected database)
+# commit bloat:       --key dolt-commit-bloat-<db> (commits > 50000; compaction
+#                     is a manual operator action until an actuator exists)
+# orphan databases:   --key dolt-orphan-dbs (advisory orphans[] non-empty;
+#                     removal is a manual operator action — never --force here)
 ```
 Before restarting anything, collect non-fatal diagnostics first
 (`SHOW FULL PROCESSLIST`, `gc dolt logs`, bounded `gc dolt health --json`,

@@ -54,11 +54,34 @@ description: The operator's rulings on the nine attention items from the rewrite
   as the fail-safe direction, but the framing (and tuning: batch cadence,
   what lands in the operator's triage visit vs. converse) gets a pass after
   the first live week.
-- **TODO-4 — Dog coverage.** The gastown dog pool (city-baked maintenance
-  chores) is gone with the import and nothing native replaces it. Determine
-  what the dog pool actually did in this city (session logs / gastown source)
-  and either confirm the deacon patrol + orders cover it or add the missing
-  duties explicitly.
+- **TODO-4 — Dog coverage (investigated 2026-08-24; two decisions remain).**
+  Finding: the rewrite kept every *detector* and dropped every *actuator*.
+  Duty-by-duty: hang diagnostics, zombie PIDs, and orphan processes are
+  covered (deacon); jsonl-backup/reaper were gastown-internal (N/A). Four
+  gaps, with dispositions:
+  1. **Dolt backups** — the backup dog performed them (~6h cadence; the
+     deacon's STALE_H=12 verifier assumes it). UNCOVERED unless the dolt
+     builtin pack still has an actor. Runbook step 0 now verifies against
+     the live city. If unclaimed: cheapest fix is an exec order
+     (`orders/dolt-backup.toml` + ~30-line wrapper, no LLM). **OPERATOR
+     DECISION after the live check.**
+  2. **Orphan-database removal** — detection stays advisory in the deacon
+     (never --force from a patrol step); a new `dolt-orphan-dbs` escalate
+     key routes the finding to a visit. Actual removal stays manual, or
+     folds into the same exec order as (1) below the old threshold of 20.
+  3. **Compaction** — detection (>50k commits) now escalates via the new
+     `dolt-commit-bloat-<db>` key; compaction itself stays manual until a
+     FLAG actually fires.
+  4. **Wedged-agent recovery (shutdown dance)** — deliberately traded for
+     human triage visits (liveness sweep) plus the widened no-consent-UI
+     fragment and the cycle-recycle hook that remove the top causes.
+     **OPERATOR RATIFICATION:** accept "a live-but-wedged agent waits for a
+     human", or add a `gc runtime request-restart` exec order gated on the
+     quota-park safety check as the actuator.
+  Residue (cosmetic, clean opportunistically): `tmux-pick-session.sh` still
+  filters `dog`; `docs/gascity-agents.md`/`gascity-packs.md` still list dog
+  in the gastown roster tables (they document the runtime/gastown, so
+  arguably correct as-is).
 - **TODO-5 — Post-cutover cleanup.** Delete `cutover-2026-08.sh`, its test,
   and the runbook once the cutover completes cleanly; move ruling residue
   from this file into the docs it belongs in.
