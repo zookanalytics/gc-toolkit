@@ -16,8 +16,13 @@ and fully independent of the authoring session:
    change; it decides *which dedicated reviews apply* and records that
    decision by widening the anchor's `check_set` from a declared menu.
 2. **Dedicated reviewers** (`check.arch` first; `security`, `perf`,
-   `data-migration`, … later) — each reads exactly three things: the repo's
-   **charter**, the review bead, and the diff. Never the whole repo.
+   `data-migration`, `demo`, … later) — each reads exactly three things: the
+   repo's **charter**, the review bead, and the diff. Never the whole repo.
+   The `demo` gate is triage-decided like any other: "does this change
+   warrant a recorded demo (new or updated)?"; when added, a review session
+   produces it via `skills/gc-demo-script` + `skills/demo-capture` and the
+   verdict is the artifact recorded on the anchor — contained, reviewable,
+   auditable (operator decision 2026-08-24, item 9).
 
 Both ride the existing gate machinery unchanged: gate-ensure dispatches any
 named gate, signoff.sh writes the verdict evidence-bound to the reviewed
@@ -52,8 +57,15 @@ merge.sh: unchanged — merges when every declared gate is green@live head
 
 ## Rules that make it safe
 
-- **Monotonic widening.** `--add-gates` performs a set-union write with
-  read-back; it can never remove a gate. `none` stays a human-only opt-out.
+- **Monotonic widening — and triage is the sole narrower.** `--add-gates`
+  performs a set-union write with read-back; no dispatcher, formula, or
+  reviewer may pre-set or shrink `check_set` (operator ruling 2026-08-24:
+  the checks-needed decision lives in one contained, reviewable, auditable
+  place). The only sanctioned narrowing is a triage **waiver**: for gates the
+  charter explicitly marks waivable (and only those), triage may record
+  "not needed" with a one-line justification on the anchor. Waivers are
+  expected to be rare and the distiller watches their rate alongside the
+  add-rate. `none` stays a human-only opt-out.
 - **Head-bound triage.** The triage verdict is `green@<oid>` like any gate; a
   push re-stales it, so a grown diff is re-classified.
 - **Closed menu, justified adds.** The charter declares the gate menu (name →
@@ -92,10 +104,10 @@ split later only if load or model choice demands it).
 - One extra cadence hop per anchor (triage → widened dispatch), ~60s + one
   small session. codex stays always-on; triage decides the rest — this is
   the proportionality answer: expensive reviews run only when indicated.
-- Open: whether `triage` itself should be skippable for formula-poured
-  mechanical work (e.g. distiller prompt-update beads) via a dispatcher-set
-  `check_set=codex`. Default answer: yes, dispatchers may pre-set; triage is
-  the default, not a mandate.
+- Resolved (operator, 2026-08-24): dispatchers may NOT pre-set a narrower
+  `check_set`; triage runs on everything and owns the waiver mechanism above.
+  Mechanical formula-poured work gets its fast path from triage waiving
+  quickly, not from routing around triage.
 - Open: charter format for non-gc-toolkit rigs with no architecture docs —
   the triage skill's fallback is "add `arch` when the diff creates a file,
   crosses a top-level directory, or changes a public interface," plus the

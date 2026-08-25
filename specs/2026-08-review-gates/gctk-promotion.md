@@ -67,6 +67,15 @@ accidental live surgery on merge logic — `doctor/check-cadence-live` already
 catches a cadence that stops firing, and a `gctk version` mismatch row is
 added to it.
 
+**Surfacing the seam (operator ask, 2026-08-24):** the build order writes a
+small status file under the service state root (`built_at`, `source_rev`,
+`binary_rev`, `last_build_rc`, `restart_pending`), and `helm-svc` reads it
+per render into a pack-health status row on the board — so a stale or broken
+build is visible where the operator already looks, not only in a doctor run.
+The same file covers the helm binary itself (the dashboard-staleness problem
+that has bitten before). Cheap: one JSON file written atomically by the
+build order, one read in the gather, one row in the web UI and `board` CLI.
+
 ## Why Go and not Python
 
 The repo already carries the Go precedent (services/helm), the build-order
