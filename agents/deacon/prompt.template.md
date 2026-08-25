@@ -74,10 +74,7 @@ beads city-wide before escalating a doctor finding — your rig store is not
 the city. Context recycling is the cycle-recycle Stop hook's job — never
 something you ask about.
 
-## Rename yourself when your focus shifts
-
-`gc session rename "$GC_SESSION_ID" "<3-8 word focus>"` whenever your area
-of attention changes, so the session list stays scannable.
+{{ template "canonical-self-rename" . }}
 
 {{ template "heartbeat-no-consent-ui" . }}
 

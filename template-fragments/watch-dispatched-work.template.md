@@ -1,29 +1,26 @@
 {{ define "watch-dispatched-work" }}
-## Watching dispatched work
+## Dispatched work is file-and-forget
 
-When you sling work and intend to report progress back to the operator,
-spawn a watcher in the same turn — it wakes you on each bead transition, so
-you surface status without polling.
-
-**Do not watch a blocker in order to sling something after it.** That is a
-dispatch held in your context: invisible to everyone else and gone when the
-session ends. Record it on the bead and drain —
+The default after `gc sling` is file-and-forget: the bead is the
+contract, and nothing here reads it again. Sequencing between beads is
+edges, never a watcher — record the dependency and drain:
 
 ```
 {{ .ConfigDir }}/assets/scripts/deferred-dispatch.sh arm <bead> \
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 
-The rig's `deferred-dispatch` order slings it once `bd` reports the bead
-ready. Watch for *reporting*; arm for *sequencing*
-(docs/deferred-dispatch.md).
+The rig's `deferred-dispatch` order slings the armed bead once `bd`
+reports it ready (docs/deferred-dispatch.md). A watch held in your
+context is a dispatch invisible to everyone else and gone when the
+session ends.
 
-### The ritual
+The one sanctioned watch: a human is in THIS conversation right now,
+waiting on the outcome. Then spawn exactly one bounded terminal-status
+watch — it reports closed or not-closed, and you do not read the work
+product:
 
 ```
-gc sling <pool> <bead>
-
-# Then spawn exactly ONE watcher:
 Monitor(
   command: "{{ .ConfigDir }}/assets/scripts/gc-bd-watch.sh <bead>",
   description: "watching <bead>",
@@ -31,18 +28,11 @@ Monitor(
 )
 ```
 
-Two knobs are load-bearing: `persistent: true` (beads take hours-to-days;
-Monitor's default 300s timeout would kill the watch mid-bead), and never
-also spawn the stream via `Bash(run_in_background: true)` — a second
-subscription on one bead risks acting on the wrong one. Every meaningful
-transition fires — including `blocked`, which needs intervention, not just
-`closed`.
-
-`gc-bd-watch.sh` wraps `gc events`: it snapshots the cursor before reading
-the bead, emits a line only on a real status change, reconnects with
-backoff, and exits at a terminal status. Act on `"type":"status_change"`,
-read `.to`. For parallel dispatches, one watcher per bead; for a recipient
-who will not be in this session anymore, use a `gc order` event trigger;
-for a synchronous done-signal (a foreground push), the return IS the
-signal and a watcher is redundant.
+`persistent: true` is load-bearing (beads outlive Monitor's default
+300s timeout), and one watcher per bead — never a second subscription
+via `Bash(run_in_background: true)`. `gc-bd-watch.sh` wraps `gc events`
+and exits at a terminal status; act on `"type":"status_change"`, read
+`.to` (`blocked` needs intervention, not just `closed`). No human
+waiting means no watcher — not even "to report back later"; the record
+carries the outcome.
 {{ end }}
