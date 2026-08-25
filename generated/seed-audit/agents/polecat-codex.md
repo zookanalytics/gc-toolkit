@@ -650,6 +650,52 @@ refinery's and you still never close it; a step bead is machinery, not work,
 and `step-close.sh` can only ever close a bead your session already owns,
 because it resolves by the `(assignee, gc.step_ref)` pair.
 
+### The third exit: a HOLD is quiesced, never closed
+
+The loop above is for a run that FINISHED. A run you **hold** — a live sitting
+owns the decision, the filed premise is falsified, a peer already has the
+branch — reaches neither terminal exit, and closing its chain would record work
+that was never done. It still has to be parked, and parking the *bead* is not
+parking the *dispatch*.
+
+The anchor is one record; the molecule is seven more, each carrying
+`gc.routed_to` at the polecat pool and `gc.session_affinity=require`. Clear the
+anchor's route by hand and the chain outlives you: your drain releases the step
+assignees, `load-context` is the one step nothing blocks, and open + unassigned
++ routed + ready is the pool's offer predicate — so the next polecat is handed
+your dead chain as new work. Nothing sweeps it, either.
+`quiesce-completed-workflows.sh` gates on a TERMINAL anchor, and a parked-open
+one is not terminal, so the witness pass declines it every cycle forever
+(observed: anchor tk-iljtmq held 09:52Z, molecule tk-p3p9iv re-offered to a
+fresh full-context polecat ~3h later — tk-oqseh6).
+
+**Never park by hand — the park is six delivery keys across eight beads, and a
+half-park reports success.** One writer:
+
+```bash
+HD=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/hold-dispatch.sh" ] && { HD="$c/assets/scripts/hold-dispatch.sh"; break; }
+done
+: "${HD:?hold-dispatch.sh not found in the pack; do NOT hand-park — clearing only the anchor's route leaves the molecule re-offering itself forever (tk-oqseh6)}"
+"$HD" --bead <work-bead> --reason "<why you are holding, in full — this is the only record>"
+gc runtime drain-ack
+```
+
+It records your reason on the bead *before* it de-routes anything, clears every
+delivery channel the anchor and each step actually carries, releases only claims
+that are yours, and appends what it did. `workflow-finalize` keeps its
+control-dispatcher route, and **no step is closed** — a molecule with a closed
+step reads as "being driven step by step" and becomes permanently unsweepable
+(`specs/tk-8m8d4` guard 2). Pass `--steps-only` when the anchor belongs to
+somebody else and only your molecule is dead; the duplicate-dispatch refusal in
+`load-context` is exactly that case.
+
+**Do not run the close loop above on this path.** A held run closes nothing.
+Regression test: `assets/scripts/hold-dispatch.test.sh` (hermetic; stubs `gc`
+and `bd`), and `doctor/check-hold-dispatch-wired` keeps this fragment and the
+script from drifting apart.
+
 
 
 ## Non-impl done sequence override

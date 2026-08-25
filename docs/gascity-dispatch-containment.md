@@ -20,6 +20,16 @@ the routing contract's question and lives in
 This doc starts one step later: the pour already happened, and you are
 racing the pool.
 
+**If you are a polecat holding your OWN dispatch, do not hand-run this.**
+`assets/scripts/hold-dispatch.sh` is the one writer for that case: it records
+the reason, parks the anchor, and quiesces the molecule's steps in a single
+call, with the anchor-match and finalize guards below already applied. This
+recipe is the incident procedure for a dispatch nobody is holding — a pour that
+must be recalled from outside the session that received it. The hold path had
+no writer until tk-oqseh6, and hand-parking it is what produced that bug: the
+anchor was parked, the molecule was not, and the dead step chain was re-offered
+to a fresh polecat every cycle thereafter.
+
 ## Scope
 
 **Mandate.** Recovering from a graph.v2 formula dispatch that was poured
