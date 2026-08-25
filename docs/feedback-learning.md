@@ -1,21 +1,30 @@
 ---
 name: Feedback-Learning Loop
-description: The conventions of the feedback-learning loop — how corrective feedback is recorded as observation beads, how observations become operator-reviewed rule changes, and where adopted rules live in agent prompts.
+description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads, how observations become operator-reviewed rule changes, and the two prompt surfaces (operator profile, learned conventions) adopted rules live in.
 ---
 
 # Feedback-Learning Loop
 
-The city learns from corrective feedback through one path: feedback is
-recorded as observation beads, a distiller judges what the observations
-add up to, and every resulting behavior change lands as an
-operator-reviewed PR against this pack. Nothing changes agent behavior
-until that PR merges.
+The learning system's purpose is **ceiling-raising**: capturing what the
+operator cares about and responds to, so agents present better options
+and escalations over time. It works through one path — feedback
+observations → distilled conventions → prompt updates through the
+reviewed pipeline: feedback is recorded as observation beads, a distiller
+judges what the observations add up to, and every resulting behavior
+change lands as an operator-reviewed PR against this pack. Nothing
+changes agent behavior until that PR merges.
+
+Hardened detectors (`tools/lint-learned.d/`) and doctor checks are **not
+the learning system**. They are ordinary pack hygiene — a well-architected
+pack fixing its own bugs — which is why they live outside the conventions
+cap and outside `gc doctor`'s invariant set. A rule that hardens has
+graduated out of the learning system into tooling.
 
 ## Scope
 
 **Mandate.** The conventions of the feedback-learning loop — the
 observation contract, the capture channels, the promotion and retirement
-path, and the rule surface adopted rules render into.
+path, and the rule surfaces adopted rules render into.
 
 **Boundaries.** The design rationale and decision record live in
 `specs/2026-08-learning-system/`. The judgment content of the promotion
@@ -118,7 +127,20 @@ hardens (see decisions D8/D9 in
 
 ## The rule surface
 
-Adopted rules render into agent prompts via
+Adopted rules render into agent prompts on two surfaces.
+
+**The operator profile** —
+`template-fragments/operator-profile.template.md`
+(`{{ define "operator-profile" }}`), a "What the operator cares about"
+section. This is the loop's ceiling-raising surface: entries state what
+the operator values and responds to — the taste that makes agents present
+better options and escalations — not just mistakes to avoid. The
+distiller proposes profile entries; the operator gates each one at the
+promotion PR. Hard cap **12 entries**; every entry carries an anchor
+comment (source ref + date), the same discipline as the conventions
+fragments below.
+
+**Learned conventions, per role** —
 `template-fragments/learned-conventions-<role>` fragments — one per
 role, seeded by the role's first promotion (`learned-conventions-polecat`
 ships seeded empty). Every bullet is immediately preceded by its anchor
@@ -145,7 +167,9 @@ Retirements ride the same prompt-update → PR → operator-review path as
 promotions. The best outcome a rule can have is hardening: when its
 violation lints cleanly, the lint or doctor check lands in the same PR
 that deletes the prose bullet AND its anchor — provenance thereafter
-lives on the pattern bead and the harden PR. Evidence against an
+lives on the pattern bead and the harden PR. A hardened rule has left
+the learning system: the detector is ordinary pack hygiene, holding no
+prompt weight and counting against no cap. Evidence against an
 adopted rule never
 silently retires it — contradiction files a visit for the operator, who
 picks scope-narrowing, retirement, or dismissal.

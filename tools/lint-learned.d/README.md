@@ -1,4 +1,8 @@
-# lint-learned.d — hardened learned rules
+# lint-learned.d — pack hygiene, not the learning system
+
+These detectors are ordinary pack hygiene: a hardened rule has graduated OUT
+of prompts INTO tooling. The learning system's ceiling-raising surface is the
+operator profile + conventions pipeline (docs/feedback-learning.md).
 
 One detector per hardened rule. Each executable here is the executable form
 of a single learned convention that graduated out of prose — run by
