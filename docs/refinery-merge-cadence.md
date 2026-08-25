@@ -126,4 +126,5 @@ each rig checkout: `git fetch origin && git merge --ff-only origin/<default>`.
 refusal the script files one idempotent visit per blocked rig (via
 `escalate.sh`, carrying `git status` + `git log <remote>..HEAD`) and
 auto-closes it once the rig fast-forwards cleanly. The 15-minute window is
-also the exposure behind component-model I9.
+also the exposure behind component-model I9, watched by
+`doctor/check-pour-text-current`.

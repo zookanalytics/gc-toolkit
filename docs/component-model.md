@@ -104,14 +104,14 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is well-formed `verb@oid`. | `doctor/check-gate-integrity` |
 | **I7** | A gate verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: no other component contains a `check.*` write |
 | **I8** | Every step bead reaches a terminal state: no open step under a closed root, no frontier stalled past its bound. | `doctor/check-step-terminal` |
-| **I9** | A molecule executes the formula text that is current when it runs. | **UNCHECKED** → `check-pour-text-current` (tk-5w3boh). Step descriptions freeze at pour while the rig checkout advances on a 15-minute cooldown; the gap is real and still unchecked. |
+| **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 
 Two further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config) and `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent). That is the whole set:
-**9 checks, each asserting a live structural property** — none greps the
+**10 checks, each asserting a live structural property** — none greps the
 source for a past fix.
 
 ---
@@ -129,4 +129,4 @@ source for a past fix.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
   by construction. If you find the ledger disagreeing with this document, one
-  of the nine checks is missing a case; fix the check, not the prose.
+  of the ten checks is missing a case; fix the check, not the prose.
