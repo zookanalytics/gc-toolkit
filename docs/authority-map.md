@@ -17,6 +17,7 @@ change, not an implementation detail — amend this table in the same PR.
 | Merge a PR | `assets/scripts/merge.sh` (cadence arm 3) | full authorization set re-read immediately pre-merge; every gate `green@<live head>`; `--match-head-commit` | merge on an empty `check_set`, a hold, or an unclosed child |
 | Write a gate verdict (`check.<g>`) | `assets/scripts/signoff.sh` | verdict bound to the dispatch-pinned `reviewed_oid` | `--approve` a PR (the city never approves its own); write a verdict for a check it did not run |
 | Close a work bead (anchor) | `merge.sh` after a verified merge; a human otherwise | recorded `merged_sha` (or `unverified:` sentinel) | be closed by its own polecat |
+| Reopen a wrongly-closed anchor | `lifecycle.sh reopen`, invoked by a human or on operator direction | bead closed while `merge_result` is a non-closed state (the I5 violation shape) | reopen a legitimately-closed (`merged`) or open bead; run from an automated caller |
 | Close a step bead | the session executing it, via `assets/scripts/step-close.sh` | `(assignee, gc.step_ref)` ownership proof | close another session's step; close `workflow-finalize` |
 | Close a visit | converse, at the end of a sitting | outcome recorded (`gc.outcome`) | close the subject it tracks |
 | Close-with-successor (disposition) | `assets/scripts/bead-rehome.sh` callers (mechanik, converse) | `gc.superseded_by` + store stamped | bare-close a re-homed bead |

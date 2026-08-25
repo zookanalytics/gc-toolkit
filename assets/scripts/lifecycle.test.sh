@@ -3,8 +3,9 @@
 # transitions. Covers: the state verb; legal/illegal edges; --expect; the ONE
 # atomic `gc bd update` carrying every field; bd refusal (exit 1); post-write
 # verification mismatch (exit 2); human states routing to human in the same
-# call; and the drift assertion between lifecycle/lifecycle.toml and the
-# embedded lifecycle-state-table block.
+# call; the close/terminal pairing guards (--close only into a closed state,
+# closed states must --close); the reopen repair verb; and the drift assertion
+# between lifecycle/lifecycle.toml and the embedded lifecycle-state-table block.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -136,6 +137,57 @@ store '[{"id":"a-9","status":"open","assignee":"","notes":"","metadata":{"merge_
 out="$("$SUT" transition a-9 --to pull_request --set pr_number=12 2>&1)"; rc=$?
 eq "$rc" 0 "a self-edge (re-record) is legal"
 eq "$(meta a-9 pr_number)" "12" "and carries its fields"
+
+# --- close/terminal pairing: status and merge_result move together ---------------
+echo "# close pairing"
+store '[{"id":"c-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-1 --to abandoned --close 2>&1)"; rc=$?
+eq "$rc" 1 "--close on a non-closed --to state exits 1"
+has "$out" "abandoned" "the refused state is named"
+has "$out" "not a closed state" "the rule is named"
+eq "$(meta c-1 merge_result)" "pull_request" "a refused close writes nothing"
+eq "$(bstatus c-1)" "open" "and closes nothing"
+out="$("$SUT" transition c-1 --to merged 2>&1)"; rc=$?
+eq "$rc" 1 "--to merged without --close exits 1 (a terminal transition must close)"
+has "$out" "requires --close" "the missing flag is named"
+eq "$(meta c-1 merge_result)" "pull_request" "a refused terminal transition writes nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refusal attempted a bd update"
+
+# --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
+echo "# reopen"
+store '[{"id":"r-1","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_url":"https://x/pr/4"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" reopen r-1 2>&1)"; rc=$?
+eq "$rc" 0 "reopen on closed+pull_request (the violation shape) exits 0"
+eq "$(bstatus r-1)" "open" "the bead is open again"
+eq "$(meta r-1 merge_result)" "pull_request" "merge_result is untouched"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "reopen is ONE gc bd update"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--status=open" "and it flips status open"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "merge_result" "it never writes merge_result"
+
+store '[{"id":"r-2","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"merged","merged_sha":"abc"}}]'
+out="$("$SUT" reopen r-2 2>&1)"; rc=$?
+eq "$rc" 1 "reopen refuses a legitimately closed (merged) bead"
+has "$out" "legitimate" "the refusal says that close was legitimate"
+eq "$(bstatus r-2)" "closed" "and writes nothing"
+
+store '[{"id":"r-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" reopen r-3 2>&1)"; rc=$?
+eq "$rc" 1 "reopen refuses an open bead"
+has "$out" "nothing to repair" "and says there is nothing to repair"
+
+store '[{"id":"r-4","status":"closed","assignee":"","notes":"","metadata":{}}]'
+out="$("$SUT" reopen r-4 2>&1)"; rc=$?
+eq "$rc" 1 "reopen refuses a closed unanchored bead (a legal closed shape)"
+
+store '[{"id":"r-5","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+out="$(STUB_DROP_KEYS="r-5:status" "$SUT" reopen r-5 2>&1)"; rc=$?
+eq "$rc" 2 "a reopen that did not land exits 2 (read-back verification)"
+has "$out" "status" "the unverified field is named"
+
+out="$("$SUT" reopen r-nope 2>&1)"; rc=$?
+eq "$rc" 2 "reopen on an unreadable bead exits 2"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

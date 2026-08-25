@@ -59,7 +59,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     while IFS=$'\037' read -r kind id mr pr; do
         [ -n "$kind" ] || continue
         case "$kind" in
-            unlanded) errors+=("$label bead $id: CLOSED carrying merge_result=$mr${pr:+ (PR $pr)} — closed but not landed; merge.sh cannot enumerate a closed anchor, so this PR will never merge. Reopen the anchor (or record the real terminal state via lifecycle.sh)") ;;
+            unlanded) errors+=("$label bead $id: CLOSED carrying merge_result=$mr${pr:+ (PR $pr)} — closed but not landed; merge.sh cannot enumerate a closed anchor, so this PR will never merge. Repair it with \`lifecycle.sh reopen $id\` (or record the real terminal state via a lifecycle.sh transition)") ;;
             nosha)    warnings+=("$label bead $id: closed as merged${pr:+ (PR $pr)} but records NO merged_sha — the landing is unevidenced; recover the sha from the PR and record it") ;;
         esac
     done <<< "$rows"

@@ -21,6 +21,8 @@ states = [
 # gc.routed_to=human in the same atomic update).
 human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"]
 # States whose legal status is closed; every other declared state is open.
+# lifecycle.sh enforces the pairing both ways: --close is accepted only into a
+# closed state, and a transition into a closed state must carry --close.
 closed_states = ["merged"]
 
 # Legal status x merge_result combinations.

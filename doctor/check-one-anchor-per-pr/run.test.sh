@@ -34,7 +34,9 @@ BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" BD_ARGS="$TMP/bd-args.log"
 run_check() { : > "$BD_ARGS"; RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
-anchor() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s"}}' "$1" "$2"; }
+anchor() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","merge_result":"pull_request"}}' "$1" "$2"; }
+review() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","task_kind":"review","anchor_bead":"%s"}}' "$1" "$2" "$3"; }
+rework() { printf '{"id":"%s","status":"open","metadata":{"pr_url":"%s","rejection_reason":"rebase"}}' "$1" "$2"; }
 store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.json"; }
 clear_stores() { rm -f "$TMP/stores/"*.json; }
 
@@ -70,6 +72,21 @@ clear_stores
 store alpha "$(anchor a-1 '')" "$(anchor a-2 '')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "beads with an empty pr_url do not group into a finding"
+clear_stores
+
+# --- 4b. only anchors count: review beads and rework children share pr_url ----
+store alpha "$(anchor a-1 https://x/pr/5)" "$(review rv-1 https://x/pr/5 a-1)" \
+            "$(rework rw-1 https://x/pr/5)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an open re-review bead (or rework child) on the anchor's PR is not a second anchor"
+has "$OUT" "OK:" "the pass message is the OK line"
+store alpha "$(anchor a-1 https://x/pr/5)" "$(anchor a-2 https://x/pr/5)" \
+            "$(review rv-1 https://x/pr/5 a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "two genuine open anchors are still a finding"
+has "$OUT" "alpha/a-2" "the duplicate anchor is listed"
+hasnt "$OUT" "rv-1" "the review bead is not listed among the anchors"
+clear_stores
 
 # --- 5. fail-CLOSED --------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?

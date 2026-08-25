@@ -3,11 +3,15 @@
 #   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
 #     [--unset k]... [--assignee <a>] [--route <pool>] [--close] [--append-notes <t>] [--json]
 #   lifecycle.sh state <bead-id>
+#   lifecycle.sh reopen <bead-id>
 # transition: validate the edge against the declared machine, perform ONE atomic
-# `gc bd update` carrying every field of the transition, re-read and verify each
-# written field. Human states (abandoned/retargeted/blocked/refused_false_completion)
-# also stamp gc.routed_to=human in the same call unless --route is given.
-# Callers: pr-open.sh, merge.sh, pr-facts.sh, mol-refinery-patrol, signoff.sh.
+# `gc bd update` carrying every field, re-read and verify each written field.
+# --close only into a closed state, and a closed state requires --close (status
+# and merge_result move together). Human states also stamp gc.routed_to=human
+# in the same call unless --route is given.
+# reopen: repair a bead closed while merge_result is a NON-closed state — set
+# status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
+# Callers: pr-open.sh, merge.sh, pr-facts.sh, mol-refinery-patrol.
 # Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
 # 2 post-write verification mismatch (or unreadable bead).
 # CAVEAT (docs/gascity-routing-model.md row 46): clearing an assignee on a bead
@@ -52,6 +56,10 @@ is_state() { # <name>
 
 is_human_state() { # <name>
   case " $LIFECYCLE_HUMAN_STATES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+is_closed_state() { # <name>
+  case " $LIFECYCLE_CLOSED_STATES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
 edge_legal() { # <from> <to>  (a self-edge is always legal: idempotent re-record)
@@ -112,6 +120,16 @@ cmd_transition() {
   done
   [ -n "$TO" ] || { echo "$PROG: transition needs --to <state>" >&2; exit 1; }
   is_state "$TO" || { echo "$PROG: '$TO' is not a declared state" >&2; exit 1; }
+  # status and merge_result move together: a close on a non-terminal state (or
+  # a terminal state left open) is the closed-means-landed violation (I5).
+  if [ "$CLOSE" = 1 ] && ! is_closed_state "$TO"; then
+    echo "$PROG: --close refused with --to $TO — '$TO' is not a closed state (closed_states: $LIFECYCLE_CLOSED_STATES); a closed bead on a non-terminal merge_result is invisible to every open-bead consumer" >&2
+    exit 1
+  fi
+  if [ "$CLOSE" = 0 ] && is_closed_state "$TO"; then
+    echo "$PROG: --to $TO requires --close — a closed state must close in the same atomic write, or the bead is left open+$TO" >&2
+    exit 1
+  fi
   local kv
   for kv in ${SETS[@]+"${SETS[@]}"}; do
     case "${kv%%=*}" in
@@ -212,11 +230,61 @@ cmd_transition() {
   exit 0
 }
 
+cmd_reopen() { # <bead-id> — repair a wrongly-closed bead (closed + non-closed state)
+  local id="${1:-}"; shift || true
+  [ -n "$id" ] || { echo "$PROG: reopen needs a bead id" >&2; exit 1; }
+  [ $# -eq 0 ] || { echo "$PROG: reopen takes no options — it only sets status=open" >&2; exit 1; }
+  local bead st status
+  bead=$(read_bead "$id")
+  [ -n "$bead" ] || { echo "$PROG: $id unreadable — refusing to reopen blind" >&2; exit 2; }
+  st=$(state_of "$bead") || {
+    echo "$PROG: $id carries undeclared merge_result '${st#?}'; repair it before reopening" >&2
+    exit 1
+  }
+  status=$(printf '%s' "$bead" | jq -r '(.status // "") | tostring | ascii_downcase')
+  if [ "$status" != "closed" ]; then
+    echo "$PROG: $id is not closed (status='$status') — nothing to repair" >&2
+    exit 1
+  fi
+  if [ "$st" = "unanchored" ]; then
+    echo "$PROG: $id is closed with no merge_result — a closed unanchored bead is legal; reopen refused" >&2
+    exit 1
+  fi
+  if is_closed_state "$st"; then
+    echo "$PROG: $id is closed as '$st', a closed state — that close is legitimate; reopen refused" >&2
+    exit 1
+  fi
+
+  local out rc
+  out=$(gc bd update "$id" --status=open 2>&1); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$PROG: $id reopen refused by bd (rc=$rc): $out" >&2
+    exit 1
+  fi
+  # Same read-back discipline as transition: verify status flipped and
+  # merge_result stayed put before reporting the repair.
+  bead=$(read_bead "$id")
+  [ -n "$bead" ] || { echo "$PROG: $id reopen written but the read-back failed; UNVERIFIED" >&2; exit 2; }
+  local BAD="" got
+  got=$(printf '%s' "$bead" | jq -r '(.status // "") | tostring | ascii_downcase')
+  [ "$got" = "open" ] || BAD="$BAD status='$got'(want open)"
+  got=$(printf '%s' "$bead" | jq -r '(.metadata.merge_result // "") | tostring')
+  [ "$got" = "$st" ] || BAD="$BAD merge_result='$got'(want '$st' unchanged)"
+  if [ -n "$BAD" ]; then
+    echo "$PROG: $id reopen wrote but did NOT verify:$BAD" >&2
+    exit 2
+  fi
+  echo "$PROG: $id reopened — status closed -> open, merge_result '$st' unchanged"
+  exit 0
+}
+
 case "${1:-}" in
   transition) shift; cmd_transition "$@" ;;
   state)      shift; cmd_state "$@" ;;
+  reopen)     shift; cmd_reopen "$@" ;;
   *)
     echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--unset k]... [--assignee <a>] [--route <pool>] [--close] [--append-notes <text>] [--json]" >&2
     echo "       lifecycle.sh state <bead-id>" >&2
+    echo "       lifecycle.sh reopen <bead-id>   # repair a bead closed on a non-closed merge_result" >&2
     exit 1 ;;
 esac

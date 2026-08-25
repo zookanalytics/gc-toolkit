@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # doctor/check-one-anchor-per-pr — I4: every PR has exactly one owning anchor.
-# Groups OPEN beads city-wide (all stores) by their pr_url metadata; two or
-# more open beads naming the same PR is an error — N claimants on one PR means
+# Groups OPEN ANCHORS city-wide (all stores) by their pr_url metadata: only
+# merge_result-carrying beads count (anchors stamp pr_url and merge_result in
+# one lifecycle.sh write; review beads and rework children carry pr_url with
+# NO merge_result), and task_kind=review is excluded outright. Two or
+# more open anchors naming the same PR is an error — N claimants on one PR means
 # the weakest check-set decides the merge, and merge.sh's refuse-on-sight hold
 # is only a runtime backstop that fires when someone tries to land it.
 # Ledger-only, read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line =
@@ -45,8 +48,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
     rows=$(printf '%s' "$raw" | strip_ctl | jq -r '
-        .[]? | ((.metadata.pr_url // "") | tostring | gsub("[[:cntrl:]]"; " ")) as $u
+        .[]? | (.metadata // {}) as $m
+        | (($m.pr_url // "") | tostring | gsub("[[:cntrl:]]"; " ")) as $u
         | select($u != "")
+        | select((($m.task_kind // "") | tostring) != "review")
+        | select((($m.merge_result // "") | tostring) != "")
         | [$u, ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " "))] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: pr_url listing from $rig_path/.beads could not be parsed — this store was NOT checked")
