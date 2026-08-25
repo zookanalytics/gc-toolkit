@@ -178,6 +178,8 @@ mechanik in a non-gascity rig does not receive it.
 
 {{ template "operator-next-step-trailing" . }}
 
+{{ template "operator-profile" . }}
+
 {{ template "file-feedback-observations" . }}
 
 {{ template "learned-conventions-mechanik" . }}

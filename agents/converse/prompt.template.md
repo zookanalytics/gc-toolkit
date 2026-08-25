@@ -481,4 +481,6 @@ Rules:
 
 {{ template "operator-next-step-trailing" . }}
 
+{{ template "operator-profile" . }}
+
 {{ template "file-feedback-observations" . }}

@@ -99,4 +99,6 @@ job — never something you ask about.
 
 {{ template "heartbeat-no-consent-ui" . }}
 
+{{ template "operator-profile" . }}
+
 {{ template "operator-next-step-trailing" . }}
