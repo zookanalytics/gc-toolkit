@@ -7,12 +7,11 @@ description: The conventions of the feedback-learning loop — its ceiling-raisi
 
 The learning system's purpose is **ceiling-raising**: capturing what the
 operator cares about and responds to, so agents present better options
-and escalations over time. It works through one path — feedback
-observations → distilled conventions → prompt updates through the
-reviewed pipeline: feedback is recorded as observation beads, a distiller
-judges what the observations add up to, and every resulting behavior
-change lands as an operator-reviewed PR against this pack. Nothing
-changes agent behavior until that PR merges.
+and escalations over time. It works through one path. Feedback is
+recorded as observation beads; a distiller judges what the observations
+add up to; every resulting behavior change lands as an operator-reviewed
+PR against this pack. Nothing changes agent behavior until that PR
+merges.
 
 Hardened detectors (`tools/lint-learned.d/`) and doctor checks are **not
 the learning system**. They are ordinary pack hygiene — a well-architected

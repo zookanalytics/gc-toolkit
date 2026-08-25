@@ -40,9 +40,9 @@ flowchart LR
   subgraph pack["gc-toolkit pack"]
     FORM[formulas +<br/>agent prompts]
     LIFE[lifecycle.sh<br/>the transition writer]
-    CAD[merge cadence<br/>5 arms]
+    CAD[merge cadence]
     SIGN[signoff.sh<br/>the verdict writer]
-    DOC[doctor/ 9 checks]
+    DOC[doctor/<br/>invariant checks]
     HELM[helm board<br/>render-only]
   end
   subgraph git["GitHub"]
@@ -155,14 +155,14 @@ corrective feedback into standing behavior, so attention is never spent twice:
    everything else. A lesson is real when it is merged pack content, not when
    it is remembered.
 
-Doctor is the same idea applied to structure: each of its nine checks asserts
-an invariant from [component-model.md](component-model.md) §3 against the live
+Doctor is the same idea applied to structure: each of its checks asserts an
+invariant from [component-model.md](component-model.md) §3 against the live
 ledger, so a property that stops holding fails a named check instead of
 waiting to be rediscovered.
 
 ## The consistency test
 
-This document earns its keep as a test. A proposed capability must trace a
+A proposed capability must trace a
 straight line — a belief in [foundation.md](foundation.md), made concrete
 through a primitive in [component-model.md](component-model.md) §1, placed in
 one of the six workflows above. Concretely
