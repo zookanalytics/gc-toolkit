@@ -278,25 +278,18 @@ bust are inherited. `assets/scripts/gate-visit.test.sh` now sweeps
 `assets/scripts/*.sh` as well as `formulas/*.toml`, so that copy is guarded on
 the same terms as the formula ones.
 
-**Why the fallback is not optional.** The react path is fire-and-forget: `gc
-sling` routes the subject and returns 0, and the visit appears only if the
-reconciler later spawns a proactive session to run the formula. Two clamps
-outside the sling can prevent that spawn, and neither shows up in its exit
-status — proactive auto-spawn is **default-disabled**
-(`GC_PROACTIVE_ENABLED` unset ⇒ `agents/proactive/agent.toml`'s `work_query`
-and `scale_check` both emit "no demand" forever), and at
-`GC_PROACTIVE_CITY_CAP` the pool sheds first under session pressure. Under
-either, an unguarded react path leaves a routed bead nobody picks up and *no
-visit at all*: a topic that looks filed and is silently forgotten, which is the
-one outcome this channel exists to prevent. So the path is chosen by asking
-`tools/gc-proactive.sh deliverable` first (exit 0/1 plus the reason), and the
-answer is printed either way — the operator always knows whether a visit exists
-yet, or only a queued reaction.
-
-> **As of 2026-08-14 `GC_PROACTIVE_ENABLED` is set nowhere in this city**, so
-> the automatic fallback is the path that actually runs and every intake yields
-> a visit immediately, without a framing card. Opting proactive in flips the
-> default to the framed path with no change to this script.
+**Why the fallback stays.** The react path is fire-and-forget: `gc sling`
+routes the subject and returns 0, and the visit appears only when a
+proactive session runs the formula. Proactive is always-on
+(`max_active_sessions = 2` is its only throttle; routed beads queue until a
+slot frees), so a queued reaction is picked up rather than dropped — but the
+path is still chosen by asking `tools/gc-proactive.sh deliverable` first
+(exit 0/1 plus the reason, printed either way), and the fallback files the
+visit directly whenever the answer is no. The seam is fail-safe by design:
+if proactive could ever again decline work, an unguarded react path would
+leave a routed bead nobody picks up and *no visit at all* — a topic that
+looks filed and is silently forgotten, the one outcome this channel exists
+to prevent.
 
 Note what is *not* here: there is no mail-to-visit bridge, and no seam for one.
 A mailbox whose endpoint spins up a visit per message was considered and

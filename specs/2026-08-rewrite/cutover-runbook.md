@@ -81,6 +81,32 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    `assets/scripts/cutover-2026-08.sh`, `assets/scripts/cutover-2026-08.test.sh`,
    and this runbook in a follow-up commit.
 
+9. **File the follow-up work.** After `verify` is green, the outside agent
+   files each item below as a bead in the city — one bead per item, routed
+   normally. The operator's rule: scoped follow-ups must become slung work,
+   not doc notes.
+
+   1. Implement review-gates per `specs/2026-08-review-gates/scope.md`.
+   2. Implement gctk per `specs/2026-08-review-gates/gctk-promotion.md`,
+      including the helm build-status row.
+   3. Resolve the proactive-placement open question
+      (`specs/2026-08-review-gates/scope.md`, Costs and open questions):
+      where proactive/first-reaction sits once triage exists.
+   4. The Dolt backup actor decision, from step 0's findings.
+   5. The `docs/architecture.md` re-ratification conversation with the
+      operator.
+   6. LAYOUT STABILITY: nothing leaves the operator's view without explicit
+      human action, board AND tmux. Board: banding/ordering in
+      `services/helm` `internal/board/derive.go` (closed may sink, never
+      vanish). Tmux: explicit dismiss replaces idle cycling for converse
+      sittings; pane-lifetime/session-lifetime decoupling evaluated via the
+      upstream ladder (gascity local-patch candidate).
+   7. LEARNING V2: audit city feedback history to populate the operator
+      profile; widen the distiller's output vocabulary beyond prose bullets
+      (profile entries, review-rubric amendments, exemplar diffs); add a
+      repeat-feedback recurrence report (obs.category supports counting) as
+      the loop's success metric.
+
 ## Failure handling
 
 **Sweep exits 1 (OPERATOR items).** Each item is printed with the bead id and

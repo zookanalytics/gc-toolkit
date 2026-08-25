@@ -1,43 +1,37 @@
-# proactive — the dedicated, small, default-disabled pool that runs slung
-# first reactions (mol-first-reaction): read the bead, write a card to its
-# notes, file a visit. NOT a resident loop — triggered per bead by
+# proactive — the dedicated, small, always-on pool that runs slung first
+# reactions (mol-first-reaction): read the bead, write a card to its notes,
+# file a visit. NOT a resident loop — triggered per bead by
 # `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction` or
-# `tools/gc-proactive.sh scan --sling`. Deliberate differences from the impl
-# pool: small (2 slots, never starves impl work), sheds first at the
-# city-wide session cap (GC_PROACTIVE_CITY_CAP, default 20), and mr-only for
-# any code it produces. Gate + clamp + ranking are mirrored testably in
-# tools/gc-proactive.sh (`proactive_auto_enabled`, `demand`, `board_rank`) —
-# keep the copies in sync. Design: specs/bead-universe/design-doc.md Phase 4.
+# `tools/gc-proactive.sh scan --sling`. max_active_sessions = 2 is the only
+# throttle: routed beads queue at zero cost until a slot frees, so the pool
+# never starves impl work and never drops a slung reaction. mr-only for any
+# code it produces. Demand ranking is mirrored testably in
+# tools/gc-proactive.sh (`demand`, `board_rank`) — keep the copies in sync.
+# Design: specs/bead-universe/design-doc.md Phase 4.
 
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/proactive/{{.AgentBase}}"
-nudge = "Run gc hook; proactive demand is routed first-reaction work (mol-first-reaction). If the city is at the session cap, you'll find nothing — drain."
+nudge = "Run gc hook; proactive demand is routed first-reaction work (mol-first-reaction). If the claim returns nothing, drain."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0
 max_active_sessions = 2
 
-# work_query = the running worker's discovery query: [] unless enabled, []
-# at/over the city cap, else routed demand ranked by board weight.
+# work_query = the running worker's discovery query: routed demand ranked by
+# board weight (oldest-first within a band).
 work_query = '''
-_='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (a `case` on line 1 is a syntax error).
-case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '[]'; exit 0 ;; esac
+_='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
 target="{{.Rig}}/gc-toolkit.proactive"
-active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
-if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '[]'; exit 0; fi
 r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
 if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 '''
 
-# scale_check = the reconciler's SPAWN predicate; mirrors the gate and clamp
-# in count form (0 = no demand = no spawn) so spawns cannot bypass them.
+# scale_check = the reconciler's SPAWN predicate; the same demand in count
+# form (0 = no demand = no spawn) so a spawn always finds work to claim.
 scale_check = '''
 _='' # env-prefix landing — same rationale as work_query's line 1.
-case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '0'; exit 0 ;; esac
 target="{{.Rig}}/gc-toolkit.proactive"
-active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
-if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '0'; exit 0; fi
 n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
 if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
 '''

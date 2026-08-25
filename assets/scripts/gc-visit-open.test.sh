@@ -15,9 +15,11 @@
 #               fire-and-forget and returns 0 whether or not anything will
 #               ever pick the bead up, so an unguarded react path leaves the
 #               topic routed, unclaimed, and WITHOUT a visit — filed-looking
-#               and silently forgotten. Both clamps that cause it (auto-spawn
-#               disabled — the DEFAULT — and the city session cap) are asked
-#               about up front, and a "no" must divert to the direct path.
+#               and silently forgotten. The script asks `deliverable` up
+#               front, and a "no" must divert to the direct path. (The
+#               shipped tool now always answers yes — the pool is always on
+#               and its cap only queues work — so the "no" arm is exercised
+#               through the stub; the divert mechanism is the contract.)
 #   (RECOVER)   a react path that fails outright still ends in a visit rather
 #               than a subject bead nobody is coming to.
 #   (RIG)       the default rig is FIXED (gc-toolkit), never inferred from
@@ -144,14 +146,13 @@ exit "${FAKE_HELM_RC:-0}"
 HELM
 
 # --- gc-proactive.sh stub -----------------------------------------------------
-# $FAKE_DELIVERABLE picks which clamp answers: yes / disabled / cap.
+# $FAKE_DELIVERABLE picks the deliverable answer: yes / no.
 cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
 #!/usr/bin/env bash
 printf 'proactive %s\n' "$*" >> "$FAKE_CALLS"
 case "${FAKE_DELIVERABLE:-yes}" in
-  yes)      echo "yes: proactive enabled and under the city cap (3/20)"; exit 0 ;;
-  disabled) echo "no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED unset or not truthy) — a slung reaction would sit routed and unclaimed"; exit 1 ;;
-  cap)      echo "no: city at session cap (20/20) — proactive sheds first under session pressure"; exit 1 ;;
+  yes) echo "yes: the proactive pool is always on — its cap only queues a slung reaction"; exit 0 ;;
+  no)  echo "no: this pool cannot run it (stub-stated reason) — a slung reaction would sit routed and unclaimed"; exit 1 ;;
 esac
 PRO
 
@@ -203,17 +204,13 @@ has "$OUT" "not filed yet" "(SINGLE) the operator is told the visit does not exi
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
 
 # --- (SHED) an undeliverable proactive surface diverts to the direct path ----
-for why in disabled cap; do
-    run "$why" "what should the deacon do about quota parks"
-    eq "$RC" "0" "(SHED/$why) exits 0"
-    hasnt "$CALLS" "helm react" "(SHED/$why) nothing is slung at a pool that cannot run it"
-    has "$CALLS" "helm open tk-newsub" "(SHED/$why) the visit is filed directly instead"
-    has "$OUT" "visit filed" "(SHED/$why) the summary reports a filed visit"
-done
-run disabled "a topic"
-has "$OUT" "auto-spawn is disabled" "(SHED) the summary relays WHICH clamp said no"
-run cap "a topic"
-has "$OUT" "session cap" "(SHED) the cap answer is relayed verbatim too"
+run no "what should the deacon do about quota parks"
+eq "$RC" "0" "(SHED) exits 0"
+hasnt "$CALLS" "helm react" "(SHED) nothing is slung at a pool that cannot run it"
+has "$CALLS" "helm open tk-newsub" "(SHED) the visit is filed directly instead"
+has "$OUT" "visit filed" "(SHED) the summary reports a filed visit"
+run no "a topic"
+has "$OUT" "stub-stated reason" "(SHED) the tool's stated reason is relayed verbatim"
 
 # A proactive tool that is missing entirely is the same situation: no reaction
 # is coming, so the visit must be filed rather than waited for.
@@ -237,11 +234,11 @@ eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
 unset FAKE_HELM_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
-run disabled "some cross-cutting topic"
+run no "some cross-cutting topic"
 has "$CALLS" "--db $TMP/rigs/gc-toolkit/.beads" "(RIG) the default rig is gc-toolkit, not inferred from cwd"
-run disabled "a gascity topic" --rig gascity
+run no "a gascity topic" --rig gascity
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(RIG) --rig retargets the ledger"
-run disabled "a topic" --rig nosuchrig
+run no "a topic" --rig nosuchrig
 eq "$RC" "2" "(RIG) an unknown rig is a usage error"
 eq "$CALLS" "" "(RIG) an unknown rig creates nothing and files nothing"
 has "$ERR" "unknown rig" "(RIG) the error names the problem"
@@ -254,19 +251,19 @@ has "$ERR" "unknown rig" "(RIG) the error names the problem"
 # without editing the script.
 : > "$FAKE_CALLS"
 set +e
-GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=disabled sh "$SCRIPT" "a topic" >/dev/null 2>&1
+GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
 set -e
 has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAULT_RIG moves the default"
 
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
-run disabled tk-abc12
+run no tk-abc12
 eq "$RC" "0" "(SUBJECT) an existing bead id exits 0"
 hasnt "$CALLS" "bd create" "(SUBJECT) no second bead is minted for an existing subject"
 has "$CALLS" "helm open tk-abc12" "(SUBJECT) the visit is filed on the bead itself"
-run disabled tk-abc12 --rig gascity
+run no tk-abc12 --rig gascity
 eq "$RC" "2" "(SUBJECT) --rig on an existing bead is refused, not ignored"
 eq "$CALLS" "" "(SUBJECT) and files nothing"
-run disabled tk-abc12 --type decision
+run no tk-abc12 --type decision
 eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
 
 # --- (ORIGIN) the origin is recorded as a KEY, not only as prose --------------
@@ -277,7 +274,7 @@ eq "$RC" "2" "(SUBJECT) --type on an existing bead is refused"
 # parked-disposition sweep selects on to decide whether a parked subject is
 # owed a visit back once its routed work lands — without it such a sweep
 # cannot see the subject at all (tk-2cyxo).
-run disabled "why is dolt wedging under load"
+run no "why is dolt wedging under load"
 has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
   "(ORIGIN) the created subject is stamped with the key the sweep reads, in its own rig's ledger"
 
@@ -285,14 +282,14 @@ has "$CALLS" "bd update tk-newsub --db $TMP/rigs/gc-toolkit/.beads --set-metadat
 # and pointing at a bead that already exists — so both stamp. Pointing at an
 # existing bead is the path the key would most easily be missed on, since nothing
 # is created there.
-run disabled tk-abc12
+run no tk-abc12
 has "$CALLS" "bd update tk-abc12 --db $TMP/rigs/gc-toolkit/.beads --set-metadata gc.origin=operator" \
   "(ORIGIN) an existing bead is stamped too, in its own rig's ledger"
 
 # NEVER overrule an origin that is already recorded: this establishes one, it
 # does not decide one. A bead adopted as a subject may have arrived any way.
 export FAKE_ORIGIN=agent
-run disabled tk-abc12
+run no tk-abc12
 unset FAKE_ORIGIN
 hasnt "$CALLS" "gc.origin=operator" "(ORIGIN) a subject that already carries an origin is left exactly as it is"
 has "$CALLS" "helm open tk-abc12" "(ORIGIN) and the conversation is still opened"
@@ -301,27 +298,27 @@ has "$CALLS" "helm open tk-abc12" "(ORIGIN) and the conversation is still opened
 # A failed stamp costs the automatic return trip, which the backfill can repair;
 # refusing to file the visit would cost the conversation, which nothing repairs.
 export FAKE_UPDATE_FAIL=1
-run disabled tk-abc12
+run no tk-abc12
 unset FAKE_UPDATE_FAIL
 eq "$RC" "0" "(ORIGIN) a stamp that fails does not fail the intake"
 has "$CALLS" "helm open tk-abc12" "(ORIGIN) the visit is filed anyway"
 has "$ERR" "could not stamp gc.origin=operator" "(ORIGIN) and the operator is told the return trip will not fire on its own"
 
 # --- (SHAPE) prefix, not hyphen, decides id-vs-topic --------------------------
-run disabled "dolt-latency"
+run no "dolt-latency"
 has "$CALLS" "bd create" "(SHAPE) a hyphenated word whose prefix matches no rig is a topic"
 has "$CALLS" "--title dolt-latency" "(SHAPE) and keeps its literal text"
-run disabled "tk-abc12" --topic
+run no "tk-abc12" --topic
 has "$CALLS" "bd create" "(SHAPE) --topic forces a bead-shaped string to be a topic"
-run disabled "gc-toolkit is slow"
+run no "gc-toolkit is slow"
 has "$CALLS" "bd create" "(SHAPE) a multi-word string starting with a rig prefix is still a topic"
 
 # --- (TYPE) a question is a decision -----------------------------------------
-run disabled "should the refinery land siblings in one pass?"
+run no "should the refinery land siblings in one pass?"
 has "$CALLS" "bd create -t decision" "(TYPE) a topic ending in ? becomes a decision bead"
-run disabled "rework the refinery sibling pass"
+run no "rework the refinery sibling pass"
 has "$CALLS" "bd create -t task" "(TYPE) everything else is a task"
-run disabled "should we do this?" --type task
+run no "should we do this?" --type task
 has "$CALLS" "bd create -t task" "(TYPE) --type overrides the heuristic"
 
 # --- (PARAGRAPH) the designed input: a paragraph, not a phrase ----------------
@@ -345,7 +342,7 @@ $PARA_L6"
     && ok "(PARAGRAPH) the fixture exceeds the 500-byte title cap ($(bytes "$PARAGRAPH") bytes)" \
     || bad "(PARAGRAPH) fixture is $(bytes "$PARAGRAPH") bytes — it must exceed 500 or it tests nothing"
 
-run disabled -- "$PARAGRAPH"
+run no -- "$PARAGRAPH"
 TITLE="$(cat "$FAKE_TITLE")"; BODY="$(cat "$FAKE_BODY")"
 eq "$RC" "0" "(PARAGRAPH) an over-cap paragraph files instead of dying at the create"
 has "$CALLS" "helm open tk-newsub" "(PARAGRAPH) the visit is filed on the new subject"
@@ -375,9 +372,9 @@ has "$BODY" "$PARA_L6" "(PARAGRAPH) the body keeps the last line verbatim"
 # A topic that already fits is passed through untouched — the cap must not
 # rewrite the ordinary case. Multi-line still collapses: a title with newlines
 # in it renders as garbage on every surface that shows one.
-run disabled "why is dolt wedging under load"
+run no "why is dolt wedging under load"
 eq "$(cat "$FAKE_TITLE")" "why is dolt wedging under load" "(PARAGRAPH) a topic within the cap is used verbatim"
-run disabled "$(printf 'the board is slow\nand jumping in is slower')"
+run no "$(printf 'the board is slow\nand jumping in is slower')"
 eq "$(cat "$FAKE_TITLE")" "the board is slow and jumping in is slower" "(PARAGRAPH) a short multi-line topic collapses to one line"
 # Not `has`: grep -F reads a multi-line pattern as one-per-line ALTERNATIVES, so
 # it would pass on either line by itself — which is the very thing being denied.
@@ -394,7 +391,7 @@ esac
 # token would silently retarget this case at the one shape it is not about.
 CJK_TOPIC="$(printf '\344\270\255%.0s' $(seq 1 600))"
 eq "$(bytes "$CJK_TOPIC")" "1800" "(PARAGRAPH) the CJK fixture is 600 unbroken 3-byte characters"
-run disabled -- "$CJK_TOPIC"
+run no -- "$CJK_TOPIC"
 TITLE="$(cat "$FAKE_TITLE")"
 [ -n "$TITLE" ] && [ "$(bytes "$TITLE")" -le 500 ] \
     && ok "(PARAGRAPH) an unbroken 600-character token is cut to fit ($(bytes "$TITLE") bytes)" \
@@ -406,7 +403,7 @@ printf '%s' "$TITLE" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
 # --- (FAILCLOSE) nothing half-filed -------------------------------------------
 : > "$FAKE_CALLS"
 set +e
-OUT="$(FAKE_CREATE_FAIL=1 FAKE_DELIVERABLE=disabled sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+OUT="$(FAKE_CREATE_FAIL=1 FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
 eq "$RC" "4" "(FAILCLOSE) a subject that cannot be created exits 4"
@@ -422,7 +419,7 @@ has "$ERR" "nothing filed" "(FAILCLOSE) the message says nothing was filed"
 : > "$FAKE_CALLS"
 set +e
 LEDGER_SAID="validation failed: validation failed for issue : title must be 500 characters or less (got 579)"
-OUT="$(FAKE_CREATE_FAIL=1 FAKE_CREATE_ERROR="$LEDGER_SAID" FAKE_DELIVERABLE=disabled \
+OUT="$(FAKE_CREATE_FAIL=1 FAKE_CREATE_ERROR="$LEDGER_SAID" FAKE_DELIVERABLE=no \
        sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
@@ -436,19 +433,19 @@ hasnt "$CALLS" "helm open" "(WHY) and no visit is filed on a subject that does n
 # than nothing — the fallback names the missing id and the exit status.
 : > "$FAKE_CALLS"
 set +e
-FAKE_CREATE_SILENT=1 FAKE_DELIVERABLE=disabled sh "$SCRIPT" "a topic" >/dev/null 2>"$TMP/err"; RC=$?
+FAKE_CREATE_SILENT=1 FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>"$TMP/err"; RC=$?
 set -e
 ERR="$(cat "$TMP/err")"
 eq "$RC" "4" "(WHY) a silent create failure exits 4"
 has "$ERR" "no error" "(WHY) a response with no .error says so, rather than reporting nothing"
 
-run disabled
+run no
 eq "$RC" "2" "(FAILCLOSE) no argument is a usage error"
 eq "$CALLS" "" "(FAILCLOSE) and creates nothing"
-run disabled "a topic" --bogus
+run no "a topic" --bogus
 eq "$RC" "2" "(FAILCLOSE) an unknown flag is a usage error"
 eq "$CALLS" "" "(FAILCLOSE) and creates nothing"
-run disabled "topic one" "topic two"
+run no "topic one" "topic two"
 eq "$RC" "2" "(FAILCLOSE) two positionals are a usage error (quote the topic)"
 eq "$CALLS" "" "(FAILCLOSE) and create nothing"
 

@@ -3,29 +3,22 @@
 # v1 design specs/bead-universe/design-doc.md, still governing this tool).
 # "Proactive" is NOT a resident loop: it is mol-first-reaction slung at a
 # bead (read body → write a first-reaction CARD → file a visit) so the human
-# arrives at advanced work. This tool is the budget-and-trigger layer:
-#   demand [<pool>]      pool work_query — routed beads, or [] when auto-spawn
-#                        is disabled (the default) or the city is at the cap
+# arrives at advanced work. This tool is the trigger layer:
+#   demand [<pool>]      pool work_query — routed beads, board-ranked
 #   scan [--json|--sling] find movable-forward / opt-in beads; --sling reacts
 #   sling <bead> [--nudge] [-n]  sling a first reaction (mr path, hard-refuses
 #                        --merge direct — the security invariant)
-#   cap · deliverable    clamp state; "would a sling be picked up?" (exit 0/1)
-# Two clamps: the pool's own max_active_sessions (agents/proactive/agent.toml)
-# and the city-wide GC_PROACTIVE_CITY_CAP shed. Tunables resolve env-first,
-# then the pool's city config (helm-svc carries no env — tk-hscs0):
-# GC_PROACTIVE_ENABLED / _POOL / _CITY_CAP / _MERGE / _SCAN_LIMIT / _FIXTURE
-# (test hook: canned sessions/ready/scan/config .json instead of gc calls).
+#   deliverable          "would a sling be picked up?" — always yes now (kept
+#                        for callers that branch on it, exit 0/1)
+# The only throttle is the pool's max_active_sessions
+# (agents/proactive/agent.toml); slung beads queue until a slot frees.
+# Tunables: GC_PROACTIVE_POOL / _MERGE / _SCAN_LIMIT / _FIXTURE (test hook:
+# canned ready/scan .json instead of gc calls).
 set -euo pipefail
 
 PROG="${0##*/}"
 
 POOL_BASE="${GC_PROACTIVE_POOL:-gc-toolkit.proactive}"
-CITY_CAP_DEFAULT=20
-# Provisional. `resolve_tunables` (run from main) fills whichever of these two
-# the process env left unanswered from the proactive pool's resolved city
-# config. Read them only after that call — never at load time.
-CITY_CAP="${GC_PROACTIVE_CITY_CAP:-$CITY_CAP_DEFAULT}"
-PROACTIVE_ENABLED="${GC_PROACTIVE_ENABLED:-}"
 MERGE="${GC_PROACTIVE_MERGE:-mr}"
 SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
@@ -75,187 +68,47 @@ board_rank() {
         sort_by(-(prio_w(.priority)), (.created_at // ""))'
 }
 
-# ---------------------------------------------------------------------------
-# Tunable resolution: process env first, then the pool's resolved city config
-# (the same [agent.env] the reconciler injects), then the default. Needed
-# because helm-svc — the caller that must ask deliverable — structurally
-# carries no GC_PROACTIVE_* env (tk-hscs0). One config read at most, only for
-# a tunable the env left unanswered; fails SOFT in every direction.
-# ---------------------------------------------------------------------------
-
-# pool_config_env -> the target pool's resolved [agent.env] as JSON, or {}.
-# Config keys agents by bare Name + rig Dir; strip the target's wrappers.
-pool_config_env() {
-    local target rig base raw out
-    target=""
-    # resolve_pool_target dies when unqualifiable; absorb it here.
-    target="$(resolve_pool_target 2>/dev/null)" || target=""
-    [ -n "$target" ] || { printf '{}'; return 0; }
-    rig="${target%%/*}"
-    base="${target##*/}"        # <binding>.<agent-base>, or already bare
-    base="${base##*.}"          # the agent's own name, which is what config keys
-
-    raw=""
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/config.json" ] || { printf '{}'; return 0; }
-        raw="$(cat "$FIXTURE/config.json")"
-    else
-        raw="$(gc config show --json 2>/dev/null)" || raw=""
-    fi
-    [ -n "$raw" ] || { printf '{}'; return 0; }
-
-    out=""
-    out="$(printf '%s' "$raw" | jq -c --arg rig "$rig" --arg base "$base" \
-        '[ (.config.Agents // [])[]
-           | select((.Dir // "") == $rig and (.Name // "") == $base)
-           | (.Env // {}) ] | (.[0] // {})' 2>/dev/null)" || out=""
-    [ -n "$out" ] || out='{}'
-    printf '%s' "$out"
-}
-
-# resolve_tunables — fill whichever of the two the process env left unset.
-resolve_tunables() {
-    if [ -n "$PROACTIVE_ENABLED" ] && [ -n "${GC_PROACTIVE_CITY_CAP:-}" ]; then
-        return 0
-    fi
-    local env_json v
-    env_json=""
-    env_json="$(pool_config_env)" || env_json='{}'
-    [ -n "$env_json" ] || env_json='{}'
-
-    if [ -z "$PROACTIVE_ENABLED" ]; then
-        v=""
-        v="$(printf '%s' "$env_json" | jq -r '.GC_PROACTIVE_ENABLED // empty' 2>/dev/null)" || v=""
-        if [ -n "$v" ]; then PROACTIVE_ENABLED="$v"; fi
-    fi
-    if [ -z "${GC_PROACTIVE_CITY_CAP:-}" ]; then
-        v=""
-        v="$(printf '%s' "$env_json" | jq -r '.GC_PROACTIVE_CITY_CAP // empty' 2>/dev/null)" || v=""
-        case "$v" in
-            ''|*[!0-9]*) : ;;      # unset, or not a bare number: keep the default
-            *)           CITY_CAP="$v" ;;
-        esac
-    fi
-    return 0
-}
-
 usage() {
     cat <<EOF
-Usage: $PROG demand [<pool-target>]   Pool work_query: emit routed proactive
-                                      beads, or [] when AUTO-SPAWN is disabled
-                                      (the default) or the city is at the
-                                      session cap (the shed clamp). Read-only.
+Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
+                                      proactive beads, board-ranked. Read-only.
        $PROG scan [--json] [--sling]  Find movable-forward / opt-in beads; with
-                                      --sling, sling a first reaction at each
-                                      (capped). Read-only without --sling.
+                                      --sling, sling a first reaction at each.
+                                      Read-only without --sling.
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
                                       direct (the security invariant).
-       $PROG cap                      Print the city-cap state (active/cap/shed).
        $PROG deliverable              Would a slung first reaction actually be
-                                      PICKED UP? Prints the reason; exit 0 yes,
-                                      1 no. Read-only. For callers that must
-                                      fall back when it is no.
+                                      PICKED UP? Always yes (the pool is always
+                                      on; its cap only queues work). Kept for
+                                      callers that branch on the answer.
 
-Budget: pool cap = agents/proactive/agent.toml max_active_sessions; city cap =
-GC_PROACTIVE_CITY_CAP (default $CITY_CAP_DEFAULT, else the pool's city config).
+Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) is the
+only throttle; routed beads queue until a slot frees.
 Security: proactive output is mr-only
 (GC_PROACTIVE_MERGE=$MERGE; "direct" is refused).
 EOF
 }
 
 # ---------------------------------------------------------------------------
-# Cap clamp — count active city sessions and decide whether proactive sheds.
-# ---------------------------------------------------------------------------
-
-# active_session_count -> number of active sessions city-wide.
-active_session_count() {
-    local raw
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/sessions.json" ] || { printf '0'; return 0; }
-        raw="$(cat "$FIXTURE/sessions.json")"
-    else
-        raw="$(gc session list --json 2>/dev/null || printf '{"sessions":[]}')"
-    fi
-    printf '%s' "$raw" | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null \
-        || printf '0'
-}
-
-# at_cap -> exit 0 (true) if the city is at/over the cap, else exit 1.
-at_cap() {
-    local active
-    active="$(active_session_count)"
-    [ "$active" -ge "$CITY_CAP" ]
-}
-
-cmd_cap() {
-    local active state
-    active="$(active_session_count)"
-    if [ "$active" -ge "$CITY_CAP" ]; then state="SHED (at/over cap)"; else state="ok"; fi
-    printf 'city-active=%s cap=%s -> %s\n' "$active" "$CITY_CAP" "$state"
-    [ "$active" -lt "$CITY_CAP" ]
-}
-
-# ---------------------------------------------------------------------------
 # deliverable — "if I sling right now, will anything ever pick it up?"
-# Sling is fire-and-forget and both clamps are outside it (a shed and a
-# disabled pool both return 0), so a caller that needs the reaction's OUTPUT
-# must ask BEFORE it slings. Reuses the same clamp reads, so a third caller
-# cannot drift. Exit 0 yes; 1 no, stdout names which clamp said no.
+# Always yes: the pool is always on, and its max_active_sessions cap only
+# queues a routed bead, never drops it. Kept as a verb because callers
+# (assets/scripts/gc-visit-open.sh) branch on the exit status.
 # ---------------------------------------------------------------------------
 cmd_deliverable() {
-    if ! proactive_auto_enabled; then
-        # Name the consulted pool; capture in two steps (die exits the
-        # substitution subshell, so an inline fallback never runs).
-        local why_target=""
-        why_target="$(resolve_pool_target 2>/dev/null)" || why_target=""
-        [ -n "$why_target" ] || why_target="the proactive pool, which could not be named because GC_RIG is unset"
-        printf 'no: proactive auto-spawn is disabled (GC_PROACTIVE_ENABLED is unset or not truthy in this process env AND in the city config for %s) — a slung reaction would sit routed and unclaimed\n' \
-            "$why_target"
-        return 1
-    fi
-    if at_cap; then
-        printf 'no: city at session cap (%s/%s) — proactive sheds first under session pressure\n' \
-            "$(active_session_count)" "$CITY_CAP"
-        return 1
-    fi
-    printf 'yes: proactive enabled and under the city cap (%s/%s)\n' \
-        "$(active_session_count)" "$CITY_CAP"
+    printf 'yes: the proactive pool is always on — its cap (max_active_sessions, agents/proactive/agent.toml) only queues a slung reaction, never drops it\n'
     return 0
 }
 
 # ---------------------------------------------------------------------------
-# demand — the proactive pool's work_query. The reconciler runs this to
-# decide whether to spawn a proactive worker. We SHED (emit []) at the cap so
-# proactive is the first thing to stop under session pressure; otherwise we
-# emit the standard pool demand (ready, unassigned, routed-to-us beads).
+# demand — the proactive pool's work_query: the standard pool demand (ready,
+# unassigned, routed-to-us beads), board-ranked. The reconciler runs this to
+# decide whether to spawn a proactive worker.
 # ---------------------------------------------------------------------------
 
-# proactive_auto_enabled -> true iff auto-spawn is opted in (the RESOLVED
-# tunable). Truthy set mirrored in agents/proactive/agent.toml's work_query
-# and scale_check; keep the three in sync (gate-asserted).
-proactive_auto_enabled() {
-    case "$PROACTIVE_ENABLED" in
-        1|true|yes|on) return 0 ;;
-        *)             return 1 ;;
-    esac
-}
-
 cmd_demand() {
-    # Gate FIRST — before the shed clamp — so a disabled surface emits []
-    # regardless of city load and pays no session/ready queries.
-    if ! proactive_auto_enabled; then
-        printf '[]'
-        return 0
-    fi
-
-    # The shed clamp: at/over the city cap, there is NO proactive demand.
-    if at_cap; then
-        printf '[]'
-        return 0
-    fi
-
     local r='[]'
     if [ -n "$FIXTURE" ]; then
         if [ -f "$FIXTURE/ready.json" ]; then r="$(cat "$FIXTURE/ready.json")"; fi
@@ -351,21 +204,13 @@ cmd_scan() {
         return 0
     fi
 
-    # --sling: advance each candidate up to the remaining city headroom, so a
-    # scan never blows past the cap in one sweep.
-    local active headroom slung=0
-    active="$(active_session_count)"
-    headroom=$(( CITY_CAP - active ))
-    if [ "$headroom" -le 0 ]; then
-        log "scan --sling: city at cap ($active/$CITY_CAP) — proactive sheds, nothing slung"
-        return 0
-    fi
-
+    # --sling: advance each candidate. The sweep is bounded by the scan's own
+    # candidate limit (GC_PROACTIVE_SCAN_LIMIT); the pool cap queues the rest.
+    local slung=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
     for id in $ids; do
-        [ "$slung" -ge "$headroom" ] && { log "scan --sling: hit city headroom ($headroom), stopping"; break; }
         if cmd_sling "$id"; then
             slung=$(( slung + 1 ))
         fi
@@ -397,13 +242,6 @@ cmd_sling() {
         mr|local) : ;;
         *) die "sling: unknown merge strategy '$MERGE' (mr|local)" ;;
     esac
-
-    # The shed clamp also guards the single-bead sling: at the cap, refuse to
-    # add another proactive session.
-    if [ -z "$dry" ] && at_cap; then
-        log "$PROG: sling: city at session cap ($(active_session_count)/$CITY_CAP) — proactive sheds, not slinging $bead"
-        return 0
-    fi
 
     local target
     target="$(resolve_pool_target)"
@@ -438,17 +276,11 @@ main() {
     local verb="$1"; shift || true
     case "$verb" in
         -h|--help|help) usage; exit 0 ;;
-    esac
-    # Every remaining verb consults at least one of the two clamps. Resolve both
-    # once, here — after --help, which must stay free of a config read.
-    resolve_tunables
-    case "$verb" in
         demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
         sling)  cmd_sling "$@" ;;
-        cap)    cmd_cap ;;
         deliverable) cmd_deliverable ;;
-        *) die "unknown verb '$verb' (demand|scan|sling|cap|deliverable; --help)" ;;
+        *) die "unknown verb '$verb' (demand|scan|sling|deliverable; --help)" ;;
     esac
 }
 

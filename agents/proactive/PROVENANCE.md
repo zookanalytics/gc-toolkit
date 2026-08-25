@@ -28,6 +28,11 @@ execute. It is a sibling of the impl polecat pool (same worktree/refinery
 machinery) with three deliberate differences, all from the design's budget +
 security commitments:
 
+**Update (2026-08-25):** the enable gate (`GC_PROACTIVE_ENABLED`) and the
+city-wide shed clamp (item 2 below) were removed at operator direction in
+the rewrite review — the pool is always-on and `max_active_sessions` is
+the only throttle. Item 2 stands as the v1 design record.
+
 1. **Dedicated + small** (`max_active_sessions = 2`). Routing proactive work
    into the impl pool would starve real implementation (head-of-line blocking
    on the impl pool's 5 slots). The design's "max 2-3"; start at 2.
@@ -64,7 +69,7 @@ The `gc.proactive_reaction` marker stops the scan from re-reacting. The card
 shape (Understanding · Found · Proposal · Decision needed) is the same one a
 converse session opens with and the board's pick-a-row visit lands the human on.
 
-Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — the shed clamp
-halts proactive at the cap; the mr-invariant refuses `direct`; the formula
+Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — demand flows
+unconditionally; the mr-invariant refuses `direct`; the formula
 writes the card and files the visit without closing; the slice tool fences reached
 content. Design refs: design-doc.md Key Components 5-6, Phase 4.

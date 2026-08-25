@@ -112,3 +112,6 @@ split later only if load or model choice demands it).
   the triage skill's fallback is "add `arch` when the diff creates a file,
   crosses a top-level directory, or changes a public interface," plus the
   charter-gap observation.
+- Open: where proactive/first-reaction sits in the workflow once triage
+  exists — first-reaction is approximately triage-for-conversations, and may
+  become the triage gate's front half. Decide during implementation.

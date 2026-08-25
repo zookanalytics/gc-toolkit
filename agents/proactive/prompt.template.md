@@ -33,9 +33,8 @@ gc bd update <id> --claim
 gc bd show <id> --json | jq '.[0].metadata'
 ```
 
-If `gc hook` finds **nothing**, the city is at its session cap and proactive
-has **shed** (by design — proactive is the first thing to stop under session
-pressure). Do not spin. Drain:
+If `gc hook` finds **nothing**, another worker claimed the routed bead
+first. Do not spin. Drain:
 
 ```bash
 gc runtime drain-ack
