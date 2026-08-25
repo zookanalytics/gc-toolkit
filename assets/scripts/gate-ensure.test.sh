@@ -4,7 +4,8 @@
 # persist or the enumeration is unreadable); the `none` opt-out; marker
 # classification (green@live head, stale green, exception, fixable, absent,
 # unmappable); in-flight dedup (routed, poured, claimed) + stranded repair
-# (convoy probe: re-sling only a never-poured review); the dispatch shape
+# (convoy probe: re-sling only a review with no LIVE tracking convoy, and
+# converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold; and
 # the dispatch_count cap.
@@ -143,6 +144,18 @@ hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured (a re-pour mints a
 eq "$(meta rev-4 'gc.routed_to')" "<absent>" "…and gc.routed_to is not restored beside the live workflow"
 hasnt "$out" "dispatched review new-" "…and no twin was minted"
 
+echo "# a review tracked ONLY by a closed convoy is dead-tracked — re-slung"
+store "[$(anchor D5 pull_request codex "" polecat/d5),
+        {\"id\":\"rev-5\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D5\"}},
+        {\"id\":\"conv-2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
+printf 'conv-2|tracks|rev-5\n' >> "$STUB_DEPS"
+echo "sha-d5" > "$GH_DIR/head_polecat_d5"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "STRANDED review rev-5" "a closed convoy no longer counts as a live pour"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-5 --on mol-review" "…so the stranded review is re-slung, not suppressed forever"
+eq "$(meta rev-5 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
+
 echo "# merge_hold gates the re-dispatch"
 store "[$(anchor E1 pull_request codex "" polecat/e1 ',"merge_hold":"true"')]"
 echo "sha-e1" > "$GH_DIR/head_polecat_e1"
@@ -186,6 +199,25 @@ printf 'conv-g1|tracks|new-2\n' >> "$STUB_DEPS"
 out=$(run)
 has "$out" "convoy-tracked" "the half-landed pour is recognized by its convoy"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…never re-poured"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
+
+echo "# a hard sling failure (rc!=0, nothing written) is not counted…"
+store "[$(anchor K1 pull_request codex "" polecat/k1)]"
+echo "sha-k1" > "$GH_DIR/head_polecat_k1"
+out=$(STUB_SLING_FAIL=1 run); rc=$?
+eq "$rc" 0 "a hard sling failure leaves rc=0 (gate armed, merge held)"
+has "$out" "pour did not read back" "the hard-failed pour is reported"
+has "$out" "dispatch NOT counted" "…and the dispatch is not counted"
+eq "$(meta K1 dispatch_count)" "<absent>" "…and no review round was consumed"
+krid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$krid" 'gc.execution_routed_to')" "<absent>" "the failed sling wrote no exec stamp"
+
+echo "# …and converges: the next pass re-slings it as stranded (no convoy)"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "STRANDED review $krid" "the never-poured bead is seen as stranded"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL $krid --on mol-review" "…and re-slung successfully"
+eq "$(meta "$krid" 'gc.execution_routed_to')" "$POOL" "…with the pour read back (hard-fail convergence)"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
 
 echo

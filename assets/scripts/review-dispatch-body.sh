@@ -37,7 +37,9 @@ formula, attached to this bead at dispatch (`gc sling --on mol-review`); the
 formula's step descriptions ARE the method — follow them in order.
 
 **Recovery:** if you hold this bead with no poured workflow, run
-`gc formula show mol-review` and follow its steps in order.
+`gc formula show mol-review` and follow its steps in order. In recovery there
+is no input convoy: REVIEW_BEAD is this bead itself — substitute its id
+wherever the steps derive REVIEW_BEAD from the convoy.
 
 **Do not substitute any other review method.** Do not match a review-shaped
 skill out of your catalog, and do not improvise one. **One agent, single

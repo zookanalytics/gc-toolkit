@@ -5,17 +5,17 @@
 # that died after merge.sh landed it) -> lifecycle transition to merged;
 # CLOSED-unmerged -> abandoned + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING -> file ONE rework child per head to
-# the fix pool (dedup: an existing rework child naming this branch whose
-# rejection_reason names this head; a created-but-unstamped orphan is adopted
-# by its deterministic title, never twinned); gate green at a STALE head ->
-# file one re-review child per head to the review pool, carrying mol-review
-# via gc sling --on (dedup: a live review naming the anchor, or one with
-# review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
-# stamped with fix_target_pool for the rework path; dismissal of our OWN superseded CHANGES_REQUESTED (never a human's;
-# signoff_dismissed recorded and read back FIRST; skipped when native
-# auto-merge is armed). A merged record never carries an empty merged_sha —
-# an unreadable mergeCommit records merged_sha=unverified:PR#<n>, loudly.
+# nothing about the new base); CONFLICTING -> file ONE rework child per head
+# to the fix pool (dedup: a rework child naming this branch whose
+# rejection_reason names this head; an unstamped orphan is adopted by title,
+# never twinned); gate green at a STALE head -> file one re-review child per
+# head to the review pool, carrying mol-review via gc sling --on (dedup: a
+# live review naming the anchor, or one with review_branch=branch and
+# reviewed_oid=<live head>; same orphan adoption), stamped with fix_target_pool
+# for the rework path; dismissal of our OWN superseded CHANGES_REQUESTED
+# (never a human's; signoff_dismissed read back FIRST; skipped under native
+# auto-merge). A merged record never carries an empty merged_sha — an
+# unreadable mergeCommit records merged_sha=unverified:PR#<n>, loudly.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u

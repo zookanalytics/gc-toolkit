@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
-# gate-ensure — arm 1 of the merge cadence (refinery-reconcile.sh).
-# For every open anchor in pre_open_gate/pull_request: canonicalize check_set
-# (empty/absent -> stamp the declared default; a list or the `none` opt-out is
-# left alone), then ensure every declared, non-green gate is RAISABLE: marker
-# green at the live branch head, a live routed/claimed review bead in flight,
-# or a fresh dispatch — stamp metadata + blocks edge first (fail-closed),
-# review bead body from review-dispatch-body.sh, then attach the review
-# formula and route in one call — gc sling <review-pool> <bead> --on
-# mol-review — counting the dispatch only after the pour's
-# gc.execution_routed_to reads back. The dispatch pins reviewed_oid=<live
-# head> (signoff.sh binds the verdict to it) and fix_target_pool (the rework
-# route). A title probe adopts a created-but-unstamped orphan instead of
-# minting a twin; a sling is never retried in-pass (a re-pour mints a second
-# workflow root — held-for-retry instead).
+# gate-ensure — arm 1 of the merge cadence; caller: refinery-reconcile.sh.
+# For every open pre_open_gate/pull_request anchor: canonicalize check_set
+# (empty -> stamp the declared default; a list or `none` is left alone),
+# then ensure every declared non-green gate is RAISABLE — marker green at
+# the live branch head, a live routed/claimed review in flight, or a fresh
+# dispatch: metadata + blocks edge stamped first (fail-closed), body from
+# review-dispatch-body.sh, then formula and route in one call (gc sling
+# <review-pool> <bead> --on mol-review), counted only after the pour's
+# gc.execution_routed_to read-back. The dispatch pins reviewed_oid=<live
+# head> (signoff.sh binds the verdict) and fix_target_pool (rework route).
+# An unstamped orphan is adopted by its title, never twinned; a failed
+# sling is never retried in-pass (a re-pour mints a second workflow root).
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
-# Exits: 0 ok (a dispatch failure leaves the gate armed and merge HELD);
-# 3 = a gating anchor could not be made safe (unreadable enumeration, or a
-# check_set stamp that did not persist) — the driver holds merge.sh this pass.
+# Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
+# anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
 set -u
 
 PROG="gate-ensure"
@@ -106,15 +103,17 @@ pour_ok() { # <bead-id> <pool>
   [ "$got" = "${2:-}" ]
 }
 
-# Count the tracking convoys over a bead: >0 means a poured workflow already
-# drives it and a second pour would mint a second root. Non-zero rc = the
-# probe could not answer.
+# Count the LIVE tracking convoys over a bead: >0 means a poured workflow
+# still drives it and a second pour would mint a second root. A dep row with
+# no status field counts (fail-closed toward no-re-pour when the shape is
+# unknown); a closed/dead convoy does not — that pour is over and must not
+# suppress the stranded re-sling. Non-zero rc = the probe could not answer.
 tracking_convoys() { # <bead-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
   [ -n "$raw" ] || return 1
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw" | jq -r '[ .[] | select((.issue_type // .type // "") == "convoy") ] | length' 2>/dev/null
+  printf '%s' "$raw" | jq -r '[ .[] | select((.issue_type // .type // "") == "convoy") | select(((.status // "open") | tostring) as $s | ($s == "open" or $s == "in_progress" or $s == "blocked" or $s == "deferred" or $s == "hooked" or $s == "pinned")) ] | length' 2>/dev/null
 }
 
 meta_of() { # <row-json> <key>

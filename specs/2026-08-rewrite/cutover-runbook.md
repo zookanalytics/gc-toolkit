@@ -106,6 +106,12 @@ says OPERATOR is their decision, not yours. Work the steps in order.
       (profile entries, review-rubric amendments, exemplar diffs); add a
       repeat-feedback recurrence report (obs.category supports counting) as
       the loop's success metric.
+   8. REVIEW-WEDGE VISIBILITY: a poured review abandoned without a verdict
+      or restore (agent died after closing its step chain) still holds its
+      gate silently — add a liveness-qualified escalation (escalate.sh,
+      deduped situation key) to gate-ensure's exec-stamp-only reach once
+      live-city step/convoy semantics can be probed; stub-based tests cannot
+      pin that probe.
 
 ## Failure handling
 

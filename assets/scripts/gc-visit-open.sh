@@ -11,8 +11,8 @@
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
 # PREFERRED slings mol-first-reaction (framing card, reaction files the
 # visit); FALLBACK files the visit directly — taken on --no-react or whenever
-# `gc-proactive.sh deliverable` says the pool cannot run (fire-and-forget
-# slings are invisible failures under the default-disabled/capped pool).
+# `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
+# a sling into a downed pool fails invisibly; today's tool always says yes).
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
 set -u

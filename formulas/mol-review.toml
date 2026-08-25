@@ -255,8 +255,7 @@ REVIEWED_OID=<the OID from the review step>
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict approve --reviewed-oid "$REVIEWED_OID" --notes-file findings.md
-# or: --verdict request-changes --reviewed-oid "$REVIEWED_OID" --notes-file findings.md
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md
 ```
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads, and never run `gh pr review --approve`.
@@ -264,10 +263,21 @@ beads, and never run `gh pr review --approve`.
 **2. Failure arms.** "Head moved" from signoff.sh is not a failure — it is a
 different commit: re-pin at the new head, redo load-dispatch and review, and
 call it again with the new OID; what you must not do is re-submit the verdict
-you already have. Any other failure: leave the review bead open with your
-findings appended (`gc bd update "$REVIEW_BEAD" --append-notes ...`) so the
-next offer resumes — an unrecorded verdict is recoverable; a hand-rolled one
-is not.
+you already have. Any other failure, in this order: append your findings to
+the review bead (`gc bd update "$REVIEW_BEAD" --append-notes ...`); close the
+step chain forward with part 3's step-close loop; then — only after the chain
+is closed — restore the bead's claimability from the dispatch-stamped pool
+and drain:
+```bash
+POOL=$(gc bd show "$REVIEW_BEAD" --json | jq -r '.[0].metadata.review_pool // empty')
+[ -n "$POOL" ] && gc bd update "$REVIEW_BEAD" --set-metadata gc.routed_to="$POOL"
+gc runtime drain-ack
+```
+The pour retired gc.routed_to and this workflow's steps are now closed, so no
+second authority remains; restoring the route returns the bead to the pool's
+routed tier as a formula-less review bead whose body carries the method note
+(the documented recovery shape), so the next claim genuinely resumes — an
+unrecorded verdict is recoverable; a hand-rolled one is not.
 
 **3. Close this workflow's step chain, then drain.** Terminal step: it still
 closes its own bead — that is how a graph.v2 step advances, and skipping it
@@ -290,7 +300,7 @@ gc runtime drain-ack
 **Never** close the review bead (`signoff.sh` disposes of it) and never
 touch the anchor. Done means gone.
 
-**Exit criteria:** exactly one signoff.sh call succeeded (or the bead is
-left open and resumable with findings appended), step chain closed forward,
-drain acknowledged.
+**Exit criteria:** exactly one signoff.sh call succeeded (or findings are
+appended and, after the chain closed, the bead's route is restored so the
+pool can re-claim it), step chain closed forward, drain acknowledged.
 """
