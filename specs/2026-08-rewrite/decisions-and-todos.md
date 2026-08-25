@@ -72,9 +72,25 @@ description: The operator's rulings on the nine attention items from the rewrite
   4. **Wedged-agent recovery (shutdown dance)** — deliberately traded for
      human triage visits (liveness sweep) plus the widened no-consent-UI
      fragment and the cycle-recycle hook that remove the top causes.
-     **OPERATOR RATIFICATION:** accept "a live-but-wedged agent waits for a
-     human", or add a `gc runtime request-restart` exec order gated on the
-     quota-park safety check as the actuator.
+     **Cost analysis (2026-08-24):** this is the one true regression — a
+     ≤7-minute cheap-model dance became an operator interrupt with up to
+     ~6h wedge latency (the sweep's precheck interval), and the mechanical
+     alternative (`gc runtime request-restart`) silently no-ops for
+     refinery/named on-demand sessions. Everything else the dog did moved
+     DOWN in cost (exec orders beat dog sessions; a dog pool is
+     0-when-idle so it cannot recreate the boot failure mode).
+     **Recommendation:** reintroduce the dog as a warrant-executor-ONLY
+     pool (name is collision-free without the gastown import): demand-
+     scaled 0→2, cheap model, work arrives only as routed warrant beads
+     from the deacon/witness detectors, one formula
+     (mol-dog-shutdown-dance) + one probe script, a declared
+     [metadata.warrant] registry group, escalate.sh on every stop path;
+     the dead session's beads flow into existing witness orphan recovery
+     (no healer reappears). ~15-40 cheap calls per episode vs. one
+     operator interrupt + stalled WIP. **OPERATOR DECISION:** reintroduce
+     at cutover, or evidence-first (tripwire: recurring wedged-agent
+     visits in the first live week), or accept the human-wait as a priced
+     trade.
   Residue (cosmetic, clean opportunistically): `tmux-pick-session.sh` still
   filters `dog`; `docs/gascity-agents.md`/`gascity-packs.md` still list dog
   in the gastown roster tables (they document the runtime/gastown, so
