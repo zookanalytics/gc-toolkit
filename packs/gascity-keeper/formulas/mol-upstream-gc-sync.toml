@@ -2,35 +2,15 @@ description = """
 Detect upstream-gascity drift in the vendored gastown pack. Read-only —
 walks `agents/*/PROVENANCE.md`, asks the gascity rig what's changed since
 each pinned commit, writes a markdown report into bead notes plus a
-referenced file. No file mutation. No pin bumps. Apply and pin-bump are
-follow-up mols.
+referenced file. No file mutation, no pin bumps (apply and pin-bump are
+follow-up mols).
 
 Extends `mol-polecat-base` for `load-context`, but replaces the
 `implement / self-review` chain with a single `survey` step that drives
 `tools/upstream-gc-sync.sh`, then a `report-and-close` step that persists
-the output and closes the bead.
-
-This mol is the read-only half of the gastown sync workflow. Pair with a
-v2 apply mol that consumes `metadata.report_file` to land hunks and bump
-pins.
-
-## Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| upstream_rig | gascity | The upstream rig name (resolved via `gc rig list --json`) |
-| upstream_ref | origin/main | Ref in the upstream rig to compare each pin against |
-| sync_script | tools/upstream-gc-sync.sh | Drift-detector script (relative to pack root) |
-| with_diff | 0 | If `1`, include unified diffs per agent (verbose) |
-| notify_recipient | (empty) | Optional mail address; if set, the report is mailed in addition to being written to bead notes |
-
-## Failure modes
-
-| Step | Failure handling |
-|------|------------------|
-| workspace-setup | Worktree creation or upstream fetch failure → halt; bead stays open with `metadata.aborted_at=workspace-setup` |
-| survey | Script not found, rig path missing, ref unreachable → write the failure tail into bead notes, set `metadata.aborted_at=survey`, drain and exit. Bead stays open for operator review. |
-| report-and-close | Should not fail; if it does, the report file is still on disk under `metadata.work_dir` |"""
+the output and closes the bead. Every abort path leaves the bead open,
+reassigned to `{{notify_recipient}}` (or `human`), with the failure tail
+in notes and `metadata.aborted_at` naming the step."""
 formula = "mol-upstream-gc-sync"
 extends = ["mol-polecat-base"]
 version = 3
@@ -61,10 +41,8 @@ id = "workspace-setup"
 title = "Set up gc-toolkit worktree (read-only — no branch needed)"
 needs = ["load-context"]
 description = """
-This mol is read-only. We don't create a feature branch — the survey
-step runs the drift-detector script and writes a report to the bead.
-The worktree exists so the script's CWD is a deterministic pack root
-and so multiple sync runs don't collide.
+Read-only mol: no feature branch. The worktree gives the survey script a
+deterministic pack-root CWD and keeps concurrent sync runs from colliding.
 
 **1. Reuse or create the worktree:**
 
@@ -73,9 +51,7 @@ WORKTREE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.work_dir // empty'
 ```
 
 If `WORKTREE` is non-empty and points to an existing directory, `cd`
-there and skip to step 2.
-
-Otherwise create one scoped to this bead:
+there and skip to step 2. Otherwise:
 ```bash
 git fetch --prune origin
 WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
@@ -84,27 +60,16 @@ cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH"
 ```
 
-The worktree is detached — no branch is created. This mol never
-commits, so there's nothing to push.
-
-**2. Fetch upstream rig:**
+**2. Fetch upstream rig** (fresh, so the report reflects current upstream):
 ```bash
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="{{upstream_rig}}") | .path')
 git -C "$RIG_ROOT" fetch --prune origin
 ```
 
-The drift detector compares each pin against `{{upstream_ref}}` in
-this rig — a fresh fetch is required so the report reflects current
-upstream state, not a stale local view.
-
-`gc rig list --json` is the stable shape: top-level `.rigs[]` with
-`.name` and `.path` keys. A `select` that matches no rig prints an
-empty string, which makes the next `git -C "" fetch` fail loudly —
-that's the trigger for the abort path below.
-
-If `{{upstream_rig}}` is not present in `gc rig list --json` (rig not
-registered in this city), record the failure, hand the bead back to
-a durable owner, and abort:
+If `{{upstream_rig}}` is not registered in this city (the `select` prints
+empty and the fetch fails loudly), record the failure and abort — the
+`--status=open` + reassign + `gc.routed_to` triplet keeps the bead from
+stranding `in_progress` on this drained session:
 ```bash
 ABORT_OWNER="{{notify_recipient}}"
 [ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
@@ -118,10 +83,6 @@ gc runtime drain-ack
 exit 1
 ```
 
-Without the `--status=open`/reassign/`gc.routed_to` triplet the bead would
-strand `in_progress` on this drained session — same lifecycle-class regression
-the rebase/pr-prep abort paths already fix.
-
 **Exit criteria:** worktree exists at `metadata.work_dir`; upstream
 rig `{{upstream_rig}}` has been fetched."""
 
@@ -130,11 +91,7 @@ id = "preflight-tests"
 title = "Skip — sync variant is read-only"
 needs = ["workspace-setup"]
 description = """
-This mol does not modify code, run tests, or build anything. Its only
-runtime dependencies are the `gc` CLI, `git`, and a POSIX shell — all
-guaranteed by the polecat session.
-
-Close this step and proceed."""
+No code changes, tests, or builds in this mol. Close this step and proceed."""
 
 [[steps]]
 id = "implement"
@@ -149,17 +106,16 @@ id = "self-review"
 title = "Skip — replaced by survey step"
 needs = ["implement"]
 description = """
-There is no implementation diff to review — the report itself is the
-deliverable, and `report-and-close` persists it. Close this step
-and proceed."""
+No implementation diff to review — the report is the deliverable. Close
+this step and proceed."""
 
 [[steps]]
 id = "survey"
 title = "Run the drift-detector script and capture the report"
 needs = ["workspace-setup"]
 description = """
-Drive `{{sync_script}}` against the upstream rig and capture stdout
-to a report file under the worktree.
+Drive `{{sync_script}}` against the upstream rig, capturing stdout to a
+report file under the worktree.
 
 **1. Verify the script is present and executable:**
 ```bash
@@ -229,21 +185,17 @@ id = "report-and-close"
 title = "Append report to bead notes, optionally mail, close bead, exit"
 needs = ["survey"]
 description = """
-Persist the report so it survives without depending on the worktree,
-optionally mail a copy, then close the bead.
+Persist the report so it survives without the worktree, optionally mail a
+copy, then close.
 
-**1. Append the report to bead notes:**
+**1. Append the report to bead notes** (readable via `gc bd show`, no
+filesystem access needed):
 ```bash
 REPORT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.report_file')
 gc bd update {{issue}} --notes "$(cat "$REPORT_FILE")"
 ```
 
-The notes carry the full markdown — anyone with `gc bd show {{issue}}`
-can read the report directly without filesystem access.
-
 **2. Optionally mail the report:**
-
-If `{{notify_recipient}}` is non-empty, mail a copy:
 ```bash
 RECIPIENT="{{notify_recipient}}"
 if [ -n "$RECIPIENT" ]; then
@@ -253,18 +205,13 @@ if [ -n "$RECIPIENT" ]; then
 fi
 ```
 
-**3. Close the bead:**
+**3. Close the bead and exit:**
 ```bash
 gc bd close {{issue}} --reason "Drift report generated: $REPORT_FILE"
-```
-
-**4. Drain and exit:**
-```bash
 gc runtime drain-ack
 exit 0
 ```
 
-**Exit criteria:** bead is closed; `metadata.report_file` references
-the on-disk report; bead notes carry the markdown body; if
-`{{notify_recipient}}` was set, the recipient has been mailed; session
-has drained."""
+**Exit criteria:** bead closed; `metadata.report_file` set; notes carry
+the markdown body; recipient mailed when `{{notify_recipient}}` was set;
+session drained."""

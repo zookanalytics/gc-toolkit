@@ -1,410 +1,145 @@
 #!/usr/bin/env bash
-# Hermetic test for refinery-reconcile.sh — the merge-cadence pass runner that
-# replaced the per-rig /tmp idle driver (tk-d83wm).
-#
-# Stub pass scripts stand in for the seven real ones, recording their argv; a
-# fake `gc` serves the agent roster and the bead listing; a fake `git` answers
-# the ls-remote gate. No live city, no Dolt, no network, no systemd.
-#
-# Covers: (a) every pass runs, in the formula's order, on one invocation;
-# (b) there is no loop and no sleep — the cadence belongs to the order;
-# (c) the refinery identity and BOTH pool addresses are derived from one
-# discovery, so they cannot disagree; (d) check-set-heal rc=3 HOLDS merge-skill
-# for that pass and is reported without failing the order — an approval-gated
-# queue must not raise order.failed every cooldown; (e) any other non-zero pass
-# rc fails the order, and every LATER pass still runs; (f) a missing pass script
-# is skipped, not fatal; (g) GC_RIG absent is refused rather than guessed;
-# (h) the state dir is keyed per rig, so co-tenant rigs cannot share a handoff
-# dedup; (i) the fresh-handoff detector gates on the branch existing on origin,
-# reports each id once, and re-reports one that returns; (j) an anchored bead is
-# never reported as a lost handoff, while an UNROUTED bead assigned to a
-# near-miss refinery address IS — it is polled by nobody, and since tk-qf2l0j
-# retired the pass that repaired it, this detector is what reports it;
-# (k) the pass log is bounded; (l) the order file parses and still carries
-# the wiring the runner depends on; (m) the refinery identity is projected to
-# the convoy-graduation pass and to NOTHING else, since a process-wide export
-# would silence the other passes' "wake the refinery" nudges; (n) the real
-# graduation pass's GC_AGENT gate still matches the contract (m) relies on,
-# and both of its states exit 0.
+# Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
+# driver. Covers: GC_RIG required; refinery discovery + pool derivation;
+# the arm ORDER (gate-ensure, pr-open, merge, pr-facts, convoy-graduate);
+# the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
+# same pass, without failing the order), exercised by extracting and executing
+# the marked block against stubs; BEADS_ACTOR / GC_AGENT projections scoped to
+# their arms; a failing arm not skipping the arms after it; and the exit-1
+# failure report.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$HERE/refinery-reconcile.sh"
-ORDER="$HERE/../../orders/refinery-reconcile.toml"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"
+harness_init
+RUNNER="$HERE/refinery-reconcile.sh"
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
-eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3" "got '$1' want '$2'"; }
-# Here-strings, not pipes: `grep -q` exits at its first match and SIGPIPEs the
-# writer, and pipefail promotes that 141 to the pipeline's status — so a match
-# that SUCCEEDED takes the failure branch once the payload is big enough to
-# still be flushing. doctor/check-pipefail-grep-q is the standing gate on this.
-has() { grep -qF -- "$2" <<< "$1" && ok "$3" || bad "$3" "missing '$2'"; }
-hasnt() { grep -qF -- "$2" <<< "$1" && bad "$3" "unexpected '$2'" || ok "$3"; }
-
-# --- a pack dir holding stub passes next to the real runner ------------------
-PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts" "$TMP/bin" "$TMP/state" "$TMP/rigroot"
-cp "$SCRIPT" "$PACK/assets/scripts/refinery-reconcile.sh"
-RUNNER="$PACK/assets/scripts/refinery-reconcile.sh"
-
-PASSES="check-set-heal pre-open-resolve merge-skill reconcile-merged-prs reconcile-gate-verdicts reconcile-graduated-convoys"
-
-# Stub pass: appends "<name> <argv...>" to the trace, exits with the rc named in
-# $TMP/rc.<name> (default 0).
-mkstub() { # name
-    cat > "$PACK/assets/scripts/$1.sh" <<STUB
+# Stub arms record invocation order, args and the projected identities.
+SD="$TMP/scripts"
+mkdir -p "$SD"
+cp "$RUNNER" "$SD/refinery-reconcile.sh"
+chmod +x "$SD/refinery-reconcile.sh"
+mkarm() { # <name> [rc]
+  cat > "$SD/$1" <<ARM
 #!/usr/bin/env bash
-printf '%s %s\n' "$1" "\$*" >> "$TMP/trace"
-printf '%s GC_AGENT=[%s]\n' "$1" "\${GC_AGENT-}" >> "$TMP/envtrace"
-printf '%s BEADS_ACTOR=[%s]\n' "$1" "\${BEADS_ACTOR-}" >> "$TMP/actortrace"
-rcfile="$TMP/rc.$1"
-[ -f "\$rcfile" ] && exit "\$(cat "\$rcfile")"
-exit 0
-STUB
-    chmod +x "$PACK/assets/scripts/$1.sh"
+printf '%s|%s|%s|%s\n' "$1" "\$*" "\${BEADS_ACTOR:-}" "\${GC_AGENT:-}" >> "\${ARM_LOG:?}"
+exit ${2:-0}
+ARM
+  chmod +x "$SD/$1"
 }
-mkstubs() { for p in $PASSES; do mkstub "$p"; done; }
-mkstubs
+export ARM_LOG="$TMP/arms.log"
+export STUB_AGENTS="$TMP/agents.json"
+printf '{"agents":[{"qualified_name":"myrig/gc-toolkit.refinery"},{"qualified_name":"myrig/gc-toolkit.polecat"}]}' > "$STUB_AGENTS"
+export REFINERY_RECONCILE_STATE_DIR="$TMP/state"
+export STUB_ORIGIN_HEAD="main"
+unset BEADS_ACTOR GC_AGENT GC_PACK_NAME 2>/dev/null || true
 
-# --- fake gc: agent roster + bead listing ------------------------------------
-cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
-case "$1 ${2:-}" in
-  "agent list")
-    cat "$GCSTUB_AGENTS"
-    ;;
-  "bd list")
-    cat "$GCSTUB_BEADS"
-    ;;
-  "convoy list")
-    echo '[]'
-    ;;
-  *) exit 0 ;;
+drive() { GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" 2>&1; }
+
+echo "# GC_RIG is required"
+out=$(env -u GC_RIG "$SD/refinery-reconcile.sh" 2>&1); rc=$?
+eq "$rc" 2 "no GC_RIG exits 2"
+has "$out" "GC_RIG is unset" "…and says why"
+
+echo "# arms run in order with derived pools and scoped identities"
+for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh; do mkarm "$a"; done
+: > "$ARM_LOG"
+out=$(drive); rc=$?
+eq "$rc" 0 "a clean pass exits 0"
+order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
+eq "$order" "gate-ensure.sh,pr-open.sh,merge.sh,pr-facts.sh,convoy-graduate.sh" "the five arms ran in the load-bearing order"
+has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
+merge_line=$(grep '^merge.sh' "$ARM_LOG")
+has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
+facts_line=$(grep '^pr-facts' "$ARM_LOG")
+has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat --review-pool myrig/gc-toolkit.polecat-codex" "pr-facts got both derived pools"
+has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
+grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
+has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
+has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
+gate_line=$(grep '^gate-ensure' "$ARM_LOG")
+case "$gate_line" in
+  *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;
+  *) ok "identity projections are scoped, not process-wide" ;;
 esac
-GC
-chmod +x "$TMP/bin/gc"
 
-# --- fake git: ls-remote answers from a list of branches that "exist" --------
-cat > "$TMP/bin/git" <<'GIT'
-#!/usr/bin/env bash
-for a in "$@"; do
-  case "$a" in refs/heads/*)
-    grep -qxF "${a#refs/heads/}" "$GITSTUB_BRANCHES" 2>/dev/null && exit 0 || exit 2 ;;
-  esac
-done
-exit 0
-GIT
-chmod +x "$TMP/bin/git"
+echo "# gate-ensure rc=3 HOLDS merge.sh without failing the order"
+mkarm gate-ensure.sh 3
+: > "$ARM_LOG"
+out=$(drive); rc=$?
+eq "$rc" 0 "the designed hold does not fail the order"
+has "$out" "merge.sh HELD this pass" "the hold is reported"
+if grep -q '^merge.sh' "$ARM_LOG"; then bad "merge.sh RAN despite an unsafe gate-ensure"; else ok "merge.sh did not run"; fi
+grep -q '^pr-facts' "$ARM_LOG" && ok "pr-facts still ran (arms are independent)" || bad "pr-facts was skipped by the hold"
 
-cat > "$TMP/agents.json" <<'JSON'
-{"agents":[
- {"name":"polecat","qualified_name":"alpha/gc-toolkit.polecat"},
- {"name":"refinery","qualified_name":"alpha/gc-toolkit.refinery"},
- {"name":"refinery","qualified_name":"beta/gc-toolkit.refinery"}
-]}
-JSON
-: > "$TMP/beads-empty.json"; echo '[]' > "$TMP/beads-empty.json"
-: > "$TMP/branches"
+echo "# a failing arm fails the order but does not skip later arms"
+mkarm gate-ensure.sh
+mkarm pr-open.sh 1
+: > "$ARM_LOG"
+out=$(drive); rc=$?
+eq "$rc" 1 "a failing arm exits 1"
+has "$out" "pr-open rc=1" "…naming the failed arm"
+grep -q '^merge.sh' "$ARM_LOG" && ok "merge.sh still ran after the pr-open failure" || bad "merge.sh was skipped"
+grep -q '^convoy-graduate' "$ARM_LOG" && ok "convoy-graduate still ran" || bad "convoy-graduate was skipped"
 
-export GCSTUB_AGENTS="$TMP/agents.json"
-export GCSTUB_BEADS="$TMP/beads-empty.json"
-export GITSTUB_BRANCHES="$TMP/branches"
+echo "# integration_auto_land=false disables graduation only"
+mkarm pr-open.sh
+: > "$ARM_LOG"
+out=$(REFINERY_RECONCILE_INTEGRATION_AUTO_LAND=false drive); rc=$?
+eq "$rc" 0 "the disabled pass exits 0"
+if grep -q '^convoy-graduate' "$ARM_LOG"; then bad "convoy-graduate ran despite the kill-switch"; else ok "convoy-graduate disabled"; fi
+grep -q '^merge.sh' "$ARM_LOG" && ok "the merge arm is untouched by the switch" || bad "merge arm missing"
 
-run() { # [env assignments handled by caller]; runs the runner, captures out+rc
-    : > "$TMP/trace"; : > "$TMP/envtrace"; : > "$TMP/actortrace"
-    # `env -u GC_AGENT` reproduces the order's environment exactly: core's
-    # exec env sets BEADS_ACTOR/GC_RIG/GC_RIG_ROOT/BEADS_DIR and no GC_AGENT.
-    # Without the scrub this suite would inherit a GC_AGENT from whatever agent
-    # session invoked it and silently stop testing the condition that matters.
-    OUT="$(env -u GC_AGENT PATH="$TMP/bin:$PATH" \
-        BEADS_ACTOR="order:refinery-reconcile" \
-        GC_RIG="${RIG_OVERRIDE-alpha}" \
-        GC_RIG_ROOT="$TMP/rigroot" \
-        GC_PACK_STATE_DIR="$TMP/state" \
-        "$RUNNER" 2>&1)"
-    RC=$?
-    TRACE="$(cat "$TMP/trace" 2>/dev/null)"
-}
+echo "# no refinery bound = nothing to reconcile"
+printf '{"agents":[]}' > "$STUB_AGENTS"
+out=$(drive); rc=$?
+eq "$rc" 0 "no bound refinery exits 0"
+has "$out" "no refinery agent bound" "…and says so"
+printf '{"agents":[{"qualified_name":"myrig/gc-toolkit.refinery"}]}' > "$STUB_AGENTS"
 
-# --- 1. every pass runs, in the formula's order ------------------------------
-echo "── 1. the pass set ──"
-rm -f "$TMP"/rc.*
-run
-eq "$RC" 0 "(1) a clean pass exits 0"
-ORDER_SEEN="$(printf '%s\n' "$TRACE" | awk '{print $1}' | paste -sd, -)"
-eq "$ORDER_SEEN" \
-   "check-set-heal,pre-open-resolve,merge-skill,reconcile-merged-prs,reconcile-gate-verdicts,reconcile-graduated-convoys" \
-   "(2) all six passes ran, in the formula's order"
+echo "# the marked interlock block executes standalone against stubs"
+GATE="$(awk '/# >>> heal-gates-merge/{f=1;next} /# <<< heal-gates-merge/{f=0} f' "$RUNNER")"
+[ -n "$GATE" ] && ok "heal-gates-merge block extracted" || bad "heal-gates-merge markers missing"
+hasnt "$GATE" '{{' "the block is template-free (executable verbatim)"
+GSD="$TMP/gsd"; mkdir -p "$GSD"
+printf '#!/usr/bin/env bash\nexit 3\n' > "$GSD/gate-ensure.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/pr-open.sh"
+printf '#!/usr/bin/env bash\necho ran >> "${MERGE_SENTINEL:?}"\n' > "$GSD/merge.sh"
+chmod +x "$GSD"/*.sh
+export MERGE_SENTINEL="$TMP/merge-ran"; : > "$MERGE_SENTINEL"
+{
+  printf 'set -u\nSCRIPTS_DIR=%q\nPASS_OUT=""\nNOTED=""\nFAILED=""\n' "$GSD"
+  printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\n' \
+    'myrig/gc-toolkit.refinery' codex 'myrig/p-codex' 'myrig/p'
+  printf '%s\n' "$GATE"
+  printf 'echo "MERGE_HELD=$MERGE_HELD"\n'
+} > "$TMP/gaterun.sh"
+gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
+[ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite rc=3" || ok "(block) rc=3 held merge.sh"
+has "$gout" "MERGE_HELD=1" "(block) the hold flag is set"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/gate-ensure.sh"
+: > "$MERGE_SENTINEL"
+gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
+[ -s "$MERGE_SENTINEL" ] && ok "(block) a clean gate-ensure lets merge.sh run" || bad "(block) merge.sh did not run after a clean gate-ensure"
+has "$gout" "MERGE_HELD=0" "(block) the hold flag is clear"
 
-# --- 2. no loop, no sleep ----------------------------------------------------
-echo "── 2. the cadence is the order's, not the script's ──"
-COUNT="$(printf '%s\n' "$TRACE" | grep -c '^merge-skill ')"
-eq "$COUNT" 1 "(3) one invocation runs the pass set exactly once"
-grep -qE '^[[:space:]]*sleep ' "$SCRIPT" \
-    && bad "(4) the runner contains no sleep" "found a sleep" \
-    || ok "(4) the runner contains no sleep"
-grep -qE '^[[:space:]]*while true' "$SCRIPT" \
-    && bad "(5) the runner contains no unbounded loop" "found while true" \
-    || ok "(5) the runner contains no unbounded loop"
-grep -q 'flock' "$SCRIPT" \
-    && bad "(6) no flock — the controller's open-tracking gate is the single-flight" "found flock" \
-    || ok "(6) no flock — the controller's open-tracking gate is the single-flight"
-
-# --- 3. one discovery drives all three addresses -----------------------------
-echo "── 3. identity ──"
-has "$TRACE" "--refinery alpha/gc-toolkit.refinery" "(7) the handoff pass gets the discovered refinery address"
-has "$TRACE" "--fix-pool alpha/gc-toolkit.polecat"  "(8) the fix pool shares the discovered binding prefix"
-has "$TRACE" "--review-pool alpha/gc-toolkit.polecat-codex" "(9) the review pool shares it too"
-hasnt "$TRACE" "beta/" "(10) another rig's refinery is never addressed"
-
-# An unbound refinery ("<rig>/refinery") yields an empty prefix, not a literal.
-cat > "$TMP/agents-bare.json" <<'JSON'
-{"agents":[{"name":"refinery","qualified_name":"alpha/refinery"}]}
-JSON
-GCSTUB_AGENTS="$TMP/agents-bare.json" run
-has "$TRACE" "--fix-pool alpha/polecat" "(11) an unbound refinery yields unprefixed pools, not a literal prefix"
-GCSTUB_AGENTS="$TMP/agents.json"
-
-# --- 4. the heal gate --------------------------------------------------------
-echo "── 4. check-set-heal gates merge-skill ──"
-echo 3 > "$TMP/rc.check-set-heal"
-run
-eq "$RC" 0 "(12) rc=3 is a designed HOLD, not an order failure"
-hasnt "$TRACE" "merge-skill " "(13) merge-skill is HELD for the pass"
-has "$OUT" "UNSAFE" "(14) the hold is reported on stdout"
-has "$TRACE" "reconcile-merged-prs " "(15) the passes after the hold still run"
-
-echo 1 > "$TMP/rc.check-set-heal"
-run
-eq "$RC" 1 "(16) any other non-zero heal rc fails the order"
-has "$TRACE" "merge-skill " "(17) a plain heal failure does NOT hold merge-skill"
-rm -f "$TMP/rc.check-set-heal"
-
-# --- 5. a failing pass never skips the passes after it -----------------------
-echo "── 5. best-effort ──"
-echo 4 > "$TMP/rc.pre-open-resolve"
-run
-eq "$RC" 1 "(18) a failing pass fails the order, so it reaches order.failed"
-has "$OUT" "pre-open-resolve rc=4" "(19) the failing pass is named for the event excerpt"
-has "$TRACE" "merge-skill " "(20) later passes still run"
-has "$TRACE" "reconcile-graduated-convoys " "(21) including the last one"
-rm -f "$TMP/rc.pre-open-resolve"
-
-echo "── 6. a missing pass script ──"
-rm -f "$PACK/assets/scripts/reconcile-gate-verdicts.sh"
-run
-eq "$RC" 0 "(22) an absent pass is skipped, not fatal (older pack copies lack newer arms)"
-has "$TRACE" "reconcile-graduated-convoys " "(23) the pass after it still runs"
-mkstub reconcile-gate-verdicts
-
-# --- 7. no rig is a refusal, not a guess -------------------------------------
-echo "── 7. rig scoping ──"
-RIG_OVERRIDE="" run
-eq "$RC" 2 "(24) GC_RIG unset is refused"
-eq "$TRACE" "" "(25) nothing ran against an unnamed rig"
-unset RIG_OVERRIDE
-
-RIG_OVERRIDE=beta run
-[ -d "$TMP/state/refinery-reconcile/beta" ] && [ -d "$TMP/state/refinery-reconcile/alpha" ] \
-    && ok "(26) each rig keys its own state dir under one CITY+PACK state root" \
-    || bad "(26) each rig keys its own state dir under one CITY+PACK state root" \
-           "$(ls "$TMP/state/refinery-reconcile" 2>&1 | tr '\n' ' ')"
-unset RIG_OVERRIDE
-
-# --- 7b. the graduation target is this rig's own, not a shared constant -------
-echo "── 7b. graduation target ──"
-cat > "$TMP/bin/git" <<'GIT2'
-#!/usr/bin/env bash
-if [ "${3:-}" = "symbolic-ref" ]; then
-  [ -n "${GITSTUB_HEAD:-}" ] && { printf '%s
-' "$GITSTUB_HEAD"; exit 0; }
-  exit 1
-fi
-for a in "$@"; do
-  case "$a" in refs/heads/*)
-    grep -qxF "${a#refs/heads/}" "$GITSTUB_BRANCHES" 2>/dev/null && exit 0 || exit 2 ;;
-  esac
-done
-exit 0
-GIT2
-chmod +x "$TMP/bin/git"
-GITSTUB_HEAD="origin/trunk" run
-has "$TRACE" "--target trunk" "(26b) the target comes from this rig's origin/HEAD, not a shared constant"
-GITSTUB_HEAD="" run
-has "$TRACE" "--target main" "(26c) an unreadable origin/HEAD falls back to main (the old drivers' hardcoded value)"
-: > "$TMP/trace"
-OUT="$(PATH="$TMP/bin:$PATH" GC_RIG=alpha GC_RIG_ROOT="$TMP/rigroot" \
-  GC_PACK_STATE_DIR="$TMP/state" REFINERY_RECONCILE_TARGET=release \
-  GITSTUB_HEAD=origin/trunk "$RUNNER" 2>&1)"
-has "$(cat "$TMP/trace")" "--target release" "(26d) an explicit override still wins"
-unset GITSTUB_HEAD
-
-# --- 8. the fresh-handoff detector -------------------------------------------
-echo "── 8. fresh-handoff detector ──"
-cat > "$TMP/beads.json" <<'JSON'
-[
- {"id":"tk-pushed","assignee":"","metadata":{"branch":"polecat/tk-pushed","gc.routed_to":""}},
- {"id":"tk-unpushed","assignee":"","metadata":{"branch":"polecat/tk-unpushed","gc.routed_to":""}},
- {"id":"tk-anchored","assignee":"","metadata":{"branch":"polecat/tk-anchored","gc.routed_to":"","merge_result":"pull_request"}},
- {"id":"tk-someone","assignee":"alpha/gc-toolkit.polecat","metadata":{"branch":"polecat/tk-someone","gc.routed_to":"alpha/gc-toolkit.polecat"}},
- {"id":"tk-nearmiss","assignee":"alpha/refinery","metadata":{"branch":"polecat/tk-nearmiss","gc.routed_to":""}},
- {"id":"tk-handed","assignee":"alpha/gc-toolkit.refinery","metadata":{"branch":"polecat/tk-handed","gc.routed_to":""}}
-]
-JSON
-echo "polecat/tk-pushed"   >  "$TMP/branches"
-echo "polecat/tk-anchored" >> "$TMP/branches"
-echo "polecat/tk-someone"  >> "$TMP/branches"
-echo "polecat/tk-nearmiss" >> "$TMP/branches"
-echo "polecat/tk-handed"   >> "$TMP/branches"
-GCSTUB_BEADS="$TMP/beads.json"
-
-run
-has  "$OUT" "FRESH HANDOFF" "(27) a pushed, unanchored, unowned branch is reported"
-has  "$OUT" "tk-pushed"     "(28) by id"
-hasnt "$OUT" "tk-unpushed"  "(29) a bead whose branch is not on origin is live WIP, not a lost handoff"
-hasnt "$OUT" "tk-anchored"  "(30) an anchored bead belongs to the passes, not the detector"
-hasnt "$OUT" "tk-someone"   "(31) a bead someone else holds is not a lost handoff"
-# The set the retired reconcile-refinery-handoffs pass used to repair (tk-qf2l0j).
-# An assignee is only reachability if something POLLS it: the refinery's find-work
-# matches "$AGENT" exactly, so an unrouted bead addressed to anything else is read
-# by no one — and no bead-keyed pass can see it either, because it has no anchor.
-has  "$OUT" "tk-nearmiss"   "(51) an unrouted bead at a near-miss refinery address is polled by nobody, so it IS a lost handoff (tk-0nn3f)"
-hasnt "$OUT" "tk-handed"    "(52) a correctly-addressed handoff is this refinery's own find-work, not a lost one"
-eq "$RC" 0 "(32) a fresh handoff is news, not a failure"
-
-run
-hasnt "$OUT" "FRESH HANDOFF" "(33) the same id is not re-reported on the next pass"
-
-echo "polecat/tk-unpushed" >> "$TMP/branches"
-run
-has "$OUT" "tk-unpushed" "(34) a branch that appears later IS reported then"
-hasnt "$OUT" "tk-pushed" "(35) and the already-seen id stays quiet"
-
-GCSTUB_BEADS="$TMP/beads-empty.json"
-
-# --- 9. the log is bounded ---------------------------------------------------
-echo "── 9. the pass log ──"
-LOG="$TMP/state/refinery-reconcile/alpha/pass.log"
-[ -s "$LOG" ] && ok "(36) the pass writes a durable log under the pack state dir" \
-              || bad "(36) the pass writes a durable log under the pack state dir"
-for _ in 1 2 3; do
-    OUT="$(PATH="$TMP/bin:$PATH" GC_RIG=alpha GC_RIG_ROOT="$TMP/rigroot" \
-        GC_PACK_STATE_DIR="$TMP/state" REFINERY_RECONCILE_LOG_KEEP=5 "$RUNNER" 2>&1)"
-done
-LINES="$(wc -l < "$LOG" | tr -d ' ')"
-[ "$LINES" -le 5 ] && ok "(37) the log is trimmed to LOG_KEEP lines" \
-                   || bad "(37) the log is trimmed to LOG_KEEP lines" "got $LINES"
-
-# --- 10. the order that drives it --------------------------------------------
-echo "── 10. the order ──"
-if command -v python3 >/dev/null 2>&1; then
-    ORDER_JSON="$(python3 - "$ORDER" <<'PY'
-import json,sys,tomllib
-d=tomllib.load(open(sys.argv[1],'rb'))['order']
-print(json.dumps(d))
-PY
-)" || ORDER_JSON=""
-    [ -n "$ORDER_JSON" ] && ok "(38) orders/refinery-reconcile.toml parses as TOML" \
-                         || bad "(38) orders/refinery-reconcile.toml parses as TOML"
-    has "$ORDER_JSON" '"scope": "rig"' "(39) scope=rig — one registration, and one single-flight gate, per rig"
-    has "$ORDER_JSON" '"trigger": "cooldown"' "(40) cooldown is the cadence"
-    has "$ORDER_JSON" 'refinery-reconcile.sh' "(41) it execs this runner"
-    hasnt "$ORDER_JSON" 'no_work_gate' "(42) no_work_gate is NOT set — it would disable the single-flight gate"
-    # timeout must stay under core order-tracking-sweep's --stale-after 10m, or a
-    # wedged pass has its tracking bead swept and a second dispatch starts.
-    TMO="$(printf '%s' "$ORDER_JSON" | sed -n 's/.*"timeout": "\([^"]*\)".*/\1/p')"
-    case "$TMO" in
-        *s) SECS="${TMO%s}" ;;
-        *m) SECS=$(( ${TMO%m} * 60 )) ;;
-        *)  SECS=99999 ;;
-    esac
-    [ "$SECS" -gt 0 ] && [ "$SECS" -lt 600 ] \
-        && ok "(43) timeout ($TMO) stays under order-tracking-sweep's 10m stale window" \
-        || bad "(43) timeout ($TMO) stays under order-tracking-sweep's 10m stale window"
+echo "# the shipped order stays wired to this runner"
+ORDER="$(cd "$HERE/../.." && pwd)/orders/refinery-reconcile.toml"
+o=$(cat "$ORDER" 2>/dev/null)
+has "$o" 'trigger = "cooldown"' "order is cooldown-triggered"
+has "$o" 'interval = "60s"' "order keeps the 60s cadence"
+has "$o" 'timeout = "300s"' "order timeout stays under the 10m tracking sweep"
+has "$o" 'scope = "rig"' "order is rig-scoped (single-flight per rig)"
+has "$o" 'refinery-reconcile.sh' "order execs this runner"
+if grep -qE '^[[:space:]]*no_work_gate' "$ORDER"; then
+  bad "no_work_gate must never be set (it opts out of the single-flight gate)"
 else
-    echo "skip - python3 absent; order-file assertions not run"
+  ok "no_work_gate is not set"
 fi
 
 echo
-# --- 13. the graduation pass's identity, and its blast radius ----------------
-# Regression for the pre-open review finding on tk-d83wm: the runner resolved
-# the refinery identity but never projected it, so under the order the convoy
-# graduation pass skipped every tick while reporting success.
-echo "── 13. GC_AGENT reaches the graduation pass, and only it ──"
-rm -f "$TMP"/rc.*
-run
-ENVTRACE="$(cat "$TMP/envtrace" 2>/dev/null)"
-has "$ENVTRACE" "reconcile-graduated-convoys GC_AGENT=[alpha/gc-toolkit.refinery]" \
-    "(44) the graduation pass sees the resolved refinery identity, not an empty one"
-# Any pass other than the graduation one seeing a non-empty GC_AGENT means the
-# export leaked process-wide — which would silence the "wake the refinery" nudge
-# at recover-stranded-branches.sh:855.
-LEAKED="$(printf '%s\n' "$ENVTRACE" | grep -v '^reconcile-graduated-convoys ' \
-    | grep -v 'GC_AGENT=\[\]$' || true)"
-eq "$LEAKED" "" "(46) no other pass sees GC_AGENT — the identity does not leak process-wide"
-
-# The identity must follow the discovery, not a hardcoded address.
-GCSTUB_AGENTS="$TMP/agents-bare.json" run
-ENVTRACE="$(cat "$TMP/envtrace" 2>/dev/null)"
-has "$ENVTRACE" "reconcile-graduated-convoys GC_AGENT=[alpha/refinery]" \
-    "(47) an unbound refinery projects its own discovered address"
-GCSTUB_AGENTS="$TMP/agents.json"
-
-# --- 13b. the closing passes run as the REFINERY, not as the order -----------
-# Regression for tk-5kfhl. Core stamps the order exec env with
-# BEADS_ACTOR="order:<name>", and `bd close` is assignee-gated: it compares the
-# ASSIGNEE (the refinery, because that is what a polecat's done sequence writes)
-# against the ACTOR. `order:refinery-reconcile` is neither encoding of the
-# refinery, so close_anchor's identity-encoding override correctly declines and
-# every close fails — forever, on every pass. Measured on the live city: 8 anchors
-# open over MERGED PRs, ~80 failed closes across 12 passes, zero closed in 8+
-# hours, two mayor escalations. The board read shipped work as unlanded.
-echo "── 13b. BEADS_ACTOR reaches the two closing passes, and only them ──"
-rm -f "$TMP"/rc.*
-run
-ACTORTRACE="$(cat "$TMP/actortrace" 2>/dev/null)"
-has "$ACTORTRACE" "merge-skill BEADS_ACTOR=[alpha/gc-toolkit.refinery]" \
-    "(44b) merge-skill closes the anchor it just merged AS the refinery"
-has "$ACTORTRACE" "reconcile-merged-prs BEADS_ACTOR=[alpha/gc-toolkit.refinery]" \
-    "(45b) the close-on-land observer closes as the refinery too"
-# Every OTHER pass must still carry the order's own actor. The cadence files beads
-# as well as closing them, and `order:refinery-reconcile` is honest provenance for
-# a bead an order filed — so this identity is scoped to the closes, exactly as
-# GC_AGENT is scoped to graduation above.
-LEAKEDACTOR="$(printf '%s\n' "$ACTORTRACE" \
-    | grep -vE '^(merge-skill|reconcile-merged-prs) ' \
-    | grep -v 'BEADS_ACTOR=\[order:refinery-reconcile\]$' || true)"
-eq "$LEAKEDACTOR" "" "(46b) no other pass sees the refinery actor — it does not leak process-wide"
-# ...and it follows the discovery, not a hardcoded address.
-GCSTUB_AGENTS="$TMP/agents-bare.json" run
-ACTORTRACE="$(cat "$TMP/actortrace" 2>/dev/null)"
-has "$ACTORTRACE" "reconcile-merged-prs BEADS_ACTOR=[alpha/refinery]" \
-    "(47b) an unbound refinery closes under its own discovered address"
-GCSTUB_AGENTS="$TMP/agents.json"
-
-# --- 14. the contract with the REAL graduation pass --------------------------
-# Section 13 asserts against stubs that echo their own environment, so a rename
-# of the variable inside the consumer would leave those green while the cadence
-# silently broke again. Pin the actual cross-script contract: the gate is keyed
-# on GC_AGENT, and BOTH states exit 0 — which is precisely why this regression
-# was invisible under the order (a skipped pass and a working pass are the same
-# rc, so `order.failed` never rose).
-GRAD="$HERE/reconcile-graduated-convoys.sh"
-if [ ! -f "$GRAD" ]; then
-    echo "── 14. real-pass contract: SKIPPED (no reconcile-graduated-convoys.sh alongside) ──"
-else
-    echo "── 14. the real graduation pass's GC_AGENT gate ──"
-    GOUT="$(env -u GC_AGENT PATH="$TMP/bin:$PATH" GC_RIG=alpha GC_RIG_ROOT="$TMP/rigroot" \
-        bash "$GRAD" --target main 2>&1)"; GRC=$?
-    eq "$GRC" 0 "(48) GC_AGENT unset — the real pass exits 0, so the no-op is SILENT not an error"
-    has "$GOUT" "GC_AGENT unset; skip" "(49) ...and it is the identity gate that skipped it"
-    GOUT="$(PATH="$TMP/bin:$PATH" GC_AGENT=alpha/gc-toolkit.refinery GC_RIG=alpha \
-        GC_RIG_ROOT="$TMP/rigroot" bash "$GRAD" --target main 2>&1)"
-    hasnt "$GOUT" "GC_AGENT unset; skip" "(50) GC_AGENT set — it gets PAST the gate and does its work"
-fi
-
-echo "refinery-reconcile.test: $PASS passed, $FAIL failed"
+echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -48,9 +48,9 @@
 #     city import <pack> ... locked but not cached at <path>;
 #     run 'gc import install'
 #
-# This script used to resolve the convoy's tracked member with
-# `gc convoy status`. When that died, the member came back empty and the script
-# failed at step 2 on EVERY iteration — the exit condition went blind to an
+# The tracked member is resolved from the ledger, not `gc convoy status`:
+# when that command dies the member comes back empty and the script would
+# fail every iteration — the exit condition goes blind to an
 # already-green gate and the loop burned its whole budget (observed: gc-c05nr,
 # rebase complete and gate-green at 89e2e699f, attempts 2-7 all failing
 # identically on a cold `compound-engineering` import). It also silently

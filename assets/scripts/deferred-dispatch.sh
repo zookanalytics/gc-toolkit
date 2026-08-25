@@ -1,58 +1,23 @@
 #!/usr/bin/env bash
 # deferred-dispatch.sh — a pending dispatch is a fact about the work, so it
-# lives on the work bead.
+# lives on the work bead, not in an agent's context. `gc sling` pours
+# immediately and reads no `blocks` deps, so sequencing needs a durable hold:
+#   arm <bead> --target <agent> [--sling-arg X]... [--reason "..."]
+# records the intent as metadata; `reconcile` (orders/deferred-dispatch.toml,
+# cooldown, scope="rig") performs the sling once `bd list --ready` — beads' own
+# readiness predicate, never re-implemented here — reports the bead ready.
+# `list` answers "what dispatches are owed?"; `disarm` withdraws one.
+# Callers: agents sequencing dependent work; the deferred-dispatch order.
 #
-# THE PROBLEM (tk-y0ygs). `gc sling` pours its formula immediately and takes no
-# notice of the bead's `blocks` deps: the poured records carry `gc.root_bead_id`
-# and one `tracks` edge to the workflow root, and NONE of them carries an edge
-# to the work bead, so a `blocks` edge between two work beads is not on any path
-# the read side walks (docs/gascity-routing-model.md, "A `blocks` dep between
-# work beads does not hold a graph.v2 dispatch"). Sling a blocked bead and a
-# polecat claims it within ~2 minutes.
-#
-# So sequencing was done by an agent REMEMBERING not to dispatch yet. That hold
-# lived in one session's context and died with it: invisible to every other
-# agent and to the operator, with no recovery path — if the holder died, the
-# bead sat forever behind a `blocks` edge that nothing acted on, and nothing
-# anywhere knew a dispatch was owed. The operator's words: "This someone or
-# something needs to hold state outside of beads is a problem."
-#
-# THE FIX. Arm the dispatch onto the bead instead of holding it in your head:
-#
-#     deferred-dispatch.sh arm <bead> --target <agent> [--sling-arg X]... [--reason "..."]
-#
-# The intent becomes durable metadata on the work bead. This script's
-# `reconcile` verb runs on a cooldown order (orders/deferred-dispatch.toml,
-# scope="rig") and performs the sling once the bead is dispatchable. Nothing is
-# held in an agent's context, the pending dispatch survives every session death,
-# and `deferred-dispatch.sh list` answers "what dispatches are owed?" for anyone
-# who asks.
-#
-# WHAT COUNTS AS DISPATCHABLE is not re-implemented here. `bd list --ready`
-# applies beads' own readiness predicate — open, no active blocker of a blocking
-# type (`blocks`/`waits-for`/`conditional-blocks`), not in_progress, blocked,
-# deferred or hooked, and the parent-child blocked-flag cascade included. Asking
-# bd rather than walking dependency rows is what keeps this from drifting away
-# from the predicate every other reader uses.
-#
-# WHAT THIS IS NOT. It does not make `gc sling` itself dep-aware, and it does not
-# give the poured step beads an edge to the work bead. Both of those live in the
-# gc binary (gascity), not in this pack; the layer determination and what each
-# would take is in specs/tk-y0ygs/layer-determination.md. This is the fix
-# available at pack level, and it is the one that answers the operator's
-# complaint directly: the state moves onto the bead.
-#
-# NOT set -e: per-bead, best-effort by contract. One bead that cannot be slung
-# must not skip the beads after it, and the next cooldown retries. But a failure
-# to ENUMERATE is different in kind and exits non-zero — see the loop below.
+# Per-bead best-effort (one bad bead never skips the rest; the next cooldown
+# retries), but a failure to ENUMERATE exits non-zero — an unreadable queue
+# must never read as an empty one.
 set -u
 
 PROG="deferred-dispatch"
 
-# --- the vocabulary ----------------------------------------------------------
-# One key is the index AND the payload: `bd list --has-metadata-key` enumerates
-# armed beads without needing to know any target in advance (--metadata-field
-# can only match an exact value, which a per-bead target is not).
+# One key is index AND payload: `bd list --has-metadata-key` enumerates armed
+# beads without knowing any target in advance.
 K_TARGET="gc.dispatch_when_ready"
 K_ARGS="gc.dispatch_when_ready_args"
 K_BY="gc.dispatch_when_ready_armed_by"
@@ -62,8 +27,6 @@ K_REASON="gc.dispatch_when_ready_reason"
 BD_DB=""          # optional --db passthrough; otherwise BEADS_DIR pins the rig
 DRY_RUN=0
 
-# One EXIT trap owns every temp file. A RETURN trap per function is subtler
-# than it looks and this script runs exactly one verb before exiting.
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
 trap cleanup EXIT
@@ -75,8 +38,6 @@ bd_() {
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# Who is arming. GC_AGENT is the agent address in a session; BEADS_ACTOR is what
-# bd itself stamps. Either is more useful on the bead than "unknown".
 actor() { printf '%s' "${GC_AGENT:-${BEADS_ACTOR:-${USER:-unknown}}}"; }
 
 usage() {
@@ -103,10 +64,8 @@ target and bead, e.g. --sling-arg --on --sling-arg mol-pr-from-issue.
 EOF
 }
 
-# --- bd readers --------------------------------------------------------------
-# `bd show <id> --json` answers an ARRAY when the id resolves and an OBJECT
-# ({"error": ...}) when it does not — both at rc=0, so rc is not a discriminator
-# and array-shaped jq throws on the miss. Discriminate on type.
+# `bd show --json` answers an array on a hit and an {"error":...} object on a
+# miss, both at rc=0 — discriminate on type, not exit status.
 show_bead() { # id -> single bead object on stdout, or nothing (rc 1)
     local id="$1" raw
     raw="$(bd_ show "$id" --json 2>/dev/null)" || return 1
@@ -141,9 +100,7 @@ cmd_arm() {
     json="$(show_bead "$bead")" || json=""
     [ -n "$json" ] || { echo "$PROG: arm: $bead does not resolve in this store" >&2; return 1; }
 
-    # Refuse to arm work that is already in flight. Arming a dispatched bead
-    # would queue a SECOND pour behind the first, which is the duplicate-dispatch
-    # failure the load-context step exists to refuse.
+    # Arming already-dispatched work would queue a second pour behind the first.
     local status assignee routed exec_routed
     status="$(printf '%s' "$json" | jq -r '.status // ""')"
     assignee="$(printf '%s' "$json" | jq -r '.assignee // ""')"
@@ -178,16 +135,8 @@ cmd_arm() {
 
     echo "$PROG: armed $bead -> $target${reason:+ ($reason)}"
 
-    # An arm on an already-ready bead is legal and deliberate — it is what makes
-    # `arm` a safe universal replacement for a hand-held `sling`. Say so, so the
-    # caller is not surprised when it dispatches on the next pass.
-    #
-    # Asked through the SAME query the reconcile pass uses, not a per-id one:
-    # `bd list --ready` refuses an `--id` filter outright ("--ready cannot
-    # filter on IDFilter"), so a per-id readiness probe is not merely narrower,
-    # it always errors. Reusing the pass's own query also means this hint and
-    # the pass can never disagree. The metadata was written just above, so the
-    # bead is in scope for it.
+    # Asked through the SAME query reconcile uses: bd refuses --ready with an
+    # --id filter, and reusing the pass's query keeps hint and pass agreeing.
     local ready
     ready="$(bd_ list --has-metadata-key "$K_TARGET" --ready --json --limit 0 2>/dev/null \
         | jq -r --arg id "$bead" '[.[] | select(.id == $id) | .id][0] // ""' 2>/dev/null)"
@@ -229,10 +178,7 @@ cmd_disarm() {
     echo "$PROG: disarmed $bead"
 }
 
-# --- enumeration -------------------------------------------------------------
-# A could-not-enumerate failure must never read as an empty queue. Every read
-# here is checked and every failure exits non-zero; the caller (an order) logs
-# the failure and the next cooldown retries.
+# Unreadable is not empty: every read is checked and any failure returns 1.
 armed_rows() { # writes "<id>\t<status>\t<ready 0|1>" to $1
     local out="$1" all ready_ids
     all="$(bd_ list --has-metadata-key "$K_TARGET" --all --json --limit 0 2>/dev/null)" || return 1
@@ -319,8 +265,6 @@ cmd_reconcile() {
     done
 
     local rows; rows="$(mktemp_tracked)" || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }
-    # Enumeration failure is NOT an empty queue. Exit non-zero so the order logs
-    # it; a silent zero here would read exactly like "nothing was owed".
     armed_rows "$rows" || {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
@@ -333,8 +277,7 @@ cmd_reconcile() {
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
 
-        # Armed and closed: the work is done or was disposed of. Retire the
-        # record so a closed bead does not carry a dispatch nobody owes.
+        # Armed and closed: retire the record, no dispatch is owed.
         if [ "$status" = "closed" ]; then
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would retire arm on closed $id"
@@ -365,9 +308,8 @@ cmd_reconcile() {
             failed=$((failed + 1)); continue
         fi
 
-        # Already dispatched. Either a previous pass slung it and died before
-        # clearing the record, or somebody slung it by hand. Retire the arm
-        # rather than pouring a second workflow onto the same bead.
+        # Already routed (a pass died between sling and disarm, or a hand
+        # sling): retire the arm rather than pour a second workflow.
         if [ -n "$routed" ] || [ -n "$exec_routed" ]; then
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would retire arm on already-dispatched $id"
@@ -379,9 +321,7 @@ cmd_reconcile() {
             retired=$((retired + 1)); continue
         fi
 
-        # Somebody holds it. Slinging would take the bead away from them. The
-        # arm stays, visible in `list` and here, rather than being resolved by
-        # a writer that cannot know whether the holder still wants it.
+        # Held: slinging would take the bead away from its assignee.
         if [ -n "$assignee" ]; then
             echo "$PROG: HELD $id is ready but assigned to '$assignee' — not slinging; disarm or clear the assignee" >&2
             held=$((held + 1)); continue
@@ -409,8 +349,7 @@ cmd_reconcile() {
         dispatched=$((dispatched + 1))
     done < "$rows"
 
-    # A loop that ran fewer times than the queue held is the same blackout as an
-    # unreadable queue, and it must not print a summary that reads like success.
+    # A partial pass must not print a summary that reads like success.
     if [ "$processed" != "$expected" ]; then
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1

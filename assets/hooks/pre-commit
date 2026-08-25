@@ -1,45 +1,20 @@
 #!/usr/bin/env bash
-# Keep generated/seed-audit/ in step with the fragments it renders.
-#
-# WHY A HOOK AND NOT ONLY A CHECK. generated/seed-audit/ is a golden file over
-# every agent prompt and formula recipe in this pack, so it moves whenever a
-# fragment moves. A check alone would turn every fragment edit into "your change is fine,
-# now go run a command and amend" — which is how golden files acquire a
-# reputation for being a tax. Regenerating here means the artifact is simply
-# never out of date, and doctor/check-seed-audit-current only ever fires on a
-# commit that bypassed hooks (a GitHub web edit, `--no-verify`, an agent with
-# core.hooksPath unset).
-#
-# COST. A commit that touches none of the inputs below pays one `git diff
-# --cached --name-only` and exits — single-digit milliseconds. Only a commit
-# that actually moves a prompt pays the render (~15-25s, 44 `gc` invocations).
-#
-# INSTALL. This directory is not wired up by cloning; point git at it once:
-#
-#     assets/scripts/render-seed-audit.sh --install-hook
-#
-# which sets `core.hooksPath = assets/hooks`. The path is relative, so it
-# resolves in linked worktrees too. `gc doctor` reports when it is not set.
-#
-# THE ONE SHARP EDGE. The render reads the WORKING TREE, not the index. Under a
-# partial `git add -p` of a fragment, the artifact this hook stages describes the
-# working tree rather than the commit, and the two reconcile on the next commit.
-# The hook says so out loud rather than doing it quietly; it does not stash to
-# "fix" it, because the stash stack is shared with every other worktree of this
-# repo and popping somebody else's entry is a worse failure than a transient
-# artifact.
+# Keep generated/seed-audit/ in step with the fragments it renders: a commit
+# touching a seed input regenerates the audit and stages it, so the golden
+# file is simply never out of date (doctor/check-seed-audit-current only
+# fires on a commit that bypassed hooks). A commit touching no input pays one
+# `git diff --cached --name-only`; one that does pays the render (~15-25s).
+# Install once: assets/scripts/render-seed-audit.sh --install-hook
+# (sets core.hooksPath = assets/hooks; relative, so worktrees resolve too).
+# Sharp edge: the render reads the WORKING TREE, not the index — under a
+# partial `git add -p` the staged artifact describes the working tree, said
+# out loud below rather than "fixed" with a shared-stash pop.
 
 set -uo pipefail
 
-# Inputs the rendered artifact is a function of. Kept in step with
-# digest_inputs() in assets/scripts/render-seed-audit.sh — over-inclusive on
-# both sides, since a spurious re-render costs seconds and a missed one ships a
-# stale audit.
-#
-# The renderer is on the list because it CARRIES the synthetic city the prompts
-# render against: one line of that scenario moves 13 agent prompts. Omitting it
-# let a renderer-only edit stale the artifact while the doctor check still
-# reported it current (tk-wchab, pre-open signoff P1).
+# Inputs the artifact is a function of — kept in step with digest_inputs()
+# in render-seed-audit.sh. The renderer itself is on the list: it CARRIES
+# the synthetic city the prompts render against (tk-wchab).
 INPUT_RE='^(agents/|template-fragments/|formulas/|packs/|pack\.toml$|assets/scripts/render-seed-audit\.sh$)'
 
 staged="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)"
@@ -50,11 +25,8 @@ touched="$(grep -E "$INPUT_RE" <<< "$staged")"
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 script="$root/assets/scripts/render-seed-audit.sh"
-# Absent is "this pack has no renderer" — nothing to do. NOT executable is a
-# different thing entirely, and testing -x for both let a committed `chmod -x`
-# disable the upkeep loop silently while the doctor check also reported OK
-# (pre-open signoff P1). Every invocation below therefore goes through `bash`,
-# so a mode bit cannot decide whether a seed change regenerates the artifact.
+# Absent = no renderer, nothing to do; NOT executable is different — every
+# invocation goes through bash so a mode bit cannot disable the upkeep loop.
 [ -f "$script" ] || exit 0
 if [ ! -x "$script" ]; then
     printf 'pre-commit: NOTE — %s is not executable; running it through bash.\n' \

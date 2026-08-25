@@ -217,8 +217,8 @@ If step 1 reports `main-ahead > 0`, OR step 3's push is rejected with
 work is no longer landable as-is. Do NOT attempt to retry the
 force-push. Hand the bead back THROUGH the keeper as a durable,
 un-missable handback (the keeper is the operator's contact point for
-this decision), and notify mayor as a secondary cross-rig coordination
-signal. The operator (via the gascity-keeper) decides whether to:
+this decision), and file a secondary escalation visit via `escalate.sh`.
+The operator (via the gascity-keeper) decides whether to:
 
 - Re-pour the rebase formula to redo the work atop the new
   `origin/main`, or
@@ -230,9 +230,9 @@ Route the race loss THROUGH the keeper as a durable, un-missable
 handback. The keeper's prime sweep keys on `metadata.aborted_at`, so set
 it (in addition to `rejection_reason`) and reassign the bead to the
 requesting keeper, record the context in the bead notes, then **nudge the
-keeper**. Lock that durable handback in FIRST; the mayor mail follows as a
-cross-rig coordination signal. The operator decision now surfaces durably
-through the keeper, not via best-effort mail alone.
+keeper**. Lock that durable handback in FIRST; the escalation visit follows
+as a secondary signal. The operator decision surfaces durably through the
+keeper, not via a best-effort side channel alone.
 
 ```bash
 # Prefer the keeper stamped at dispatch; fall back to the rig-scoped keeper.
@@ -263,20 +263,10 @@ EOF
 # is the real guarantee).
 gc session nudge "$KEEPER_TARGET" "rebase race loss on $WORK: origin/main advanced — operator decision needed (metadata.aborted_at=refinery-race-loss)" || true
 
-# Cross-rig coordination signal (secondary): tell mayor a race fired.
-gc mail send mayor -s "ESCALATION: rebase race loss on $WORK" -m "$(cat <<EOF
-Bead: $WORK
-Branch: $BRANCH
-Reason: origin/main advanced after the rebase polecat finished.
-
-Either the rebase needs re-pouring atop the new main tip, or what
-landed on main supersedes it. Routed back to the gascity-keeper
-(assignee=$KEEPER_TARGET, aborted_at=refinery-race-loss) for the
-operator decision.
-
-Backup ref (pre-rebase tip): $BACKUP_REF
-EOF
-)"
+# Secondary escalation signal: one open visit per situation key.
+"$PACK_DIR/assets/scripts/escalate.sh" --situation "rebase-race-loss:$WORK" \
+  --subject "$WORK" \
+  --summary "Rebase race loss on $WORK: origin/main advanced after the rebase polecat finished ($BRANCH no longer landable as-is). Routed to the keeper (assignee=$KEEPER_TARGET, aborted_at=refinery-race-loss) for the operator decision. Backup ref: $BACKUP_REF" || true
 ```
 
 ### Refinery overlay scope
@@ -284,8 +274,8 @@ EOF
 This rebase-handling overlay is opt-in per rig (only rigs that import
 the `gascity-keeper` sub-pack). A refinery in a rig that does NOT
 import the sub-pack will not carry these instructions; a rebase-shaped
-bead that ends up at such a refinery is a routing leak. Escalate to
-mayor instead of force-pushing. PR #17's "reject as routing leak"
+bead that ends up at such a refinery is a routing leak. Escalate via
+`escalate.sh` instead of force-pushing. PR #17's "reject as routing leak"
 intent survives in the unintended-target case; the legitimate path is
 the overlay above.
 {{ end }}

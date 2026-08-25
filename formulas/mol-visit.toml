@@ -52,17 +52,31 @@ gc bd dep add "$VISIT" {{subject}} --type=tracks
 # the beads that most need conversation.
 # To gate other work on this conversation, add a blocking edge:
 # gc bd dep add "$VISIT" --blocks "<blocked-bead-id>"
+# Read the group stamp back and repair it from the subject if it landed
+# empty: it can land present-but-empty while every sibling stamp in the
+# same update lands, and an empty group disables converse's group-scoped
+# re-claim fence (tk-ax6y4, tk-msfmu). Repair and warn, never exit — this
+# block files the one visit for its scope, and on a persistent miss the
+# tracks edge still carries the subject for guards that read the union
+# (tk-d6ddn).
+GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
+if [ "$GROUP_GOT" != "{{subject}}" ]; then
+  echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '{{subject}}' — repairing (tk-ax6y4)" >&2
+  gc bd update "$VISIT" --set-metadata "gc.continuation_group={{subject}}" || true
+  GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
+  if [ "$GROUP_GOT" = "{{subject}}" ]; then
+    echo "gate-visit: the repair landed on $VISIT" >&2
+  else
+    echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union (tk-d6ddn)" >&2
+  fi
+fi
 # <<< gate-visit
 ```
 
 The visit bead's body is the visit prompt; extend the `-d` body if {{visit}}
-alone under-specifies the visit. Stamp-don't-sling, one key per flag, and
-the POOL must be the rig-qualified exact-match form
-(docs/gascity-routing-model.md). Warm, the live group session vacuums the
-visit; cold, pool demand spawns one. `task_kind=visit` is the
-structural marker that makes a visit legible as engagement (to the
-board and to patrols) — note the witness's orphan recovery deliberately
-does NOT skip on it: a visit whose session died mid-hold SHOULD return to
-the pool, because respawn-and-reconstitute-from-the-record is the cold
-continuity path (specs/2026-08-fresh-start/spine-port.md, decision D4).
+alone under-specifies it. Stamp-don't-sling, one key per flag, and the POOL
+must be the rig-qualified exact-match form (docs/gascity-routing-model.md).
+Warm, the live group session vacuums the visit; cold, pool demand spawns
+one. `task_kind=visit` is the structural marker that makes a visit legible
+as engagement.
 """

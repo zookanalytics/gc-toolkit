@@ -241,7 +241,7 @@ does the force-push:
 
 If a rebase-shaped bead lands at a refinery that does NOT carry the
 gascity overlay (i.e., a refinery in a rig that doesn't import the
-`gascity-keeper` sub-pack), refinery escalates to mayor instead of
+`gascity-keeper` sub-pack), refinery escalates via `escalate.sh` instead of
 force-pushing. That preserves PR #17's defensive intent for the
 mis-routed case while keeping the legitimate path automated for the
 intended case.

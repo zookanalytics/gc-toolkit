@@ -3,42 +3,18 @@
 #
 # Usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]
 #
-# Ensures the target directory is a git worktree of the rig repo. For
-# backward compatibility, the older <repo-dir> <agent-name> <city-root>
-# signature still works and resolves the target under
-# <city-root>/.gc/worktrees/<rig>/<agent-name>.
-#
-# Called from pre_start in pack configs. Runs before the session is created
-# so the agent starts IN the worktree directory.
+# Ensures <target-dir> is a git worktree of the rig repo, on a per-target
+# branch cut from the remote default-branch tip. Called from agent pre_start
+# (agents/*/agent.toml) before the session exists, so the agent starts IN the
+# worktree. Existing worktrees are left alone; --sync fast-forwards them.
 
 set -eu
 
 RIG_ROOT="${1:?usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]}"
-ARG2="${2:?missing target-dir}"
-ARG3="${3:?missing agent-name}"
+WT="${2:?missing target-dir}"
+AGENT="${3:?missing agent-name}"
+SYNC="${4:-}"
 
-is_path_like() {
-    # Legacy mode passes the city path as arg 3. Agent names are validated
-    # elsewhere and are not expected to look like filesystem paths.
-    case "$1" in
-        */*|.*|*:*|*\\*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-if is_path_like "$ARG3"; then
-    AGENT="$ARG2"
-    CITY="$ARG3"
-    RIG=$(basename "$RIG_ROOT")
-    WT="$CITY/.gc/worktrees/$RIG/$AGENT"
-    SYNC="${4:-}"
-else
-    WT="$ARG2"
-    AGENT="$ARG3"
-    SYNC="${4:-}"
-fi
-
-# rebase_in_progress reports whether the worktree is parked mid-rebase.
 rebase_in_progress() {
     for STATE in rebase-merge rebase-apply; do
         DIR=$(git -C "$WT" rev-parse --git-path "$STATE" 2>/dev/null) || DIR=""
@@ -55,9 +31,8 @@ sync_worktree() {
         return 0
     fi
 
-    # A worktree found mid-rebase or mid-merge already carries a
-    # conflicted index from an earlier cycle. Clear it before the session
-    # starts; --abort restores the branch tip, so no commit is at risk.
+    # Clear a conflicted index left by an earlier cycle; --abort restores the
+    # branch tip, so no commit is at risk.
     if rebase_in_progress; then
         git -C "$WT" rebase --abort 2>/dev/null || true
     fi
@@ -67,28 +42,23 @@ sync_worktree() {
 
     git -C "$WT" fetch origin 2>/dev/null || true
 
-    # Sync by fast-forward, never by replaying local commits. Agent home
-    # branches accumulate commits the default branch later sheds; a
-    # `pull --rebase` replays them onto every fetched tip, conflicts once
-    # they are gone, and parks the worktree mid-rebase behind `|| true`.
+    # Fast-forward only, never replay local commits: a `pull --rebase` replays
+    # shed commits onto every fetched tip and parks the worktree mid-rebase.
     UPSTREAM=$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
     [ -n "$UPSTREAM" ] || return 0
 
-    # A branch that cannot fast-forward — diverged, or dirty enough that
-    # the merge would clobber uncommitted work — is left as it stands.
-    # That is the designed outcome here, not a failure to report.
+    # A branch that cannot fast-forward is left as it stands, by design.
     git -C "$WT" merge --ff-only "$UPSTREAM" >/dev/null 2>&1 || true
 }
 
 branch_name() {
-    # Namescape worktree branches by target path so multiple cities or rigs
-    # can share one underlying repo without colliding on global refs like
-    # gc-refinery or gc-polecat-1.
+    # Namespace by target path so multiple cities/rigs can share one repo
+    # without colliding on global refs.
     HASH=$(printf '%s' "$WT" | git -C "$RIG_ROOT" hash-object --stdin | cut -c1-12)
     printf 'gc-%s-%s' "$AGENT" "$HASH"
 }
 
-# Idempotent: skip if worktree already exists.
+# Idempotent: an existing worktree is only synced.
 if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
     sync_worktree
     exit 0
@@ -129,6 +99,8 @@ restore_stage() {
     STAGE=""
 }
 
+# A non-empty target that is not yet a worktree: stage its contents aside,
+# create the worktree, then merge them back (existing files win).
 if [ -d "$WT" ] && [ "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
     STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.XXXXXX")
     find "$WT" -mindepth 1 -maxdepth 1 -exec mv {} "$STAGE"/ \;
@@ -136,19 +108,13 @@ if [ -d "$WT" ] && [ "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
 fi
 
 rmdir "$WT" 2>/dev/null || true
-# Clear stale metadata from removed worktrees before branch/worktree lookup.
 git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1 || true
 
 BRANCH=$(branch_name)
 
-# Determine the upstream default branch ref and refresh it so the agent's
-# persistent worktree branch is always created from the remote tip, not
-# from whatever happened to be checked out locally. Without this fetch +
-# explicit start-point, the worktree branch inherits a stale local default
-# branch — across many beads, this causes the agent's local default branch
-# to drift behind origin's, and feature branches cut from it carry
-# already-merged commits that the refinery rebase rejects as spurious
-# duplicates with mismatched hashes.
+# Cut the worktree branch from the refreshed remote default-branch tip, never
+# from a stale local default branch — feature branches cut from a lagging tip
+# carry already-merged commits the refinery rebase rejects.
 DEFAULT_REF=$(git -C "$RIG_ROOT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
 if [ -n "$DEFAULT_REF" ]; then
     DEFAULT_BRANCH=${DEFAULT_REF#refs/remotes/origin/}
@@ -162,10 +128,7 @@ if git -C "$RIG_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
         exit 1
     fi
 else
-    # Build the worktree-add argv directly (not a command string) so $RIG_ROOT,
-    # $WT, and friends survive as single arguments when paths contain
-    # whitespace. Append the explicit start-point only when origin/HEAD is
-    # configured; otherwise fall back to current HEAD as before.
+    # argv, not a command string, so paths with whitespace survive.
     set -- worktree add "$WT" -b "$BRANCH"
     if [ -n "$DEFAULT_REF" ]; then
         set -- "$@" "$DEFAULT_REF"
@@ -191,12 +154,10 @@ trap - EXIT HUP INT TERM
 mkdir -p "$WT/.beads"
 echo "$RIG_ROOT/.beads" > "$WT/.beads/redirect"
 
-# Submodule init (best-effort).
 git -C "$WT" submodule init 2>/dev/null || true
 
-# Keep runtime ignores local to git metadata instead of mutating the tracked
-# repository .gitignore. --git-path resolves the exclude file Git actually
-# consults for this worktree, including linked-worktree layouts.
+# Runtime ignores live in git metadata (--git-path resolves the exclude file
+# for linked-worktree layouts), never in the tracked .gitignore.
 EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude)
 case "$EXCLUDE" in
     /*) ;;
@@ -233,7 +194,6 @@ append_exclude ".github/hooks/"
 append_exclude ".github/copilot-instructions.md"
 append_exclude "state.json"
 
-# Optional sync.
 sync_worktree
 
 exit 0

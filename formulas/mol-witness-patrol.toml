@@ -1,353 +1,70 @@
 description = """
-Witness patrol loop. Poured as a root-only wisp on startup:
+Witness patrol loop — rig work-health RECOVERY only. Poured as a root-only
+wisp on startup (the agent prompt's startup reconcile adopts before it
+pours):
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var escalation_cooldown='{{escalation_cooldown}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
-Pass EVERY declared var on that pour, not just binding_prefix. `--root-only`
-materializes no defaults, so a var the pour omits reaches the wisp
-unrendered and the cycle runs on whatever fallback its consumer happens to
-have. The startup and crash-recovery pours live in the witness agent
-template (`template-fragments/layered-startup-discovery.template.md`,
-markers `patrol-wisp-vars` / `patrol-wisp-fallback`), which reads the
-defaults back out of this file via `gc formula show --json` rather than
-retyping them; `next-iteration` forwards them for every cycle after the
-first.
+Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
+pour the next iteration. Steps are not materialized; read each description
+as you reach it. Never exit the wisp from an intermediate step — continue,
+or jump to next-iteration to pour and burn.
 
-Those are TWO writes, and the gap between them is load-bearing: a wisp
-poured but not assigned belongs to nobody, so it never reaches a hook and
-no assignee-scoped query can ever find it again. Guard the assign wherever
-you pour (see `next-iteration`), and reconcile by TITLE rather than by
-assignee so an orphan from an interrupted pour is still collectable
-(tk-fj56a).
+Scope: the witness recovers work whose owner died, files ONE warrant bead
+for the dog pool when an owner is alive but wedged, and watches the
+refinery queue. It does NOT manage processes (controller), write code
+(polecats), merge (refinery/cadence), kill sessions directly (the dog pool
+executes warrants), or run the batch unnamed-wait triage (the
+liveness-sweep exec order owns that surface). Escalations go through
+assets/scripts/escalate.sh — one open visit per situation key.
 
-A `--root-only` pour materializes no formula defaults, so this bootstrap is
-where any NON-DEFAULT var (`event_timeout`, `escalation_cooldown`) has to be
-set — add it as another `--var` here. From then on `next-iteration` forwards
-every declared var to the wisp it pours, which is what keeps the setting
-alive past the first cycle.
-
-Each wisp is ONE iteration: check for work, patrol, pour the next
-iteration. On crash, re-read the formula steps and determine where
-you left off from context (bead state, mail state, last action).
-
-Formula steps are NOT materialized as child beads. Work through them in
-order, reading each step's description as you reach it — one step at a
-time, not the whole formula up front.
-
-The loop mechanism: EVERY step is one leg of the same wisp. Never exit
-the wisp from an intermediate step — either continue to the next step
-or jump directly to `next-iteration` to pour and burn. Exiting without
-burning leaks wisps (see #1884). The prompt only bootstraps the first
-wisp.
-
-## Witness Role
-
-The witness is the rig's work-health monitor. It does NOT manage processes
-(the controller handles start/stop/restart/zombie detection). The witness
-monitors the WORK layer:
-
-1. **Orphaned bead recovery** — beads assigned to agents that won't spawn
-   (pool max changed, agent removed from config). This is the core job.
-2. **Refinery queue health** — work beads assigned to refinery, staleness.
-3. **Polecat health** — detect stuck polecats, file warrants for dog pool.
-4. **Help mail** — triage HELP/escalation requests from polecats.
-5. **Completed-workflow quiesce** — retire the dead step beads of finished
-   mol-polecat-work molecules so the pool stops re-offering them (tk-p9ji9).
-
-Gate checks and convoy/swarm completion are town-wide concerns handled by
-the deacon, not the per-rig witness.
-
-## Canonical Work Chain
-
-```
-worktree → (push) → branch → (merge) → target branch
-```
-
-Each transition moves the canonical location of the work. Once moved,
-the previous location is disposable:
-- After push: worktree disposable (branch is canonical)
-- After merge: branch disposable (target is canonical)
-
-The witness's core recovery job: when a bead is orphaned (agent won't
-come back), ensure the work reaches the branch (push), then clean up
-the worktree. This makes the work schedulable again.
-
-## What the witness does NOT do
-
-- Zombie detection (controller reconcile loop handles this)
-- Process start/stop (controller handles this)
-- Code implementation (polecats do this)
-- Gate checks (deacon handles town-wide)
-- Convoy/swarm completion (deacon handles cross-rig)
-- Kill stuck agents directly (files warrant, dog pool runs shutdown dance)
-
-## Escalation discipline — read this before ANY `gc mail send`
-
-This applies to every step, not just the one that documents an escalation
-command.
-
-You re-derive your triggers from live state each cycle, so a condition
-that was true last cycle is usually still true now. Mailing on each is
-how ONE stuck PR produced FIVE witness escalations in 2h53m (2026-07-27,
-PR #35 / anchor su-lou.10.8; the su refinery added two more). The cost is
-not the volume: repeated escalations train the recipient to ignore
-escalation mail, which is the one signal that is supposed to be rare, and
-each `gc mail send` is a permanent bead plus a Dolt commit for as long as
-the item stays stuck.
-
-**Any escalation that is ABOUT A BEAD goes through the gate instead of
-straight to `gc mail send`:**
-
-```bash
-# >>> escalation-wiring-discipline
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-BODY="Observation: <what you found>
-Recommendation: <what should happen>"
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --state "<what is HOLDING it>" --cooldown "{{escalation_cooldown}}" --subject "<subject>" --body "$BODY"; then
-    echo "witness: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
-  fi
-else
-  gc mail send mayor/ -s "<subject>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
-fi
-# <<< escalation-wiring-discipline
-```
-
-It mails the first time, then stays quiet until `--state` changes or the
-cooldown elapses. It suppresses REPETITION, never news — with one class it
-declines outright rather than deduping: a PR that is mergeable, green on
-every check that gates its merge, and merely unapproved is a resting state, and the correct number of escalations
-about it is zero, not one (tk-qe2tv). That only applies where the block
-names the PR through `--pr`, which the queue-health step does and no
-one-shot notice does. A rig that has not synced the script falls back to
-mailing directly — the old behavior, not a dropped escalation.
-
-Keep the resolution loop in the SAME shell as the send. Each tool call is
-a fresh shell, so a `SCRIPTS_DIR` you resolved earlier is gone, and an
-empty one expands to `/escalation-gate.sh` — which fails and sends
-nothing. Only the gc-toolkit rig has its own `assets/scripts`; the other
-three resolve through the `GC_CITY_PATH` candidate.
-
-A non-zero exit from the gate is NOT fatal and NOT a licence to mail
-anyway. A NON-ZERO exit means one thing only — it could not bound the
-escalation (unreadable anchor, unwritable stamp) — and mailing past that
-is the unbounded storm. Log it, keep patrolling, let the next cycle
-retry. That is why the call above is wrapped in `if ! ...; then echo`
-rather than run bare: this is a best-effort pass and must reach its
-later checks.
-
-**"Next cycle retries" is only true while the TRIGGER survives the pass.**
-The gate is re-invoked next cycle because the patrol re-derives the same
-condition — a stuck PR is still stuck, a queue is still backed up. That
-holds for every RE-DERIVED escalation (`QUEUE_HEALTH`, the example above).
-It does NOT hold for a ONE-SHOT recovery notice, where the same pass then
-performs the state transition that clears the condition: close the orphan,
-or return it to the pool, and nothing re-detects it, so a refused send is
-lost for good rather than retried. When you write a new gated block, ask
-which kind it is:
-
-- **The transition is yours to withhold** — do that. `ORPHAN_CLOSED` gates
-  its `gc bd close` on the notice getting out, so a refusal leaves the
-  bead open and the next cycle genuinely retries both.
-- **The transition must happen regardless** (recovery is load-bearing and
-  the mail is advisory) — then say BEST-EFFORT, and do not print a retry
-  promise the code cannot keep. `SALVAGE_REFUSED` and `ORPHAN_RECOVERED`
-  are this kind: blocking a husk's recovery on a mail failure would strand
-  real work to protect a message.
-
-A refusal message that promises a retry which cannot happen is worse than
-one that admits the loss — it reads as handled in the patrol log.
-
-Things that are easy to get wrong:
-
-- **Do not reword your way past it.** Those five PR #35 mails had five
-  different subjects — "stranded on human approval", "Codex-green but
-  stranded", "fully gate-green", "approval-gated ~88h", "stranded 3d".
-  One situation, five framings, because you compose the subject fresh
-  each cycle from whatever you just observed. The gate keys on the ANCHOR
-  and the channel, never on the message, exactly so rephrasing cannot
-  reopen the storm. Reaching for `gc mail send` directly because "this
-  framing is new" IS the bug.
-- **Put the real hold inputs in `--state`.** Head oid, `reviewDecision`,
-  `mergeStateStatus` — whatever would make you say "this is genuinely
-  different now". That fingerprint is what lets real news through
-  immediately, so a lazy `--state` is what turns the gate into a mute.
-- **Sanitize any `gc bd show --json` you build `--state` from:**
-  `gc bd show <bead> --json 2>/dev/null | tr -d '[:cntrl:]'`. jq rejects
-  every unescaped control character — including a plain tab, which prose
-  notes do contain — and a failed parse leaves `--state` EMPTY, which the
-  gate reads as "no state tracked" and suppresses real news for a whole
-  cooldown. A lost parse must not look like a lost fingerprint.
-- **Never pass an EMPTY `--state` when you meant to track state, and never
-  substitute a differently-shaped one on the same `--kind`.** Both are the
-  same mistake at different depths. Empty is a real fingerprint meaning
-  "no state tracked", so it gets stamped durably and the cooldown alone
-  governs from then on. A substitute (the bead's fields standing in for a
-  PR's, because `gh pr view` failed) compares unequal in BOTH directions,
-  so the item mails when the outage starts and again when it ends — a flap
-  through the cooldown, driven by an outage rather than by news. When the
-  fingerprint you meant to build is unavailable, send that observation on
-  its own channel — `--kind witness-degraded`, with a value naming what is
-  unavailable and nothing that varies while it is — and leave the real
-  channel's stamp alone. Step `check-refinery` does this; copy that shape.
-- **Never put a timestamp in `--state` — least of all the anchor's own
-  `updated_at`.** The gate stamps `escalated.<kind>` ON THE ANCHOR before
-  it mails, and that write bumps the anchor's `updated_at`. A fingerprint
-  containing it therefore differs on the very next cycle *because the gate
-  ran*, so an unchanged item re-mails forever: the storm, now with a
-  dedup step in front of it. Fingerprint only inputs the gate does not
-  itself write — `status`, `merge_result`, `branch`, the landing target
-  (`merged_target // target`, the pre-open order), the `check.<gate>`
-  markers, the PR's own fields.
-
-`--cooldown "{{escalation_cooldown}}"` is passed on every gated call, and
-`next-iteration` forwards the var to the wisp it pours — both halves are
-needed for a configured value to be honored end to end. The call alone
-only honors it for one cycle: a `--root-only` pour materializes no
-defaults, so a value the pour drops arrives unrendered at the next wisp
-and every later cycle silently runs the script's own 24h default instead.
-Where the var was never set at all it still arrives unrendered, and the
-script recognizes that shape and falls back to that default rather than
-failing the send.
-
-`--force` is for a situation that truly worsened in a way the fingerprint
-does not capture. Using it every cycle is the storm again.
-
-Suppressed escalations still print a verdict line — the item is still
-stuck, and your log still says so.
-
-**The rule is enforced, not merely documented.**
-`witness-escalation-wiring.test.sh` scans this file for every
-`gc mail send` and fails on any that is neither inside a gated
-`escalation-wiring-*` block nor on this exception list. Exactly two are
-exempt, both because there is no bead to key a stamp on:
-
-- the `check-inbox` forward of a polecat HELP mail — it is about an
-  AGENT, not a bead, and the message that triggers it is archived once
-  handled, so it cannot re-fire every cycle the way a live condition
-  does;
-- the `recover-orphaned-beads` empty-liveness-map fail-safe — rig-global,
-  no anchor exists at all.
-
-Every other escalation in this formula (`SALVAGE_REFUSED`,
-`ORPHAN_CLOSED`, `ORPHAN_RECOVERED`, `QUEUE_HEALTH`) is bead-scoped and
-gated. Adding a third bare bead-scoped mail fails that test — gate it
-instead, or the storm comes back through the new one.
-
-Regression test: `assets/scripts/escalation-gate.test.sh` (hermetic; stubs
-`gc`, covers the five-subject drift case, state-change and cooldown
-re-opening, stamp-before-mail, and the refuse-to-send-when-unbounded rule).
-
-The WIRING above is covered too, by
-`assets/scripts/witness-escalation-wiring.test.sh`: it runs the block
-between the `escalation-wiring-*` markers verbatim against stubs, so
-dropping `--anchor`/`--state`, hoisting the `SCRIPTS_DIR` resolution out
-of the sending shell, or swapping the gated call back to a bare
-`gc mail send` fails a test rather than quietly reopening the storm.
-Keep the markers when editing these blocks.
-
-Read a step's description immediately before acting on that step — not
-all of them at once. Config values override defaults."""
+Marked blocks (host-bead-skip, liveness-lookup, husk-guard, patrol-wisp-pour)
+are extracted and executed by their tests; keep markers, keep them
+backslash-free."""
 formula = "mol-witness-patrol"
-version = 18
 
 [vars]
 [vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, including trailing dot when bound."
+description = "Agent identity prefix, including trailing dot when bound."
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep (the harness blocks that, which drops all pacing). This value sets patrol frequency, which is the dominant cost term once a cycle is cheap — raise it rather than trimming steps if patrol cost needs to come down. Raised 180 -> 600 (tk-2qa85): the four witnesses were 56.9% of all city model calls over 24h (19,905 of 34,983), and sampled cycles ran ~285-521 s of which only the 180 s wait was compressible, so frequency was the only term that could move without dropping a check. 600 is a CEILING, not a preference: the wait is one bounded tool call and the harness caps a single call at 600 s (a longer one is SIGTERMed mid-wait and silently returns less pacing than configured), so a larger value here would not be honoured without also making the wait resumable across calls. This value reaches the loop ONLY through the startup pour, which reads it from this default via `gc formula show` and forwards it as an explicit --var; city.toml [rigs].formula_vars cannot override it, because mergeRigFormulaVars preserves an explicit --var."
+description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it."
 default = "600"
-
-[vars.escalation_cooldown]
-description = "Seconds before an UNCHANGED situation may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h: at the 600s patrol interval that is a 144x reduction on a stuck item, while still resurfacing it daily so it cannot fall silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
-default = "86400"
 
 [[steps]]
 id = "check-inbox"
 title = "Check mail"
 description = """
-**Check mail:**
 ```bash
 gc mail inbox
 ```
-
-Handle each message type:
-
-**HELP / Blocked:**
-Classify by keyword, then act based on severity:
-
-| Category | Keywords | Severity | Action |
-|----------|----------|----------|--------|
-| Emergency | crash, data loss, corruption, security | Critical | Mail mayor immediately [HIGH] |
-| Failed | failed, error, cannot, broken, exception | High | Investigate; mail mayor if unresolvable |
-| Blocked | blocked, waiting, depends on, need access | Medium | Try to unblock (point to docs, suggest approach); escalate if you can't |
-| Decision | should I, which approach, trade-off, design | Low | Answer if you can; escalate only if architectural |
-| Lifecycle | done, finished, idle, restarting | Info | Acknowledge; no escalation needed |
-| General help | help, stuck, confused, how do I | Low | Point to docs/suggest approach; escalate only if truly stuck |
-
-For escalations:
-```bash
-gc mail send mayor/ -s "ESCALATION: <polecat> needs help [HIGH|MED|LOW]" -m "<category>: <details>"
-```
-Do NOT escalate routine blocks or lifecycle messages — handle them yourself.
-Archive after handling.
-
-**HANDOFF:**
-Read predecessor context. Continue from where they left off.
-Archive after absorbing context.
-
-**Other / informational:**
-Archive after reading.
-
-**Hygiene principle**: Archive messages after they're fully processed.
-Inbox should be near-empty after this step.
-
-Close this step and continue to `recover-orphaned-beads` — do NOT exit
-the wisp here. The `next-iteration` step is the only place that pours
-the next wisp and burns this one."""
+Triage HELP/blocked mail from polecats: unblock what you can (point at
+docs, suggest an approach); a blocker that needs a human becomes a visit
+via escalate.sh (`--subject <the polecat's bead> --key polecat-help`).
+Emergencies (crash, data loss, corruption, security) escalate immediately.
+A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
+filed — note the outcome (the closed warrant carries the evidence) and
+archive. Lifecycle chatter is acknowledged and archived. Inbox near-empty
+after this step. Close it and continue."""
 
 [[steps]]
 id = "recover-orphaned-beads"
 title = "Recover orphaned work beads"
 needs = ["check-inbox"]
 description = """
-**This is the witness's core job.**
+**The witness's core job.** Find beads assigned to agents that will never
+process them, salvage unpublished worktree work, and return the beads to
+the pool. Canonical chain: worktree -> (push) -> branch -> (merge) ->
+target; recovery ensures work reaches the branch, then the bead is
+schedulable again.
 
-Find beads assigned to agents that will never process them, salvage any
-unpublished work from the worktree, and return beads to the pool.
-
-This happens when:
-- Pool max was reduced (agents that won't spawn anymore)
-- An agent was removed from config
-- An agent crashed and the controller decided not to restart it (quarantine)
-
-**Step 1: Find orphaned beads via session-ID liveness.**
-
-List beads assigned to agents in YOUR rig:
+**1. Candidates.** List this rig's beads and keep only ASSIGNED ones:
 ```bash
 gc bd list --status=in_progress --json --limit=0
 gc bd list --status=open --json --limit=0
 ```
-
-Filter for beads with an assignee (skip unassigned beads). This pass does not
-solve the controller race where orphaned work may already have been released to
-open/unassigned before witness observes it; that requires a separate
-worktree-salvage scan keyed by `metadata.work_dir`. Bound Gastown polecat
-assignees use the shape `<rig>/{{binding_prefix}}<polecat-suffix>`.
-
-Assigned-but-dead beads are exactly the witness's recovery domain — there is
-no class of assigned bead that orphan recovery must skip. Visits and their
-converse sessions need no carve-out either: a visit whose session died
-mid-hold SHOULD return to the pool, because respawn-and-reconstitute-from-the-
-record is the cold continuity path (specs/2026-08-fresh-start/spine-port.md,
-decision D4). The markers let the regression test extract and exercise this
-exact filter (assets/scripts/host-bead-skip.test.sh):
 ```bash
 # >>> host-bead-skip
 # Keep only beads that are ASSIGNED. Reads the bead-list array on stdin,
@@ -356,216 +73,87 @@ exact filter (assets/scripts/host-bead-skip.test.sh):
 jq -c '[ .[] | select((.assignee // "") != "") ]'
 # <<< host-bead-skip
 ```
+There is no assigned-bead class orphan recovery must skip on kind alone: a
+visit whose session died SHOULD return to the pool (cold continuity is
+respawn-and-reconstitute). Two exclusions are structural, not kind-based:
+- **Infrastructure identities** (refinery, witness, deacon, mechanik,
+  configured named sessions) — the controller owns their lifecycle.
+- **Dispatcher-routed control beads** (`gc.routed_to=control-dispatcher`,
+  `gc.kind=workflow-finalize`/`ralph`) — infrastructure, not orphans; the
+  serve loop picks them up.
 
-Get the full session roster for liveness checks:
+**2. Liveness — session-ID liveness, never template matching.** Pool
+instances get NEW ids on restart, so pattern-matching an assignee against a
+template false-negatives forever. Build the assignee->state map ONCE per
+cycle from `gc session list --state=all --json` (an OBJECT — iterate
+`.sessions[]`; fields are lowercase snake_case) plus the session beads
+(`gc bd list --type=session --label=gc:session --include-infra --all
+--json --limit=0`), keyed on id / name / session_name / alias / agent_name
+/ configured_named_identity. Stream both blobs through temp files, never
+--argjson (ARG_MAX).
+
+**Fail safe — never orphan on an empty map.** An empty map while sessions
+exist is schema drift; acting on it false-orphans live agents. Skip orphan
+recovery this cycle and escalate
+(`escalate.sh --subject <this wisp> --key witness-empty-liveness-map ...`),
+then continue to check-refinery.
+
+Resolve each bead's assignee exact-first, with exactly ONE narrow fallback
+— the last `/`-segment, resolved toward LIFE (a collision with any
+non-closed session reads as alive; the retry can un-orphan, never
+manufacture an orphan):
 ```bash
-gc session list --state=all --json
-gc bd list --type=session --label=gc:session --include-infra --include-gates --all --json --limit=0
-```
-
-For each bead with an assignee, check **session-ID liveness** — NOT
-template pattern matching. Pool instances get new IDs on restart, so
-matching against a template pattern (e.g., `worker-3` matches template
-`worker`) gives false negatives: the old session ID is dead but the
-witness skips it thinking "the pool will restart it." The pool creates
-a NEW session with a different ID — the old one never comes back.
-
-**Liveness check procedure:**
-
-1. Build the assignee→state liveness map ONCE per cycle (before the
-   per-bead loop), then resolve each bead's assignee against it. Resolve by
-   exact identifier lookup FIRST, with exactly ONE narrow fallback: when the
-   exact lookup misses, retry on the identity's last `/`-separated segment
-   (the lookup snippet below implements it). Do not go further — no regex
-   session-ID extraction, no fixed prefix list: rig prefixes are
-   configuration-derived, and assignees may be a session bead ID, session
-   name, alias, concrete agent name, or configured named identity.
-
-   Two schema facts this recipe depends on (verified live, gc-3tn8g):
-   - `gc session list --json` returns an OBJECT `{sessions:[...], ...}`, not
-     a top-level array — iterate `.sessions[]`, never the top level (the
-     top-level values include booleans, so `$x.id` on them errors).
-   - Session fields are lowercase snake_case: `id / name / session_name /
-     alias / agent_name / state / closed`. Key the map on `id`, `name`,
-     `session_name`, `alias`, and `agent_name` — the exact identifier forms
-     an assignee may take.
-
-   Stream both JSON blobs through temp files, never `--argjson` on argv: on a
-   busy city the session `command` fields are large and overflow ARG_MAX
-   (`argument list too long: jq`). Build the map once:
-   ```bash
-   SESSIONS_FILE=$(mktemp); SESSION_BEADS_FILE=$(mktemp)
-   gc session list --state=all --json > "$SESSIONS_FILE"
-   gc bd list --type=session --label=gc:session --include-infra --include-gates --all --json --limit=0 > "$SESSION_BEADS_FILE"
-
-   LIVENESS_MAP=$(jq -n --slurpfile sessions "$SESSIONS_FILE" --slurpfile session_beads "$SESSION_BEADS_FILE" '
-     def add($m; $key; $state; $closed):
-       if (($key // "") | length) == 0 then $m
-       else $m + {($key): (if $closed then "closed" else ($state // "") end)}
-       end;
-     (reduce ($sessions[0].sessions // [])[] as $s ({};
-         add(.; $s.id;         $s.state; ($s.closed // false))
-       | add(.; $s.name;       $s.state; ($s.closed // false))
-       | add(.; $s.session_name; $s.state; ($s.closed // false))
-       | add(.; $s.alias;      $s.state; ($s.closed // false))
-       | add(.; $s.agent_name; $s.state; ($s.closed // false))
-     )) as $from_sessions
-     | reduce ($session_beads[0] // [])[] as $b ($from_sessions;
-         add(.; $b.metadata.configured_named_identity; $b.metadata.state; ($b.status == "closed")))')
-
-   SESSION_COUNT=$(jq -r '(.sessions // []) | length' "$SESSIONS_FILE")
-   MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq -r 'length')
-   rm -f "$SESSIONS_FILE" "$SESSION_BEADS_FILE"
-   ```
-
-   **Fail safe — never orphan on an empty map.** If the map is empty while
-   sessions exist, the schema has drifted again (the exact failure in
-   gc-3tn8g). An empty map resolves every assignee to `absent` and would
-   false-orphan live agents. ABORT recovery this cycle — do NOT classify any
-   bead as orphaned — escalate, then continue to `check-refinery`:
-   ```bash
-   if [ "${MAP_COUNT:-0}" -eq 0 ] && [ "${SESSION_COUNT:-0}" -gt 0 ]; then
-     echo "FAIL-SAFE: empty liveness map with $SESSION_COUNT live sessions — skipping orphan recovery (treat all assignees as live)."
-     gc mail send mayor/ -s "WITNESS: orphan-recovery disabled — empty liveness map" -m "Built an empty assignee->state map from $SESSION_COUNT live sessions. gc session list --json schema likely drifted again (gc-3tn8g); skipping orphan recovery this cycle to avoid false-orphaning live agents. Re-check the recover-orphaned-beads liveness recipe."
-     # Skip the rest of this step; proceed to check-refinery.
-   fi
-   ```
-
-   Resolve each bead's assignee against the prebuilt map. An exact-match-only
-   lookup false-orphans live sessions, because a bead's assignee and its
-   session's registered identity routinely disagree in nothing but the
-   `<rig>/` prefix — and both shapes occur live (tk-opfsi):
-
-       bead assignee  gascity/gc-toolkit.gc-z0vi2  vs  alias  gc-toolkit.gc-z0vi2
-       bead assignee  gc-toolkit.furiosa           vs  alias  gc-toolkit/gc-toolkit.furiosa
-
-   So compare on the last path segment when — and only when — the exact
-   lookup misses. The markers let the regression test extract and exercise
-   this exact snippet (assets/scripts/liveness-lookup.test.sh).
-   ```bash
-   # >>> liveness-lookup
-   # Exact lookup first: authoritative whenever the assignee is a literal map key.
-   STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '.[$a] // "absent"')
-   # Identity-normalizing fallback. Stripping the prefix can make two sessions in
-   # different cities collide on one bare identity (gc-toolkit/gc-toolkit.furiosa
-   # and gascity/gc-toolkit.furiosa both bare to gc-toolkit.furiosa), so resolve a
-   # collision toward LIFE: any matching session that is not closed/archived wins.
-   # Only when EVERY candidate owner is dead does the fallback report a dead state.
-   # The retry can therefore turn `absent` into a live state, but can never
-   # manufacture an orphan — the fail-safe direction.
-   if [ "$STATE" = "absent" ]; then
-     STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '
-       def bare: sub("^.*/"; "");
-       [ to_entries[] | select((.key | bare) == ($a | bare)) | .value ] as $matches
-       | if ($matches | length) == 0 then "absent"
-         else ([ $matches[] | select(. != "closed" and . != "archived") ] | first) // $matches[0]
-         end')
-   fi
-   # <<< liveness-lookup
-   ```
-
-2. An `absent` lookup (assignee not in the map) is orphaned only for
-   pool/ephemeral work identities. If the assignee is a refinery, witness, or
-   other configured infrastructure identity, skip it instead of recovering it.
-
-3. Classify:
-   - `active` or `awake` → **not orphaned** (may be stuck —
-     `check-polecat-health` handles that separately)
-   - `creating`, `asleep`, `drained`, `suspended`, `draining`, or
-     `quarantined` → **not orphaned** (controller or operator state still owns
-     the session)
-   - `archived`, `closed`, or `absent` after BOTH the exact lookup and the
-     normalizing retry → **orphaned bead** for pool/ephemeral work — the owning
-     session is gone and will never come back, regardless of whether the pool
-     template still exists. Never classify on the exact lookup alone: a
-     rig-qualified assignee whose session registered the bare alias resolves
-     `absent` there while its owner is active (tk-opfsi).
-
-**Important**: Beads assigned to the refinery, witness, or other
-infrastructure agents (not pool instances) should be skipped — those
-agents have persistent identity and the controller manages their
-lifecycle directly.
-
-**Step 2: For each orphaned bead, salvage work from the worktree.**
-
-The canonical work chain: `worktree → (push) → branch → (merge) → target`.
-Our job is to ensure work reaches the branch so it's schedulable.
-
-Read the bead metadata to find the worktree and branch — and, when the
-orphaned bead is a workflow STEP that records neither, resolve them from its
-anchor before deciding anything:
-```bash
-META=$(gc bd show <bead> --json | jq '.[0].metadata')
-# gc-toolkit local delta: polecat formula records the per-bead worktree in
-# metadata.work_dir (not metadata.worktree). Base v10 reads .worktree, which
-# is empty for every gc-toolkit polecat handoff; we read .work_dir to match
-# what mol-polecat-work.workspace-setup actually writes.
-WORKTREE=$(echo "$META" | jq -r '.work_dir // empty')
-BRANCH=$(echo "$META" | jq -r '.branch // empty')
-
-# >>> salvage-anchor-resolve
-# BOTH KEYS ARE EMPTY for the shape this step orphans most often (tk-19213). A
-# graph.v2 STEP bead carries `gc.step_ref`, `gc.root_bead_id` and a session name
-# — never a branch or a worktree. Those live on the ANCHOR (the work item), one
-# hop away through the root's input convoy. So the reads above returned nothing,
-# Cases A through D were all skipped, and every orphaned step landed in Case E,
-# "nothing salvageable", however much finished work was sitting on origin.
-#
-# With no branch name in hand the pass improvised, searching remote refs for the
-# only ids it had: the workflow, the convoy, the session. No branch is named
-# after any of those — a polecat branch is `polecat/<work-item-id>` — so the
-# search could not match the branch it existed to find. Step tk-bs8mv was closed
-# "no branch/worktree work to salvage (verified via git branch -r search for
-# s68nh/c2h7d/mnd3, none found)" while `polecat/tk-lv6q5` held the whole
-# implementation, codex-green; it later merged as PR #333. Nothing was lost, and
-# nothing about the check is why.
-#
-# resolve-salvage-branch.sh walks root -> gc.input_convoy_id -> the convoy's
-# single tracked member, then asks origin about that work item's recorded
-# `metadata.branch` and `polecat/<work-item-id>` BY NAME. The old id searches are
-# kept as additional keys and reported as `candidate_refs` — a weak signal, never
-# the verdict. It is read-only.
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/resolve-salvage-branch.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# SALVAGE_BLIND=1 means the search never ran to a conclusion. Case E is gated on
-# it below: "nothing to salvage" is a claim about a search that completed, and
-# the whole failure being fixed here is a pass that made that claim without one.
-SALVAGE_BLIND=0
-SALVAGE_RC=0
-ANCHOR=""
-if [ -z "$SCRIPTS_DIR" ]; then
-  SALVAGE_BLIND=1
-  echo "witness: resolve-salvage-branch.sh not found on any candidate path; cannot resolve an anchor for <bead>." >&2
-else
-  SALVAGE_OUT=$(mktemp)
-  "$SCRIPTS_DIR/resolve-salvage-branch.sh" --bead "<bead>" > "$SALVAGE_OUT"
-  SALVAGE_RC=$?
-  ANCHOR=$(sed -n 's/^anchor=//p' "$SALVAGE_OUT")
-  # The bead's own metadata still wins where it has any: a rejection-resume or a
-  # caller-supplied branch is recorded deliberately. The resolver only fills what
-  # the orphaned bead could not answer for itself.
-  [ -n "$BRANCH" ]   || BRANCH=$(sed -n 's/^branch=//p' "$SALVAGE_OUT")
-  [ -n "$WORKTREE" ] || WORKTREE=$(sed -n 's/^work_dir=//p' "$SALVAGE_OUT")
-  if [ "$SALVAGE_RC" -ne 0 ]; then
-    SALVAGE_BLIND=1
-    echo "witness: resolve-salvage-branch exited $SALVAGE_RC for <bead> (see its stderr); the branch search did not complete." >&2
-  fi
-  rm -f "$SALVAGE_OUT"
+# >>> liveness-lookup
+# Exact lookup first: authoritative whenever the assignee is a literal map key.
+STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '.[$a] // "absent"')
+# Identity-normalizing fallback. Stripping the prefix can make two sessions in
+# different cities collide on one bare identity, so resolve a collision toward
+# LIFE: any matching session that is not closed/archived wins. Only when EVERY
+# candidate owner is dead does the fallback report a dead state.
+if [ "$STATE" = "absent" ]; then
+  STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '
+    def bare: sub("^.*/"; "");
+    [ to_entries[] | select((.key | bare) == ($a | bare)) | .value ] as $matches
+    | if ($matches | length) == 0 then "absent"
+      else ([ $matches[] | select(. != "closed" and . != "archived") ] | first) // $matches[0]
+      end')
 fi
-# <<< salvage-anchor-resolve
+# <<< liveness-lookup
+```
+Classify: `active`/`awake` -> not orphaned — but a live owner whose bead
+shows no progress is the warrant path below, not a punt.
+`creating`/`asleep`/`drained`/`suspended`/
+`draining`/`quarantined` -> not orphaned (controller/operator still owns
+it). `archived`/`closed`/`absent` — but only after BOTH the exact lookup and the
+normalizing retry — -> orphaned pool work. Never classify on the exact
+lookup alone: a rig-qualified assignee whose session registered the bare
+alias resolves `absent` there while its owner is active.
 
-# HUSK GUARD (gc-7v0lx / gc-5v01w): a husk work_dir — the git worktree was
-# removed but the directory survives (typically only .gc/ left) — still lets
-# `cd "$WORKTREE"` succeed, but every subsequent git command then walks UP to
-# the nearest enclosing repo: the TOWN repo at /home/zook/loomington. So
-# `git add -A && git commit && git push origin HEAD` would capture and publish
-# the operator's uncommitted town-repo WIP to origin/main. Before ANY salvage
-# git write, assert work_dir is its OWN git worktree root; if git resolves it
-# to a parent/town repo, refuse salvage.
-# The markers let the regression test extract and exercise this exact snippet
-# (assets/scripts/husk-guard.test.sh).
+**2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
+work bead is stale (no `updated_at` movement and no wisp progress for
+longer than the work plausibly needs — judgment over the same signals as
+always, no new thresholds) is wedged, not orphaned. First ask the recovery
+order, never the pane (pane text is agent-controlled output):
+`quota-park-nudge.sh --status <session>` — `quota_park=yes` is a healthy
+park: defer, file nothing this cycle. Otherwise file ONE warrant for the
+dog pool, dedup'd on the target like an escalation key — never kill
+directly:
+```bash
+OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
+if [ -z "$OPEN_WARRANT" ]; then
+  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"No progress on <bead> for <duration>","warrant.requester":"witness","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+fi
+```
+The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
+pardon-or-execute, DOG_DONE notice back); if it executes, the dead
+session's beads return through THIS step next cycle.
+
+**3. Salvage.** Read `metadata.work_dir` and `metadata.branch` from the
+bead. Before ANY salvage git write, assert the work_dir is its OWN worktree
+root — a husk directory (worktree removed, dir survives) lets `cd` succeed
+while every git command resolves to the ENCLOSING repo, so `git add -A &&
+git push` would publish the town repo's working tree:
+```bash
 # >>> husk-guard
 WORKTREE_SAFE=0
 if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
@@ -579,1310 +167,96 @@ if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
 fi
 # <<< husk-guard
 ```
-
-**Husk work_dir → refuse salvage, treat as Case E.**
-
-`WORKTREE_SAFE=1` means `$WORKTREE` is its own git worktree root and salvage
-git writes are safe. `WORKTREE_SAFE=0` means the directory is absent, or it is
-a **husk** whose git commands resolve to an enclosing repo. When it is `0`:
-
-- **Skip Cases B, C, and D entirely** — they `cd "$WORKTREE"` and run
-  `git add -A` / `git commit` / `git push`, which from a husk would commit and
-  publish the town repo's working tree. There is nothing salvageable in a husk;
-  the worktree git data is already gone.
-- Handle the bead as **Case E** (nothing to salvage): escalate, then fall
-  through to Step 3 for cleanup / return-to-pool. Step 3's own `git` calls run
-  from the rig root, not `$WORKTREE`, so they stay safe.
-
-Case A is unaffected: it queries `origin` from the rig root and never touches
-`$WORKTREE`. Case B's `git ls-remote` must still be gated, because from a husk
-it would resolve `origin` from the **town** repo and answer for the wrong
-remote — reporting the branch missing and falling through to Case C's writes.
-
-Escalate the refusal (work_dir was recorded but is unusable — worth a
-look). This is ABOUT A BEAD, so it goes through the gate like every other
-bead-scoped escalation — see "Escalation discipline" above.
-
-**This notice is BEST-EFFORT, unlike ORPHAN_CLOSED's.** Recovery continues
-to Step 3 either way, and Step 3 returns the bead to the pool — which
-clears the orphan condition that produced this pass. There is therefore no
-next cycle to retry a refused send on. That is the right trade here and
-not an oversight: recovery is load-bearing and the notice is advisory, so
-blocking a husk's recovery on a mail failure would strand real work to
-protect a message. Say so rather than promising a retry that cannot
-happen — the refusal is still on the patrol's stderr, and the recovery
-itself is logged as an event in Step 4:
-```bash
-# >>> escalation-wiring-salvage-refused
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# The husk is what holds this: the same work_dir resolving to the same wrong root
-# is the same news. A re-orphan under a different work_dir or branch is not, and
-# gets through immediately.
-STATE="salvage-refused/${WORKTREE:-none}/${ACTUAL_ROOT:-none}/${BRANCH:-none}"
-BODY="Bead <bead> recorded work_dir=$WORKTREE, but it is not its own git worktree root.
-git toplevel: ${ACTUAL_ROOT:-<none>}
-Expected root: $EXPECTED_ROOT
-Observation: worktree git data is gone (husk). Salvage add/commit/push was REFUSED — running it would have committed and pushed the enclosing (town) repo's working tree to origin/main.
-Action: treated as Case E (nothing to salvage); bead returned to pool.
-Branch: ${BRANCH:-none}"
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "SALVAGE_REFUSED: <bead> husk work_dir" --body "$BODY"; then
-    echo "witness: escalation-gate did not send SALVAGE_REFUSED (see its stderr); NOT falling back to a bare mail. This notice is BEST-EFFORT and is NOT retried: recovery continues below and returns the bead to the pool, which clears the orphan condition that produced it." >&2
-  fi
-else
-  gc mail send mayor/ -s "SALVAGE_REFUSED: <bead> husk work_dir" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; best-effort notice, not retried (recovery clears the orphan condition below)." >&2
-fi
-# <<< escalation-wiring-salvage-refused
-```
-
-Check the bead and worktree state, then act:
-
-**Case A: Branch exists on origin (work already published).**
-Worktree is disposable — canonical work is on the branch.
-```bash
-git ls-remote --heads origin $BRANCH  # Verify branch exists on remote
-```
-If branch exists on origin → skip to Step 3 (cleanup).
-
-**Case B: Worktree exists, branch pushed but not on origin yet.**
-Branch is recorded in metadata but polecat may have crashed before push.
-Requires `WORKTREE_SAFE=1` — a husk resolves `origin` from the town repo.
-```bash
-if [ "$WORKTREE_SAFE" != "1" ]; then
-  echo "husk work_dir — Case B does not apply (see HUSK GUARD); handle as Case E." >&2
-else
-  cd "$WORKTREE"
-  git ls-remote --heads origin $BRANCH
-fi
-```
-If branch IS on origin → skip to Step 3.
-If branch is NOT on origin → fall through to Case C.
-
-**Case C: Worktree exists with unpushed commits.**
-Work is committed locally but never pushed. Branch is not yet canonical.
-Requires `WORKTREE_SAFE=1` — this case performs git WRITES.
-```bash
-if [ "$WORKTREE_SAFE" != "1" ]; then
-  echo "husk work_dir — REFUSING Case C salvage writes (see HUSK GUARD); handle as Case E." >&2
-else
-  cd "$WORKTREE"
-  BRANCH=$(git branch --show-current)
-  git log origin/main..HEAD --oneline  # Shows unpushed commits
-fi
-```
-Commit any remaining uncommitted/untracked work first (safeguard) — still
-only when `WORKTREE_SAFE=1`, since `git add -A` from a husk stages the town
-repo's working tree:
+If the branch is already on origin (`git ls-remote --heads origin $BRANCH`,
+run from the RIG ROOT — a husk resolves `origin` from the wrong repo), the
+worktree is disposable: go to step 4. Otherwise salvage — every git write
+gated on the guard:
 ```bash
 if [ "$WORKTREE_SAFE" = "1" ]; then
   cd "$WORKTREE"
   git status --porcelain
-  # If any output:
+  # Commit whatever is uncommitted/untracked, then publish the branch. All
+  # work is useful work — never discard.
   git add -A
-  git commit -m "witness: salvage uncommitted work (<bead>)"
-fi
-```
-Publish the work to make branch canonical:
-```bash
-if [ "$WORKTREE_SAFE" = "1" ]; then
-  cd "$WORKTREE"
-  git push origin HEAD
-  gc bd update <bead> --set-metadata branch=$BRANCH
-fi
-```
-Skip to Step 3 (cleanup).
-
-**Case D: Worktree exists with ONLY uncommitted/untracked changes (no commits).**
-Same resolution as Case C. All work is useful work — never discard.
-Requires `WORKTREE_SAFE=1` — this case performs git WRITES.
-```bash
-if [ "$WORKTREE_SAFE" != "1" ]; then
-  echo "husk work_dir — REFUSING Case D salvage writes (see HUSK GUARD); handle as Case E." >&2
-else
-  cd "$WORKTREE"
-  git add -A
-  git commit -m "witness: salvage work from orphaned agent (<bead>)"
+  git commit -m "witness: salvage work from orphaned agent (<bead>)" || true
   BRANCH=$(git branch --show-current)
   git push origin HEAD
-  gc bd update <bead> --set-metadata branch=$BRANCH
-fi
-```
-Skip to Step 3 (cleanup).
-
-**Case E: Nothing salvageable.** Either no worktree exists
-(`metadata.work_dir` missing or directory gone) and no branch is on origin,
-or the HUSK GUARD refused (`WORKTREE_SAFE=0`) because `$WORKTREE` is a husk
-whose git commands resolve to an enclosing repo.
-
-Nothing to salvage — a husk's git data is already gone, and no `git add -A` /
-`commit` / `push` may run against it. The bead goes back to pool and a new
-polecat starts fresh.
-
-**Case E requires a completed search — `SALVAGE_BLIND` must be 0.** "Nothing
-to salvage" is a claim about a search that ran and came back empty, and the
-bug this gate closes is a pass that made that claim having never named a
-branch to look for. When `SALVAGE_BLIND=1` the anchor did not resolve, the
-store did not answer, or the remote did not — none of which is evidence that
-the work is not there:
-
-```bash
-if [ "$SALVAGE_BLIND" = "1" ]; then
-  echo "witness: <bead> — branch search did not complete (rc $SALVAGE_RC); NOT concluding Case E. Skipping this bead; the orphan condition re-derives it next cycle." >&2
-  # Do NOT fall through to Step 3: returning the bead to the pool clears the
-  # orphan condition, and with it the only thing that brings this bead back.
-fi
-```
-
-Skip the bead entirely and move to the next one. It stays assigned to a dead
-agent, so it is re-detected rather than re-dispatched, and the next cycle
-retries the resolution — the same shape as the ORPHAN_CLOSED one-shot above.
-An orphan that waits a cycle costs one patrol pass; an orphan wrongly declared
-empty costs the branch.
-
-**What a skip does and does not risk.** A resolution that stays blind — a root
-row genuinely gone, say — is retried every cycle and never recovered, so the
-diagnostic above repeats on the patrol's stderr indefinitely. That is loud on
-purpose, and it is not a data risk: `recover-stranded-branches` selects work
-beads by their OWN `metadata.branch` and a published head, with no reference to
-any workflow root, so PUBLISHED work behind a skipped step is already owned by
-that pass. What a skip does defer is UNPUBLISHED worktree work — the Case C and
-D writes — which is exactly what the anchor's `work_dir` above exists to reach.
-A bead blind across many cycles is worth the mayor's attention under the
-Escalation discipline above; it is not worth guessing a branch for.
-
-Whatever `$ANCHOR` resolved to belongs in the Step 4 notice: for a step bead
-it names the work item whose branch was searched, which is the one thing a
-reader needs to check the verdict by hand.
-
-**Step 3: Verify work on main before resetting.**
-
-Before resetting the bead to pool, check if the branch was already merged
-to main (polecat finished, pushed, but crashed before closing the bead):
-```bash
-git log main --oneline | grep -q "$BRANCH"
-# Or check if branch commits are reachable from main:
-git merge-base --is-ancestor origin/$BRANCH origin/main
-```
-
-**A branch that came from the ANCHOR does not license closing THIS bead.**
-Now that a step bead resolves a branch (see `salvage-anchor-resolve` above),
-"already on main" can be true of a bead that is not the one holding the work:
-`$ANCHOR` non-empty means `$BRANCH` belongs to the work item, and the verdict
-is about the work item's branch, not about this step. Closing the step is the
-one thing that must not happen — `load-context` closed unblocks
-`workspace-setup`, which is pool-routed, and the next polecat walks forward
-into re-implementing on a branch that is already merged. Send it to Step 3b
-instead, where `gc workflow delete-source` retires the whole subtree the way
-the machinery does:
-
-```bash
-if [ -n "$ANCHOR" ]; then
-  echo "witness: <bead> is a workflow STEP; the merged branch $BRANCH belongs to anchor $ANCHOR. Not closing the step — falling through to Step 3b." >&2
-fi
-```
-
-If the work is already on main **and the bead owns the branch itself**:
-- **Close the bead** (work is done, don't re-dispatch). Bead-scoped, so it
-  goes through the gate — and the gate call comes BEFORE the close,
-  because the gate stamps `escalated.<kind>` on this same bead and that
-  write should land while the bead is still open.
-
-  **The close is what CONSUMES this one-shot, so it waits on the notice.**
-  An open bead assigned to a dead agent is the only thing that brings this
-  pass back next cycle. Close it after a gate refusal and "next cycle
-  retries" is a promise the code just made impossible: the bead is no
-  longer an orphan, nothing re-derives the condition, and the mayor is
-  never told the work landed. So the close runs only once the notice is
-  out. Leaving the bead open one more cycle is cheap and self-correcting —
-  it stays assigned to the dead agent, so it is re-detected rather than
-  re-dispatched, and the next pass retries both the notice and the close.
-  Note a SUPPRESSED verdict still exits 0 and still means "the mayor was
-  told" (on an earlier cycle, for this same state), so it closes normally.
-
-  **That reading is only sound because the gate records DELIVERY, not just
-  the attempt.** A stamp is written before its mail — that ordering is what
-  bounds the storm — so between the two writes it records an escalation
-  that may never go out, and if the send fails AND the rollback fails (same
-  `gc bd update` path, so one broken store breaks both) the stamp survives
-  for a mail nobody received. This block would then read the next cycle's
-  suppression as "the mayor was told" and spend its one-shot close on a
-  non-notice: bead closed, orphan condition gone, mayor never told, nothing
-  left to re-derive it. So the stamp carries `.pending` until `gc mail send`
-  returns 0, and the gate re-escalates on a pending stamp instead of
-  suppressing. If you ever gate another irreversible transition on a
-  suppression, that is the property you are relying on:
-```bash
-# >>> escalation-wiring-orphan-closed
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-STATE="orphan-closed/${BRANCH:-none}"
-BODY="Branch ${BRANCH:-none} already on main. Closing instead of resetting."
-NOTIFIED=0
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ORPHAN_CLOSED: <bead> already merged" --body "$BODY"; then
-    echo "witness: escalation-gate did not send ORPHAN_CLOSED (see its stderr); NOT falling back to a bare mail, and NOT closing the bead — an open orphan is what brings this pass back. Next cycle retries both." >&2
-  else
-    NOTIFIED=1
-  fi
+  gc bd update <bead> --set-metadata branch="$BRANCH"
 else
-  if gc mail send mayor/ -s "ORPHAN_CLOSED: <bead> already merged" -m "$BODY"; then
-    NOTIFIED=1
-  else
-    echo "witness: fallback 'gc mail send' failed; leaving <bead> open so next cycle retries the notice and the close together." >&2
-  fi
-fi
-if [ "$NOTIFIED" = "1" ]; then
-  gc bd close <bead>
-fi
-# <<< escalation-wiring-orphan-closed
-```
-- Clean up worktree and skip to Step 4.
-
-If the work is NOT on main, proceed with reset:
-
-**Step 3b: Clean up worktree and return bead to pool.**
-
-Once the branch is canonical (on origin), the worktree is disposable:
-```bash
-# Delete worktree if it exists
-cd <rig-root>
-git worktree remove <worktree-path> --force 2>/dev/null
-rm -rf <worktree-path> 2>/dev/null  # Fallback
-git worktree prune
-```
-
-Return the bead to the pool — **by its kind**:
-
-- **A visit (`metadata.task_kind == "visit"`): release the assignee and
-  nothing else.** A visit is a plain routed bead with no worktree, no
-  branch, and no workflow subtree; its metadata (`gc.routed_to`,
-  `gc.continuation_group`, `task_kind`) IS its identity, and the
-  workflow reset below strips it — a recovered visit with no
-  continuation group mis-files for everything that reads groups.
-  ```bash
-  gc bd update <bead> --assignee="" --status=open
-  ```
-  Verify the metadata survived (`gc bd show <bead> --json` — the three
-  keys above still present) before moving on.
-- **Everything else** (molecule/workflow work): close any orphaned
-  workflow subtree, then reopen the source:
-  ```bash
-  gc workflow delete-source <bead> --apply && gc workflow reopen-source <bead>
-  ```
-
-**Step 4: Assess and notify.**
-
-Always log each recovery as an event. Mail the mayor only when the
-recovery is unexpected or concerning — use your judgment:
-
-| Situation | Action |
-|-----------|--------|
-| Pool resize / config change removed agent | Log only. Routine. |
-| Agent crashed mid-work, branch already on origin | Log + nudge mayor. Low urgency. |
-| Work salvaged from worktree (data was at risk) | Log + mail mayor. Work was nearly lost. |
-| Same bead recovered before (check `metadata.recovered`) | Log + mail mayor. Possible crash loop. |
-
-When you do mail — bead-scoped, so through the gate. **Best-effort, like
-SALVAGE_REFUSED and unlike ORPHAN_CLOSED:** Step 3b has already returned
-the bead to the pool by the time this runs, so the orphan condition is
-already spent and a refused send has no next cycle to retry it. The
-recovery is what matters and it has happened; the notice is advisory:
-```bash
-# >>> escalation-wiring-orphan-recovered
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# The orphaned SESSION is in the fingerprint deliberately. A second recovery of
-# the same bead under a DIFFERENT session is a crash loop — the row above that
-# says to mail on it — so it must get through at once. Re-running this pass over
-# the same recovery is not news, and is suppressed.
-STATE="orphan-recovered/<agent>/${BRANCH:-none}"
-BODY="Bead <bead> was assigned to <agent> which is no longer active.
-Recovery: <what was done — branch pushed / metadata set / work salvaged / nothing to salvage>
-Branch: ${BRANCH:-none}
-Status: Reset to open pool for re-dispatch.
-Concern: <why this one warrants attention>"
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ORPHAN_RECOVERED: <bead>" --body "$BODY"; then
-    echo "witness: escalation-gate did not send ORPHAN_RECOVERED (see its stderr); NOT falling back to a bare mail. This notice is BEST-EFFORT and is NOT retried: the bead was already returned to the pool in Step 3b, so the orphan condition that produced it is spent." >&2
-  fi
-else
-  gc mail send mayor/ -s "ORPHAN_RECOVERED: <bead>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; best-effort notice, not retried (the bead is already back in the pool)." >&2
-fi
-# <<< escalation-wiring-orphan-recovered
-```
-
-Mark recovered beads so spawn storm detection can track patterns:
-```bash
-gc bd update <bead> --set-metadata recovered=true
-```
-
-**Exit criteria:** All orphaned beads recovered, worktrees cleaned.
-Or no orphans found. Continue to `recover-stranded-branches` — do NOT
-exit the wisp here. The `next-iteration` step is the only place that
-pours the next wisp and burns this one."""
-
-[[steps]]
-id = "recover-stranded-branches"
-title = "Recover published work with no landing path"
-needs = ["recover-orphaned-beads"]
-description = """
-Hand off COMPLETED work that reached origin and then stopped, because nothing in
-the city owns its next move (tk-f69ay).
-
-**The failure this catches.** A polecat implemented, committed and PUSHED its
-branch, then died BEFORE its "Submit work to refinery and exit" step. Recovered by
-hand on 2026-08-11 (tk-0981e): the branch sat on origin, one clean commit ahead of
-main, merging cleanly — and the bead read `status=open`, assignee EMPTY,
-`gc.routed_to` EMPTY, no `merge_result`, no PR. No data was lost, but only because
-a human happened to look.
-
-**Why the step above does not see it.** `recover-orphaned-beads` is scoped to
-"beads assigned to agents that will never process them" and keyed on the assignee,
-so an UNASSIGNED bead is not in its candidate set at all; and its salvage cases C,
-D and E all reason about UNCOMMITTED work at risk inside a worktree, so for work
-that is already committed and pushed, Case E ("nothing to salvage") is literally
-correct. The patrol is right that no DATA is at risk. The question none of the
-passes asks is the next one: is there a LANDING PATH? Work safely on origin with
-no owner is not salvaged — it is stranded, and every other detector is blind to it
-at the same time (pool demand needs a route, the refinery's queue needs its own
-assignee, and every bead-keyed reconcile pass enumerates on `pr_url` /
-`pr_number` / `merge_result`, none of which this bead has).
-
-```bash
-# Same agent-env resolution the other passes use, so the idle loop runs the
-# CURRENT script even when a worktree copy lags.
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
-            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/recover-stranded-branches.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# Best-effort, like every other patrol pass: a failed pass is retried next cycle
-# and must never abort the wisp. The pass exits NON-ZERO when a handoff it decided
-# on could not be verified — a verdict, not an abort; it still attempts every bead.
-if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/recover-stranded-branches.sh" \\
-    --refinery "${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery" \\
-    || echo "recover-stranded-branches: pass failed (non-fatal); retries next cycle" >&2
+  echo "husk or missing work_dir — REFUSING salvage writes (see HUSK GUARD); nothing salvageable." >&2
 fi
 ```
+When nothing is salvageable (no worktree and no branch on origin, or the
+guard refused), escalate the refusal best-effort
+(`escalate.sh --subject <bead> --key witness-salvage-refused ...`) and fall
+through — recovery is load-bearing, the notice advisory.
 
-Run it with `--dry-run` first if you want to see the selection without writing.
-`--min-age-minutes` (default 30) sets how long a branch must have been quiet
-before it counts as stranded rather than mid-submission.
+**4. Verify before reset.** If the branch is already reachable from the
+target (`git merge-base --is-ancestor origin/$BRANCH origin/main`), the
+work landed: escalate the observation, close the bead, clean the worktree.
+Otherwise reset:
 
-**What it selects, and what it must not.** A bead qualifies only when ALL of it
-holds: open or in_progress, assignee EMPTY, `gc.routed_to` empty or absent, a
-`metadata.branch`, no `merge_result`, no recorded PR field, no `duplicate_of` /
-`hold_reason` / live `merge_hold` (those mean somebody DECIDED the branch should
-not move), a non-review `task_kind`, a branch that really is on origin and ahead
-of its target, NO pull request for that head in any state, no LIVE session behind
-its molecule, and a tip older than the age gate.
+**5. Cleanup + return to pool.** Remove the worktree (from the rig root:
+`git worktree remove <path> --force; git worktree prune`). Then, by kind:
+- **A visit (`metadata.task_kind == "visit"`)**: release the assignee and
+  NOTHING else — `gc bd update <bead> --assignee="" --status=open`. Its
+  metadata (route, continuation group, task_kind) IS its identity; verify
+  the three keys survived.
+- **Everything else**: `gc workflow delete-source <bead> --apply &&
+  gc workflow reopen-source <bead>`.
 
-The liveness condition is the load-bearing one, and it is an AND — not the OR the
-bug report proposed. Verified live: a work bead is `open` with `assignee=null` and
-no `gc.routed_to` for the WHOLE time its polecat is working it, because
-mol-polecat-work assigns the polecat to the STEP beads and never to the anchor. So
-"unassigned" describes every in-flight molecule too, and "no live session stands
-behind it" is what separates a strand from work in progress. The pass resolves the
-bead's input convoy, finds the workflow root that owns it, and treats the molecule
-as live if the root records a live session or any of its live steps is held by
-one.
+**PRESERVE `metadata.branch` on every recovery** — it is where the next
+polecat resumes from; a recovery that strips it re-does the work. Mark
+`recovered=true` so a repeat recovery of the same bead reads as a crash
+loop (escalate that: `--key witness-crash-loop`).
 
-**A queued rework child is the second shape that is not a strand** (tk-6tlcu). A
-pre-open rework child carries no `merge_result`, no PR field and no hold — they all
-sit on its `parent-child` ANCHOR — so it wears the candidate shape in full while
-its anchor's own gate is carrying its next move. The pass therefore walks DOWN to
-the parent (`--direction=down`; the upward listing answers with the convoys that
-track the bead, not with the parent) and leaves the child alone when the anchor
-carries a terminal `merge_result` or a `check.*=fixable@<oid>` marker. The grab it
-prevents is not merely a wasted handoff: the assignee write breaks the
-`gc.execution_routed_to != "" AND assignee == ""` clause that is the only way a
-queued child satisfies check-set-heal's `acting()`, so each one silently
-un-suppresses the anchor's review gate and burns a round of `GC_MAX_REVIEW_ROUNDS`
-against an UNCHANGED head — until the cap escalates the anchor to a human as
-"review rounds exhausted", falsely.
-
-That resolution runs FIRST, ahead of every refusal and not just the handoff
-(tk-pwm2g). A polecat carries `metadata.branch` from its workspace-setup step and
-nothing on origin until it pushes, tens of minutes later, so an unpushed branch and
-a lost one look identical — and while the "not on origin" refusal returned before
-liveness was consulted, every implementation that outlasted the age gate collected
-a durable marker saying its published work had vanished. The age gate cannot cover
-this: implementation routinely outlasts any threshold, which is exactly why
-liveness is the guard.
-
-**The repair is the handoff, not a re-dispatch.** The missing action is the submit
-step itself — stamp `branch` and `target`, set the bead back to `open`, reassign it
-to the refinery — so the pass performs it directly rather than pouring a fresh
-molecule to spend a full-context session re-deriving four fields. That is not a
-shortcut past review: the refinery still takes the branch through the pre-open
-codex gate and the PR still needs external human approval, so a branch pushed by a
-polecat that died MID-implementation gets reviewed exactly as it would have been.
-It never closes a bead — only the refinery does that, after verifying a merge, and
-`open` is the only status this pass ever writes.
-
-**Every field of that handoff is READ BACK, because a reported write is not a
-durable one.** `branch` and `target` are verified BEFORE the assignee is written at
-all: an assignee that sticks over a target that did not both removes the bead from
-this pass's candidate set (it is no longer unassigned, so nothing retries it) and
-hands the refinery a branch to rebase onto a missing or stale base — an owned-convoy
-member onto `main`. Refusing there costs one cycle; proceeding is un-retryable.
-`status=open` is written in the same update as the assignee for a matching reason:
-`find-work` polls `--assignee=$GC_AGENT --status=open`, and this scan admits
-`in_progress` beads, so an `in_progress` handoff is assigned to an actor that never
-polls it AND no longer unassigned — strictly worse than the strand it started from.
-If the post-write read disagrees, the pass releases its OWN assignee (never another
-actor's) so the bead matches the candidate shape again next cycle.
-
-Everything it cannot establish, it refuses and says so: an unreadable session
-roster or bead listing hands off NOTHING (an unread roster makes every running
-polecat look dead), a failed `gh` lookup is not proof that no PR exists, and a
-target branch missing from origin is escalated rather than guessed at. An
-un-repaired strand is the status quo this pass improves on; a wrong handoff
-creates a new one.
-
-Read its stderr. A recurring refusal on the same bead means a branch is stranded
-in a way this pass will not repair on its own — the one refusal that mails the
-mayor is the unresolvable-target case, and the rest are bounded to one warning per
-(branch, tip) by a marker on the bead. The marker records the refusal's escalation
-class as well as the tip, so the quiet marker a transient read failure leaves can
-never cancel the mail a later cycle owes for the same commit; the mail itself is
-still issued once per (branch, tip).
-
-The recovery marker is read back, not merely written (tk-6tlcu). When the refinery
-DECLINES a handoff it clears the assignee and hands the bead back, restoring the
-candidate shape exactly — and the hand-back itself bumps `updated_at`, which is all
-the age gate reads. So a decline used to set the loop PERIOD rather than break the
-loop, and every declined bead returned every `--min-age-minutes`, forever. The pass
-now compares `stranded_branch_recovered` against `<branch>@<tip>` by EQUALITY, so a
-tip it has already handed off once is left alone while a branch that has genuinely
-moved is still rescued.
-
-One marker is retracted rather than left to expire. Every other one names the tip it
-was written at and so goes stale the moment the branch moves, but `<branch>@missing`
-names the ABSENCE of a tip: a later push does not make it read as false. A sweep at
-the top of each pass clears that class as soon as `ls-remote` answers for the
-branch, on any bead carrying one — including a bead that has since been handed to
-the refinery, which is where the marker was actually found and where nothing else
-would ever revisit it.
-
-Regression test: `assets/scripts/recover-stranded-branches.test.sh` (hermetic;
-stubs `gc`, `git` and `gh`; covers the canonical strand, the metadata-before-
-assignee order, target resolution from the bead / its convoy / the repository
-default, both liveness signals and their converse, every non-candidate field, an
-existing PR in any state, a failed PR lookup, an unpublished branch, a live polecat
-whose branch is unpublished BECAUSE it has not pushed yet being left entirely alone,
-a stale `@missing` marker being retracted once the branch appears (on a handed-off
-bead as well as a candidate), a missing
-target branch, an already-landed branch, the age gate, both fail-safes, the
-one-warning-per-bead bound and the escalation class that keeps a transient
-refusal from cancelling it, the non-zero exit on an unverified handoff, a
-branch/target write that reports success and is NOT durable stopping the handoff
-before the assignee, an `in_progress` strand being handed over as `status=open`, a
-handoff whose fields are rolled back after the assignee sticks releasing that
-assignee again, a queued pre-open rework child being left untouched while a child
-whose parent carries neither marker is still recovered, a declined handoff not
-re-arming at the same tip while a moved branch still is, that `--dry-run` writes
-nothing, and that no bead is ever closed). The two guards above are additionally
-proved by MUTATION — each is cut out of a copy of the pass and the case is required
-to fail — because two guards in series mask each other and both would otherwise
-read green.
-
-**Exit criteria:** Stranded branches handed off, or none found. Continue to
-`check-refinery` — do NOT exit the wisp here. The `next-iteration` step is the
-only place that pours the next wisp and burns this one."""
+Continue to check-refinery — do NOT exit the wisp here."""
 
 [[steps]]
 id = "check-refinery"
 title = "Check refinery queue health"
-needs = ["recover-stranded-branches"]
+needs = ["recover-orphaned-beads"]
 description = """
-Ensure the refinery is processing work and the queue is healthy.
-
-**Step 1: Check work beads assigned to refinery:**
 ```bash
-gc bd list --assignee=<rig>/{{binding_prefix}}refinery --status=open --json
+gc bd list --assignee=${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery --status=open --json --limit=0
 ```
-
-These are work beads with `metadata.branch` and `metadata.target` that
-polecats have submitted for merging. Look for:
-
-- **Stale beads**: Assigned to refinery but old `UpdatedAt`. The refinery
-  may be stuck or the bead may have been missed.
-- **Queue depth**: Many beads waiting may indicate the refinery is
-  overwhelmed or down.
-- **Empty queue**: No work assigned — refinery is idle, which is usually fine.
-  On its own an empty queue still proves nothing: a handoff addressed by hand to
-  a near-miss identity (`<rig>/refinery` for the canonical
-  `<rig>/{{binding_prefix}}refinery`) is missing from this listing, not absent
-  from the city, and reading it as health is what let the live case sit for over
-  an hour (tk-0nn3f). The refinery merge cadence reports that bead as a
-  `FRESH HANDOFF` — an unrouted, branch-pushed bead this refinery is not the
-  assignee of — so read the cadence's pass log before calling the queue healthy.
-
-**Step 2: Assess refinery wisp freshness:**
-
-Check when the refinery last completed a patrol cycle by looking at
-recent burned wisps. If the refinery has work assigned but its last
-wisp is stale, the refinery may be stuck.
-
-**Step 3: Nudge if needed:**
+Look for: **stale beads** (assigned long ago, untouched — the refinery may
+be stuck), **queue depth** (a pile means stuck or overwhelmed), **empty
+queue** (usually fine — but a near-miss assignee on a handoff is missing
+from this listing, not absent from the city; read the cadence's pass log
+before calling it healthy). Nudge first:
 ```bash
-gc session nudge <rig>/{{binding_prefix}}refinery "Work beads waiting for merge. Please check queue."
+gc session nudge ${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery "Work beads waiting for merge. Please check queue."
 ```
-
-**Step 4: Escalate if needed — through the gate.**
-
-**Config: escalation_cooldown = {{escalation_cooldown}}**
-
-This is the step the escalation storm came from (see "Escalation
-discipline" above): a stuck PR keeps satisfying the trigger, so every
-cycle re-derived it and mailed again. Escalate PER ANCHOR, through
-`escalation-gate.sh`, never with a bare `gc mail send`.
-
-Build `--state` from the inputs that are actually HOLDING the item, so
-that a real change gets through at once while a still-stuck item stays
-quiet:
-
-Resolve the script here, in the same shell that sends — each tool call is a
-fresh shell, so a `SCRIPTS_DIR` exported while reading an earlier section is
-GONE by the time you run this. An empty `$SCRIPTS_DIR` would expand to
-`/escalation-gate.sh`, fail, and send nothing at all — a silent mute, which
-is worse than the storm.
-
+Escalate only what a human must act on — a stuck queue, never an
+approval-gated one (a PR awaiting the operator is a resting state worth
+zero escalations):
 ```bash
-# >>> escalation-wiring-refinery
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-# `tr -d` strips control characters BEFORE jq. bd emits them from prose notes and
-# jq rejects EVERY unescaped one — a plain tab included — so an unsanitized read
-# fails BOTH jq calls below and leaves STATE empty. The gate reads an empty
-# --state as "no state tracked" and then suppresses real news for a full cooldown:
-# a lost parse must never look like a lost fingerprint. The character CLASS, not a
-# numeric-escape range, on purpose: this block lives in a TOML multi-line string,
-# which would eat the backslashes and ship something other than what you read here.
-ROW=$(gc bd show <bead> --json 2>/dev/null | tr -d '[:cntrl:]')
-PR=$(printf '%s' "$ROW" | jq -r '.[0].metadata.pr_number // empty' 2>/dev/null)
-# ONE CHANNEL, ONE SHAPE OF FINGERPRINT. A PR-backed anchor is fingerprinted from
-# the PR; an anchor with no PR from the bead. They are NOT substitutes for each
-# other: sending the bead one on the PR one's channel compares unequal in both
-# directions, so a `gh` outage mails when it starts AND again when it ends —
-# a flap through the cooldown driven by GitHub's availability, not by news. And a
-# fingerprint that came out EMPTY is worse still: the gate reads empty as "no state
-# tracked", stamps it durably, and then holds every real change for a full
-# cooldown. So a degraded read moves to its OWN kind, where it dedups against its
-# own history and leaves the real channel's stamp — and the cooldown riding on it —
-# untouched.
-KIND=witness
-if [ -n "$PR" ]; then
-  STATE=$(gh pr view "$PR" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
-else
-  STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
-    (.status // "-"),
-    (.metadata.merge_result // "-"),
-    (.metadata.branch // "-"),
-    (.metadata.merged_target // .metadata.target // "-"),
-    ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
-  ] | join("/")' 2>/dev/null)
-fi
-if [ -z "$STATE" ]; then
-  # The fingerprint we meant to build is unavailable. Name WHAT is unavailable, and
-  # nothing that varies while it is: a constant degraded fingerprint mails once and
-  # then rides its own cooldown for as long as the outage lasts, instead of
-  # chattering on whatever incidental field still happens to be readable.
-  KIND=witness-degraded
-  if [ -n "$PR" ]; then STATE="unavailable/gh/pr-$PR"; else STATE="unavailable/bead/<bead>"; fi
-fi
-# Name the PR to the gate only on the path that actually read it. The gate does
-# its own `gh pr view` to decide whether this bead is held by nothing worse than
-# an unsigned PR, so a degraded read must name nothing and be decided by the
-# ordinary dedup. Note this block resolves the PR UNPINNED, so the gate inherits
-# the same ambient resolution the fingerprint came from — the same PR, and so the
-# same answer. mol-refinery-patrol's held-anchor block pins both to the origin
-# remote; porting that here is a separate change and is not made by this one.
-GATE_PR=""
-if [ "$KIND" = witness ] && [ -n "$PR" ]; then GATE_PR="$PR"; fi
-BODY="Work bead IDs: <ids>
-Observation: <what you found>
-Recommendation: <what should happen>"
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead>" --kind "$KIND" --state "$STATE" --pr "$GATE_PR" --cooldown "{{escalation_cooldown}}" --subject "QUEUE_HEALTH: <summary>" --body "$BODY"; then
-    echo "witness: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
-  fi
-else
-  gc mail send mayor/ -s "QUEUE_HEALTH: <summary>" -m "$BODY" || echo "witness: fallback 'gc mail send' failed; next cycle retries." >&2
-fi
-# <<< escalation-wiring-refinery
+"$SCRIPTS/escalate.sh" --subject <bead> --key witness-refinery-queue --message "Observation: <what is stuck and since when>. Recommendation: <what should happen>."
 ```
-
-`headRefOid/reviewDecision/mergeStateStatus` is the right fingerprint for
-a PR-backed anchor: a new commit, an approval, or a mergeability change
-are exactly the events worth re-mailing about, and nothing else is.
-
-For an anchor with no PR — a pre-open gate is the common one — the bead's
-own `status`, `merge_result`, `branch`, landing target and `check.<gate>`
-markers serve the same purpose.
-
-Read that landing target as `merged_target // target`, the same order
-`pre-open-resolve.sh` uses. A `pre_open_gate` anchor records where it
-intends to land in `merged_target`; `target` is the polecat-era field and
-may be absent, or stale after a retarget. Reading `target` alone collapses
-that component to `-` on an anchor that never had one, and misses a
-retarget entirely — in both cases the fingerprint stops distinguishing two
-genuinely different situations and the gate holds real news for a full
-cooldown.
-
-**The two fingerprints are not substitutes for each other.** The bead
-fingerprint used to double as the fallback when `gh pr view` failed, on
-the reasoning that a coarser fingerprint beats an EMPTY one (empty reads
-as "no state tracked" and mutes real news until the cooldown). Both halves
-are true and the conclusion still did not follow: the gate compares each
-`--state` against the last one sent on the same `--kind`, so an unchanged
-PR compares unequal when the substitute appears AND unequal again when the
-real one comes back. One `gh` hiccup therefore bought two mails and reset
-the cooldown twice, on a PR that never moved — a flap driven by GitHub's
-availability rather than by any news, which is the storm arriving through
-the mechanism built to stop it.
-
-So a fingerprint that cannot be built the usual way moves to its own
-channel, `--kind witness-degraded`, and says only what is unavailable
-(`unavailable/gh/pr-<n>`). That value is CONSTANT for as long as the
-outage lasts, so the degraded channel mails once and then rides its own
-cooldown; the real channel's stamp is never overwritten, so when `gh`
-recovers the comparison is against the last PR fingerprint actually
-observed and an unchanged PR stays quiet. The cost is bounded at one extra
-mail per cooldown while an outage lasts, and the witness still hears that
-it has gone partly blind — which is itself worth one mail.
-
-**Never call the gate with an empty `--state` from here.** Empty is a
-legitimate fingerprint meaning "no state tracked", and the gate stamps it
-durably: a step that MEANT to track state and failed would mark the anchor
-stateless and suppress every real change until the cooldown. Both arms
-above therefore end in a non-empty value by construction — a real
-fingerprint, or a degraded one on the degraded channel.
-
-**`updated_at` is deliberately NOT in that fingerprint.** The gate stamps
-`escalated.<kind>` on this same anchor before mailing, so including
-`updated_at` makes every next cycle look changed *because the gate itself
-wrote* — the item re-mails forever and the dedup buys nothing. Only
-inputs the gate does not write belong in `--state`
-(`witness-escalation-wiring.test.sh` runs the block twice against a stub
-that advances `updated_at` on every write, and fails if the second cycle
-mails).
-
-`--cooldown "{{escalation_cooldown}}"` is already on the call, so the
-Config value above reaches the gate; an unrendered var degrades to the
-script's own default rather than failing the send. Carrying that value
-past THIS cycle is `next-iteration`'s job — it forwards the var on the
-pour, because a `--root-only` wisp materializes no defaults.
-
-The gate call is wrapped in `if ! ...; then echo` because this pass is
-best-effort and must reach the steps after it. A non-zero exit means the
-gate could not BOUND the escalation (unreadable anchor, unwritable
-stamp) — log it and carry on. Do not mail directly instead: that is the
-unbounded storm, and the next cycle retries the gated send anyway.
-
-One escalation per anchor — do not also send a queue-wide summary that
-names the same anchors, which is the same mail wearing a different hat.
-
-**Exit criteria:** Queue health assessed; nudge sent or escalation
-filed if needed. Continue to `quiesce-completed-workflows` — do NOT exit
-the wisp here. The `next-iteration` step is the only place that pours the
-next wisp and burns this one."""
-
-[[steps]]
-id = "quiesce-completed-workflows"
-title = "Quiesce completed workflows"
-needs = ["check-refinery"]
-description = """
-Retire the dead step beads of `mol-polecat-work` molecules whose inline
-execution has already finished, so the pool stops re-offering them (tk-p9ji9).
-
-**The failure this prevents.** mol-polecat-work materializes 7 step beads, but
-the polecat runs them INLINE in one session and no step closes its own bead.
-The graph is chained, so while `load-context` stays open it is the ONLY ready
-step — and it still carries `gc.routed_to=<rig>/{{binding_prefix}}polecat`.
-Open + ready + routed is exactly the pool's offer predicate, so every idle
-polecat gets handed the same dead step, forever. Each one burns a wisp to
-re-derive "already done, nothing to do" and drain. The molecule cannot finalize
-itself either: under close-on-land its anchor stays OPEN until the refinery
-lands the PR, so the churn runs for the whole human-approval wait — measured at
-~1 wisp / 4-5 min, i.e. ~200 wisps overnight on a single anchor.
-
-This step is the containment the witness previously performed BY HAND, molecule
-by molecule (ten of them by 2026-07-22), now automated.
-
-**Two re-offer shapes, two different levers.** Clearing `gc.routed_to` fixes
-only the first — verified live: the pool work query returns open, UNASSIGNED,
-routed, ready beads only, so an assigned step never rides the pool path.
-
-| Shape | State | Lever |
-|---|---|---|
-| unassigned | assignee empty + `gc.routed_to` set | clear `gc.routed_to` |
-| assigned | assignee=`<polecat session>` + `gc.session_affinity=require` | clear `gc.routed_to` **and** the assignee |
-
-For the assigned shape the bead is already invisible to the pool; it is handed
-back on the ASSIGNED-work path, which is keyed on the assignee. Clearing only
-`gc.routed_to` there is a no-op — that is why the by-hand sweeps kept leaving a
-residual of sessions still holding their in_progress step.
-
-**The two clears are SEPARATE calls, route first, and the assignee clear passes
-`--force` (tk-z27pw).** Batched into one `gc bd update`, bd's claim guard refuses
-`--assignee ""` on a step still held in_progress and rolls the WHOLE update back —
-so `gc.routed_to` was never cleared either, the step stayed fully re-offerable,
-and the pass logged `update failed; retries next patrol` every cycle forever while
-still exiting 0. Route-first is what keeps splitting safe: the intermediate state
-is open + assigned + unrouted (invisible to the pool), never open + unassigned +
-routed (the pool-offer shape, which would race a fresh polecat into the husk).
-`--force` is legitimate here because the anchor is already terminal, so the step
-graph is spent — rework is dispatched as a STANDALONE bead with no `gc.step_ref`
-and never re-walks these steps, so no holder can ever resume one. That clear runs
-through bare `bd`, because `gc bd` rejects `--force` in its bead-ID safety
-pre-check and exits 1.
-
-**DANGER — never "fix" this by closing the step bead.** Closing `load-context`
-unblocks `workspace-setup` and walks the next polecat forward onto a branch that
-is ALREADY green-gated and PR'd; any push there moves the head, stales the
-anchor's `check.<gate>=green@<oid>` marker, and BLOCKS the open PR from merging.
-The script has no close path at all, and its regression test asserts that.
-Clearing the routing is the safe lever; closing is not.
-
-Quiescing is containment, not finalization — the molecule is left stranded but
-quiet. Finalizing the step graph at submit-and-exit time is the durable upstream
-fix (gascity core / gastown formula) and is deliberately out of scope here.
-
-```bash
-# Resolve the pack scripts the same way mol-refinery-patrol does: from agent-env
-# paths, so the idle loop runs the CURRENT script even when a worktree copy lags.
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \
-            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/quiesce-completed-workflows.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# Best-effort, like every other patrol pass: a failed pass is retried next cycle
-# and must never abort the wisp. The -x guard means a rig that has not synced
-# this script simply keeps the old by-hand behavior.
-#
-# The pass exits NON-ZERO when any step update failed (tk-z27pw) — it still
-# attempts every root first, so a non-zero exit is a verdict, not an abort. The
-# `||` below is what keeps that non-fatal. A recurring failure here means some
-# step could not be quiesced; read the stderr lines, which name the bead and
-# which half (route or assignee) was refused.
-if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/quiesce-completed-workflows.sh" \
-    || echo "quiesce-completed-workflows: pass failed (non-fatal); retries next cycle" >&2
-fi
-```
-
-Run it with `--dry-run` first if you want to see the selection without writing.
-
-**What it touches, and what it must not.** For each molecule it resolves the
-anchor the way the formula itself does (root -> `gc.input_convoy_id` -> the
-convoy's single tracked member) and acts only when that anchor is DONE. Five
-shapes count as done, the last three each a re-offer the predicates before them
-missed:
-
-| Shape | Anchor reads | Why the molecule is dead |
-|---|---|---|
-| closed | `status=closed` | the work bead itself is finished |
-| stamped | `merge_result` of `pre_open_gate`, `pull_request`, `merged` | past polecat work, parked in the merge gate |
-| handoff (tk-yxlqb) | `assignee=<rig>/{{binding_prefix}}refinery`, unstamped | handed off, but the refinery has not stamped yet |
-| parked (tk-rlm94) | `status=blocked` AND `gc.routed_to=human`, unstamped, assignee cleared | handed off the pool for a human decision — `blocked` is not in the pool's ready predicate, so no polecat can be offered it |
-| re-claimed (tk-nv3qr) | `assignee` = the anchor's own `gc.session_name`, and that session is NOT the molecule's | rejected, re-pooled, and re-claimed by ANOTHER polecat — which works it as a bare bead and never re-walks this step graph |
-
-The last two are each conjunctions, and in both cases that is what keeps the pass
-fail-closed rather than an accident of how they were written.
-
-**And a terminal anchor is not by itself a dead molecule (tk-8m8d4).** An anchor
-outlives its molecules — the original, then one per rework round — so `merge_result`
-describes the WORK, not the molecule standing in front of it. Read as the latter,
-the pass de-routed and un-assigned the frontier step of a LIVE rework molecule 87
-seconds after a polecat claimed it, and that molecule never moved again (signal-loom
-`sl-xhfl`, anchor `sl-ew4w` wearing `pull_request` from the very PR the rework
-existed to fix). Two guards sit between the verdict above and the sweep, one per
-direction the marker can be wrong in:
-
-| Guard | Holds back | How it knows |
-|---|---|---|
-| 1 — the marker PREDATES the molecule | a rework molecule poured against an anchor that was already terminal | `quiesce.terminal_since` on the anchor: this pass's last observation of it — `live`, or the date of a terminal transition it WATCHED happen. A molecule materialized after that date cannot have produced that state |
-| 2 — the marker arrived MID-FLIGHT | a step-driven graph whose anchor was stamped at its submit step while its teardown steps still had to run | the molecule's own closed-step count. Zero is the inline-execution husk this pass exists for; more means the graph is being driven step by step |
-
-Guard 1 only ever compares against a date it EARNED. A terminal sighting is dated
-`now` when the previous pass had the same anchor marked `live`, because then the
-marker was written between the two observations; the `live` mark is written on every
-live verdict, which both discards the previous episode's date and arms the next one's.
-
-An episode this pass never saw begin is UNDATED, and undated is not evidence
-(tk-fotoi). At rollout, after a witness outage, or on any anchor first met
-mid-episode, a spent husk and a live rework molecule look identical — both older
-than anything we know, both wearing guard 2's zero-closed signature — so the
-ambiguous reasons fail closed and the root is left alone, counted `undated` in the
-summary. Nothing is written on that path either: a date invented on first sighting is
-a guess, and the next pass would read it back as evidence and sweep on it. An earlier
-cut stamped `now` on sight and swept in the same pass, on the reasoning that every
-molecule alive predates the stamp — which is true, and is exactly why the stamp says
-nothing about them; that is the `sl-xhfl` strip, reached through the guard written to
-prevent it.
-
-The cost is stated plainly rather than hidden: an anchor already terminal when the
-patrol first meets it is never swept for an ambiguous reason. Its husk keeps burning
-wisps until the anchor lands (`closed`/`merged`, which sweep unconditionally) or is
-repooled, and the witness's manual sweep is the fallback in between. Every episode
-that BEGINS under patrol coverage is dated from its own transition and swept one
-cycle later.
-
-Guard 2 exempts `closed` and `merge_result=merged`: those two are the only anchor
-states no live molecule wears, and a husk can ACQUIRE a closed step when somebody
-closes `load-context` by hand to stop the churn. That is the same two-state line
-`detect-stalled-workflows.sh` draws from the other side, and the two passes now
-agree about which anchor states prove anything.
-
-Both fail closed: an undatable molecule, an unparseable stamp, an episode never seen
-begin, or an unreadable closed-step listing all leave the root alone, exactly like an
-unresolved anchor. A transition stamp that will not PERSIST counts too — it is read
-back after it is written, and a write refused (or one that reports success and lands
-nothing) leaves the episode undated, because otherwise every later pass meets the
-same anchor as a first sighting and the guard never engages at all.
-
-Parked is never bare `blocked`: the escalation path sets `blocked` before it
-drains, so a live session is reachable in that state, while `blocked` +
-routed-to-human is only ever written by a pass that has already routed the work
-off the pool.
-
-Re-claimed is doubly conditional. `gc.session_name` is stamped at claim time and
-is NOT cleared on release, so a leftover record proves nothing — the assignee
-must still EQUAL it before it counts as the current holder, and all three names
-must be non-empty, or the pass declines to guess and leaves the molecule alone.
-
-The two clauses read different fields and are independent: a re-claimed anchor is
-held by a session and is not parked, and a parked one is held by nobody at all.
-
-It never rewrites `status`, and never touches the `workflow-finalize` step — that
-one keeps its control-dispatcher route because it is the molecule's only escape
-path. On the anchor it writes exactly one key, guard 1's `quiesce.terminal_since`
-stamp: additive, read by nothing but this pass, and never a lifecycle field, so no
-gated state on a bead sitting in the merge queue is in reach. An anchor it cannot
-resolve is SKIPPED, deliberately: quiescing a live molecule would strip the
-assignee off steps a running polecat still has to claim, draining it
-mid-implementation. An un-quiesced husk only wastes wisps, which is much the
-cheaper failure.
-
-Regression test: `assets/scripts/quiesce-completed-workflows.test.sh` (hermetic,
-stubs `gc` and `bd`, including bd's claim guard; covers both shapes, the split
-calls and their route-first order, the `--force` assignee clear, the no-close
-rule, the finalize-route exemption, fail-closed, idempotence, that a refused
-assignee clear neither rolls back the route clear nor exits 0, the
-re-claimed-anchor predicate together with both of its fail-closed halves — a
-recorded session that is not the current holder, and an anchor recording no
-session at all — the parked predicate with both of ITS halves alone as negative
-controls, the intersection of the last two: each of them decided by its own
-clause on an anchor that also carries the other's field, which is what pins the
-argument positions the two landed on — and both tk-8m8d4 guards: the rework
-molecule held back by its date, the ordinary husk that still sweeps once an
-episode is dated, a live -> terminal transition dated and swept in one pass, a
-live anchor marked `live` so the stale date goes AND the next episode can be
-dated, the mid-flight graph held back by its closed steps, the landed anchor
-exempt from that despite carrying some, each guard's fail-closed half, and that
-the anchor is written for the stamp key and nothing else. The tk-fotoi shapes ride
-the same fixture: the historical `sl-xhfl` molecule under an anchor never seen
-live, left alone on the first pass AND on the second — a delayed strip is still
-the strip — a refused transition stamp, and one that reports success without
-landing, both caught by reading the stamp back).
-
-**Exit criteria:** Completed-workflow husks quiesced, or none found. Continue to
-`check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is
-the only place that pours the next wisp and burns this one."""
-
-[[steps]]
-id = "detect-stalled-workflows"
-title = "Signal workflows that stopped advancing"
-needs = ["quiesce-completed-workflows"]
-description = """
-Report a graph.v2 workflow whose frontier has stopped moving and which nothing in
-the city can pick up (tk-xesf6).
-
-**The failure this catches.** A workflow that stops advancing emits nothing — no
-alarm, no escalation, no board entry. It is found when a human asks after the work
-by name, which is how the two instances this step was built on were found (signal-loom
-`sl-xhfl` and `sl-jnjd`, silent for 2h and 7h). Every other consumer keys on BEADS,
-and a stalled workflow's beads are each individually healthy:
-
-| Pass | Keyed on | Why it misses a stalled workflow |
-|---|---|---|
-| mol-liveness-sweep | `gc bd ready` + edge check | a ROOT is blocked by its own workflow-finalize step, so no root is ever a candidate; its STEPS reach the candidate set and are then dropped by class 2(i)(c), because every graph.v2 step `tracks` its still-open root |
-| witness `recover-orphaned-beads` | assignee + dead session | scoped to ASSIGNED beads; a stalled frontier is unassigned |
-| `recover-stranded-branches.sh` | `metadata.branch` | a workflow that stalled before its worktree step pushed nothing |
-| `quiesce-completed-workflows.sh` | the ANCHOR's state, plus its two tk-8m8d4 guards | de-routes husks; asks whether the workflow ADVANCED, never how long ago it last moved — a workflow silent for hours with an un-landed anchor is quiet, not quiesceable |
-| deacon / refinery patrols | session queues, merge queue | a stalled workflow has neither an assignee nor a merge handoff |
-
-Each is right about its own question. The unasked one is whether the workflow is
-still MOVING — visible only in the time derivative, which nothing computed.
-
-```bash
-# Resolve the pack scripts the same way the steps above do, so the idle loop runs
-# the CURRENT script even when a worktree copy lags.
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
-            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/detect-stalled-workflows.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# Best-effort, like every other patrol pass: a failed pass is retried next cycle and
-# must never abort the wisp. The -x guard means a rig that has not synced this script
-# simply keeps the old behavior (no signal at all).
-#
-# A NON-ZERO exit is a verdict, not an abort: every root is attempted first, and the
-# code says only that some signal could not be written. Read the stderr lines.
-if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/detect-stalled-workflows.sh" \\
-    || echo "detect-stalled-workflows: pass failed (non-fatal); retries next cycle" >&2
-fi
-```
-
-Run it with `--dry-run` to see the selection without writing, and
-`--stall-minutes N` to change the window (default 120).
-
-**What it reports, and what it must not.** A workflow is stalled only when ALL of
-these hold for at least the window: SILENT (no bead of the workflow written — the
-root or anything carrying `gc.root_bead_id`, in any status), UNHELD (no live session
-behind the root or any member), STARTED (the graph closed at least one step), and
-UNCLAIMABLE (its frontier — the members `gc bd ready` returns — is non-empty and
-every frontier bead is unassigned AND unrouted, so no pool and no session can be
-offered it).
-
-Every other wait has a name and is exempt: a live session is working it; a ROUTED
-frontier means demand exists and a quiet pool is the deacon's queue-starvation pass,
-not this one; an ASSIGNED frontier belongs to orphan recovery; an empty frontier
-means a blocker is naming the wait in the graph; `triage.hold` or `gc.takeaway` on
-the root or the anchor is an operator holding it deliberately. A suspended rig needs
-no test — it runs no patrol.
-
-**One carve-out on that last exemption (tk-2cyxo).** A `gc.takeaway` whose RECORDED
-WAIT — its `blocks` edges and its children — has fully closed names a wait that has
-ENDED, and stops muting: "next sitting when the findings land" is a hold until they
-land and a stale marker afterwards. `triage.hold` is never carved out, because it
-names its wait in prose with no edge to discharge. The predicate is asked of
-`detect-parked-dispositions.sh` (`--wait-spent`) rather than copied, and it fails
-closed — an absent sibling script or any unreadable read leaves the takeaway muting
-exactly as before.
-
-**The anchor is consulted for exactly two states, and this is the load-bearing
-choice.** `closed` and `merge_result=merged` mean the work landed, so the workflow
-is finished. Every OTHER state `quiesce-completed-workflows.sh` treats as terminal —
-`pull_request`, `pre_open_gate`, a refinery handoff, a human park — is deliberately
-NOT honoured here: an anchor carries several molecules over its life, and a REWORK
-molecule is poured against an anchor that already wears the previous round's
-`pull_request`. Reading that as "this workflow is done" is what made both live
-stalls invisible. The husk guard is instead the workflow's own evidence — a molecule
-that closed NO step is an inline-execution husk (mol-polecat-work closes none, ever,
-tk-p9ji9) and is exempt by construction, which is what keeps this pass from
-reporting most of the rig.
-
-**One signal per stalled workflow, never one per pass.** Two guards (tk-1g9yw). The
-PRIMARY is a visit-already-open check: before filing, the pass skips a root that
-already carries an open visit (matched by `stall_root`), the same way mol-liveness-sweep
-and mol-triage-recurrence skip a subject whose visit is already live. A visit may sit
-open indefinitely — the operator gets to it — so this guard, not any timer, bounds the
-converse fleet. The BACKSTOP, for after a visit is closed, is the `stall_flagged` marker
-on the root, keyed to the OBSERVATION — the sorted frontier bead-id set — exactly as
-`recover-stranded-branches.sh` keys `stranded_branch_flagged` to `<branch>@<tip>`. The
-marker is deliberately NOT keyed on the root's last-touch: stamping it is a `bd update`,
-which bumps `updated_at`, the very field a last-touch key is read from, so such a key
-re-flags the same workflow every stall window forever — the token amplifier tk-1g9yw
-fixed. A workflow that stays stuck keeps the same frontier and is never re-reported; one
-that advances and stalls again has a different frontier and earns exactly one more. This
-patrol runs continuously, so a per-pass signal would be a per-minute signal — the noise
-tk-jbv0r and tk-76jxq are about.
-
-The signal is one visit per stalled workflow on a standing `triage.scope=stalled-workflows`
-subject, routed to the rig's converse pool — the same shape and the same vocabulary
-mol-liveness-sweep files its batch visit in, so a stall lands where the board already
-looks. The visit is filed BEFORE the marker is stamped: a failed create then leaves
-the stall un-retired, while the reverse would retire it on a visit nobody saw.
-
-This pass REPORTS; it never repairs. It writes nothing to a member, a step or an
-anchor, and it has no close path at all.
-
-Regression test: `assets/scripts/detect-stalled-workflows.test.sh` (hermetic; stubs
-`gc`; covers the stall, the pull_request-anchor rework case, both landed-anchor
-exemptions, movement recorded only on a CLOSED member, the zero-closed-step husk,
-both liveness signals, a routed and an assigned frontier, an empty frontier, holds on
-the root and on the anchor, the empty-hold tri-state, the frontier-keyed dedupe marker
-and its re-flag, one visit per stalled bead across REPEATED passes with the real
-`updated_at` bump in play, the create-before-mark order, a failed create leaving the
-marker unstamped, all three fail-safes, that no bead is ever closed or written outside
-the visit, and that `--dry-run` writes nothing).
-
-**Exit criteria:** Stalled workflows signalled, or none found. Continue to
-`detect-parked-dispositions` — do NOT exit the wisp here. The `next-iteration` step is
-the only place that pours the next wisp and burns this one."""
-
-[[steps]]
-id = "detect-parked-dispositions"
-title = "Bring a parked conversation back — landed work, or a hold nobody is holding"
-needs = ["detect-stalled-workflows"]
-description = """
-File one visit back to converse on either of two observations: a parked,
-operator-origin subject whose routed work has all landed (tk-2cyxo), or a `holding`
-takeaway with no live sitting behind it (tk-jsyci7).
-
-**The failure this catches.** A `gc.takeaway` stamp does three unrelated jobs at
-once, and two of them conspire: it parks the board row at LOW (a conversation that
-reached a takeaway wants nothing and only has to stay findable), and it MUTES the
-stall detector above. So the one automation in the city that files visits is silenced
-by the exact stamp that records the wait, and a subject that dispatched work could
-never be brought back BY the system — only by the operator noticing a row.
-
-Measured on the incident that produced this step: `tk-z9nln` (an operator ask) parked
-with the takeaway *"next sitting when findings land"*. The findings landed at 17:54Z.
-At 22:13Z — **4h19m later** — the operator found it by eye. Nothing had noticed, and
-the audit's headline sat in a merged file, untold.
-
-```bash
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" \\
-            "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" \\
-            "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/detect-parked-dispositions.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# Best-effort, like every other patrol pass: a failed pass is retried next cycle and
-# must never abort the wisp. The -x guard means a rig that has not synced this script
-# keeps the old behavior (no return trip at all).
-if [ -n "$SCRIPTS_DIR" ]; then
-  "$SCRIPTS_DIR/detect-parked-dispositions.sh" \\
-    || echo "detect-parked-dispositions: pass failed (non-fatal); retries next cycle" >&2
-fi
-```
-
-Run it with `--dry-run` to see the selection without writing.
-
-**What makes a subject ready, and why it is wider than the board's own predicate.**
-Parked (`gc.takeaway` non-empty — an EMPTY stamp is a CLEARED park), operator-origin
-(`gc.origin=operator`, ruled deliberately narrow: that is the set where the operator
-has a standing expectation of an answer), and its recorded wait has at least one
-member and every one of them is CLOSED.
-
-The recorded wait is the union of the subject's `blocks` edges — what `gc-helm
-takeaway --waiting-on` writes, and all the board's `disposition_due` can see — AND
-its CHILDREN. The children half is not an embellishment: a sitting that routes work
-files it as a child of the subject, and a parent cannot be blocked by its own
-descendant (`bd` refuses the edge, because blocked cascades and the child would never
-close), so the canonical converse shape produces zero `waiting_on` edges. Keyed on
-`waiting_on` alone this pass could not fire for the subject the incident was measured
-on.
-
-**It never clears the takeaway.** That stamp is the durable record of what the sitting
-concluded — or of what it is still waiting for — and the operator's headline on the
-board; the visit is ADDITIVE. The pass writes only its observation markers
-(`disposition_flagged`, `hold_flagged`), one key per write, and only after a visit
-exists.
-
-**One visit per observation.** Same two guards as the pass above, for the same reason
-(tk-1g9yw): an open visit naming the subject is the primary bound — the filing goes
-through `gc-helm.sh open`, which owns that guard and matches BOTH recordings of a
-visit's subject — and `disposition_flagged`, keyed to the sorted id set of the work
-that landed, is the backstop for after that visit is closed. Never keyed on a
-timestamp: stamping the marker bumps `updated_at`, so such a key invalidates itself
-and re-files forever.
-
-**The second observation: a hold nobody is holding (tk-jsyci7).** The converse
-contract stamps `gc.takeaway` when a hold BEGINS — `holding — <the decision needed>`
-— precisely so a session reaped mid-hold leaves a dated trace. But that same stamp is
-what mutes the stall detector, and the un-mute above keys on a RECORDED wait closing.
-A sitting holding on the OPERATOR has no recorded wait at all: what it waits on is a
-human answer, not a bead. Nothing can close, so the mute never lifts.
-
-Measured the day it was filed: `tk-fhlv4` held from 06:09:20Z and was found by hand at
-16:2xZ — **10h16m**, no live visit, no assignee, a substantive finding unanswered. It
-was not merely outside the disposition arm, it was RETIRED from it: that arm had
-already fired and stamped `disposition_flagged` when its routed work landed, and the
-sitting then re-parked into a hold, which routes nothing — so no new landed set can
-ever form and that marker can never differ again.
-
-So: a `holding` takeaway, no visit naming the bead by any of its three recordings
-(`gc.continuation_group`, the `tracks` edge, or a visit's `stall_root` — the takeaway
-lands on the ITEM, so a stalled-workflow sitting stamps the ROOT), and nothing still
-recorded as in flight. That last half is what keeps it off work in progress: a hold
-whose recorded wait is OPEN is waiting, not stranded. No origin filter, unlike the
-arm above — a hold is by contract a wait on the operator whoever filed the subject.
-Deduped by `hold_flagged=<gc.takeaway_at>`, which BOTH arms stamp: a sitting that
-concludes a disposition visit does not always clear a takeaway that still reads
-"holding", and without that record the two arms would hand the subject back and forth
-one visit per pass.
-
-**It also owns the predicate the step above asks for.** `--wait-spent <bead-id>`
-answers whether a takeaway's recorded wait has fully closed;
-`detect-stalled-workflows.sh` calls it before letting a takeaway mute a stall, rather
-than keeping a second copy that drifts.
-
-Regression test: `assets/scripts/detect-parked-dispositions.test.sh` (hermetic; stubs
-`gc` and `gc-helm.sh`; covers readiness by edge, by child and by both, an open child
-or blocker holding the subject, a parent-child row on the subject NOT being read as
-routed work, a park that routed nothing, an agent-origin park, an empty takeaway,
-both recordings of an already-open visit, the dedupe marker and its re-flag, an
-unresolvable blocker, both fail-safes, a filing that exits 0 without filing, the
-takeaway never being cleared, `--dry-run`, one visit across repeated passes with the
-real `updated_at` bump in play, and every answer of `--wait-spent`; and for the hold
-arm: a stranded hold, one on a subject nobody filed as operator-origin, a mid-flight
-hold that is NOT signalled, the per-hold dedupe and its re-stamp, the already-disposed
-subject that only this arm can reach, an item held by a live sitting through its
-visit's `stall_root` alone, an undated hold with and without an existing marker, and
-that closing one arm's visit does not hand the subject to the other).
-
-**Exit criteria:** Dispositions signalled, or none due. Continue to
-`check-polecat-health` — do NOT exit the wisp here. The `next-iteration` step is the
-only place that pours the next wisp and burns this one."""
-
-[[steps]]
-id = "check-polecat-health"
-title = "Check polecat work progress"
-needs = ["detect-parked-dispositions"]
-description = """
-Detect polecats that are alive but not making progress on their work.
-
-The controller detects dead agents and restarts them. But a polecat can
-be alive and stuck — infinite loop, blocked on something, or just not
-progressing. The controller can't detect this; it's a work-layer judgment.
-
-**Step 1: Find active polecat work beads:**
-```bash
-gc bd list --status=in_progress --json --limit=0
-```
-Filter for beads assigned to polecat-pattern agents in YOUR rig.
-
-**Step 2: For each, assess progress:**
-
-Check the work bead's `UpdatedAt` timestamp and the polecat's molecule
-wisp freshness. Consider:
-
-- **Recently updated** → making progress, skip
-- **Stale but agent is in a long tool call** → might be fine, use judgment
-- **Very stale, no wisp progress** → likely stuck
-
-There are no hardcoded thresholds. Consider the nature of the work, the
-time elapsed, and whether the agent shows any signs of activity. This is
-judgment work — exactly why an LLM does it, not Go code.
-
-**Quota-parked is NOT stuck — and do not read the pane to decide that.** A
-polecat whose turn ended inside a provider quota block sits at an idle prompt
-under the limit banner: nothing drives it until the window reopens, so from
-the work layer it looks exactly like a stuck one. Warranting it runs the
-shutdown dance on a healthy session with live context, and the fresh polecat
-hits the same block.
-
-Ask the recovery order rather than the screen. It classifies without an LLM
-and answers in closed fields:
-
-```bash
-QPN=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/quota-park-nudge.sh" ] && { QPN="$cand/assets/scripts/quota-park-nudge.sh"; break; }
-done
-[ -n "$QPN" ] && "$QPN" --status "<session-id>"
-```
-
-- `quota_park=yes` — confirmed parked within the last few minutes and being
-  nudged. **Defer** the warrant this cycle and say so in your log. A bounded
-  defer, not a standing suppression.
-- `quota_park=no` — the order looked at that session recently and it is not
-  parked (or the operator excluded it from recovery). Normal warrant path.
-- `quota_park=unknown` — it vouches for nothing about this session, and
-  `reason=` says which kind of nothing:
-  - `reason=no-recent-sweep` — no pass at all lately. Quota-park recovery
-    itself looks down; normal warrant path, and say so in your log.
-  - `reason=not-swept` — a pass ran but never reached this session (deferred by
-    the sweep budget, an unreadable pane, an id it refused). Ordinary partial
-    coverage, not an outage; normal warrant path, no alarm.
-  - `reason=stale-episode` — it saw a park here once and nothing has confirmed
-    it since. Normal warrant path.
-  - `reason=unsafe-session-id` / `reason=foreign-state` — it holds no usable
-    state for that session: an id it will not name a file with, or something at
-    that path it did not write. Normal warrant path, no alarm.
-  - `reason=state-dir-unavailable` — its state directory cannot be created or
-    written, so it holds no evidence about any session and can record none.
-    Quota-park recovery itself looks down; normal warrant path, and say so in
-    your log.
-- **No output, or output you cannot parse** — the helper was not found (`QPN`
-  empty), is not executable, or printed nothing: the `[ -n "$QPN" ] && …` above
-  yields an empty string in each case. That is `unknown`, never `no` and never
-  `yes`. Normal warrant path, and log it as *recovery status unavailable* — the
-  same as `reason=no-recent-sweep`, because it means the same thing: there is no
-  recovery to defer to.
-- `escalated=1` on a session you already deferred once — nudging has not
-  brought it back and a human has been mailed. Escalate to the mayor rather
-  than deferring again in silence.
-
-**Why not just peek the pane.** Pane text is agent-controlled output. A wedged
-— or prompt-injected — agent can print a provider-shaped banner and idle, and
-a warrant path that stands down on that alone is an off switch any agent can
-reach for itself, on the one path that would have recovered its work. The
-status surface above emits no pane text at all. Peek the screen afterwards if
-you want to see it; never as the input to the decision.
-
-(Bead tk-al95k, docs/quota-park-recovery.md.)
-
-**Step 3: For stuck polecats, file a warrant:**
-
-Do NOT kill the agent directly. File a warrant bead and let the dog pool
-handle the shutdown dance (multi-stage interrogation with due process):
-
-```bash
-gc bd create --type=task \
-  --title="Stuck: <agent>" \
-  --metadata '{"target":"<session-name>","reason":"No progress on <bead> for <duration>","requester":"witness","gc.routed_to":"{{binding_prefix}}dog"}' \
-  --label=warrant
-```
-
-The dog pool picks up the warrant and runs `mol-shutdown-dance`, which
-gives the polecat 3 chances to prove it's alive before killing it.
-
-**Step 4: Log assessment:**
-
-Note which polecats were checked and their status for observability.
-Don't escalate to mayor for individual stuck polecats — the warrant
-system handles it. Only escalate if you see a pattern (many stuck
-polecats, systemic issue).
-
-**Exit criteria:** All active polecat work beads assessed. Warrants
-filed for stuck agents. Or no stuck polecats found. Continue to
-`next-iteration` — do NOT exit the wisp here. The `next-iteration` step
-is the only place that pours the next wisp and burns this one."""
+One escalation per stuck bead, never a queue-wide roundup. Close this step
+and continue to next-iteration."""
 
 [[steps]]
 id = "next-iteration"
 title = "Pour next iteration and loop"
-needs = ["check-polecat-health"]
+needs = ["check-refinery"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-End of patrol cycle. Pour the next iteration, then wait or exit.
-
-**1. Pour next iteration BEFORE burning — and GUARD the assign:**
-
-The pour and the assign are two separate writes. If the assign fails and
-you burn anyway, the next wisp is left with NO assignee: it never lands on
-your hook, so the loop is DROPPED, and because it is invisible to every
-assignee-scoped query it also leaks forever, one row per interrupted cycle
-(tk-fj56a; one found live at ~3.5h old, 2026-07-28). So on any failure,
-roll the pour back and do NOT proceed to step 3 — a surviving current wisp
-is recoverable, a dropped loop is not. The startup reconcile is the
-backstop, not the fix: it now scans by TITLE rather than assignee, so it
-can collect a stray this rollback misses.
+**1. Pour next iteration BEFORE burning — and GUARD the assign.** The pour
+and the assign are separate writes; a wisp poured but not assigned reaches
+no hook and drops the loop, invisibly (the prompt's title-scoped startup
+reconcile is the backstop, not the fix). Forward every declared var — a
+--root-only pour materializes no defaults. Keep the pour on ONE line (TOML
+eats a trailing backslash):
 
 ```bash
 # >>> patrol-wisp-pour
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var escalation_cooldown='{{escalation_cooldown}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1
@@ -1894,87 +268,23 @@ if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
 fi
 # <<< patrol-wisp-pour
 ```
+If either guard fires, stay on the current wisp and retry next cycle; skip
+steps 2 and 3.
 
-If either guard fires, stay on the current wisp and retry the pour on the
-next cycle. Skip steps 2 and 3.
-
-**Forward EVERY declared var, not just `binding_prefix`.** A `--root-only`
-pour materializes no formula defaults, so a var that is not passed on this
-line reaches the next wisp unrendered and the loop silently reverts to
-whatever fallback the consumer happens to have — the script's built-in 24h
-for `escalation_cooldown`, nothing at all for `event_timeout`. Each wisp is
-one iteration of the SAME loop, so a configured value that survives only
-the first cycle is not configured at all: this pour is the only thing
-carrying it forward. Passing an unrendered `{{var}}` through is harmless —
-it arrives exactly as unrendered as it would have been — so forward them
-unconditionally rather than trying to detect which ones were set.
-`witness-escalation-wiring.test.sh` enumerates `[vars.*]` from this file and
-fails if any declared var is missing from this line, so a var added later
-cannot quietly stop propagating.
-
-Keep the pour on ONE line. This is a TOML triple-quoted string: a trailing
-backslash continuation is eaten before the witness ever sees it, and the
-wrapped remainder ships as separate commands.
-
-**2. Wait before next cycle:**
+**2. Wait before the next cycle** — a bounded clock-poll in ONE tool call
+(the harness blocks a standalone sleep, and caps one call at 600s):
 ```bash
 end=$(( $(date +%s) + {{event_timeout}} ))
 until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
 ```
-
-This wait is the loop's ONLY backoff — do not skip it, and do not
-replace it with a bare `sleep {{event_timeout}}`. The agent harness
-blocks a standalone `sleep`:
-
-    Blocked: standalone sleep 60. To wait for a condition, use Monitor
-    with an until-loop
-
-A blocked wait is not a no-op that costs one tool error — it silently
-removes all pacing, and the patrol re-cycles as fast as it can spawn.
-The bounded clock-poll above is accepted by the harness and keeps the
-same fixed-duration semantics.
-
-Keep this wait inside ONE tool call and keep {{event_timeout}} at or below
-600 seconds. The harness caps a single call at 600 s and SIGTERMs it at the
-cap mid-wait, so a larger value does not wait longer — it silently returns
-whatever pacing fit under the cap, and the configured number stops meaning
-anything. Raising the interval past 600 s means first making the wait
-resumable across calls (persist the deadline, re-enter the loop until it
-passes), not just raising the number.
-
-Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed duration gives predictable idle cost.
 
 **3. Burn this wisp — only if step 1 succeeded:**
 ```bash
 gc bd mol burn <this-wisp-id> --force
 ```
 
-Burning is conditional on the next wisp existing AND being assigned to
-you. Never burn to "clean up" after a failed pour: that trades one
-recoverable wisp for a stopped patrol loop.
+Re-read the plain `gc formula show mol-witness-patrol` for step order (not
+the full --json; pull one step's description only as you reach it).
 
-The new wisp is ready. Do NOT re-read the whole formula to start the
-next cycle. `gc formula show mol-witness-patrol --json` is ~42KB
-(~11k tokens); an idle cycle uses under 10% of it, and 4 witnesses
-re-reading it every cycle costs ~12M tokens/day.
-
-Read the plain form (~6KB) for step order and Config values:
-
-```bash
-gc formula show mol-witness-patrol
-```
-
-Then pull a single step's description only when you are about to run
-that step — substitute the step id you need:
-
-```bash
-gc formula show mol-witness-patrol --json 2>/dev/null \
-  | jq -r '.steps[] | select(.id | endswith(".check-inbox")) | .description'
-```
-
-The invariant that must survive the cheaper read: every step is one leg
-of THIS wisp. Never exit the wisp from an intermediate step — continue
-to the next step, or jump to next-iteration to pour and burn.
-
-**Exit criteria:** Next wisp poured and assigned, this wisp burned. Or:
-the pour/assign guard fired, this wisp still alive, retry next cycle."""
+**Exit criteria:** next wisp poured and assigned, this one burned — or the
+guard fired and this wisp survives for the retry."""

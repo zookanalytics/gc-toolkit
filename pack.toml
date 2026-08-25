@@ -1,252 +1,73 @@
-# gc-toolkit — primary pack for a Gas Town city.
+# gc-toolkit — primary pack for a Gas City city. Native roster, no imports.
 #
-# gc-toolkit imports the gastown pack wholesale and layers per-agent
-# patches. See specs/tk-0t1ip/pack-patch-timing-analysis.md for the
-# safety analysis and prerequisites: no city-level [imports.gastown],
-# no [rigs.imports.gastown].
+# Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
+# witness, deacon, converse, mechanik, polecat-codex, proactive). There is no
+# gastown import and there are no cross-pack prompt patches: each agent's
+# prompt.template.md is purpose-written and injects shared doctrine from
+# template-fragments/ directly.
 #
-# Native gc-toolkit agents (mechanik, converse, proactive, polecat-codex,
-# _polecat-gemini) ship under agents/. Gastown roster (boot, deacon, mayor,
-# polecat, refinery, witness) is imported and divergences are
-# expressed as bare-name [[patches.agent]] — pure fragment-append
-# overlays on top of base prompts. Each gc-toolkit-specific doctrine
-# (heartbeat-no-consent-ui, layered-startup-discovery-{boot,deacon,refinery,witness},
-# convoy-integration-branch-mayor, polecat-convoys, polecat-append-notes,
-# file-work-records, operator-next-step-trailing, file-feedback-observations,
-# learned-conventions-polecat) lives in template-fragments/ and is named
-# explicitly in inject_fragments_append below; the base prompt template is
-# reused verbatim from gastown. No whole-file prompt mirrors.
-#
-# One doctrine fragment is deliberately NOT injected here:
-# polecat-non-impl-done is carried by agents/polecat-codex/agent.toml alone.
-# See the polecat patch below for why, and
-# doctor/check-polecat-fragment-sync for the declared exception that keeps
-# the divergence honest.
-#
-# Opt-in sub-packs ship under packs/<name>/ and are imported by
-# specific rigs (not by gc-toolkit's importers). The first sub-pack
-# is `packs/gascity-keeper/` — the keeper agent + the
-# mol-upstream-gc-* formula family + the refinery rebase-handling
-# overlay, all of which are gascity-fork-specific and should not be
-# loaded into rigs that don't carry a fork. See
-# `packs/gascity-keeper/pack.toml` for the import wiring that the
-# gascity rig adds in city.toml.
-#
-# Dog is intentionally NOT vendored: the imported gastown pack owns the
-# dog pool (gastown/agents/dog/; gastown pack.toml: "This pack owns its
-# dog pool") and ships dog as a city-scoped agent, so gc-toolkit needs no
-# roster entry of its own.
+# OVERLAY WIRING. Claude-hook overlays (overlays/cycle-recycle,
+# overlays/work-context) are staged into an agent's work dir via
+# `overlay_dir`, which the pack format carries only on [[patches.agent]] —
+# agent.toml has no overlay key. A patch modifies an EXISTING agent, and a
+# pack may patch its own, so each stanza below targets one of our native
+# agents and carries nothing but the overlay. Both hooks self-gate by role
+# and are safe no-ops elsewhere.
 
 [pack]
 name = "gc-toolkit"
 schema = 2
 
-[imports.gastown]
-# gastown composes from the public gascity-packs registry, resolved from
-# the user-global pack cache (the running binary pre-seeds that cache with
-# its embedded gastown PackFS at this pin). Builtin packs are not
-# materialized into a per-city .gc/system/packs tree; see
-# cmd/gc/embed_builtin_packs.go.
-source = "https://github.com/gastownhall/gascity-packs/tree/main/gastown"
-version = "sha:33d3a430a67d1782ad364556cb566bdb01d0afe3"
-
 [global]
-# Ordering is load-bearing. Gastown's tmux-theme.sh runs first (from
-# the imported pack) and sets the full status-bar theme, including a
-# status-right that points at gastown's status-line.sh. Our overrides
-# below run AFTER (see gascity/internal/config/pack.go:1450 — "Collect
-# globals: included globals first, then this pack's own"; iterated
-# in order at runtime/tmux/adapter.go:824). The override script
-# rewrites status-right to point at gc-toolkit-status-line.sh, which
-# adds the composable title and indicator slots while preserving
-# gastown's tier theming and `%H:%M` time slot.
+# Ordering is load-bearing: bindings first, then the status-line override,
+# which rewrites status-right to gc-toolkit-status-line.sh (composable title
+# and indicator slots) while preserving the tier theme and %H:%M time slot.
 session_live = [
     "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
     "{{.ConfigDir}}/assets/scripts/tmux-status-line-override.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
 ]
 
-[[patches.agent]]
-name = "boot"
-inject_fragments_append = [
-    # Base boot reads the deacon's patrol wisp with `gc bd list ... --json` and
-    # no --include-infra, at two sites: the Step 2 triage query and the
-    # "Check deacon work" quick-reference row. Wisps are ephemeral
-    # (<store>.wisps), so both return empty on every wake and the triage rows
-    # keyed on wisp staleness can never fire (lx-ody8m). This fragment
-    # supersedes both sites.
-    "layered-startup-discovery-boot",
-]
-
-[[patches.agent]]
-name = "deacon"
-inject_fragments_append = [
-    "canonical-self-rename",
-    "heartbeat-no-consent-ui",
-    "layered-startup-discovery-deacon",
-]
-# Deterministic cycle-recycle: overlays/cycle-recycle/ ships a Claude `Stop` hook
-# (.claude/settings.json + .claude/hooks/cycle-recycle.sh) staged into this agent's
-# work dir. It self-gates to patrol roles, so the same overlay is a safe no-op
-# elsewhere.
-overlay_dir = "overlays/cycle-recycle"
-
-[[patches.agent]]
-name = "mayor"
-inject_fragments_append = [
-    "canonical-self-rename",
-    "convoy-integration-branch-mayor",
-    # The mayor rules on cross-store dispositions and is the one actor that
-    # REOPENS a closed bead, which is a write against somebody else's decision.
-    # Both halves of tk-isyz0 land on it: stamp a successor pointer when a
-    # ruling re-homes work, and never conclude "false close" from a
-    # single-store search.
-    "bead-disposition",
-    "operator-next-step-trailing",
-    # Feedback-learning capture: file corrective feedback as observation
-    # beads (specs/2026-08-learning-system/implementation-design.md §2a).
-    "file-feedback-observations",
-    # The `gc doctor` grant every agent carries (gastown's
-    # operational-awareness fragment, its closing bullet) is conditional but
-    # unbounded, and the mayor acted on it as a start-up sweep. tk-julp3 bounded
-    # it in the mechanik's own prompt body; the mayor's prompt is gastown's and
-    # carries no doctor reference of its own, so the bound has to arrive the way
-    # the grant does — as a fragment. Deliberately NOT city-wide via
-    # city.toml [agent_defaults]: that list reaches the deacon, which owns the
-    # instruments (tk-vvnkj, specs/tk-vvnkj/decision.md).
-    "health-instruments-boundary",
-]
-
+# Deterministic work-bead description delivery: a Claude PostToolUse hook
+# injects the claimed work bead's description right after the claim, so the
+# spec reaches the worker even on a mid-workflow respawn (tk-osf13). Gates
+# itself to claude-provider polecat pools.
 [[patches.agent]]
 name = "polecat"
-# polecat-non-impl-done is ABSENT ON PURPOSE — do not "restore" it.
-#
-# It is the largest artifact in this pack: 70,043 B rendered, 68% of the whole
-# polecat prompt, re-paid on every compaction. It documents the done sequence
-# for beads that produce no commits (PR signoffs, research), and the measurement
-# in specs/tk-23wdf/context-budget-ledger.md §7 candidate 1 is that 2.3% of this
-# pool's beads take that path — against 100% on polecat-codex, which is the
-# signoff pool and keeps the fragment (agents/polecat-codex/agent.toml).
-#
-# The cost of the omission is stated in the ledger and accepted, not overlooked:
-# the ~2% of claude-pool beads that are non-impl fall back to the impl done
-# sequence and hand a zero-commit branch to the refinery, which needs a human
-# nudge. The remedy is a research-dispatch emitter that names the method on the
-# bead (§6, second MIGRATE row) — nobody has written it — NOT re-adding 70 KB to
-# every spawn.
-#
-# doctor/check-polecat-fragment-sync asserts this list against every native pool
-# that shares the base prompt, so the divergence is declared there as a
-# pool-scoped exception. That declaration is what makes the fragment REQUIRED on
-# polecat-codex rather than merely tolerated: drop it there too and the check
-# errors.
-inject_fragments_append = [
-    "polecat-convoys",
-    # Base ships the impl done sequence in two places that are read as one
-    # instruction — approval-fallacy's "### The Done Sequence" and the prompt's
-    # own "## FINAL REMINDER" — and both write the handoff note with `--notes`,
-    # which REPLACES. Every handoff therefore destroys whatever notes the bead
-    # already carried (typically the mayor's dispatch note), invisibly, at the
-    # moment the bead is passed to the refinery (tk-t41dq). This fragment
-    # supersedes the `--notes` in both copies and in mol-polecat-work's
-    # submit-and-exit step. It is the anti-case to polecat-non-impl-done: a
-    # 2,583 B correction on the path EVERY polecat takes.
-    "polecat-append-notes",
-    # The same two done-sequence copies (plus mol-polecat-work's
-    # submit-and-exit) all end at `gc runtime drain-ack` without closing a
-    # single step bead. A graph.v2 step advances only by closing its own, so
-    # every completed run left its whole chain open, pool-routed and
-    # re-offered as new work — 490 of 746 open beads at the census (tk-zab6q).
-    # This fragment supersedes that ending in all three copies. Like
-    # polecat-append-notes, a correction on the path EVERY polecat takes.
-    "polecat-close-step-chain",
-    "file-work-records",
-    # Feedback-learning loop (specs/2026-08-learning-system/
-    # implementation-design.md §2a, §5): the capture fragment files
-    # corrective feedback as observation beads; learned-conventions-polecat
-    # is the distiller-managed rule surface, seeded empty. Any change to
-    # this list must be hand-synced into agents/polecat-codex/agent.toml
-    # inject_fragments (no automatic propagation) — and that hand-sync is
-    # checked by doctor/check-polecat-fragment-sync.
-    "file-feedback-observations",
-    "learned-conventions-polecat",
-]
-# Deterministic work-bead description delivery: overlays/work-context/ ships a
-# Claude `PostToolUse` hook that injects the work bead's own description right
-# after the polecat claims it. Upstream mol-polecat-work/mol-polecat-base read
-# the bead five times, always jq-filtered to one metadata field; the description
-# reaches the worker only through `load-context`'s prose `gc bd show`, which the
-# `implement` step never repeats and a mid-workflow respawn never runs. Both
-# paths degrade silently to title-only (tk-osf13). The hook self-gates to
-# GC_TEMPLATE polecat pools on the claude provider, so staging it elsewhere is a
-# no-op. doctor/check-work-context-hook guards the wiring.
 overlay_dir = "overlays/work-context"
 
+# Deterministic context recycle for the long-running patrol roles: a Claude
+# Stop hook recycles the session past a 200K input-token threshold
+# (docs/cycle-recycle.md). Gates itself to witness | deacon | refinery.
 [[patches.agent]]
 name = "refinery"
-inject_fragments_append = [
-    # Every other artifact in this pack already treats the refinery as a
-    # heartbeat agent: the cycle-recycle `Stop` hook self-gates to
-    # `witness | deacon | refinery`, doctor/check-cycle-recycle-hook requires
-    # the overlay on all three, and the fragment's own closing line says the
-    # rule "applies to all heartbeat agents (witness, deacon, refinery)".
-    # Only the injection was missing, which left the refinery the one patrol
-    # role whose hook will never prompt while the agent reading the prompt was
-    # never told not to — and the deacon and witness, who DO read the line, are
-    # told the refinery is covered.
-    #
-    # This is the same derivation error as operator-next-step-trailing below
-    # (tk-l1pj6): a fragment set scoped by "which roles does the operator
-    # converse with" rather than by what the fragment governs. It is also the
-    # same shape as the defect that widened the fragment itself (tk-17wggn,
-    # lx-nc2kw) — a guardrail that reads as covering a case it does not reach.
-    # check-cycle-recycle-hook now asserts the injection per-agent, so the trio
-    # cannot silently drift apart again.
-    "heartbeat-no-consent-ui",
-    "layered-startup-discovery-refinery",
-    # The refinery holds the human-approval merge gate, so its entire subject
-    # matter is work that is waiting on the operator — and it went the whole
-    # life of the rule without receiving it. On 2026-08-13 the gascity refinery
-    # spent ~7h escalating twice and re-narrating the clock over a queue whose
-    # only content was PRs awaiting the operator's own approval: exactly the
-    # behaviour of an agent that has never been told this is not reportable
-    # (tk-l1pj6).
-    #
-    # The omission was not an oversight about this one name. The set of agents
-    # that carry this fragment was derived from "which roles does the operator
-    # converse with", and the pack's own agent provenance wrote that reading
-    # down as fact — "deacon, witness and refinery … are patrol / automation
-    # roles, not operator-facing" (it lived in a PROVENANCE.md under the
-    # thread agents, removed with them in tk-5savt and still readable in git
-    # history). That is the right test for
-    # whether a role deserves an operator-spawnable sitting. It is the wrong
-    # test for this fragment, whose trigger is whether a human reads the
-    # agent's prose as a report. The refinery is precisely where the two tests
-    # diverge: nobody holds a sitting with it, and it still writes straight
-    # into the operator's attention (pane narration, escalations, and
-    # `gc.routed_to=human` on the beads it parks).
-    #
-    # doctor/check-operator-next-step-wiring now holds the corrected
-    # classification for every agent in the pack and fails closed on an
-    # unclassified one, so the next agent cannot inherit the same silence.
-    "operator-next-step-trailing",
-]
-# Deterministic cycle-recycle (see deacon patch above).
 overlay_dir = "overlays/cycle-recycle"
 
 [[patches.agent]]
 name = "witness"
-inject_fragments_append = [
-    "heartbeat-no-consent-ui",
-    # Base witness reconciles its patrol wisps with `gc bd list --type=molecule`
-    # and no --include-infra. Wisps are ephemeral (<store>.wisps), so those
-    # queries return empty and every restart pours a fresh wisp while leaking
-    # the prior one (tk-1waw2). This fragment supersedes both reconcile sites.
-    "layered-startup-discovery-witness",
-]
-# Deterministic cycle-recycle (see deacon patch above).
 overlay_dir = "overlays/cycle-recycle"
 
+[[patches.agent]]
+name = "deacon"
+overlay_dir = "overlays/cycle-recycle"
+
+# Named singletons. The pool templates (polecat, polecat-codex, converse,
+# proactive) need no stanza — instance expansion is their lifecycle.
 [[named_session]]
 template = "mechanik"
+scope = "city"
+mode = "always"
+
+[[named_session]]
+template = "refinery"
+scope = "rig"
+mode = "on_demand"
+
+[[named_session]]
+template = "witness"
+scope = "rig"
+mode = "always"
+
+[[named_session]]
+template = "deacon"
 scope = "city"
 mode = "always"

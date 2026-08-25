@@ -100,19 +100,47 @@ The loop, every visit:
    Before prepping, resolve what this sitting is about and who holds it:
    ```bash
    # >>> visit-fold-check
-   ITEM=$(gc bd show "$VISIT" --json \
-     | tr -d '[:cntrl:]' | jq -r '.[0].metadata.stall_root // ""')
+   V=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]')
+   ITEM=$(printf '%s' "$V" | jq -r '.[0].metadata.stall_root // ""')
+   # The claim reports the gc.continuation_group STAMP, and the stamp lands
+   # empty on a minority of visits while the `tracks` edge filed alongside
+   # it still carries the subject (tk-tu5g3). Recover it from the edge
+   # before using it as a filter — both predicates below key on it.
+   if [ -z "$SUBJECT" ]; then
+     SUBJECT=$(printf '%s' "$V" | jq -r '
+       [ ((.[0].dependencies // [])[]?
+           | select((((.type // .dependency_type // "") | tostring))=="tracks")
+           | ((.depends_on_id // .id // "") | tostring)) ]
+       | map(select(. != "")) | .[0] // ""')
+   fi
    ITEM="${ITEM:-$SUBJECT}"
-   HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
-     | tr -d '[:cntrl:]' \
-     | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
-         [ .[]
-           | select((.metadata.task_kind // "")=="visit")
-           | select((.metadata["gc.continuation_group"] // "")==$s)
-           | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
-           | select((.assignee // "")!="")
-           | .id ]
-         + [$v] | unique | .[0]')
+   if [ -z "$SUBJECT" ]; then
+     # Neither recording resolved. With an empty $s both predicates below
+     # degenerate to matching every empty-group visit — stall_root is empty
+     # on those too, so it falls back to $s and matches as well — and the
+     # lowest-id tiebreak would fold this sitting into one about an
+     # unrelated subject. You are the holder.
+     HOLDER="$VISIT"
+   else
+     HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
+       | tr -d '[:cntrl:]' \
+       | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
+           [ .[]
+             | select((.metadata.task_kind // "")=="visit")
+             | . as $c
+             # a sibling wears the same flaky stamp: read ITS group the same way
+             | (if (($c.metadata // {})["gc.continuation_group"] // "") != ""
+                then (($c.metadata // {})["gc.continuation_group"] // "")
+                else ([ ($c.dependencies // [])[]?
+                        | select((((.type // .dependency_type // "") | tostring))=="tracks")
+                        | ((.depends_on_id // .id // "") | tostring) ]
+                      | map(select(. != "")) | .[0] // "") end) as $cg
+             | select($cg==$s)
+             | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
+             | select((.assignee // "")!="")
+             | .id ]
+           + [$v] | unique | .[0]')
+   fi
    # <<< visit-fold-check
    ```
    **Fold only when `$HOLDER` is another visit's id** — then append
@@ -133,8 +161,27 @@ The loop, every visit:
    with ZERO sittings — recorded live as su-331y (workflow su-ykfw) and
    su-s1if (workflow su-vc8n) under group su-vehr. Lowest id holds, so
    the outcome is one sitting rather than none.
+
+   Both halves rest on `$SUBJECT` being known, which is why the block
+   refuses to fold when it is not. The claim reports the
+   `gc.continuation_group` STAMP, and that stamp lands empty on a
+   minority of visits (tk-tu5g3). With an empty subject the two filters
+   stop discriminating and the tiebreak becomes a coin-toss across
+   unrelated topics — the ZERO-SITTINGS outcome by the other door. The
+   `tracks` edge is the visit's second recording of its own subject and
+   has held where the stamp did not (su-ab9je); when even that is
+   missing, you hold.
+
+   Recovering only YOUR OWN subject is not enough. A sibling visit wears
+   the same flaky stamp, so a scan matching siblings by stamp alone
+   cannot see an empty-stamped one: two live sittings whose edges name
+   the same subject would each find only themselves, both read as
+   holder, and both proceed — the duplicate the lowest-id tiebreak
+   exists to collapse. So every candidate's group is resolved the same
+   stamp-or-edge way inside the scan; the listing already carries
+   `dependencies`, so this costs no extra read.
    `assets/scripts/converse-fold-scope.test.sh` runs this block against
-   both shapes; keep them in step.
+   every one of those shapes; keep them in step.
 2. **Re-check the premise.** A visit can sit for days before anyone
    claims it, and the condition that justified filing it routinely dies
    in the meantime. Test the VISIT's own premise against live state
@@ -153,7 +200,7 @@ The loop, every visit:
      | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'
    ```
    NON-EMPTY is the test — an EMPTY stamp is a CLEARED hold, not a hold
-   (the same tri-state `detect-stalled-workflows.sh` reads).
+   (the same tri-state the liveness sweep reads).
 
    Two readings end the visit here, with no sitting and nothing posted:
 
@@ -167,8 +214,8 @@ The loop, every visit:
      make is the bug this step exists to prevent (tk-mndjz).
 
      **A takeaway is not a benign wait when the wait it named has
-     ENDED.** A disposition visit — filed by
-     `assets/scripts/detect-parked-dispositions.sh`, and saying so —
+     ENDED.** A disposition visit — filed by the liveness sweep
+     (`assets/scripts/liveness-sweep.sh`), and saying so —
      exists *because* a parked subject's routed work all landed, so the
      subject it names necessarily carries a takeaway. Reading that stamp
      as "the wait is already named" closes the exact signal the stamp
@@ -249,7 +296,7 @@ The loop, every visit:
    it: reaped, the item still says what the sitting was waiting for and
    when. Unstamped, a reaped hold is indistinguishable from one that
    never happened — and it is now also what BRINGS THE HOLD BACK:
-   `assets/scripts/detect-parked-dispositions.sh` files a fresh visit on
+   the liveness sweep files a fresh visit on
    a `holding` takeaway that no live visit names, once per hold, keyed on
    this stamp's `gc.takeaway_at` (tk-jsyci7). Before that, a hold was the
    one wait nothing could re-ask — it names no bead to close, and the
@@ -282,7 +329,7 @@ The loop, every visit:
    **The stamp lands on the ITEM, not on the shared bucket.** Siblings of
    a standing scope would otherwise overwrite each other's headline — one
    field, one bucket, N sittings — and the readers that consume it look
-   at the item: `assets/scripts/detect-stalled-workflows.sh` treats a
+   at the item: the liveness sweep (`assets/scripts/liveness-sweep.sh`) treats a
    non-empty `gc.takeaway` on the workflow root (or its anchor) as the
    named wait that exempts it from being re-reported — until the edges
    that wait names have all closed, at which point it stops exempting
@@ -375,8 +422,8 @@ The loop, every visit:
 
    **A recorded wait is now also the return trip.** On an
    operator-origin subject (`gc.origin=operator`), once every recorded
-   wait has closed, `assets/scripts/detect-parked-dispositions.sh` files
-   a fresh visit back to this pool from the witness patrol — so the
+   wait has closed, the liveness sweep (`assets/scripts/liveness-sweep.sh`)
+   files a fresh visit back to this pool — so the
    conversation resumes without the operator having to notice a board
    row (tk-2cyxo). It reads two things as the recorded wait: the
    `--waiting-on` edges above, AND the subject's CHILDREN. If you filed
@@ -467,8 +514,7 @@ Rules:
   indistinguishable from a careless one from the store the bead lived in:
   a ruling executed this way on 2026-08-09 closed eight beads unpointed
   and cost four wrong conclusions downstream (tk-isyz0). Doctrine:
-  `docs/work-bead-state-machine.md` → "Disposition: a close that hands the
-  work to a successor".
+  `docs/state-machine.md` → "Disposition".
 - **Action needed → route through a formula, never a bare worker
   sling.** Discover the options: `gc formula list` if available, else
   read the `description` field of each `formulas/*.toml` in the rig
@@ -483,6 +529,10 @@ Rules:
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
 
+{{ template "canonical-self-rename" . }}
+
 {{ template "operator-next-step-trailing" . }}
+
+{{ template "operator-profile" . }}
 
 {{ template "file-feedback-observations" . }}

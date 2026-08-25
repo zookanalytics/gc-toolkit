@@ -1,1 +1,0 @@
-description = "The no-landing-path recovery stays shipped and wired — assets/scripts/recover-stranded-branches.sh with its regression test, called from the witness patrol's own step, so completed work that was pushed and then abandoned by a dying polecat cannot go back to being invisible to every detector at once (tk-f69ay)"

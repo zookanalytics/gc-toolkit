@@ -660,8 +660,10 @@ find "$STAGE" -name '*.scope' -delete
 
 # ---------------------------------------------------------------------- emit
 if [ "$MODE" = "check" ]; then
-    if [ ! -d "$OUT" ]; then
-        printf 'seed audit is MISSING at %s\n' "${OUT#"$ROOT"/}" >&2
+    # An absent tree — or the README-only stub a fresh checkout ships — is
+    # MISSING, not stale: the first render recreates it.
+    if [ ! -d "$OUT" ] || [ ! -f "$OUT/INDEX.md" ]; then
+        printf 'seed audit is MISSING at %s (first render recreates it)\n' "${OUT#"$ROOT"/}" >&2
         printf 'run: assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n' >&2
         exit 1
     fi

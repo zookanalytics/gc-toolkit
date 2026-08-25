@@ -1,0 +1,9 @@
+# refinery — per-rig merge-judgment patrol (named singleton, on_demand; the
+# [[named_session]] stanza lives in pack.toml). Runs mol-refinery-patrol.
+# The 60s merge cadence is the refinery-reconcile ORDER, not this session.
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/worktrees/{{.Rig}}/refinery/{{.AgentBase}}"
+nudge = "Run gc prime, then the startup wisp reconcile; process the merge queue."
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+idle_timeout = "2h"

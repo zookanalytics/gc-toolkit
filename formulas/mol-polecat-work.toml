@@ -1,103 +1,29 @@
 description = """
-Polecat work lifecycle — feature-branch variant.
+Polecat work lifecycle — feature-branch variant. Extends the core
+mol-polecat-base with worktree/branch setup, affected-aware self-review, and
+the refinery handoff. Run by every polecat in the city; the agent prompt
+carries the doctrine, this file carries the mechanics.
 
-## gc-toolkit MIRROR of the gastown formula of the same name
+Contract (self-cleaning model): receive work -> follow steps in order ->
+push branch, ONE atomic handoff update to the refinery -> close own step
+chain -> drain. NEVER close the work bead (the refinery closes it after a
+verified merge). ALWAYS close your own step beads through
+assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
+own bead, and step-close.sh resolves it from the (assignee, gc.step_ref)
+pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead after a claim.
+workflow-finalize is the control-dispatcher's — never close it.
 
-This file SHADOWS `gastown/formulas/mol-polecat-work.toml`: the pack search
-order resolves `rigs/gc-toolkit/formulas` after `gastown/formulas`, so this
-copy is what every polecat in the city actually runs. It was copied verbatim
-from base on 2026-08-17 and then given two `submit-and-exit` deltas. Both are
-listed in `docs/gascity-packs.md` §7a and executed by
-`assets/scripts/submit-branch-gate.test.sh` — run that test after any
-reconciliation against base, because taking base's `submit-and-exit` wholesale
-silently restores both defects.
+Two distinct branch questions: {{base_branch}} is what the worktree is
+poured FROM (on a rework child, the reviewed branch — by design);
+metadata.target is where the work LANDS. submit-and-exit resolves the
+landing target once and fails closed; the marked submit-* blocks are
+extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
+after any edit here.
 
-**Why the deltas exist.** `{{base_branch}}` answers two different questions in
-this formula, and base's `submit-and-exit` treats them as one:
-
-- **branch FROM** — what `workspace-setup` pours the worktree from and what
-  `self-review` diffs against. On a rework this is the branch *under review*:
-  the signoff dispatch slings the child with
-  `--var base_branch=<reviewed branch>` on purpose, so the worktree has the
-  PR-only files (tk-qqgeo).
-- **merge INTO** — where the refinery lands the work. That is
-  `metadata.target`, which the signoff already set to the real landing branch
-  (`REVIEW_BASE`, normally `main`).
-
-`{{base_branch}}` is the first. Base's `submit-and-exit` spends it on the
-second, and separately rebuilds the branch name from a template as though
-`metadata.branch` did not exist — contradicting its own `workspace-setup`,
-which calls a pre-set `metadata.branch` authoritative. On a rework child both
-misread the same way: the gate rejects the branch this formula just told the
-polecat to check out, and the target write renders `target=<the branch being
-pushed>`, a self-merge. Fixed in `submit-and-exit` steps 1 and 5 (tk-3yj8g).
-
-Extends mol-polecat-base with feature-branch workspace setup and
-refinery-based submission. The polecat creates a feature branch,
-implements the work, then pushes and reassigns to the refinery for
-merge review.
-
-## Polecat Contract (Self-Cleaning Model)
-
-1. Receive work (molecule poured with this formula, assigned to you)
-2. Follow steps in order (read descriptions, execute, move to next)
-3. Submit: push branch, set metadata on work bead, assign to refinery, exit
-4. You are GONE — Refinery merges, closes the bead
-
-**No MR beads.** Work beads flow directly: pool → polecat → refinery → closed.
-The polecat sets `metadata.branch` and `metadata.target` on the work bead
-and reassigns it to the refinery. The refinery merges and closes.
-
-**NEVER CLOSE THE WORK BEAD.** You must not run `bd close` or set
-status=closed on the issue you were dispatched to implement. Even if you
-believe the code is already merged, reassign to refinery — only the refinery
-verifies merges and closes work beads.
-
-**ALWAYS CLOSE YOUR OWN STEP BEADS.** This is not an exception to the rule
-above; it is a different bead. A graph.v2 step advances only by closing the
-step bead that carries it, so a run that closes nothing leaves all seven steps
-open forever, `workflow-finalize` never becomes ready, and the whole chain is
-re-offered as if it were unstarted work. That is the husk generator this
-formula shipped for months (tk-y389z, tk-zab6q): the blanket "never close
-beads" rule was read as covering step beads, which are machinery, not work.
-
-The two are told apart by who owns them, not by judgement:
-
-| Bead | Carries | Closed by |
-|---|---|---|
-| work bead | the issue being implemented | the refinery, after a verified merge |
-| step bead | `metadata."gc.step_ref"` + your session as `assignee` | **you**, via `assets/scripts/step-close.sh` |
-| `workflow-finalize` | `gc.kind=workflow-finalize`, routed to `core.control-dispatcher` | the control-dispatcher — never you |
-
-`submit-and-exit` step 8 closes the chain. Close a step bead ONLY through
-`assets/scripts/step-close.sh`, which resolves the bead from the
-`(assignee, gc.step_ref)` pair — never from `$GC_TRIGGER_BEAD_ID` or
-`$GC_BEAD_ID`, both of which name the wrong bead after a hook-claim and fail
-silently (tk-niu2f, tk-7w69a). `doctor/check-step-close-owns-bead` enforces
-this.
-
-`{{base_branch}}` may come from the work bead's own `metadata.target` or
-be inherited from a parent convoy with `metadata.target` set.
-
-## Variables
-
-| Variable | Source | Description |
-|----------|--------|-------------|
-| binding_prefix | import binding | Agent identity prefix for bound Gas Town imports. |
-| affected_tests_command | rig `formula_vars` | Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full `test_command`. |
-
-**Rejection-aware.** If the work bead has `metadata.branch` and
-`metadata.rejection_reason`, a previous attempt was rejected by the
-refinery. Resume the existing branch — don't redo all the work.
-
-## Failure Modes
-
-| Situation | Action |
-|-----------|--------|
-| Tests fail | Fix them. Do not proceed with failures. |
-| Blocked on external | Mail Witness, mark yourself stuck |
-| Context filling | `gc runtime request-restart` (blocks until controller kills you) |
-| Unsure what to do | Mail Witness, don't guess |"""
+Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
+attempt bounced with the branch intact — resume it per metadata.prepare_mode
+(merge = shared branch, never rebase/force-push), don't redo the work.
+"""
 formula = "mol-polecat-work"
 extends = ["mol-polecat-base"]
 
@@ -106,11 +32,11 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, including trailing dot when bound."
+description = "Agent identity prefix (with trailing dot when bound) for the refinery handoff address."
 default = ""
 
 [vars.affected_tests_command]
-description = "Shell-safe affected-tests command. Must read `git diff --name-only origin/{{base_branch}}...HEAD` and run the matching test subset. From rig `formula_vars` or empty to run full test_command."
+description = "Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full test_command."
 default = ""
 
 [[steps]]
@@ -118,18 +44,15 @@ id = "workspace-setup"
 title = "Set up worktree and feature branch"
 needs = ["load-context"]
 description = """
-Ensure you have an isolated git worktree and a clean feature branch.
-Every check is idempotent — safe to re-run after crash/restart.
+Ensure an isolated git worktree and a clean feature branch. Every check is
+idempotent — safe to re-run after crash/restart.
 
-**Config: base_branch = {{base_branch}}**
+**Config: base_branch = {{base_branch}}** (resolved by `gc sling`:
+metadata.target on the bead, else the parent convoy chain, else the rig
+default branch)
 **Config: setup_command = {{setup_command}}**
 
-`{{base_branch}}` is resolved by `gc sling` in this order:
-1. `metadata.target` on the work bead
-2. `metadata.target` on the parent convoy chain
-3. the rig repo's default branch
-
-**1. Fetch latest and derive your work bead:**
+**1. Fetch and derive the work bead:**
 ```bash
 git fetch --prune origin
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -141,89 +64,51 @@ if [ -z "$WORK_BEAD_ID" ]; then
 fi
 ```
 
-**2. Ensure worktree exists.**
-
-Check if `metadata.work_dir` already records your worktree path:
+**2. Worktree — reuse or create.** Reuse `metadata.work_dir` when the
+directory still exists; otherwise create one scoped to the BEAD (not the
+agent) and record it immediately so restarts and witness recovery can find it:
 ```bash
 WORKTREE=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.work_dir // empty')
-```
-
-**If worktree path exists in metadata** — reuse it:
-```bash
-cd "$WORKTREE"              # Enter existing worktree
-```
-If the directory is missing (witness cleaned it, disk issue), fall through
-to create a new one.
-
-**If no worktree** — create one scoped to the bead, not the agent:
-```bash
-WORKTREE_PATH=$(pwd)/worktrees/"$WORK_BEAD_ID"
-git worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
-cd "$WORKTREE_PATH"
-```
-Record immediately so restarts and witness recovery can find it:
-```bash
-gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$WORKTREE_PATH"
-```
-
-Worktrees are scoped to the work bead (not the agent name) so that:
-- An agent can pick up new work even if an old worktree is being recovered
-- Multiple orphaned worktrees can coexist without collision
-- The witness cleans them independently per-bead
-
-**3. Ensure branch exists.**
-
-Check if `metadata.branch` already records a branch:
-```bash
-BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
-```
-
-**If branch exists in metadata** — treat it as authoritative. This
-metadata may come from rejection recovery or from a caller that wants
-work applied to an existing branch. Fetch the named remote branch first.
-If `origin/$BRANCH` exists, make the local branch fast-forward to that
-remote tip or stop on divergence:
-```bash
-git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || \
-    echo "Could not fetch metadata.branch=$BRANCH from origin. Checking local refs before stopping."
-if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-        git checkout "$BRANCH" || exit 1
-        git merge --ff-only "origin/$BRANCH" || {
-            echo "Local branch $BRANCH diverged from origin/$BRANCH."
-            echo "STOP. Reconcile the branch before continuing."
-            gc runtime drain-ack
-            exit 1
-        }
-    else
-        git checkout --track -b "$BRANCH" "origin/$BRANCH" || exit 1
-    fi
-elif git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    git checkout "$BRANCH" || exit 1
+if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
+  cd "$WORKTREE"
 else
-    echo "metadata.branch=$BRANCH was set but no local or origin branch exists."
-    echo "STOP. Do not create a different branch."
-    gc runtime drain-ack
-    exit 1
+  WORKTREE_PATH=$(pwd)/worktrees/"$WORK_BEAD_ID"
+  git worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
+  cd "$WORKTREE_PATH"
+  gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$WORKTREE_PATH"
 fi
 ```
-If resuming a rejected branch, bring it current with the base the way the
-refinery classified it — **not** always by rebase.
 
-`metadata.prepare_mode` is that classification, stamped by the refinery's
-`shared-branch-merge-mode` block in the same pass that rejected you: `rebase`
-for a disposable per-bead `polecat/<bead-id>` branch, `merge` for every other
-shape. A rebase REWRITES commits, which is free on your own throwaway branch and
-destructive on a branch other work already depends on — an owned convoy's
-`integration/*` branch carries commits that are already MERGED PRs, so rewriting
-them re-points those PRs at objects the branch no longer holds and leaves the
-originals dangling and GC-eligible (incident 2026-08-19, convoy tk-t80p1 ->
-PR #388, three merged PRs rewritten; tk-a0hva).
+**3. Branch — metadata.branch is AUTHORITATIVE when set** (rejection
+recovery, or a caller applying work to an existing branch). Fetch it,
+fast-forward only, and stop on divergence — never create a different branch:
+```bash
+BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
+if [ -n "$BRANCH" ]; then
+  git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || echo "Could not fetch metadata.branch=$BRANCH; checking local refs."
+  if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+      git checkout "$BRANCH" || exit 1
+      git merge --ff-only "origin/$BRANCH" || { echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."; gc runtime drain-ack; exit 1; }
+    else
+      git checkout --track -b "$BRANCH" "origin/$BRANCH" || exit 1
+    fi
+  elif git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    git checkout "$BRANCH" || exit 1
+  else
+    echo "metadata.branch=$BRANCH is set but no local or origin branch exists. STOP — do not create a different branch."
+    gc runtime drain-ack
+    exit 1
+  fi
+fi
+```
 
-The refinery refuses to rewrite such a branch itself. The hand-back is the way
-that rewrite still reaches one: the rejection routes the same bead to this pool,
-and this step is where a worker would rebase it. So read the mode and honor it.
-
+If resuming a REJECTED branch, bring it current the way the refinery
+classified it — `metadata.prepare_mode` is stamped by the refinery's prepare
+block: `rebase` for a disposable per-bead branch, `merge` for every other
+shape. A rebase rewrites commits, which is destructive on a branch other
+work already depends on (an integration branch carries already-merged PRs),
+so honor the mode:
 ```bash
 # >>> rejected-branch-resume-mode
 BEAD_JSON=$(gc bd show "$WORK_BEAD_ID" --json 2>/dev/null)
@@ -231,73 +116,44 @@ REJECTION=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.rejection_reason // 
 if [ -n "$REJECTION" ]; then
     PREPARE_MODE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.prepare_mode // empty')
     if [ "$PREPARE_MODE" = "merge" ]; then
-        echo "prepare_mode=merge: this is a SHARED branch — bringing it current by MERGE (rewriting it would orphan already-merged PRs)"
+        echo "prepare_mode=merge: SHARED branch — bring it current by MERGE; never rebase, amend, squash, or force-push it"
         git merge --no-edit origin/{{base_branch}}
-        # If conflicts: resolve them (this is likely the rejection reason), then
-        #   git add <resolved files> && git commit
-        # to complete the MERGE commit. Do NOT reach for git rebase, git merge
-        # --squash, git commit --amend, or a force-push to tidy the result: every
-        # one of them rewrites the shared history this mode exists to preserve.
+        # Conflicts (likely the rejection reason): resolve, git add, git commit.
     else
         git rebase origin/{{base_branch}}
-        # If conflicts: resolve them (this is likely the rejection reason)
-        # After resolving: git rebase --continue
+        # Conflicts: resolve, then git rebase --continue.
     fi
     gc bd update "$WORK_BEAD_ID" --unset-metadata rejection_reason
 fi
 # <<< rejected-branch-resume-mode
 ```
+Leave `prepare_mode` on the bead — it is the refinery's classification,
+re-stamped on every prepare.
 
-Leave `prepare_mode` on the bead. It is the refinery's classification, re-stamped
-on every prepare — clearing it here would hand the next rejection an unclassified
-branch.
-
-**If no branch** — create one and record it. Always branch from the
-freshly-fetched `origin/{{base_branch}}`, never from local
-{{base_branch}} or whatever branch happens to be checked out.
-Polecat worktrees are reused across beads, so the local copy of
-{{base_branch}} may lag the remote — branching from a stale local ref
-inherits already-merged commits with stale hashes and causes the next
-refinery rebase to reject for spurious "duplicate" conflicts.
-
+**If no branch**: create `polecat/<bead-id>` from the FRESHLY-FETCHED remote
+tip (a stale local base causes spurious duplicate conflicts at the refinery)
+and record it:
 ```bash
-git fetch origin {{base_branch}}                     # ensure origin ref is current
+git fetch origin {{base_branch}}
 BRANCH="polecat/$WORK_BEAD_ID"
-git branch -D "$BRANCH" 2>/dev/null || true          # drop any stale local branch with the same name
-git checkout -B "$BRANCH" "origin/{{base_branch}}"   # force-create from the freshly-fetched remote tip
+git branch -D "$BRANCH" 2>/dev/null || true
+git checkout -B "$BRANCH" "origin/{{base_branch}}"
 gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 ```
 
-Recording the branch early means:
-- Witness can find and salvage your work if you crash
-- Rejection-aware resume knows which branch to check out
-- The submit step updates the metadata (branch may change after rebase)
+**4. Clean state + setup:** `git status` should be clean; run
+`{{setup_command}}` (empty = skip).
 
-**4. Ensure clean working state:**
-```bash
-git status                  # Should be clean
-```
-
-**5. Run project setup (if configured):**
-```bash
-{{setup_command}}
-```
-Empty setup_command → skip.
-
-**Exit criteria:** In your worktree, on a clean feature branch, rebased
-on latest {{base_branch}}, deps installed, worktree and branch recorded
-on the bead."""
+**Exit criteria:** in the worktree, on a clean recorded branch, current with
+{{base_branch}}, deps installed."""
 
 [[steps]]
 id = "self-review"
 title = "Self-review and run tests (affected-aware)"
 needs = ["implement"]
 description = """
-Review your changes and verify they work. Override of mol-polecat-base
-`self-review` to support affected-test detection — when the rig configures
-`affected_tests_command`, only the tests touched by your diff run, instead
-of the full suite. Saves polecat time and reduces CI clog from PRs whose
-locally-runnable failures should have been caught before push.
+Review your changes and verify they work before handing off. Overrides the
+base self-review to support affected-test detection.
 
 **Config: setup_command = {{setup_command}}**
 **Config: typecheck_command = {{typecheck_command}}**
@@ -310,13 +166,11 @@ locally-runnable failures should have been caught before push.
 ```bash
 git diff origin/{{base_branch}}...HEAD
 git log --oneline origin/{{base_branch}}..HEAD
-git diff --stat origin/{{base_branch}}...HEAD
 ```
+Check for bugs, security issues, missing error handling, debug cruft,
+unintended file changes. Fix what you find.
 
-Check for: bugs, security issues, style violations, missing error handling,
-debug cruft, unintended file changes. Fix anything you find.
-
-**2. Run quality checks (skip empty commands):**
+**2. Quality checks (skip empty commands):**
 ```bash
 {{setup_command}}
 {{typecheck_command}}
@@ -324,52 +178,25 @@ debug cruft, unintended file changes. Fix anything you find.
 {{build_command}}
 ```
 
-**3. Run tests — affected subset if rig provides one, full suite otherwise:**
+**3. Tests — affected subset when the rig provides one, full suite otherwise:**
 ```bash
 if [ -n "{{affected_tests_command}}" ]; then
-    # Rig has an affected-tests detector. Run only the tests our diff
-    # touches — same logic the rig's CI uses to dispatch test workflows.
-    # The command must read `git diff --name-only origin/{{base_branch}}...HEAD`
-    # internally and execute the relevant test subset.
     {{affected_tests_command}}
 else
-    # No affected detector — run the full suite (legacy behavior).
     {{test_command}}
 fi
 ```
 
-**ALL CHECKS MUST PASS.** If your change caused the failure, fix it.
-If pre-existing, file a bead.
+**ALL CHECKS MUST PASS.** Your change caused the failure -> fix it.
+Pre-existing -> file a bead. A PR that fails locally fails in CI too — fix
+before submitting.
 
-Refusing to push on local failure is a feature: the rig's CI will run the
-same affected subset (and more), and a PR that already fails locally will
-fail in CI too — wasting reviewer attention and CI minutes. Fix before
-submitting.
+**4. Commit everything.** If uncommitted changes remain, commit them with a
+body explaining what slipped through implement (self-review touch-up, test
+addition, formatter run). NEVER discard implementation changes with
+`git checkout -- .`
 
-**4. Ensure everything is committed:**
-```bash
-git status                  # Must be clean
-git log origin/{{base_branch}}..HEAD --oneline  # Must show your commits
-```
-
-If uncommitted changes exist, commit them with a body explaining what
-slipped through the `implement` step (typically a self-review touch-up,
-test addition, or formatter run):
-```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-git add -A
-git commit -m "<type>: <imperative subject> ($WORK_BEAD_ID)" -m "$(cat <<'BODY'
-<Explain what these residual changes are: a self-review fix,
-test-only addition, formatter run, etc. Be specific.>
-BODY
-)"
-```
-
-NEVER discard implementation changes with `git checkout -- .`
-
-**Exit criteria:** All checks pass (affected subset OR full suite), all
-changes committed, working tree clean."""
+**Exit criteria:** all checks pass, all changes committed, tree clean."""
 
 [[steps]]
 id = "submit-and-exit"
@@ -378,25 +205,17 @@ needs = ["self-review"]
 description = """
 Hand off your work and self-clean. You cease to exist after this step.
 
-**1. Branch-shape gate (fails closed — non-negotiable).**
+The `# >>> submit-*` marked blocks below are extracted verbatim and executed
+by assets/scripts/submit-branch-gate.test.sh, so they must stay
+backslash-free (a TOML triple-quoted string eats a trailing backslash) and
+keep their markers.
 
-Before anything else, verify that the branch under your feet is the branch
-the refinery will merge. The refinery merges the branch recorded in your
-bead's `metadata.branch`; if you push from some other branch (your agent home
-branch, a stray local checkout, etc.), the handoff contract is broken and the
-bead is permanently stranded as "assigned to refinery, no merge target". See
-gastownhall/gascity#2082.
-
-**The invariant is `CURRENT_BRANCH == metadata.branch`, not a name template.**
-`polecat/<bead-id>` is how *fresh* work satisfies that invariant, and it is
-the right check only when `metadata.branch` is unset. A rework child filed by
-a REQUEST_CHANGES signoff arrives with `metadata.branch` already naming the
-reviewed branch, and `workspace-setup` step 3 says in as many words that such
-a value is AUTHORITATIVE — so gating on the template would reject the branch
-this very formula just told the polecat to check out. Obeying that literally
-is not merely inconvenient: cutting `polecat/<bead-id>` from the reviewed
-branch forks it, orphans the pre-open review bead's `review_branch` pin, and
-offers the refinery a second branch to land independently of the first.
+**1. Branch-shape gate (fails closed).** The refinery merges the branch in
+`metadata.branch`; pushing from any other branch strands the bead. The
+invariant is `CURRENT_BRANCH == metadata.branch` — `polecat/<bead-id>` is
+only how FRESH work satisfies it (a rework child legitimately stands on the
+reviewed branch that workspace-setup called authoritative; forcing the
+template there forks the branch under review):
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -405,15 +224,9 @@ WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 CURRENT_BRANCH=$(git branch --show-current)
 METADATA_BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
 if [ -n "$METADATA_BRANCH" ]; then
-    # Recorded by workspace-setup, or handed down by the caller (rejection
-    # recovery, a rework child resuming a reviewed branch). Either way it IS
-    # the merge target of record, so it is what this gate matches.
     EXPECTED_BRANCH="$METADATA_BRANCH"
     GATE_SOURCE="metadata.branch"
 else
-    # Nothing recorded a branch, so the per-bead convention is all there is to
-    # check — and checking it is what catches a polecat that skipped
-    # workspace-setup and is still sitting on its agent home branch.
     EXPECTED_BRANCH="polecat/$WORK_BEAD_ID"
     GATE_SOURCE="polecat/<bead-id> convention (metadata.branch unset)"
 fi
@@ -422,79 +235,44 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     echo "  current branch:  ${CURRENT_BRANCH:-<detached HEAD>}"
     echo "  expected branch: $EXPECTED_BRANCH"
     echo "  gate source:     $GATE_SOURCE"
-    echo ""
-    echo "Refinery handoff merges metadata.branch. Pushing this commit and"
-    echo "reassigning to refinery would strand the work."
-    echo ""
+    echo "Refinery handoff merges metadata.branch; proceeding would strand the work."
     if [ -n "$METADATA_BRANCH" ]; then
-        echo "This bead already names its branch, so do NOT create a different one:"
-        echo "  - git checkout '$EXPECTED_BRANCH'  (fetch it from origin if absent)"
-        echo "  - Move any commits you made on '${CURRENT_BRANCH:-<detached HEAD>}' onto it"
-        echo "  - Re-run submit-and-exit"
+        echo "This bead already names its branch — check out '$EXPECTED_BRANCH', move your commits onto it, re-run submit-and-exit."
     else
-        echo "Recover by re-running the workspace-setup step:"
-        echo "  - Create the per-bead worktree under this agent's worktrees/$WORK_BEAD_ID"
-        echo "  - Create branch '$EXPECTED_BRANCH' from origin/{{base_branch}}"
-        echo "  - Cherry-pick your commits from '${CURRENT_BRANCH:-<detached HEAD>}' onto it"
-        echo "  - Re-run submit-and-exit"
+        echo "Re-run workspace-setup: create '$EXPECTED_BRANCH' from origin/{{base_branch}}, cherry-pick your commits, re-run submit-and-exit."
     fi
-    echo ""
-    echo "Do NOT proceed past this gate."
     gc runtime drain-ack
     exit 1
 fi
-# The gate passed, so the checked-out branch is the one the refinery will
-# merge. Record it if nothing had — a divergent local state is invisible to
-# the refinery otherwise. When metadata.branch was already set it equals
-# CURRENT_BRANCH by the test above, so there is nothing to rewrite.
 if [ -z "$METADATA_BRANCH" ]; then
     gc bd update "$WORK_BEAD_ID" --set-metadata branch="$CURRENT_BRANCH"
 fi
 # <<< submit-branch-gate
 ```
 
-**1b. Resolve the landing target (fails closed).**
-
-`{{base_branch}}` is the branch this worktree was poured FROM. It is not
-necessarily where the work LANDS, and on the rework path it is definitely
-not: the signoff dispatch slings the child with
-`--var base_branch=<the reviewed branch>` so the worktree has the PR-only
-files (tk-qqgeo), while the child's `metadata.target` already names the real
-landing branch. Writing `{{base_branch}}` over that renders
-`target=<the branch you are pushing>` — a self-merge the refinery cannot
-perform, and a strand indistinguishable from a missing merge target.
-
-Resolve it ONCE, here, before the push: a bead that cannot name a landing
-branch then halts with nothing pushed and nothing to clean up. Steps 3 and 5
-both consume `$LANDING_TARGET` rather than re-deriving it, so the halt arm and
-the handoff arm cannot disagree about where the work was supposed to go.
+**1b. Resolve the landing target (fails closed).** `{{base_branch}}` is what
+the worktree was poured FROM, not necessarily where the work LANDS. A
+caller-set `metadata.target` always wins (a signoff sets REVIEW_BASE, an
+owned convoy its integration branch); `base_branch` fills in only for fresh
+work; a bead that can name neither halts with nothing pushed. Both consumers
+below read `$LANDING_TARGET`, so the halt arm and the handoff cannot
+disagree:
 
 ```bash
 # >>> submit-target-resolve
 EXISTING_TARGET=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.target // empty')
 BASE_BRANCH="{{base_branch}}"
 if [ -n "$EXISTING_TARGET" ]; then
-    # The caller already said where this lands: a signoff sets it to
-    # REVIEW_BASE, an owned convoy to its integration branch. Never overwrite
-    # an answer that came from someone who knew more than this step does.
     LANDING_TARGET="$EXISTING_TARGET"
 elif [ -n "$BASE_BRANCH" ] && [ "$BASE_BRANCH" != "$CURRENT_BRANCH" ]; then
-    # Fresh work: nothing recorded a target, and base_branch names a real
-    # branch other than this one, so branch-from and merge-into coincide.
     LANDING_TARGET="$BASE_BRANCH"
 else
     echo "TARGET RESOLUTION FAILED"
     echo "  metadata.target: <unset>"
     echo "  base_branch:     ${BASE_BRANCH:-<empty>}"
     echo "  current branch:  $CURRENT_BRANCH"
-    echo ""
-    echo "Nothing names a landing branch, and base_branch cannot stand in for"
-    echo "one: it is either empty or the branch being pushed. Recording it"
-    echo "would ask the refinery to merge a branch into itself, which strands"
-    echo "the bead exactly the way a missing merge target does."
-    echo ""
-    echo "Set the intended landing branch, then re-run submit-and-exit:"
-    echo "  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
+    echo "Nothing names a landing branch, and base_branch is empty or the branch being pushed — recording it would be a self-merge."
+    echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
     gc runtime drain-ack
     exit 1
 fi
@@ -502,38 +280,14 @@ echo "landing target: $LANDING_TARGET"
 # <<< submit-target-resolve
 ```
 
-**2. Final clean-state verification (safeguard):**
-```bash
-git status --porcelain
-```
-If ANY output (untracked files, uncommitted changes):
-```bash
-git add -A
-git commit -m "chore: capture remaining work ($WORK_BEAD_ID)" -m "$(cat <<'BODY'
-<Explain the remaining changes discovered by final clean-state
-verification and why they are safe to hand off.>
-BODY
-)"
-```
-This is a belt-and-suspenders check — self-review should have caught this,
-but we never push with untracked work left behind.
+**2. Final clean-state check:** `git status --porcelain`; any output gets
+committed (`chore: capture remaining work ($WORK_BEAD_ID)`) — never push
+with untracked work left behind.
 
-**3. Push your branch:**
-
-The `auto_push=false` arm is a *terminal* exit — it ends the run deliberately
-without a handoff — so it carries its own copy of step 8's chain-close block.
-It has to be a copy rather than a call: `exit 0` never reaches step 8, and each
-fenced block is its own shell, so a function defined in one is out of scope in
-the other. The suite pins the two byte-identical (modulo this arm's two-space
-indent), exactly as it already pins the prompt fragment's copy — a block
-written twice is how the `--notes` correction was defeated before (tk-t41dq).
-
-The `gc bd update` below is one long line on purpose. Everything between the
-markers is extracted from this file verbatim and executed by the test, so it
-has to be backslash-free: TOML eats a trailing backslash together with the
-newline and the next line's indent, and a shell continuation written here would
-mean the test runs something other than what the polecat reads. The suite
-asserts the absence.
+**3. auto_push=false halt arm, then push.** The halt arm is a TERMINAL exit,
+so it carries its own copy of the chain-close block — `exit 0` never reaches
+step 5, and each fenced block is its own shell (the test pins the copy
+byte-identical to step 5's, +2 indent):
 
 ```bash
 # >>> submit-auto-push-halt
@@ -543,18 +297,12 @@ if [ "$AUTO_PUSH" = "false" ]; then
   BRANCH=$(git branch --show-current)
   [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
   gc bd update "$WORK_BEAD_ID" --status=open --assignee="" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
-  # The bead is at rest. What is still open is the step chain, and it is still
-  # this session's — an opt-out halt strands the same husk as any other
-  # unclosed exit, and it is the one exit tidy enough to forget. Close it here,
-  # after the bead write and before the drain, for the reasons step 8 gives:
-  # forward order because `bd` refuses to close a blocked issue, and
-  # `workflow-finalize` left for the control-dispatcher.
   # >>> submit-halt-chain-close
   SC=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
-  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment (tk-niu2f)}"
+  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
   for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
     "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
@@ -563,122 +311,55 @@ if [ "$AUTO_PUSH" = "false" ]; then
   exit 0
 fi
 # <<< submit-auto-push-halt
-git push origin HEAD
-PUSH_EXIT=$?
-if [ $PUSH_EXIT -ne 0 ]; then
-    echo "PUSH FAILED (exit $PUSH_EXIT)"
-    echo "Branch '$CURRENT_BRANCH' was NOT pushed to origin."
-    echo "Aborting handoff — bead stays with polecat."
-    echo ""
-    echo "Diagnose the push failure (network, auth, force-needed?) and re-run submit-and-exit."
-    echo "NOTE: if metadata.prepare_mode=merge, a non-fast-forward rejection is NOT a force-push case."
-    echo "      That branch is shared; force-pushing it orphans already-merged PRs. Redo the resume as a merge."
-    gc runtime drain-ack
-    exit 1
-fi
-# Verify the ref is reachable on origin before trusting the push succeeded.
+git push origin HEAD || { echo "PUSH FAILED — bead stays with polecat. If prepare_mode=merge, a non-fast-forward rejection is NOT a force-push case (shared branch); redo the resume as a merge."; gc runtime drain-ack; exit 1; }
+# Verify the ref is actually on origin before trusting the push.
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 LOCAL_HEAD=$(git rev-parse HEAD)
-if [ -z "$REMOTE_REF" ]; then
-    echo "PUSH VERIFICATION FAILED"
-    echo "  git push exited 0 but 'git ls-remote' returned no ref for '$CURRENT_BRANCH' on origin."
-    echo "  Branch is local-only. Aborting handoff."
-    gc runtime drain-ack
-    exit 1
-fi
-if [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
-    echo "PUSH VERIFICATION FAILED"
-    echo "  origin/$CURRENT_BRANCH = $REMOTE_REF"
-    echo "  local HEAD             = $LOCAL_HEAD"
-    echo "  Branch tip on origin does not match local HEAD. Aborting handoff."
+if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
+    echo "PUSH VERIFICATION FAILED: origin/$CURRENT_BRANCH (${REMOTE_REF:-absent}) != local HEAD ($LOCAL_HEAD). Aborting handoff."
     gc runtime drain-ack
     exit 1
 fi
 ```
 
-**4. Clean up local branch (prevent stale branch accumulation):**
+**4. Clean up the local branch** (it is pushed; the refinery owns it now):
 ```bash
-BRANCH=$(git branch --show-current)
-git checkout --detach                 # Detach so we can delete the branch
-git branch -D "$BRANCH"              # Branch is pushed; refinery owns it now
+git checkout --detach && git branch -D "$CURRENT_BRANCH"
 ```
 
-**5. Update metadata on the work bead:**
+**5. ONE atomic handoff.** A single `gc bd update` carries the whole
+transition — target, notes, refinery assignee, cleared route — so no partial
+handoff can strand the bead between writes. `--append-notes`, never
+`--notes` (which REPLACES and erases the dispatch note). The empty
+`gc.routed_to` is deliberate: the direct assignment IS the handoff, and
+named-session work must not read as pool demand.
+
 ```bash
 # >>> submit-target-consume
 [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
-gc bd update "$WORK_BEAD_ID" --set-metadata target="$LANDING_TARGET" --append-notes "Implemented: <brief summary>"
+REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+gc bd update "$WORK_BEAD_ID" --status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --append-notes "Implemented: <brief summary>"
 # <<< submit-target-consume
 ```
-Branch was recorded in workspace-setup and re-verified by the gate in step 1.
-This adds the target for the refinery — `$LANDING_TARGET` from step 1b, which
-preserves a target the caller already set instead of overwriting it with
-`{{base_branch}}`. If an existing pull request was provided by the caller,
-`metadata.existing_pr` is preserved for refinery validation. The refinery
-records canonical `pr_url` only after verifying the PR is open and matches the
-branch, base, and origin repository.
 
-`--append-notes`, never `--notes`: a work bead reaching this step routinely
-carries the mayor's dispatch note — routing diagnosis, requirements added
-after filing, corrections aimed at the reviewer — and `--notes` REPLACES,
-erasing all of it at the exact moment the bead is handed to the people who
-most need it. The loss is invisible from inside this step: the update
-succeeds, the handoff works, and nothing downstream can miss a note it never
-saw (tk-6kf6r).
+`${GC_RIG:+$GC_RIG/}` renders the rig prefix only inside a rig session; a
+hand-written empty prefix (`/{{binding_prefix}}refinery`) strands beads.
 
-**6. Reassign to refinery:**
+**6. Wake the refinery (belt-and-suspenders — it polls anyway):**
 ```bash
-REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
-gc bd update "$WORK_BEAD_ID" --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to=""
-```
-
-`${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery` resolves to
-`$GC_RIG/{{binding_prefix}}refinery` when running inside a rig session,
-or `{{binding_prefix}}refinery` when running in an HQ-only city where
-the workspace is the rig. Writing a rendered empty rig prefix produces
-`/{{binding_prefix}}refinery` and strands beads outside the refinery pool.
-
-Set `assignee` to the configured refinery named-session identity and clear
-`gc.routed_to` because the direct assignment is the handoff. Generic pool
-demand is represented by unassigned work with `gc.routed_to=<target>`, so
-named-session work should not retain pool-demand metadata.
-
-The refinery will pick this up, rebase onto {{base_branch}}, run tests,
-merge, and close the bead. If there's a conflict, the refinery puts the
-bead back in the pool with `rejection_reason` metadata — a new polecat
-picks it up and resumes from the existing branch.
-
-**7. Signal refinery to check for work immediately (belt-and-suspenders):**
-```bash
-REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
 gc session wake "$REFINERY_TARGET" || true
 gc session nudge "$REFINERY_TARGET" "Run 'gc prime' to check merge queue and begin processing." || true
 ```
 
-The `gc bd update` in step 6 generates a `bead.updated` event the refinery's
-event-watch will see, but that can take up to `event_timeout` seconds. Wake
-starts a stopped on_demand session; nudge leaves a visible prompt for a running
-one as soon as it is ready for input. Failure is non-fatal: the refinery finds
-the work on its next poll.
-
-**8. Close this workflow's step chain (before draining).**
-
-This step and the `auto_push=false` arm in step 3 are the run's only *terminal*
-exits — the two places the session ends for good rather than halting for a
-resume — so both close the chain, each with its own copy of the block below.
-Every other arm in this step halts with the work resumable, and there the open
-chain **is** the recovery mechanism: a fresh polecat picks the run back up.
-
-The work bead is now the refinery's. What is still yours is the graph.v2
-machinery that carried this run, and it does not clean itself up: a step
-advances only by closing its own bead, so a session that drains while its
-steps are open leaves all seven behind. They keep `gc.routed_to` pointing at
-the polecat pool, the drain releases their assignee, and `load-context` — the
-one step nothing blocks — becomes ready and claimable. The next polecat is
-then offered a finished run that is indistinguishable from new work, and if
-it takes the offer at face value `workspace-setup` rebuilds a branch that may
-already be green-gated under a live review. This is the husk generator
-(tk-y389z, tk-zab6q); closing the chain here is what stops it.
+**7. Close this workflow's step chain.** The work bead is the refinery's;
+the step chain is still yours, and it does not clean itself up. Forward
+order is mandatory: each step blocks the next and `bd` refuses to close a
+blocked issue, so the chain only unwinds from the unblocked end (one-line
+proof: a reversed loop closes exactly one bead and reports five refusals).
+Run it only AFTER the handoff; never close `workflow-finalize` (the
+control-dispatcher's finalizer closes the root and force-closes stragglers
+once `submit-and-exit`, its only blocker, closes last). A non-zero
+step-close is a refusal to report, not a reason to stop the loop.
 
 ```bash
 # >>> submit-chain-close
@@ -686,62 +367,19 @@ SC=""
 for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-: "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment (tk-niu2f)}"
+: "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
   "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
 done
 # <<< submit-chain-close
 ```
 
-**The order is forward, and it is not a preference — `bd` enforces it.** Each
-step is blocked by the one before it, and `bd` refuses to close a blocked
-issue:
-
-    tk-3kabdu: updating issue: cannot close blocked issue: tk-3kabdu is blocked by [tk-8yvm91]
-
-So the chain can only unwind from the unblocked end. `load-context` closes
-first because nothing blocks it; closing it is what unblocks
-`workspace-setup`, and so on down to `submit-and-exit`. Any other order closes
-exactly one bead — whichever happens to be unblocked — and reports five
-refusals. Do not "improve" this into dependent-first; it was tried, and it is
-the shape above.
-
-**What the order costs, and why it is still safe enough.** Closing a step is
-what makes the next one *ready*, so this order does briefly publish a ready
-`workspace-setup` — the step that rebuilds a branch — before the loop reaches
-the end. That window is real and cannot be designed away, so it is bounded
-instead:
-
-- The steps stay **assigned to this session** for the whole loop. Pool
-  fallback only offers *unassigned* beads, so a ready step is not claimable
-  while you are alive, and the loop is six consecutive local calls.
-- The loop runs **after** the refinery handoff, so there is no unsubmitted
-  work for a mistaken claim to destroy.
-- `submit-and-exit` closes **last**, and it is the only blocker on
-  `workflow-finalize`. Reaching the end therefore arms
-  `core.control-dispatcher`, whose finalizer closes the workflow root and
-  force-closes any member still open — the backstop for anything this loop
-  missed.
-
-If the session dies mid-loop the remainder is re-pooled, which is exactly the
-pre-fix behaviour for a strictly smaller set of steps. Never run this loop
-before the handoff — or, in the `auto_push=false` arm, before the bead write
-that parks the branch as ready. Both are the moment the work stops being
-something a mistaken claim could destroy.
-
-A non-zero exit from `step-close.sh` means it refused — the bead it would have
-closed is not this session's for that step, or `bd` rejected the close — so
-the loop reports it and carries on. It must not stop the remaining steps from
-closing.
-
-**9. Signal reconciler and exit.**
+**8. Drain and exit:**
 ```bash
 gc runtime drain-ack
 exit
 ```
 
-`gc runtime drain-ack` tells the reconciler to kill this session. The
-reconciler only restarts you if the pool check command finds more work.
-You are GONE. Done means gone. There is no idle state.
-
-**Exit criteria:** Branch pushed, metadata set, bead reassigned, refinery signaled, step chain closed, drain acknowledged, session exited."""
+**Exit criteria:** branch pushed and verified, one atomic handoff written,
+refinery signaled, step chain closed forward, drain acknowledged. Done means
+gone."""

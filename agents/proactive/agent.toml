@@ -1,111 +1,42 @@
-# proactive — the dedicated, small, mr-only pool that runs slung first
-# reactions. Phase 4 of the Bead-Universe Operating Model
-# (specs/bead-universe/design-doc.md — Key Components 5-6, Phase 4). That
-# design is v1, superseded in part by specs/tk-h9pq5/design-doc.md (v2):
-# v2 replaced the binding and lifecycle and left Phase 4 standing, so v1
-# still governs here — read its supersession banner before citing the rest.
-#
-# "Proactive" in v1 is NOT a resident loop. It is a `mol-first-reaction`
-# (formulas/mol-first-reaction.toml) slung at a bead: a cheap first reaction
-# that reads the body, writes a first-reaction card to the notes, and files
-# a visit on the bead so the human arrives at advanced work.
-# This pool is where those slung reactions execute. It is a sibling of the
-# impl polecat pool — same worktree/refinery machinery — with three
-# deliberate differences:
-#
-#   max_active_sessions = 2   A DEDICATED, SMALL pool so proactive can never
-#                             starve impl work (the polecat pool keeps its own
-#                             5 slots). The design's "max 2-3"; start at 2.
-#
-#   work_query SHEDS at the   The city-wide session cap (design's "reconciler
-#   city cap                  clamp"). work_query is the WORKER's discovery query
-#                             (what a running worker greps for its bead); the
-#                             reconciler's SPAWN decision runs scale_check below.
-#                             Both carry this clamp and emit "no demand" (0 / [])
-#                             when active city sessions are at/over
-#                             GC_PROACTIVE_CITY_CAP (~8-16 band, default 20).
-#                             Only THIS pool consults the clamp, so proactive
-#                             is the first thing to shed under session pressure
-#                             (design degraded mode "proactive sheds first").
-#                             The clamp is INLINE here (not a tool call) because
-#                             work_query's template surface has no {{.ConfigDir}}
-#                             — only {{.Rig}}/{{.RigRoot}}/… — so a pack-relative
-#                             tool path would not resolve in importing rigs. The
-#                             same logic is mirrored, testably, in
-#                             tools/gc-proactive.sh `demand` (the gate fixture
-#                             drives that copy).
-#
-#   mr-only for code          A first reaction is notes-only by default. IF it
-#                             produces code, that output takes the codex-gated
-#                             `mr` path, never `direct` (the security
-#                             invariant — enforced by the city default
-#                             default_merge_strategy="mr", by GC_DEFAULT_MERGE_
-#                             STRATEGY below, and by tools/gc-proactive.sh which
-#                             refuses --merge direct). See PROVENANCE.md.
-#
-# Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on
-# mol-first-reaction --merge mr` (operator/board one-shot) or by the
-# process-scan `tools/gc-proactive.sh scan --sling` (movable-forward beads).
-# NOT a resident loop either way.
+# proactive — the dedicated, small, always-on pool that runs slung first
+# reactions (mol-first-reaction): read the bead, write a card to its notes,
+# file a visit. NOT a resident loop — triggered per bead by
+# `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction` or
+# `tools/gc-proactive.sh scan --sling`. max_active_sessions = 2 is the only
+# throttle: routed beads queue at zero cost until a slot frees, so the pool
+# never starves impl work and never drops a slung reaction. mr-only for any
+# code it produces. Demand ranking is mirrored testably in
+# tools/gc-proactive.sh (`demand`, `board_rank`) — keep the copies in sync.
+# Design: specs/bead-universe/design-doc.md Phase 4.
 
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/proactive/{{.AgentBase}}"
-nudge = "Run gc hook; proactive demand is routed first-reaction work (mol-first-reaction). If the city is at the session cap, you'll find nothing — drain."
+nudge = "Run gc hook; proactive demand is routed first-reaction work (mol-first-reaction). If the claim returns nothing, drain."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0
-# Dedicated + small: never starves the impl polecat pool's 5 slots. The
-# design's "max 2-3" budget; start conservative at 2.
 max_active_sessions = 2
 
-# THE DEFAULT-DISABLED GATE (auto-spawn opt-in). FIRST and gc-free: emit []
-# unless GC_PROACTIVE_ENABLED is truthy, so a disabled surface costs zero gc
-# calls. Mirrored in tools/gc-proactive.sh `proactive_auto_enabled`
-# (gate-asserted); keep the two in sync.
-#
-# THE CITY-WIDE SHED CLAMP (the reconciler clamp). Emit [] — no demand, so the
-# reconciler spawns nothing and an idle worker drains — when active city
-# sessions are at/over the cap. Otherwise emit the standard routed pool demand
-# (ready, unassigned, non-epic beads routed to this pool), RANKED BY BOARD
-# WEIGHT so the scarce slots go to the highest-priority work first (the board's
-# prio_w = max(0, 4-p), oldest-first within a band) instead of bd-ready's
-# oldest-across-all-priorities order. The pool suffix `gc-toolkit.proactive` is
-# fixed for this agent; only the rig varies, so it is templated and the rest is
-# literal (no shell metacharacters in rig names). The ranking jq is mirrored in
-# tools/gc-proactive.sh `board_rank`; keep the two in sync (gate-asserted).
+# work_query = the running worker's discovery query: routed demand ranked by
+# board weight (oldest-first within a band).
 work_query = '''
-_='' # env-prefix landing. The reconciler prepends VAR='…' to line 1; before the
-# `case` keyword that is a shell syntax error (exit 2, demand permanently 0). A
-# bare assignment line absorbs the prefix AND persists it for the gc calls below
-# (POSIX: assignments with no command word affect the current shell) — a `:` or
-# `true` landing would silently drop the prefixed variable instead.
-case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '[]'; exit 0 ;; esac
+_='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
 target="{{.Rig}}/gc-toolkit.proactive"
-active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
-if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '[]'; exit 0; fi
 r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
 if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 '''
 
-# scale_check is the reconciler's SPAWN predicate (work_query above is only the
-# running worker's discovery query). The PR #105 disable gate lived in work_query
-# alone, so spawns bypassed it; this mirrors that GC_PROACTIVE_ENABLED gate and
-# city-cap shed in COUNT form (0 = no demand = no spawn). Full rationale: tk-8j2g1.
+# scale_check = the reconciler's SPAWN predicate; the same demand in count
+# form (0 = no demand = no spawn) so a spawn always finds work to claim.
 scale_check = '''
-_='' # env-prefix landing — same rationale as work_query's line 1: an env
-# assignment cannot precede the `case` keyword, and a bare assignment both
-# absorbs and persists the prefixed variable.
-case "${GC_PROACTIVE_ENABLED:-}" in 1|true|yes|on) : ;; *) printf '0'; exit 0 ;; esac
+_='' # env-prefix landing — same rationale as work_query's line 1.
 target="{{.Rig}}/gc-toolkit.proactive"
-active=$(gc session list --json 2>/dev/null | jq '[(.sessions // [])[] | select(.state == "active")] | length' 2>/dev/null || echo 0)
-if [ "${active:-0}" -ge "${GC_PROACTIVE_CITY_CAP:-20}" ]; then printf '0'; exit 0; fi
 n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
 if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
 '''
 
-# The mr-invariant, belt-and-suspenders: even if a first reaction produces
-# code and reaches the refinery, the merge strategy defaults to mr (never
-# direct). Mirrors the refinery override in city.toml.
+# mr-invariant, belt-and-suspenders: code from a first reaction defaults to
+# the gated mr path, never direct.
 [env]
 GC_DEFAULT_MERGE_STRATEGY = "mr"

@@ -1,52 +1,42 @@
 # gc-toolkit
 
 A pack for [Gas City](https://github.com/gastownhall/gascity), the multi-agent
-runtime — custom agents, formulas, and planning workflows for getting work done
-while spending human attention sparingly.
+runtime. gc-toolkit gets work done by relentlessly focusing on high-bandwidth
+human interaction: agents do the cheap work before they interrupt, the surface
+makes judgment easier rather than transferring work back to the operator, and
+every lesson compounds into the pack so attention is never spent twice
+([docs/foundation.md](docs/foundation.md) is the charter).
 
-gc-toolkit is built directly on Gas City's primitives (beads, molecules, checks,
-skills, roles, routing); it does not depend on a *fork* of the runtime. It is **not** an
-extension of [gastown](https://github.com/gastownhall/gastown) — gastown is an
-example pack for Gas City, not an upstream. gc-toolkit borrows what is genuinely
-reusable from it (reusable molecules above all) and is otherwise an independent
-implementation of its own approach. Part of the agent roster is still stood up by
-importing gastown today, but that mechanism is transitional and being reduced —
-not the architecture.
+The pack is its workflows. Every component belongs to one of six:
 
-## Status
+| Workflow | What it does | Entry points |
+|---|---|---|
+| **work** | a filed bead becomes a pushed branch | `mol-polecat-work`, `lifecycle/lifecycle.toml`, `assets/scripts/lifecycle.sh` |
+| **review** | a gate verdict lands on the anchor | polecat pools (cadence-routed via `REVIEW_POOL`), `formulas/mol-review.toml`, `assets/scripts/signoff.sh` |
+| **merge** | gates green at the live head become a landed PR | `orders/refinery-reconcile.toml` + 5 arms ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
+| **visit** | a human decision is prepared, framed, and held for | `mol-visit`, converse, `assets/scripts/escalate.sh`, the helm board |
+| **feedback** | corrective lessons become standing pack behavior | feedback miner/distiller orders ([docs/feedback-learning.md](docs/feedback-learning.md)) |
+| **patrol** | drift between recorded and true state is repaired | witness / deacon patrols, `orders/liveness-sweep.toml`, `doctor/` |
 
-**Early.** Actively evolving. Prompts, formulas, and agent configs may change
-without warning. No stable release yet.
+## Roster
 
-## What's Here
+All agents are native to this pack — no gastown import.
 
-### Agents
-
-- **`mechanik`** — city-scoped structural engineer. Owns formulas, agent
-  configs, dispatch patterns, quality gates, prompt engineering, and
-  operational conventions. Analyzes patterns and designs improvements;
-  does not grind beads.
-
-### Formulas
-
-Coming soon. The goal is a planning pipeline loosely inspired by gt-toolkit's
-spec → plan → beads → deliver shape, but built for our own workflow and
-opinions rather than cloned directly.
-
-### Docs
-
-- `docs/foundation.md` — guiding beliefs and operating discipline behind gc-toolkit
-- `docs/architecture.md` — the 30,000-ft guide to how those beliefs are composed from Gas City's primitives, and the consistency test that keeps new work grounded
-- `docs/component-model.md` — the primitives that survive a from-scratch rewrite: the PR lifecycle as one state machine, and every invariant bound to a mechanical check
-- `docs/install.md` — wiring gc-toolkit into a city (imports, sub-packs, patches, verification)
-- `docs/gascity-reference.md` — index of canonical Gas City documentation at `docs.gascityhall.com`, plus the bar for adding new `docs/gascity-*.md`
-- `docs/gascity-local-patching.md` — recommended process for cities that must carry local `gascity` patches
-- `docs/file-structure.md` — conventions for where docs and specs live in this pack
-- `docs/skills.md` — how skills are authored, filed, and exposed so one `SKILL.md` serves both Gas City and (when portable) Claude / Codex
+| Agent | Kind | Job |
+|---|---|---|
+| `polecat` | worker pool | claims routed work beads, implements, hands off |
+| `polecat-codex` | worker pool (codex provider) | a polecat; the merge cadence routes review beads — beads carrying `mol-review` — to this pool |
+| `refinery` | patrol | merge judgment: rejection, blocked/refused calls; the mechanical cadence runs as an order |
+| `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
+| `deacon` | patrol | city infra health: dolt, doctor sweep |
+| `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
+| `converse` | conversation role | holds subject conversations, claims visits |
+| `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
+| `proactive` | optional | always-on first-reaction pass (2-slot pool) |
 
 ## Usage
 
-Import `gc-toolkit` from a rig in your `city.toml`:
+Import gc-toolkit from a rig in your `city.toml`:
 
 ```toml
 [[rigs]]
@@ -57,8 +47,8 @@ prefix = "mr"
 source = "rigs/gc-toolkit"
 ```
 
-gc-toolkit provides a `mechanik` named session template. Declare it
-once at the city level:
+gc-toolkit provides a `mechanik` named-session template. Declare it once at
+the city level:
 
 ```toml
 [[named_session]]
@@ -72,66 +62,34 @@ gc start
 gc session attach mechanik
 ```
 
-See [`docs/install.md`](docs/install.md) for the full install
-reference — remote imports, opt-in sub-packs (`gascity-keeper`),
-`[[rigs.patches]]` fragment wiring, per-rig overrides, and `gc
-doctor` verification.
+See [docs/install.md](docs/install.md) for the full install reference — remote
+imports, the opt-in `gascity-keeper` sub-pack, the helm `[[service]]` stanza,
+and `gc doctor` verification of the nine structural checks.
 
 ## Developing this pack
 
-Run once per clone, so the generated seed audit stays in step with the
-fragments it renders:
+Run `assets/scripts/render-seed-audit.sh --install-hook` once per clone. It
+wires `assets/hooks/pre-commit`, which regenerates `generated/seed-audit/` —
+the rendered standing prompt of every agent and compiled recipe of every
+formula, against a synthetic city — whenever a commit touches a renderer
+input (`agents/`, `template-fragments/`, `formulas/`, `packs/`, `pack.toml`,
+or the renderer itself). Nothing under `generated/` is hand-edited;
+`doctor/check-seed-audit-current` warns when the artifact is stale or absent,
+and `render-seed-audit.sh --check` verifies it exactly.
 
-```bash
-assets/scripts/render-seed-audit.sh --install-hook
-```
+## Docs
 
-That sets `core.hooksPath = assets/hooks`, which wires
-`assets/hooks/pre-commit`. The hook regenerates `generated/seed-audit/` only on
-a commit that touches the renderer's input set — `agents/`,
-`template-fragments/`, `formulas/`, `packs/`, `pack.toml`, or
-`assets/scripts/render-seed-audit.sh` itself, which carries the synthetic city
-the prompts render against; every other commit pays a single `git diff --cached`
-and exits.
-
-`generated/seed-audit/` is the artifact it maintains: the full standing prompt
-of every agent this pack configures and the compiled recipe of every formula it
-exposes, one file per scenario, with per-scenario byte and token counts in
-`INDEX.md`. It is a rendered mirror of things tracked elsewhere in this repo,
-not documentation anybody keeps current by hand — which is why it sits under
-`generated/` rather than `docs/`. Nothing in that tier is hand-edited; an edit
-to it survives until the next render and no longer. `.gitattributes` marks the
-whole tier `linguist-generated`, so a one-line fragment change arrives for
-review as that one line instead of as the 45-file re-render it also produced.
-
-`gc doctor` reports it when the hook is not wired, and
-`doctor/check-seed-audit-current` fails when a prompt input moved without the
-artifact moving with it. For certainty rather than the cheap digest comparison:
-
-```bash
-assets/scripts/render-seed-audit.sh --check
-```
-
-## Relationship to gastown
-
-gc-toolkit does **not** extend or augment gastown. Gastown is an *example pack*
-for Gas City, not an upstream that gc-toolkit builds on; its operating model
-diverges enough (notably the attention/board model) that gc-toolkit is best
-understood as an independent implementation of its own approach, built directly
-on Gas City.
-
-What gc-toolkit takes from gastown is what is genuinely reusable — reusable
-molecules above all. Part of the agent roster is also still stood up by importing
-gastown today, with gc-toolkit's opinions patched in on top, but that mechanism
-is transitional and being reduced — deliberately not the architecture. See
-[`docs/architecture.md`](docs/architecture.md) for how the pieces fit together.
+- [docs/foundation.md](docs/foundation.md) — beliefs and operating discipline (the charter)
+- [docs/architecture.md](docs/architecture.md) — how the workflows compose Gas City's primitives, and the consistency test for new work
+- [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
+- [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
+- [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
+- [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
 
 ## Related
 
-- [gascity](https://github.com/gastownhall/gascity) — the Gas City runtime gc-toolkit is built on
-- [gastown](https://github.com/gastownhall/gastown) — an example pack for Gas City; gc-toolkit borrows reusable pieces but does not extend it
+- [gascity](https://github.com/gastownhall/gascity) — the runtime gc-toolkit is built on
 - [gascity-packs](https://github.com/gastownhall/gascity-packs) — community packs
-- [gt-toolkit](https://github.com/Xexr/gt-toolkit) — Gas Town formula library (inspiration)
 
 ## License
 

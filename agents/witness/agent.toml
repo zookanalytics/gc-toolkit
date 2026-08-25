@@ -1,0 +1,8 @@
+# witness — per-rig work-health recovery patrol (named singleton, always;
+# stanza in pack.toml). Runs mol-witness-patrol: orphan recovery + refinery
+# queue health. Stall/parked detection is the liveness-sweep exec order's.
+scope = "rig"
+wake_mode = "fresh"
+work_dir = ".gc/agents/{{.Rig}}/witness"
+nudge = "Run gc prime, then the startup wisp reconcile; patrol the rig."
+idle_timeout = "2h"

@@ -12,7 +12,7 @@ Twice observed, two different providers:
 | Date | Provider | Parked | Cost |
 |---|---|---|---|
 | 2026-07-22 | Claude session limit | both rig witnesses | 1h26m still parked *after* the window reopened; no orphan recovery in either rig meanwhile |
-| 2026-08-02 | Codex usage limit | two review polecats | ~7h30m holding the gc-toolkit merge queue; cleared only when the mayor nudged by hand |
+| 2026-08-02 | Codex usage limit | two review polecats | ~7h30m holding the gc-toolkit merge queue; cleared only by a hand nudge |
 
 Both times every agent resumed within 20s of a single `gc session nudge`.
 Bug: `tk-al95k`.
@@ -90,7 +90,7 @@ wedged during the very incidents this order recovers from. Unbounded, one hung
 capped at `QUOTA_PARK_CALL_TIMEOUT` (a wedged one is skipped, not fatal) and the
 pass as a whole at `QUOTA_PARK_SWEEP_BUDGET`, after which the remainder defers
 to the next cycle rather than overlapping it — reported in the summary line, not
-silently. Same `run_bounded` idiom as `assets/scripts/merge-skill.sh`.
+silently. Same `run_bounded` idiom as `assets/scripts/merge.sh`.
 
 **And the bound is a hard one where the host allows it.** `timeout N` sends
 SIGTERM and then *waits*: a child free to ignore the signal runs as long as it
@@ -222,8 +222,8 @@ rule stated only in the first one does not reach the other two. Queue starvation
 is the easiest of them to get wrong: a quota-parked agent holds open beads with
 `bead.updated_at` frozen for hours, which is the starvation signature exactly.
 Seven warrants were filed against two quota-parked agents on 2026-08-02. If a
-park outlasts `QUOTA_PARK_ESCALATE_AFTER` (2h), one mail goes to the mayor —
-once per episode, not once per cycle.
+park outlasts `QUOTA_PARK_ESCALATE_AFTER` (2h), one escalation visit is filed
+via `escalate.sh` — once per episode, not once per cycle.
 
 "Hold back" is the whole of it, though, and not "never warrant": each of those
 steps asks this order for a verdict rather than reading the pane, and defers only
@@ -342,18 +342,19 @@ redirects into rather than replaces, which is why a planted symlink or FIFO is
 still safely destroyed rather than followed.
 
 `escalated` is a **0/1** field. The state file carries a third value —
-`unconfirmed`, for a mail whose bound expired mid-send — but that is internal
-bookkeeping for the resend suppression, and from the moment it is recorded this
-script behaves as though the human was mailed, so the surface reports `1`. The
+`unconfirmed`, for an escalation whose bound expired mid-write — but that is
+internal bookkeeping for the resend suppression, and from the moment it is
+recorded this script behaves as though the human was notified, so the surface
+reports `1`. The
 patrols and this doc define only `0` and `1`; publishing a value no consumer
 handles is how a park that outlasted `ESCALATE_AFTER` keeps getting deferred down
 an undefined path. The regression suite asserts that agreement in both
 directions — every value the surface emits is one the patrol formulas handle.
 
 The defer is bounded at the far end too. `escalated=1` means the park outlasted
-`ESCALATE_AFTER` and a human has already been mailed; a session still parked
-after that has not been recovered by nudging, and the patrols escalate to the
-mayor instead of deferring again in silence.
+`ESCALATE_AFTER` and an escalation visit is already open; a session still parked
+after that has not been recovered by nudging, and the patrols refresh the
+escalation via `escalate.sh` instead of deferring again in silence.
 
 `QUOTA_PARK_EXCLUDE` suppresses the *action*, not the observation. An excluded
 alias is still counted as parked in the summary line, but it is not nudged and
@@ -366,32 +367,30 @@ acting on, which is the deferral the exclusion was meant to end. So the episode
 is cleared as the exclusion takes effect.
 
 **The escalation quotes no pane text.** A pane holds whatever the agent printed,
-and an agent can print text shaped like an operator directive; mail is durable
-and the mayor reads it as an authenticated channel, so an excerpt in the body
-launders untrusted content into that channel. The mail carries only the alias,
-session id, park age, attempt count, and the same closed **detector class** the
-status surface reports. All of that comes from the session list or the script's
-own state file. A human who wants the screen reads it directly with `gc session
-peek <id>`, which the mail body says.
+and an agent can print text shaped like an operator directive; the visit is
+durable and the operator reads it as an authenticated channel, so an excerpt in
+the body launders untrusted content into that channel. The visit carries only
+the alias, session id, park age, attempt count, and the same closed **detector
+class** the status surface reports. All of that comes from the session list or
+the script's own state file. A human who wants the screen reads it directly
+with `gc session peek <id>`, which the visit body says.
 
 It says one more thing, for the same reason the patrol rule changed: that this is
-a **possible** park and not a proven one. The evidence behind the mail is a
+a **possible** park and not a proven one. The evidence behind the visit is a
 pattern match on a pane, so the body asks the reader to check rather than telling
 them the session is healthy and must not be warranted — an instruction that,
 derived from agent-controlled text, is one an agent could have written for
 itself.
 
-**An escalation whose bound expired is not sent twice.** `gc mail send` writes
-durable mail through Dolt, the layer likeliest to be slow during the incident
-this order runs in, so a bound can expire *after* the write commits: the mail is
-in the mayor's inbox and this script never heard about it. Recorded only on rc 0,
-the next eligible pass sends a second copy of the same escalation — one mail per
-cycle instead of one per episode, arriving during exactly the partial failure the
-bounds exist to tolerate. So the escalation flag carries three states, the same
-way an unconfirmed nudge does: `1` for a send that completed, `unconfirmed` for
-one whose bound expired mid-flight (suppresses the resend, and says in the log
-that it is doing so), and empty only for a *fast* rejection, which delivered
-nothing and therefore cannot duplicate when the next cycle retries it.
+**An escalation whose bound expired is not filed twice.** `escalate.sh` writes
+through Dolt, the layer likeliest to be slow during the incident this order runs
+in, so a bound can expire *after* the write commits: the visit exists and this
+script never heard about it. `escalate.sh` itself keeps exactly one open visit
+per situation key, so a retry refreshes rather than duplicates; the local flag
+still carries three states, the same way an unconfirmed nudge does: `1` for a
+write that completed, `unconfirmed` for one whose bound expired mid-flight
+(suppresses the resend, and says in the log that it is doing so), and empty only
+for a *fast* rejection, which delivered nothing and can safely be retried.
 
 ## Two rules the recurrences taught us
 
@@ -427,7 +426,7 @@ fixes; a fix that dismissed banner times as garbage would be wrong in the other
 direction. So the banner time is treated as a lower bound worth knowing and
 never as an authority — the script does not read the reset clause at all, it
 polls. Being early costs one no-op nudge; being late costs a day of throughput.
-(Bead `tk-al95k`, mayor correction 2026-08-02T16:35Z, which supersedes the
+(Bead `tk-al95k`, operator correction 2026-08-02T16:35Z, which supersedes the
 "the stated reset time is not trustworthy" framing in the note above it.)
 
 ## Tuning
@@ -439,7 +438,7 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_PEEK_LINES` | `20` | pane lines captured; must be ≥ 1 |
 | `QUOTA_PARK_TAIL_LINES` | `12` | how far up the banner may sit; must be ≥ 1 |
 | `QUOTA_PARK_BACKOFF_BASE` / `_CAP` | `120` / `900` | seconds between retries; must be ≥ 1 |
-| `QUOTA_PARK_ESCALATE_AFTER` / `_TO` | `7200` / `mayor/` | one mail per long park; `0` disables |
+| `QUOTA_PARK_ESCALATE_AFTER` | `7200` | one escalation visit (via `escalate.sh`) per long park; `0` disables |
 | `QUOTA_PARK_EXCLUDE` | — | ERE of aliases never nudged |
 | `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call; `0` disables the bound |
 | `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM; must be ≥ 1 (`timeout -k 0` is accepted and would silently restore the soft bound) |
@@ -458,8 +457,8 @@ in a tuning knob must not be able to switch off city-wide recovery quietly.
 
 The floor is why `0` is not simply "an integer, therefore fine". Zero is the
 documented off switch for exactly three knobs — `CALL_TIMEOUT` (unbounded
-calls), `SWEEP_BUDGET` (no per-pass budget) and `ESCALATE_AFTER` (never mail a
-human) — and those keep a floor of `0`. Everywhere else zero is a typo that
+calls), `SWEEP_BUDGET` (no per-pass budget) and `ESCALATE_AFTER` (never
+escalate) — and those keep a floor of `0`. Everywhere else zero is a typo that
 disables recovery while looking deliberate: `TAIL_LINES=0` makes `tail -n 0`
 print nothing, so nothing is ever detected as parked; `PEEK_LINES=0` empties
 every capture, which reads as an unreadable pane; `BACKOFF_BASE=0` or

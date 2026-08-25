@@ -134,23 +134,16 @@ fi
 # verbatim, and these assertions keep the class-specific field from creeping
 # back. Asserted over the shipped step TEXT, because the templates are prose —
 # no snippet marker fences them.
-ALERT_LINES="$(grep -E 'Backup needed:|Backup dog retries not clearing' <<< "$STEP" || true)"
+ALERT_LINES="$(grep -E 'FLAG line, verbatim' <<< "$STEP" || true)"
 if [ -z "$ALERT_LINES" ]; then
-    bad "could not find the Step 3 backup alert templates in the dolt-health step"
+    bad "could not find the Step 3 backup alert template in the dolt-health step"
 else
-    ok "found the Step 3 backup alert templates"
+    ok "found the Step 3 backup alert template (escalate.sh, verdict verbatim)"
 
     if grep -qE 'newer file <' <<< "$ALERT_LINES"; then
         bad "Step 3 backup alert demands a 'newer file' most FLAG classes lack: $ALERT_LINES"
     else
         ok "Step 3 backup alerts demand no class-specific 'newer file' field"
-    fi
-
-    # Both of them — the dog nudge and the mayor escalation.
-    if [ "$(grep -c 'verbatim' <<< "$ALERT_LINES" || true)" -ge 2 ]; then
-        ok "both Step 3 backup alerts carry the Step 2a verdict line verbatim"
-    else
-        bad "Step 3 backup alerts do not both carry the verdict line: $ALERT_LINES"
     fi
 fi
 

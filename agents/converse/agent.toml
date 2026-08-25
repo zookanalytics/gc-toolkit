@@ -1,83 +1,21 @@
-# converse — works visits: filed requests for bounded sittings of a
-# subject bead's dialogue. A visit that still needs a human is held and
-# becomes the sitting; one whose premise died closes silently (tk-mndjz).
-# Design authority: specs/tk-h9pq5/design-doc.md. Demand is the default
-# routed-pool predicate (visit beads stamped gc.routed_to=<rig>/gc-toolkit.converse);
-# no work_query override because a filed visit IS the demand.
+# converse — works visits: filed requests for bounded sittings of a subject
+# bead's dialogue. A visit that still needs a human is held and becomes the
+# sitting; one whose premise died closes silently. Design authority:
+# specs/tk-h9pq5/design-doc.md; session-ending mechanics (idle_timeout DOES
+# end a held sitting; the no-wake-reason drain takes the pane after it) are
+# verified in docs/gascity-human-engagement.md — read that before tuning.
+# Demand is the default routed-pool predicate; a filed visit IS the demand.
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
-# This value is typed into the agent's tmux pane and submitted as if the
-# operator had typed it ("Nudge is text typed into the agent's tmux session
-# after startup" — gascity internal/config/config.go). Converse is the one
-# role whose pane is a human conversation surface; every other pane is a
-# machine work-log where a nudge is invisible plumbing. So this line is
-# operator-facing text, and it stays at peer length — polecat-codex 12 words,
-# mechanik 13, proactive 23.
-#
-# It reached 55 words by ratchet — 21 (ce471c1) -> 40 (ef58879, tk-mndjz) ->
-# 55 (6044336, tk-msfmu) — because each converse incident appended a clause
-# and none ever removed one. The operator read the result in their own thread
-# on 2026-08-22 and ruled it cut back (tk-82epi -> tk-mpl1c).
-#
-# Both appended clauses were redundant on arrival: each restated a mechanism
-# that landed in the same commit. The premise re-check IS step 2 of
-# prompt.template.md. Group scoping is enforced by
-# assets/scripts/converse-claim.sh, which releases an out-of-group turn back
-# to the pool whether or not this line mentions it. That is where the guards
-# live now, and mechanism holds without spending the operator's attention.
-#
-# Two things must survive any future edit. Name the CLAIMER, not
-# `gc hook --claim`: the nudge is read before the prompt's step 1, so naming
-# the raw command re-teaches the unscoped claim tk-msfmu removed. And do not
-# empty the field — a CLI agent needs something typed to start a turn, so an
-# empty nudge wakes a session that then does nothing.
-#
-# STANDING RULE: the next converse incident does not get another clause here.
-# Put the fix in the prompt or in a script.
+# Two constraints on editing the nudge: it must name converse-claim.sh (the
+# claimer — the scoped claim lives there, never the raw `gc hook --claim`),
+# and it must never be empty (a CLI agent needs typed text to start a turn).
+# Keep it at peer length; fixes go in the prompt or a script.
 nudge = "Run assets/scripts/converse-claim.sh; work the visit it returns."
-# Long idle, but a timeout DOES end a held sitting — do not read this as
-# "visit boundaries are the only ending" (it said that until tk-bzm86
-# checked). Verified 2026-08-11 against the gascity source; the full
-# mechanism and its consequences live in
-# docs/gascity-human-engagement.md → "How a held sitting ends":
-#   - idle is tmux `#{window_activity}` — the terminal's last OUTPUT. An
-#     operator reading a held thread without typing does not touch it, so
-#     8h of attention reads as 8h of neglect.
-#   - a held visit is assigned work, so core DEFERS the idle stop
-#     (DecideIdleTimeout) — but only for `assigned_work_defer_limit`
-#     consecutive ticks (default 3, ~90s at patrol_interval=30s), then
-#     forces the stop as `assigned_work_exhausted`. The defer buys
-#     seconds, not immortality.
-#   - the stop clears the scrollback, and wake_mode=fresh makes the
-#     respawn a clean session: the thread is UNRECOVERABLE, not hidden.
-# So this value is a bound on how long an unattended sitting survives, and
-# the pack's defense is durability, not longevity — the converse prompt
-# stamps the subject's takeaway when the hold BEGINS so a reap still
-# leaves a dated trace. Raising this number would only widen the window
-# in which a dead thread looks alive.
-#
-# This timeout bounds a HELD sitting only, and it is not the clock that
-# usually takes the pane. Once a sitting ENDS the session has no wake
-# reason left, and the reconciler drains it as `no-wake-reason` within
-# about a minute — measured at ~58s on 2026-08-20, roughly an hour after
-# the sitting itself concluded. That drain kills the pane and its whole
-# process tree outright, reading nothing out of it first, so an operator
-# still composing a reply loses what they typed
-# (tk-tufrw; upstream fix gc-ze774). Mechanism in the sibling section of
-# the doc cited above: docs/gascity-human-engagement.md → "How a pane
-# dies when no sitting is live". Nothing in this file can defend against
-# it; do not tune idle_timeout expecting to.
-#
-# Open visits outlive sessions either way — a dead session's visit is
-# recovered (witness patrol, or `gc bd reclaim` once its lease expires)
-# and a fresh session resumes it from the record. Recovery is eventual,
-# not prompt: the reconciler's reassign path refuses a held visit by
-# design, so witness/reclaim latency is the bound on how long a stranded
-# visit waits.
+# Bounds how long an unattended HELD sitting survives; open visits outlive
+# sessions either way (recovery reconstitutes from the record).
 idle_timeout = "8h"
 min_active_sessions = 0
-# Bounds concurrently LIVE sittings only (provider memory), not how many
-# visits may be open — open visits queue and hold their place
-# indefinitely at zero session cost.
+# Bounds concurrently LIVE sittings only; open visits queue at zero cost.
 max_active_sessions = 6

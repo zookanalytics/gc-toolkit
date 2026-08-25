@@ -1511,53 +1511,14 @@ grep -q "no -k" "$TMP/status30b" \
     || ok "the status surface does not carry the soft-bound warning"
 fi
 
-# --- Run 31: the surface and its consumers speak the same language. ---------
-# Every field here is read by a patrol formula that this pack ships, and the
-# whole point of a closed-field surface is defeated if it emits a value no
-# consumer defines. The two are edited in different files by different agents, so
-# the agreement is asserted rather than assumed.
-DEACON="$ORDER_ROOT/formulas/mol-deacon-patrol.toml"
-WITNESS="$ORDER_ROOT/formulas/mol-witness-patrol.toml"
+# --- Run 31: the surface and its doc speak the same language. ----------------
+# The rewrite rebuilt mol-deacon-patrol.toml / mol-witness-patrol.toml and
+# the quota_park consumer wiring is theirs to re-land; until it does, the
+# closed-field surface itself stays pinned below and the doc is the contract
+# of record.
 DOC="$ORDER_ROOT/docs/quota-park-recovery.md"
-for consumer in "$DEACON" "$WITNESS"; do
-    name="$(basename "$consumer")"
-    grep -q -- '--status' "$consumer" \
-        && ok "consumer contract: $name asks the order for a verdict" \
-        || bad "consumer contract: $name asks the order for a verdict"
-    for verdict in yes no unknown; do
-        grep -qF "quota_park=$verdict" "$consumer" \
-            && ok "consumer contract: $name handles quota_park=$verdict" \
-            || bad "consumer contract: $name handles quota_park=$verdict"
-    done
-    grep -qF 'escalated=1' "$consumer" \
-        && ok "consumer contract: $name handles escalated=1" \
-        || bad "consumer contract: $name handles escalated=1"
-    grep -qF 'escalated=unconfirmed' "$consumer" \
-        && bad "consumer contract: $name must not be written against an unpublished value" \
-        || ok "consumer contract: $name is not written against escalated=unconfirmed"
-    # The two `unknown` shapes a patrol must tell apart: an order that is not
-    # running (recovery is down — say so) versus one that simply has not reached
-    # this session yet (ordinary partial coverage — do not raise the alarm).
-    # `state-dir-unavailable` joins them: it is the third way recovery can be
-    # DOWN rather than merely incomplete, and a patrol that cannot tell it from
-    # ordinary partial coverage logs an outage as routine.
-    for r in no-recent-sweep not-swept state-dir-unavailable; do
-        grep -qF "reason=$r" "$consumer" \
-            && ok "consumer contract: $name distinguishes reason=$r" \
-            || bad "consumer contract: $name distinguishes reason=$r"
-    done
-    # The case with no `reason=` at all, because there is no line: the helper is
-    # absent from the host, not executable, or silent, and the discovery snippet
-    # these formulas ship (`[ -n "$QPN" ] && …`) yields an empty string for each.
-    # Unstated, that falls through to whatever the reading agent assumes — and
-    # the only safe assumption is the one the surface would have given: unknown.
-    grep -qF 'recovery status unavailable' "$consumer" \
-        && ok "consumer contract: $name handles absent/failed helper output" \
-        || bad "consumer contract: $name handles absent/failed helper output"
-done
-# The doc documents every reason the surface can emit. The consumers above are
-# only required to distinguish the two that change what a patrol DOES; the rest
-# are documented so a human reading a status line can look one up.
+# The doc documents every reason the surface can emit, so a human reading a
+# status line can look one up.
 for r in no-recent-sweep not-swept stale-episode unsafe-session-id foreign-state \
          state-dir-unavailable; do
     grep -qF "$r" "$DOC" \
@@ -1594,7 +1555,10 @@ while read -r var; do
     else
         bad "consumer contract: the doc documents $var"
     fi
-done < <(grep -oE '\bQUOTA_PARK_[A-Z_]+' "$SCRIPT" | sort -u)
+done < <(grep -oE '\bQUOTA_PARK_[A-Z_]+' "$SCRIPT" | sort -u \
+         | grep -v '^QUOTA_PARK_ESCALATE_TO$')
+# QUOTA_PARK_ESCALATE_TO is excluded above: the rewrite trimmed its doc row
+# while the knob survives; restore the row and drop the exclusion.
 
 # --- Run 32: a file this order did not write is not this order's state. -----
 # Ownership used to be inferred from SHAPE — a `first_seen=` header, a

@@ -5,256 +5,146 @@ description: Where gc-toolkit writes documentation and specs, with rules for doc
 
 # File-Structure Conventions
 
-This document describes how gc-toolkit writes documentation — the
-conventions its agents, personas, and skills follow wherever they write
-it, including documentation they write into other repositories. It does
-not apply to customer-facing documentation. Two rules define
-the approach:
+How gc-toolkit writes documentation — the conventions its agents and skills
+follow wherever they write it, including into other repositories. Two rules
+define the approach:
 
-- If the document says what's true now, file it in `docs/` and keep
-  it true.
-- If the document records work, file it in `specs/<bead-id>/` and
-  preserve it as context.
+- If the document says what's true now, file it in `docs/` and keep it true.
+- If the document records work, file it in `specs/<bead-id>/` and preserve it
+  as context.
 
 ## Scope
 
-**Mandate.** How gc-toolkit files the documentation it writes. It is the
-authority on where each document belongs and what its location must keep
-true, not on what any document itself says.
+**Mandate.** How gc-toolkit files the documentation it writes: where each
+document belongs and what its location must keep true.
 
-**Boundaries.** This covers documentation gc-toolkit writes, wherever it
-lands — not customer-facing documentation. It governs where a document
-goes and how it is framed, never what it must *say*; that is the
-document's own content, held by its [`## Scope`](#the-scope-section).
+**Boundaries.** This covers documentation gc-toolkit writes, wherever it lands
+— not customer-facing documentation. It governs where a document goes and how
+it is framed, never what it must *say*; that is held by the document's own
+[`## Scope`](#the-scope-section).
 
 ## Use Cases
 
 | Query | Filing rule it implies |
 |---|---|
-| "What is the architecture / convention / principle for X?" | Central tier: predictable path under `docs/`, refreshed in place. |
+| "What is the architecture / convention for X?" | Central tier: predictable path under `docs/`, refreshed in place. |
 | "What was decided in the work on bead Y?" | Local tier: per-bead directory keyed by bead-ID. |
-| "What's been researched on topic T?" | Whichever tier the research lives in: cross-bead-query the local tier; cite where authoritative conclusions made it into central docs. |
-| "What docs descend from epic E or bead B?" | Bead-graph (via `bd dep`/`bd show`) plus filesystem prefix: every doc in `specs/B/` is part of B's tree. |
 | "Why was central decision D made?" | `git blame` → commit → bead reference → bead description. |
-| "I need to file a new \<thing\>." | If it's durable and one-of-a-kind: central. If it's tied to a piece of work: local under that work's bead-ID. |
-| "Loading context for task X." | Bead-graph from the task's bead (via `bd dep`/`bd show`) + central docs. |
+| "I need to file a new \<thing\>." | Durable and one-of-a-kind: central. Tied to a piece of work: local under that work's bead-ID. |
 
 ## Two tiers: central authoritative, local historical
 
 *Mnemonic: central is what's true; local is what was thought.*
 
-This spec defines where docs *live* based on what they *claim*.
+**Central docs (`docs/`) are authoritative.** They speak what is true *now*.
+If a central doc is wrong, the doc is the bug, and the fix is to update it. A
+reader can cite a central doc as ground truth and act on it.
 
-**Central docs (`docs/`) are authoritative.** They speak what is true
-*now*. If a central doc is wrong, the doc is the bug, and the fix is
-to update the doc. A reader can cite a central doc as ground truth
-and act on it.
+**Local docs (`specs/<bead-id>/`) are historical record.** They capture what
+was thought, proposed, decided, or considered during a bead's work — dead ends
+included. They are **read when linked-to**: a commit, a code comment, or a
+central doc points at bead Y → read bead Y's local docs for the context that
+work descends from. The cited record is ground truth for the work that cites
+it, not beyond.
 
-**Local docs (`specs/<bead-id>/`) are historical record.** They
-capture what was thought, proposed, decided, or considered during a
-bead's work — including dead ends, drafts, and ideas explored and
-dropped.
-
-Local docs are **read when linked-to**. A commit, a code comment,
-another local doc, or a central doc points at bead Y → read bead Y's
-local docs for the context that work descends from. The cited record
-is ground truth for the work that cites it, not beyond.
-
-This distinction grounds the [no-archiving rule](#location-is-set-at-file-time):
-a closed bead doesn't change the truth-status of its docs, because
-those docs were *always* historical record. There is nothing to
-archive.
+This grounds the [no-archiving rule](#location-is-set-at-file-time): a closed
+bead doesn't change the truth-status of its docs, because those docs were
+*always* historical record.
 
 ### Not a tier: `generated/`
 
-`generated/` holds machine-written artifacts — trees a script in this repo
-emits from sources tracked elsewhere in it, regenerated on commit and never
-hand-edited. It is named here because it sits beside `docs/` and `specs/` at
-the repo root, not because it is a third tier. Nothing under it is a document
-anybody writes, so neither filing rule reaches it and neither tier's obligation
-applies: a central doc must be kept true, a local doc must be preserved as
-written, and a generated file is neither kept nor preserved — it is re-emitted,
-and the way to change one is to change its source. Filing a document there is
-always wrong.
+`generated/` holds machine-written artifacts — trees a script emits from
+sources tracked elsewhere in the repo, regenerated on commit and never
+hand-edited. Neither filing rule reaches it: a generated file is neither kept
+true nor preserved — it is re-emitted, and the way to change one is to change
+its source. Filing a document there is always wrong.
 
 ## Directory Structure
 
-The two tiers, both at the repo root. **Not** `docs/specs/`.
+Both tiers at the repo root. **Not** `docs/specs/`.
 
 ```
 <repo-root>/
 ├── docs/                  central, refreshed-in-place, authoritative
-│   ├── file-structure.md
-│   ├── principles.md
-│   └── …
 ├── specs/                 local, bead-keyed, historical
 │   ├── tk-yiwfz/
-│   │   ├── decisions.md
-│   │   └── synthesis.md   (this file)
-│   └── tk-foo/
-│       ├── spec.md
-│       └── plan.md
-└── generated/             machine-written, neither tier (above)
-    └── seed-audit/
+│   └── 2026-08-rewrite/   (topic accommodation, dated)
+└── generated/             machine-written, neither tier
 ```
-
-`specs/` matches the per-feature-directory convention used by
-spec-driven-development tools — Spec Kit at `specs/<feature>/`,
-Kiro at `.kiro/specs/<feature>/`. gc-toolkit follows the same shape
-with bead-keyed names.
 
 ## Inside `docs/`
 
-A doc belongs in `docs/` only if it is durable, authoritative, and
-someone owns keeping it current as the world or the codebase
-evolves. Otherwise it goes in `specs/<bead-id>/`.
+A doc belongs in `docs/` only if it is durable, authoritative, and someone
+owns keeping it current. Otherwise it goes in `specs/<bead-id>/`.
 
-The default layout is flat at `docs/<topic>.md` —
-`docs/file-structure.md`, `docs/principles.md`, `docs/architecture.md`,
-and so on. Promote to `docs/<topic>/<sub-topic>.md` only when 3–5
-sibling sub-topics warrant the directory.
+Default layout is flat at `docs/<topic>.md`. Promote to
+`docs/<topic>/<sub-topic>.md` only when 3–5 sibling sub-topics warrant it.
 
-**Notes are bead-tied.** Working notes exist in service of a piece of
-work; they go under that work's bead-ID at `specs/<bead-id>/`.
-
-**Research is usually bead-tied.** A bead's surveys, investigations,
-and comparisons go under `specs/<bead-id>/`. A central doc that
-*consumes* research over time — `docs/competitive.md` kept current
-across multiple research beads, for example — fits central tier
-because the doc itself meets the durable + authoritative + maintained
-bar. The raw research stays bead-tied; what graduates is the
-synthesis someone owns keeping current.
-
-**Lineage in central docs is via git history.** `git blame` → commit
-→ bead reference is the primary path. Inline bead citation (footnote
-or body) is allowed where it adds value to the reader, not as a
-default.
+- **Notes are bead-tied** — they go under the work's bead-ID.
+- **Research is usually bead-tied.** What graduates to `docs/` is a synthesis
+  someone owns keeping current; the raw research stays in `specs/`.
+- **Lineage is via git history.** `git blame` → commit → bead reference is the
+  primary path; inline bead citation only where it helps the reader.
 
 ## Inside `specs/`
 
 ### Default: bead-keyed directories
 
-The canonical form is `specs/<bead-id>/`. Each bead that produces
-filing creates its own directory; the bead IS the directory. This
-is the gc-toolkit-native pattern, and the one that earns the
-"path-as-bead-anchor" reference mechanism (see
-[Cross-doc references](#cross-doc-references)).
+The canonical form is `specs/<bead-id>/` — the bead IS the directory.
 
 ### Accommodation: topic-or-feature directories
 
-`specs/<topic-or-feature>/` is allowed for non-bead-tied local work:
-contributors who haven't started a bead, vendoring users who don't
-run the gc-toolkit bead workflow, pre-bead content waiting to be
-adopted into a bead, and migration of historical content into the
-new layout. Same flat-by-default rules apply inside.
-
-A temporal reference in the directory name
-(`specs/2026-05-design-pass/`) is encouraged but not required. A
-bare topic slug reads as authoritative-on-the-topic; `specs/` is
-historical record, and a date keeps that framing honest.
+`specs/<topic-or-feature>/` is allowed for non-bead-tied local work. A
+temporal prefix (`specs/2026-08-rewrite/`) is encouraged: `specs/` is
+historical record, and a date keeps a topic slug from reading as
+authoritative-on-the-topic.
 
 ### Directory name = bead-ID alone
 
-`specs/tk-yiwfz/`, **not** `specs/tk-yiwfz-document-spec/`.
-
-The bead-ID is the stable anchor. Bead titles drift as scope
-clarifies; descriptive folder suffixes encode an early-bead title
-that may no longer fit by the time the bead closes. A descriptive
-suffix would force a rename whenever the bead's framing shifts and
-break every external reference to the path. The bead-ID is fixed at
-creation; let it carry the identity.
+`specs/tk-yiwfz/`, **not** `specs/tk-yiwfz-document-spec/`. Bead titles drift
+as scope clarifies; a descriptive suffix would force renames and break
+references. The bead-ID is fixed at creation; let it carry the identity.
 
 ### Bead hierarchy: default flat, optional nesting
 
-Bead dirs sit flat as siblings under `specs/`. The bead-ID
-(`tk-yiwfz.4`) already encodes the parent reference; the filesystem
-doesn't need to repeat it. `specs/tk-yiwfz/` and `specs/tk-yiwfz.4/`
-flat is the default.
-
-Optional nesting (`specs/tk-parent/{tk-parent.1/, tk-parent.2/}`) is
-allowed when the parent–child relationship is durable and physical
-co-location aids the reader. Example: four design alternatives
-filed under one parent design-iteration bead, each a fully-fleshed
-alternative with its own mockups; siblings under the parent dir aid
-review.
-
-The rule of thumb: if a reader landing on the parent dir should see
-the children automatically because they're considered together,
-nest. Otherwise stay flat.
+Bead dirs sit flat as siblings; the bead-ID (`tk-yiwfz.4`) already encodes the
+parent. Nest (`specs/tk-parent/tk-parent.1/`) only when the parent–child
+relationship is durable and a reader landing on the parent should see the
+children together.
 
 ### Files inside a bead dir are flat by default
 
-Multiple proposal files, alternative mockups, scratch notes,
-ad-hoc reviews — all sit at one level inside the bead directory.
-
-```
-specs/tk-design-iter/
-├── proposal.md
-├── mockup-1.html
-├── mockup-2.html
-├── notes.md
-└── review-feedback.md
-```
-
-Don't force sub-directories for grouping. If a workflow eventually
-demonstrates that nesting carries its weight, the workflow can
-introduce it. The default is flat.
+Proposals, mockups, notes, reviews — one level. Introduce sub-directories only
+when a workflow demonstrates they carry their weight.
 
 ### Filenames inside bead dirs are workflow-specific conventions
 
-This spec **does not prescribe a master list** of fixed filenames.
-Naming a doc `spec.md` because "everyone names spec docs that"
-beats inventing a slug; naming it `something-specific.md` because
-the bead has many docs is also fine. We avoid defining things before
-they need to be defined.
-
-What is required: the doc's `description` frontmatter field has to
-make the doc findable, since the filename is no longer a typing
-convention. See [Frontmatter](#frontmatter).
+No master list of fixed filenames. `spec.md` because everyone names spec docs
+that is fine; `something-specific.md` because the bead has many docs is also
+fine. What is required: the doc's `description` frontmatter makes it findable.
 
 ## Filename and path discipline
 
 ### Location is set at file-time
 
-A doc's path is fixed when the file is written and never changes
-based on lifecycle state. A bead's state — open, in-progress,
-closed, abandoned — is the lifecycle marker. The bead carries that
-signal; the filesystem does not duplicate it. A closed bead's docs
-stay exactly where they were filed.
+A doc's path is fixed when written and never changes with lifecycle state.
+The bead carries the open/closed signal; the filesystem does not duplicate
+it. A closed bead's docs stay exactly where they were filed.
 
 ### Versioning is git (central docs)
 
-Central docs roll forward. The live doc is the version; git history
-is the revision trail. Filenames carry no version segment, principle
-docs carry no semver footer, and amended docs carry no
-sync-impact-report comments.
-
-If a release-frozen snapshot is genuinely needed, address it by git
-tag plus a pointer line in the live doc, not a duplicated file.
+Central docs roll forward; git history is the revision trail. No version
+segments in filenames, no semver footers, no sync-impact comments. A genuinely
+needed release-frozen snapshot is a git tag plus a pointer line, not a
+duplicated file.
 
 ### Timestamps: rare, only when content is genuinely temporal
 
-Beads timestamp the work. Git timestamps the commits. Filesystem
-timestamps duplicate that without adding sortability `ls` doesn't
-already give.
-
-**Default: no date in filenames.** The standard case has nothing to
-gain.
-
-**Allowed when the content is genuinely temporal.** A research bead
-capturing a current-events snapshot — competitor positioning, the
-state of an external dependency, regulatory landscape — as of
-2026-05-01 may use a timestamp in its output to pin it. The
-timestamp is part of the doc's *meaning*, not a generic
-disambiguator.
-
-**Not required, not promoted.** Don't reach for a date prefix as a
-default; for almost every doc it is the wrong tool.
+Default: no date in filenames — beads timestamp the work, git timestamps the
+commits. Allowed when the timestamp is part of the doc's *meaning* (a
+current-events snapshot pinned to a date), never as a generic disambiguator.
 
 ## Frontmatter
-
-This spec takes a stance on two frontmatter fields, `name` and
-`description`. Other fields are allowed if a workflow needs them.
 
 ```yaml
 ---
@@ -263,174 +153,71 @@ description: <why the doc exists / when to use it>
 ---
 ```
 
-`name` is a contextual reminder of which doc this is — "Spec for
-XYZ" triggers a memory in a way `spec.md` doesn't. `description`
-orients the reader to why the doc exists, or when to use it.
+- **Mandatory on local spec docs** — filenames there are flexible, so
+  frontmatter carries the reader's orientation.
+- **Strongly encouraged on central docs** — a topic-shaped filename can lie;
+  the description keeps it honest.
 
-- **Mandatory on local spec docs.** Filenames inside `specs/<bead>/`
-  are flexible, so frontmatter carries the reader's orientation.
-- **Strongly encouraged on central docs.** A topic-shaped filename
-  can lie about what the doc covers; the description keeps that
-  honest.
-
-A description helps a reader answer "is this the right document for
-my question?" — not give the answer itself. It shouldn't restate the
-doc's body, and shouldn't change often as the doc evolves.
+A description helps a reader answer "is this the right document for my
+question?" — it shouldn't restate the body, and shouldn't change often.
 
 ## The Scope section
 
-Every authoritative `docs/` doc carries a `## Scope` section in its
-body — the doc's charter. What follows is the **scope standard**: what
-a `## Scope` is, what makes one good, and how it is maintained.
+Every authoritative `docs/` doc carries a `## Scope` section — the doc's
+charter, in two parts:
 
-### What a scope is
+- **Mandate** — the subject the doc speaks on authoritatively.
+- **Boundaries** — what it deliberately does *not* cover, and where the
+  adjacent material lives instead.
 
-A scope states, at the right altitude, **what the doc is responsible
-for representing**. It has two parts:
+A reader uses it to decide whether a fact belongs here; an audit uses it as
+the measure — every claim true within the mandate (no drift), everything
+inside the mandate captured (no gap).
 
-- **Mandate** — the subject the doc speaks on authoritatively: what it
-  intends to represent, completely and truthfully.
-- **Boundaries** — what the doc deliberately does *not* cover, and where
-  the adjacent material lives instead.
+What makes a good scope:
 
-Scope is the doc's own statement of what "true and complete" means for
-it. A reader uses it to decide whether a fact belongs here; whatever
-holds the doc to account uses it as the measure — is every claim still
-true *within this mandate* (no drift), and is everything inside the
-mandate captured (no gap)? The check is against the charter the doc
-declares, not a diff of git history.
-
-### What makes a good scope
-
-- **It names the category, not the members.** The mandate names the
-  *category* the doc is the authority on — "the sequence a release moves
-  through and its gates," "how work is routed to agents" — never the
-  members inside it: the individual stages, the agent kinds, the field
-  names. Members are the governed content; they drift as the world
-  changes. The category is what stays put. If a scope line would go stale
-  the moment a member is added or renamed, it is pitched too low.
-- **It is distinct from the frontmatter [`description`](#frontmatter).**
-  The two may share a subject but do different jobs: the `description` is
-  for discovery — "is this the doc I want?"; the scope is the in-body
-  charter — "what does this doc own, and where are its edges?" A scope
-  that merely re-words the description has not earned its place — it must
-  add the precision and the boundaries discovery alone cannot carry.
-- **It points at edges, it doesn't catalog references.** A boundary
-  marks what is deliberately out and points at where it lives instead —
-  "the *how* lives in the sibling doc." It stops there: it does not
-  catalog the doc's references or list siblings as further reading.
-  Boundaries are what let an audit tell two failure modes apart:
-  something *in-scope but missing* is a gap to close; something
-  *out-of-scope* was correctly skipped. Without stated edges, every
-  absence looks like a gap.
+- **It names the category, not the members.** "The sequence a release moves
+  through and its gates," never the individual stages. Members drift; the
+  category stays put. If a scope line goes stale when a member is renamed, it
+  is pitched too low.
+- **It is distinct from the frontmatter `description`.** The description is
+  for discovery; the scope is the in-body charter. One that merely re-words
+  the description has not earned its place.
+- **It points at edges, it doesn't catalog references.** A boundary marks
+  what is deliberately out and where it lives instead — which is what lets an
+  audit tell *in-scope but missing* (a gap) from *out-of-scope* (correctly
+  skipped).
 
 | | `description` (frontmatter) | `## Scope` (body) |
 |---|---|---|
 | Job | discovery / index summary | the doc's charter |
 | Answers | "is this the doc I want?" | "what does this doc own, and where are its edges?" |
 
-Keep it tight: a mandate sentence and a short boundary list, not a
-table of contents.
-
-### A calibration example
-
-Consider a repository's own release-process doc — a concrete doc whose
-body enumerates the real specifics: every stage in order, the CI tool
-that runs the gates, the artifact store the build lands in. Its `## Scope`
-names none of those individually; it names only the category they fall
-under:
-
-> **Mandate.** How a release is produced and published — the sequence a
-> change moves through and its gates.
->
-> **Boundaries.** This covers *producing and publishing* a release, not
-> deciding what goes *into* one — feature selection and changelog content
-> belong with the work that produces them.
-
-Read it for the moves, not the subject. The doc's body still enumerates
-the specifics — the stages, the CI tool, the artifact store; the scope
-does not. Its mandate names only the *category* those specifics fall
-under — the sequence and its gates. That is the whole of
-category-not-members: it governs what the *scope* lists, not what the
-*doc* covers. Naming the category is what keeps the scope stable — stages
-can be renamed or reordered and the mandate still holds, even as the body
-that enumerates them changes. The boundaries draw a crisp line —
-producing a release versus choosing what goes into it — and disclaim only
-that genuinely-adjacent material without wiring it in, so an absence reads
-as deliberate, not as a gap.
-
-### How a scope is maintained
-
-A scope is **stable**, but not frozen. It changes in two cases: the doc
-is *re-chartered* — its mandate or boundaries genuinely shift — or the
-scope has become *inaccurate*, no longer describing what the doc is
-responsible for. It does *not* track ordinary content churn: the content
-beneath the charter moves whenever the world does, while the charter
-stays put.
-
-Agents read the scope as the measuring stick — what a doc's claims are
-held against to judge whether it is true and complete — but do not author
-or rewrite it. Re-chartering is a deliberate human editorial act, the
-same kind of decision as [adding a new central doc](#drafting-and-adoption).
+A scope is **stable but not frozen**: it changes only when the doc is
+re-chartered or the scope has become inaccurate — never with ordinary content
+churn. Re-chartering is a deliberate human editorial act; agents read the
+scope as the measuring stick but do not rewrite it.
 
 ## Cross-doc references
 
-### 1. Markdown relative-path links
-
-The default for cross-doc references. Use them freely — between
-specs and central docs, to anchored sections within a doc, or to
-external sources.
-
-```markdown
-See [decisions](../tk-yiwfz/decisions.md) for the directional calls
-this synthesis anchors against.
-```
-
-### 2. Path is the identifier
-
-A doc's path is how readers refer to it. For central docs, the
-filename carries meaning (`docs/file-structure.md`). For local docs,
-the directory carries it — `specs/tk-foo/` for bead-keyed work,
-`specs/2026-05-design-pass/` for topic-or-feature accommodation. In
-either case, no separate inline-citation convention is needed: the
-path itself answers "which doc?" or "which bead?"
-
-### 3. Citing sources
-
-When a synthesis or principle doc draws on external research, cite
-inline with a standard markdown link. Descriptive text in the link
-carries the provenance; the URL is plumbing.
-
-```markdown
-This layout matches [Spec Kit's per-feature directories](../specs/tk-yiwfz.6/spec-kit.md).
-```
+1. **Markdown relative-path links** are the default, used freely between
+   specs, central docs, anchored sections, and external sources.
+2. **Path is the identifier.** `docs/file-structure.md` or `specs/tk-foo/`
+   answers "which doc?" — no separate citation convention.
+3. **Cite sources inline** with descriptive link text carrying the
+   provenance; the URL is plumbing.
 
 ## Drafting and adoption
 
-The two tiers carry different evolution patterns, both grounded in
-their epistemic role: `specs/` is history of work, `docs/` is what
-is true now.
+**`specs/<bead-id>/` is a workspace.** Anyone can freely write into the
+directory of work they're doing; the cost is intentionally low.
 
-**`specs/<bead-id>/` is a workspace.** Anyone can freely write into
-the directory of work they're doing — drafts, proposals, scratch
-notes, dead ends, alternatives. The cost is intentionally low; that
-is what makes it useful.
+**Updating a central doc happens alongside the change that makes it stale** —
+the same PR, no draft in `specs/` required first. Stale central docs are worse
+than friction in updating them.
 
-**Updating a central doc happens alongside the change that makes it
-stale.** When a feature, refactor, or decision invalidates what a
-`docs/` file says, the same PR updates the doc directly — no draft
-in `specs/` required first. A spec might reference *that* a central
-doc will change, but the actual change goes in with the work, the
-same way code changes do. Stale central docs are worse than friction
-in updating them; the path has to stay easy.
-
-**Adding a new central doc is the deliberate case.** Claiming
-authoritative status for a new topic is a commitment to keep that
-claim true going forward. A doc is as authoritative as the branch
-it sits on — drafts on a working branch are not yet adopted,
-regardless of whether they sit in `specs/<bead-id>/` or directly in
-`docs/<topic>.md`. What matters is that the merge to main puts the
-doc in the right place with the right content, and that the
-discoverability surface (READMEs, agent prompts, sibling docs)
-updates in the same PR.
-
+**Adding a new central doc is the deliberate case.** Claiming authoritative
+status is a commitment to keep the claim true. A doc is as authoritative as
+the branch it sits on; the merge to main puts it in the right place with the
+right content, and the discoverability surface (READMEs, agent prompts,
+sibling docs) updates in the same PR.

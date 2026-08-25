@@ -812,6 +812,48 @@ run_claim '{"bead_id":"tk-c"}' "tk-subj" "$RELEASED"
 eq "$COUT" "action=work bead=tk-c group=" "(NOGROUP) an ungrouped turn is worked, not released on a guess"
 eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
 
+# --- (EMPTYSTAMP) the stamp is empty; the tracks edge still carries it -------
+# tk-tu5g3. `gc hook --claim` reports the gc.continuation_group STAMP, and the
+# stamp lands empty on a minority of visits. An empty group turns the
+# deliberate (NOGROUP) fallback above from a rare benign case into THE failure
+# case, silently disabling this guard for exactly the turn it was written to
+# catch: an unrelated visit vacuumed onto a live sitting. A visit records its
+# subject twice, and the `tracks` edge has held where the stamp did not
+# (su-ab9je).
+VISIT_TRACKS='[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{"task_kind":"visit"},"dependencies":[{"id":"tk-other","dependency_type":"tracks"}]}]'
+
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" "$VISIT_TRACKS"
+eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
+   "(EMPTYSTAMP) an empty stamp is recovered from the tracks edge, and the guard fires"
+eq "$CRC" "1" "(EMPTYSTAMP) …the session is told to drain"
+grep -q -- '--status=open' <<< "$CUPD" \
+  && ok "(EMPTYSTAMP) …and the turn goes back to the pool" \
+  || bad "(EMPTYSTAMP) the recovered-foreign turn was never released: $CUPD"
+
+# The mirror. Recovery must not release a turn that IS this thread's — without
+# it the fix would drain every sitting whose stamp went missing.
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-other" "$VISIT_TRACKS"
+eq "$COUT" "action=work bead=tk-foreign group=tk-other" \
+   "(EMPTYSTAMP) a recovered group that MATCHES this thread is worked"
+eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and nothing is released"
+
+# A visit carrying neither recording is still unprovable, so the pre-existing
+# fallback stands: work it rather than release on a guess.
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" \
+    '[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{"task_kind":"visit"}}]'
+eq "$COUT" "action=work bead=tk-foreign group=" \
+   "(EMPTYSTAMP) a visit with no tracks edge keeps the cannot-prove-foreign fallback"
+eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and is not released"
+
+# SCOPE. `tracks` is not a visit-only edge — a convoy tracks its members — so
+# resolving it for any bead would invent a group for something that never had
+# one and release a turn this session was entitled to work.
+run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" \
+    '[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{},"dependencies":[{"id":"tk-kid","dependency_type":"tracks"}]}]'
+eq "$COUT" "action=work bead=tk-foreign group=" \
+   "(EMPTYSTAMP) a NON-visit tracks edge invents no group"
+eq "${CUPD:-<none>}" "<none>" "(EMPTYSTAMP) …and releases nothing"
+
 # --- (FOREIGN) the defect itself --------------------------------------------
 run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "$RELEASED"
 eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \

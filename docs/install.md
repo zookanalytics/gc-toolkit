@@ -1,33 +1,32 @@
 # Installing gc-toolkit
 
-> Reference for wiring `gc-toolkit` into a Gas City. Assumes a working
-> Gas City install (`gc version` returns a version) and a city
-> created with `gc init`.
+> Reference for wiring `gc-toolkit` into a Gas City. Assumes a working Gas
+> City install (`gc version` returns a version) and a city created with
+> `gc init`.
 
-This guide covers:
+gc-toolkit ships a **native agent roster** — polecat, refinery, witness,
+deacon, converse, mechanik, polecat-codex, proactive — declared in its own
+`pack.toml`. It imports nothing: there are no gastown prerequisites, no
+transitive imports, and no agent patches to wire.
 
-1. [Importing gc-toolkit](#1-importing-gc-toolkit) into a city
-2. [Opting into sub-packs](#2-opting-into-sub-packs) (general pattern)
-3. [`[[rigs.patches]]` — fragment injection](#3-rigs-patches--fragment-injection)
-4. [Per-rig overrides](#4-per-rig-overrides) via `[[rigs.overrides]]`
+Covered here:
+
+1. [Importing gc-toolkit](#1-importing-gc-toolkit)
+2. [The mechanik named session](#2-the-mechanik-named-session)
+3. [Sub-pack opt-in: gascity-keeper](#3-sub-pack-opt-in-gascity-keeper)
+4. [The helm board service](#4-the-helm-board-service)
 5. [Verification](#5-verification)
 
-For Gas City and pack/city v2 background, see
-[`gascity-reference.md`](gascity-reference.md).
+For Gas City background, see [`gascity-reference.md`](gascity-reference.md).
 
 ---
 
 ## 1. Importing gc-toolkit
 
-`gc-toolkit` is a pack. A city imports it from a filesystem path or a
-git remote, scoped either to a single rig or as a default for every
-rig in the city.
-
 ### Per-rig import (most common)
 
-Drop `gc-toolkit` somewhere reachable from the city root (the
-convention is `rigs/gc-toolkit/`), then add the import to your
-`city.toml`:
+Drop gc-toolkit somewhere reachable from the city root (the convention is
+`rigs/gc-toolkit/`), then add the import to your `city.toml`:
 
 ```toml
 [[rigs]]
@@ -38,8 +37,7 @@ prefix = "mr"
 source = "rigs/gc-toolkit"
 ```
 
-`source` is resolved relative to the city root. The path can be a
-checkout you manage yourself or a worktree.
+`source` resolves relative to the city root.
 
 ### Remote git import
 
@@ -49,13 +47,10 @@ source = "github.com/<owner>/gc-toolkit"
 version = "v0.1.0"
 ```
 
-`version` is required for git-backed imports. Run `gc import install`
-to materialize the pack under `.gc/cache/`.
+`version` is required for git-backed imports; run `gc import install` to
+materialize the pack under `.gc/cache/`.
 
 ### Default import across every rig
-
-If every rig in the city should pick up gc-toolkit, declare the
-import once in the city pack's `pack.toml`:
 
 ```toml
 # pack.toml (city root)
@@ -64,200 +59,88 @@ import once in the city pack's `pack.toml`:
 source = "rigs/gc-toolkit"
 ```
 
-Any per-rig `[rigs.imports.gc-toolkit]` in `city.toml` overrides the
-default for that rig.
+Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 
 ### What the import brings in
 
-Importing gc-toolkit binds the following into the rig:
-
-- **Agents** — `mechanik` (city-scoped session template), plus prompt
-  overrides on gastown's `boot`, `deacon`, `mayor`, `refinery`, and
-  `witness`.
-- **Polecat fragment** — `polecat-convoys` appended to the polecat
-  prompt for owned-convoy awareness.
-- **Skills** — surfaced via `gc skill list` (e.g.,
-  `gc-toolkit.handoff`, `gc-toolkit.session-title`).
-- **Template fragments** — `operational-awareness`, `propulsion`,
-  `polecat-convoys`, `cycle-recycle`, and others available to
-  `inject_fragments_append` / `append_fragments`.
-
-gc-toolkit transitively imports `gastown`, so the gastown roster
-(boot, deacon, mayor, polecat, refinery, witness, dog) comes in
-automatically. Do not also add `[rigs.imports.gastown]` — that would
-double-import gastown's agents.
+- **The roster** — worker pools (`polecat`, and `polecat-codex` on the
+  codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
+  role (`converse`), and `proactive` (always-on, 2-slot).
+- **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
+  metadata registry) and the single transition writer
+  `assets/scripts/lifecycle.sh`.
+- **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
+  `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
+  `boot-health`, `quota-park-nudge`, `helm-build`, and the feedback
+  miner/distiller.
+- **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
+  `gc-toolkit.session-title`, …).
+- **Doctor checks** — the nine structural checks verified below.
 
 ---
 
-## 2. Opting into sub-packs
+## 2. The mechanik named session
 
-`gc-toolkit` ships **opt-in sub-packs** under `packs/<name>/`. A
-sub-pack is a separate pack that ships alongside `gc-toolkit` but is
-imported only by rigs that need it. Today there is one sub-pack:
-`gascity-keeper`, for rigs maintaining a `gascity` fork.
-
-### General pattern
-
-Import a sub-pack on the rig that should run it, **in addition to**
-the gc-toolkit import:
+gc-toolkit provides a `mechanik` named-session template (the city-scoped
+structural engineer). Declare it once at the city level:
 
 ```toml
-[[rigs]]
-name = "my-rig"
-prefix = "mr"
+[[named_session]]
+template = "mechanik"
+```
 
-[rigs.imports.gc-toolkit]
-source = "rigs/gc-toolkit"
+Then:
 
+```bash
+gc start
+gc session attach mechanik
+```
+
+---
+
+## 3. Sub-pack opt-in: gascity-keeper
+
+`packs/gascity-keeper/` is a separate pack for the one rig that maintains a
+`gascity` fork. Import it **in addition to** gc-toolkit, on that rig only:
+
+```toml
 [rigs.imports.gascity-keeper]
 source = "rigs/gc-toolkit/packs/gascity-keeper"
 ```
 
-Substitute the binding key and `source` for whichever sub-pack you
-are wiring; the shape is the same.
+The complete wiring snippet — including the `[[rigs.patches]]`
+fragment-injection blocks for refinery and polecat — lives in the sub-pack
+itself: [`packs/gascity-keeper/pack.toml`](../packs/gascity-keeper/pack.toml).
+The sub-pack ships its own `[[named_session]]` (`scope = "rig"`), so the
+keeper is spawnable without an extra block; it resolves to
+`<rig>/gascity-keeper.keeper` (confirm with `gc config show`).
 
-A sub-pack typically ships:
-
-- One or more agents (`agents/<name>/`)
-- Formulas (`formulas/<name>.toml`)
-- Template fragments (`template-fragments/<name>.template.md`)
-- A `[[named_session]]` declaration for on-demand spawn
-
-The fragments and agents become available to the importing rig once
-the import lands. Fragments still need to be **wired** into existing
-agents via `[[rigs.patches]]` — see the next section.
-
-### Concrete example: `gascity-keeper`
-
-The keeper-specific wiring snippet lives in the sub-pack itself:
-[`packs/gascity-keeper/pack.toml`](../packs/gascity-keeper/pack.toml).
-Copy that block into your `city.toml` under the rig that maintains
-the fork. The snippet covers:
-
-- `[rigs.imports.gascity-keeper]` import
-- `[[rigs.patches]]` fragment-injection blocks for refinery and polecat
-- A note on the resolved keeper identity
-
-The sub-pack itself ships a `[[named_session]]` with
-`scope = "rig"`, so the keeper is automatically spawnable in the
-importing rig — no extra `[[named_session]]` block is required in
-`city.toml`. Adding one duplicates the resolved identity.
-
-The `gascity-keeper.` prefix is the **import binding** (the table
-key under `[rigs.imports.gascity-keeper]`). `keeper` is the agent's
-directory name inside the sub-pack. The keeper resolves to
-`<rig>/gascity-keeper.keeper` after composition — confirm with `gc
-config show`.
+Sub-pack imports are rig-scoped: declare them inside a `[[rigs]]` block, never
+at the city level, or every rig picks them up.
 
 ---
 
-## 3. `[[rigs.patches]]` — fragment injection
+## 4. The helm board service
 
-`[[rigs.patches]]` is a post-composition hook scoped to one rig. The
-most common use is **appending template fragments to an existing
-agent's prompt** without forking the agent.
-
-```toml
-[[rigs.patches]]
-agent = "refinery"
-inject_fragments_append = ["rebase-conventions", "rebase-conventions-force-push", "refinery-rebase-handling"]
-```
-
-The block goes inside the relevant `[[rigs]]` block. TOML table
-arrays scope: every `[[rigs.patches]]` after a `[[rigs]]` header
-applies to that rig only.
-
-- `agent` — bare name of an agent provided by the import chain
-  (gc-toolkit → gastown).
-- `inject_fragments_append` — fragments to append. The named
-  fragments must exist as `template-fragments/<name>.template.md`
-  in some imported pack.
-
-Other fields available on a patch block (subset most-used):
-
-| Field | Purpose |
-|-------|---------|
-| `provider` | Override LLM provider |
-| `prompt_template` | Replace the prompt template wholesale |
-| `max_active_sessions` | Pool size override |
-| `idle_timeout` | Idle timeout override |
-| `wake_mode` | `"fresh"` or `"resume"` |
-| `env` | Per-rig environment variables (as a sub-table) |
-
-The complete patch-block field list is in
-[`gascity-reference.md`](gascity-reference.md#configuration-reference).
-
-### Resolution order
-
-Fragments compose in import order:
-
-1. Agent's base prompt (from the deepest import, usually gastown)
-2. Pack-level `[[patches.agent]]` overrides (e.g. gc-toolkit's
-   `inject_fragments_append = ["polecat-convoys"]` on the polecat)
-3. City-level `[[rigs.patches]]` (this section)
-
-`gc config explain` shows the provenance of every resolved field if
-you need to debug a missing fragment.
-
----
-
-## 4. Per-rig overrides
-
-Where `[[rigs.patches]]` modifies the composed prompt or replaces
-fields wholesale, `[[rigs.overrides]]` adjusts runtime/lifecycle
-fields on a per-rig basis:
+The board is a Go sidecar (`services/helm`), render-only, and optional —
+everything works without it. `[[service]]` is forbidden in rig-imported
+packs, so the stanza is **city-level**: add it to the city's `city.toml` (or
+city-root `pack.toml`), with the command path relative to the city root:
 
 ```toml
-[[rigs]]
-name = "my-rig"
-prefix = "mr"
+[[service]]
+name = "helm"
+kind = "proxy_process"
 
-[rigs.imports.gc-toolkit]
-source = "rigs/gc-toolkit"
-
-[[rigs.overrides]]
-agent = "refinery"
-[rigs.overrides.env]
-GC_DEFAULT_MERGE_STRATEGY = "mr"
+  [service.process]
+  command = ["bash", "rigs/gc-toolkit/assets/scripts/gc-helm-svc.sh"]
+  health_path = "/healthz"
 ```
 
-Common override fields:
-
-```toml
-[[rigs.overrides]]
-agent = "polecat"
-provider = "gemini"
-max_active_sessions = 10
-idle_timeout = "30m"
-wake_mode = "fresh"
-
-[rigs.overrides.env]
-RIG_SPECIFIC_VAR = "value"
-```
-
-### `[[rigs.patches]]` vs `[[rigs.overrides]]`
-
-Both are scoped to one rig in `city.toml`. The pragmatic split:
-
-- `[[rigs.patches]]` for **prompt composition** (fragments, prompt
-  template replacement, provider).
-- `[[rigs.overrides]]` for **runtime knobs** (pool size, idle
-  timeout, env, wake mode).
-
-Either form can carry env / pool fields — pick by intent rather than
-mechanics. `gc config explain` resolves both.
-
-### Refinery merge defaults
-
-The refinery's `direct` merge default matches upstream gascity
-expectations for fork-keeper rigs. Downstream cities that want
-PR-default refinery output should set
-`default_merge_strategy = "mr"` at the city level in `city.toml`.
-All rigs in the city inherit the setting unless an individual rig
-overrides it. Per-bead `metadata.merge_strategy` always wins over
-the city/rig default. The gascity-keeper upstream-rebase workflow
-uses different formulas (`mol-upstream-gc-rebase` etc.) and is
-unaffected by this setting.
+The launcher `exec`s a prebuilt binary; the `helm-build` order keeps it built.
+Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`;
+rendering is `helm-svc board --json`. See
+[`services/helm/README.md`](../services/helm/README.md).
 
 ---
 
@@ -265,48 +148,47 @@ unaffected by this setting.
 
 ### `gc doctor`
 
-After editing config, run:
-
 ```bash
 gc doctor
 ```
 
-A healthy install passes all required checks. Common first-time
-failures:
+The pack's nine checks, and what a failure means:
 
-| Failure | Cause | Fix |
-|---------|-------|-----|
-| `config-refs` | An import `source` path doesn't exist | Verify paths under `[rigs.imports.*]` |
-| `pre-start-scripts` | An imported pack's script path doesn't resolve | Confirm the pack materialized; run `gc import install` for remote imports |
-| `skill-collision` | Two packs ship a skill with the same name | `gc skill list --agent <name>` to identify; agent-scoped variant wins |
-| `check-seed-audit-current` | A prompt fragment moved without `generated/seed-audit/` being regenerated, or the pre-commit hook that regenerates it is not wired in this checkout | `assets/scripts/render-seed-audit.sh && git add generated/seed-audit`; wire the hook once with `assets/scripts/render-seed-audit.sh --install-hook` |
+| Check | Asserts (invariant) | First-failure cause |
+|---|---|---|
+| `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml` (I2) | a writer minted an undeclared state |
+| `check-routed-work-claimable` | every route and assignee names a live target; rig-scoped orders bound (I3) | a pool renamed, or an order missing its rig registration |
+| `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
+| `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
+| `check-gate-integrity` | gating anchors declare `check_set`; markers are well-formed `verb@oid` (I6+I7) | a hand-written or truncated marker |
+| `check-step-terminal` | no open step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
+| `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
+| `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
+| `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
 
-Run `gc doctor --verbose` for details on any failed check; `gc doctor
---fix` applies the canonical remediation where one exists.
+`gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
+canonical remediation where one exists.
 
 ### `gc config show`
 
-Confirms the resolved agent list and which prompt templates are bound:
-
 ```bash
-gc config show | grep -E '^\[\[agent\]\]|^name =|^prompt_template ='
+gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
-Look for `mechanik` (gc-toolkit's city-scoped agent) and confirm the
-patched gastown agents (`boot`, `deacon`, `mayor`, `refinery`,
-`witness`) point at gc-toolkit's `patches/*-prompt.template.md`
-files.
+Confirm the native roster is present — `polecat`, `polecat-codex`,
+`refinery`, `witness`, `deacon`, `dog`, `converse`, `mechanik` — with no
+gastown entries.
 
-### `gc skill list`
+### First render of the seed audit
 
-Confirms the skills gc-toolkit exposes are visible to an agent:
+`generated/seed-audit/` ships empty; render it once per clone, which also
+wires the pre-commit hook that keeps it current:
 
 ```bash
-gc skill list --agent <rig>/gc-toolkit.polecat
+assets/scripts/render-seed-audit.sh --install-hook
 ```
 
-You should see `gc-toolkit.handoff` and `gc-toolkit.session-title`
-alongside the `core.*` skills.
+Until then `check-seed-audit-current` warns rather than errors.
 
 ### Smoke test
 
@@ -316,36 +198,21 @@ gc session new mechanik
 gc session attach mechanik
 ```
 
-If the `mechanik` session comes up with the gc-toolkit prompt header,
-the import composed correctly. For a sub-pack like `gascity-keeper`,
-address the template by its fully-qualified `<rig>/<binding>.<template>`
-form from the city root (or run from the rig directory / pass
-`--rig <rig>`):
-
-```bash
-gc session new <rig>/gascity-keeper.keeper
-gc session attach <alias>
-```
+If the mechanik session comes up with the gc-toolkit prompt header, the
+import composed correctly.
 
 ---
 
 ## Gotchas
 
-- **Sub-pack imports are rig-scoped.** Placing a sub-pack import at
-  the city level (top-level `[imports.<sub-pack>]`) loads it into
-  every rig, including ones that should not pick it up. Always
-  declare sub-pack imports inside a `[[rigs]]` block.
-- **`source` paths are city-root-relative.** A relative
-  `source = "rigs/gc-toolkit"` resolves from the city root, not the
-  rig root.
-- **Rig names must have distinct first two letters.** The bead-prefix
-  is auto-derived from the rig name; picking `gc` and `gascity` as
-  rig names would clash. Use distinct prefixes (`prefix = "gc"`,
-  `prefix = "gx"`) if you need similar names.
-- **`pack.toml` vs `city.toml`.** Pack-level config (workspace
-  defaults, transitive imports, `[global]` hooks) goes in `pack.toml`
-  at the city root. Per-rig wiring (`[[rigs]]`, `[rigs.imports.*]`,
-  `[[rigs.patches]]`, `[[rigs.overrides]]`) goes in `city.toml`.
-- **Do not double-import gastown.** gc-toolkit imports gastown
-  transitively. Adding `[rigs.imports.gastown]` on top causes
-  duplicate agent definitions.
+- **`source` paths are city-root-relative**, not rig-root-relative.
+- **Rig names must differ in their first two letters** — the bead prefix is
+  auto-derived, so set explicit `prefix` values for similar names.
+- **`pack.toml` vs `city.toml`.** Pack-level config (defaults, `[global]`
+  hooks) goes in the city root `pack.toml`; per-rig wiring (`[[rigs]]`,
+  `[rigs.imports.*]`, `[[rigs.patches]]`, `[[rigs.overrides]]`) goes in
+  `city.toml`.
+- **Merged is not live until the checkout syncs.** `reconcile-rig-checkouts`
+  fast-forwards each rig checkout every 15 minutes; a just-merged pack change
+  is not what the runtime executes until then (see
+  [refinery-merge-cadence.md](refinery-merge-cadence.md), *Adjacent order*).

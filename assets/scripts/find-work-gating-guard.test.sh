@@ -182,7 +182,7 @@ esac
 
 # The guard flags; it must not repair. Restoring assignee="" here would fight
 # whichever writer set it, from a pass that cannot see why — the same reason
-# check-set-heal.sh (a-norm0) only flags a non-canonically-assigned anchor.
+# gate-ensure.sh only flags a non-canonically-assigned anchor.
 grep -q 'gc bd update' "$TMP/select.sh" \
   && bad "(11) selection must not write to beads" "found a gc bd update in the guard" \
   || ok "(11) selection flags only — no bead writes"

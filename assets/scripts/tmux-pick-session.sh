@@ -1,11 +1,11 @@
 #!/bin/sh
-# tmux-pick-session.sh — Gas City session picker.
-# Companion design notes: tmux-pick-session.md (alongside this file).
+# tmux-pick-session.sh — Gas City session picker (prefix+S).
 #
 # Usage: tmux-pick-session.sh [--all] [--city-path <path>]
 #
 # Default filter hides polecat-*, control-dispatcher, deacon, witness,
-# dog, boot. The currently-attached session is always shown.
+# dog (the warrant-executor pool — short-lived, rarely worth attaching),
+# boot. The currently-attached session is always shown.
 # --all disables the filter; toggle from inside the menu via [.].
 # --city-path is the absolute path of the city this binding belongs
 # to — baked in by tmux-bindings.sh at install time so the API URL is
@@ -32,12 +32,9 @@
 #   •  — pane is the active pane within its window (only on inline
 #         pane sub-rows)
 #
-# Sessions with more than one pane get inline pane sub-rows in the
-# SAME display-menu (NOT a chained sub-menu, NOT a popup). We can't
-# use `choose-tree -F` because its leading "session: window: pane:"
-# triplet is hardcoded in tmux's window-tree.c and ignores the format
-# flag. See tmux-pick-session.md for the full rationale, alternatives
-# considered, and hotkey allocation rule.
+# Multi-pane sessions get inline pane sub-rows in the SAME display-menu
+# (`choose-tree -F` cannot be used: its "session: window: pane:" prefix is
+# hardcoded in tmux's window-tree.c).
 set -e
 
 ALL=0
@@ -56,11 +53,7 @@ SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 ACTIVE=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 TAB="$(printf '\t')"
 
-# sq <string> — POSIX shell-quote $1 for safe embedding in a sh -c body.
-# Wraps in '...' with any internal ' broken out as '\''. Used wherever
-# a captured path is interpolated into a tmux command string; without
-# it a path containing whitespace or shell metacharacters would be
-# split or re-interpreted, silently mis-routing the API call.
+# sq <string> — POSIX shell-quote for safe embedding in a tmux command.
 sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
@@ -114,13 +107,9 @@ gc_city_name() {
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
-# Per-session GC titles (session_name\ttitle, one per line). The supervisor
-# API's CachingStore answers in tens of ms steady-state vs the 75-190ms
-# idle / 5-20s loaded cost of the gc-CLI subprocess. curl -f swallows the
-# body during the cold-cache 503 window after `gc start`; any failure
-# (timeout, missing curl, jq parse error) yields an empty TITLES and the
-# picker renders without titles. Skipped entirely when no city resolves —
-# `/v0/city//sessions` would just 404.
+# Per-session GC titles (session_name\ttitle) from the supervisor API (tens
+# of ms vs a 5-20s gc subprocess under load); any failure renders without
+# titles, and no resolvable city skips the call.
 TITLES=""
 CITY_NAME=$(gc_city_name)
 if [ -n "$CITY_NAME" ]; then
@@ -254,13 +243,9 @@ BEGIN {
 END {
     # Header rows are collapsed-mode only. sub_pri=-1 (col 2) makes them
     # sort ahead of S (5) and P (9) rows within the same rig_sort group.
-    # Emit a header for every rig with at least one tmux session, even
-    # when the filter hides every session in that rig — the rig still
-    # surfaces as a bare `── <rig> ──` (or `── <rig> • N polecats ──`).
-    # Operators use the picker primarily for topology awareness;
-    # a rig whose only sessions are hidden polecats would otherwise
-    # vanish from the menu and its polecat count would be unreachable
-    # without `.` (show all). See tmux-pick-session.md for full rationale.
+    # A header renders for every rig with sessions, even all-hidden ones —
+    # the picker is topology awareness, and a hidden-polecat rig must not
+    # vanish from the menu.
     if (all) exit
     for (r in rig_seen) {
         rs = rig_sort_of[r]
@@ -347,35 +332,15 @@ $LIST
 LIST_EOF
 
 set -- "$@" "" "" ""
-# Preserve --city-path through the self-reinvoke; the binding runs from
-# tmux's bare env so re-running without it would re-introduce the
-# multi-city mis-route the install-time capture closes. sq() wraps the
-# path in sh-level single quotes; the outer run-shell wrap uses TMUX
-# double quotes so the inner ' chars don't terminate the menu-command
-# group at tmux's parser layer.
+# Preserve --city-path through the self-reinvoke (tmux's bare env).
 reinvoke_suffix=""
 [ -n "$EXPLICIT_CITY_PATH" ] && reinvoke_suffix=" --city-path $(sq "$EXPLICIT_CITY_PATH")"
 
-# Fixed keeper pin/unpin entry, sitting alongside [ show all ] as a
-# standalone menu action rather than a per-session row. The gascity-keeper
-# runs on_demand, so when it is drained it has no pane — and therefore no
-# row to hang a per-row action on — yet the operator still needs a surface
-# to bring it up. tmux-keeper-toggle.sh owns both the pin-state detection
-# and the pin/unpin call (one shared helper, no duplicated logic); we ask
-# it for the current state to render the matching label. The label tracks
-# the real durable pin (the keeper session bead's pin_awake), not tmux
-# liveness — a keeper materialized by hooked work is up but unpinned and
-# must still offer [ pin ]. That read is a bounded gc/beads round-trip, so
-# the state call threads --city-path for deterministic resolution from
-# tmux's bare env (unlike the pure-tmux check it replaces); when it can't
-# answer in time the entry degrades to a neutral [ keeper… ] label rather
-# than stalling the picker or guessing — toggle re-reads state itself, so
-# the entry stays actionable. The ',' hotkey is a fixed punctuation slot
-# (like '.' for show-all) so it never collides with the a-z0-9 per-row
-# hotkeys. run-shell -b backgrounds the toggle so a slow `gc session pin`
-# cannot freeze the server (cf. tmux-visit-prompt.sh, which backgrounds the
-# same class of call from inside the script because its foreground half has
-# ordering work to do first).
+# Fixed keeper pin/unpin entry (',' — a punctuation slot, like '.'): the
+# on_demand keeper has no pane when drained, so it needs a standalone
+# action. tmux-keeper-toggle.sh owns state detection and the toggle; an
+# unanswerable state degrades to a neutral [ keeper… ] label (toggle
+# re-reads state itself). run-shell -b so a slow pin cannot freeze tmux.
 KEEPER_TOGGLE="$(dirname "$SCRIPT")/tmux-keeper-toggle.sh"
 # shellcheck disable=SC2086 # ${EXPLICIT_CITY_PATH:+…} expands to 0 or 2 fields
 case "$("$KEEPER_TOGGLE" ${EXPLICIT_CITY_PATH:+--city-path "$EXPLICIT_CITY_PATH"} state 2>/dev/null || echo unknown)" in

@@ -474,7 +474,7 @@ eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(USAGE) no usage error wrote any
 
 # --- 16. structural: every value-taking arm validates before shifting ---------
 # No runtime test can cover an option that does not exist yet, so assert the
-# shape (same guard as escalation-gate.test.sh).
+# shape.
 ARMS=$(grep -c 'require_value "\$@"; ' "$SCRIPT")
 SHIFT2=$(grep -c 'shift 2 ;;' "$SCRIPT")
 eq "$ARMS" "$SHIFT2" "(STRUCT) every 'shift 2' arm is preceded by require_value on the same line"

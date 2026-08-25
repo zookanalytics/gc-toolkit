@@ -1,12 +1,10 @@
 {{ define "bead-disposition" }}
 ### Closing a bead whose work moved: stamp the successor
 
-Not every close is a landing. A bead also closes because its work **moved** — a
-pack defect **re-homed** into another rig's store, work **folded** into a bead
-that absorbed it, a defect **fixed upstream** by a commit already landed, a
-**duplicate**. Each hands the work to a **successor**, and a close that does not
-name its successor is indistinguishable from a careless close in exactly the
-place the question gets asked: the store the bead lived in.
+Not every close is a landing. A bead also closes because its work MOVED —
+re-homed to another rig's store, folded into an absorbing bead, fixed
+upstream, a duplicate. Each hands the work to a successor, and a close that
+does not name its successor is indistinguishable from a careless close.
 
 **Never write that close by hand.** One writer:
 
@@ -18,19 +16,15 @@ done
   --kind re-homed|folded|fixed-upstream|duplicate --note "<why, one sentence>"
 ```
 
-It derives both stores from the bead-id prefixes, stamps `gc.superseded_by` +
-`gc.superseded_by_store` on the closing bead, **reads them back**, and only then
-closes with a populated reason naming kind + successor + store. It refuses
-rather than close a bead unpointed, so a failure leaves an open pointed bead —
-visible and finishable — never a bare `[Closed]`. On an **already-closed** bead
-it is the repair tool: pointer plus a note, nothing reopened.
+It stamps `gc.superseded_by` + `gc.superseded_by_store`, reads them back,
+and only then closes with a reason naming kind + successor + store; it
+refuses to close a bead unpointed. On an already-closed bead it is the
+repair tool (pointer + note, nothing reopened).
 
-**The read side: a missing successor is not proof of a false close.** Before you
-reopen a closed bead, or escalate one as carelessly closed, ask the bead for its
-pointer under **both** conventions in the wild — `jq -r
-'.[0].metadata["gc.superseded_by"] // .[0].metadata.superseded_by'` (flat dotted
-keys; `.metadata.gc.superseded_by` silently yields null) — then read its notes
-and close reason, then search **every** store for a successor. Your rig store is
+**The read side: a missing successor is not proof of a false close.**
+Before reopening or escalating a closed bead, read the pointer under both
+conventions (`.metadata["gc.superseded_by"] // .metadata.superseded_by`),
+read notes and close reason, then search EVERY store — your rig store is
 not the city:
 
 ```bash
@@ -40,22 +34,8 @@ gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do
 done
 ```
 
-Reopening is a write against somebody else's decision. On 2026-08-09 a
-single-store search produced **four wrong conclusions across two agents** over
-eight beads — reopens, escalations, and retractions that were themselves wrong —
-and every one of them would have been prevented by widening the search or by the
-pointer above. A silent record is a reason to look wider, not evidence of a
-false close; when you resolve one, stamp the pointer the bead should have
-carried.
-
-**Who closed it:** the `issues` row has no `closed_by`, and every Dolt write
-commits as `beads@local`, so the commit log cannot attribute a close. The
-per-store `events` table can — the database name is the bead prefix:
-
-```bash
-gc dolt sql -q "SELECT issue_id, event_type, actor, created_at FROM <prefix>.events WHERE issue_id = '<bead-id>' ORDER BY created_at"
-```
-
-Full doctrine: `docs/work-bead-state-machine.md` → "Disposition: a close that
-hands the work to a successor".
+Reopening is a write against somebody else's decision; a silent record is a
+reason to look wider, not evidence of a false close. Who closed it: the
+per-store `events` table (`SELECT issue_id, event_type, actor, created_at
+FROM <prefix>.events WHERE issue_id = '<bead-id>'`).
 {{ end }}

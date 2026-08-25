@@ -1,1 +1,0 @@
-description = "The workflow-stall detector stays shipped and wired — assets/scripts/detect-stalled-workflows.sh with its regression test, called from the witness patrol's own step, so a graph.v2 workflow whose frontier stops advancing cannot go back to emitting no signal at all (tk-xesf6)"

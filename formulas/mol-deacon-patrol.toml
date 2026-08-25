@@ -1,479 +1,86 @@
 description = """
-Deacon patrol loop. Poured as a root-only wisp on startup:
+Deacon patrol loop — city infrastructure health. Poured as a root-only wisp
+on startup (the agent prompt's startup reconcile adopts before it pours):
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}'
+  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
-Each wisp is ONE iteration: check inbox, run town-wide coordination
-tasks, pour the next iteration. On crash, re-read the formula steps
-and determine where you left off from context.
+Each wisp is ONE iteration: mail, orphan-process cleanup, Dolt health,
+doctor sweep, pour the next iteration. Steps are not materialized; read
+each description as you reach it, and never exit the wisp from an
+intermediate step. The deacon is the controller's judgment layer — it never
+starts/stops agents, never recovers per-rig beads (witness), never writes
+code. Escalations go through assets/scripts/escalate.sh — one open visit
+per situation key.
 
-Formula steps are NOT materialized as child beads. Read the step
-descriptions below and work through them in order.
-
-The loop mechanism: every exit path (happy or early) pours the next
-wisp before burning this one. The prompt only bootstraps the first wisp.
-
-## Deacon Role
-
-The deacon is the **LLM sidekick to the controller**. It handles periodic
-tasks that require judgment or observation — things the Go controller
-can't or shouldn't do.
-
-1. **Work-layer health** — are witnesses and refineries making progress?
-   (Not "are they running" — that's the controller's job.)
-2. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
-3. **Orphan process cleanup** — kill leaked claude/node subagent processes.
-4. **System diagnostics** — run `gc doctor`, act on findings.
-
-Mechanical tasks (gate evaluation, cross-rig deps, orphan bead sweeps,
-wisp compaction) are handled by exec orders in the maintenance
-pack — no LLM needed.
-
-## Idle Town Principle
-
-The deacon should be silent/invisible when the town is healthy and idle.
-Skip health checks when no active work exists. Use exponential backoff
-between patrol cycles.
-
-## What the deacon does NOT do
-
-- Start/stop/restart agents (controller handles this)
-- Per-rig orphaned bead recovery (witness handles this)
-- Code implementation (polecats do this)
-- Kill agents directly (files warrants, dog pool runs shutdown dance)
-- Pool sizing (controller pool reconciliation)
-
-Read each step's description before acting — Config values override defaults."""
+The marked backup-manifest-check block is extracted and executed by
+assets/scripts/dolt-backup-manifest-check.test.sh; keep the markers and
+keep it backslash-free."""
 formula = "mol-deacon-patrol"
-version = 18
 
 [vars]
 [vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, including trailing dot when bound."
+description = "Agent identity prefix, including trailing dot when bound."
 default = ""
 
 [vars.event_timeout]
-description = "Seconds to wait before re-checking. Replaces former event-watch loop which hot-spun on cache-reconcile firehose. Spend it with a bounded until-loop, not a standalone sleep — the harness blocks a standalone sleep, and a blocked wait is not a slow patrol, it is NO pacing at all. Raised 60 -> 600 (tk-2qa85), together with the next-iteration defect that made the old value dead letter: the pour forwarded only binding_prefix, and a --root-only pour materializes no defaults, so from cycle 2 this var arrived unrendered and there was no interval left to honour. The deacon was 17.9% of all city model calls over 24h (6,273 of 34,983). 600 is the harness ceiling on a single bounded wait call, not a preference — see the same note on mol-witness-patrol. This value reaches the loop ONLY through the startup pour, which reads it from this default via `gc formula show`; city.toml [rigs].formula_vars cannot override it, because mergeRigFormulaVars preserves an explicit --var."
+description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep). Ceiling 600: the harness caps one call at 600s."
 default = "600"
 
 [[steps]]
 id = "check-inbox"
 title = "Check mail"
 description = """
-**Check mail:**
 ```bash
 gc mail inbox
 ```
-
-Handle each message type:
-
-**HELP / Escalation:**
-Assess the request. Can you help directly? If not, escalate:
-```bash
-gc mail send mayor/ -s "ESCALATION: <agent> needs help" -m "<details>"
-```
-Archive after handling.
-
-**DOG_DONE:**
-A utility agent completed its task (e.g., shutdown dance, dep
-propagation). Note the outcome for observability. Archive.
-
-**Other / informational:**
-Archive after reading.
-
-**Hygiene principle**: Archive messages after they're fully processed.
-Inbox should be near-empty after this step.
-
-Close this step and proceed."""
+Handle what you can directly; anything needing a human becomes a visit via
+escalate.sh. A `DOG_DONE:` notice is a completed shutdown dance on a
+warrant — note the outcome (the closed warrant carries the evidence) and
+archive. Archive processed messages — inbox near-empty after this step.
+Close it and proceed."""
 
 [[steps]]
 id = "orphan-process-cleanup"
 title = "Kill orphaned claude subagent processes"
 needs = ["check-inbox"]
 description = """
-Claude Code's Task tool spawns subagent processes that sometimes don't
-clean up. These accumulate and consume significant memory.
-
-**Detection:** Orphaned subagent processes have TTY = "?" in `ps` output.
-They are child processes of claude/node that lost their parent.
-
-```bash
-ps aux | grep -E 'claude|node' | grep '?'
-```
-
-**Judgment required:** Not all TTY=? processes are orphaned. Some are
-legitimate background processes. Look for:
-- Processes consuming significant memory (>500MB RSS)
-- Processes that have been running much longer than any active session
-- Multiple identical processes (accumulated from repeated crashes)
-
-**Action:** Kill confirmed orphans:
-```bash
-kill <pid>
-```
-
-Use judgment — this is exactly why an LLM does it, not Go code.
-
-Close this step after check (even if no orphans found)."""
-
-[[steps]]
-id = "health-scan"
-title = "Check work-layer health"
-needs = ["orphan-process-cleanup"]
-description = """
-Monitor whether work is flowing through rig coordination agents.
-The controller handles "is the agent running?" The deacon handles
-"is work progressing?"
-
-**Skip docked/parked rigs.** Only check active rigs.
-
-**For each active rig, assess witness health:**
-
-Check witness patrol wisp freshness. Each patrol cycle burns a wisp.
-If the last wisp is much older than the maximum backoff cap (300s) plus
-buffer, the witness may be stuck. But if there's no active work in the
-rig, the witness is legitimately idle — not stuck.
-
-**For each active rig, assess refinery health:**
-
-Check refinery patrol wisp freshness + queue state:
-- Wisp recently burned → healthy (actively cycling)
-- Wisp open, no work assigned to refinery → idle, fine
-- Wisp open, work assigned to refinery, stale `UpdatedAt` → stuck
-
-**No hardcoded thresholds.** Read wisp timestamps, queue state, and
-the nature of the current work. Make a judgment call about whether
-something is stuck. This is exactly why an LLM does it, not Go code.
-
-**Quota-parked is NOT stuck — and do not read the pane to decide that.** An
-agent whose turn ended inside a provider quota block sits at an idle prompt
-under the limit banner: it has no pending work and no timer to drive it until
-the window reopens, so it looks exactly like a stuck agent from every angle
-the work layer can see. A shutdown dance would discard a healthy session
-holding live context and the fresh one would hit the same block; seven
-warrants were filed against two such agents on 2026-08-02 (bead tk-al95k).
-
-Ask the recovery order rather than the screen. It classifies without an LLM
-and answers in closed fields:
-
-```bash
-QPN=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/quota-park-nudge.sh" ] && { QPN="$cand/assets/scripts/quota-park-nudge.sh"; break; }
-done
-[ -n "$QPN" ] && "$QPN" --status "<session-id>"
-```
-
-- `quota_park=yes` — the order confirmed a park on that session within the
-  last few minutes and is nudging it. **Defer** the warrant this cycle and say
-  so in your log. This is a bounded defer, not a standing suppression.
-- `quota_park=no` — the order looked at that session recently and it is not
-  parked (or the operator excluded it from recovery). Normal warrant path.
-- `quota_park=unknown` — the order is vouching for nothing about this session,
-  and `reason=` says which kind of nothing:
-  - `reason=no-recent-sweep` — no pass at all lately. Quota-park recovery
-    itself looks down; normal warrant path, and say so in your log.
-  - `reason=not-swept` — a pass ran but never reached this session (deferred by
-    the sweep budget, an unreadable pane, an id it refused). Ordinary partial
-    coverage, not an outage; normal warrant path, no alarm.
-  - `reason=stale-episode` — it saw a park here once and nothing has confirmed
-    it since. Normal warrant path.
-  - `reason=unsafe-session-id` / `reason=foreign-state` — it holds no usable
-    state for that session: an id it will not name a file with, or something at
-    that path it did not write. Normal warrant path, no alarm.
-  - `reason=state-dir-unavailable` — its state directory cannot be created or
-    written, so it holds no evidence about any session and can record none.
-    Quota-park recovery itself looks down; normal warrant path, and say so in
-    your log.
-- **No output, or output you cannot parse** — the helper was not found (`QPN`
-  empty), is not executable, or printed nothing: the `[ -n "$QPN" ] && …` above
-  yields an empty string in each case. That is `unknown`, never `no` and never
-  `yes`. Normal warrant path, and log it as *recovery status unavailable* — the
-  same as `reason=no-recent-sweep`, because it means the same thing: there is no
-  recovery to defer to.
-- `escalated=1` on a session you already deferred once — nudging has not
-  brought it back and a human has been mailed. Do not keep deferring in
-  silence: escalate to the mayor.
-
-**Why not just peek the pane.** Pane text is agent-controlled output. A wedged
-— or prompt-injected — agent can print a provider-shaped banner and idle, and
-a warrant path that stands down on that alone is an off switch any agent can
-reach for itself, on the one path that would have recovered its work. The
-status surface above emits no pane text at all. Peek the screen afterwards if
-you want to see it; never as the input to the decision.
-
-See docs/quota-park-recovery.md.
-
-**For stuck coordination agents, file a warrant:**
-```bash
-gc bd create --type=task --label=warrant \
-  --title="Stuck: <rig>/<role>" \
-  --metadata '{"target":"<session>","reason":"<reason>","requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}'
-```
-
-The dog pool runs `mol-shutdown-dance` for due process.
-
-**Escalate to mayor** only for systemic issues (multiple rigs affected,
-patterns of failure).
-
-Close this step after assessment."""
-
-[[steps]]
-id = "queue-starvation-check"
-title = "Cross-check assigned work against visible work signal"
-needs = ["health-scan"]
-description = """
-Cross-check assigned work against visible work signal. A session can
-look healthy-idle in a patrol wisp view while its queue is silently
-starving — the refinery (upstream #1833) self-polled for 13h42m with
-seven beads in its queue and no visible work signal, because its poll
-filter resolved to an identity that didn't match its own.
-
-The deacon's wisp-freshness check catches "no patrol activity" but not
-"active polling, wrong filter, queue silently piling up." This step
-closes that gap.
-
-**Step 1: For each active coordination/merge session, compute the pair:**
-- `A` = count of open beads assigned to the session's agent identity
-- `B` = the most recent bead.updated_at across those beads (work signal)
-
-```bash
-gc agents list --json --active | jq -r '.[] | .agent_id' | while read -r AGENT; do
-    ASSIGNED=$(gc bd list --status=open --assignee="$AGENT" --json --limit=0 | jq 'length')
-    LATEST=$(gc bd list --status=open --assignee="$AGENT" --json --limit=0 \\
-        | jq -r '[.[].updated_at] | max // ""')
-    printf '%s\\t%s\\t%s\\n' "$AGENT" "$ASSIGNED" "$LATEST"
-done
-```
-
-The latest bead.updated_at is the cheapest proxy for "did this session
-move work recently?" — every claim, status transition, metadata update,
-or note bumps it.
-
-**Step 2: Flag when queue > 0 and signal is stale (judgment call,
-guideline ~30min):**
-
-If `A > 0` AND `now - B` has grown well past the patrol's natural
-cadence (default guideline: 30min — roughly 6x the 300s max patrol
-backoff), the session is holding work without making progress. This
-is exactly why an LLM does it, not Go code. Consider:
-- Coordination agents (refinery, witness) naturally cycle in seconds
-  when work is present; 30min is an eternity, not a lull.
-- Polecats may take longer per step; be more lenient before flagging.
-- A freshly-assigned bead with no prior activity gets `updated_at` at
-  assignment time; if it's hours old, the session picked it up but
-  never acted.
-
-**Quota-parked is NOT starvation.** A quota-parked agent produces this exact
-signature — open beads, `bead.updated_at` frozen for hours — and it is not
-stuck: its turn ended inside the block, so it has no pending work and no timer
-until the window reopens. Of every path that can warrant a session, this is
-the easiest one to get wrong.
-
-Before flagging, ask the recovery order — **not** the pane, which is
-agent-controlled output a wedged or prompt-injected session can use to switch
-its own recovery off:
-
-```bash
-QPN=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/quota-park-nudge.sh" ] && { QPN="$cand/assets/scripts/quota-park-nudge.sh"; break; }
-done
-[ -n "$QPN" ] && "$QPN" --status "<session-id>"
-```
-
-`quota_park=yes` → defer the warrant this cycle (bounded defer, logged; the
-order is nudging it). `quota_park=no` → it looked recently and this is not a
-park → normal path. `quota_park=unknown` → it vouches for nothing here →
-normal path, and read `reason=`: `reason=no-recent-sweep` means quota-park
-recovery itself looks down (note that), while `reason=not-swept` (budget
-deferred it, or the pane was unreadable) and `reason=stale-episode` are
-ordinary partial coverage and need no alarm. `reason=state-dir-unavailable` —
-it cannot create or write its state directory, so it holds no evidence about
-anything: normal path, and note it like `no-recent-sweep`. No output at all
-(helper absent, not executable, or silent — the `[ -n "$QPN" ]` guard above
-yields an empty string) is `unknown` too, never `no`: normal path, logged as
-*recovery status unavailable*. `escalated=1` on a session you
-already deferred → nudging has not recovered it; escalate to the mayor rather
-than deferring again in silence.
-
-Warranting one of these anyway discards a healthy session holding live context
-and the fresh one hits the same block: seven warrants were filed against two
-such agents on 2026-08-02 (bead tk-al95k). See docs/quota-park-recovery.md.
-
-**Step 3: For flagged sessions, nudge first, then warrant:**
-
-```bash
-gc session nudge "$STUCK_SESSION" "Queue has $ASSIGNED open beads, no bead activity for <duration>. Run gc hook."
-```
-
-If the nudge doesn't unstick within the next patrol cycle, escalate
-by filing a warrant for the dog pool:
-
-```bash
-gc bd create --type=task --label=warrant \\
-    --title="Stuck queue: <session> — $ASSIGNED beads, no activity $duration" \\
-    --metadata '{"target":"<session>","reason":"queue starvation: N beads, no bead.updated_at progress","requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}'
-```
-
-The dog runs `mol-shutdown-dance` and the controller respawns a fresh
-session that re-reads the queue with a correct filter.
-
-**Step 4: A genuinely-idle session (no assigned beads) is NOT flagged.**
-If `A == 0`, this step is a no-op for that session. Idle-but-ready
-refineries and witnesses are healthy.
-
-Close this step after the cross-check runs for every active session."""
-
-[[steps]]
-id = "utility-agent-health"
-title = "Check utility agent (dog) health"
-needs = ["queue-starvation-check"]
-description = """
-Detect utility agents (dogs) that are alive but stuck on their work.
-
-The controller detects dead agents. But "working too long" is a
-work-layer judgment: is this task genuinely slow, or is the agent stuck?
-The controller can't know this. The deacon can, by checking bead and
-wisp timestamps.
-
-**Step 1: Find active utility agent work:**
-```bash
-gc bd list --status=in_progress --metadata-field gc.routed_to={{binding_prefix}}dog --json --limit=0
-```
-
-**Step 2: For each, assess progress:**
-
-Check the work bead's `UpdatedAt` and the agent's wisp freshness.
-Consider the nature of the work — a shutdown dance with 240s timeouts
-will naturally take longer than a quick dep propagation.
-
-No hardcoded thresholds. Use judgment.
-
-**Quota-parked is NOT stuck.** A turn that ended inside a provider quota block
-freezes the dog's bead and wisp timestamps for exactly the reason they look
-frozen when it is stuck. Check before warranting — and check the recovery
-order, **not** the pane, which is agent-controlled output a wedged or
-prompt-injected session can use to switch its own recovery off:
-
-```bash
-QPN=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/quota-park-nudge.sh" ] && { QPN="$cand/assets/scripts/quota-park-nudge.sh"; break; }
-done
-[ -n "$QPN" ] && "$QPN" --status "<session-id>"
-```
-
-`quota_park=yes` → defer the warrant this cycle (bounded defer, logged).
-`quota_park=no` → it looked recently and this is not a park → normal path.
-`quota_park=unknown` → it vouches for nothing here → normal path, and read
-`reason=`: `reason=no-recent-sweep` means quota-park recovery itself looks
-down (note that), while `reason=not-swept` (the budget deferred this session,
-or its pane was unreadable) and `reason=stale-episode` are ordinary partial
-coverage. `reason=state-dir-unavailable` — it cannot create or write its state
-directory and holds no evidence about anything: normal path, noted like
-`no-recent-sweep`. No output at all (helper absent, not executable, or silent)
-is `unknown` too, never `no`: normal path, logged as
-*recovery status unavailable*. `escalated=1` on a session you already deferred
-→ escalate to the mayor instead of deferring again.
-
-Warranting a real park sends a second dog to run the shutdown dance on a
-healthy session, and the replacement hits the same block (bead tk-al95k,
-docs/quota-park-recovery.md).
-
-**Step 3: For stuck utility agents, file a warrant:**
-```bash
-gc bd create --type=task --label=warrant \
-  --title="Stuck dog: <agent>" \
-  --metadata '{"target":"<session>","reason":"<reason>","requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}'
-```
-
-A different dog from the pool picks up the warrant and runs the
-shutdown dance. If the pool is at capacity with all dogs stuck,
-escalate to mayor.
-
-Close this step after assessment."""
+Subagent processes sometimes outlive their parents and accumulate memory.
+Detect: `ps aux | grep -E 'claude|node' | grep '?'` (TTY = "?"). Judgment
+required — not every TTY=? process is orphaned; look for large RSS
+(>500MB), runtimes far beyond any live session, or multiples of the same
+command. Kill confirmed orphans with `kill <pid>`. Close this step even
+when nothing was found."""
 
 [[steps]]
 id = "dolt-health"
 title = "Run Dolt data-plane health check"
-needs = ["utility-agent-health"]
+needs = ["orphan-process-cleanup"]
 description = """
-Run `gc dolt health --json` to inspect the Dolt data plane and flag anomalies.
-
-This step surfaces problems that individual patrol steps won't catch:
-commit bloat (compactor dog may have failed), unrestorable backups (backup
-dog may have failed), orphan databases, and zombie Dolt server processes.
-
-**Step 1: Run the health check**
-
-Keep the report — Step 2a needs its `databases[]` list, and re-probing
-costs another 5 s per database against a data plane this step exists to
-watch:
+**1. Run the check once and keep the payload** (re-probing costs ~5s per
+database against the very data plane being watched):
 ```bash
 HEALTH_JSON=$(gc dolt health --json)
 printf '%s' "$HEALTH_JSON" | jq .
 ```
+Key decisions off `server.reachable`, never `server.running` — a process
+can hold the port with wedged goroutines. Thresholds: unreachable server =
+CRITICAL; `latency_ms > 5000` = overloaded; `databases[].commits > 50000` =
+compactor stalled; zombie PIDs = kill them; `orphans[]` = ADVISORY only
+(verify with the dry-run `gc dolt-cleanup --json` before believing it, and
+never run a destructive `--force` from this step).
 
-Parse the JSON output (HealthReport schema):
-- `server`: running, reachable, pid, port, latency_ms
-- `databases[]`: name, commits, open_beads
-- `backups`: dolt_freshness, dolt_age_seconds, dolt_stale — **never
-  sufficient on its own.** Absent backup data renders as
-  `"dolt_freshness": "", "dolt_age_sec": 0, "dolt_stale": false`, so a
-  TOTAL backup failure is indistinguishable from a fresh backup and
-  `dolt_stale` can only ever fire on a *partial* one. Verify backups by
-  manifest mtime on disk (Step 2a); treat these fields as advisory.
-- `processes`: zombie_count, zombie_pids
-- `orphans[]`: name, size
-
-Note: `--json` always exits 0 when the payload is well-formed; health
-state is signalled in-band. Key decisions off `server.reachable`, not
-`server.running` — a process can hold the port while its goroutines
-are wedged (the latter is what first prompted this check to exist).
-
-**Step 2: Evaluate thresholds**
-
-| Signal | Threshold | Meaning |
-|--------|-----------|---------|
-| `server.reachable == false` | — | Dolt server is down or unresponsive (CRITICAL) |
-| `server.latency_ms > 5000` | 5 s | Server may be overloaded |
-| `databases[].commits > 50000` | 50 k | Compactor dog may have stalled |
-| backup restorability — see **Step 2a** | every live database has a readable backup dir with no file newer than its manifest, <12 h old | Backup dog may have failed. Do NOT key this off `backups.dolt_stale` — it reads false-clean through a total outage |
-| `processes.zombie_count > 0` | any | Zombie Dolt servers detected |
-| `orphans` non-empty | any | Advisory only — NEVER act on this count directly; verify with `gc dolt-cleanup` (hyphen, dry-run) first |
-
-**Step 2a: Verify backups by manifest mtime (never by `dolt_stale`)**
-
-A backup is restorable only up to its committed **manifest**. Dolt writes
-chunk `.darc` files first and commits the `manifest` last, so a healthy
-database's newest file IS its manifest. If a `.darc` is newer, the run
-uploaded data but never committed it — nothing after the manifest
-timestamp is restorable, however new the chunks look. Directory mtime and
-directory size both lie here: they move with the chunk writes.
-
-**On an mtime tie the manifest wins.** `stat` reports whole seconds, so a
-manifest committed milliseconds after the final chunk is indistinguishable
-from one written in the same instant. Since Dolt commits the manifest last,
-a same-second tie means the commit landed in the same second as the last
-chunk — the signature of a *fast* sync, not a torn one. Breaking that tie
-the other way false-FLAGs a healthy backup, and does so more often as a
-database gets smaller and faster: the check would degrade exactly as
-backups improve. Only a `.darc` **strictly** newer than the manifest is a
-finding.
-
-**Drive the scan from the live database list, not from the backup dirs.**
-A database whose backup directory is *missing entirely* is the worst case
-and is invisible to a walk of `$BACKUP_ROOT/*/` — that walk can only judge
-backups that already exist, so it would emit no verdict for the one
-database with no backup at all and still let you conclude "clean". The
-expected set is `databases[].name` from the Step 1 report; a backup dir
-with no matching live database is advisory only (a dropped or renamed db).
-
-The markers below let the regression test extract and exercise this exact
-snippet (assets/scripts/dolt-backup-manifest-check.test.sh), so the shipped
-rule cannot drift from the tested one.
+**2. Verify backups by manifest mtime — never by `backups.dolt_stale`.**
+Absent backup data renders as `dolt_stale=false`, so that field reads
+false-clean through a TOTAL outage. The contract, carried by the block
+below: a backup is restorable only up to its committed manifest (Dolt
+writes chunks first, manifest LAST, so a healthy dir's newest file IS the
+manifest and an equal-second tie resolves TO it); the scan is driven by the
+live `databases[].name` list, never a walk of the backup dirs (a database
+with no dir at all is invisible to a walk); missing/empty roots are
+FLAG-ROOT findings naming every affected database; an in-flight sync gets a
+bounded RECHECK grace that a stale manifest bypasses; and an unreadable
+directory is UNPROVEN, never clean.
 
 ```bash
 # >>> backup-manifest-check
@@ -495,13 +102,8 @@ mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 
 # Split the list ONCE, with awk rather than with shell word-splitting, and
 # derive both forms from it: one name per line for the loop below, and the
 # space-joined one-liner a root-level finding names every affected database on.
-# Both used to lean on splitting an unquoted expansion, which zsh — the shell
-# this snippet is pasted into — does not perform (tk-1c9vf): `for name in
-# $EXPECTED_DBS` ran ONCE on every name joined into a single token, and
-# DB_NAMES stayed newline-separated, so the `case " $DB_NAMES "` membership
-# test below matched nothing and called every live database's backup directory
-# an orphan. $EXPECTED_DBS arrives newline-separated from jq and
-# space-separated from the test's fixture, so split on any whitespace.
+# (zsh does not word-split unquoted expansions, so a shell split runs once on
+# the whole list joined into a single token.)
 DB_LIST=$(mktemp)
 printf '%s' "$EXPECTED_DBS" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$DB_LIST"
 DB_NAMES=$(awk '{ if (s == "") s = $0; else s = s " " $0 } END { print s }' "$DB_LIST")
@@ -520,48 +122,24 @@ else
             continue
         fi
         m_t=$(mtime_of "$db/manifest")
-        # Seed the scan WITH the manifest so an mtime tie resolves to it.
-        # mtime_of reads whole seconds, so a manifest committed milliseconds
-        # after the last chunk ties with it; paired with the strictly-greater
-        # test below, the tie used to be broken by `find` traversal order
-        # (directory/inode order, not time order) and a chunk yielded first
-        # won -- a healthy backup read as uncommitted. Dolt commits the
-        # manifest LAST, so a tie means the commit landed in the same second
-        # as the final chunk: a fast, healthy sync, and it gets MORE likely
-        # as a database gets smaller. Seeding encodes that invariant --
-        # on a tie, the manifest wins. Only a chunk STRICTLY newer than the
-        # manifest displaces it, which is the torn-backup signature this
-        # check exists to catch. With no manifest, m_t is 0, so the seed is
-        # inert and the no-manifest arms below behave exactly as before.
+        # Seed the scan WITH the manifest so an mtime tie resolves to it: stat
+        # reads whole seconds and Dolt commits the manifest LAST, so a tie is a
+        # fast healthy sync. Only a chunk STRICTLY newer than the manifest
+        # displaces it — the torn-backup signature.
         newest="manifest"; newest_t=$m_t
-        # ...but a seed is only safe once the directory has actually been READ.
-        # Capture the scan instead of streaming it in from a process
-        # substitution: `done < <(find ...)` throws the exit status away, so a
-        # directory the patrol cannot enumerate (permissions, I/O error, a find
-        # that dies) is indistinguishable from one holding nothing newer than
-        # the manifest -- and the seed then carries a fresh manifest all the way
-        # to OK, hiding a strictly newer chunk behind an unreadable directory.
-        # An unread directory is UNPROVEN, never clean.
-        # Seed the status and capture with `||` rather than reading `$?` after a
-        # bare assignment: the failing scan is EXPECTED here, and under `set -e`
-        # a command substitution that exits non-zero aborts the assignment's
-        # whole shell before `scan_rc` is ever set -- the arm below would then
-        # never run and the snippet would emit no verdict at all. `||` marks the
-        # failure as handled, so the check survives a strict-shell paste (same
-        # reason as the `|| true` on the re-run below).
+        # ...but a seed is only safe once the directory has actually been READ:
+        # capture the scan and its exit status, because an enumeration that
+        # fails (or lists nothing while the manifest is readable) would let the
+        # seed carry a fresh manifest to OK and hide a newer chunk behind an
+        # unreadable directory. Unread is UNPROVEN, never clean. `||` marks the
+        # expected failure as handled so a strict-shell paste survives.
         scan_rc=0
         scan_out=$(find "$db" -type f 2>/dev/null) || scan_rc=$?
         scan_fail=""
         if [ "$scan_rc" -ne 0 ]; then
-            # Re-run only on this path, to name the cause in the verdict Step 3
-            # carries. `|| true` so a paste of this snippet under `set -e -o
-            # pipefail` is not aborted by the (expected) non-zero find.
             scan_why=$(find "$db" -type f 2>&1 >/dev/null | sed -n 1p || true)
             scan_fail="find exited $scan_rc${scan_why:+: $scan_why}"
         elif [ "$m_t" -gt 0 ] && [ -z "$scan_out" ]; then
-            # The manifest is readable but the scan listed nothing at all, not
-            # even the manifest: the enumeration came back empty without
-            # reporting failure. Also unproven.
             scan_fail="find listed no files though $db/manifest is readable"
         fi
         while IFS= read -r f; do
@@ -572,8 +150,6 @@ else
         since=$(( NOW - newest_t ))
         age_h=$(( (NOW - m_t) / 3600 ))
         if [ -n "$scan_fail" ]; then
-            # Indeterminate by default; a missing or already-stale manifest
-            # makes it a finding outright, since nothing here can clear it.
             if [ "$m_t" -eq 0 ]; then
                 echo "FLAG $name: backup directory scan failed ($scan_fail) and there is no manifest - nothing verifiably restorable"
             elif [ "$age_h" -gt "$STALE_H" ]; then
@@ -611,399 +187,95 @@ fi
 # <<< backup-manifest-check
 ```
 
-Every expected database gets exactly one verdict:
+"Healthy" requires an explicit `OK` for EVERY database in `databases[]` —
+no FLAG, no FLAG-ROOT, no outstanding RECHECK (re-run the block; a RECHECK
+whose cause is an unreadable directory never clears by waiting — fix the
+read or treat as FLAG).
 
-| Verdict | Meaning |
-|---------|---------|
-| `OK` | the backup dir was read, no file in it is newer than the manifest (a tie counts as the manifest), and the manifest is within the staleness threshold |
-| `FLAG` | not restorable — act on it (Step 3) |
-| `RECHECK` | indeterminate — a sync may be in flight, or the backup dir could not be read — **not** clean |
-| `FLAG-ROOT` | no root, empty root, or no database list: nothing is verified |
-| `INFO` | extra backup dir, no live database — advisory, never a verdict |
-
-Flag a database when ANY holds:
-- it has **no backup directory**, or
-- it has **no manifest** (and nothing is being written right now), or
-- a file in its backup dir is **strictly newer** than the manifest (an
-  equal-second tie is not — the manifest is committed last), or
-- the manifest is older than **12 h** — 2x the 6 h cadence (backup runs at
-  21:00 / 03:00 / 09:00 / 15:00Z), or
-- its backup dir **could not be enumerated** *and* the manifest is missing
-  or already stale — an unreadable directory with a fresh manifest is a
-  `RECHECK` instead, never an `OK`.
-
-**An unreadable backup directory is not a clean one.** The scan decides
-"nothing is newer than the manifest" by *reading* the directory; if that
-read fails, the answer is unknown, not "nothing". The manifest seed above
-makes this failure especially dangerous — a readable, fresh manifest would
-otherwise carry an unreadable directory to `OK` and hide a torn backup
-behind a permissions or I/O error. So the scan's exit status is checked,
-and an enumeration that fails (or that returns nothing while the manifest
-is readable) produces `RECHECK`/`FLAG` with the scan error attached, never
-a verdict about newness it never established.
-
-**Missing and empty roots are findings, not warnings.** A missing or empty
-`$BACKUP_ROOT` means *no* database has a restorable backup — the most
-severe state this check can find. It names the affected databases so Step 3
-has something concrete to nudge and escalate with; never let it degrade
-into an unnamed warning.
-
-**The in-flight grace, and why it cannot hide a real failure.** During a
-normal sync the newest file is a `.darc` until the run commits, so a scan
-that fires the instant it sees a chunk newer than the manifest would flag
-every healthy run in progress. `RECHECK` covers that window, and it closes
-two ways so a broken sync cannot camp in it:
-- **Writes stop advancing.** A live sync keeps writing; a dead one freezes.
-  Once the newest file is older than `GRACE_SEC` (15 min), it is a FLAG.
-  Re-running Step 2a is the whole re-check — no state to carry.
-- **The manifest is already stale.** A run in flight cannot explain a
-  manifest older than 12 h. That combination is a sync that keeps writing
-  and never commits, so it flags immediately regardless of the grace
-  window. This is exactly the lx shape: fresh chunks every rotation, a
-  manifest 40 h behind.
-
-A `RECHECK` is not a pass. Re-run Step 2a before concluding the step, and
-treat a database that is still `RECHECK` after the grace window as `FLAG`.
-
-**Do not flag on sync duration.** A large database is slow but healthy as
-long as its manifest is newest and recent — lx is ~3 GB and needs ~95 s to
-sync. The failure this catches is "uploaded but never committed"
-(`.darc` newer than manifest), not "slow".
-
-**Step 2b: Read the backup dog's failure mail (live second channel)**
-
-The backup dog reports per-database sync failures by mail to the `human`
-mailbox, which no agent drains — during the outage that prompted this
-step, several such mails sat unread while the patrol logged OK. This step
-is that channel's reader:
-
+**3. React.** Escalate each finding through the one writer, carrying the
+verdict line VERBATIM (each is a complete one-line reason; do not
+re-template it):
 ```bash
-gc mail inbox human | grep -E 'Dolt backup: [0-9]+/[0-9]+ databases failed to sync'
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+"$SCRIPTS/escalate.sh" --subject <this wisp or the tracking bead> --key dolt-backup-<db> --message "<the Step 2 FLAG line, verbatim>"
+# server unreachable: --key dolt-server-unreachable (CRITICAL)
+# FLAG-ROOT:          --key dolt-backup-root (names every affected database)
+# commit bloat:       --key dolt-commit-bloat-<db> (commits > 50000; compaction
+#                     is a manual operator action until an actuator exists)
+# orphan databases:   --key dolt-orphan-dbs (advisory orphans[] non-empty;
+#                     removal is a manual operator action — never --force here)
 ```
+Before restarting anything, collect non-fatal diagnostics first
+(`SHOW FULL PROCESSLIST`, `gc dolt logs`, bounded `gc dolt health --json`,
+`gc dolt status`) — a blind restart destroys the evidence.
 
-A hit names the failing databases in its body and should corroborate
-Step 2a; a hit with a clean Step 2a (or the reverse) means one of the two
-channels is lying — investigate rather than picking the happier one.
-**List only.** Do NOT `gc mail read` or `gc mail archive` these — that is
-the operator's inbox, and draining it here hides the outage from them.
-
-**Step 3: React to alerts**
-
-**Server down (CRITICAL):** `server.reachable == false` — either no
-process is listening on the port, or a process is listening but not
-answering SQL (wedged goroutines, migration lock, saturated pool).
-```bash
-gc mail send mayor/ -s "ESCALATION: Dolt server unreachable [CRITICAL]" \\
-  -m "gc dolt health reports server.reachable=false"
-```
-
-**Commit bloat (commits > 50k in any DB):**
-The compactor dog (`mol-dog-compactor`) may have failed. Log for awareness.
-If the compactor order is configured, it will self-dispatch. Otherwise
-nudge the dog pool:
-```bash
-gc session nudge dog/ "Compactor needed: <db_name> has <count> commits"
-```
-
-**Unrestorable backup (any Step 2a `FLAG`, or a Step 2b mail):**
-The backup dog (`mol-dog-backup`) may have failed. A file **strictly** newer
-than the manifest is a FAILED backup, not a slow one — the database cannot
-be restored past the manifest timestamp. An equal-second tie is not a
-finding: Dolt commits the manifest last, so Step 2a resolves a tie to the
-manifest.
-
-**Carry the Step 2a line, do not re-describe it.** A `FLAG` has several
-classes — no backup directory, no manifest, a strictly newer file, a stale
-manifest, a directory that could not be read — and only one of them has a
-"newer file" to report. A template that demands one produces an alert with
-an empty or invented field for every other class. Each Step 2a verdict is
-already a complete one-line reason, so paste it verbatim and let it say
-which failure this is. Same pattern — log and nudge if order hasn't
-self-healed:
-```bash
-gc session nudge dog/ "Backup needed: <the Step 2a FLAG line, verbatim>"
-```
-If the same database is still flagged on the next rotation, the dog's own
-retries are not clearing it. Escalate — unattended, this is silent data
-loss on a ledger nobody can restore:
-```bash
-gc mail send mayor/ -s "ESCALATION: <db> has no restorable backup [HIGH]" \\
-  -m "<the Step 2a FLAG line, verbatim>. Backup dog retries not clearing."
-```
-"Still flagged on the next rotation" is answered by your own escalation
-trail, not by memory: that mail is the durable record. Before escalating,
-check whether this database was already escalated:
-```bash
-gc mail inbox mayor/ | grep -F "no restorable backup"
-```
-A prior hit for the same database means the retries have had a full cycle
-and have not cleared it — escalate again and say so.
-
-**No backup root, or an empty one (`FLAG-ROOT`):** the most severe state
-this step can report — *no* database has a restorable backup, so the whole
-Step 2a verdict set is missing rather than clean. Escalate immediately with
-the database names the verdict lists; do not nudge the dog and move on:
-```bash
-gc mail send mayor/ -s "ESCALATION: no Dolt backups exist at all [CRITICAL]" \\
-  -m "Backup root <path> missing/empty. NO restorable backup for: <db names>."
-```
-
-**Indeterminate (`RECHECK`):** a sync may be in flight. Re-run the Step 2a
-snippet; a live sync advances its newest file, a dead one does not. If the
-database is still `RECHECK` after the grace window, treat it as a `FLAG`
-above. Never count a `RECHECK` toward "healthy". A `RECHECK` whose reason is
-a failed directory scan will not clear by waiting — the re-run reads the
-same unreadable directory. Fix the read (permissions, mount, disk) or
-escalate it as a `FLAG`; the one thing it never becomes is an `OK`.
-
-**Zombie processes:**
-Kill zombie Dolt servers not on the expected port:
-```bash
-kill <zombie_pid>
-```
-
-**Orphan DBs (`orphans` non-empty):**
-Do NOT act on the health `orphans` count directly — the reporter can
-false-positive live rig databases as orphans, and a forced removal on that
-count would destroy a live rig ledger (unrecoverable). Confirm against the
-rig-protected dry-run authority first:
-```bash
-gc dolt-cleanup --json    # hyphen, Go-side: dry-run, rig-protected
-```
-Real orphans are exactly the databases it lists under `dropped.names`
-(`rigs_protected` are already excluded). If `dropped.names` is empty, there
-is nothing to clean — the health `orphans` entries are live rig DBs (a
-reporter false-positive); log and move on. `gc dolt-cleanup` (hyphen,
-the Go-side command) is dry-run by default; removal happens only under
-`--force`. Do NOT rely on the `gc dolt cleanup` (space) pack-script's
-defaults — always use the hyphen command for orphan inspection/cleanup.
-Reclaim confirmed orphans only via human-approved
-`gc dolt-cleanup --force` escalated to mayor — never run a destructive
-`--force` automatically from this step, and never
-`gc dolt cleanup --force --server-down-ok` against a reachable server (it can
-`rm -rf` an open database and corrupt NBS, #1549).
-
-**If everything is healthy:**
-Log `Dolt health: OK` and move on. "Healthy" requires an explicit `OK`
-verdict from Step 2a for **every** database in `databases[]` — no `FLAG`,
-no `FLAG-ROOT`, and no outstanding `RECHECK`. A green `gc dolt health`
-alone does not earn it, and neither does "nothing was flagged": a database
-with no backup directory produces no verdict from a dir-walk at all, which
-is how a total outage reads clean. Count the verdicts against the expected
-list before you write OK.
-
-**Exit criteria:** Health check run, every database in `databases[]`
-carrying a Step 2a verdict, alerts handled or escalated."""
+**Exit criteria:** health check run, every database carrying a verdict,
+findings escalated."""
 
 [[steps]]
 id = "system-health"
-title = "Run system diagnostics"
+title = "Run gc doctor sweep"
 needs = ["dolt-health"]
 description = """
-Run `gc doctor --json` for a workspace health check. **Always
-pass `--json`.** The default human output puts a count in the headline
-message (e.g. "1 session model finding(s)") and hides the actionable
-list of findings in `CheckResult.Details` unless `--verbose` is set.
-
-**Schema — verified against the live payload (2026-08-09).** Findings
-live in **`.results[]`** — one entry per check, well over a hundred of
-them. Every entry carries
-`{name, status, severity, message}`; `details[]` and `fix_hint` appear
-only when non-empty, so do not index them unconditionally. `status` is
-`ok` / `warning` / `error`, and `severity` (e.g. `blocking`) is what
-separates a blocking finding from an advisory one — pair it with the
-top-level `blocking_failed` count. The counts are **flat top-level
-fields** — `{ok, passed, warned, failed, blocking_failed, fixed}` — NOT
-a nested `summary` object. There is **no `.checks` key**: `jq '.checks[]'`
-returns nothing (or `Cannot iterate over null`) instead of erroring, so
-a stale path reads as "clean" no matter how bad the city is. Trust the
-payload over this paragraph, and re-verify the field names if the drift
-guard below ever fires. Upstream reference:
-`engdocs/contributors/doctor-json.md`.
-
-gc-toolkit local delta: keep `--json` parsing. Base v14 uses a bare
-`gc doctor` whose human-output count is a regression for the deacon
-(needs the structured findings list to decide whether to act or
-escalate).
-
-**Run it ONCE and reuse the payload.** Every invocation re-runs every
-check, and that takes ~4 minutes under normal city load — so bound it at
-300s or more. A 120s bound returns rc 124 and an empty file, which is
-indistinguishable from a wedged data plane and invites a false CRITICAL.
-`gc doctor` exits **1** when findings exist; that is normal, not failure.
-
+Run once, bounded, and reuse the payload (`gc doctor` exits 1 when findings
+exist — that is normal):
 ```bash
 DOCTOR_JSON=$(timeout 300 gc doctor --json); DOCTOR_RC=$?
 ```
-
-**Fail loud on schema drift — never degrade to empty.** Assert the key
-exists before filtering. A missing key means a `gc` upgrade changed the
-contract, and that must break this step visibly: silently, it converts
-the patrol into a duplicate-escalation generator, because an empty
-finding set and an empty dedupe result both read as "nothing to see".
-
+Schema guard (one line, fail loud — a missing `.results` key means the
+contract drifted and the filter below is blind, which must never read as
+clean):
 ```bash
-if [ "$DOCTOR_RC" != 0 ] && [ "$DOCTOR_RC" != 1 ]; then
-  gc mail send mayor/ -s "DOCTOR: gc doctor --json did not complete [HIGH]" -m "rc=$DOCTOR_RC at a 300s bound (124 = the bound fired), payload empty or partial. NOT reporting clean."
-elif ! printf '%s' "$DOCTOR_JSON" | jq -e 'has("results")' >/dev/null 2>&1; then
-  KEYS=$(printf '%s' "$DOCTOR_JSON" | jq -c 'keys' 2>/dev/null)
-  [ -n "$KEYS" ] || KEYS="unparseable (payload is not JSON)"
-  gc mail send mayor/ -s "DOCTOR: --json schema drift, no .results key [HIGH]" -m "Top-level keys: $KEYS. Findings moved or the payload is not JSON; the findings filter is now blind and this step reports clean regardless of city state."
-fi
+printf '%s' "$DOCTOR_JSON" | jq -e 'has("results")' >/dev/null 2>&1 || { echo "doctor payload invalid or schema drifted (rc=$DOCTOR_RC) — NOT reporting clean"; }
 ```
+An rc other than 0/1, or a payload without `.results`, is a FAILED scan:
+escalate it (`--key doctor-sweep-failed`) and do not run the filter.
 
-Either branch is a **failed** health scan, not a clean one. Do not run
-the findings filter on a payload you could not validate.
-
-**Before escalating "`gc doctor --json` emits invalid JSON", rule out
-your own capture — this non-bug has been re-filed 6+ times.** The check
-above is immune because it pipes with `printf '%s'` and `jq -e`, but
-hand-inspection reopens the trap: zsh's `echo` (and `print`) collapse
-backslash escapes in their argument, so a payload that is valid JSON on
-disk comes out mangled the instant you `echo "$DOCTOR_JSON"` to look at
-it — a doubled backslash becomes a single one, and `jq` then rightly
-rejects what `echo` printed, not what `gc doctor` emitted. Findings from
-shell-script checks quote embedded code, so they carry exactly the
-escaped quotes an echo round-trip corrupts. Inspect a JSON payload only
-through `printf '%s' "$DOCTOR_JSON" | jq .` or a file redirect — never
-`echo` it under zsh.
-
-So reproduce any suspected serializer or double-escape bug from a
-**fresh redirect** before you escalate it:
-
-```bash
-gc doctor --json > /tmp/doc.json      # a redirect writes the bytes verbatim
-jq -e . /tmp/doc.json > /dev/null      # exit 0 = valid JSON; the serializer is fine
-```
-
-If the redirected file parses, the corruption was your capture method,
-not `gc doctor`, and there is nothing to report. A byte-level
-investigation already proved the serializer (Go `json.Encoder`,
-`cmd/gc/json_schema.go`) correct and byte-identical between the running
-binary and gascity HEAD, and the live cache
-`.gc/runtime/doctor-findings.json` valid and fresh (tk-roz7f
-/ PR#334, `specs/tk-roz7f/analysis.md`; lx-ns0p closed as a no-op;
-prior mis-escalations lx-wisp-jjwn, j6xsp, mvhdd, ktuur, zxx26). A real
-serializer break reproduces through a redirect; one that appears only
-through an echo is a capture artifact — do not re-file it.
-
-**Publish the payload for the close-time doctor-finding gate.** The
-refinery asks, at every anchor close, whether the bead it is closing
-names a doctor check that is STILL FIRING
-(`assets/scripts/doctor-finding-gate.sh`, tk-fwspr) — the gate that
-stops "merged" from silently becoming "fixed". It has to ask with
-`--no-run`: `gc doctor` has no per-check selector, so evaluating a gate
-live means running every check inside the merge loop, minutes per close.
-So it can only answer from a payload someone else already paid for, and
-**this step is the only pass in the city that runs `gc doctor` on a
-schedule.** If you do not publish it, the gate is not degraded — it is
-inert: INDETERMINATE at every close, forever, and the annotation never
-fires once.
-
-This costs nothing. The payload is already in `$DOCTOR_JSON` and already
-validated; publishing is one pipe. Do it only on the validated payload —
-the script re-validates and refuses an empty or schema-drifted one,
-which is the same "NOT reporting clean" rule as above applied at the
-cache boundary (an empty payload installed as the cache would answer
-every later probe with "nothing is firing").
-
-```bash
-GATE=""
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/doctor-finding-gate.sh" ] && { GATE="$cand/assets/scripts/doctor-finding-gate.sh"; break; }
-done
-if [ -n "$GATE" ]; then
-  printf '%s' "$DOCTOR_JSON" | "$GATE" publish -
-fi
-```
-
-`publish` is fail-soft and quiet by design: on success it prints the
-cache path (one line) and exits 0; on an empty or schema-drifted payload
-it refuses, prints nothing, and exits 2, leaving the prior cache in
-place. A bare path here is the success confirmation, and silence is a
-soft skip — the gate is INDETERMINATE until the next patrol republishes.
-Neither is an error, and neither is anything to escalate.
-
-The cache path is resolved inside the script, so this step and the
-refinery agree on it by construction. Do not compute it here: a second
-copy of that fallback chain, in prose an agent retypes each patrol, is a
-cache that misses silently and a gate that reports INDETERMINATE while
-looking perfectly wired.
-
-**The actionable subset** — only the warning/error checks, with their
-full details:
-
+The actionable subset:
 ```bash
 printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.status != "ok")'
 ```
-
-**Cross-check every finding against existing beads before escalating —
-city-wide.** This step is what produces the "not tracked by any open
-bead" claim, so the claim is worth exactly as much as the search behind
-it. Two ways that search goes wrong, both observed live (2026-08-09:
-four findings escalated as untracked, two of them already tracked; one
-finding escalated three times in two hours):
-
-- **`gc bd list` cannot do it.** `bd list` has no text query — it filters
-  by status/assignee/label. The text search is `bd search`, which matches
-  titles and IDs; `--desc-contains` adds description text.
-- **Your rig store is not the city.** Your default store is one rig's
-  `.beads`, but doctor findings are city-wide and the tracking bead
-  usually lives in the rig that owns the defect. `census-owner-liveness`
-  was tracked by `gc-ddvrx` in the **gascity** store — unreachable from a
-  gc-toolkit-scoped query no matter how well written.
-
-Search every store, HQ included, for each finding's `name`:
-
+For each finding: act directly on the simple ones (stale locks, temp
+cleanup, `gc doctor --fix`-able); dedup the rest against existing beads
+city-wide (`bd search` per rig store — your rig store is not the city, and
+a name miss is not proof of absence: search the finding's distinctive nouns
+too) — an OPEN match means tracked, note the id and move on. Escalate only
+the untracked remainder, one situation key per finding so repeats dedup:
 ```bash
-FINDING=<the .results[].name you are about to escalate>
-gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do
-  HITS=$(bd --db "$RP/.beads" search "$FINDING" --status open --limit 20 --json 2>/dev/null | jq -r '.[]? | .id + " [" + .status + "] " + .title')
-  if [ -n "$HITS" ]; then echo "== $RP"; echo "$HITS"; fi
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
+FINDING=$(printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.name=="<check>")')
+"$SCRIPTS/escalate.sh" --subject <this wisp or the tracking bead> --key "doctor-<check-name>" --message "$FINDING"
 ```
+State what the dedup found — bead ids on a match, the stores and terms
+searched on a miss.
 
-**Widen past the check name.** That search is the cheap first pass, not
-the whole dedupe — a tracking bead may describe the same defect in
-different words, so a name miss is not proof of absence. Before calling a
-finding untracked, also search the distinctive nouns from its `.message`
-and `.details[]` (a path, a bead id, a check it cites), and search
-description text as well as titles (`--desc-contains "<term>"`).
+Two adjacent duties, same cadence:
+- Closing a bead that names a doctor finding? Close it through
+  `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
+  ledger cannot say "fixed" while the check still fires.
+- Stuck sessions: read `$SCRIPTS/quota-park-nudge.sh --status`
+  (closed-field surface) instead of session panes. `quota_park=yes` is a
+  healthy park — never a warrant. A session it reports `escalated=1`
+  (nudging exhausted), or a live infrastructure session whose patrol wisp
+  is stale past the freshness you already treat as wedged, is
+  live-but-wedged: file ONE warrant for the dog pool — never kill directly,
+  and skip if an open warrant already names the target:
+  ```bash
+  OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
+  if [ -z "$OPEN_WARRANT" ]; then
+    gc bd create --type=task --title="Stuck: <rig>/<role>" --metadata '{"warrant.target":"<session>","warrant.reason":"<what is stale and for how long>","warrant.requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+  fi
+  ```
+  The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
+  pardon-or-execute, DOG_DONE notice back); its probe re-checks the
+  quota-park surface, so a race with a fresh park still cannot execute a
+  parked session.
 
-An **open** match means the finding is tracked: do not escalate it, note
-it as already-tracked with the bead id. A **closed** match (`--status
-all`) is context rather than suppression — the finding recurred after
-someone closed it, which belongs in the escalation.
-
-**Do not re-escalate what you already escalated.** Your own escalation
-trail is the durable record and it surfaces in the same search: HQ holds
-your prior `DOCTOR: ...` mail beads, which is why the
-`census-owner-liveness` search above also returns `lx-wisp-wu2tl`, an
-earlier escalation of that same finding. If a finding's only matches are
-your own prior escalations, it has already been raised — do not send it
-again unless the finding materially changed, and if you do, say
-"re-reporting, previously escalated as <id>".
-
-**For simple findings:** Act directly (e.g., stale lock files, temp
-directory cleanup, broken worktrees via `gc doctor --fix`).
-
-**For complex findings:** Escalate to mayor. Forward the offending
-check object verbatim (it includes `name`, `status`, `severity`,
-`message`, and any `details` / `fix_hint`) so the mayor sees the same
-machine-readable context —
-from the payload you already captured, not a fresh 4-minute run:
-```bash
-finding=$(printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.name=="<check>")')
-gc mail send mayor/ -s "DOCTOR: <finding>" -m "$finding"
-```
-
-State what the dedupe found, not just what the check said: the bead ids
-when there are matches, and "no open bead in any store matches <name> or
-<terms searched>" when there are none. An unqualified "not tracked by any
-open bead" backed by `bd list` is the claim that cost three mayor
-round-trips — if you did not run the city-wide search, do not make it.
-
-Close this step after check."""
+Close this step after the sweep."""
 
 [[steps]]
 id = "next-iteration"
@@ -1012,49 +284,34 @@ needs = ["system-health"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-End of patrol cycle. Pour the next iteration, then wait or exit.
+**1. Quick inbox hygiene:** `gc mail inbox`; handle urgent, archive rest.
 
-**1. Quick inbox check (end-of-cycle hygiene):**
+**2. Pour next iteration BEFORE burning — and GUARD the assign** (a poured
+but unassigned wisp reaches no hook and drops the loop; forward every
+declared var — a --root-only pour materializes no defaults):
 ```bash
-gc mail inbox
+NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
+if [ -z "$NEXT" ]; then
+  echo "Could not pour next deacon wisp; NOT burning this one."
+  exit 1
+fi
+if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
+  echo "Could not assign poured wisp $NEXT; rolling it back and NOT burning this one."
+  gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile will collect it."
+  exit 1
+fi
 ```
-Handle any urgent messages that arrived during patrol. Archive the rest.
 
-**2. Pour next iteration BEFORE burning:**
-```bash
-NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id')
-gc bd update "$NEXT" --assignee=$GC_AGENT
-```
-
-**3. Wait before next cycle:**
+**3. Wait before the next cycle** — a bounded clock-poll in ONE tool call
+(the harness blocks a standalone sleep, and caps one call at 600s):
 ```bash
 end=$(( $(date +%s) + {{event_timeout}} ))
 until [ "$(date +%s)" -ge "$end" ]; do sleep 5; done
 ```
 
-This wait is the loop's ONLY backoff. Do not replace it with a bare
-`sleep {{event_timeout}}`: the agent harness blocks a standalone sleep,
-and a blocked wait is not a slower patrol, it removes the pacing entirely
-and the deacon re-cycles as fast as it can. The bounded clock-poll above is
-accepted by the harness and keeps the same fixed-duration semantics. This
-mirrors mol-witness-patrol's next-iteration step, which carries the same
-form for the same reason.
-
-Keep this wait inside ONE tool call and keep {{event_timeout}} at or below
-600 seconds. The harness caps a single call at 600 s and SIGTERMs it at the
-cap mid-wait, so a larger value does not wait longer — it silently returns
-whatever pacing fit under the cap. Raising the interval past 600 s means
-first making the wait resumable across calls (persist the deadline, re-enter
-the loop until it passes), not just raising the number.
-
-Previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. A bounded wait gives predictable idle cost.
-
-**4. Burn this wisp:**
+**4. Burn this wisp — only if step 2 succeeded:**
 ```bash
 gc bd mol burn <this-wisp-id> --force
 ```
 
-The new wisp is ready. Re-read formula steps to start
-the next patrol cycle.
-
-**Exit criteria:** Next wisp poured, this wisp burned."""
+The new wisp is ready; run `gc hook` and start the next cycle."""

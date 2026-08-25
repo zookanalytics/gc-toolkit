@@ -1,59 +1,14 @@
-# polecat-codex — pool of polecat workers backed by the Codex CLI provider.
-# Same role as gastown.polecat; provider switches the agent process to `codex`.
-# Distinct work_dir keeps codex worktrees out of the default polecats/ tree.
-# The prompt is shared with gastown's polecat by reference (prompt_template
-# below) — intentional divergence is limited to provider, work_dir, and
-# session-cap.
+# polecat-codex — the rig's worker pool on the codex provider. Same doctrine
+# and prompt shape as agents/polecat; the merge cadence routes review beads
+# (carrying mol-review) here via REVIEW_POOL, but any bead-with-formula is
+# claimable.
 scope = "rig"
 provider = "codex"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
-nudge = "Run gc hook; it checks assigned work first, then routed pool work."
+nudge = "Run gc hook --claim --json; it checks assigned work first, then routed pool work."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0
-# Capped at 2 while codex polecats are still being shaken out; revisit once
-# we've validated end-to-end on signal-loom. Per-rig cap (each importing rig
-# gets its own pool of up to 2).
+# Pool sizing, not review policy: two concurrent sessions per rig.
 max_active_sessions = 2
-
-# Share the polecat prompt by reference instead of carrying a near-duplicate.
-# The "<pack>//<subpath>" form resolves against the imported gastown pack's
-# cache dir (resolvePackQualifiedAgentPaths, gascity
-# internal/config/pack_qualified_path.go, called from compose.go); an unknown
-# OR ambiguous pack name fails config load rather than silently falling back
-# to the default agent prompt. Settled against the resolver in tk-5wdy8 —
-# but note what it does NOT check: the pack NAME is validated, the subpath is
-# joined onto the pack dir with no existence test. A gastown reorganisation
-# that moved this file would leave the reference resolving to a path that is
-# not there, and a non-strict `gc prime` renders the 16-line generic stub for
-# it with exit 0 and an empty stderr. doctor/check-agent-prompt-integrity is
-# the guard for that; it asserts resolution, not spelling.
-# inject_fragments must be
-# kept in sync by hand with the polecat patch's inject_fragments_append in
-# pack.toml — there is no automatic propagation — so this pool gets the same
-# convoy, append-notes, file-work-records, feedback-observation, and
-# learned-conventions guidance.
-# "By hand" is now checked rather than trusted: doctor/check-polecat-fragment-sync
-# compares the two lists and errors on any divergence. A pool missing a
-# fragment does not fail — it primes cleanly and runs the unpatched base
-# doctrine for whatever that fragment corrected (tk-t41dq).
-#
-# polecat-non-impl-done is the ONE name this pool carries that the pack.toml
-# patch does not, and it is load-bearing here: this is the signoff pool, so
-# 100% of its spawns run the non-impl done sequence, against 2.3% on the claude
-# pool where the fragment costs 70 KB/spawn (tk-0981e;
-# specs/tk-23wdf/context-budget-ledger.md §7 candidate 1). The divergence is
-# declared as a pool-scoped exception in check-polecat-fragment-sync, which
-# makes the fragment REQUIRED here — remove it from the list below and the
-# check errors, exactly as if the patch had listed it.
-prompt_template = "gastown//agents/polecat/prompt.template.md"
-inject_fragments = [
-    "polecat-convoys",
-    "polecat-append-notes",
-    "polecat-close-step-chain",
-    "polecat-non-impl-done",
-    "file-work-records",
-    "file-feedback-observations",
-    "learned-conventions-polecat",
-]

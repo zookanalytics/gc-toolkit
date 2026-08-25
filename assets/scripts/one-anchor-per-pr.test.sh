@@ -4,7 +4,7 @@
 #
 # The defect: a rework child processed through the mr flow was stamped
 # merge_result=pull_request like a first handoff, becoming a SECOND gating
-# anchor for the same PR. Because merge-skill.sh validates each anchor
+# anchor for the same PR. Because merge.sh validates each anchor
 # independently, the PR's effective gate became its WEAKEST anchor — the
 # rework anchor carried no check_set, so a CLEAN PR merged with the real
 # anchor's codex gate red. And because the in-flight-rework hold excludes
@@ -15,8 +15,8 @@
 # gating anchor (merge_result=pull_request or pre_open_gate on the same
 # branch). If so, the hand-back is a rework: the review anchors to the
 # EXISTING anchor and $WORK closes as landed-on-branch — never minting a
-# second anchor. (merge-skill.sh independently HOLDS any PR claimed by >1 open
-# anchor — legacy pairs — covered by merge-skill.test.sh case 12.)
+# second anchor. (merge.sh independently HOLDS any PR claimed by >1 open
+# anchor; doctor/check-one-anchor-per-pr asserts it structurally.)
 #
 # This EXECUTES the real resolve snippet extracted verbatim from the formula
 # (between the one-anchor-per-pr-resolve markers) against a fake `gc`, so it
@@ -177,21 +177,52 @@ grep -q 'merge_result=' <<< "$REWORK_ARM" \
   && bad "(8) rework arm must NOT stamp merge_result (would mint a second anchor)" \
   || ok "(8) rework arm stamps no merge_result — \$WORK never enters the anchor class"
 
-# The signoff must link to the RESOLVED anchor, not unconditionally to $WORK:
-# the dispatch stamps anchor_bead from GATING_ANCHOR and the gate-dep BLOCKS it.
-grep -q -- '--set-metadata anchor_bead="\$GATING_ANCHOR"' "$TOML" \
-  && ok "(9) review dispatch stamps anchor_bead from the resolved GATING_ANCHOR" \
-  || bad "(9) review dispatch must stamp anchor_bead=\"\$GATING_ANCHOR\""
-grep -q -- '--blocks "\$GATING_ANCHOR"' "$TOML" \
-  && ok "(10) review gate-dep BLOCKS the resolved GATING_ANCHOR" \
-  || bad "(10) review gate-dep must block \"\$GATING_ANCHOR\""
+# --- Executable pin: the terminal arm never stamps an unaddressable PR. -------
+# An empty pr_url/pr_number on a pull_request anchor is skipped by merge.sh and
+# pr-facts.sh forever; the arm must fall back to pre_open_gate (pr-open.sh then
+# adopts the recorded PR and stamps real coordinates).
+TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-per-pr-terminal/{f=0} f' "$TOML")"
+[ -n "$TERMINAL" ] \
+  && ok "(9a) terminal snippet extracted for execution" \
+  || bad "(9a) terminal snippet extraction EMPTY"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/git"
+chmod +x "$TMP/bin/git"
+export LCLOG="$TMP/lc.log"
+cat > "$TMP/bin/lc-stub" <<'L'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${LCLOG:?}"
+L
+chmod +x "$TMP/bin/lc-stub"
+printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
+run_terminal() { # <pre_open> <pr_url> <pr_number>
+  : > "$LCLOG"
+  EXISTING_ANCHOR="" WORK=w1 BRANCH=polecat/w1 TARGET=main CHECK_SET=codex \
+    LC="$TMP/bin/lc-stub" PRE_OPEN="$1" PR_URL="$2" PR_NUMBER="$3" \
+    bash "$TMP/terminal.sh" >/dev/null 2>&1
+  cat "$LCLOG"
+}
+lc_out=$(run_terminal 0 "https://github.com/o/r/pull/7" 7)
+case "$lc_out" in
+  *"--to pull_request"*"pr_url=https://github.com/o/r/pull/7"*) ok "(9b) resolved PR coordinates transition to pull_request" ;;
+  *) bad "(9b) resolved PR coordinates must transition to pull_request (got: $lc_out)" ;;
+esac
+lc_out=$(run_terminal 0 "" "")
+case "$lc_out" in
+  *"--to pull_request"*) bad "(9c) unresolved PR coordinates must NEVER stamp pull_request (got: $lc_out)" ;;
+  *"--to pre_open_gate"*) ok "(9c) unresolved PR coordinates fall back to pre_open_gate (pr-open adopts the PR)" ;;
+  *) bad "(9c) expected a pre_open_gate fallback transition (got: $lc_out)" ;;
+esac
 
-# The gating transitions (both sub-states) must sit INSIDE the terminal markers,
-# downstream of the rework arm, so a rework hand-back can never reach them.
+# Review dispatch moved to the cadence's gate-ensure; the formula's remaining
+# duty is that the transitions land on the right bead, checked below.
+
+# The gating transitions (both sub-states, written through lifecycle.sh) must
+# sit INSIDE the terminal markers, downstream of the rework arm, so a rework
+# hand-back can never reach them.
 T_START=$(grep -n '# >>> one-anchor-per-pr-terminal' "$TOML" | head -1 | cut -d: -f1)
 T_END=$(grep -n '# <<< one-anchor-per-pr-terminal' "$TOML" | head -1 | cut -d: -f1)
-PREOPEN_LINE=$(grep -n -- '--set-metadata merge_result=pre_open_gate' "$TOML" | head -1 | cut -d: -f1)
-POSTOPEN_LINE=$(grep -n -- '--set-metadata merge_result=pull_request' "$TOML" | head -1 | cut -d: -f1)
+PREOPEN_LINE=$(grep -n -- '--to pre_open_gate' "$TOML" | head -1 | cut -d: -f1)
+POSTOPEN_LINE=$(grep -n -- '--to pull_request' "$TOML" | head -1 | cut -d: -f1)
 { [ -n "$T_START" ] && [ -n "$T_END" ] && [ -n "$PREOPEN_LINE" ] && [ -n "$POSTOPEN_LINE" ] \
   && [ "$PREOPEN_LINE" -gt "$T_START" ] && [ "$PREOPEN_LINE" -lt "$T_END" ] \
   && [ "$POSTOPEN_LINE" -gt "$T_START" ] && [ "$POSTOPEN_LINE" -lt "$T_END" ]; } \

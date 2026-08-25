@@ -1,49 +1,11 @@
-# boot-health — is the deacon stuck? Answered without an LLM.
-#
-# Replaces the detection half of the `boot` agent. Boot is a watchdog over the
-# deacon: each wake it peeks the deacon's pane, reads its patrol wisp, checks
-# its mail, and almost always concludes "healthy, exit". That is three
-# mechanical reads and a threshold, and it was costing a full fresh-context
-# LLM session to reach.
-#
-# Measured on 2026-08-08 (lx-llzfk): boot ran 1,298 model calls in 4 hours —
-# 97% of every model call in the city and 90% of its tokens — against one
-# polecat of real work. The rate is not a local misconfiguration: `mode =
-# "always"` + `wake_mode = "fresh"` are pack defaults, `patrol_interval = 30s`
-# is the upstream default, and `compute_awake_set.go` exempts `always` named
-# sessions from idle-sleep, so `sleep_after_idle` cannot reach boot. There is
-# no throttle knob; the only fix is to stop spending a model on the question.
-#
-# Every other patrol in this city is already shaped this way — dolt-health
-# polls at 30s and spawn-storm-detect at 5m, both as exec orders at zero token
-# cost, escalating to an agent only on a finding. Boot was the last watchdog
-# built as an always-on session.
-#
-# REPORT-ONLY. This order observes and mails a human; it does not nudge and
-# does not file warrants. The 2026-08-08 audit killed the escalation design
-# that was drafted here first, for three measured reasons:
-#
-#   * Nudging an idle deacon forces a full context reload — ~84k tokens, more
-#     than one boot cycle. The remedy cost more per unit than the disease.
-#   * 4 of boot's 5 nudges over 14 days never landed: "queued nudge session
-#     fence mismatch". The deacon is mode=always/wake_mode=fresh and recycles
-#     every ~4.6 min, so the fence moves out from under a queued nudge.
-#   * mol-shutdown-dance decides an agent is dead when it fails to answer a
-#     nudge with ALIVE. Against this target the nudge is what fails, so the
-#     pardon path cannot fire and the dance would kill a healthy deacon. Boot
-#     itself filed tk-qdhnd (2026-07-28, still open) warning about exactly that.
-#
-# Escalation is therefore deferred behind trustworthy nudge delivery, tracked
-# on its own bead. What is NOT deferred is the observation, which boot has not
-# actually been capable of since 2026-07-22 (lx-ody8m): its wisp query omits
-# --include-infra and returns [] on every wake. Over 14 days and ~2,852 wakes
-# boot acted 6 times, and 4 of those never landed.
-#
-# Interval is 2m against a deacon whose own backoff caps at 300s, so nothing
-# here fires before the deacon has had several full cycles to breathe.
-#
-# Supersedes the detection role of the `boot` named session — see the bead for
-# the retirement step. Bugs lx-llzfk (spin) and lx-ody8m (blind query).
+# boot-health — "is the deacon stuck?" answered mechanically (three reads and
+# a threshold), replacing the always-on `boot` watchdog session. REPORT-ONLY:
+# it observes and reports to a human; it does not nudge the deacon (a nudge
+# forces a full context reload and delivery to a fresh-wake singleton is
+# unreliable) and it files no warrants. The dog pool exists again, but
+# boot-health deliberately does not file warrants: a false nudge-death
+# diagnosis must not kill a healthy deacon. Interval 2m against a deacon whose
+# own backoff caps at 300s, so it never fires before several full deacon cycles.
 [order]
 description = "Detect a wedged deacon mechanically and report it; no nudge, no warrant"
 trigger = "cooldown"
@@ -54,8 +16,7 @@ timeout = "90s"
 idempotent = true
 
 [order.env]
-# Session name, not a mail address — this is what gets peeked.
+# Session name to peek (not a mail address).
 BOOT_HEALTH_DEACON = "gc-toolkit.deacon"
-# Where a cold-deacon report goes. A human decision point by design; not the
-# deacon itself, which is the subject of the report.
-BOOT_HEALTH_REPORT_TO = "mayor/"
+# Where a cold-deacon report goes — a human decision point by design.
+BOOT_HEALTH_REPORT_TO = "human"

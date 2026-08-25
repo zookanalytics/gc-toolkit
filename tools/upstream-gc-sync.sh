@@ -81,8 +81,8 @@ if [ ! -d agents ]; then
     exit 2
 fi
 
-# PROVENANCE Source lines in the gc-toolkit pack are workspace-relative,
-# prefixed with rigs/gascity/. Strip that to get the rig-relative path.
+# PROVENANCE Source lines in the gc-toolkit pack are workspace-relative;
+# strip the rig prefix to get the rig-relative path.
 GASCITY_PREFIX="rigs/gascity/"
 
 # Pack-level subtrees that PROVENANCE.md doesn't cover. Listed for the

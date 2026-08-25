@@ -1,17 +1,15 @@
 ---
 name: session-title
-description: Use when the operator explicitly asks to set, view, suggest, or rotate a title for the current session. Triggers include "rename this session", "rename mechanik", "rename mayor", "set my title", "set the title to X", "what's my title", "what's my session title", "suggest a title".
+description: Use when the operator explicitly asks to set, view, suggest, or rotate a title for the current session. Triggers include "rename this session", "rename mechanik", "set my title", "set the title to X", "what's my title", "what's my session title", "suggest a title".
 ---
 
 # Session Title
 
 Set, view, suggest, or auto-rotate the title for the current session.
-Applies to **canonical agents** (mayor, mechanik, deacon) and to any
-ad-hoc session the operator spawns. The title shows up in
-`gc session list`, the operator's session popup, the dashboard, and
-(once the consumer side lands — tk-ki46h) the tmux footer, so a
-descriptive title helps the operator and other agents see at a glance
-what the session is on.
+Applies to **canonical agents** (mechanik, deacon) and to any ad-hoc
+session the operator spawns. The title shows up in `gc session list`,
+the operator's session popup, and the dashboard, so a descriptive title
+helps the operator see at a glance what the session is on.
 
 > **Operator-initiated only.** Do not invoke this skill unless the
 > operator asks for it. The agent's own judgment that the title is
@@ -19,8 +17,7 @@ what the session is on.
 > conversation and let the operator decide.
 >
 > The convention side of self-renaming — canonicals rotating as focus
-> shifts — is documented in the `canonical-self-rename` template
-> fragment, not gated by this skill.
+> shifts — lives in each agent's own prompt, not gated by this skill.
 
 ## Detect the form
 
@@ -100,17 +97,11 @@ gc session list --json \
             end)'
 ```
 
-The `title` field is plumbed end-to-end in gascity but defaults to the
-agent name (e.g. `gc-toolkit.polecat`) when no operator or agent has
-refined it. For an ad-hoc session — whose `agent_name` includes an
-`-adhoc-<hex>` suffix — gascity strips that suffix when assigning the
-default, so `gc-toolkit.mechanik-adhoc-6d0c0eb30f` gets the
-default title `gc-toolkit.mechanik`. The jq above collapses both
-forms to `(no title set)` so the report reflects whether a
-*meaningful* title exists, not whether the field happens to be
-populated. Canonical sessions don't carry the `-adhoc-*` suffix; the
-same jq still handles them correctly because the role-default check
-covers both shapes.
+The `title` field defaults to the agent name when nobody has refined it
+(with any `-adhoc-<hex>` suffix stripped when the default is assigned).
+The jq collapses both default forms to `(no title set)` so the report
+reflects whether a *meaningful* title exists, not whether the field is
+populated.
 
 ## Suggest
 
@@ -142,21 +133,10 @@ beads, bead descriptions, or unrelated transcripts — the title should
 reflect the live session the operator is asking about.
 
 **Forward focus, not historical summary.** A title that names a
-decision already made or work already shipped is stale the moment
-it's applied. Name what's still ahead.
-
-> **Bad:** *"Evaluate gc-8p3dnt options and trade-offs"* — when the
-> evaluation is already done and the session has moved on to
-> shipping the follow-ups. The title locks the popup to a question
-> that's already answered.
->
-> **Good:** *"ship session-title doc + codex review"* — names the work
-> still ahead. Operator scanning `gc session list` sees what this
-> session is actually on.
-
-This guidance applies to both Auto-rename (where you apply directly)
-and Suggest (where you propose and wait). Both must look ahead, not
-behind.
+decision already made or work already shipped is stale the moment it's
+applied. *"Evaluate options and trade-offs"* is bad once the evaluation
+is done; *"ship session-title doc + codex review"* names the work still
+ahead. Applies to Auto-rename and Suggest alike.
 
 ## Title style
 
@@ -181,18 +161,13 @@ section cross-references rather than duplicating.
 
 ### Canonical mode
 
-Canonical agents (mayor, mechanik, deacon) **rotate** their title as
-focus shifts. The canonical's role-name default (`mayor`, `mechanik`,
-`deacon`) gives the operator no signal beyond
-"this agent is alive." A rotating focus title — `skill rename
-audit`, `signal-loom landing convoy`, `gc-toolkit PR #60 review
-triage` — makes `gc session list` and the session popup scannable:
-the operator sees what each canonical is currently on without having
-to peek. The title must use a human-meaningful
-reference (a `<repo> PR #N` form or topic/verb-noun phrase) — a bare
-bead ID gives the operator nothing to scan.
+Canonical agents (mechanik, deacon) **rotate** their title as focus
+shifts. The role-name default gives the operator no signal beyond "this
+agent is alive"; a rotating focus title — `skill rename audit`,
+`gc-toolkit PR #60 review triage` — makes `gc session list` scannable.
+Use a human-meaningful reference (a `<repo> PR #N` form or
+topic/verb-noun phrase) — a bare bead ID gives nothing to scan.
 
 The rotation is a single `gc session rename` per focus shift, run by
-the agent itself (not the operator). See the
-`canonical-self-rename` template fragment for the trigger and the
-cadence.
+the agent itself (not the operator); each agent's prompt states the
+trigger and the cadence.

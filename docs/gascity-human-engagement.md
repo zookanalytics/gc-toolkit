@@ -226,7 +226,7 @@ the alert model rather than duplicating them.
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
 bead that already exists — `mol-first-reaction` files one after reacting,
-`detect-stalled-workflows.sh` files one on a stall, `gc-helm.sh open` files one
+`liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
 agent on topic X," where X has no bead yet. That affordance existed under the
 retired `-thread` model (a keystroke, any moment) and was not carried across
@@ -278,25 +278,18 @@ bust are inherited. `assets/scripts/gate-visit.test.sh` now sweeps
 `assets/scripts/*.sh` as well as `formulas/*.toml`, so that copy is guarded on
 the same terms as the formula ones.
 
-**Why the fallback is not optional.** The react path is fire-and-forget: `gc
-sling` routes the subject and returns 0, and the visit appears only if the
-reconciler later spawns a proactive session to run the formula. Two clamps
-outside the sling can prevent that spawn, and neither shows up in its exit
-status — proactive auto-spawn is **default-disabled**
-(`GC_PROACTIVE_ENABLED` unset ⇒ `agents/proactive/agent.toml`'s `work_query`
-and `scale_check` both emit "no demand" forever), and at
-`GC_PROACTIVE_CITY_CAP` the pool sheds first under session pressure. Under
-either, an unguarded react path leaves a routed bead nobody picks up and *no
-visit at all*: a topic that looks filed and is silently forgotten, which is the
-one outcome this channel exists to prevent. So the path is chosen by asking
-`tools/gc-proactive.sh deliverable` first (exit 0/1 plus the reason), and the
-answer is printed either way — the operator always knows whether a visit exists
-yet, or only a queued reaction.
-
-> **As of 2026-08-14 `GC_PROACTIVE_ENABLED` is set nowhere in this city**, so
-> the automatic fallback is the path that actually runs and every intake yields
-> a visit immediately, without a framing card. Opting proactive in flips the
-> default to the framed path with no change to this script.
+**Why the fallback stays.** The react path is fire-and-forget: `gc sling`
+routes the subject and returns 0, and the visit appears only when a
+proactive session runs the formula. Proactive is always-on
+(`max_active_sessions = 2` is its only throttle; routed beads queue until a
+slot frees), so a queued reaction is picked up rather than dropped — but the
+path is still chosen by asking `tools/gc-proactive.sh deliverable` first
+(exit 0/1 plus the reason, printed either way), and the fallback files the
+visit directly whenever the answer is no. The seam is fail-safe by design:
+if proactive could ever again decline work, an unguarded react path would
+leave a routed bead nobody picks up and *no visit at all* — a topic that
+looks filed and is silently forgotten, the one outcome this channel exists
+to prevent.
 
 Note what is *not* here: there is no mail-to-visit bridge, and no seam for one.
 A mailbox whose endpoint spins up a visit per message was considered and
@@ -329,7 +322,7 @@ conspired:
 1. it parks the board row (`gather_meta_anchors` emits `kind:"parked"`,
    floored at `LOW`, because a conversation that reached a takeaway wants
    nothing and only has to stay findable); and
-2. it **mutes the stall detector** — `detect-stalled-workflows.sh` reads a
+2. it **mutes the stall detector** — the liveness sweep reads a
    takeaway on a root or its anchor as a wait a human named and owns.
 
 So the one automation in the city that files visits was silenced by the exact
@@ -341,9 +334,10 @@ audit's headline sat in a merged file, untold.
 
 Two changes close that (tk-2cyxo), and they are deliberately separate:
 
-- **The push.** `assets/scripts/detect-parked-dispositions.sh`, a step of the
-  witness patrol, files one visit back to the converse pool when a **parked,
-  operator-origin** subject's routed work has **all landed**. It goes through
+- **The push.** The liveness sweep (`assets/scripts/liveness-sweep.sh`,
+  which absorbed the parked-disposition detector) files one visit back to the
+  converse pool when a **parked, operator-origin** subject's routed work has
+  **all landed**. It goes through
   `gc-helm.sh open`, so it inherits the canonical `gate-visit` block and the
   one-open-visit-per-subject gate rather than re-deriving them. It writes
   exactly one key — `disposition_flagged`, the sorted id set of the work that
@@ -351,7 +345,7 @@ Two changes close that (tk-2cyxo), and they are deliberately separate:
   clears the takeaway**: that stamp is the record of what the sitting
   concluded, and the visit is additive.
 - **The un-mute.** A takeaway whose recorded wait has *fully closed* no longer
-  exempts a workflow from `detect-stalled-workflows.sh`. One carve-out, not a
+  exempts a workflow from the stall detection in `liveness-sweep.sh`. One carve-out, not a
   removal: `triage.hold` still mutes unconditionally, because it names its wait
   in prose with no edge to discharge. The predicate lives once, in the sweep
   (`--wait-spent <bead-id>`), and the detector asks it — a mirrored predicate in

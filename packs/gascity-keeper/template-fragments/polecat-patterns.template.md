@@ -50,12 +50,11 @@ Two-rule policy:
 
 - **Routine rotation** — predecessor thought less than ~2 hours,
   OR the bead is not on the critical path. Accept loss. Leave the
-  worktree on disk. Log an informational mail to mayor; do not
-  push anywhere.
+  worktree on disk. Note it on the bead; do not push anywhere.
 - **High-cost rotation** — predecessor thought more than ~2 hours
-  AND the bead is on the critical path. Ping mayor with that
-  specific context before acting. Mayor may authorize salvage to
-  a preservation branch.
+  AND the bead is on the critical path. File an escalation visit
+  (`escalate.sh`) with that specific context before acting; the
+  operator may authorize salvage to a preservation branch.
 
 **Never** silently push to the original polecat branch when a
 successor has already replaced `metadata.branch`. That creates a
@@ -129,7 +128,7 @@ the merge itself, but as of 2026-05-06 that is still external.
 - Do not try to auto-merge or enable GitHub auto-merge unless the
   operator explicitly asks.
 - Once the impl bead is closed by the refinery, that chain is
-  mayor-complete from the dispatch perspective. Move on to the
+  complete from the dispatch perspective. Move on to the
   next bead.
 - A handoff truly stalls only when the bead **stays open**, no
   `merge_result` metadata appears, and the refinery is alive but

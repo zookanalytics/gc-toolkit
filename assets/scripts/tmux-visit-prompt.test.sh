@@ -465,14 +465,19 @@ eq "$(cat "$TMP/calls.log")" "" "MKTEMPFAIL: ...and nothing is filed"
 # The OTHER guard, and the reason the case above cannot stand in for it: an
 # unwritable draft directory must not kill the key. It falls back, says so, and
 # the press still files.
-UNWRITABLE="$TMP/nodraft"
-mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
-DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
-tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "not writable" "DRAFTDIRFAIL: an unwritable draft dir is reported"
-has "$(cat "$TMP/calls.log")" "argv=[a topic whose dir is read-only]" \
-    "DRAFTDIRFAIL: ...and the press still files, because a bad dir must not cost the thought"
-chmod 700 "$UNWRITABLE"
+if [ "$(id -u)" -eq 0 ]; then
+    # root ignores directory modes, so the unwritable dir cannot be staged.
+    ok "DRAFTDIRFAIL: skipped (running as root; chmod cannot make a dir unwritable)"
+else
+    UNWRITABLE="$TMP/nodraft"
+    mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
+    DRAFT_DIR_OVERRIDE="$UNWRITABLE" run_handler "$CFG_OK" "a topic whose dir is read-only" || true
+    tcalls=$(cat "$TMP/tmux.log")
+    has "$tcalls" "not writable" "DRAFTDIRFAIL: an unwritable draft dir is reported"
+    has "$(cat "$TMP/calls.log")" "argv=[a topic whose dir is read-only]" \
+        "DRAFTDIRFAIL: ...and the press still files, because a bad dir must not cost the thought"
+    chmod 700 "$UNWRITABLE"
+fi
 
 # (BLANKDUR) — the blank branch is also where a truncated write lands, so a
 # paragraph can be lost behind it. Three seconds was too short for that.
@@ -521,23 +526,27 @@ DRAFT_DIR_OVERRIDE="$REAPDIR" run_handler "$CFG_OK" "a fresh press that reaps"
 SHAREDTMP="$TMP/sharedtmp"; mkdir -p "$SHAREDTMP"
 : > "$SHAREDTMP/draft-unrelated"
 touch -d '30 days ago' "$SHAREDTMP/draft-unrelated" 2>/dev/null || touch -t 202001010000 "$SHAREDTMP/draft-unrelated"
-NOWRITE="$TMP/nowrite2"; mkdir -p "$NOWRITE"; chmod 500 "$NOWRITE"
-(
-    export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux-rs.log" GUM_CALLS="$TMP/gum.log"
-    export FAKE_TOPIC="a press that has to fall back" TMPDIR="$SHAREDTMP"
-    export GC_VISIT_DRAFT_DIR="$NOWRITE"
-    : > "$TMUX_CALLS"; : > "$CALLS"
-    PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
-    for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
-)
-chmod 700 "$NOWRITE"
-[ -e "$SHAREDTMP/draft-unrelated" ] \
-    && ok "REAPSCOPE: an unrelated stale draft-* in the shared temp root survives the fallback" \
-    || bad "REAPSCOPE: the fallback reaper deleted a file this script does not own"
-has "$(cat "$TMP/tmux-rs.log")" "gc-visit-drafts" \
-    "REAPSCOPE: ...because the fallback is a script-owned subdirectory, and the message names it"
-has "$(cat "$TMP/calls.log")" "argv=[a press that has to fall back]" \
-    "REAPSCOPE: ...and the press still files"
+if [ "$(id -u)" -eq 0 ]; then
+    ok "REAPSCOPE: skipped (running as root; chmod cannot make a dir unwritable)"
+else
+    NOWRITE="$TMP/nowrite2"; mkdir -p "$NOWRITE"; chmod 500 "$NOWRITE"
+    (
+        export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux-rs.log" GUM_CALLS="$TMP/gum.log"
+        export FAKE_TOPIC="a press that has to fall back" TMPDIR="$SHAREDTMP"
+        export GC_VISIT_DRAFT_DIR="$NOWRITE"
+        : > "$TMUX_CALLS"; : > "$CALLS"
+        PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_OK" >/dev/null 2>&1 || true
+        for _ in $(seq 1 100); do grep -q 'display-message .*-d ' "$TMUX_CALLS" && break; sleep 0.05; done
+    )
+    chmod 700 "$NOWRITE"
+    [ -e "$SHAREDTMP/draft-unrelated" ] \
+        && ok "REAPSCOPE: an unrelated stale draft-* in the shared temp root survives the fallback" \
+        || bad "REAPSCOPE: the fallback reaper deleted a file this script does not own"
+    has "$(cat "$TMP/tmux-rs.log")" "gc-visit-drafts" \
+        "REAPSCOPE: ...because the fallback is a script-owned subdirectory, and the message names it"
+    has "$(cat "$TMP/calls.log")" "argv=[a press that has to fall back]" \
+        "REAPSCOPE: ...and the press still files"
+fi
 
 # (BLANK) — blank and whitespace-only both file nothing.
 for blank in "" "   "; do

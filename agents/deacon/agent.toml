@@ -1,0 +1,7 @@
+# deacon — city infra patrol (named singleton, always; stanza in pack.toml).
+# Runs mol-deacon-patrol: orphan processes, dolt health, doctor sweep.
+scope = "city"
+wake_mode = "fresh"
+work_dir = ".gc/agents/deacon"
+nudge = "Run gc prime, then the startup wisp reconcile; patrol the city."
+idle_timeout = "2h"

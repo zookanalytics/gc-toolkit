@@ -1,250 +1,34 @@
 description = """
-Refinery patrol loop. Poured as a root-only wisp on startup:
+Refinery patrol loop — merge JUDGMENT only. Poured as a root-only wisp:
 
-  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var escalation_cooldown={{escalation_cooldown}}
+  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var check_set={{check_set}}
   gc bd update $WISP --assignee=$GC_AGENT
 
-Each wisp is ONE iteration: check for work, merge one branch, pour
-the next iteration. On crash, re-read the formula steps and determine
-where you left off from context (git state, bead state, last action).
+Each wisp is ONE iteration: find one assigned work bead, prepare its branch,
+run the rig's checks, decide (land / gate / reject), pour the next wisp,
+burn this one. Steps are not materialized; read each description as you
+reach it. On crash, re-derive position from git and bead state.
 
-Formula steps are NOT materialized as child beads. Read the step
-descriptions below and work through them in order.
+Everything downstream of the gating handoff — gate arming and review
+dispatch, PR opening, the merge itself, external PR facts, convoy
+graduation — is the refinery-reconcile ORDER's (60s, no session). This
+formula never runs those passes: docs/refinery-merge-cadence.md.
 
-The loop mechanism: every exit path (happy or early) pours the next
-wisp before burning this one. The prompt only bootstraps the first wisp.
+State writes: every merge_result transition goes through
+assets/scripts/lifecycle.sh (one atomic validated write per transition);
+every escalation goes through assets/scripts/escalate.sh (one open visit
+per situation key). Resolve both at shell runtime — formula bodies get no
+{{.ConfigDir}}:
 
-Work beads flow directly: pool → polecat → refinery → closed.
-No separate MR beads. The polecat sets metadata (branch, target) on
-the work bead and assigns it to the refinery. On rejection, the
-refinery puts the bead back in the pool with rejection metadata.
+    LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+    done
 
-Merge strategy is per-work-bead metadata:
-- `direct` (default): fast-forward merge to target and push
-- `mr` / `pr`: publish a GitHub pull request instead of landing directly
-
-In `mr` mode, refinery does NOT land the branch directly. It publishes a
-pull request, records the PR on the anchor bead, and transitions it to a
-GATING state — it stays OPEN. The anchor closes later, on a verified merge to
-its target (close-on-land), reconciled in the find-work idle loop. The anchor
-is typically a CONVOY graduating its branch to the target (every PR is an
-owned convoy; see docs/work-bead-state-machine.md), but the mechanism is the
-same for any mr-mode bead. Stock GasTown closes at PR-creation; this pack
-keeps the bead open so `closed` always means landed.
-
-## Escalation discipline — read this before ANY `gc mail send`
-
-This applies to every step, not just the ones that document an escalation
-command.
-
-You re-derive your triggers from live state on every idle wake, and a PR
-waiting for the operator's signature keeps re-deriving true for as long as
-the operator is away. Mailing on each pass is how a queue of TWO blocked
-PRs produced EIGHT near-identical escalations in 2h (2026-08-09/10,
-signal-loom), and two more on 2026-08-13 against zero landings. The
-subjects varied only in the count as PRs accumulated — "3 CI-green PRs
-held", "6 merge-ready PRs blocked", "7 PRs green but parked" — so nothing
-was actionable differently at mail 8 than at mail 1.
-
-**A PR awaiting operator approval is a HEALTHY state, not an anomaly, and
-the number of escalations it is worth is ZERO.** It cannot change without
-a GitHub-side event, the city structurally cannot approve its own PRs,
-and the operator reviews the queue on their own cadence — that IS the
-workflow, not a backlog anyone is unblocking. Telling them about it tells
-them nothing they did not already know.
-
-This paragraph used to end "so the escalation is worth sending exactly
-once", which does not follow from its own premise: a state that is not an
-anomaly does not warrant one mail either. Exactly-once was not even a
-bound. The gate's stamp is keyed on the ANCHOR, so "once per PR" is a
-toll that scales with throughput — signal-loom's refinery was corrected
-about PR #541 and then escalated PR #544 hours later, a different anchor
-at a different head and so genuinely new to every fingerprint the gate
-compares. The better this city gets at producing PRs, the worse the drip
-(tk-qe2tv).
-
-**You do not have to remember this.** `escalation-gate.sh` REFUSES the
-class outright when the held-anchor block below hands it `--pr`: it
-re-reads the PR itself and sends nothing if GitHub says the PR is
-mergeable, green on every check that gates its merge, unobjected-to and
-merely unapproved. A refusal exits 0,
-prints `REFUSED`, and stamps nothing. It is not the gate failing and it
-is not a licence to mail anyway — there is nothing being held back to
-retry.
-
-**What still escalates, and must.** The class is narrow, and the gate
-proves each of these is outside it rather than trusting you to:
-
-- a PR that is APPROVED and green and still not landing — that is a real
-  fault, and the remedy is not a signature;
-- a head move that strands a gate (`check.<name>=green@<old-head>` on the
-  anchor while the PR sits at a newer head);
-- a merge that errors, or a PR GitHub reports as CONFLICTING;
-- a failing or still-running REQUIRED check, a CHANGES_REQUESTED review, a
-  draft, a closed PR. The gate asks `gh pr checks --required`, which is
-  GitHub's own answer to which checks gate this merge and what each one's
-  CURRENT run said — so an ADVISORY check that is red is not a hold (it
-  cannot block the merge), and a required check that failed and was re-run
-  green is green (tk-ayt0n);
-- an anchor a previous pass already blocked — `blocked_reason` or
-  `merge_result=blocked`, which is where "Existing PR metadata needs
-  human correction" lands.
-
-**The cost is burial, not volume.** Those duplicates pushed the mayor's
-inbox to 19 unread, and two escalations that genuinely needed a mayor
-decision were TIME-BOXED and sat between them: a convoy duplicate
-disposition that expired after ~5.5h when one of its three options merged
-out from under it, and a false graduation hold that would have proposed
-reverting 5 landed PRs. High-value escalations competing with a repeating
-low-value one is the actual failure. Each `gc mail send` is also a
-permanent bead plus a Dolt commit, billed for as long as the human is away.
-
-**Any escalation that is ABOUT A BEAD goes through the gate instead of
-straight to `gc mail send`:**
-
-```bash
-# >>> escalation-wiring-discipline
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-BODY="Observation: <what you found>
-Recommendation: <what should happen>"
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<bead-id>" --kind refinery --state "<what is HOLDING it>" --cooldown "{{escalation_cooldown}}" --subject "<subject>" --body "$BODY"; then
-    echo "refinery: escalation-gate did not send (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
-  fi
-else
-  gc mail send mayor/ -s "<subject>" -m "$BODY" || echo "refinery: fallback 'gc mail send' failed; next cycle retries." >&2
-fi
-# <<< escalation-wiring-discipline
-```
-
-It mails the first time, then stays quiet until `--state` changes or the
-cooldown elapses. It suppresses REPETITION, never news — with one class it
-declines outright rather than deduping, the mergeable-and-merely-unapproved
-PR described above, and only where the held-anchor block names the PR. A rig
-that has not synced the script falls back to mailing directly — the old
-behavior, not a dropped escalation.
-
-**`--kind refinery`, always.** The gate's default kind is `witness`, and
-one anchor + kind = one open escalation. The witness escalates about these
-same anchors (PR #35: five witness mails, two refinery ones), so sharing a
-kind would let whichever role got there first mute the other. The kind
-names the sending ROLE, never the topic — splitting "queue health" and
-"stranded PR" into separate kinds just restores the storm one framing at a
-time.
-
-**Gate PER ANCHOR, not per queue.** The tempting reading of those eight
-mails is "fingerprint the whole gating set". Do not: adding a fourth PR to
-a set of three changes a set fingerprint, so the whole set re-mails and
-the three unchanged PRs are re-escalated for the fourth's sake — which is
-exactly the observed pattern where the subject line was just a rising
-count. One gated call per held anchor gives each PR one mail, and a newly
-blocked PR speaks only for itself. Per-rig namespacing comes free: the
-stamp lives on the anchor bead, and anchors are rig-scoped, so the four
-co-tenant refineries on this host cannot collide.
-
-Keep the resolution loop in the SAME shell as the send. Each tool call is
-a fresh shell, so a `SCRIPTS_DIR` you resolved earlier is gone, and an
-empty one expands to `/escalation-gate.sh` — which fails and sends
-nothing. Only the gc-toolkit rig has its own `assets/scripts`; the other
-three resolve through the `GC_CITY_PATH` candidate.
-
-A non-zero exit from the gate is NOT fatal and NOT a licence to mail
-anyway. A NON-ZERO exit means one thing only — it could not bound the
-escalation (unreadable anchor, unwritable stamp) — and mailing past that
-is the unbounded storm. Log it, keep patrolling, let the next cycle retry.
-That is why the call above is wrapped in `if ! ...; then echo` rather than
-run bare: the idle reconcile is a best-effort pass and must reach its
-later passes.
-
-**"Next cycle retries" is only true while the TRIGGER survives the pass.**
-Most escalations here are RE-DERIVED from live state — a held anchor is
-still held, a capped signoff is still capped, an unsupported
-`merge_strategy=local` still refuses to merge and deliberately transitions
-nothing — so the next idle wake genuinely re-derives them and calls the
-gate again. `block_existing_pr` is the exception: it writes
-`merge_result=blocked` and `assignee=""` in the same breath, and the
-find-work query excludes both, so the pass that escalates is also the pass
-that clears the trigger. That one says BEST-EFFORT and does not print a
-retry promise the code cannot keep. It is deliberately NOT the
-`ORPHAN_CLOSED` shape — withholding the block to protect a mail would
-leave a bead with invalid PR metadata being re-selected and re-processed
-every cycle, and the durable record already outlives the mail: the reason
-is on the bead in `blocked_reason` with `gc.routed_to=human`.
-
-A refusal message that promises a retry which cannot happen is worse than
-one that admits the loss — it reads as handled in the patrol log.
-
-Things that are easy to get wrong:
-
-- **Do not reword your way past it.** Reaching for `gc mail send` directly
-  because "this framing is new" IS the bug. The gate keys on the ANCHOR
-  and the channel, never on the message, precisely so rephrasing cannot
-  reopen the storm.
-- **Put the real hold inputs in `--state`.** Head oid, `reviewDecision`,
-  `mergeStateStatus` — whatever would make you say "this is genuinely
-  different now". That fingerprint is what lets real news through
-  immediately, so a lazy `--state` turns the gate into a mute.
-- **Sanitize any `gc bd show --json` you build `--state` from:**
-  `gc bd show <bead> --json 2>/dev/null | tr -d '[:cntrl:]'`. jq rejects
-  every unescaped control character — including a plain tab, which prose
-  notes do contain — and a failed parse leaves `--state` EMPTY, which the
-  gate reads as "no state tracked" and suppresses real news for a whole
-  cooldown. A lost parse must not look like a lost fingerprint.
-- **Never pass an EMPTY `--state` when you meant to track state, and never
-  substitute a differently-shaped one on the same `--kind`.** A substitute
-  (the bead's fields standing in for a PR's, because `gh pr view` failed)
-  compares unequal in BOTH directions, so the item mails when the outage
-  starts and again when it ends — a flap through the cooldown driven by
-  GitHub's availability rather than by news. Send that observation on its
-  own channel (`--kind refinery-degraded`, with a value naming what is
-  unavailable and nothing that varies while it is) and leave the real
-  channel's stamp alone. The held-anchor block in `find-work` does this;
-  copy that shape.
-- **Never put a timestamp in `--state` — least of all the anchor's own
-  `updated_at`.** The gate stamps `escalated.<kind>` ON THE ANCHOR before
-  it mails, and that write bumps `updated_at`. A fingerprint containing it
-  differs on the very next pass *because the gate ran*, so an unchanged
-  item re-mails forever: the storm, now with a dedup step in front of it.
-  Fingerprint only inputs the gate does not itself write — `status`,
-  `merge_result`, `branch`, the landing target (`merged_target // target`,
-  the pre-open order), the `check.<gate>` markers, the PR's own fields.
-
-`--cooldown "{{escalation_cooldown}}"` is passed on every gated call, and
-every pour of the next wisp forwards the var — both halves are needed for
-a configured value to be honored end to end. The call alone only honors it
-for one cycle: a `--root-only` pour materializes no defaults, so a value a
-pour drops arrives unrendered at the next wisp and every later cycle
-silently runs the script's own 24h default instead. Where the var was
-never set at all it still arrives unrendered, and the script recognizes
-that shape and falls back to that default rather than failing the send.
-
-`--force` is for a situation that truly worsened in a way the fingerprint
-does not capture. Using it every cycle is the storm again.
-
-Suppressed escalations still print a verdict line — the item is still
-held, and your patrol log still says so. Silence toward the mayor is not
-silence in the log.
-
-**The rule is enforced, not merely documented.**
-`assets/scripts/refinery-escalation-wiring.test.sh` scans this file for
-every `gc mail send` and fails on any that is neither inside a gated
-`escalation-wiring-*` block nor on its exception list. Exactly one is
-exempt: the `validate-identity` empty-`GC_AGENT` escalation, because it
-fires before any work bead is selected and there is no bead to key a stamp
-on — and it exits the session, so it cannot re-fire on a cadence anyway.
-Every other escalation here is bead-scoped and gated. Adding a second bare
-bead-scoped mail fails that test — gate it instead, or the storm comes
-back through the new one.
-
-Regression test for the gate itself:
-`assets/scripts/escalation-gate.test.sh` (hermetic; stubs `gc`, covers the
-subject-drift case, state-change and cooldown re-opening, stamp-before-mail,
-and the refuse-to-send-when-unbounded rule).
-
-Read each step's description before acting — Config values override defaults."""
+Marked blocks are extracted and executed by their tests
+(find-work-gating-guard, mr-aware-rejection-failclosed,
+preexisting-failure-dedup, one-anchor-per-pr, check-set-normalize) — keep
+markers and keep the blocks backslash-free (TOML eats line-ending
+backslashes)."""
 formula = "mol-refinery-patrol"
 
 [requires]
@@ -252,87 +36,76 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Import binding prefix for gastown agent identities, including trailing dot when bound."
+description = "Agent identity prefix, including trailing dot when bound."
+default = ""
+
+[vars.rig_name]
+description = "Rig this patrol serves; injected by the pour (forwarded verbatim by next-iteration). Declared so the {{rig_name}} token in the pour commands resolves instead of surviving literally."
 default = ""
 
 [vars.run_tests]
-description = "Whether to run tests before merging"
+description = "Whether to run tests before merging."
 default = "true"
 
 [vars.setup_command]
-description = "Setup/install command (e.g., pnpm install). Empty = skip."
+description = "Setup/install command. Empty = skip."
 default = ""
 
 [vars.typecheck_command]
-description = "Type check command (e.g., tsc --noEmit). Empty = skip."
+description = "Type check command. Empty = skip."
 default = ""
 
 [vars.lint_command]
-description = "Lint command (e.g., eslint .). Empty = skip."
+description = "Lint command. Empty = skip."
 default = ""
 
 [vars.test_command]
-description = "Test command to run (if run_tests is true)"
+description = "Test command (when run_tests is true)."
 default = ""
 
 [vars.build_command]
-description = "Build command (e.g., go build ./...). Empty = skip."
+description = "Build command. Empty = skip."
 default = ""
 
 [vars.target_branch]
-description = "Default target branch for merges"
+description = "Default target branch for merges."
 default = "main"
 
 [vars.default_merge_strategy]
-description = "Default when bead metadata.merge_strategy is unset. 'direct' = FF + push to target. 'mr'/'pr' = open pull request."
+description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline."
 default = "mr"
 
 [vars.delete_merged_branches]
-description = "Whether to delete source branches after merge"
+description = "Delete source branches after a direct merge."
 default = "true"
-
-[vars.integration_branch_auto_land]
-description = "System-auto convoy graduation. When an OWNED integration convoy's members are all closed AND the ledger records at least one merge onto its integration branch, the refinery assigns the convoy bead to itself and lands integration->main through the same work-bead machine (a human-approved PR). Default on; set 'false' as a kill-switch. Non-owned auto-convoys (per-sling tracking bundles) are never affected."
-default = "true"
-
-[vars.escalation_cooldown]
-description = "Seconds before an UNCHANGED situation may be escalated again (see 'Escalation discipline'). A CHANGED state fingerprint always re-escalates immediately, so this bounds repetition only, never news. Default 24h: at the 60s idle cadence that is a 1440x reduction on an approval-gated queue, while still resurfacing it daily so it cannot fall silent. Lower it only if a real escalation was noticed too late — not to make the patrol chattier."
-default = "86400"
 
 [vars.auto_ff_rig_main]
-description = "After a successful direct merge, attempt to fast-forward the rig's canonical checkout (\\$GC_RIG_ROOT) when it is on the target branch with a clean tree. Best-effort; never blocks the merge."
+description = "After a direct merge, best-effort fast-forward the rig's canonical checkout when it is on the target branch with a clean tree. Never blocks the merge."
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set for mr-mode PRs: a comma-separated list of gate names that must each be green at the live head before the merge fires. Each gate records a per-gate marker check.<name>=green@<sha> on the gating anchor, and merge-skill.sh holds the merge until every named gate is green at the live head. 'codex' dispatches a review bead to the rig's codex polecat pool as a check-set member. 'approval' is the one member evidenced by GitHub review state instead of a stamped marker (merge-skill.sh drops it from the marker loop, the way it drops the 'none' sentinel, since nothing can stamp check.approval). It requires an APPROVED latest-review that is ALL THREE of: (a) attached to the PR's LIVE head — an approval of an earlier commit re-gates exactly like a stale check.<name>=green@<old-sha>, so any push after the approval re-arms the gate; (b) from an account other than the one the city acts as (the city posts COMMENT signoffs and never approves its own PRs); and (c) from a TRUSTED approver, which is a stronger bar than merely non-self — on a public repo any account can submit an APPROVED review, and this gate matters precisely where GitHub enforces nothing server-side. Trust has two policies: when MERGE_TRUSTED_APPROVERS is set in the refinery's environment (comma-separated logins) that allowlist IS the policy and no permission probe runs; otherwise the approver must hold admin/maintain/write permission on the repo (read from repos/{owner}/{repo}/collaborators/<login>/permission). Anything else HOLDS the merge, fail-closed — including a permission probe that cannot be READ, since unreadable is indistinguishable from 'no access' and guessing lands unreviewed work. Separately from this member — and from check_set entirely — a standing CHANGES_REQUESTED from ANY non-self reviewer vetoes the merge on EVERY PR, whoever approved: one reviewer's approval does not answer another's unresolved objection, and a rig that never declares 'approval' is not a rig where a human's 'not this' stops counting (tk-bdfww). Unlike the approval the veto is not head-bound — an objection stands until its author supersedes it or it is dismissed. If the refinery's token cannot read collaborator permissions, set MERGE_TRUSTED_APPROVERS rather than leaving the gate permanently held. Declare 'approval' on a rig whose repo does NOT require reviews — there mergeStateStatus=CLEAN is true with zero approvals, so without it merge-skill.sh will land unreviewed work (tk-5niup). It is also armed automatically, whatever check_set says, on an anchor carrying signoff_dismissed (the re-gate retracted the city's own blocking review, so CLEAN is partly our own doing). To run a rig GATELESS, set the explicit sentinel 'none' (or 'off'): the merge-push step normalizes it to the canonical 'none', which is STAMPED on the anchor and which merge-skill.sh reads as 'no gates' (merge then governed only by CI + no-open-child + whatever mergeStateStatus=CLEAN folds on that repo). An EMPTY value is NOT an opt-out — it is treated as absent and recovers this default, because {{check_set}} is hand-substituted from raw TOML on the --root-only patrol path and a mis-substitution would otherwise silently un-gate every PR (tk-4na1b). The sentinel is stamped rather than collapsed to empty so that 'gateless by choice' and 'never normalized' are DISTINCT on the anchor: a hand-recovered bead bypasses this formula entirely and arrives carrying an empty check_set, which check-set-heal.sh repairs at the refinery boundary before the merge skill can read it as ungated (tk-i48ca). Replaces the retired review_gate string + signoff_head side-channel."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green@<live head> before merge.sh lands the PR. 'codex' = a review dispatched by the cadence's gate-ensure; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
 default = "codex"
 
 [[steps]]
 id = "validate-identity"
 title = "Validate canonical agent identity"
 description = """
-**Fail fast if `$GC_AGENT` is not set.**
-
-The refinery uses `$GC_AGENT` (not `$GC_ALIAS`) as its canonical mailbox
-identity. The session harness
-(`internal/session/lifecycle.go:RuntimeEnvWithSessionContext`) guarantees
-`$GC_AGENT` is populated for every live session — it falls back to the
-session name when the alias is empty. `$GC_ALIAS` can legitimately be
-empty, which is how a refinery once self-polled for 13h42m with seven
-queued beads while looking healthy-idle (upstream #1833).
-
-Verify at startup:
+**Fail fast if `$GC_AGENT` is empty.** The refinery self-polls on
+`$GC_AGENT` (the harness-guaranteed identity; `$GC_ALIAS` can legitimately
+be empty, and polling on an empty filter idles a refinery that looks
+healthy):
 ```bash
 if [ -z "${GC_AGENT:-}" ]; then
-    echo "GC_AGENT is empty — session harness did not inject the canonical identity."
-    echo "Refusing to self-poll with an empty filter; escalate before proceeding."
-    gc mail send mayor/ -s "ESCALATION: refinery started with empty GC_AGENT [HIGH]" \\
-        -m "Session has no canonical agent identity. Investigate session harness."
+    echo "GC_AGENT is empty — refusing to self-poll with an empty filter."
+    SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+    done
+    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "${GC_SESSION_ID:-refinery}" --key refinery-empty-identity --message "Refinery session started with empty GC_AGENT; investigate the session harness."
     gc runtime drain-ack
     exit 1
 fi
 ```
-
 Close this step only when `$GC_AGENT` is confirmed non-empty."""
 
 [[steps]]
@@ -340,532 +113,64 @@ id = "check-inbox"
 title = "Check mail"
 needs = ["validate-identity"]
 description = """
-**Check mail:**
 ```bash
 gc mail inbox
 ```
-
-Archive any messages you handle. Note any context relevant to
-upcoming merge work (e.g., priority overrides, hold requests).
-
-Close this step and proceed."""
+Archive what you handle; note context relevant to merge work (priority
+overrides, hold requests). Close this step and proceed."""
 
 [[steps]]
 id = "find-work"
 title = "Find next work bead assigned to me"
 needs = ["check-inbox"]
 description = """
-Search for work beads assigned to you with branch metadata, skipping any bead
-that is already a gating anchor:
+Select one assigned, open, branch-bearing work bead — excluding ANY bead
+that carries a `merge_result`: a bead with one is a gating anchor driven by
+the cadence's bead-keyed passes, never by this queue, and an assignee on one
+is an anomaly to flag, not work to take. Every path that legitimately
+returns a bead here clears the field first.
+
 ```bash
 # >>> find-work-select
 WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json)
 WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
-  echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the bead-keyed passes below, never by find-work; an assignee on one is an anomaly. Flag only — do not re-gate it, do not clear it here (tk-jcal4)." >&2
+  echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the cadence, never by find-work; flag only — do not re-gate it, do not clear it here." >&2
 fi
 # <<< find-work-select
 ```
 
-`${GC_RIG:+--rig="$GC_RIG"}` scopes the query to this refinery's rig
-database. Without it, `gc bd list` routes to the HQ database and never
-sees rig-scoped work beads — the `assignee` field alone does not route
-by namespace. For HQ-only refineries `$GC_RIG` is empty and the flag
-expands to nothing.
+`${GC_RIG:+--rig}` scopes to this refinery's rig store; `--limit=25` (not 1)
+because the filter is client-side — a parked anchor at the head of a 1-row
+window would starve a queue with real work behind it. Flag, never rewrite.
 
-The `merge_result` filter is the selection guard (tk-jcal4). A parked gating
-anchor is `status=open` and carries `metadata.branch` — both BY DESIGN, since
-"open means unlanded" and the resolver needs the branch — so the only thing
-that kept one out of this query was `assignee=""`. That made
-"a gating anchor is never re-processed" rest on an unenforced convention:
-nobody ever writing an assignee onto one. Any actor can write that field, and
-on 2026-08-11 a rig witness wrote `assignee=<refinery>` onto two correctly
-parked shutupandlisten anchors (`merge_result=pull_request`, codex-green,
-PR#55/PR#56 open awaiting human approval). Re-processing them would have
-reset both to `merge_result=pre_open_gate`, orphaning two live PRs from their
-anchors, dispatching duplicate codex reviews, and eventually opening a SECOND
-PR per branch via `pre-open-resolve.sh` — every write reporting success. Now
-the query decides it: a bead carrying ANY `merge_result` is out.
+If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),
+default `metadata.target` to {{target_branch}}, note the id, close this
+step.
 
-ANY value, not just the gating pair. Every path that legitimately returns a
-bead to this queue clears the field first — the rejection repool folds
-`--unset-metadata merge_result` into the same update (merge-push step 3,
-`mr-aware-rejection`) precisely so the hand-back re-gates fresh. The terminal
-dispositions (`merged`, `blocked`, `refused_false_completion`) are already
-`assignee=""` and routed to human. So `merge_result` present means some pass
-that knew what it was doing recorded a disposition, and this queue is not it.
-
-`--limit` is 25, not 1, because the filter is applied client-side: with
-`--limit=1` a single parked anchor at the head of the result set would return
-NO work and idle a refinery that has real work queued, converting this false
-positive into a starvation-shaped false negative. 25 is far above the normal
-population of this query (parked anchors do not carry an assignee at all, so
-the expected count is zero), and the flag line above makes an unexpected pile
-visible rather than silent.
-
-Flag, never rewrite. Restoring `assignee=""` here would fight whichever writer
-set it, from a pass that cannot see why. This mirrors how `check-set-heal.sh`
-(a-norm0) treats the same anomaly — it flags a gating anchor assigned to a
-non-canonical refinery identity and leaves the field alone.
-
-If found: read the bead metadata to confirm it has a branch:
-```bash
-gc bd show $WORK --json | jq '.[0].metadata'
-```
-The bead MUST have `metadata.branch`. If `metadata.target` is missing,
-use {{target_branch}} as default. Note the work bead ID and close this step.
-
-If NO work found: this turn is over. Do NOT sleep, do NOT call ScheduleWakeup,
-do NOT use Monitor. End the turn; the session_sleep policy restarts this session
-after the configured idle interval.
-
-**1. The reconcile cadence is not yours to drive.** The passes described below
-run every 60s on every rig, in the controller, as the `refinery-reconcile` exec
-order (`orders/refinery-reconcile.toml` ->
-`assets/scripts/refinery-reconcile.sh`, `scope = "rig"`). They are mechanical
-shell — metadata and timer comparison, GitHub API status decoding — so they need
-no agent and no session, and they keep running while every refinery in the city
-is asleep.
-
-That order is also the ONLY writer you have to coordinate with. Running the
-passes inline is a SECOND `merge-skill.sh` writer against the same anchors: the
-controller's own single-flight gate cannot see a copy you launched by hand, and
-two writers racing one anchor is the failure the cadence is arranged to prevent.
-So do not run them here, and do not re-implement the cadence out of band — an
-out-of-band driver is what this replaced (tk-d83wm; the history is in
-specs/tk-agzpl/refinery-idle-driver-liveness.md and
-docs/refinery-merge-cadence.md).
-
-If you need to know what the cadence just did, read it rather than re-deriving
-it: `gc order list` shows the order and `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`
-holds the recent passes. A pass that fails raises an `order.failed` event
-carrying the failing pass names.
-
-If you need to know whether it is running at all, `gc doctor` answers that —
-`check-refinery-merge-cadence` asserts per rig that the order is registered,
-has run recently, and has no out-of-band driver beside it. Do NOT reach for
-`gc order history` without `--limit 0`: a bounded read answers for the city
-store alone while printing a RIG column, so it reports one rig's runs as though
-they were the city's. That misread produced a P1 against a cadence that was
-running normally (tk-fdstg; gascity gc-6a6vz has the binary-side fix).
-
-**2. What the cadence runs (best-effort, every tick).** The passes below are
-convergent nets for single best-effort one-shots that can fail for any reason:
-(a-pre) pre-open PR-create — open the PR for each anchor parked in
-`pre_open_gate` whose codex signoff is green at the branch head (the second half
-of the pre-open codex gate; the PR is born codex-green, tk-6d0vb.1.8); (a)
-close-on-land — the merge skill lands each ready gating anchor (validate ->
-merge -> record) and the detect-only observer closes anchors whose PR merged and
-flags out-of-band-closed PRs; and (b) graduate owned integration convoys whose
-members are now all closed. This step remains their specification — what each
-pass does, in what order, and why — because the order is their caller, not their
-charter.
-
-Pass (a) — close-on-land, in two roles. mr-mode keeps the anchor (a convoy
-graduating, or any mr-mode bead) OPEN as the PR's gating bead (merge-push step
-4); this pass is what later lands and closes it.
-
-(a-reopen) CLOSED-BUT-NOT-LANDED, the first phase of `check-set-heal.sh` (tk-vnlll)
-— runs before (a-norm0), because (a-norm0) and every pass below it enumerate OPEN
-beads, so none of them can see an anchor that was CLOSED at PR-creation. Under the
-close-on-land contract `closed` MEANS landed, which makes such a bead a FALSE DURABLE
-RECORD as well as an unreachable one: the ledger reads "landed" while the PR rots, and
-nothing escalates because nothing can see it. signal-loom sl-jcr4 was closed carrying
-`pr_url` and no `merge_result`, and PR#518 then sat OPEN for four days — head matching
-the anchor's `gc.work_commit`, base main, mergeStateStatus CLEAN, all 11 checks SUCCESS
-and APPROVED by an admin — with zero escalations; the observer could only report it as
-"ANCHORLESS", which is a report, not a repair. The signature is narrow: `closed` + a PR
-reference + a `merge_result` that is NOT a disposition + that PR still OPEN.
-`merge_result` spells two different facts with one key, and only one of them means a
-pass decided this bead was finished: a DISPOSITION (`merged`, written by the merge
-skill; `abandoned`/`retargeted`, written by the observer) is terminal, while a HANDOFF
-(`pull_request` — the PR is open and waiting to be landed; `pre_open_gate` — the branch
-is waiting on its codex signoff) is the opposite, and is the very marker merge-skill's
-own gating enumeration keys on. So the test is an explicit ALLOW-LIST of the
-non-terminal spellings — absent, `pull_request`, `pre_open_gate` — and anything else,
-including a marker no pass here has heard of, reads as a disposition and is left alone.
-Requiring merge_result ABSENT, as this arm first did, read the handoff spelling as a
-completion record and declined the exact case it exists for: on 2026-08-23 eight
-gc-toolkit anchors were closed in a 19-second span carrying `merge_result=pull_request`
-and a green `check.codex` at the live head, the operator approved all eight PRs, every
-one was CLEAN and MERGEABLE, and none landed — merge-skill cannot enumerate a closed
-anchor, this arm would not reopen one carrying a merge_result, and the observer could
-only log ANCHORLESS every pass, so the whole rig's merge queue sat dead for hours one
-API call from eight landings (tk-fip23). The repair is ONLY to reopen, and what happens
-next depends on which spelling it repaired: an ABSENT merge_result makes the bead by
-construction the shape (a-norm0) already handles, so it is re-stamped and gated on the
-SAME pass by code that is already reviewed; an IN-FLIGHT one needs no re-stamp at all,
-since the bead already wears the marker merge-skill enumerates on and `--status=open`
-alone restores it to the queue. Reopening lands nothing by itself — every gate that
-decides whether the PR MAY merge (approval, mergeability, `check.*` at the live head)
-is still evaluated by the merge skill, on live state. The reopen is deliberately the FIRST write — stamping merge_result
-onto a still-closed bead would make it a non-candidate for both phases and strand it
-permanently — and the closed set is bounded by ONE `gh pr list --state open` before any
-per-bead work, since hundreds of legitimately closed beads per rig carry a `pr_url`.
-It refuses to guess on the same terms (a-norm0) does: review/rework children, a live
-route, a bead an operator has parked (`merge_hold`/`rebase_hold`) or marked non-gating
-(`tracking_only`), a PR a live anchor
-already drives, two candidates for one PR, and any PR whose
-identity does not certify are all excluded — and a bead it already reopened ONCE that
-has been closed AGAIN is escalated rather than reopened, because a live writer is
-re-closing it and flapping would fight that writer every idle pass.
-
-(a-norm0) MERGE_RESULT RECOVERY, the second phase of `check-set-heal.sh` (tk-wsxd0)
-— runs before everything else below in this loop. Every pass below, and the check-set
-normalization that follows, enumerates gating anchors on the `merge_result`
-metadata field. So an anchor missing `merge_result` ENTIRELY is not merely
-un-healed: it is INVISIBLE to all of them at once, and there is no pass that can
-see it. The failure is silent and unbounded — shutupandlisten's hand-recovered
-anchor su-uzy9.1 carried `branch` + `pr_url` but no `merge_result`, the rig-wide
-gating set read EMPTY, and PR#37 sat open 6 days with zero escalations. This phase
-enumerates on a predicate that SURVIVES the damage — beads the refinery already
-canonicalized a PR onto (`pr_url`/`pr_number`) that carry no `merge_result` — and
-restores `merge_result=pull_request`, backfilling `pr_number` (merge-skill.sh skips
-an anchor that names no PR under ANY of pr_number/fork_pr/fork_pr_url, and HOLDS one
-whose keys name several different numbers) and `pr_url` from the certified PR, and
-`merged_target` (what
-the retarget check compares) from the anchor's own recorded `target`/`merged_target` —
-falling back to the certified PR's live base ONLY when no recorded intent survived.
-Preferring the record is the point: taking the live base would silently BLESS a
-retarget made while the anchor was invisible, which is exactly the window one could
-have slipped through. The `pr_url` backfill is what makes the certification DURABLE:
-certification happens in this pass's process, while merge-skill.sh and the observer
-act on the anchor in others, and a recovered anchor is `pr_number`-only until the URL
-lands — a bare number being exactly the identifier that names a different pull request
-in every other repository. It refuses to guess: a rework/review child, a PR already claimed by
-another open anchor, two candidates naming one PR, live polecat WIP, and the
-pre-open state (a branch with no PR is indistinguishable from ordinary in-flight
-work) are all excluded — stamping a child would silently cancel the in-flight-rework
-hold merge-skill.sh derives from its empty `merge_result`. So is a bead an operator has
-PARKED (`merge_hold`/`rebase_hold`, read the way merge-skill.sh reads them): such a bead
-is held precisely BY being out of the anchor set, so it survives every exclusion above
-by construction, and enrolling it would mutate a parked bead and send (a-norm) to arm
-its gate and dispatch a signoff onto a PR nobody can land (tk-44xkw). A NON-GATING
-TRACKING RECORD (`tracking_only`, read on the same terms) is refused in the same place
-and for a sharper version of that reason (tk-8329m): it withholds `merge_result` on
-purpose so nothing arms itself to land a PR this city was only tracking, and the same
-marker releases merge-skill.sh's in-flight holder hold — so honouring it there and not
-here would trade a permanent hold for an armed auto-merge. That refusal is
-made per candidate rather than by filtering the candidate set, because the
-two-candidates guard is a WHOLE-SET property: dropping a held bead would make its
-unheld rival for the same PR look unambiguous and get promoted. Running first is what
-lets a recovered anchor be GATED by (a-norm) below on the SAME pass. It also flags
-— never rewrites — a gating anchor assigned to a non-canonical refinery identity,
-the second half of PR#37's invisibility (it hid the bead from find-work's assignee
-filter while the missing `merge_result` hid it from every bead-keyed pass).
-
-(a-norm) CHECK-SET NORMALIZATION at the refinery boundary (`check-set-heal.sh`,
-tk-i48ca) — runs BEFORE the merge skill. The merge-push step normalizes
-`check_set` for every bead that flows through it, but a hand-RECOVERED bead (a
-salvage hand-off, or any bead reconstructed outside this formula) never runs that
-step and arrives with an EMPTY check_set — which merge-skill.sh reads as "declares
-no gates", landing the PR with no codex review. This pass stamps the declared
-default on any gating anchor whose check_set is absent/empty, then dispatches the
-missing codex signoff (or reuses an in-flight one) so the gate it just armed is
-satisfiable rather than a permanent hold. Only the explicit `none`/`off` sentinel
-is an opt-out; because the merge-push step now STAMPS that sentinel instead of
-collapsing it to empty, "gateless by choice" and "never normalized" are distinct
-states on the anchor. Stamp-then-dispatch, on purpose: a stamp that lands without
-its dispatch leaves the merge HELD and retried, whereas a dispatch that lands
-without its stamp leaves the PR mergeable un-reviewed.
-
-(a-norm) IS ALSO THE RE-GATE OWNER (tk-t46nq). The same pass runs the
-satisfiability check over EVERY gating anchor that names a real gate — not only
-ones whose check_set it healed. An anchor is satisfiable only while its marker is
-green AT THE LIVE HEAD, so an ABSENT marker (in either sub-state) and a STALE one
-on a PRE-OPEN anchor both re-dispatch the codex signoff. This is what gives
-"rework done -> re-gate" an automated owner on the pre-open path: a
-REQUEST_CHANGES signoff CLEARS `check.codex` and files a rework child, and when
-that child lands and is handed back, the anchor carries a perfectly normal
-`check_set=codex` with no marker and nothing in flight. Before this it belonged to
-nobody — the heal pass called it already-normalized, `pre-open-resolve.sh` can
-only HOLD, and `merge-skill.sh` never sees a pre-open anchor — so it parked until
-a human hand-dispatched the re-gate, once per REVIEW ROUND. A stale marker on a
-POST-OPEN anchor is deliberately NOT taken here: that is (a1)'s stale-gate arm,
-which carries `merge_hold` and one-re-review-per-head guards this pass does not.
-
-Idempotent — the dispatched review is itself in flight, so the next pass reuses it
-instead of twinning, and the anchor reclassifies as satisfiable the moment the
-signoff stamps the marker at the live head. Both repair markers — `check_set_healed`
-here and phase 0's `merge_result_healed` — remain the durable audit trail of what
-was repaired; neither decides who gets checked any more, because every gating anchor
-now does.
-
-(a0) The MERGE SKILL (`merge-skill.sh`) — the single writer of merged-truth. For
-each open gating anchor whose PR is open+ready it runs validate -> merge ->
-record: validate the live base == the anchor's `merged_target`, every gate in the
-anchor's `check_set` is green at the live head (per-gate marker
-check.<name>=green@<head>, so a stale approval or a post-review commit re-gates
-instead of merging early), no open rework
-child holds the PR, the `approval` member is satisfied by a real EXTERNAL
-approving review wherever the anchor requires it (named in `check_set`, or armed
-automatically by `signoff_dismissed` — tk-5niup; the review must be at the LIVE
-head and from a TRUSTED non-city approver — the `MERGE_TRUSTED_APPROVERS`
-allowlist when set, otherwise admin/maintain/write repo permission — see
-`[vars.check_set]`), and GitHub reports the PR mergeable — `mergeStateStatus ==
-CLEAN` (CI + base-current + no-conflict, plus approval only where the repo
-requires a review), or `UNSTABLE` with every REQUIRED status check green at the
-validated head. `UNSTABLE` means "a check is red and nothing required is
-blocking" — a failing REQUIRED check is reported as `BLOCKED` instead — so
-treating it as a gate zeroed merge throughput outright on any rig whose CI is red
-but whose checks are not required, which is the shape every rig here is in
-(tk-zuoys). It is resolved against the required contexts protecting the base
-branch (rulesets + classic branch protection, unioned), never against the state
-name: zero required contexts makes the red checks advisory and the PR mergeable,
-a red or missing required context still holds, and protection that cannot be READ
-holds too. Every other state — `BLOCKED`, `BEHIND`, `DIRTY`, `UNKNOWN` — holds as
-before; then ONE MORE READ of the anchor, immediately before the merge, because
-every gate above ran against metadata read several round-trips earlier and another
-writer can park it (`merge_hold`), re-gate a `check.<name>`, close it or retarget
-it in that window without ever moving the head — an unreadable re-read holds, since
-a merge is the one act this pass cannot retract; then an EXPLICIT `gh pr merge
---squash --match-head-commit <validated head>` (NOT auto-merge, and pinned to the
-commit the gates validated so a mid-pass push cannot land an unvalidated head); then
-close the bead `"Merged to <target> at <sha>"` + stamp `merge_result=merged`. The
-refinery is the single writer — it does not delegate the landing to GitHub
-auto-merge and poll; `gh pr merge --auto` is never the main-PR path.
-
-Its `approval` member and the observer's superseded-review arm are two halves of
-one mechanism: a COMMENT re-gate never supersedes an earlier
-CHANGES_REQUESTED, so a changes-round PR stays BLOCKED on a dead commit while the
-bead reads green; retracting our own superseded review is what reconciles them,
-and the explicit approval requirement is what keeps that retraction from becoming
-an unreviewed merge on a repo that requires no review.
-
-Every read and the merge itself are PINNED with `--repo` to the repository the
-`origin` remote names, and the URL that comes back is compared against it: a bead
-names its PR by NUMBER, `gh` resolves a number in whatever repository it considers
-current (`gh repo set-default`, GH_REPO, GH_HOST, cwd), and this is the one pass
-whose mistake cannot be retried away. Unresolvable origin merges NOTHING. The same
-pin applies to (a1) below, which writes terminal state (closes, escalations) off the
-same reads.
-
-(a1) The detect-only OBSERVER (`reconcile-merged-prs.sh`) — runs AFTER the skill,
-with NO merge authority. For each open gating anchor (`merge_result=pull_request`)
-it reads the PR: merged -> close the bead `"Merged to <target> at <sha>"`
-(mirroring direct-mode; the convergent record + the backstop for a skill that
-died between merging and recording, or an out-of-band merge); closed-unmerged ->
-out-of-band close (the refinery did not do it; route to human, escalate once);
-open+ready -> leave it for the skill; open+draft -> skip (drafts are retired, so
-no PR is created draft; a stray draft is left untouched); retargeted (live base
-!= `merged_target`) -> never close as landed, route to human, escalate once;
-open+CONFLICTING (stale base — an upstream-rebase landing rewrote the target out
-from under every open PR) -> file a rebase child of the anchor and route it to
-`--fix-pool`, once per head (`stale_base_head`). The conflict arm is the one
-disposition that KEEPS `merge_result=pull_request`: the remedy is mechanical, so
-the anchor stays gating and the merge skill lands it as soon as the rebase clears
-the conflict — no human re-engagement. Enumerated by bead, with every PR read PINNED
-with `--repo` to the origin remote's repository (an unresolvable origin skips the
-pass), so each PR resolves in-repo rather than wherever gh happens to point.
-Convergent + cheap — one `gh pr view` per anchor, anchors are few. See
-docs/work-bead-state-machine.md.
-
-Pass (b) — convoy graduation (`reconcile-graduated-convoys.sh`, gated on
-`integration_branch_auto_land`). The same machine ONE LEVEL UP. Runs AFTER pass
-(a), so the wake that closes a convoy's last merged child immediately graduates
-the now-complete convoy. For each OWNED integration convoy whose members are
-ALL closed it assigns the convoy bead to the refinery as an ordinary mr-mode
-work bead (`branch=integration/<id>`, `target={{target_branch}}`,
-`merge_strategy=mr`); the next iteration lands integration->main behind a
-human-approved PR. The interlock: under close-on-land a child closes only on
-merge, so "all closed" reads as "all merged" and graduation cannot assemble a
-half-built integration branch. That reading is one-directional, though, and the
-count cannot check it — a member closed having landed NOTHING (a probe, a
-duplicate the owner disposed of, anything closed before close-on-land was the
-contract) makes it vacuously true forever. So completion is not sufficient: the
-pass also requires the ledger to record at least one merge ONTO the branch
-(some bead carrying `merged_target=<branch>` with `merge_result=merged`), and
-reports a convoy that has none as vacuous rather than graduating it (tk-q0uxl).
-Owned-only and rig-scoped — non-owned
-auto-convoys (per-sling tracking bundles) are never touched. Idempotent: a
-convoy already carrying `branch` (graduation initiated) is skipped. See
-docs/work-bead-state-machine.md.
-
-**3. Escalating a held anchor — once per anchor, through the gate.**
-
-The reconcile passes above HOLD rather than land whenever a gate is unmet,
-and the most common hold by far is an mr-mode PR that is CI-green and
-waiting for the operator's approval. That hold re-derives true on every
-idle wake, which is how eight near-identical "PRs blocked on human
-approval" mails reached the mayor in 2h. Read the "Escalation discipline"
-section at the top of this formula before sending anything from this loop.
-
-Most idle wakes should escalate NOTHING. `merge held`, `0 escalated, 0
-retargeted`, and an unchanged set of approval-gated PRs are the normal
-readings of a healthy queue — log the verdict line and move on. Escalate a
-held anchor only when a human genuinely has to act on THAT anchor, and
-send it per-anchor through the gate, never as a queue-wide roundup:
-
-```bash
-# >>> escalation-wiring-held-anchor
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# The repository THIS checkout's origin names, host-qualified. A bead names its
-# PR by NUMBER, and `gh pr view <n>` resolves a number in whatever repository gh
-# considers CURRENT — `gh repo set-default`, GH_REPO, GH_HOST and cwd all move
-# it — so an unpinned read can fingerprint a stranger's same-numbered pull
-# request and then mail, or stay silent, on ITS state. It comes from the origin
-# remote, never from `gh`: gh's current repository is the hazard itself. Same
-# parse and same fail-closed rule as reconcile-merged-prs.sh's
-# ORIGIN_REPO_Q and check-set-heal.sh's resolve_origin_repo_q (the reference
-# implementation), in parameter expansion rather than their `sed` because a TOML
-# multi-line string cannot carry that expression's backslashes.
-ORIGIN_REPO_Q=""
-ORIGIN_URL=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
-case "$ORIGIN_URL" in
-  git@github.com:*)       ORIGIN_REPO_Q=${ORIGIN_URL#git@github.com:} ;;
-  https://github.com/*)   ORIGIN_REPO_Q=${ORIGIN_URL#https://github.com/} ;;
-  ssh://git@github.com/*) ORIGIN_REPO_Q=${ORIGIN_URL#ssh://git@github.com/} ;;
-esac
-ORIGIN_REPO_Q=${ORIGIN_REPO_Q%.git}
-while [ "${ORIGIN_REPO_Q%/}" != "$ORIGIN_REPO_Q" ]; do ORIGIN_REPO_Q=${ORIGIN_REPO_Q%/}; done
-case "$ORIGIN_REPO_Q" in
-  */*/*|/*|*/) ORIGIN_REPO_Q="" ;;
-  */*)         ORIGIN_REPO_Q="github.com/$ORIGIN_REPO_Q" ;;
-  *)           ORIGIN_REPO_Q="" ;;
-esac
-# tr -d strips control characters BEFORE jq: bd emits them from prose notes and
-# jq rejects every unescaped one, including a plain tab. An unsanitized read
-# fails the jq calls below and leaves STATE empty, which the gate reads as "no
-# state tracked" — a lost parse must not look like a lost fingerprint. The
-# character CLASS, not a numeric-escape range, because this block lives in a
-# TOML multi-line string that would eat the backslashes.
-ROW=$(gc bd show <anchor> --json 2>/dev/null | tr -d '[:cntrl:]')
-# WHICH pull request this anchor names, read from EVERY key a bead names one
-# with — pr_number, fork_pr, and a number scanned out of fork_pr_url — and
-# restricted to this repository. From `pr_number` ALONE, as this did, an anchor
-# keyed only by fork_pr/fork_pr_url — what the fork-sync flow stamps, and it
-# stamps no pr_number at all — takes the NO-PR branch below and is fingerprinted
-# from its bead, so a head move, an approval, or a mergeStateStatus change on
-# the very PR holding it is invisible to this gate until the cooldown expires:
-# the exact "suppress repetition, never news" contract this block exists to
-# keep. Byte-for-byte merge-skill.sh's `pr_nums_here`, which
-# reconcile-merged-prs.sh already duplicates for the same question about the
-# same anchors (assets/scripts/reconcile-merged-prs.sh:704 documents why); each
-# copy is standalone by design — this one is instruction text an agent runs, so
-# there is nothing to source — and merge-skill.test.sh's (SYNC) check compares
-# all four character for character, so a narrowing here fails there.
-PR_SELF_JQ='
-def pr_nums_here($o):
-  ( [ (.metadata.pr_number // empty), (.metadata.fork_pr // empty) ] | map(tostring) )
-  + ( ((.metadata.fork_pr_url // "") | tostring)
-      | [ capture("^[A-Za-z][A-Za-z0-9+.-]*://(?<h>[^/]+)/(?<r>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
-      | .[0]
-      | if . == null then []
-        elif ($o == "" or (.h + "/" + .r) == $o) then [ .n ]
-        else [] end )
-  | map(select(test("^[0-9]+$"))) | unique;
-'
-PR_NUMS=$(printf '%s' "$ROW" | jq -r --arg o "$ORIGIN_REPO_Q" "$PR_SELF_JQ"'.[0] | pr_nums_here($o) | join(" ")' 2>/dev/null)
-# EXACTLY ONE in-repo number or nothing, which is merge-skill.sh's rule for the
-# same question: zero says the anchor names no PR here, several says it names
-# more than one and neither answers "which PR holds this anchor".
-PR=""
-PR_AMBIGUOUS=""
-case "$PR_NUMS" in
-  "")    PR="" ;;
-  *" "*) PR_AMBIGUOUS=1 ;;
-  *)     PR="$PR_NUMS" ;;
-esac
-# ONE CHANNEL, ONE SHAPE OF FINGERPRINT. A PR-backed anchor is fingerprinted
-# from the PR — head oid, reviewDecision, mergeStateStatus, the three inputs
-# that actually hold it — and an anchor with no PR yet (pre_open_gate) from the
-# bead. They are NOT substitutes: sending the bead one on the PR one's channel
-# compares unequal in both directions, so a gh outage mails when it starts AND
-# again when it ends, a flap through the cooldown driven by GitHub's
-# availability rather than by news. Which is why an anchor that names a PR this
-# pass cannot READ — no resolvable origin to pin the number to, or two numbers
-# and no way to choose — degrades below instead of borrowing the bead shape.
-KIND=refinery
-STATE=""
-if [ -n "$PR" ] && [ -n "$ORIGIN_REPO_Q" ]; then
-  STATE=$(gh pr view "$PR" --repo "$ORIGIN_REPO_Q" --json headRefOid,reviewDecision,mergeStateStatus -q '[.headRefOid,.reviewDecision,.mergeStateStatus]|join("/")' 2>/dev/null)
-elif [ -z "$PR" ] && [ -z "$PR_AMBIGUOUS" ]; then
-  STATE=$(printf '%s' "$ROW" | jq -r '.[0] | [
-    (.status // "-"),
-    (.metadata.merge_result // "-"),
-    (.metadata.branch // "-"),
-    (.metadata.merged_target // .metadata.target // "-"),
-    ((.metadata | to_entries | map(select(.key | startswith("check."))) | sort_by(.key) | map(.key + "=" + (.value | tostring)) | join(",")) as $c | if $c == "" then "-" else $c end)
-  ] | join("/")' 2>/dev/null)
-fi
-if [ -z "$STATE" ]; then
-  # The fingerprint we meant to build is unavailable. Name WHAT is unavailable
-  # and nothing that varies while it is, so a degraded read mails once and then
-  # rides its own cooldown for the length of the outage.
-  KIND=refinery-degraded
-  if [ -n "$PR_AMBIGUOUS" ]; then
-    STATE="unavailable/ambiguous-pr/<anchor>"
-  elif [ -n "$PR" ] && [ -z "$ORIGIN_REPO_Q" ]; then
-    STATE="unavailable/origin-repo/pr-$PR"
-  elif [ -n "$PR" ]; then
-    STATE="unavailable/gh/pr-$PR"
-  else
-    STATE="unavailable/bead/<anchor>"
-  fi
-fi
-# NAME THE PR TO THE GATE ONLY ON THE PATH THAT ACTUALLY READ IT, PINNED. The
-# gate does its own `gh pr view` to decide whether this anchor is held by nothing
-# worse than an unsigned PR, and an unpinned read THERE is the same drift hazard
-# this block refuses for its own fingerprint: `gh pr view <n>` resolves a bare
-# number in whatever repository gh considers current, so the class would be
-# decided against a stranger's same-numbered PR. A degraded read and an ambiguous
-# anchor therefore name nothing, and are decided by the ordinary dedup — which is
-# also right on its own terms, since a degraded escalation is about the outage,
-# not about the PR.
-GATE_PR=""
-GATE_REPO=""
-if [ "$KIND" = refinery ] && [ -n "$PR" ] && [ -n "$ORIGIN_REPO_Q" ]; then
-  GATE_PR="$PR"
-  GATE_REPO="$ORIGIN_REPO_Q"
-fi
-BODY="Anchor: <anchor>
-PR: ${PR:-${PR_NUMS:-none}}
-Observation: <why this specific anchor cannot proceed without a human>
-Recommendation: <what the human must do>"
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "<anchor>" --kind "$KIND" --state "$STATE" --pr "$GATE_PR" --repo "$GATE_REPO" --cooldown "{{escalation_cooldown}}" --subject "MERGE_HELD: <anchor> <summary>" --body "$BODY"; then
-    echo "refinery: escalation-gate did not send MERGE_HELD (see its stderr); NOT falling back to a bare mail. Next cycle retries." >&2
-  fi
-else
-  gc mail send mayor/ -s "MERGE_HELD: <anchor> <summary>" -m "$BODY" || echo "refinery: fallback 'gc mail send' failed; next cycle retries." >&2
-fi
-# <<< escalation-wiring-held-anchor
-```
-
-`merged_target // target` is the pre-open order deliberately: an anchor
-parked in `pre_open_gate` records its landing target in `merged_target`,
-so reading `target` alone collapses that component to a constant on
-exactly the anchor kind this fallback exists for, and a retarget would
-then wait out a full cooldown.
-
-The escalation is not what makes the hold visible. `patrol-summary` still
-records every held anchor every cycle, and the gate prints its verdict
-line either way — suppression removes the MAIL, not the record.
-
-**4. Re-check for assigned work.** If found, close this step. Otherwise repeat
-from step 1 (sleep → reconcile → re-check).
-
-Note: previous implementation watched `gc events --type=bead.updated` for fast wake-up, but cache-reconcile fires that event constantly, turning the watch into a tight loop with no useful backoff. Fixed sleep gives predictable idle cost (~$0 vs ~$3.46/15min hot-loop measured 2026-04-29). The reconcile pass above is bounded by the same cadence — it adds one `gh pr list` per idle wake, not a hot loop.
-
-**Do not close this step until you have a work bead with branch metadata.**"""
+If NO work: this turn is over. End the turn — no sleeping, no watching, and
+do NOT run the cadence's passes inline (the refinery-reconcile order is the
+single writer; see docs/refinery-merge-cadence.md). The session_sleep policy
+restarts you on the idle interval."""
 
 [[steps]]
 id = "rebase"
-title = "Rebase branch on target"
+title = "Prepare the branch on its target"
 needs = ["find-work"]
 description = """
 **Config: target_branch = {{target_branch}}**
 
-Read the work bead ONCE, then prepare the branch. WHICH git operation is
-correct depends on what kind of branch this is, so the read, the
-classification and the action are one fail-closed block: a separate
-`gc bd show` per field fails OPEN (`gc bd` writes errors to stderr and leaves
-stdout empty), and a classification field that reads empty because the bead
-was unreadable is indistinguishable from one that is genuinely unset.
+Read the bead ONCE, classify the branch, and prepare it — one fail-closed
+block, because `gc bd` fails open (errors to stderr, empty stdout) and an
+unreadable classification must not read as "unset". Rebase REWRITES commits:
+free on a disposable per-bead branch, destructive on a branch other work
+depends on (an integration branch carries already-merged PRs). ALLOWLIST,
+not denylist: only `polecat/*` may be rewritten; every other shape — and any
+graduation bead — is brought current by MERGE. The mode is stamped on the
+bead BEFORE touching the worktree, because the hand-back path (a rejection
+repool) reads it in a different shell and would otherwise rebase a shared
+branch.
 
 ```bash
 TARGET_BRANCH_DEFAULT="{{target_branch}}"
@@ -885,37 +190,11 @@ if [ -z "$BRANCH" ]; then
   gc runtime drain-ack
   exit 1
 fi
-# Rebase REWRITES commits. That is free on a disposable per-bead branch and
-# destructive on a branch other work already depends on. An owned convoy's
-# integration branch carries commits that are already MERGED PRs: rewriting
-# them re-points those PRs at objects the branch no longer holds and leaves the
-# originals dangling and GC-eligible (incident 2026-08-19, convoy tk-t80p1 ->
-# PR #388, three merged PRs rewritten; tk-a0hva).
-#
-# ALLOWLIST, not denylist: the only branch shape the refinery may rewrite is
-# the per-bead polecat/<bead-id> branch, which the polecat branch convention
-# guarantees is single-author and disposable. Every other shape — an
-# integration/* branch, feat/*, an unprefixed one-off — is brought current by
-# MERGE. An unrecognized branch therefore fails to the non-destructive side by
-# construction, which a denylist of known-shared prefixes could not do.
 case "$BRANCH" in
   polecat/*) PREPARE_MODE=rebase ;;
   *)         PREPARE_MODE=merge ;;
 esac
-# A graduation bead IS the integration->main case, whatever its branch is
-# named; reconcile-graduated-convoys.sh stamps the flag when it hands one over.
 if [ "$GRADUATION" = "true" ]; then PREPARE_MODE=merge; fi
-# CARRY the classification on the bead, because the rewrite this block prevents
-# can still happen one step later, performed by a different actor. Both rejection
-# arms below hand the bead back to the polecat pool, and the polecat resume path
-# brings a branch current by REBASE and is told to force-push when that push is
-# non-fast-forward. The classifier runs ONLY here, and the snippets downstream
-# run in separate shells, so the bead is the only carrier that reaches them:
-# mol-polecat-work's `rejected-branch-resume-mode` block reads this key and
-# merges instead of rebasing when it says merge.
-# Fail CLOSED, and before touching the worktree: a mode that was not recorded is
-# a hand-back that WILL rebase a shared branch, so refuse to prepare a branch
-# that cannot be handed back safely.
 if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2>&1; then
   echo "could not record prepare_mode=$PREPARE_MODE on $WORK — NOT preparing the branch; leaving it with the refinery to retry"
   gc runtime drain-ack
@@ -933,88 +212,43 @@ fi
 # <<< shared-branch-merge-mode
 ```
 
-If `$PREPARE_FAILED` is EMPTY (the rebase or the merge succeeded): close this
-step, proceed to run-tests.
+`$PREPARE_FAILED` empty: close this step, proceed to run-tests.
 
-If `$PREPARE_FAILED` is SET (conflicts):
+`$PREPARE_FAILED` set (conflicts): the abort already ran, so the tree is
+clean. Retire the workflow, reopen the source, and repool with rejection
+metadata — one shape-validated read, fail closed on an unreadable bead, and
+the whole transition through lifecycle.sh (it clears `merge_result`
+atomically with the repool, so the hand-back re-gates fresh; `existing_pr`
+carries the anchor's PR over so the rework reuses it instead of minting a
+duplicate):
 
-1. The block already ran the matching abort, so the worktree is clean here.
-2. Clean up the existing workflow and reopen the source bead:
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
-```
-3. Put the work bead back in the pool with rejection metadata. Derive mr-shape
-from ONE shape-validated read taken BEFORE the repool, and fold the anchor's
-`merge_result` clear into the SAME update. A bead carrying `merge_result` is a
-gating ANCHOR with a live PR, not a plain work bead; `gc bd` fails OPEN (errors to
-stderr, empty stdout), so an unreadable read must NOT fall through to a plain
-direct-mode repool. Fail CLOSED: if the bead is unreadable, do NOT repool — leave
-it with the refinery and stop, so a later iteration retries the reject with a
-readable bead.
-```bash
+REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
-# Read + SHAPE-validate ONCE before repooling; the repool and the merge_result
-# clear derive from the same read (bd fails open, so an unread bead != non-mr).
+LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+done
+if [ -z "$LC" ]; then
+  echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
 BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
   echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
-MR_STATE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
 PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-gc bd update $WORK \
-  --status=open \
-  --assignee="" \
-  --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)" \
-  --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
-  ${MR_STATE:+--unset-metadata merge_result} \
-  ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
+"$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
 ```
-Left set, the anchor stays in `merge-skill.sh`'s scan
-(`--status=open --metadata-field merge_result=pull_request`) while the polecat
-reworks, and this path files no rework child to engage the skill's in-flight
-hold — so the skill lands the un-gated rework the moment the push goes `CLEAN`.
-(An empty `check_set` merges outright; a non-empty one only stalls, on the
-now-stale `check.<name>=green@<old-head>`; neither re-fires the human approval —
-these rulesets leave `dismiss_stale_reviews_on_push` off.) Clearing it drops the
-anchor from the scan, so the hand-back re-gates `$WORK` fresh against the new head.
 
-Keep `branch` and `pr_number`, and carry `pr_url` over to `existing_pr` so the
-hand-back reuses the SAME PR instead of opening a duplicate.
-
-4. Do NOT delete the branch (new polecat needs it for conflict resolution).
-5. Clean up temp branch (leaves worktree detached so other worktrees can hold {{target_branch}}): `git checkout {{target_branch}} && git branch -D temp && git switch --detach HEAD`
-6. Pour next patrol iteration before burning:
-```bash
-CURRENT_WISP=${GC_BEAD_ID:-}
-if [ -z "$CURRENT_WISP" ]; then
-  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
-fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var escalation_cooldown={{escalation_cooldown}} --json | jq -r '.new_epic_id // empty')
-if [ -z "$NEXT" ]; then
-  echo "Could not pour next refinery wisp; not burning."
-  gc runtime drain-ack
-  exit 1
-fi
-if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
-  echo "Could not assign next refinery wisp; not burning."
-  gc runtime drain-ack
-  exit 1
-fi
-if [ -n "$CURRENT_WISP" ]; then
-  gc bd mol burn "$CURRENT_WISP" --force
-else
-  echo "Could not resolve current wisp; not burning."
-  gc runtime drain-ack
-  exit 1
-fi
-```
-7. Close this step after the current wisp is burned.
-
-**A new polecat will pick up the bead, see the branch and rejection,
-rebase, and reassign to refinery.**"""
+Do NOT delete the branch (the resuming polecat needs it). Clean up:
+`git checkout {{target_branch}} && git branch -D temp && git switch --detach HEAD`.
+Then jump to next-iteration (pour before burn) — the rejection ends this
+cycle."""
 
 [[steps]]
 id = "run-tests"
@@ -1022,705 +256,209 @@ title = "Run quality checks and tests"
 needs = ["rebase"]
 description = """
 **Config: run_tests = {{run_tests}}**
-**Config: test_command = {{test_command}}**
-**Config: setup_command = {{setup_command}}**
-**Config: typecheck_command = {{typecheck_command}}**
-**Config: lint_command = {{lint_command}}**
-**Config: build_command = {{build_command}}**
 
-Run each configured check in order (skip empty ones silently):
+Run each configured check in order, skipping empty ones:
 ```bash
 {{setup_command}}
 {{typecheck_command}}
 {{lint_command}}
 {{build_command}}
 ```
+If run_tests = "true": `{{test_command}}`. When the rig ships no commands at
+all, run the quality gates documented in the rig's CLAUDE.md instead —
+never silently skip the gates.
 
-If run_tests = "true":
-```bash
-{{test_command}}
-```
-
-If run_tests = "false": skip tests entirely.
-
-Track results: which checks ran, pass/fail, specific failures.
-Close this step when all checks complete (pass or fail)."""
+Track which checks ran and what failed. Close this step when all checks
+complete (pass or fail)."""
 
 [[steps]]
 id = "handle-failures"
 title = "Handle quality check or test failures"
 needs = ["run-tests"]
 description = """
-If all checks and tests PASSED: close this step, proceed to merge-push.
+All checks PASSED: close this step, proceed to merge-push.
 
-If any check or test FAILED:
+Any FAILED: diagnose — branch regression, or pre-existing on target?
+**FORBIDDEN: writing code to fix failures. You are a merge processor.**
 
-Read the current branch and target again:
+**Branch-caused:** retire the workflow and repool with the failure summary —
+the same fail-closed lifecycle repool as the rebase step:
 ```bash
-BRANCH=$(gc bd show $WORK --json | jq -r '.[0].metadata.branch')
-TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_branch}}"')
+gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
+REJECT_REASON="<failure summary>"
+# >>> mr-aware-rejection
+LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+done
+if [ -z "$LC" ]; then
+  echo "lifecycle.sh not found — NOT repooling $WORK (every merge_result transition goes through it); leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
+if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
+  gc runtime drain-ack
+  exit 1
+fi
+PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
+"$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
+# <<< mr-aware-rejection
 ```
+Delete the branch only when NOTHING PR-shaped is on the bead (re-read it;
+an unreadable read keeps the branch — a wrongly kept branch is swept later,
+a wrongly deleted one strands a PR). Clean up temp, jump to next-iteration.
 
-1. Diagnose: branch regression or pre-existing on target?
+**Pre-existing on target:** dedup FIRST, file only if none, then proceed
+with the merge. One block, one shell — a probe result that does not survive
+into the filing arm reads as "no duplicate":
+```bash
+# >>> preexisting-failure-dedup
+# ONE short, distinctive token, reused for BOTH the probe below and the
+# title of any bead it files. Dedup only works while the two agree: the
+# probe is a title SUBSTRING match, so a prose failure summary — reworded
+# every cycle — never matches the bead the last cycle filed, and each
+# patrol files another P1 for the same failure. Use the failing test name,
+# the failing target, or an error symbol.
+FAIL_TOKEN="<failing test name or error symbol>"
+# --title-contains is the real flag (case-insensitive title substring).
+# NOT --search: bd has no such flag, and rejects it with "unknown flag" on
+# stderr while leaving stdout EMPTY — which reads as "no duplicate found".
+DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
+# SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
+# so an unreadable list cannot be told from a genuine "no match" — and
+# guessing "no match" is precisely what files the duplicate. A readable
+# empty result is the JSON array []; anything that is not an array is
+# UNKNOWN. On unknown, file nothing and merge nothing: the GATE below
+# cannot be satisfied by a bead you were unable to check for, and the same
+# unavailable bd would fail the `gc bd create` anyway. The next patrol
+# re-probes.
+if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "duplicate probe unreadable (bd unavailable?) — filing nothing and NOT merging $WORK; the next patrol re-probes"
+  gc runtime drain-ack
+  exit 1
+fi
+DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
+if [ -n "$DUP_ID" ]; then
+  echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
+else
+  # The SAME token goes in the title, so the NEXT patrol's probe finds it.
+  gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN (<one-line detail>)"
+fi
+# <<< preexisting-failure-dedup
+```
+Note the resulting bug id in your merge notes — it satisfies the GATE.
 
-2. If branch caused it:
-   - Clean up the existing workflow and reopen the source bead:
-     ```bash
-     gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
-     ```
-   - Put the work bead back in the pool with rejection metadata — the same
-     mr-aware, fail-closed repool the rebase step performs: ONE shape-validated
-     read BEFORE the repool, the `merge_result` clear folded into the SAME update,
-     and fail CLOSED (do not repool; leave it with the refinery, drain-ack + exit)
-     when the bead is unreadable — so an unvalidated read never leaves the anchor
-     routed to the polecat with `merge_result` still set:
-     ```bash
-     # >>> mr-aware-rejection
-     # Read + SHAPE-validate ONCE before repooling; the repool and the merge_result
-     # clear derive from the same read (bd fails open, so an unread bead != non-mr).
-     BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
-     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-       echo "could not read $WORK (bd unavailable?) — NOT repooling; leaving it with the refinery to retry"
-       gc runtime drain-ack
-       exit 1
-     fi
-     MR_STATE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_result // empty')
-     PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
-     gc bd update $WORK \
-       --status=open \
-       --assignee="" \
-       --set-metadata rejection_reason="<failure summary>" \
-       --set-metadata gc.routed_to="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" \
-       ${MR_STATE:+--unset-metadata merge_result} \
-       ${MR_STATE:+${PR_URL:+--set-metadata existing_pr="$PR_URL"}}
-     # <<< mr-aware-rejection
-     ```
-   - Delete the branch **only when no PR depends on it.** `$BRANCH` is the
-     anchored PR's head; deleting it strands that PR un-merged. Re-read the bead
-     here — don't reuse `$MR_STATE` from the block above (these snippets may run
-     in separate shells, and an unset var reads as direct-mode and deletes a live
-     branch). Fail CLOSED: anything PR-shaped, or any read you couldn't
-     complete, keeps the branch:
-     ```bash
-     BEAD_JSON=$(gc bd show $WORK --json 2>/dev/null)
-     if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-       # bd fails open — errors to stderr, empty stdout — so validate the SHAPE.
-       # A wrongly-kept branch is swept later; a wrongly-deleted one strands a PR.
-       echo "could not read $WORK (bd unavailable?) — leaving $BRANCH untouched"
-     else
-       PR_STATE=$(printf '%s' "$BEAD_JSON" \
-         | jq -r '.[0].metadata | (.merge_result // "") + ((.pr_number // "") | tostring) + (.existing_pr // "")')
-       if [ -z "$PR_STATE" ]; then
-         git push origin --delete $BRANCH
-       else
-         echo "mr-mode anchor ($PR_STATE): leaving $BRANCH — it is an open PR's head branch"
-       fi
-     fi
-     ```
-   - Clean up (leaves worktree detached so other worktrees can hold $TARGET): `git checkout "$TARGET" && git branch -D temp && git switch --detach HEAD`
-   - Pour next patrol iteration before burning:
-     ```bash
-     CURRENT_WISP=${GC_BEAD_ID:-}
-     if [ -z "$CURRENT_WISP" ]; then
-       CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
-     fi
-     NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var escalation_cooldown={{escalation_cooldown}} --json | jq -r '.new_epic_id // empty')
-     if [ -z "$NEXT" ]; then
-       echo "Could not pour next refinery wisp; not burning."
-       gc runtime drain-ack
-       exit 1
-     fi
-     if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
-       echo "Could not assign next refinery wisp; not burning."
-       gc runtime drain-ack
-       exit 1
-     fi
-     if [ -n "$CURRENT_WISP" ]; then
-       gc bd mol burn "$CURRENT_WISP" --force
-     else
-       echo "Could not resolve current wisp; not burning."
-       gc runtime drain-ack
-       exit 1
-     fi
-     ```
-   - Close this step after the current wisp is burned.
-
-3. If pre-existing on target:
-   - Check for a duplicate FIRST and file only if there is none. Run the whole
-     decision as ONE block: each value below is consumed in the same shell that
-     computed it. These snippets may run in separate shells, and a probe result
-     that does not survive into the filing arm reads there as "no duplicate" —
-     the same fail-open this block exists to close.
-     ```bash
-     # >>> preexisting-failure-dedup
-     # ONE short, distinctive token, reused for BOTH the probe below and the
-     # title of any bead it files. Dedup only works while the two agree: the
-     # probe is a title SUBSTRING match, so a prose failure summary — reworded
-     # every cycle — never matches the bead the last cycle filed, and each
-     # patrol files another P1 for the same failure. Use the failing test name,
-     # the failing target, or an error symbol.
-     FAIL_TOKEN="<failing test name or error symbol>"
-     # --title-contains is the real flag (case-insensitive title substring).
-     # NOT --search: bd has no such flag, and rejects it with "unknown flag" on
-     # stderr while leaving stdout EMPTY — which reads as "no duplicate found".
-     DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$FAIL_TOKEN" --json 2>/dev/null)
-     # SHAPE-validate the read. bd fails open (errors to stderr, empty stdout),
-     # so an unreadable list cannot be told from a genuine "no match" — and
-     # guessing "no match" is precisely what files the duplicate. A readable
-     # empty result is the JSON array []; anything that is not an array is
-     # UNKNOWN. On unknown, file nothing and merge nothing: the GATE below
-     # cannot be satisfied by a bead you were unable to check for, and the same
-     # unavailable bd would fail the `gc bd create` anyway. The next patrol
-     # re-probes.
-     if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-       echo "duplicate probe unreadable (bd unavailable?) — filing nothing and NOT merging $WORK; the next patrol re-probes"
-       gc runtime drain-ack
-       exit 1
-     fi
-     DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
-     if [ -n "$DUP_ID" ]; then
-       echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
-     else
-       # The SAME token goes in the title, so the NEXT patrol's probe finds it.
-       gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN (<one-line detail>)"
-     fi
-     # <<< preexisting-failure-dedup
-     ```
-   - Note the resulting bug ID — `$DUP_ID`, or the bead just filed — in your
-     merge notes. That ID is what satisfies the GATE below.
-   - Proceed with merge (failure not caused by this branch)
-
-**GATE**: Cannot merge without all checks passing OR pre-existing bug filed/found.
-**FORBIDDEN**: Writing code to fix failures. You are a merge processor."""
+**GATE**: no merge without all checks passing OR the pre-existing bug
+filed/found."""
 
 [[steps]]
 id = "merge-push"
-title = "Merge and push"
+title = "Merge and push (direct) or transition to gating (mr)"
 needs = ["handle-failures"]
 description = """
-**Config: target_branch = {{target_branch}}**
-**Config: delete_merged_branches = {{delete_merged_branches}}**
+**Config: target_branch = {{target_branch}}** /
+**delete_merged_branches = {{delete_merged_branches}}** /
+**auto_ff_rig_main = {{auto_ff_rig_main}}**
 
-Read the merge target and merge strategy from the work bead metadata:
+Read strategy and helpers once:
 ```bash
-BRANCH=$(gc bd show $WORK --json | jq -r '.[0].metadata.branch')
-TARGET=$(gc bd show $WORK --json | jq -r '.[0].metadata.target // "{{target_branch}}"')
-MERGE_STRATEGY=$(gc bd show $WORK --json | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
-# gc-toolkit local delta: normalize empty default_merge_strategy var. When the
-# wisp is poured with `--var default_merge_strategy=` (e.g., an operator
-# bypasses the formula default explicitly), the substitution leaves
-# MERGE_STRATEGY empty and `direct` is the safe fallback.
+WORK_JSON=$(gc bd show $WORK --json)
+BRANCH=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.branch')
+TARGET=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
+MERGE_STRATEGY=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
-EXISTING_PR=$(gc bd show $WORK --json | jq -r '.[0].metadata.existing_pr // empty')
-ORIGIN_REPO_ERROR=""
-if command -v gh >/dev/null 2>&1; then
-  if ! ORIGIN_REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>&1); then
-    ORIGIN_REPO_ERROR="gh repo view failed while resolving origin repository: $ORIGIN_REPO"
-    ORIGIN_REPO=""
-  fi
-else
-  ORIGIN_URL=$(git remote get-url origin)
-  case "$ORIGIN_URL" in
-    git@github.com:*|https://github.com/*)
-      ORIGIN_REPO=$(printf '%s\n' "$ORIGIN_URL" \
-        | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\\.git$##')
-      ;;
-    *)
-      ORIGIN_REPO_ERROR="GitHub REST fallback supports only github.com origin remotes; install gh for $ORIGIN_URL."
-      ;;
-  esac
-fi
-if [ "$MERGE_STRATEGY" = "pr" ]; then
-  MERGE_STRATEGY="mr"
-fi
+[ "$MERGE_STRATEGY" = "pr" ] && MERGE_STRATEGY="mr"
+EXISTING_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.existing_pr // empty')
 if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
-  echo "metadata.existing_pr requires pull-request handoff; using merge_strategy=mr."
+  echo "metadata.existing_pr requires the PR pipeline; using merge_strategy=mr."
   MERGE_STRATEGY="mr"
 fi
-
-# gc-toolkit local delta: surface integration-branch targets so the operator
-# knows direct refinery handling lands on the convoy's integration branch, not
-# {{target_branch}}; graduation to {{target_branch}} is system-auto once all the
-# convoy's children close (find-work pass (c), reconcile-graduated-convoys.sh).
-case "$TARGET" in
-  integration/*)
-    echo "INFO: Merging $WORK to integration branch '$TARGET' (not {{target_branch}}). The owning OWNED convoy graduates to {{target_branch}} automatically once all its children close — the refinery opens a human-approved integration->{{target_branch}} PR (find-work pass (c), gated on integration_branch_auto_land). No manual graduation bead or 'gc convoy land' needed."
-    ;;
-esac
-
-block_existing_pr() {
-  reason="$1"
-  gc bd update $WORK \
-    --assignee="" \
-    --set-metadata merge_result=blocked \
-    --set-metadata gc.routed_to=human \
-    --set-metadata blocked_reason="$reason"
-  # >>> escalation-wiring-existing-pr
-  # BEST-EFFORT, and NOT retried: the update above set merge_result=blocked and
-  # assignee="", both of which the find-work query excludes, so this pass has
-  # already cleared the condition that would re-derive the escalation. The
-  # durable record outlives the mail either way — blocked_reason is on the bead
-  # with gc.routed_to=human. Gated all the same: a rig where a human leaves the
-  # bead parked and something re-opens it must not restart the storm.
-  SCRIPTS_DIR=""
-  for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-    if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-  done
-  # The inputs that make it invalid, none of which the gate itself writes. A
-  # corrected existing_pr, a rebased branch or a retarget is genuinely different
-  # and mails at once; re-observing the same bad metadata is not news.
-  STATE="existing-pr/${EXISTING_PR:-none}/${BRANCH:-none}/${TARGET:-none}"
-  BODY="$reason
-Work bead: $WORK
-Existing PR: $EXISTING_PR
-Branch: $BRANCH
-Target: $TARGET"
-  if [ -n "$SCRIPTS_DIR" ]; then
-    if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$WORK" --kind refinery --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ESCALATION: invalid existing_pr for $WORK" --body "$BODY"; then
-      echo "refinery: escalation-gate did not send the invalid-existing_pr notice (see its stderr); NOT falling back to a bare mail. This notice is BEST-EFFORT and is NOT retried: the bead is already blocked and routed to human, which is the durable record." >&2
-    fi
-  else
-    gc mail send mayor/ -s "ESCALATION: invalid existing_pr for $WORK" -m "$BODY" || echo "refinery: fallback 'gc mail send' failed; best-effort notice, not retried (the bead is already blocked and routed to human)." >&2
-  fi
-  # <<< escalation-wiring-existing-pr
-  CURRENT_WISP=${GC_BEAD_ID:-}
-  if [ -z "$CURRENT_WISP" ]; then
-    CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
-  fi
-  if [ -z "$CURRENT_WISP" ]; then
-    echo "Could not resolve current wisp; not burning."
-    echo "$reason"
-    echo "STOP. Existing PR metadata needs human correction."
-    gc runtime drain-ack
-    exit 1
-  fi
-  NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var escalation_cooldown={{escalation_cooldown}} --json | jq -r '.new_epic_id // empty')
-  if [ -z "$NEXT" ]; then
-    echo "Could not pour next refinery wisp; not burning."
-    gc runtime drain-ack
-    exit 1
-  fi
-  if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
-    echo "Could not assign next refinery wisp; not burning."
-    gc runtime drain-ack
-    exit 1
-  fi
-  if [ -n "$CURRENT_WISP" ]; then
-    gc bd mol burn "$CURRENT_WISP" --force
-  else
-    echo "Could not resolve current wisp; not burning."
-    echo "$reason"
-    echo "STOP. Existing PR metadata needs human correction."
-    gc runtime drain-ack
-    exit 1
-  fi
-  echo "$reason"
-  echo "STOP. Existing PR metadata needs human correction."
+LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
+done
+if [ -z "$LC" ]; then
+  echo "lifecycle.sh not found — cannot transition $WORK; leaving it with the refinery to retry"
   gc runtime drain-ack
   exit 1
-}
-
+fi
 branch_has_real_change() {
-  # Shared false-completion predicate (0-diff/0-commit guard). Does
-  # <branch-ref> introduce a real change vs its merge-base with
-  # <target-ref>? Diff is authoritative — commit-count alone is a weaker
-  # proxy because a branch can carry commits that net-zero — so we use
-  # `git diff --quiet` and ALSO require >=1 commit beyond the base.
-  #   exit 0 = real change (safe to merge / open PR)
-  #   exit 1 = empty: no diff, or no commits, vs base (REFUSE close-as-merged)
-  #   exit 2 = base/diff could not be computed: merge-base failed OR `git diff`
-  #           itself errored (exit >1). Fail closed — a tool error is a suspect,
-  #           not a licence to merge — so the caller halts, never improvises.
-  bhrc_target="$1"
-  bhrc_branch="$2"
-  bhrc_base=$(git merge-base "$bhrc_target" "$bhrc_branch" 2>/dev/null) || return 2
-  git diff --quiet "$bhrc_base" "$bhrc_branch"
-  case "$?" in
-    0) return 1 ;;  # no diff -> empty -> refuse
-    1) : ;;         # diff present -> fall through to the commit-count check
-    *) return 2 ;;  # git diff errored -> suspect -> refuse (fail closed)
-  esac
-  [ "$(git rev-list --count "$bhrc_base..$bhrc_branch" 2>/dev/null || echo 0)" -ge 1 ] || return 1
+  # 0-diff/0-commit guard: does <branch-ref> introduce a real change vs its
+  # merge-base with <target-ref>? 0 = yes; 1 = empty (REFUSE close-as-merged);
+  # 2 = could not compute (fail closed — a tool error is a suspect).
+  bhrc_base=$(git merge-base "$1" "$2" 2>/dev/null) || return 2
+  git diff --quiet "$bhrc_base" "$2"
+  case "$?" in 0) return 1 ;; 1) : ;; *) return 2 ;; esac
+  [ "$(git rev-list --count "$bhrc_base..$2" 2>/dev/null || echo 0)" -ge 1 ] || return 1
   return 0
 }
-
-halt_false_completion() {
-  # branch_has_real_change tripped: a close-as-merged would assert "work was
-  # merged" for a branch that merges to a no-op, which is definitionally
-  # false. Halt-and-escalate (NEVER silent retry): leave the bead blocked
-  # with a structured note, hand to human, nudge mayor + witness, then stop.
-  # This surfaces the transient cause (e.g. session starvation -> 0-commit
-  # polecat) instead of masking it.
-  fc_branch="$1"
-  fc_base="$2"
-  gc bd update $WORK \
-    --status=blocked \
-    --assignee="" \
-    --set-metadata merge_result=refused_false_completion \
-    --set-metadata gc.routed_to=human \
-    --set-metadata false_completion_suspected="branch $fc_branch no verified change vs $fc_base; refused merge-close"
-  gc session nudge mayor "FALSE-COMPLETION HALT: $WORK — branch $fc_branch no verified change vs $fc_base; refused close-as-merged. Bead left blocked; NEVER silent retry."
-  gc session nudge "${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness" "FALSE-COMPLETION HALT: $WORK — branch $fc_branch no verified change vs $fc_base; refused close-as-merged."
-  echo "REFUSED close-as-merged: $WORK branch $fc_branch introduces no real change vs $fc_base."
-  echo "STOP. Bead left blocked + escalated to mayor/witness. NEVER silent retry."
-  gc runtime drain-ack
-  exit 1
-}
-
-pr_lookup_missing() {
-  case "$1" in
-    *"Could not resolve to a PullRequest"*|*"could not resolve to a PullRequest"*|*"no pull requests found"*|*"Not Found"*|*"not found"*|*"404"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-pr_lookup_repo_mismatch() {
-  case "$1" in
-    *" belongs to repo "*", want "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-resolve_github_token() {
-  TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-${GIT_TOKEN:-}}}"
-  if [ -n "$TOKEN" ]; then
-    printf '%s\n' "$TOKEN"
-    return
-  fi
-  printf 'protocol=https\nhost=github.com\n\n' \
-    | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null \
-    | sed -n 's/^password=//p' \
-    | head -n 1
-}
-
-init_github_rest() {
-  if [ -n "${API:-}" ] && [ -n "${TOKEN:-}" ]; then
-    return 0
-  fi
-  if [ -n "$ORIGIN_REPO_ERROR" ]; then
-    echo "$ORIGIN_REPO_ERROR" >&2
-    return 1
-  fi
-  TOKEN=$(resolve_github_token)
-  if [ -z "$TOKEN" ]; then
-    echo "GitHub PR mode requires gh or a GitHub token available from env/git credential fill." >&2
-    return 1
-  fi
-  case "$ORIGIN_REPO" in
-    */*)
-      OWNER=${ORIGIN_REPO%%/*}
-      REPO=${ORIGIN_REPO#*/}
-      ;;
-    *)
-      echo "Could not resolve standard github.com origin repository for REST fallback." >&2
-      return 1
-      ;;
-  esac
-  API="https://api.github.com/repos/$OWNER/$REPO"
-}
-
-curl_gh_api() {
-  err_file="$1"
-  shift
-  curl -fsS \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$@" 2>"$err_file"
-}
-
-lookup_pr_info() {
-  ref="$1"
-  err_file="$2"
-  if command -v gh >/dev/null 2>&1; then
-    gh pr view --json url,number,state,headRefName,baseRefName,headRepositoryOwner,headRepository -- "$ref" 2>"$err_file"
-    return $?
-  fi
-  if ! init_github_rest 2>"$err_file"; then
-    return 1
-  fi
-  PR_REF_REPO=$(printf '%s\n' "$ref" | sed -nE 's#^[Hh][Tt][Tt][Pp][Ss]://github.com/([^/]+/[^/]+)/pull/[0-9]+/?$#\\1#p' | head -n 1)
-  if [ -n "$PR_REF_REPO" ] && [ "$PR_REF_REPO" != "$ORIGIN_REPO" ]; then
-    echo "Pull request $ref belongs to repo $PR_REF_REPO, want $ORIGIN_REPO." >"$err_file"
-    return 1
-  fi
-  PR_NUMBER=$(printf '%s\n' "$ref" | sed -nE 's#^[Hh][Tt][Tt][Pp][Ss]://github.com/[^/]+/[^/]+/pull/([0-9]+)/?$#\\1#p; s|^#([0-9]+)$|\\1|p; s|^([0-9]+)$|\\1|p' | head -n 1)
-  if [ -z "$PR_NUMBER" ]; then
-    PR_MATCHES=$(curl_gh_api "$err_file" \
-      --get "$API/pulls" \
-      --data-urlencode "state=open" \
-      --data-urlencode "head=$OWNER:$ref" \
-      --data-urlencode "base=$TARGET") || return 1
-    PR_NUMBER=$(printf '%s\n' "$PR_MATCHES" | jq -r '.[0].number // empty')
-  fi
-  if [ -z "$PR_NUMBER" ]; then
-    echo "Pull request $ref was not found." >"$err_file"
-    return 1
-  fi
-  PR_RAW=$(curl_gh_api "$err_file" "$API/pulls/$PR_NUMBER") || return 1
-  printf '%s\n' "$PR_RAW" \
-    | jq '{url:.html_url, number, state:(.state | ascii_upcase), headRefName:.head.ref, baseRefName:.base.ref, headRepositoryOwner:{login:.head.repo.owner.login}, headRepository:{name:.head.repo.name}}'
-}
-
-if [ "$MERGE_STRATEGY" = "mr" ] && [ -n "$EXISTING_PR" ]; then
-  if [ -z "$BRANCH" ] || [ "$BRANCH" = "null" ]; then
-    block_existing_pr "metadata.existing_pr is set but metadata.branch is missing."
-  fi
-
-  if [ -z "$ORIGIN_REPO" ]; then
-    [ -n "$ORIGIN_REPO_ERROR" ] && echo "$ORIGIN_REPO_ERROR"
-    echo "Could not resolve origin repository for existing PR validation. STOP. Debug and retry without mutating bead state."
-    gc runtime drain-ack
-    exit 1
-  fi
-
-  EXISTING_PR_ERR=$(mktemp)
-  EXISTING_PR_INFO=$(lookup_pr_info "$EXISTING_PR" "$EXISTING_PR_ERR")
-  EXISTING_PR_STATUS=$?
-  EXISTING_PR_ERROR=$(cat "$EXISTING_PR_ERR")
-  rm -f "$EXISTING_PR_ERR"
-  if [ "$EXISTING_PR_STATUS" -ne 0 ] || [ -z "$EXISTING_PR_INFO" ]; then
-    if pr_lookup_repo_mismatch "$EXISTING_PR_ERROR"; then
-      block_existing_pr "Existing PR $EXISTING_PR is not in $ORIGIN_REPO. $EXISTING_PR_ERROR"
-    fi
-    if pr_lookup_missing "$EXISTING_PR_ERROR"; then
-      block_existing_pr "Existing PR $EXISTING_PR was not found or is not accessible."
-    fi
-    echo "Could not resolve existing PR $EXISTING_PR. STOP. Debug and retry without mutating bead state."
-    [ -n "$EXISTING_PR_ERROR" ] && echo "$EXISTING_PR_ERROR"
-    gc runtime drain-ack
-    exit 1
-  fi
-
-  EXISTING_PR_STATE=$(printf '%s\n' "$EXISTING_PR_INFO" | jq -r '.state')
-  EXISTING_PR_HEAD=$(printf '%s\n' "$EXISTING_PR_INFO" | jq -r '.headRefName')
-  EXISTING_PR_BASE=$(printf '%s\n' "$EXISTING_PR_INFO" | jq -r '.baseRefName')
-  EXISTING_PR_URL=$(printf '%s\n' "$EXISTING_PR_INFO" | jq -r '.url')
-  EXISTING_PR_REPO=$(printf '%s\n' "$EXISTING_PR_URL" | sed -E 's#^https://github.com/([^/]+/[^/]+)/pull/[0-9]+$#\\1#')
-  EXISTING_PR_HEAD_REPO=$(printf '%s\n' "$EXISTING_PR_INFO" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')
-
-  if [ "$EXISTING_PR_STATE" != "OPEN" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR is $EXISTING_PR_STATE, want OPEN."
-  fi
-  if [ "$EXISTING_PR_HEAD" != "$BRANCH" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR targets branch $EXISTING_PR_HEAD, want $BRANCH."
-  fi
-  if [ "$EXISTING_PR_BASE" != "$TARGET" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR targets base $EXISTING_PR_BASE, want $TARGET."
-  fi
-  if [ "$EXISTING_PR_REPO" != "$ORIGIN_REPO" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR belongs to repo $EXISTING_PR_REPO, want $ORIGIN_REPO."
-  fi
-  if [ "$EXISTING_PR_HEAD_REPO" != "$ORIGIN_REPO" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR head repo $EXISTING_PR_HEAD_REPO, want $ORIGIN_REPO."
-  fi
-fi
-
-if [ "$MERGE_STRATEGY" = "mr" ] && [ -z "$ORIGIN_REPO" ]; then
-  [ -n "$ORIGIN_REPO_ERROR" ] && echo "$ORIGIN_REPO_ERROR"
-  echo "Could not resolve origin repository for pull-request handoff. STOP. Debug and retry without mutating bead state."
-  gc runtime drain-ack
-  exit 1
-fi
 ```
 
-**If MERGE_STRATEGY = "direct" (default):**
-
-gc-toolkit local delta: if the push to `$TARGET` is rejected because the
-target branch is GitHub-protected (GH006 / GH013 / "protected branch" /
-"Changes must be made through a pull request" / "approving review" /
-"Cannot update this protected ref"), refinery automatically promotes the
-work bead to `merge_strategy=pr` and continues under the "mr" block below
-— no operator intervention required. Any other push failure stops the
-wisp for debugging.
-
-**0. Refuse a 0-diff branch (false-completion guard):**
-
-A close-as-merged asserts "work was merged"; a branch that introduces no
-change vs its merge-base merging is definitionally false. Refuse it before
-touching `$TARGET`. Legit no-op resolutions MUST use wontfix/duplicate/
-not-planned, never merged — so this never blocks a real merge.
+**0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
+branch that merges to a no-op is a false completion. Never silently retry:
 ```bash
-branch_has_real_change "origin/$TARGET" temp || \
-  halt_false_completion "$BRANCH" "$(git merge-base "origin/$TARGET" temp 2>/dev/null || printf '%s' "origin/$TARGET")"
+if ! branch_has_real_change "origin/$TARGET" temp; then
+  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close"
+  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+  gc runtime drain-ack
+  exit 1
+fi
 ```
 
-**1. Merge, push, verify, and close work bead (auto-promote on protected branch):**
-
-Run this as one script. It merges, pushes, verifies the remote target ref,
-then records merge metadata and closes the bead. It uses a temporary
-detached worktree for the target branch because the real target branch may
-already be checked out in the rig's canonical worktree (`$GC_RIG_ROOT`). Do
-NOT replace this with `git checkout $TARGET` — that fails with `fatal:
-'$TARGET' is already used by worktree` under the normal multi-worktree
-layout and halts the merge before push/auto-promote. The metadata write
-happens only after the remote target ref is verified at the merged SHA.
-
-gc-toolkit local delta: the protected-branch auto-promote (per the note
-above) lives in the push branch below — a GitHub-protected `$TARGET` flips
-the bead to `merge_strategy=pr` and falls through to the "mr" block instead
-of failing. The rebased `temp` branch is never touched by the merge (it
-happens in the throwaway worktree against `temp`'s SHA), so it stays intact
-and checked out in the refinery worktree for the PR push.
-
+**If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
+(the real target branch may be checked out in the rig's canonical
+worktree), push, verify the remote ref, then record + close through ONE
+lifecycle call. A push rejected for branch protection (GH006/GH013/
+"protected branch"/"Changes must be made through a pull request"/"approving
+review"/"Cannot update this protected ref") auto-promotes the bead to
+`merge_strategy=pr` and falls through to the mr block — temp is untouched
+and still available for the PR push. Any other push failure stops the wisp.
 ```bash
 set -e
-
 MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
 MERGE_WT="$MERGE_PARENT/target"
-cleanup_merge_wt() {
-  git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true
-  rm -rf "$MERGE_PARENT"
-}
-trap cleanup_merge_wt EXIT
-
-is_protected_branch_error() {
-  case "$1" in
-    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|\
-    *"Changes must be made through a pull request"*|\
-    *"approving review"*|*"Cannot update this protected ref"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
+trap 'git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"' EXIT
 git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
 TEMP_SHA=$(git rev-parse temp)
 git worktree add --detach "$MERGE_WT" "origin/$TARGET"
 git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
 MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
-MERGED_SHORT=$(git -C "$MERGE_WT" rev-parse --short HEAD)
-
 PUSH_ERR=$(mktemp)
 if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
-  rm -f "$PUSH_ERR"
-
   git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
   REMOTE=$(git rev-parse "origin/$TARGET")
   if [ "$MERGED_SHA" != "$REMOTE" ]; then
-    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP. Do not mutate bead state."
-    gc runtime drain-ack
-    exit 1
+    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
+    gc runtime drain-ack; exit 1
   fi
-
-  gc bd update "$WORK" \
-    --set-metadata merge_result=merged \
-    --set-metadata merged_sha="$MERGED_SHA" \
-    --set-metadata merged_target="$TARGET" \
-    --unset-metadata rejection_reason && \
-  gc bd close "$WORK" --reason "Merged to $TARGET at $MERGED_SHORT"
+  "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
 else
-  PUSH_STDERR=$(cat "$PUSH_ERR")
-  rm -f "$PUSH_ERR"
-  if is_protected_branch_error "$PUSH_STDERR"; then
-    echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-    gc bd update "$WORK" --set-metadata merge_strategy=pr
-    MERGE_STRATEGY=mr
-    # temp is untouched and still checked out in the refinery worktree; the
-    # throwaway merge worktree is removed by the trap. Fall through to the
-    # "If MERGE_STRATEGY = 'mr'" block below.
-  else
-    echo "Push failed: $PUSH_STDERR"
-    echo "STOP. Debug and retry. Do NOT continue."
-    gc runtime drain-ack
-    exit 1
-  fi
+  case "$(cat "$PUSH_ERR")" in
+    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
+      echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
+      gc bd update "$WORK" --set-metadata merge_strategy=pr
+      MERGE_STRATEGY=mr ;;
+    *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
+  esac
 fi
+rm -f "$PUSH_ERR"
 ```
+After a successful direct merge: detach and delete temp; if
+delete_merged_branches = "true", `git push origin --delete $BRANCH`; and if
+auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
+(`$GC_RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on
+its failure.
 
-If the script exits non-zero: STOP. Debug and retry. Do NOT write merge
-metadata, close the bead, or delete the source branch.
+**If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
+pushes the prepared branch and transitions the anchor into the gated
+pipeline; the cadence's gate-ensure dispatches the review, pr-open opens the
+PR, merge.sh lands it. Gate dispatch does NOT happen here.
 
-Both the `--set-metadata` write and the `gc bd close` are required —
-`merged_sha` and `merged_target` are the only forensic breadcrumbs tying a
-closed bead to its merge commit on `$TARGET`. `--unset-metadata
-rejection_reason` clears any stale rejection field from an earlier
-rejected/reworked attempt before the successful close.
-
-**If `$MERGE_STRATEGY` was just flipped to `mr` (auto-promotion fired),
-skip steps 2-3 below and execute the "If MERGE_STRATEGY = 'mr'" block
-instead. The rebased `temp` branch is still checked out in the refinery
-worktree and available for the PR push.**
-
-**2. Cleanup (leaves worktree detached so other worktrees can hold $TARGET):**
-```bash
-git checkout --detach "origin/$TARGET" >/dev/null 2>&1 || true
-git branch -d temp || git branch -D temp || true
-```
-If delete_merged_branches = "true": `git push origin --delete $BRANCH`
-
-**3. Auto-fast-forward rig canonical checkout (best-effort):**
-
-**Config: auto_ff_rig_main = {{auto_ff_rig_main}}**
-
-gc-toolkit local delta: if `auto_ff_rig_main = "true"`, attempt to keep
-the rig's canonical checkout (`$GC_RIG_ROOT`) in sync with the freshly
-pushed `$TARGET`. The merge metadata is already recorded and the bead is
-already closed — this is a side-effect cleanup that MUST NOT abort the
-merge or affect bead state on failure.
-
-```bash
-RIG_ROOT="${GC_RIG_ROOT:-}"
-if [ "{{auto_ff_rig_main}}" = "true" ] && [ -n "$RIG_ROOT" ] \
-   && { [ -d "$RIG_ROOT/.git" ] || [ -f "$RIG_ROOT/.git" ]; }; then
-  RIG_BRANCH=$(git -C "$RIG_ROOT" branch --show-current 2>/dev/null || echo "")
-  RIG_DIRTY=$(git -C "$RIG_ROOT" status --porcelain --untracked-files=no 2>/dev/null)
-  if [ "$RIG_BRANCH" = "$TARGET" ] && [ -z "$RIG_DIRTY" ]; then
-    git -C "$RIG_ROOT" fetch --quiet origin "$TARGET" 2>/dev/null || true
-    if git -C "$RIG_ROOT" merge-base --is-ancestor \
-         "$TARGET" "origin/$TARGET" 2>/dev/null; then
-      if git -C "$RIG_ROOT" pull --ff-only --quiet origin "$TARGET" 2>/dev/null; then
-        echo "Auto-FF: $RIG_ROOT $TARGET → $(git -C "$RIG_ROOT" rev-parse --short HEAD)"
-      else
-        echo "Auto-FF: pull failed (best-effort, ignoring)"
-      fi
-    else
-      BEHIND=$(git -C "$RIG_ROOT" rev-list --count "$TARGET..origin/$TARGET" 2>/dev/null || echo "?")
-      AHEAD=$(git -C "$RIG_ROOT" rev-list --count "origin/$TARGET..$TARGET" 2>/dev/null || echo "?")
-      echo "Auto-FF: $RIG_ROOT diverged ($AHEAD ahead, $BEHIND behind origin/$TARGET) — not modifying"
-    fi
-  elif [ -n "$RIG_DIRTY" ]; then
-    echo "Auto-FF: $RIG_ROOT has uncommitted changes — skipping"
-  elif [ "$RIG_BRANCH" != "$TARGET" ]; then
-    echo "Auto-FF: $RIG_ROOT on '$RIG_BRANCH', not '$TARGET' — skipping"
-  fi
-fi
-```
-
-If `auto_ff_rig_main = "false"`: skip entirely. The stance can shift to a
-different surfacing mechanism (cron, hook, manual) without changing this
-formula.
-
-**If MERGE_STRATEGY = "mr":**
-
-Refinery does NOT land the branch directly. Instead it publishes a pull
-request and treats PR creation as the terminal handoff for THIS PATROL
-ITERATION — but NOT as completion. Under close-on-land the anchor (a convoy
-graduating to {{target_branch}}, or any mr-mode bead) stays OPEN as the PR's
-gating bead and closes only when the PR merges (step 4 +
-reconcile-merged-prs.sh). See docs/work-bead-state-machine.md.
-
-**0. Refuse a 0-diff branch (false-completion guard):**
-
-The same predicate covers the empty-PR / 0-commit concern: do not publish a
-pull request for a branch that introduces no change vs its merge-base. The
-PR handoff closes the bead, so an empty PR is the same false completion as
-an empty direct merge.
-```bash
-branch_has_real_change "origin/$TARGET" temp || \
-  halt_false_completion "$BRANCH" "$(git merge-base "origin/$TARGET" temp 2>/dev/null || printf '%s' "origin/$TARGET")"
-```
-
-**1. Push the prepared branch back to origin:**
-
-Force-push ONLY when the push actually rewrites history. In merge mode
-(`shared-branch-merge-mode` in the rebase step) `temp` is a DESCENDANT of the
-branch, so a plain fast-forward push carries it and no force is needed or
-wanted; in rebase mode it is not a descendant, and the lease is what makes the
-rewrite safe. Deriving that from the git ancestry rather than re-testing the
-branch name keeps this site from drifting away from the one that classified
-the branch.
-
+1. Push the prepared branch. Force ONLY when the push actually rewrites
+history — derived from ancestry, not the branch name:
 ```bash
 git checkout temp
 # >>> shared-branch-push-mode
@@ -1737,85 +475,59 @@ else
 fi
 # <<< shared-branch-push-mode
 ```
-If the fast-forward push is REJECTED, the branch moved since the rebase step's
-fetch and your merge no longer contains its tip: STOP, fetch, re-run the prepare
-block, retry. If `--force-with-lease` fails it is the same cause and the same
-remedy.
-Never use plain `--force`, and never force a branch the prepare block put in
-merge mode — that rewrite is the thing this design exists to prevent.
+A rejected push means the branch moved since the fetch: STOP, re-fetch,
+re-run the prepare block, retry. Never plain `--force`, and never force a
+branch the prepare block put in merge mode.
 
-**2. Decide pre-open vs post-open, then (post-open only) reuse/create the PR:**
-
-gc-toolkit local delta (pre-open codex gate, tk-6d0vb.1.8): when `codex` is a
-member of `check_set` and this is the FIRST handoff (no `existing_pr`), the PR is
-NOT opened here. Codex reviews the BRANCH first — step 4 dispatches the review
-against the `origin/<base>...origin/<branch>` compare-range — and the anchor
-parks in the `pre_open_gate` sub-state. A later idle pass (`pre-open-resolve.sh`,
-folded into find-work) opens the non-draft PR only once `check.codex=green@<head>`,
-so a PR that becomes visible is codex-vetted at birth. This preserves #163 (still
-non-draft, no draft phase re-introduced) and #185 (comment-only), and closes the
-window in which a non-draft PR was public before codex confirmed. The POST-OPEN
-path below is unchanged and still runs for two cases: a check_set WITHOUT codex
-(open the PR immediately, gate on CI + approval only), and any `existing_pr`
-rework (the PR already exists, so codex reworks run on the open PR via the
-template's post-open `gh pr review` arm).
-
-Read the bead's description and notes once and stage them into a PR body
-file (using `--body-file` avoids quoting/encoding hazards with multi-line
-markdown). The body always carries the bead's full description (the
-"why"), and includes the polecat's implementation notes (the "what")
-when present.
-
-The PR always opens non-draft — every PR that exists is a real candidate.
-When the `check_set` includes `codex` the signoff gate (dispatched in step 4)
-holds the merge instead: the merge stays held until the codex gate is green at
-the live head (check.codex=green@<head>), so no draft state is needed to gate
-readiness. With the pre-open gate above, the codex member is already green when
-the PR opens; a post-open rework that pushes a new commit re-gates it exactly as
-before (the marker is head-bound).
-
+2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
+base==$TARGET, in the origin repo — `gh pr view <ref> --json
+url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
+not a retry:
 ```bash
-WORK_JSON=$(gc bd show $WORK --json)
-EXISTING_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.existing_pr // empty')
-ISSUE_TITLE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].title')
-ISSUE_DESC=$(printf '%s' "$WORK_JSON" | jq -r '.[0].description // empty')
-ISSUE_NOTES=$(printf '%s' "$WORK_JSON" | jq -r '.[0].notes // empty')
-ISSUE_TYPE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].issue_type // "task"')
-ISSUE_PRIORITY=$(printf '%s' "$WORK_JSON" | jq -r '.[0].priority // empty')
+"$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>"
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+[ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
+```
+Then jump to next-iteration (pour before burn).
 
-# Pre-open codex gate decision (tk-6d0vb.1.8). CODEX_GATE: is codex a member of
-# the check_set? Normalized the SAME way merge-skill.sh enforces it (split on
-# comma, trim surrounding whitespace, drop empties) so a spaced "lint, codex" is
-# recognized — matching the fail-closed site below and the merge skill (tk-aj4ua).
-# PRE_OPEN: codex gate AND no PR yet (first handoff). An existing_pr rework stays
-# on the post-open path (its PR is already open; codex reworks run on it).
-#
-# tk-4na1b: an EMPTY value must never out-rank the non-empty formula default.
-# `{{check_set}}` is hand-substituted from the raw TOML on this --root-only patrol
-# path (the wisp stamps no gc.var.*, so the declared default = "codex" never
-# reaches the substitution as a value), and an empty check_set declares NO gates —
-# the PR then lands on CI + approval alone, with no review ever dispatched. Recover
-# the declared default here, mirroring the MERGE_STRATEGY:-direct idiom above. This
-# normalization must run BEFORE the membership test: stamping a gate that was never
-# dispatched would hold the merge forever on a marker nothing can stamp.
-# A genuinely gateless rig opts out EXPLICITLY via the `none`/`off` sentinel, which
-# normalizes to the CANONICAL `none` — a value that is STAMPED on the anchor, not
-# collapsed to empty (tk-i48ca). merge-skill.sh reads `none`/`off` as "no gates"
-# exactly as it reads empty, so a gateless rig still lands on CI + approval alone;
-# its empty-means-ungated behavior is deliberately UNCHANGED (#163/#182).
-#
-# tk-i48ca — WHY THE SENTINEL MUST SURVIVE AS DATA. Collapsing `none` to "" made
-# "deliberately gateless" and "never normalized" the SAME value on the anchor, so
-# nothing downstream could tell them apart. A hand-RECOVERED bead (furiosa salvage,
-# or any bead reconstructed outside this formula) reaches the refinery having never
-# run this normalization, carrying check_set="" — indistinguishable from an opt-out,
-# and merge-skill.sh lands it with NO codex review. Stamping the sentinel makes every
-# formula-normalized anchor carry a NON-EMPTY check_set, so an empty one at the
-# refinery boundary is an unambiguous "this never ran normalization" signal that
-# check-set-heal.sh can safely repair.
-# The render is kept OUTSIDE the check-set-normalize markers so the extracted
-# snippet stays template-free — the regression test drives CHECK_SET through the
-# env (assets/scripts/check-set-normalize.test.sh).
+3. Decide pre-open vs post-open. PRE_OPEN means "no PR is recorded under
+ANY key" — the refinery's own `pr_url`/`pr_number` count, not just the
+caller's `existing_pr`, so a post-open anchor reaching this step by any
+route converges on its PR instead of being re-parked:
+```bash
+# >>> pre-open-recorded-pr
+RECORDED_PR="$EXISTING_PR"
+if [ -z "$RECORDED_PR" ]; then
+  RECORDED_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
+fi
+PRE_OPEN=0
+if [ -z "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
+  PRE_OPEN=1
+fi
+if [ -n "$RECORDED_PR" ] && [ -z "$EXISTING_PR" ]; then
+  echo "merge-push: $WORK already records PR $RECORDED_PR (pr_url/pr_number); taking the POST-OPEN path so the existing PR is reused, not re-parked to pre_open_gate." >&2
+fi
+# The post-open transition needs BOTH url and number; resolve them here so the
+# terminal arm never stamps an unaddressable pull_request (empty pr_number is
+# skipped by merge.sh and pr-facts.sh forever).
+PR_URL=""; PR_NUMBER=""
+if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
+  PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
+  PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
+fi
+# <<< pre-open-recorded-pr
+```
+On the post-open path, verify `$PR_VIEW` reports OPEN + head==$BRANCH
++ base==$TARGET; a caller-supplied PR that fails goes to the blocked arm
+above, anything else stops the wisp for debugging without mutating state.
+
+4. Normalize the check-set. Empty never out-ranks the declared default (the
+--root-only pour path can mis-substitute), and the `none`/`off` sentinel is
+STAMPED as the canonical `none` rather than collapsed to empty:
+```bash
 CHECK_SET="{{check_set}}"
 # >>> check-set-normalize
 _cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
@@ -1825,318 +537,18 @@ case "$_cs_canon" in
 esac
 unset _cs_canon
 # <<< check-set-normalize
-# Membership decided IN-SHELL, never through a `... | grep -qxF codex` pipeline
-# (tk-tmefn). `grep -q` exits at its FIRST match, closing the pipe under the
-# `tr`/`sed` still writing the gates that FOLLOW `codex`; they take SIGPIPE and
-# the pipeline's LAST status is 141. Under `set -o pipefail` that 141 becomes the
-# pipeline's status, and a check_set that DOES name codex reads as one that does
-# not — decided by nothing but how many gates happen to come after it, so a rig
-# passes on a short check_set and silently drops PRE_OPEN (the PR then opens
-# BEFORE codex has reviewed it) once the list grows.
-#
-# This step's block sets `-e`, NOT `-o pipefail`, so the trap is LATENT here
-# rather than live: the pipeline's status is grep's 0 and the membership reads
-# correctly today. It is fixed anyway because the identical construct WAS live in
-# check-set-heal.sh and merge-skill.sh (both `set -o pipefail`), a single
-# `set -o pipefail` added to this preamble is all it would take to arm it, and
-# the in-shell form is not worse in any dimension. Whitespace is stripped
-# outright — a gate name cannot contain any — and the comma wrapping makes it a
-# whole-token test.
-CODEX_GATE=0
-case ",$(printf '%s' "$CHECK_SET" | tr -d '[:space:]')," in
-  *",codex,"*) CODEX_GATE=1 ;;
-esac
-# PRE_OPEN means "no PR exists for this bead yet" (first handoff), so the test
-# must read EVERY key under which a PR can already be recorded — not just the
-# caller-supplied `existing_pr` (tk-jcal4). The refinery's own post-open
-# transition records the PR it opened as `pr_url` + `pr_number` and never writes
-# `existing_pr`; so does check-set-heal.sh's merge_result recovery. A bead
-# carrying those keys reaching this decision read as PRE_OPEN and was parked back
-# to `merge_result=pre_open_gate`, detaching a live PR from its anchor and
-# arranging for `pre-open-resolve.sh` to open a SECOND PR for the same branch
-# once the (duplicate) review greened. The find-work guard above closes the one
-# known route to that state; this closes the decision itself, so any other path
-# reaching merge-push with a post-open anchor converges instead of forking.
-#
-# RECORDED_PR is deliberately separate from EXISTING_PR: `existing_pr` is a
-# caller's reuse contract and carries its own strict validation (block-and-
-# escalate if that PR is not OPEN on this branch/base/repo). A `pr_url` the
-# refinery itself minted is not a caller contract, so it selects the post-open
-# path without inheriting that escalation. The post-open path then resolves the
-# PR by branch — `gh pr create` fails harmlessly on a branch that already has
-# one, and the `gh pr view "$BRANCH"` fallback recovers it — and re-verifies its
-# shape before re-stamping the anchor with the same PR.
-#
-# jq: `//` falls through on null and false ONLY, so an empty-string `pr_url`
-# would out-rank a real `pr_number` under a `//` chain. Test each for emptiness.
-#
-# PRE_OPEN also requires gh: the pre-open PR-create resolver (pre-open-resolve.sh)
-# opens the PR via gh, so a no-gh (REST-fallback) rig must stay on the post-open
-# path or its PR would never open. merge-skill/observer already require gh, so
-# this only preserves the no-gh path's prior behavior (open via REST for manual
-# merge), never regresses it.
-# >>> pre-open-recorded-pr
-RECORDED_PR="$EXISTING_PR"
-if [ -z "$RECORDED_PR" ]; then
-  RECORDED_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
-fi
-PRE_OPEN=0
-if [ "$CODEX_GATE" = 1 ] && [ -z "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
-  PRE_OPEN=1
-fi
-if [ -n "$RECORDED_PR" ] && [ -z "$EXISTING_PR" ]; then
-  echo "merge-push: $WORK already records PR $RECORDED_PR (pr_url/pr_number); taking the POST-OPEN path so the existing PR is reused, not re-parked to pre_open_gate (tk-jcal4)." >&2
-fi
-# <<< pre-open-recorded-pr
-
-# POST-OPEN only: reuse/create + verify the PR now. Skipped entirely in pre-open,
-# where pre-open-resolve.sh opens the PR later once codex is green.
-if [ "$PRE_OPEN" = 0 ]; then
-PR_BODY_FILE=$(mktemp)
-{
-  echo "## Summary"
-  echo
-  if [ -n "$ISSUE_DESC" ]; then
-    printf '%s\n' "$ISSUE_DESC"
-  else
-    printf 'Refinery handoff for `%s` (no bead description recorded).\n' "$WORK"
-  fi
-  if [ -n "$ISSUE_NOTES" ]; then
-    echo
-    echo "## Implementation notes"
-    echo
-    printf '%s\n' "$ISSUE_NOTES"
-  fi
-  echo
-  echo "## Refinery handoff"
-  echo
-  printf -- '- Issue: `%s` (%s%s)\n' "$WORK" "$ISSUE_TYPE" "${ISSUE_PRIORITY:+, P$ISSUE_PRIORITY}"
-  printf -- '- Source branch: `%s`\n' "$BRANCH"
-  printf -- '- Target: `%s`\n' "$TARGET"
-  printf -- '- Rebased on `%s` via Gastown Refinery.\n' "$TARGET"
-} > "$PR_BODY_FILE"
-
-if [ -n "$EXISTING_PR" ]; then
-  PR_REF="$EXISTING_PR"
-else
-  if command -v gh >/dev/null 2>&1; then
-    PR_URL=$(gh pr create \
-      --base "$TARGET" \
-      --head "$BRANCH" \
-      --title "$ISSUE_TITLE ($WORK)" \
-      --body-file "$PR_BODY_FILE" 2>/dev/null || true)
-
-    if [ -z "$PR_URL" ]; then
-      PR_URL=$(gh pr view "$BRANCH" --json url -q '.url')
-    fi
-  else
-    PR_ERR=$(mktemp)
-    if ! init_github_rest 2>"$PR_ERR"; then
-      cat "$PR_ERR"
-      rm -f "$PR_ERR"
-      gc runtime drain-ack
-      exit 1
-    fi
-    EXISTING=$(curl_gh_api "$PR_ERR" \
-      --get "$API/pulls" \
-      --data-urlencode "state=open" \
-      --data-urlencode "head=$OWNER:$BRANCH" \
-      --data-urlencode "base=$TARGET")
-    PR_STATUS=$?
-    PR_ERROR=$(cat "$PR_ERR")
-    if [ "$PR_STATUS" -ne 0 ]; then
-      echo "GitHub API request failed while checking for an existing PR for $BRANCH."
-      [ -n "$PR_ERROR" ] && echo "$PR_ERROR"
-      rm -f "$PR_ERR"
-      gc runtime drain-ack
-      exit 1
-    fi
-    PR_NUMBER=$(printf '%s\n' "$EXISTING" | jq -r '.[0].number // empty')
-    if [ -z "$PR_NUMBER" ]; then
-      CREATE_PAYLOAD=$(jq -n \
-        --arg title "$ISSUE_TITLE ($WORK)" \
-        --arg head "$BRANCH" \
-        --arg base "$TARGET" \
-        --rawfile body "$PR_BODY_FILE" \
-        '{title:$title, head:$head, base:$base, body:$body, draft:false}')
-      CREATED=$(curl_gh_api "$PR_ERR" \
-        -X POST "$API/pulls" \
-        -d "$CREATE_PAYLOAD")
-      PR_STATUS=$?
-      PR_ERROR=$(cat "$PR_ERR")
-      if [ "$PR_STATUS" -ne 0 ]; then
-        echo "GitHub API request failed while creating a PR for $BRANCH."
-        [ -n "$PR_ERROR" ] && echo "$PR_ERROR"
-        rm -f "$PR_ERR"
-        gc runtime drain-ack
-        exit 1
-      fi
-      PR_NUMBER=$(printf '%s\n' "$CREATED" | jq -r '.number // empty')
-      if [ -z "$PR_NUMBER" ]; then
-        echo "GitHub API response did not include a pull request number."
-        rm -f "$PR_ERR"
-        gc runtime drain-ack
-        exit 1
-      fi
-    fi
-    PR_RAW=$(curl_gh_api "$PR_ERR" "$API/pulls/$PR_NUMBER")
-    PR_STATUS=$?
-    PR_ERROR=$(cat "$PR_ERR")
-    rm -f "$PR_ERR"
-    if [ "$PR_STATUS" -ne 0 ]; then
-      echo "GitHub API request failed while reading PR $PR_NUMBER."
-      [ -n "$PR_ERROR" ] && echo "$PR_ERROR"
-      gc runtime drain-ack
-      exit 1
-    fi
-    PR_URL=$(printf '%s\n' "$PR_RAW" | jq -r '.html_url // empty')
-  fi
-  PR_REF="$BRANCH"
-fi
-
-rm -f "$PR_BODY_FILE"
-
-# Verify the pull request exists and has the expected shape (post-open path).
-PR_ERR=$(mktemp)
-PR_INFO=$(lookup_pr_info "$PR_REF" "$PR_ERR")
-PR_STATUS=$?
-PR_ERROR=$(cat "$PR_ERR")
-rm -f "$PR_ERR"
-if [ "$PR_STATUS" -ne 0 ] || [ -z "$PR_INFO" ]; then
-  if [ -n "$EXISTING_PR" ] && pr_lookup_missing "$PR_ERROR"; then
-    block_existing_pr "Existing PR $EXISTING_PR was not found or is not accessible."
-  fi
-  echo "Pull request $PR_REF was not found."
-  [ -n "$PR_ERROR" ] && echo "$PR_ERROR"
-  gc runtime drain-ack
-  exit 1
-fi
-PR_URL=$(printf '%s\n' "$PR_INFO" | jq -r '.url')
-PR_NUMBER=$(printf '%s\n' "$PR_INFO" | jq -r '.number')
-PR_STATE=$(printf '%s\n' "$PR_INFO" | jq -r '.state')
-PR_HEAD=$(printf '%s\n' "$PR_INFO" | jq -r '.headRefName')
-PR_BASE=$(printf '%s\n' "$PR_INFO" | jq -r '.baseRefName')
-PR_REPO=$(printf '%s\n' "$PR_URL" | sed -E 's#^https://github.com/([^/]+/[^/]+)/pull/[0-9]+$#\\1#')
-PR_HEAD_REPO=$(printf '%s\n' "$PR_INFO" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')
-echo "$PR_URL $PR_NUMBER $PR_STATE $PR_HEAD $PR_BASE $PR_REPO $PR_HEAD_REPO"
-if [ "$PR_STATE" != "OPEN" ]; then
-  if [ -n "$EXISTING_PR" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR is $PR_STATE, want OPEN."
-  fi
-  echo "Pull request $PR_REF is $PR_STATE, want OPEN."
-  gc runtime drain-ack
-  exit 1
-fi
-if [ "$PR_HEAD" != "$BRANCH" ]; then
-  if [ -n "$EXISTING_PR" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR targets branch $PR_HEAD, want $BRANCH."
-  fi
-  echo "Pull request $PR_REF targets branch $PR_HEAD, want $BRANCH."
-  gc runtime drain-ack
-  exit 1
-fi
-if [ "$PR_BASE" != "$TARGET" ]; then
-  if [ -n "$EXISTING_PR" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR targets base $PR_BASE, want $TARGET."
-  fi
-  echo "Pull request $PR_REF targets base $PR_BASE, want $TARGET."
-  gc runtime drain-ack
-  exit 1
-fi
-if [ "$PR_REPO" != "$ORIGIN_REPO" ]; then
-  if [ -n "$EXISTING_PR" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR belongs to repo $PR_REPO, want $ORIGIN_REPO."
-  fi
-  echo "Pull request $PR_REF belongs to repo $PR_REPO, want $ORIGIN_REPO."
-  gc runtime drain-ack
-  exit 1
-fi
-if [ "$PR_HEAD_REPO" != "$ORIGIN_REPO" ]; then
-  if [ -n "$EXISTING_PR" ]; then
-    block_existing_pr "Existing PR $EXISTING_PR head repo $PR_HEAD_REPO, want $ORIGIN_REPO."
-  fi
-  echo "Pull request $PR_REF head repo $PR_HEAD_REPO, want $ORIGIN_REPO."
-  gc runtime drain-ack
-  exit 1
-fi
-fi
 ```
-If this command fails or prints empty output (post-open path): STOP. Debug and retry. Do NOT continue.
 
-**4. Dispatch the codex signoff (branch pre-open, or PR post-open) and transition the anchor to GATING (it stays OPEN):**
-
-gc-toolkit local delta (close-on-land): mr-mode does NOT close this bead
-here. Stock GasTown closes at PR-creation; this pack keeps the bead OPEN as
-the PR's gating anchor so `closed` always means *landed* and the dep graph
-keeps showing who is on which PR. In the universalized model this anchor is
-typically a CONVOY graduating its branch to {{target_branch}}, but the
-mechanism is identical for any mr-mode bead. The anchor closes later, on a
-verified merge, via `reconcile-merged-prs.sh` in the find-work idle loop. See
-docs/work-bead-state-machine.md.
-
-The refinery's active endpoint hands the bead to a gating sub-state and moves on
-(the bounded patrol loop is preserved) — it does NOT babysit the PR to merge.
-POST-OPEN the anchor goes straight to `merge_result=pull_request` with the PR
-recorded (`pr_url`/`pr_number` are the forensic breadcrumbs; the reconcile pass
-scans for that marker). PRE-OPEN (codex gate, first handoff) there is no PR yet:
-the anchor goes to `merge_result=pre_open_gate` and `pre-open-resolve.sh` opens
-the PR later once codex is green. Either way `--unset-metadata rejection_reason`
-clears a stale rejection field from an earlier reworked attempt.
-
-One-anchor-per-PR exception (tk-ynz4b): when the branch ALREADY has an open
-gating anchor (this hand-back is a rework child resuming the anchor's branch),
-`$WORK` does not transition to either gating sub-state — it closes as
-landed-on-branch and the re-review is anchored to the EXISTING anchor. A rework
-bead stamped `merge_result` would join the merge skill's anchor enumeration
-with no `check_set` (the weakest anchor decides the merge — check-set bypass)
-while simultaneously vanishing from its in-flight-rework hold.
-
-REWORK HAND-BACK IS NOT AN ORDINARY mr WORK BEAD (tk-t46nq). This is the trap the
-exception exists to close, and it is easy to walk into because the child LOOKS
-like ordinary work: the fix-target dispatch stamps it `merge_strategy=mr` with
-`branch=<the anchor's branch>` and routes it to the polecat pool like any other
-task. Run it as a normal mr handoff and you mint that gateless second anchor on a
-branch that already has one. The join key is the BRANCH, in BOTH sub-states
-(`pr_number` exists only post-open) — which is why `one-anchor-per-pr-resolve`
-scans `pull_request` and `pre_open_gate` alike. The correct handling is exactly
-three things: close the child as landed-on-branch, never stamp `merge_result` on
-it, and dispatch the re-review against the EXISTING anchor. If this step never
-runs, the re-dispatch is not lost — (a-norm)'s satisfiability sweep is the
-deterministic backstop that re-gates the anchor on the next idle pass.
-
-gc-toolkit local delta: if `codex` is a member of `check_set`, dispatch a signoff
-bead (one member of the anchor's check-set) for the codex polecat pool and record
-the review->anchor link (anchor_bead metadata + a best-effort BLOCKS edge) BEFORE
-the gating transition. PRE-OPEN the review targets the BRANCH compare-range
-(`review_branch`/`review_base`, no PR yet); POST-OPEN it targets the open PR
-(`pr_url`/`pr_number`). The transition is then FAIL-CLOSED on that link: the
-anchor is detached into gating only once anchor_bead is verified recorded on the
-review bead; otherwise it stays assigned for the next patrol to retry, never
-detached into a gating state the signoff cannot rediscover. Idempotent — a second
-refinery pass reuses the open signoff bead and re-verifies (heals) the link.
-
+5. One-anchor-per-PR guard, then ONE lifecycle transition. If another OPEN
+bead already gates this branch (either sub-state — branch is the join key),
+$WORK is a rework hand-back: close it landed-on-branch, never stamp
+`merge_result` on it (a merge_result-carrying rework child joins the anchor
+enumeration as a gateless second anchor), and let gating continue on the
+existing anchor — the pushed head moved, so its head-bound markers are
+already stale and the cadence re-gates them. Multi-candidate tiebreak: the
+OLDEST anchor (the original predates any rework-minted duplicate);
+`created_at` is the real field, `.created`/`.id` only defensive fallbacks.
 ```bash
-# One-anchor-per-PR resolution (tk-ynz4b): if another OPEN bead already gates
-# this branch (merge_result=pull_request or pre_open_gate on the SAME branch),
-# $WORK is a rework hand-back for that anchor — the fix-target dispatch resumes
-# the anchor's own branch, so branch equality is the join key, and it holds
-# across both anchor sub-states (pr_number exists only post-open; branch is
-# stamped in both). The signoff below must then anchor to the EXISTING anchor
-# (its check.<name> markers are the ones the merge skill and pre-open-resolve
-# read), and the terminal arm closes $WORK as landed-on-branch instead of
-# minting a second anchor. A rework bead that leaked into the anchor class
-# carried no check_set (gates vacuous — the WEAKEST anchor decides the merge,
-# bypassing codex) and, carrying merge_result, was also invisible to the merge
-# skill's in-flight-rework hold. The markers let the regression test extract
-# and exercise this snippet (assets/scripts/one-anchor-per-pr.test.sh).
-#
-# Multi-candidate tiebreak: pick the OLDEST anchor (the original predates any
-# rework-minted duplicate). `gc bd list --json` names the creation timestamp
-# `created_at` — `.created` does not exist on a real row, so sorting on it alone
-# collapses to lexicographic id order and can elect the NEWER, gateless duplicate
-# as GATING_ANCHOR (stamping anchor_bead + check.<name> on the wrong bead while
-# the true anchor stays red). `.created` is kept only as a defensive fallback for
-# a differently-shaped row; `.id` is the last-resort determinism guarantee.
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
 for MR_STATE in pull_request pre_open_gate; do
@@ -2150,614 +562,75 @@ for MR_STATE in pull_request pre_open_gate; do
 done
 GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
-[ -n "$EXISTING_ANCHOR" ] && echo "Rework hand-back: branch $BRANCH already gated by anchor $EXISTING_ANCHOR; $WORK will close as landed-on-branch (one-anchor-per-PR, tk-ynz4b)."
-
-# CODEX_GATE / PRE_OPEN were computed in step 2. When codex is a check-set
-# member, dispatch the signoff review — pre-open against the branch, post-open
-# against the PR. The check_set membership normalization (whole-line match) lives
-# at the step-2 decision and at the fail-closed site below (inlined there so the
-# extracted signoff-anchor-failclosed snippet is self-contained); this site keys
-# off the precomputed CODEX_GATE instead of re-normalizing.
-if [ "$CODEX_GATE" = 1 ]; then
-  CODEX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat-codex"
-  FIX_POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
-
-  # Shared membership predicate — canonical copy in assets/scripts/check-set-heal.sh,
-  # drift-checked by assets/scripts/inflight-membership.test.sh. Copy the markers too.
-  # >>> inflight-membership
-  # shellcheck disable=SC2034  # part of the shared block; not every host spends it
-  INFLIGHT_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
-  INFLIGHT_MEMBERSHIP_JQ='def claimable:
-  . as $b
-  | (($b.metadata // {})) as $m
-  | ((($b.assignee // "") | tostring) | gsub("[[:space:]]"; "")) as $as
-  | ((($m["gc.routed_to"] // "") | tostring) != "")
-    or (((($m["gc.execution_routed_to"] // "") | tostring) != "") and ($as == ""));
-def acting($live):
-  . as $b
-  | (($b.metadata // {})) as $m
-  | (($live | split(",")) | map(select(. != "open"))) as $owning
-  | ((($m.task_kind // "") | tostring) == "review")
-    or (($owning | index(((($b.status // "") | tostring) | ascii_downcase))) != null)
-    or ($b | claimable);
-def anchor_authority($a):
-  ((((. // {}).metadata // {}).anchor_bead // "") | tostring) as $ab
-  | if $ab == "" then "unattributed" elif $ab == $a then "mine" else "theirs" end;
-'
-  # <<< inflight-membership
-
-  # Dedup an in-flight review so a second refinery pass reuses it (idempotent)
-  # rather than dispatching a twin. Pre-open keys the lookup on the branch +
-  # anchor (no PR number exists yet); post-open keys on the PR number.
-  #
-  # BOTH ARMS DECIDE MEMBERSHIP THE SAME WAY, through `anchor_authority` above:
-  # `anchor_bead` is authoritative and a review naming ANOTHER anchor is positively
-  # not this one's (tk-j5wrs ruling 2). The pre-open arm asks the ledger for it
-  # directly; the post-open arm cannot, because a PR number is shared by every
-  # anchor that ever gated the branch — one-anchor-per-PR resolves $GATING_ANCHOR
-  # for exactly that reason — so it filters what the PR-keyed query returns instead
-  # of trusting the first row. Reusing another anchor's review is how one signoff
-  # ends up holding two merges, and minting a twin because the query returned
-  # somebody else's row first is the other half of the same mistake.
-  if [ "$PRE_OPEN" = 1 ]; then
-    REVIEW_TITLE="Review branch $BRANCH -> $TARGET: $ISSUE_TITLE"
-    EXISTING_REVIEW=$(gc bd list \
-      --metadata-field task_kind=review \
-      --metadata-field review_branch="$BRANCH" \
-      --metadata-field anchor_bead="$GATING_ANCHOR" \
-      --status=open,in_progress --limit=1 --json 2>/dev/null \
-      | jq -r '.[0].id // empty')
-  else
-    REVIEW_TITLE="Review PR#$PR_NUMBER: $ISSUE_TITLE"
-    EXISTING_REVIEW=$(gc bd list \
-      --metadata-field task_kind=review \
-      --metadata-field pr_number="$PR_NUMBER" \
-      --status=open,in_progress --limit=0 --json 2>/dev/null \
-      | jq -r --arg a "$GATING_ANCHOR" "$INFLIGHT_MEMBERSHIP_JQ"'
-          [ .[]? | select((anchor_authority($a)) != "theirs") ] | .[0].id // empty' 2>/dev/null)
-  fi
-
-  # CONVERGENCE CAP, refinery half (tk-uqfk1). The polecat half declines to file
-  # a rework child past the cap (template-fragments/polecat-non-impl-done.template.md,
-  # signoff-round-cap). This is the same check on the OTHER side of the loop: the
-  # two halves are independent, so a rig running a stale prompt fragment still
-  # cannot mint round N+1 here. The count is now the SHARED block rather than a
-  # second implementation of it (tk-vie5k) — it used to be re-typed here, which is
-  # how three of the four dispatchers ended up with no cap at all.
-  CAP_ANCHOR="$GATING_ANCHOR"
-  # >>> signoff-round-cap
-  # Rounds spent on CAP_ANCHOR, counted off the anchor itself: one rework child per
-  # round by construction, each stamped `source_review_bead` by the signoff that
-  # filed it. EVERY status counts — a closed child is a COMPLETED round.
-  #
-  # THE COUNT BELONGS TO THE ANCHOR, not to whoever is about to dispatch (tk-j5wrs
-  # ruling 3). Three of the four dispatchers had no cap at all, so round N+1 was
-  # minted in exactly the window the cap exists to close; a count read off the anchor
-  # cannot drift between them. Copy this block, markers included — every copy is
-  # extracted, diffed against canonical and EXECUTED by
-  # assets/scripts/signoff-round-cap.test.sh.
-  #
-  # Inputs:  CAP_ANCHOR (may be empty), GC_MAX_REVIEW_ROUNDS (default 3)
-  # Outputs: ROUNDS, CAP_HIT
-  #
-  # NO ANCHOR NEVER CAPS: without one there is no reliable round history, and capping
-  # on a guess parks live work for a human. An unreadable ledger reads as 0 for the
-  # same reason — the wrong direction here strands every review during an outage.
-  CAP_ANCHOR="${CAP_ANCHOR:-}"
-  ROUNDS=0
-  if [ -n "$CAP_ANCHOR" ]; then
-    ROUNDS=$(gc bd dep list "$CAP_ANCHOR" --direction=up -t parent-child --json 2>/dev/null | jq '[.[] | select(.metadata.source_review_bead != null)] | length' 2>/dev/null || echo 0)
-  fi
-  case "${ROUNDS:-}" in ''|*[!0-9]*) ROUNDS=0 ;; esac
-  CAP_HIT=0
-  if [ -n "$CAP_ANCHOR" ] && [ "$ROUNDS" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
-    CAP_HIT=1
-  fi
-  # <<< signoff-round-cap
-  if [ "$CAP_HIT" = 1 ]; then
-    # Do NOT mint a review bead and do NOT wake the codex pool. Leave the anchor
-    # OPEN and held: with no open rework child the merge skill still will not
-    # land it, so this parks for a human rather than merging past an owed gate.
-    #
-    # >>> signoff-cap-no-gate-write
-    # AND DO NOT TOUCH check.<gate>. This arm stops the SPAWN and routes to a
-    # human; the gate's VERDICT is recorded by the one pass that owns it,
-    # assets/scripts/reconcile-gate-verdicts.sh, whose R11 stamps
-    # `check.<gate>=exception@<head>` for this exact condition. Until tk-mf3em
-    # this arm also cleared the marker, so ONE convergence-cap event produced two
-    # opposite terminal states and which one survived was decided by pass
-    # ordering (su-uzy9.5 2026-08-13, arm B last; sl-ew4w 2026-08-19, this arm
-    # last). Both were observed in production.
-    #
-    # Clearing was never a safety property. merge-skill.sh holds on anything that
-    # is not `green@<live head>`, so an absent marker holds exactly as hard as a
-    # stale or non-green one — the clear bought nothing there. What it cost is
-    # the opposite of what the cap is for: check-set-heal.sh dispatches on an
-    # ABSENT marker and skips on `exception@*`, so clearing re-armed the very
-    # dispatch this arm just declined to make. It also re-runs every pass that
-    # reaches the dispatch (see the escalation note below), while
-    # reconcile-gate-verdicts runs earlier in the same wake from find-work — so
-    # the marker oscillated stamped/cleared once per wake and check-set-heal
-    # re-dispatched codex on every one. Live on sl-ew4w/PR#533: a no-op review
-    # roughly every 14 minutes (sl-88w0u, sl-o8akz, sl-pv0md, sl-3bi4n), holding
-    # an APPROVED + CLEAN PR for ~14h.
-    #
-    # It could also destroy a VALID verdict. CODEX_GATE is decided by check_set
-    # membership alone, so this arm is reached whenever the merge is held for ANY
-    # reason — including `check.codex=green@<live head>` with a different gate
-    # (say `approval`) doing the holding. Unsetting there discards a green nobody
-    # asked to retract.
-    #
-    # The sidecars are the tell that this was always incoherent: the clear
-    # removed `check.codex` but not `check.codex.reason` /
-    # `.exception_escalated`, leaving the anchor asserting that an exception was
-    # escalated for a gate that was never evaluated. Not writing the marker at
-    # all is what makes the two arms agree by construction.
-    gc bd update "$GATING_ANCHOR" \
-      --set-metadata gc.routed_to=human \
-      --set-metadata blocked_reason="signoff did not converge after $ROUNDS rework rounds (cap ${GC_MAX_REVIEW_ROUNDS:-3}); findings are in the review beads under this anchor" \
-      >/dev/null 2>&1 || true
-    # <<< signoff-cap-no-gate-write
-    # >>> escalation-wiring-signoff-cap
-    # RE-DERIVED, so next cycle genuinely retries: the anchor stays OPEN and held
-    # with its rounds count intact, and this arm recomputes ROUNDS >= cap on every
-    # pass that reaches the dispatch. A stuck cap therefore mails once and then
-    # rides the cooldown instead of once per pass for as long as the human is away.
-    SCRIPTS_DIR=""
-    for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-      if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-    done
-    # ROUNDS is the news here: another completed rework round is a genuinely
-    # different situation and must get through at once, while re-observing the
-    # same round count is the repetition this gate exists to suppress. The branch
-    # or PR identifies which target is capped. No timestamp, and nothing the gate
-    # itself writes.
-    STATE="signoff-cap/${ROUNDS:-0}/${GC_MAX_REVIEW_ROUNDS:-3}/${BRANCH:-pr-$PR_NUMBER}"
-    BODY="Target: ${BRANCH:-PR#$PR_NUMBER}
-Rounds spent: $ROUNDS (cap ${GC_MAX_REVIEW_ROUNDS:-3})
-
-The refinery declined to dispatch another codex review. No review bead was
-created and no pool was woken. The anchor is OPEN, held, and routed to human:
-land as-is, split the remaining findings into follow-up beads, or abandon."
-    if [ -n "$SCRIPTS_DIR" ]; then
-      if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$GATING_ANCHOR" --kind refinery --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ESCALATION: signoff not converging on $GATING_ANCHOR ($ROUNDS rounds)" --body "$BODY"; then
-        echo "refinery: escalation-gate did not send the signoff-cap notice (see its stderr); NOT falling back to a bare mail. The anchor stays OPEN and held, so the next cycle re-derives the cap and retries." >&2
-      fi
-    else
-      gc mail send mayor/ -s "ESCALATION: signoff not converging on $GATING_ANCHOR ($ROUNDS rounds)" -m "$BODY" || echo "refinery: fallback 'gc mail send' failed; next cycle retries." >&2
-    fi
-    # <<< escalation-wiring-signoff-cap
-    echo "refinery: $GATING_ANCHOR — signoff round cap reached ($ROUNDS >= ${GC_MAX_REVIEW_ROUNDS:-3}); routed to human, no re-dispatch"
-  elif [ -z "$EXISTING_REVIEW" ]; then
-# The METHOD carried by this dispatch (tk-jufvl, wired here by tk-dy7sb). THIS is
-# the path that mints most review beads — both the PRE_OPEN (branch) arm and the
-# post-open (PR) arm funnel through the one create below — and until now it was
-# the only dispatch that named no method: 45 of the 60 most recent review beads
-# in this rig carry an empty description. A reviewer handed a bare title picks its
-# own method by catalog description-match, which is the drift that ran a 6-persona
-# fan-out at ~4.7M tokens per review. review-dispatch-body.sh is the ONE source of
-# that prose, already shared by check-set-heal.sh and reconcile-merged-prs.sh —
-# both REPAIR paths. Wiring it here is what makes the method a property of the
-# review bead rather than of the reviewing agent's catalog.
-#
-# FAIL-SOFT, never fail-stop, for the same reason as the two existing callers: an
-# un-dispatched signoff leaves the armed gate unsatisfiable and HOLDS the merge
-# forever, which is strictly worse than a title-only bead. A missing or failing
-# emitter degrades to exactly today's behaviour, loudly.
-#
-# Resolution mirrors the pack-script precedent in this same formula (find-work,
-# SCRIPTS_DIR): a formula step is NOT the script, so there is no $0/BASH_SOURCE to
-# dirname off — resolve from agent-env paths instead. The owning rig finds the
-# emitter under its own root; importer rigs (signal-loom, gascity, shutupandlisten)
-# find it at <city>/rigs/gc-toolkit. First executable candidate wins.
-#
-# Kept BACKSLASH-FREE on purpose. This description is a TOML basic multi-line
-# string (triple-quoted), where a line-ending backslash is an escape that joins
-# the two lines: the text the agent runs would then differ from the text
-# assets/scripts/first-round-review-body.test.sh extracts and executes. That test
-# asserts the absence of backslashes here, so the two forms cannot diverge.
-# >>> first-round-review-body
-    REVIEW_BODY_EMITTER=""
-    for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-      if [ -x "$cand/review-dispatch-body.sh" ]; then REVIEW_BODY_EMITTER="$cand/review-dispatch-body.sh"; break; fi
-    done
-    REVIEW_BODY=""
-    if [ -x "$REVIEW_BODY_EMITTER" ]; then
-      REVIEW_BODY=$("$REVIEW_BODY_EMITTER" 2>/dev/null) || REVIEW_BODY=""
-    fi
-    if [ -n "$REVIEW_BODY" ]; then
-      REVIEW_BEAD=$(printf '%s' "$REVIEW_BODY" | gc bd create "$REVIEW_TITLE" -t task --body-file - --json | jq -r .id)
-    else
-      echo "refinery: WARN review method unavailable (${REVIEW_BODY_EMITTER:-review-dispatch-body.sh not found beside this rig assets/scripts}); dispatching a TITLE-ONLY review — the reviewer will have to pick its own method (tk-jufvl)" >&2
-      REVIEW_BEAD=$(gc bd create "$REVIEW_TITLE" -t task --json | jq -r .id)
-    fi
-# <<< first-round-review-body
-    # anchor_bead is the DURABLE anchor pointer: it is set atomically with the
-    # review's routing fields here, so it is as reliable as the review's own
-    # dispatch. The completion path resolves the anchor by the BLOCKS edge first
-    # and falls back to this field when the edge is missing
-    # (template-fragments/polecat-non-impl-done.template.md). It points at the
-    # RESOLVED gating anchor — $WORK on a first handoff, the existing anchor on
-    # a rework hand-back (tk-ynz4b) — so the signoff stamps check.<name> on the
-    # bead the merge skill actually gates on, never on a rework child. PRE-OPEN
-    # stamps review_branch/review_base (the compare-range the reviewer diffs,
-    # and the template's pre-open discriminator); POST-OPEN stamps
-    # pr_url/pr_number.
-    #
-    # review_pool is the DURABLE copy of the review's own route, stamped
-    # atomically with it for the same reason anchor_bead is stamped alongside
-    # the blocks edge: gc.routed_to is WORKING state (a claim consumes it, a
-    # re-route rewrites it), so the completion path cannot rely on it still
-    # being there. When a signoff ends with the gate unrecorded it must put the
-    # review BACK in a pool to be re-offered; with no route to restore, the bead
-    # is open, unassigned and in NO pool — offered to nobody, so the gate is
-    # owed forever and the PR (or the pre-open branch) sits held. This is the
-    # field that path falls back to.
-    if [ "$PRE_OPEN" = 1 ]; then
-      gc bd update "$REVIEW_BEAD" \
-        --set-metadata task_kind=review \
-        --set-metadata check_name=codex \
-        --set-metadata review_branch="$BRANCH" \
-        --set-metadata review_base="$TARGET" \
-        --set-metadata fix_target_pool="$FIX_POOL" \
-        --set-metadata anchor_bead="$GATING_ANCHOR" \
-        --set-metadata review_pool="$CODEX_POOL" \
-        --set-metadata gc.routed_to="$CODEX_POOL"
-    else
-      gc bd update "$REVIEW_BEAD" \
-        --set-metadata task_kind=review \
-        --set-metadata check_name=codex \
-        --set-metadata pr_url="$PR_URL" \
-        --set-metadata pr_number="$PR_NUMBER" \
-        --set-metadata fix_target_pool="$FIX_POOL" \
-        --set-metadata anchor_bead="$GATING_ANCHOR" \
-        --set-metadata review_pool="$CODEX_POOL" \
-        --set-metadata gc.routed_to="$CODEX_POOL"
-    fi
-    # Gate-as-dep (close-on-land): the review bead BLOCKS the open anchor —
-    # the RESOLVED gating anchor, same as anchor_bead above. Replaces the
-    # retired backward work_bead pointer — the dep graph now carries the gate,
-    # and the rework arm resolves the anchor by walking this edge
-    # (gc bd dep list <review> --direction=up -t blocks).
-    #
-    # The edge is best-effort: a failed edge must not strand the PR (the review
-    # still routes), so we only warn. The completion path does not depend on the
-    # edge alone — it falls back to metadata.anchor_bead (stamped above) so a
-    # dropped edge cannot leave the anchor un-signoff-stamped and hold
-    # the merge forever.
-    gc bd dep "$REVIEW_BEAD" --blocks "$GATING_ANCHOR" \
-      || echo "WARN: could not attach review $REVIEW_BEAD as a gate-dep of $GATING_ANCHOR (anchor_bead fallback persists the link)" >&2
-    gc session wake "$CODEX_POOL" || true
-    gc session nudge "$CODEX_POOL" "Review bead $REVIEW_BEAD for $WORK" || true
-  fi
-  # The review bead the fail-closed gate below verifies: the one just created, or
-  # the reused open one (which the dispatch above does NOT re-stamp).
-  REVIEW_FOR_GATE="${REVIEW_BEAD:-$EXISTING_REVIEW}"
-fi
-
-# Capture the rendered check-set for the codex fail-closed check below. Kept
-# OUTSIDE the signoff-anchor-failclosed markers so the extracted snippet stays
-# template-free — the regression test drives CHECK_SET through the env.
-# Re-applies the same tk-4na1b empty-never-beats-the-default normalization as the
-# CODEX_GATE site above (empty -> declared default; `none`/`off` -> the canonical
-# `none` sentinel, which merge-skill.sh reads as no-gates), so this block stays
-# self-sufficient if it is run on its own: a raw re-render here would otherwise
-# clobber the normalized value and hand the stamp sites below an empty check_set —
-# which is not merely ungated but INDISTINGUISHABLE from a never-normalized
-# recovery bead (tk-i48ca).
-CHECK_SET="{{check_set}}"
-_cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
-case "$_cs_canon" in
-  '')       CHECK_SET="codex" ;;
-  none|off) CHECK_SET="none" ;;
-esac
-unset _cs_canon
-
-# Fail-closed (finding fix #2; finding fix #3 adds the codex-id guard inside the
-# markers below): do NOT detach the anchor into gating unless the durable
-# review->anchor link (anchor_bead) is RECORDED. The dispatch stamps it
-# atomically for a NEW review, but a reused review (EXISTING_REVIEW) was never
-# stamped, and any stamp can fail transiently — so heal it here and VERIFY it
-# persisted. If it cannot be recorded, leave $WORK assigned to the refinery and
-# OPEN; the next patrol retries (idempotent: the EXISTING_REVIEW guard + this
-# heal converge). Detaching with no recoverable anchor would strand the PR: the
-# signoff could not stamp check.codex and the merge skill would hold the
-# merge forever. The markers let the regression test extract this exact
-# snippet (assets/scripts/signoff-anchor-failclosed.test.sh).
-# >>> signoff-anchor-failclosed
-# Finding fix #3 (codex gate requires a review id): an empty REVIEW_FOR_GATE in
-# codex mode means review create/lookup failed — gc bd create returned no id on a
-# transient CLI failure (jq on empty input exits 0, and this block is not under
-# set -e), so REVIEW_BEAD and EXISTING_REVIEW are both empty. The no-op path below
-# (`if [ -n ... ]`) would then SKIP the gate and fall through to the gating
-# transition, detaching the anchor with no review bead. That strands the PR
-# exactly like the unrecorded-anchor case: the merge skill holds the merge
-# waiting for check.codex, but no review bead exists to ever stamp it.
-# Fail closed — leave $WORK assigned to the refinery and OPEN so the next patrol
-# retries (idempotent: the EXISTING_REVIEW guard heals on retry). Non-codex gates
-# legitimately have no review bead, so this fires ONLY when codex review is a
-# required check-set member.
-# Membership normalized identically to the CODEX_GATE site above (whole-token
-# match against the comma-wrapped list, whitespace stripped) so a spaced
-# "lint, codex" is recognized here too — matching merge-skill.sh enforcement so
-# dispatch and fail-closed never diverge (tk-aj4ua). Decided IN-SHELL for the
-# reason given there (tk-tmefn): a `... | grep -qxF codex` pipeline reports 141 on
-# a long check_set once `pipefail` is on, which HERE would skip the guard entirely
-# and detach the anchor with NO review bead — the exact stranding this fail-closed
-# check exists to prevent. Latent today (this block sets `-e` only), fixed anyway
-# so the two sites cannot diverge and so enabling pipefail stays safe.
-_fc_codex=0
-case ",$(printf '%s' "${CHECK_SET:-}" | tr -d '[:space:]')," in
-  *",codex,"*) _fc_codex=1 ;;
-esac
-if [ "$_fc_codex" = 1 ] && [ -z "${REVIEW_FOR_GATE:-}" ]; then
-  echo "Codex review gate required but no review id (create/lookup failed); leaving $WORK assigned to refinery for retry." >&2
-  gc runtime drain-ack
-  exit 1
-fi
-# The linkage target is the RESOLVED gating anchor (one-anchor-per-pr-resolve
-# above): $WORK on a first handoff, the existing anchor on a rework hand-back
-# (tk-ynz4b). Default to $WORK so the extracted snippet runs standalone.
-FC_ANCHOR="${GATING_ANCHOR:-$WORK}"
-# The review's ROUTE, read back the same way the anchor link is (tk-tmefn).
-#   review_pool   the DURABLE copy of the route. Never consumed, and the only
-#                 field the signoff can restore the route from when it must put
-#                 the review BACK to be re-offered.
-#   gc.routed_to  the LIVE offer, which a claim CONSUMES — so an empty value is a
-#                 fault only when nobody has claimed the bead either. A codex
-#                 polecat that claimed the review between the dispatch and this
-#                 read leaves it legitimately empty, and re-routing then would
-#                 offer a claimed review to a second pool. A non-empty value
-#                 naming a DIFFERENT pool is a fault in its own right (tk-5niup):
-#                 it is a route to somebody who will never stamp this gate.
-# An unreadable bead answers neither, and unverified is not verified: it takes
-# the same fail-closed defer as a bad route.
-fc_read_route() { # <bead-id> -> "review_pool|gc.routed_to|assignee" (empty if unreadable)
-  gc bd show "$1" --json 2>/dev/null \
-    | jq -r '.[0] | [(.metadata.review_pool // ""),
-                     (.metadata["gc.routed_to"] // ""),
-                     (.assignee // "")] | join("|")' 2>/dev/null
-}
-fc_route_ok() { # <route-state> <pool>
-  local state="${1:-}" pool="${2:-}" p r a
-  [ -n "$state" ] || return 1
-  IFS='|' read -r p r a <<< "$state"
-  [ "$p" = "$pool" ] || return 1
-  # The live half must BE the pool, not merely be non-empty (tk-5niup). A
-  # gc.routed_to naming a DIFFERENT pool is not a route to $pool: the review is
-  # offered to a pool that will never stamp THIS gate, so no codex polecat is
-  # guaranteed to claim it — yet the anchor is detached into pre_open_gate /
-  # pull_request all the same. That is the identical unclaimable strand an empty
-  # route produces, only harder to see because the field looks populated, and it
-  # is precisely the route-persistence class this gate exists to close.
-  # Match-or-claimed, identical to arm_stale_gate (reconcile-merged-prs.sh) and
-  # check-set-heal.sh's route_ok, so the formula gate and the scripts cannot
-  # diverge on what "routed" means: an assignee means the review is ALREADY
-  # claimed (the claim consumed gc.routed_to, so empty is legitimate then);
-  # unclaimed, the live offer has to name $pool.
-  [ -n "$a" ] || [ "$r" = "$pool" ] || return 1
-  return 0
-}
-if [ -n "${REVIEW_FOR_GATE:-}" ]; then
-  gc bd update "$REVIEW_FOR_GATE" --set-metadata anchor_bead="$FC_ANCHOR" >/dev/null 2>&1 || true
-  RECORDED_ANCHOR=$(gc bd show "$REVIEW_FOR_GATE" --json 2>/dev/null \
-    | jq -r '.[0].metadata.anchor_bead // empty')
-  if [ "$RECORDED_ANCHOR" != "$FC_ANCHOR" ]; then
-    echo "Anchor linkage (anchor_bead) not durably recorded on review $REVIEW_FOR_GATE; leaving $WORK assigned to refinery for retry." >&2
-    gc runtime drain-ack
-    exit 1
-  fi
-  # A recorded anchor is only half the link: the review must also be REACHABLE by
-  # the pool that has to claim it. The dispatch above wrote the route best-effort
-  # — its status discarded, and a `gc bd update` can report success on a write
-  # that did not land — and nothing read it back. A dispatch counted without a
-  # route is not a lost pass but a PERMANENT strand: the review bead is open, so
-  # the next patrol's EXISTING_REVIEW dedup reuses it rather than minting a
-  # replacement, while no pool can ever claim it. The gate stays armed and unmet,
-  # the PR (or the pre-open branch) is held, and nothing retries. Repaired once —
-  # a transient write is the common case — then re-verified; still bad leaves
-  # $WORK with the refinery for the next patrol, exactly like the anchor-link
-  # failure above. Skipped entirely when no pool is in scope (a non-codex gate
-  # dispatches no review, so there is no route to owe).
-  if [ -n "${CODEX_POOL:-}" ]; then
-    FC_ROUTE=$(fc_read_route "$REVIEW_FOR_GATE")
-    if ! fc_route_ok "$FC_ROUTE" "$CODEX_POOL"; then
-      gc bd update "$REVIEW_FOR_GATE" \
-        --set-metadata review_pool="$CODEX_POOL" \
-        --set-metadata gc.routed_to="$CODEX_POOL" >/dev/null 2>&1 || true
-      FC_ROUTE=$(fc_read_route "$REVIEW_FOR_GATE")
-    fi
-    if ! fc_route_ok "$FC_ROUTE" "$CODEX_POOL"; then
-      echo "Review $REVIEW_FOR_GATE is not durably routed to $CODEX_POOL (got '$FC_ROUTE'); leaving $WORK assigned to refinery for retry." >&2
-      gc runtime drain-ack
-      exit 1
-    fi
-  fi
-fi
-# <<< signoff-anchor-failclosed
-
-# Close-on-land: keep the anchor OPEN as the PR's gating bead, DETACHED from both
-# work queues so it is neither re-grabbed nor read as demand:
-#   - assignee="" -> find-work (assignee=$GC_AGENT, open, has branch) skips it,
-#     so the refinery does not re-open/re-gate it in a loop;
-#   - gc.routed_to="" -> the open + unassigned anchor is NOT pool demand.
-# It closes later, on a verified merge, via reconcile-merged-prs.sh in the
-# find-work idle loop. This REPLACES the stock `gc bd close ... "Pull request
-# ready"`; closure now means landed, never handed-off.
-#
-# EXCEPT on a rework hand-back (one-anchor-per-pr-resolve above, tk-ynz4b): the
-# branch already has its gating anchor, and $WORK is a rework CHILD whose
-# landing target is the BRANCH, not {{target_branch}}. Its fix is on the branch
-# (pushed + verified this step, 0-diff-guarded), so closed=landed is honest —
-# close it and let gating continue on the existing anchor alone. $WORK must
-# NEVER be stamped merge_result: while open, a merge_result-free rework child
-# with pr_number is exactly what the merge skill's in-flight-rework hold
-# counts, and a merge_result-carrying one would join the anchor enumeration as
-# a gateless second anchor (the tk-ynz4b bypass). No marker refresh is needed
-# on the existing anchor: the pushed head moved, so every head-bound
-# check.<name>=green@<old-head> marker is already stale and re-gates until the
-# re-review dispatched above stamps the new head.
 # >>> one-anchor-per-pr-terminal
 if [ -n "$EXISTING_ANCHOR" ]; then
   REWORK_SHA=$(git rev-parse --short temp 2>/dev/null || echo "")
-  gc bd update "$EXISTING_ANCHOR" \
-    --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-review ${REVIEW_FOR_GATE:-n/a} dispatched (one-anchor-per-PR, tk-ynz4b)." \
-    >/dev/null 2>&1 || true
+  gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   gc bd update "$WORK" --unset-metadata rejection_reason >/dev/null 2>&1 || true
   gc bd close "$WORK" --reason "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"
-elif [ "$PRE_OPEN" = 1 ]; then
-  # PRE-OPEN: no PR yet. Park in the pre_open_gate sub-state; pre-open-resolve.sh
-  # opens the non-draft PR once check.codex=green@<branch-head> and flips this to
-  # merge_result=pull_request. branch/target (set by the polecat) stay on the bead
-  # for the resolver; merged_target records the intended landing base.
-  gc bd update $WORK \
-    --status=open \
-    --assignee="" \
-    --set-metadata merge_result=pre_open_gate \
-    --set-metadata merged_target="$TARGET" \
-    --set-metadata check_set="$CHECK_SET" \
-    --set-metadata gc.routed_to="" \
-    --unset-metadata rejection_reason
+elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
+  if [ "$PRE_OPEN" != 1 ]; then
+    echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
+  fi
+  "$LC" transition "$WORK" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
 else
-  # POST-OPEN: the PR exists. Record its fields + merged_target and mark it gating.
-  gc bd update $WORK \
-    --status=open \
-    --assignee="" \
-    --set-metadata merge_result=pull_request \
-    --set-metadata pr_url="$PR_URL" \
-    --set-metadata pr_number="$PR_NUMBER" \
-    --set-metadata merged_target="$TARGET" \
-    --set-metadata check_set="$CHECK_SET" \
-    --set-metadata gc.routed_to="" \
-    --unset-metadata rejection_reason
+  "$LC" transition "$WORK" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
 fi
 # <<< one-anchor-per-pr-terminal
 ```
-If the gating update fails, the bead stays assigned to the refinery and OPEN —
-it is simply re-processed next patrol iteration (the `EXISTING_REVIEW` guard and
-PR reuse make the retry idempotent). Do NOT hand-close it; closure is the
-merge-detection pass's job alone. The same convergence covers a failed rework
-hand-back close: `$WORK` stays open + assigned and the next patrol re-runs the
-step (push, review dedup, and anchor resolution are all idempotent).
+The anchor stays OPEN, detached from both work queues (`assignee=""` keeps
+it out of find-work; empty route keeps it out of pool demand). It closes
+later, on a verified merge, via the cadence — never here. A failed
+transition leaves $WORK assigned and open; the next patrol retries
+idempotently (push and anchor resolution are both re-runnable).
 
-**5. Cleanup (leaves worktree detached so other worktrees can hold $TARGET):**
-```bash
-git checkout "$TARGET"
-git branch -d temp
-git switch --detach HEAD
-```
-Do NOT delete `$BRANCH` in mr mode — GitHub pull requests need the source branch.
+6. Cleanup: `git checkout "$TARGET" && git branch -d temp && git switch
+--detach HEAD`. Never delete `$BRANCH` in mr mode — the PR needs it.
 
-**If MERGE_STRATEGY = "local":**
+**Unsupported strategies (e.g. `local`):** transition nothing; escalate
+via escalate.sh (`--subject $WORK --key refinery-unsupported-strategy`) and
+leave the bead for a human to re-strategize.
 
-STOP. Local-only merge handoff is not implemented in the Gastown example pack.
-Leave the work bead assigned to refinery and escalate to mayor for manual handling:
-```bash
-# >>> escalation-wiring-strategy-local
-# RE-DERIVED, so next cycle genuinely retries: this arm deliberately transitions
-# NOTHING (see the line below), so the bead keeps its assignee and its
-# merge_strategy and find-work re-selects it on the next pass. Without the gate
-# that is an unbounded mail per cycle for as long as the human takes to decide —
-# the same shape as the approval-gated queue, on a bead that never even moves.
-SCRIPTS_DIR=""
-for cand in "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  if [ -x "$cand/escalation-gate.sh" ]; then SCRIPTS_DIR="$cand"; break; fi
-done
-# The strategy plus where it would have landed. A human editing merge_strategy to
-# something supported, or repointing the branch, is the news that reopens this.
-STATE="strategy-local/${MERGE_STRATEGY:-local}/${BRANCH:-none}/${TARGET:-none}"
-BODY="Work bead: $WORK
-Branch: $BRANCH
-Target: $TARGET
-The Gastown example refinery supports direct and mr/pr merge strategies only."
-if [ -n "$SCRIPTS_DIR" ]; then
-  if ! "$SCRIPTS_DIR/escalation-gate.sh" --anchor "$WORK" --kind refinery --state "$STATE" --cooldown "{{escalation_cooldown}}" --subject "ESCALATION: unsupported merge_strategy=local" --body "$BODY"; then
-    echo "refinery: escalation-gate did not send the unsupported-strategy notice (see its stderr); NOT falling back to a bare mail. The bead is untouched by design, so the next cycle re-derives this and retries." >&2
-  fi
-else
-  gc mail send mayor/ -s "ESCALATION: unsupported merge_strategy=local" -m "$BODY" || echo "refinery: fallback 'gc mail send' failed; next cycle retries." >&2
-fi
-# <<< escalation-wiring-strategy-local
-```
-Do NOT close the bead, delete the branch, or burn the wisp until a human decides how to proceed.
-
-**GATE**: direct mode requires a verified target push, then closes the bead. mr
-mode POST-OPEN requires a verified PR URL, then transitions the bead to GATING
-(`merge_result=pull_request`, stays OPEN). mr mode PRE-OPEN (codex gate, first
-handoff) transitions to `pre_open_gate` with NO PR — `pre-open-resolve.sh` opens
-the PR once codex is green, moving it to `pull_request`. Either way the bead
-closes only on a verified merge (reconcile-merged-prs.sh), never at handoff.
-EXCEPTION — rework hand-back (tk-ynz4b): when the branch already has an open
-gating anchor, `$WORK` is a rework child; it closes landed-on-branch with NO
-merge_result and gating continues on the existing anchor alone."""
+**GATE**: direct requires a verified target push then one merged+close
+transition; mr requires a verified branch push then one gating transition
+(pre_open_gate, or pull_request with the PR recorded). The bead closes only
+on a verified merge — never at handoff — except a rework hand-back, which
+closes landed-on-branch with NO merge_result."""
 
 [[steps]]
 id = "patrol-summary"
 title = "Record patrol cycle summary"
 needs = ["merge-push"]
 description = """
-Summarize this patrol cycle for handoff context. This becomes the
-audit trail — the next refinery session can see what happened.
-
-Include:
-- Branch merged (name, target)
-- Test results (pass/fail, which checks ran)
-- Bugs filed (IDs, if any pre-existing failures were tracked)
-- Rejections (if the branch was rejected back to pool)
-- Any escalations sent — AND any the gate suppressed. Suppression removes the
-  mail, never the record: a held anchor that did not mail this cycle is still
-  held and still belongs in this summary. Reading "no escalations sent" as
-  "nothing is stuck" is the failure the gate would otherwise introduce, so
-  write the hold, then whether it mailed.
-
-If the cycle ended early (conflict rejection, no work found), note
-why and what state was left.
-
-This summary is not stored separately — it lives in the wisp's
-closing reason. The next session can find it via `gc bd list --type=wisp
---status=closed --limit=5` if it needs predecessor context."""
+Summarize the cycle for handoff context (it lives in the wisp's closing
+reason): branch handled and disposition (merged / gated / rejected /
+blocked), check results, bugs filed, escalations sent — and holds observed
+that did NOT escalate; suppression removes the mail, never the record. If
+the cycle ended early, note why and what state was left."""
 
 [[steps]]
 id = "next-iteration"
-title = "Prepare next patrol iteration"
+title = "Pour next iteration and loop"
 needs = ["patrol-summary"]
 description = """
-**Config: integration_branch_auto_land = {{integration_branch_auto_land}}**
+Pour the next wisp BEFORE burning this one, and GUARD the assign — a poured
+but unassigned wisp reaches no hook and drops the loop. Forward every
+declared var: a --root-only pour materializes no defaults.
 
-**1. Convoy graduation — handled by the find-work idle loop, not here.**
-
-Graduation is a convergent reconcile pass (`reconcile-graduated-convoys.sh`,
-pass (c) of the find-work step), not an inline post-merge step. It must live
-there: under close-on-land a convoy CHILD closes only when
-`reconcile-merged-prs.sh` observes its PR merged — on an idle wake, not
-synchronously at this merge — so the wake that closes a convoy's last child is
-exactly where "all members closed" first becomes true. Pass (c) runs right
-after (b) on that same wake and assigns the now-complete OWNED convoy to the
-refinery (`branch=integration/<id>`, `target={{target_branch}}`,
-`merge_strategy=mr`) to land integration->main behind a human-approved PR.
-Owned-only, rig-scoped, idempotent — and non-vacuous: "all members closed" is
-necessary but NOT sufficient, since a member closed having landed nothing makes
-it vacuously true, so the pass also requires the ledger to record a merge onto
-the branch (tk-q0uxl). No coordinator and no `gc convoy land` in the loop.
-Nothing to do in this step.
-
-**FORBIDDEN**: Landing integration branches via raw `git merge`/`git push`.
-The convoy-bead assignment in pass (c) is the ONLY path.
-
-**2. Resolve the current wisp, pour next iteration, then burn this wisp:**
 ```bash
 CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
   CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
 fi
-NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var escalation_cooldown={{escalation_cooldown}} --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var check_set={{check_set}} --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next refinery wisp; not burning."
   gc runtime drain-ack
   exit 1
 fi
 if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
-  echo "Could not assign next refinery wisp; not burning."
+  echo "Could not assign next refinery wisp; rolling it back and not burning."
+  gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile collects it."
   gc runtime drain-ack
   exit 1
 fi
@@ -2770,4 +643,5 @@ else
 fi
 ```
 
-Close this step. The new wisp is ready — re-read formula steps to begin."""
+Close this step. The new wisp is ready — re-read the step order (the plain
+`gc formula show mol-refinery-patrol`, not the full --json) and begin."""

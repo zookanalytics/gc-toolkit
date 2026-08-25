@@ -1,123 +1,18 @@
 #!/usr/bin/env bash
-# step-close — close the step bead THIS shell is executing, identified by who
-# owns it and which step it is, never by an environment variable (tk-niu2f).
+# step-close — close the step bead THIS shell is executing, identified by the
+# (assignee, gc.step_ref) pair, never by an environment variable.
+# GC_TRIGGER_BEAD_ID is the spawn-time bead and goes stale across a hook-claim,
+# so closing on it writes against the wrong bead; the store is authoritative.
 #
-# THE BUG THIS EXISTS TO PREVENT. Every graph.v2 step must close its own bead:
-# closing is what makes the next step ready, and a session that drains while
-# still owning an open assigned step bead is parked and re-pooled, so the step
-# is re-offered forever. Formulas therefore end each arm with a self-close, and
-# the id they closed on came from the environment:
+#   step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>] [--dry-run]
 #
-#     gc bd update "$GC_TRIGGER_BEAD_ID" --set-metadata gc.outcome=pass --status=closed
-#
-# `gc hook --claim` does NOT update `GC_TRIGGER_BEAD_ID` in the running
-# session's environment. After a hook-claim the variable still holds whatever
-# the session was spawned with, so the close lands on a bead this step has
-# nothing to do with. Observed 2026-08-13, session lx-2m6c: it claimed tk-9b3d8
-# (mol-feedback-distiller.load-and-gate) while its environment still read
-# GC_TRIGGER_BEAD_ID=tk-dy6cn — mol-feedback-miner.load-context, in_progress,
-# owned by a DIFFERENT live session (lx-dq84). Running the formula literally
-# would have closed the other session's unexecuted step AND left its own step
-# open to be re-offered: two molecules corrupted by one write.
-#
-# THE SAME-SESSION HALF, which is the commoner one. The fixture above is the
-# dramatic case; the everyday case needs no second session at all. A formula
-# whose steps deliberately share one session (continuation-group affinity) reads
-# a CORRECT variable on step 1 — the bead it was spawned on — and that same, now
-# stale, value on steps 2 and 3. There it names this session's OWN already-closed
-# step 1, so the close re-closes a closed bead: a successful, exit-0 no-op, after
-# which steps 2 and 3 are re-offered forever. Observed on signal-loom (root
-# sl-y17b: sl-sw26 -> sl-ot00 -> sl-57zu, the variable pinned at sl-sw26
-# throughout). Every multi-step single-session formula hits this on its happy
-# path.
-#
-# WHY THE OBVIOUS GUARD DOES NOT CATCH IT. The idiom is already guarded —
-# `[ -n "${GC_TRIGGER_BEAD_ID:-}" ]` — and the guard passes, because the
-# variable IS set. It is set to the wrong bead. Emptiness was never the failure
-# mode.
-#
-# WHY THIS IS FIXED HERE AND NOT IN THE RUNTIME. The obvious alternative — have
-# `gc hook --claim` re-export the variable — cannot work. GC_TRIGGER_BEAD_ID is
-# written in exactly two places, both building a session's SPAWN environment from
-# session.Info.TriggerBeadID (gascity cmd/gc/build_desired_state.go:3141 and
-# cmd/gc/session_lifecycle_parallel.go:1213, whose own comment notes neither key
-# is mutated on the start-prep path). A claim made by an already-running process
-# cannot alter that process's environment, so no runtime change makes this
-# variable track the current step. Resolution has to happen where the step runs.
-#
-# WHY IT IS WORSE THAN THE BUG IT REPLACED. The predecessor idiom closed on
-# `$GC_BEAD_ID`, which is not populated in the step environment at all
-# (tk-7w69a). That failed CLOSED: nothing was written and one workflow stalled
-# visibly. `$GC_TRIGGER_BEAD_ID` fails OPEN — a confident, successful write
-# against someone else's bead, with a zero exit status and nothing in the log
-# that looks wrong.
-#
-# WHAT IS AUTHORITATIVE INSTEAD. The bead itself. Every step bead carries, set
-# by the dispatch that handed it to this session:
-#
-#     assignee                = the claiming session's name
-#     metadata."gc.step_ref"  = the formula step it materializes
-#
-# That PAIR is the identity, and it names exactly one bead: this session's bead
-# for this step. It is a query, not an inheritance, so it cannot go stale across
-# a hook-claim — which is the whole defect. The caller passes --step because the
-# step id is the one fact the shell knows about itself and cannot misread; the
-# rest is read back from the store.
-#
-# STATUS IS NOT PART OF THE IDENTITY (tk-jww3y). The pair above is the proof of
-# ownership; status only says which tier of an executable bead we are looking
-# at, and an earlier version of this script treated `in_progress` as a third
-# identity component. It is not one, and assuming it was made the script fail on
-# its own happy path:
-#
-#     `gc hook --claim` flips status to in_progress only when the claim is what
-#     ASSIGNS the bead — the pool route. A graph.v2 step bead is assigned to its
-#     session up front by the graph (session affinity), so by the time the
-#     session claims it the assignee is already set and the claim advances
-#     nothing. The bead is executed at status `open`.
-#
-# Observed on mol-feedback-distiller run tk-u67el (2026-08-14): steps tk-jihd0
-# and tk-xf0ly both went open/unassigned -> open/assigned-to-the-session ->
-# closed, and were never in_progress at any point in their history. Both
-# resolutions here refused with an ownership proof they already held, and both
-# steps survived only on the agent noticing the FATAL and closing by explicit
-# id. Every step of every graph.v2 formula that self-closes through this helper
-# was on that fallback.
-#
-# So `open` is executable and is closed like `in_progress`. This does not
-# loosen the guard: the guard is the (assignee, step_ref) pair, which is
-# unchanged, and ambiguity is still refused rather than guessed. What it cannot
-# do is close a SIBLING step early — a sibling bead is pre-assigned to the same
-# session at the same time, but carries a different `gc.step_ref`, so it never
-# matches the --step this arm passes.
-#
-# `in_progress` is still resolved FIRST, and `open` is consulted only when that
-# tier is empty. Merging the two sets instead would turn a case this script
-# handles today (one in_progress bead, plus a same-step bead pre-assigned by a
-# second molecule) into an ambiguity refusal. Tiering keeps every currently
-# working resolution working and adds the open path strictly where the script
-# used to give up.
-#
-# WHY --bead IS A HINT AND NOT AN INSTRUCTION. `gc hook --claim --json` returns
-# `.bead_id`, and a caller holding it should say so — it saves a listing and it
-# is the id the claim actually handed out. But it is passed through the SAME
-# verification as everything else, because a caller can carry a stale id for
-# exactly the reason the environment does. A hint that verifies is used; a hint
-# that does not is reported and discarded, never trusted on the caller's word.
-#
-# WHAT IT REFUSES TO DO. It will not close a bead that is not assigned to this
-# session, not for this step, or one of several equally-matching candidates. A
-# refusal exits 2 and says why: an un-closed step bead stalls one workflow and
-# is visible in the graph, while a wrong close silently corrupts two. Between a
-# stall and a stray write, this script always picks the stall.
-#
-# IDEMPOTENT. A step bead already closed for this session and step is reported
-# and exits 0. Re-running an arm after a partial failure is a normal recovery
-# path and must not read as a fatal error.
-#
-# NOT set -e: every exit here is explicit, and a self-close runs at the end of
-# an arm where an inherited abort would skip the diagnostics that make a
-# failure actionable.
+# --bead is a HINT (e.g. `.bead_id` from `gc hook --claim --json`): used only if
+# it verifies against the same identity pair. A graph.v2 step executes at status
+# `open` (the graph pre-assigns it, so the claim advances nothing); in_progress
+# is resolved first, open only when that tier is empty. Ambiguity is refused —
+# a stalled step is visible, a wrong close corrupts two workflows.
+# Callers: formula done arms (mol-feedback-*), mol-polecat-work submit.
+# exit: 0 closed (or already closed) · 2 refused, nothing written
 set -uo pipefail
 
 usage() {
@@ -126,30 +21,21 @@ usage: step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>] [--d
 
   --step     the step's `gc.step_ref`, e.g. mol-feedback-distiller.load-and-gate
              (required — it is half of the identity that makes the close safe)
-  --outcome  value for metadata gc.outcome, default "pass". The formulas use
-             "pass" and "fail"; any [A-Za-z0-9._-] value is accepted.
+  --outcome  value for metadata gc.outcome, default "pass"
   --bead     candidate id, e.g. `.bead_id` from `gc hook --claim --json`. A
              HINT: used only if it verifies as this session's bead for --step.
   --dry-run  resolve and report; write nothing.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session; any that are
      set are tried as the assignee. GC_TRIGGER_BEAD_ID is consulted only as a
-     last resort and only if it verifies — see the header.
-
-Ownership is the (assignee, gc.step_ref) pair. A bead proven to be this
-session's for this step is closed at status `in_progress` or `open` — a
-graph.v2 step is assigned by the graph rather than by the claim, so it
-executes at `open` and never reaches in_progress (tk-jww3y). `in_progress`
-is resolved first; `open` only if that finds nothing.
+     last resort and only if it verifies.
 
 exit: 0 closed (or already closed) · 2 refused to close, nothing written
 USAGE
 }
 
-# Value-taking options validate before the shift: `OPT="$2"; shift 2` both hangs
-# the parse loop when the option ends argv (shift 2 fails, argv is untouched,
-# `while [ $# -gt 0 ]` spins) and silently eats a following option as its value.
-# Same shape as escalation-gate.sh; keep it when adding an option.
+# Validate before the shift: `OPT="$2"; shift 2` hangs the parse loop when the
+# option ends argv, and silently eats a following option as its value.
 require_value() {
   if [ "$#" -lt 2 ]; then
     echo "step-close: $1 requires a value" >&2
@@ -183,10 +69,6 @@ if [ -z "$STEP" ]; then
   exit 2
 fi
 
-# An unsubstituted formula var reaching here means the pour did not materialize
-# it. Refuse rather than search for the literal: `{{x}}` matches no step_ref, so
-# resolution would fail anyway, and it would fail with a confusing "no bead
-# found" instead of naming the real problem.
 case "$STEP" in
   '{{'*'}}')
     echo "step-close: --step was passed unsubstituted ('$STEP') — the pour did not render it; close by explicit id and file the pour defect" >&2
@@ -201,18 +83,13 @@ case "$OUTCOME" in
     exit 2 ;;
 esac
 
-# bd emits raw control characters inside JSON string values often enough that an
-# unfiltered `| jq` is a coin flip on any bead whose notes carry one: jq exits
-# "invalid" and the caller reads a parse failure as "no such bead". Strip the C0
-# set but keep TAB/LF/CR, which are legal in the payloads we read.
+# bd JSON with the C0 set stripped (TAB/LF/CR kept): a raw control byte in a
+# note makes jq read the whole payload as "no such bead".
 bd_json() {
   gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'
 }
 
-# Identities this session may appear under as an assignee. Step beads carry the
-# session NAME, but a bead claimed through the alias route carries the alias, so
-# try each set one, in the same order the startup work query does. `awk NF` drops
-# the unset ones and `!seen` keeps the first spelling when two are equal.
+# Identities this session may appear under as an assignee, first spelling wins.
 IDENTITIES=$(printf '%s\n%s\n%s\n' \
   "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | awk 'NF && !seen[$0]++')
 if [ -z "$IDENTITIES" ]; then
@@ -220,27 +97,14 @@ if [ -z "$IDENTITIES" ]; then
   exit 2
 fi
 
-# Does <id> verify as this session's bead for this step? Echoes the bead's
-# status on a match and nothing otherwise, so the caller can tell an
-# already-closed bead from a foreign one.
+# Does <id> verify as this session's bead for this step? Echoes its status on a
+# match. `index` is exact element equality — `inside`/`contains` match
+# substrings, which would let session lx-zzk own lx-zzk9's bead.
 verify() {
   local cand="$1" json
   [ -n "$cand" ] || return 1
   json=$(bd_json show "$cand")
   [ -n "$json" ] || return 1
-  # `index` on an array of strings is EXACT element equality. `inside`/`contains`
-  # are the trap here: on strings they match SUBSTRINGS, so a session named
-  # lx-zzk would verify as the owner of lx-zzk9's bead — the same
-  # close-someone-else's-bead failure this script exists to prevent, reintroduced
-  # inside the check meant to stop it.
-  #
-  # The bead is bound to $b BEFORE the membership test. Written inline as
-  # `select(($me | index(.assignee // "")) != null)`, the `.assignee` inside the
-  # argument resolves against $me — the identity ARRAY, not the bead — so jq
-  # errors, the error is swallowed, and every verification silently returns
-  # "does not verify". That failure is invisible from the outside: resolution
-  # falls through to discovery and closes the right bead anyway, on every test
-  # that has an unambiguous one.
   printf '%s' "$json" | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" '
     ($ids | split("\n") | map(select(. != ""))) as $me
     | .[0] as $b
@@ -251,15 +115,8 @@ verify() {
   ' 2>/dev/null
 }
 
-# Every bead at <status> for this step assigned to one of our identities, one id
-# per line. This is the authoritative resolution: it asks the store who owns
-# this step right now instead of trusting a value the session inherited.
-#
-# One status per call, deliberately. `bd list` does accept `--status=a,b` (and
-# the REPEATED flag silently keeps only the last value, so that spelling is not
-# an option), but a combined query answers "these beads are executable" without
-# saying which status each one is in — and the caller resolves in_progress ahead
-# of open, so it needs them apart. Asking twice is what makes the tiers legible.
+# Every bead at <status> for this step assigned to one of our identities.
+# One status per call: the caller resolves in_progress ahead of open.
 discover() {
   local want_status="$1" ident json
   while IFS= read -r ident; do
@@ -280,8 +137,6 @@ close_bead() {
     echo "step-close: DRY RUN — would close $target ($STEP) outcome=$OUTCOME [$via]"
     return 0
   fi
-  # Keep the update's own diagnostics: "the close failed" is not actionable on
-  # its own, and this is the last thing an arm runs before its shell ends.
   if err=$(gc bd update "$target" --set-metadata "gc.outcome=$OUTCOME" --status=closed 2>&1); then
     echo "step-close: closed $target ($STEP) outcome=$OUTCOME [$via]"
     return 0
@@ -291,10 +146,6 @@ close_bead() {
   return 1
 }
 
-# Report the stale-environment fingerprint whenever it appears. It is the defect
-# this script exists for and it is otherwise invisible: the wrong close used to
-# succeed silently, so a run log that never mentions the mismatch is exactly
-# what the bug looked like.
 warn_env_mismatch() {
   local resolved="$1"
   local env_id="${GC_TRIGGER_BEAD_ID:-}"
@@ -303,11 +154,6 @@ warn_env_mismatch() {
   echo "step-close: NOTE — GC_TRIGGER_BEAD_ID=$env_id is not this step's bead ($resolved for $STEP); the environment value is stale after a hook-claim and was not used (tk-niu2f)." >&2
 }
 
-# Executable tiers, most-started first. `open` is consulted only when nothing is
-# in_progress: a graph.v2 step is assigned by the graph rather than by the
-# claim, so it executes at `open` (tk-jww3y), but a bead the claim DID advance
-# is the better answer whenever one exists. See the header on why these are
-# tiers and not one merged set.
 TIER=in_progress
 FOUND=$(discover in_progress | sort -u)
 N=$(printf '%s\n' "$FOUND" | awk 'NF' | wc -l | tr -d ' ')
@@ -317,9 +163,7 @@ if [ "$N" -eq 0 ]; then
   N=$(printf '%s\n' "$FOUND" | awk 'NF' | wc -l | tr -d ' ')
 fi
 
-# 1. A hint that verifies wins: it is the id the claim handed out, and it has
-#    just been checked against the same (assignee, step_ref) identity as
-#    everything else. Report — but do not obey — a hint that does not verify.
+# 1. A hint that verifies wins; one that does not is reported, never obeyed.
 if [ -n "$HINT" ]; then
   HINT_STATUS=$(verify "$HINT")
   case "$HINT_STATUS" in
@@ -336,9 +180,6 @@ if [ -n "$HINT" ]; then
     '')
       echo "step-close: NOTE — --bead $HINT is not this session's bead for $STEP; ignoring the hint and resolving from the store" >&2 ;;
     *)
-      # Ours, for this step, but parked in a status no arm executes from
-      # (blocked, deferred, ...). Say which: "not your bead" would send the
-      # reader looking for an ownership problem that is not there.
       echo "step-close: NOTE — --bead $HINT IS this session's bead for $STEP, but its status is '$HINT_STATUS', which this script does not close; ignoring the hint and resolving from the store" >&2 ;;
   esac
 fi
@@ -357,18 +198,14 @@ if [ "$N" -gt 1 ]; then
   exit 2
 fi
 
-# 3. Nothing executable in either tier. Already closed is a normal re-run, not a
-#    failure.
+# 3. Nothing executable: already closed is a normal re-run.
 ALREADY=$(discover closed | sort -u | head -n 1)
 if [ -n "$ALREADY" ]; then
   echo "step-close: $ALREADY ($STEP) is already closed — nothing to do"
   exit 0
 fi
 
-# 4. Last resort: the environment, and only if it verifies. This is the old
-#    idiom's path, kept for the case where it was right all along — a session
-#    still executing the bead it was spawned with — and gated by the check that
-#    makes it safe.
+# 4. Last resort: the environment, and only if it verifies.
 ENV_STATUS=$(verify "${GC_TRIGGER_BEAD_ID:-}")
 case "$ENV_STATUS" in
   in_progress|open)
@@ -380,11 +217,8 @@ case "$ENV_STATUS" in
     exit 0 ;;
 esac
 
-# Two different failures reach here and they need different fixes, so name which
-# one happened. A non-empty $ENV_STATUS means the env id passed the ownership
-# proof — it IS this session's bead for this step — and was rejected purely on
-# status. Reporting that as "not this step's bead" is what sent a reader hunting
-# the stale-environment defect (tk-niu2f) after a status mismatch (tk-jww3y).
+# A non-empty ENV_STATUS means ownership was proven and only the status refused
+# the close — name that, it has a different fix than a stale environment.
 echo "step-close: FATAL — cannot identify this session's bead for step '$STEP'." >&2
 echo "step-close:   identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')" >&2
 if [ -n "$ENV_STATUS" ]; then

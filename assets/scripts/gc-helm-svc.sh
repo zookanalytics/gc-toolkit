@@ -8,7 +8,7 @@
 # [[service]] must be declared city-scoped: it locates the cached binary and
 # exec's it, so the supervisor's SIGTERM reaches the Go process directly.
 #
-# THIS SCRIPT DOES NOT BUILD. It used to, and that could not work: the
+# THIS SCRIPT DOES NOT BUILD. Building here cannot work: the
 # supervisor allows a proxy_process 5s to answer its health probe
 # (proxyProcessReadyTimeout, gascity internal/workspacesvc/proxy_process.go),
 # while a warm build of this module takes ~12.5s and a cold one 2m29s. The
