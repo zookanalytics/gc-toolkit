@@ -44,6 +44,28 @@ fi
 
 GROUP=$(printf '%s' "$CLAIM" | jq -r '.continuation_group // ""' 2>/dev/null || printf '')
 
+# The claim reports the gc.continuation_group STAMP, and the stamp lands empty
+# on a minority of visits while the `tracks` edge filed alongside it still
+# carries the subject (tk-tu5g3; su-ab9je is the edge holding where the stamp
+# did not). Left empty, the deliberate cannot-prove-foreign fallback below
+# silently disables this guard for exactly the turn it exists to catch — an
+# unrelated visit vacuumed onto a live sitting (tk-msfmu) — so recover the
+# group from the edge first. Scoped to task_kind=visit on purpose: `tracks` is
+# not a visit-only edge (a convoy tracks its members), and inventing a group
+# for a non-visit would release a turn this session was entitled to work. A
+# visit carrying neither recording still resolves to the fallback below; the
+# writer-side loss (tk-ax6y4) is repaired where the visit is filed.
+if [ -z "$GROUP" ]; then
+    GROUP=$(gc bd show "$BEAD" --json 2>/dev/null | tr -d '\000-\037' \
+        | jq -r 'if type == "array" then (.[0] // {}) else {} end
+                 | select(((.metadata // {}).task_kind // "") == "visit")
+                 | [ ((.dependencies // [])[]?
+                       | select((((.type // .dependency_type // "") | tostring)) == "tracks")
+                       | ((.depends_on_id // .id // "") | tostring)) ]
+                 | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf '')
+    [ -n "$GROUP" ] && echo "$PROG: the claim reported no continuation group for $BEAD; recovered '$GROUP' from its tracks edge" >&2
+fi
+
 # Work on a match, a first claim, or no group to compare — the unknown cases
 # resolve to WORK on purpose (releasing an unproven-foreign turn is a strand
 # dressed as a fix).

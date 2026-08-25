@@ -76,6 +76,24 @@ exit
    gc bd dep add "$VISIT" "<id>" --type=tracks
    # tracks, NOT parent-child: parent-child transmits the subject's
    # blocked state to the visit, making it unclaimable.
+   # Read the group stamp back and repair it from the subject if it landed
+   # empty: it can land present-but-empty while every sibling stamp in the
+   # same update lands, and an empty group disables converse's group-scoped
+   # re-claim fence (tk-ax6y4, tk-msfmu). Repair and warn, never exit — this
+   # block files the one visit for its scope, and on a persistent miss the
+   # tracks edge still carries the subject for guards that read the union
+   # (tk-d6ddn).
+   GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
+   if [ "$GROUP_GOT" != "<id>" ]; then
+     echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '<id>' — repairing (tk-ax6y4)" >&2
+     gc bd update "$VISIT" --set-metadata "gc.continuation_group=<id>" || true
+     GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
+     if [ "$GROUP_GOT" = "<id>" ]; then
+       echo "gate-visit: the repair landed on $VISIT" >&2
+     else
+       echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union (tk-d6ddn)" >&2
+     fi
+   fi
    # <<< gate-visit
    ```
 5. **Stamp the board takeaway and release the bead in ONE call.** `takeaway …
