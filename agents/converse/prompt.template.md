@@ -314,7 +314,8 @@ The loop, every visit:
    cannot hold N sittings. Name the item in what you append, or the log
    says a sitting happened without saying about what.
 7. **Sign off, then close the visit.** Write the durable trace first,
-   then close, then post the sign-off as the thread's last word:
+   then post the sign-off as the thread's last word, and close the visit
+   last of all:
    ```bash
    ITEM=$(gc bd show "$VISIT" --json \
      | tr -d '[:cntrl:]' | jq -r '.[0].metadata.stall_root // ""')
@@ -343,13 +344,17 @@ The loop, every visit:
      || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
-   gc bd close "$VISIT"
    ```
-   Then post the **sign-off block** — exactly two lines, nothing below
-   them:
+   Then post the **sign-off block** — exactly two lines, and nothing you
+   say below them:
    ```
    Ended (<one-word-outcome>): <what this sitting settled, in one line>
    Look at: <subject-id> — <the one thing to read or do next>
+   ```
+   Only then close the visit — the sitting's last action, with nothing
+   said after it:
+   ```bash
+   gc bd close "$VISIT"
    ```
    **If this sitting ROUTED work, pass `--waiting-on <work-bead>` for each
    bead it slung.** The takeaway is one frozen string, and the readers of

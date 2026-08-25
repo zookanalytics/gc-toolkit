@@ -278,6 +278,46 @@ have "the outcome stamp is still verified before the close" \
 have "close step still closes only the visit" 'gc bd close "$VISIT"' "$PROMPT"
 have "the bug is cited where the rule lives" 'tk-bzm86' "$PROMPT"
 
+# THE ORDER, not the presence (tk-747cl). Closing the visit removes the
+# session's last wake reason, and the no-wake-reason drain pinned further down
+# takes the pane whole about a minute later without reading anything out of
+# it. So a sign-off written AFTER the close is written into a surface that is
+# already condemned: on tk-z9nln the substantive answer to the operator's
+# question was posted 15 seconds after the visit closed, and they almost
+# certainly never saw it. Step 7's heading always said "sign off, then close";
+# its procedure did the opposite, and the procedure is the half that runs.
+# Line order inside the step IS the contract, so it is asserted, not described.
+STEP7="$(awk '/^7\. \*\*/ {f = 1} f && /^8\. \*\*/ {exit} f {print}' "$PROMPT")"
+if [ -z "$STEP7" ]; then
+    bad "step 7 is still extractable" \
+        "no '7. **...' step in $PROMPT — the extraction is stale, not the prompt"
+else
+    ok "step 7 is still extractable"
+    # A close that is missing entirely reports close@none and fails here too:
+    # deleting the close is not a way to satisfy an ordering check.
+    s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF 'Ended (<one-word-outcome>):' | head -1 | cut -d: -f1)
+    s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'gc bd close "$VISIT"' | head -1 | cut -d: -f1)
+    if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
+        ok "the sign-off is posted BEFORE the visit is closed"
+    else
+        bad "the sign-off is posted BEFORE the visit is closed" \
+            "sign-off@${s7_signoff:-none} close@${s7_close:-none} — a sign-off written after the close lands in a pane the drain is already taking (tk-747cl)"
+    fi
+fi
+# The heading and the procedure disagreed for as long as the bug existed, and
+# the heading was the correct half. Pin it: an edit that reverts the procedure
+# and leaves this alone reintroduces exactly that contradiction.
+have "step 7's heading states the order it performs" \
+    'Sign off, then close the visit' "$PROMPT"
+lacks "…and the step no longer teaches the inverted order" \
+    'then close, then post the sign-off' "$PROMPT" \
+    "the lead-in read close-before-sign-off, and the lead-in is the half the role executes (tk-747cl)"
+# The reap rule states this same requirement in prose, two hundred lines down,
+# and stated it correctly the whole time the procedure contradicted it. It is
+# the only place the WHY is written, so a tidying edit must not take it.
+have "the rule is stated where the reap is explained" \
+    'has to land before you close, not after' "$PROMPT"
+
 echo "── a cut-short sitting signs off too ──"
 # The low-context exit is the likeliest ending to skip the sign-off,
 # because the whole point of it is that the session is out of room.
