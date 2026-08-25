@@ -22,8 +22,9 @@
 #   (DEFERRED)  a step pinned ONLY by a deferred twin is still quiesced
 #   (FINAL)     workflow-finalize keeps its control-dispatcher route
 #   (IDEM)      an already-quiet step is not re-updated
-#   (FOREIGN)   a step held by ANOTHER session keeps its assignee, and the run
-#               exits non-zero so the miss is visible
+#   (FOREIGN)   a step held by ANOTHER session is not written AT ALL — its
+#               delivery keys survive along with its claim — and the run exits
+#               non-zero so the partial hold is visible
 #   (REPOUR)    a bead tracked by TWO convoys has BOTH molecules quiesced
 #   (NOCLOSE)   no step is closed and no step status is rewritten — asserted
 #               dynamically and as a static guard over the source
@@ -104,7 +105,7 @@ T
 #   s-defer  deferred: ONLY a deferred twin              -> still quiesced
 #   s-final  finalize: control-dispatcher route          -> MUST stay routed
 #   s-quiet  quiet   : no pins, no assignee              -> not re-updated
-#   s-them   foreign : routed + ANOTHER session's claim  -> assignee kept, failed
+#   s-them   foreign : 4 delivery keys + ANOTHER session's claim -> NO write
 # Under root-TWO (the same anchor, a second pour): s-two
 # Under root-OTHER (anchor A-OTHER):               s-other   -> untouched
 # Under root-ORPHAN (no convoy):                   s-orphan  -> untouched
@@ -115,7 +116,7 @@ cat > "$TMP/steps.json" <<JSON
   {"id":"s-defer","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.self-review","gc.root_bead_id":"root-HELD","gc.deferred_routed_to":"$POOL"}},
   {"id":"s-final","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.workflow-finalize","gc.root_bead_id":"root-HELD","gc.routed_to":"gc-toolkit/core.control-dispatcher","gc.execution_routed_to":"$POOL"}},
   {"id":"s-quiet","assignee":"","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-HELD"}},
-  {"id":"s-them","assignee":"$OTHER","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-HELD","gc.routed_to":"$POOL"}},
+  {"id":"s-them","assignee":"$OTHER","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-HELD","gc.routed_to":"$POOL","gc.execution_routed_to":"$POOL","gc.deferred_routed_to":"$POOL","gc.session_affinity":"require"}},
   {"id":"s-two","assignee":"$MYAGENT","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-TWO","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
   {"id":"s-other","assignee":"$OTHER","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
   {"id":"s-orphan","assignee":"$OTHER","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
@@ -269,17 +270,30 @@ eq "$(line_for "$S1" s-final)" "" \
 # (IDEM) nothing to clear -> not written.
 eq "$(line_for "$S1" s-quiet)" "" "(IDEM) an already-quiet step is not re-updated"
 
-# (FOREIGN) a step held by another session belongs to a live molecule. Its route
-# is still cleared, its claim is not, and the run says so by exiting non-zero.
-ST=$(line_for "$S1" s-them)
-grep -q -- '--unset-metadata gc.routed_to' <<< "$ST" \
-  && ok "(FOREIGN) a foreign-held step is still de-routed" || bad "(FOREIGN) route (got: $ST)"
-grep -qE '^(bd|FORCE) update s-them .*--assignee' "$S1" \
-  && bad "(FOREIGN) must never clear another session's claim" \
+# (FOREIGN) a step held by another session belongs to a LIVE molecule, and the
+# hold must not write to it AT ALL — not the assignee, and not the delivery keys
+# either. De-routing somebody else's step is the half that actually strands
+# them: gc.routed_to and its siblings are how that step is re-delivered when
+# their session drains, so stripping the route while politely leaving the
+# assignee alone is the hazard, not a mitigation of it. s-them carries four
+# delivery keys precisely so an ownership check that ran one call too late would
+# show up here as unsets.
+eq "$(line_for "$S1" s-them)" "" \
+  "(FOREIGN) a foreign-held step is not written at all — delivery keys and all"
+grep -qE '^(bd|FORCE) update s-them( |$)' "$S1" \
+  && bad "(FOREIGN) must never write to another session's step" \
   || ok "(FOREIGN) another session's claim left alone"
 grep -q 'not this session' "$S1.err" \
   && ok "(FOREIGN) the skip is reported" || bad "(FOREIGN) skip not reported"
-eq "$RC" "1" "(FOREIGN) a step left deliverable exits non-zero"
+grep -q 'BUG:' "$S1.err" \
+  && bad "(FOREIGN) the loop reached clear_assignee with a foreign claim" \
+  || ok "(FOREIGN) the skip happened before any write, not inside clear_assignee"
+grep -q '1 step(s) left to another session' "$S1" \
+  && ok "(FOREIGN) the summary counts it once, as foreign" \
+  || bad "(FOREIGN) summary does not report one foreign step"
+# Left alone on purpose, but the chain still has a live claim in it: that is a
+# PARTIAL hold, and the caller is entitled to know.
+eq "$RC" "1" "(FOREIGN) a partially-parked molecule exits non-zero"
 
 # (REPOUR) a re-poured bead is tracked by one convoy per pour, each naming a
 # different root. A walk that keeps only the first leaves the others routed and
@@ -343,6 +357,13 @@ grep -qE '^(bd|FORCE) update s-load .*--assignee' "$S3" \
 grep -q 'assignee clear skipped' "$S3.err" \
   && ok "(GATE) the skip is reported" || bad "(GATE) skip not reported"
 eq "$RC" "1" "(GATE) a failed clear exits non-zero"
+# A REFUSED write and a step deliberately left to its owner are different
+# outcomes and are counted in different columns — s-load/s-impl/s-two are refused
+# here, s-them is foreign. Collapsing them would make the summary say a hold was
+# botched when it was correctly partial, or the reverse.
+grep -q '1 step(s) left to another session, 3 failed' "$S3" \
+  && ok "(GATE) the summary counts refused writes apart from foreign steps" \
+  || bad "(GATE) counts (got: $(grep -o 'quiesced across.*failed' "$S3" | head -n1))"
 
 # (STEPSONLY) the duplicate-dispatch arm: the anchor belongs to a live owner, so
 # only THIS molecule is dead.

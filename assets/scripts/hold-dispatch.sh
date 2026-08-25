@@ -119,6 +119,14 @@
 # stripping it is the precise hazard every quiesce guard in this pack exists to
 # prevent.
 #
+#   UNTOUCHED MEANS BEFORE THE FIRST WRITE, NOT AFTER IT. Ownership is settled
+#   at the top of the step loop, ahead of the route clear. Deciding it inside
+#   the assignee half — where it first lived — satisfies the letter of "we never
+#   clear another session's claim" while already having de-routed their step,
+#   which is the half that actually strands a live molecule: `gc.routed_to` and
+#   its five siblings are how the step is re-delivered when that session drains.
+#   A guard that runs after the damaging write is not a guard.
+#
 # WHAT IT NEVER DOES.
 #
 #   NEVER CLOSES A STEP, and never writes a step's status. Closing `load-context`
@@ -132,6 +140,11 @@
 #   the molecule's only escape path — the dispatcher's finalizer closes the
 #   workflow root and force-closes any member still open. Guarded twice, by step
 #   id and by route, because losing it needs a hand repair.
+#
+#   NEVER WRITES TO A STEP ANOTHER SESSION HOLDS — not its assignee, and not
+#   its delivery keys either. The step is skipped whole, counted, and the run
+#   exits non-zero, because a chain with a live claim in it is a PARTIAL hold
+#   and the caller is entitled to know.
 #
 #   NEVER TOUCHES A MOLECULE THAT IS NOT THIS ANCHOR'S. Every root is verified
 #   root -> gc.input_convoy_id -> the convoy's SINGLE tracked member -> equals the
@@ -357,9 +370,13 @@ clear_delivery() {
 clear_assignee() {
   local id="$1" who="$2"
   [ -n "$who" ] || return 0
+  # Backstop, not the gate. The step loop refuses a foreign-held step before it
+  # writes anything, so this cannot fire from there. It stays because this is
+  # the function that reaches for `--force`, and the only thing licensing that
+  # is that the claim being forced past is the caller's own. Reaching here with
+  # a foreign `who` means a caller skipped the gate — refuse and say so.
   if ! is_ours "$who"; then
-    echo "$PROG: $id is assigned to '$who', not this session — left untouched (a step held by another session belongs to a live molecule)" >&2
-    foreign=$((foreign + 1))
+    echo "$PROG: BUG: $id is assigned to '$who', not this session — refusing to release it; the caller must skip a foreign-held bead before writing to it" >&2
     return 1
   fi
   echo "  $id: releasing our own claim ('$who')"
@@ -529,6 +546,20 @@ else
       case "$step" in *.workflow-finalize) continue ;; esac
       case "$routed" in *control-dispatcher*) continue ;; esac
 
+      # OWNERSHIP DECIDES WHETHER WE LOOK AT THIS STEP AT ALL, and it is settled
+      # BEFORE the first write. A step assigned to another session belongs to a
+      # LIVE molecule; stripping its delivery keys is the precise hazard every
+      # quiesce guard in this pack exists to prevent, and it is not undone by
+      # then declining to touch the assignee. The check used to sit inside
+      # clear_assignee, one call too late: clear_delivery had already de-routed
+      # somebody else's step by the time it ran. Skip the whole step — no route
+      # clear, no assignee clear, no write of any kind.
+      if [ -n "$who" ] && ! is_ours "$who"; then
+        echo "$PROG: $sid ($step) is assigned to '$who', not this session — left untouched, delivery keys and all (a step held by another session belongs to a live molecule)" >&2
+        foreign=$((foreign + 1))
+        continue
+      fi
+
       # Idempotent: a step with no delivery key and no assignee was already
       # quiesced, by an earlier run or by hand.
       pins=$(printf '%s' "$meta" | jq -r '[ to_entries[]
@@ -575,5 +606,10 @@ if [ "$DRY_RUN" -eq 0 ]; then
     || echo "$PROG: could not append the park summary to $BEAD" >&2
 fi
 
-[ "$failed" -eq 0 ] || exit 1
+# A foreign-held step is left alone ON PURPOSE, but the molecule is still not
+# fully parked — the caller is holding a dispatch whose chain has a live claim
+# in it. That is a partial hold and it exits non-zero, same as a failed write.
+if [ "$failed" -ne 0 ] || [ "$foreign" -ne 0 ]; then
+  exit 1
+fi
 exit 0
