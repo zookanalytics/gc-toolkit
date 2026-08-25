@@ -17,8 +17,9 @@ description: The operator's rulings on the nine attention items from the rewrite
    mirrors later if a silent wait bites.
 4. **Mayor** — removal stands as a net win *provided* the traffic it absorbed
    is genuinely gone. See TODO-1.
-5. **Learned-rule lint wiring** — discuss first (TODO-2); do NOT auto-wire at
-   cutover.
+5. **Learned-rule lint wiring** — DECIDED (2026-08-24): wire into the
+   gc-toolkit rig's own `lint_command` at cutover (runbook step 4b); no
+   other rig, no pre-commit wiring.
 6. **Review gates** — triage is the sole authority over `check_set`,
    including a tightly-limited charter-bounded waiver mechanism; no
    dispatcher pre-sets. Recorded in `specs/2026-08-review-gates/scope.md`.
@@ -41,15 +42,11 @@ description: The operator's rulings on the nine attention items from the rewrite
   operator's queue; (b) whether mechanik stays unloaded enough to remain the
   break-glass conversation partner (guard its prompt against scope creep).
   Revisit only if either regresses.
-- **TODO-2 — Lint: why per-rig, and why "lint".** To discuss. Standing
-  answers to react to: per-rig because `lint_command` is rig-owned config —
-  a pack that force-wires its detectors into every importing rig's refinery
-  would gate other repos' merges without their consent (the pack ships the
-  tool, the rig owns its gates); "lint" because these are source-shape rules
-  with no runtime state, which belong at write/review time — `gc doctor` now
-  asserts live system properties only. Open question: wire
-  `tools/lint-learned.sh` into the gc-toolkit rig's own `lint_command`
-  (one line of rig config), and/or into the pre-commit hook?
+- **TODO-2 — RESOLVED (2026-08-24).** Wire `tools/lint-learned.sh` into the
+  gc-toolkit rig's `lint_command` at cutover (runbook step 4b); this rig
+  only, no pre-commit wiring. Rationale stands: per-rig because the rig owns
+  its gates; "lint" because these are source-shape rules with no runtime
+  state, and `gc doctor` now asserts live properties only.
 - **TODO-3 — Liveness sweep bias wording.** "Re-report, never mute" stands
   as the fail-safe direction, but the framing (and tuning: batch cadence,
   what lands in the operator's triage visit vs. converse) gets a pass after

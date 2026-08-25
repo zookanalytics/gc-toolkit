@@ -50,6 +50,16 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    summary table's OPERATOR column is non-zero; see failure handling below.
    Re-run `--apply` after resolving — it is idempotent and re-does nothing.
 
+4b. **Wire the learned-rule lint into the gc-toolkit rig** (operator-approved,
+   2026-08-24). In the town repo's `city.toml`, on the gc-toolkit rig entry,
+   set the rig's lint command to run the learned-rule detectors over the
+   change set, matching the shape the rig's other `*_command` keys use:
+
+       lint_command = "tools/lint-learned.sh $(git diff --name-only origin/main...HEAD)"
+
+   The runner exits 0 on an empty file list. This rig only — the pack ships
+   the tool; each rig owns its own gates.
+
 5. **Shut down and restart the city** so the new pack config loads in one
    clean reload. No partial reloads: down, then up.
 
