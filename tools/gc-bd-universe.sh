@@ -125,20 +125,30 @@ acquire_children() {
 }
 
 # pr_ref <bead-json> -> the PR number on stdout, or empty if no PR is
-# referenced. Reads metadata.pr_number, else extracts the trailing number of
-# metadata.pr_url. Empty output = "pre-work, no PR yet" (not an error).
+# referenced. Reads metadata.pr_number, else the digits following `/pull/` in
+# metadata.pr_url — GitHub puts the number there whatever trails it (`/files`,
+# `#discussion_r...`), and the converse prompt's own pr_url parse splits at the
+# same marker, so a stricter parse here reads "pre-work" on a subject the
+# prompt has already decided carries a PR. Empty output = "pre-work, no PR
+# yet" (not an error), which every PR tier treats as nothing to fetch.
 pr_ref() {
-    local bead="$1" num url
+    local bead="$1" num url ref
     num="$(printf '%s' "$bead" | jq -r '.metadata.pr_number // empty')"
     if [ -n "$num" ]; then printf '%s' "$num"; return 0; fi
     url="$(printf '%s' "$bead" | jq -r '.metadata.pr_url // empty')"
-    if [ -n "$url" ]; then
-        local tail="${url##*/}"
-        case "$tail" in
-            ''|*[!0-9]*) : ;;            # non-numeric tail -> no usable ref
-            *) printf '%s' "$tail" ;;
-        esac
-    fi
+    [ -n "$url" ] || return 0
+    case "$url" in
+        */pull/*)
+            ref="${url#*/pull/}"
+            ref="${ref%%[!0-9]*}"
+            ;;
+        *)
+            ref="${url##*/}"
+            case "$ref" in *[!0-9]*) ref="" ;; esac
+            ;;
+    esac
+    if [ -n "$ref" ]; then printf '%s' "$ref"; fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------

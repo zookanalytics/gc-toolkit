@@ -180,6 +180,51 @@ JSON
 }
 JSON
 
+    # pr_url only, with a path after the number. The converse prompt reads such
+    # a subject as carrying a PR by splitting at /pull/; the tool must derive
+    # the same number from the same URL or the tier is skipped as pre-work.
+    cat > "$FXDIR/fx-urlonly.show.json" <<'JSON'
+[{
+  "id": "fx-urlonly",
+  "title": "PR referenced by URL alone, with a trailing path",
+  "description": "No pr_number; the number is only derivable from pr_url.",
+  "status": "open",
+  "issue_type": "task",
+  "priority": 2,
+  "comment_count": 0,
+  "metadata": {"pr_url": "https://github.com/seed/repo/pull/2468/files"}
+}]
+JSON
+
+    cat > "$FXDIR/fx-urlonly.conversation.json" <<'JSON'
+{
+  "number": 2468,
+  "url": "https://github.com/seed/repo/pull/2468",
+  "state": "OPEN",
+  "updatedAt": "2026-08-26T17:06:22Z",
+  "comments": [],
+  "reviews": [],
+  "review_comments": [
+    {"user": {"login": "seed-operator"}, "created_at": "2026-08-26T16:46:33Z",
+     "path": "docs/seed.md", "line": 9,
+     "body": "Objection reachable only through the pr_url-derived number: AXOLOTL."}
+  ]
+}
+JSON
+
+    cat > "$FXDIR/fx-urlbare.show.json" <<'JSON'
+[{
+  "id": "fx-urlbare",
+  "title": "PR referenced by a bare pull URL",
+  "description": "No pr_number; pr_url ends at the number.",
+  "status": "open",
+  "issue_type": "task",
+  "priority": 2,
+  "comment_count": 0,
+  "metadata": {"pr_url": "https://github.com/seed/repo/pull/1357"}
+}]
+JSON
+
     cat > "$FXDIR/fx-todo.show.json" <<'JSON'
 [{
   "id": "fx-todo",
@@ -212,7 +257,8 @@ JSON
     local f
     for f in fx-epic.show fx-epic.children fx-impl.show fx-done.show fx-done.pr \
              fx-done.conversation fx-todo.show fx-ghost.show fx-quiet.show \
-             fx-quiet.conversation; do
+             fx-quiet.conversation fx-urlonly.show fx-urlonly.conversation \
+             fx-urlbare.show; do
         jq -e . "$FXDIR/$f.json" >/dev/null || { echo "fixture: malformed seed $f.json" >&2; exit 2; }
     done
 }
@@ -280,6 +326,18 @@ has "Q11i conversation advertised in fetchable" "conversation" \
 # Q11j: a PR with nothing said on it is 'no_conversation', not an error.
 eq "Q11j quiet PR -> no_conversation" "no_conversation" \
     "$(U fetch fx-quiet conversation --json | jq -r '.state')"
+# Q11m-p: pr_url alone identifies the PR. Disagreeing with the prompt about
+# whether a subject carries one skips the tier on a normal exit, so a PR that
+# exists reads as pre-work and nothing says so.
+eq "Q11m pr_url-only + trailing path -> conversation reached" "present" \
+    "$(U fetch fx-urlonly conversation --json | jq -r '.state')"
+eq "Q11n pr_url-only inline-only magic word" "AXOLOTL" \
+    "$(U fetch fx-urlonly conversation --json | jq -r '.review_comments[].body' | grep -oE 'AXOLOTL' | head -1)"
+eq "Q11p pr_url-only number reaches the fed slice" "2468" \
+    "$(U slice fx-urlonly --json | jq -r '.pr.number')"
+# Q11q: the bare `/pull/N` form must keep resolving.
+eq "Q11q bare pull URL -> number in the fed slice" "1357" \
+    "$(U slice fx-urlbare --json | jq -r '.pr.number')"
 
 echo "-- LIVE PATH (stubbed gc/gh): every --paginate page is read --"
 # `gh --paginate` emits ONE JSON ARRAY PER PAGE. A plain `.[]?` over that

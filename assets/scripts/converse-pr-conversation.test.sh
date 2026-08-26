@@ -3,20 +3,13 @@
 # step's PR-conversation fetch (bead tk-d6ixcw; precedent:
 # converse-fold-scope.test.sh, liveness-recheck.test.sh).
 #
-# The bug: a sitting about a PR rebuilt the subject's slice from state,
-# mergeability and the check rollup, and never fetched the conversation. A
-# review submitted as COMMENTED moves none of those fields, so PR #475 read
-# identical before and after sixteen objections landed on it, and visit
-# tk-mhc2az framed it as codex-approved and clean.
+# The subject under test is a shell block inside a markdown prompt, so these
+# assertions EXTRACT the marked visit-pr-conversation block and EXECUTE it;
+# prose that only describes the fetch cannot pass them.
 #
-# An agent fully intending to be thorough still misses this, because every
-# field the prep gathers says the PR is clean. What had to change is what the
-# step FETCHES, so this test EXTRACTS the marked block from the prompt and
-# EXECUTES it against stubs rather than grepping for hopeful prose.
-#
-# Hermetic: stubs `gc` and the universe tool, reads the repo only; no city,
-# no network. The one live read is the real tool's tier dispatch, which is
-# the seam this fix can rot at without either file looking wrong.
+# Hermetic: stubs `gc` and the universe tool, reads the repo only; no city, no
+# network. The one live call is the real tool serving the tier name read out
+# of the prompt — the seam a rename can break with neither file looking wrong.
 
 set -u
 
