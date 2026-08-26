@@ -122,8 +122,10 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    9. I1 DOCTOR CHECK (carried from PR #469, whose diff targets the old
       doctor): check-wait-is-an-edge — assert every wait is a graph edge,
       not a metadata string (component-model I1). Rebuild in the new doctor
-      layout (`doctor/check-state-space` is the model); I1 and I9 are the
-      only component-model invariants without a check in this tree.
+      layout (`doctor/check-state-space` is the model); I1 is the only
+      component-model invariant without a check in this tree. I9 now has
+      `doctor/check-pour-text-current`, and component-model.md §3 already
+      cites it. I1 is marked PARTIAL, with the remainder tracked on tk-wz4igt.
    10. ONE SCRUBBER (carried from PR #461): the tree still carries ~22
        inline `tr -d` control-character scrub definitions across
        assets/scripts and tools; consolidate to one shared helper with one

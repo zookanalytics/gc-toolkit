@@ -1,19 +1,20 @@
 ---
 name: Component model — the primitives and the invariant→check binding
-description: The design authority of gc-toolkit — the short list of primitives every component must justify itself against, the anchor lifecycle's shape as counts and writers, and every invariant bound to the doctor check that fails when it stops being true. Read it before adding a component, a state, or a metadata key.
+description: The design authority of gc-toolkit — the short list of primitives every component must justify itself against, the anchor lifecycle's shape as counts and writers, every invariant bound to the doctor check that fails when it stops being true, and the index placing every component in one of the six workflows. Read it before adding a component, a state, or a metadata key.
 ---
 
 # Component model
 
-The primitive set, the anchor lifecycle's shape, and the invariant→check
-binding. This is the document a new component must justify itself against; the
-2026-08 rewrite (`specs/2026-08-rewrite/plan.md`) implements §1–§3.
+The primitive set, the anchor lifecycle's shape, the invariant→check
+binding, and where every component sits. This is the document a new component
+must justify itself against; the 2026-08 rewrite
+(`specs/2026-08-rewrite/plan.md`) implements §1–§3.
 
 ## Scope
 
 **Mandate.** Which primitives the pack is built from, the lifecycle's
-single-writer discipline stated as counts, and every invariant bound to its
-mechanical check.
+single-writer discipline stated as counts, every invariant bound to its
+mechanical check, and which workflow each component belongs to.
 
 **Boundaries.** It does not draw the lifecycle — [state-machine.md](state-machine.md)
 owns the diagram, the transition table, and the gate vocabulary. It does not
@@ -119,10 +120,117 @@ source for a past fix.
 
 ---
 
-## 4. How to use this
+## 4. Where each component sits
 
-- **Adding a component** — it must answer column 3 of §1. If it cannot, it is
-  a repair pass for a writer that should be fixed instead.
+Design rule 1 of `specs/2026-08-rewrite/plan.md` holds that every component
+belongs to one of six workflows (work, review, merge, visit, feedback, patrol)
+or is a declared shared primitive. Below is that assignment for the tree as it
+stands: every order, formula, script, and service, with nothing unplaced.
+
+**The placement rule.** A component belongs to the workflow whose product it
+advances, not the one whose name it carries. `mol-refinery-patrol` is merge
+because what it produces is merge decisions. `gate-ensure.sh` is review even
+though it runs as arm 1 of the merge cadence, because what it produces is a
+raisable gate and a routed review bead. Patrol is the workflow whose product
+is a fleet that can still run the other five.
+
+**Shared primitive** means more than one workflow calls it for the same
+reason. A component only one workflow calls belongs to that workflow, however
+general it looks.
+
+The table is maintained by hand. A doctor check asserting the property needs a
+machine-readable component list, which does not exist yet; this index is its
+prerequisite.
+
+| Component | Workflow | Why it sits there |
+|---|---|---|
+| `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
+| `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
+| `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
+| `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
+| `assets/scripts/gate-ensure.sh` | review | Makes every declared gate raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
+| `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
+| `assets/scripts/signoff.sh` | review | The single writer of gate verdicts (I7). |
+| `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
+| `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
+| `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
+| `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
+| `assets/scripts/pr-open.sh` | merge | Arm 2: `pre_open_gate` to `pull_request`. |
+| `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
+| `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
+| `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
+| `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
+| `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, routed to the converse pool. |
+| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`. What it produces is something a human reads, not a branch. |
+| `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
+| `services/helm` | visit | The board. Derives every row per render from the ledger. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, react. |
+| `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
+| `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
+| `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
+| `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
+| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions and operator re-homes. |
+| `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
+| `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
+| `assets/scripts/tmux-bindings.sh` | visit | Installs the keybindings that reach the surfaces above. |
+| `assets/scripts/tmux-pick-helm.sh` | visit | The board picker. |
+| `assets/scripts/tmux-pick-session.sh` | visit | The session picker. |
+| `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
+| `assets/scripts/tmux-status-line-override.sh` | visit | Sets the gc-toolkit status bar. |
+| `assets/scripts/gc-toolkit-status-line.sh` | visit | Renders what that status bar shows. |
+| `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
+| `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
+| `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each corrective-feedback hit as one observation bead. |
+| `formulas/mol-feedback-distiller.toml` | feedback | Turns pending observations into reviewed prompt-update proposals. |
+| `formulas/mol-witness-patrol.toml` | patrol | Mail triage, orphan recovery, and escalation for one rig. |
+| `formulas/mol-deacon-patrol.toml` | patrol | City infrastructure health: Dolt, orphan processes, doctor sweep. |
+| `formulas/mol-dog-shutdown-dance.toml` | patrol | Due process for one wedged session, against a claimed warrant. |
+| `orders/boot-health.toml` | patrol | Fires the wedged-deacon detector. |
+| `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
+| `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
+| `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
+| `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
+| `assets/scripts/doctor-finding-gate.sh` | patrol | Re-asks doctor at close time, so a merge cannot silently read as a fix. Run by the deacon patrol's doctor sweep. |
+| `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
+| `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
+| `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. |
+| `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
+| `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key. Every workflow's door to a human. |
+| `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
+| `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
+| `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives; `doctor/check-seed-audit-current` holds its freshness. |
+| `assets/scripts/step-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here. |
+| `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
+| `assets/scripts/cutover-2026-08.sh` | none | One-shot tooling for the 2026-08 cutover, disposable by its own header. Deleted with `specs/2026-08-rewrite/cutover-runbook.md`. |
+| `assets/scripts/test-harness.sh` | none | Stub fixtures sourced by `*.test.sh`. Never runs in production. |
+
+### The placements worth arguing about
+
+- **The operator surface is visit.** The board, the tmux bindings and pickers,
+  the status line, and the web terminal exist so a human can reach the queue
+  that subjects and visits hold. `services/helm` and `orders/helm-build.toml`
+  sit there for the same reason: the board is the read half of human
+  engagement, and the order exists only to keep it current.
+- **`reconcile-rig-checkouts` is merge.** A directory-imported pack runs from
+  the working tree, so a merged PR does not execute until the checkout syncs.
+  The order completes a merge's effect. `doctor/check-pour-text-current` reads
+  the same lag from the work side.
+- **The dog pool is patrol.** A patrol detector files the warrant and
+  `mol-dog-shutdown-dance` executes it. Detection and enforcement are one
+  workflow, split across two roles because a kill needs due process
+  ([authority-map.md](authority-map.md)).
+- **`liveness-sweep` is patrol, not visit.** It replaced two patrol detectors,
+  `detect-stalled-workflows.sh` and `detect-parked-dispositions.sh`, and it
+  files its finding through `escalate.sh` the way every patrol does. Producing
+  a visit does not put a component in the visit workflow.
+
+---
+
+## 5. How to use this
+
+- **Adding a component** — it must answer column 3 of §1, and it takes a row
+  in §4 in the same PR. If it can do neither, it is a repair pass for a writer
+  that should be fixed instead.
 - **Adding a state** — declare it in `lifecycle/lifecycle.toml`, name its
   writer in [state-machine.md](state-machine.md)'s table, or it does not
   exist.
