@@ -169,11 +169,12 @@ holding fails a named check instead of waiting to be rediscovered.
 
 ## The consistency test
 
-A proposed capability must trace a
-straight line — a belief in [foundation.md](foundation.md), made concrete
-through a primitive in [component-model.md](component-model.md) §1, placed in
-one of the six workflows above — §4 there indexes where every existing
-component sits. Concretely ([component-model.md](component-model.md) §5):
+A proposed capability must trace a straight line from a belief in
+[foundation.md](foundation.md), through a primitive in
+[component-model.md](component-model.md) §1, to one of the six workflows
+above. [component-model.md](component-model.md) §4 indexes where every
+existing component sits. Concretely
+([component-model.md](component-model.md) §5):
 
 - **Adding a component** — it must answer §1's "cost of not having it" column.
   If it cannot, it is a repair pass for a writer that should be fixed instead.
