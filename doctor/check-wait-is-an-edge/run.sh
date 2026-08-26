@@ -34,7 +34,7 @@ strip_ctl() { tr -d '\000-\011\013-\037'; }
 # match attributable. Free-form notes are excluded on measurement rather than
 # taste: across this city every open bead whose notes carry wait language names
 # a THIRD PARTY as the waiter, because survey and audit beads record other
-# beads states in the same words a first-person wait uses. Attributing those to
+# beads' states in the same words a first-person wait uses. Attributing those to
 # whoever wrote them down would report the graph as broken where it is correct.
 #
 # THE TRIGGER IS THE VERB wherever the value is prose. A bare bead mention is
@@ -116,10 +116,10 @@ def clean: sub("\\.+$"; "");
       | clean | select(. != $src and . != "") as $cand
       | [ $src, ("metadata " + $k + " names " + $cand), $cand, $srcedges ] )
   ,
-    # RULE B — the VALUE is this beads own status prose. Only surfaces the bead
-    # writes ABOUT ITSELF are read. Free-form notes are not: in this city they
-    # are a ledger of other beads states, where the subject of a wait sentence
-    # is routinely a third party and no pattern can attribute it.
+    # RULE B — the VALUE is status prose the bead writes about ITSELF, which is
+    # the whole reason a match here can be attributed. Free-form notes are not
+    # read: in this city they are a ledger of what OTHER beads are doing, where
+    # the subject of a wait sentence is routinely a third party.
     ( $meta | to_entries[]
       | select(.key | test($prosekey))
       | (.value | tostring)
@@ -203,7 +203,12 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
     db="$rig_path/.beads"
-    [ -d "$db" ] || continue
+    # An absent store is an uninitialised rig, not a clean one. Silence here
+    # is the failure this check exists to remove, so it is noted.
+    if [ ! -d "$db" ]; then
+        notes+=("$label: skipped (no bead store at $db)")
+        continue
+    fi
 
     open_raw=$(run_bounded bd list --db "$db" --status open --json --limit 0 2>/dev/null); open_rc=$?
     if [ "$open_rc" -ne 0 ]; then

@@ -239,7 +239,17 @@ OUT=$(RIGS_JSON="$TMP/rigs-susp.json" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a suspended rig is skipped rather than probed"
 has "$OUT" "suspended" "the skip is noted, not silent"
 
-# --- 19. control characters do not cost the store ------------------------
+# --- 19. a rig with no bead store is noted, not silently dropped ---------
+cat > "$TMP/rigs-nostore.json" <<EOF
+{"rigs":[{"name":"alpha","prefix":"aa","path":"$TMP/alpha","suspended":false},
+         {"name":"gamma","prefix":"cc","path":"$TMP/gamma-never-initialised","suspended":false}]}
+EOF
+store '[{"id":"aa-101","status":"open","metadata":{}}]'
+OUT=$(RIGS_JSON="$TMP/rigs-nostore.json" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "0" "a rig whose store does not exist does not fail the run"
+has "$OUT" "no bead store" "an absent store is reported rather than skipped in silence"
+
+# --- 20. control characters do not cost the store ------------------------
 printf '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},"notes":"tab\there\001etc"},
         {"id":"aa-202","status":"open","metadata":{}}]' > "$TMP/stores/alpha.json"
 OUT=$(run_check); RC=$?
