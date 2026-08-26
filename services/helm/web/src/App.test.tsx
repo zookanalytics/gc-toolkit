@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { Board, Tile } from './contract';
+import type { Board, Sitting, Tile } from './contract';
 
 // A board carrying all five shapes the split has to tell apart: an ordinary
 // ranked anchor, an operator-owned bead that IS attention, a parked
@@ -47,9 +47,38 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
   };
 }
 
+// The two halves of the conversation record: one sitting still running, one
+// closed with the outcome and the takeaway it left.
+const SITTINGS: Sitting[] = [
+  {
+    id: 'tk-vst01',
+    rig: 'gc-toolkit',
+    subject: 'tk-epic',
+    title: 'visit: tk-epic — what the canvas owes the operator',
+    status: 'in_progress',
+    outcome: '',
+    session: 'gc-toolkit__converse-1',
+    opened_at: '2026-08-21T18:34:00Z',
+    takeaway: '',
+  },
+  {
+    id: 'tk-vst02',
+    rig: 'gc-toolkit',
+    subject: 'tk-yps55',
+    title: 'visit: tk-yps55 — the raw script path',
+    status: 'closed',
+    outcome: 'diagnosed',
+    session: 'gc-toolkit__converse-2',
+    opened_at: '2026-08-21T17:20:00Z',
+    closed_at: '2026-08-21T17:54:00Z',
+    takeaway: 'the path was the launcher’s, not the board’s',
+  },
+];
+
 const BOARD: Board = {
   generated_at: '2026-08-21T19:14:00Z',
   total: 5,
+  sittings: SITTINGS,
   tiles: [
     tile({
       id: 'tk-epic',
@@ -148,6 +177,10 @@ function parkedSection(): HTMLElement {
   return screen.getByRole('region', { name: /parked conversations/i });
 }
 
+function sittingsSection(): HTMLElement {
+  return screen.getByRole('region', { name: /converse sittings/i });
+}
+
 // The bug in one assertion: a bead the operator owns reaches the board at all.
 // Before tk-2v08m the gather was keyed on issue type, so `gc.routed_to=human`
 // on an ordinary task made it invisible however plainly it was marked.
@@ -232,7 +265,7 @@ it('drills into a parked row like any other tile', async () => {
 // A board with nothing parked must not grow an empty section or a "· 0 parked"
 // suffix that reads as a category the operator has to check.
 it('shows no parked section when nothing is parked', async () => {
-  const attentionOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]] };
+  const attentionOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]], sittings: null };
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response(JSON.stringify(attentionOnly), { status: 200 })),
@@ -242,4 +275,75 @@ it('shows no parked section when nothing is parked', async () => {
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
   expect(screen.queryByRole('region', { name: /parked conversations/i })).toBeNull();
   expect(screen.getByText(/1 anchors · generated/)).toBeTruthy();
+});
+
+// The operator's ask in one assertion: both halves of the conversation record
+// on the board, each closed sitting carrying the justification it closed on.
+it('shows running sittings and recently closed ones with their outcome', async () => {
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+
+  const section = sittingsSection();
+  expect(within(section).getByText(/1 running · 1 closed recently/)).toBeTruthy();
+
+  const live = within(section).getByText('tk-vst01').closest('tr') as HTMLElement;
+  expect(within(live).getByText('running')).toBeTruthy();
+  expect(within(live).getByText('40m')).toBeTruthy();
+  // A sitting that has not ended has no outcome to show.
+  expect(within(live).getByText('—')).toBeTruthy();
+
+  const done = within(section).getByText('tk-vst02').closest('tr') as HTMLElement;
+  expect(within(done).getByText('closed')).toBeTruthy();
+  expect(within(done).getByText('diagnosed')).toBeTruthy();
+  expect(within(done).getByText(/the path was the launcher/)).toBeTruthy();
+});
+
+// The record is not an attention list: a sitting must not appear as a row in
+// the ranked table, where it would compete with work that needs doing.
+it('keeps sittings out of the ranked table', async () => {
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+
+  expect(within(attentionTable()).queryByText('tk-vst01')).toBeNull();
+  expect(within(attentionTable()).queryByText(/what the canvas owes the operator/)).toBeNull();
+});
+
+// A sitting's subject is an anchor, so the drill gesture is the one the rest of
+// the board already uses.
+it('drills into a sitting by its subject', async () => {
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+
+  fireEvent.click(within(sittingsSection()).getByRole('button', { name: 'tk-epic' }));
+  expect(screen.getByRole('complementary', { name: /detail for tk-epic/i })).toBeTruthy();
+});
+
+// A quiet city grows no empty section, exactly as it grows no empty parked one.
+it('shows no sittings section when there are none', async () => {
+  const noSittings: Board = { ...BOARD, sittings: null };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(noSittings), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(screen.queryByRole('region', { name: /converse sittings/i })).toBeNull();
+});
+
+// Ages are measured from the board's own generated_at rather than the wall
+// clock: a tab left open overnight must not age every sitting past what the
+// gather actually saw.
+it('ages a sitting against the board it came from, not the clock', async () => {
+  const later: Board = { ...BOARD, generated_at: '2026-08-21T21:14:00Z' };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(later), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+
+  const live = within(sittingsSection()).getByText('tk-vst01').closest('tr') as HTMLElement;
+  expect(within(live).getByText('2h')).toBeTruthy();
 });

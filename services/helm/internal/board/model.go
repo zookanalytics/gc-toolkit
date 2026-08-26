@@ -252,6 +252,58 @@ type Tile struct {
 	RankScore int       `json:"rank_score"`
 }
 
+// Sitting is one converse sitting — the visit bead a conversation runs inside —
+// as the board reports it. Sittings are NOT tiles: a tile is an anchor that
+// wants something, while a sitting is an event in the conversation record, so
+// they ride the envelope beside the ranked list rather than competing in it.
+//
+// The board carries every open sitting and those closed inside the recent
+// window (source.sittingWindow). Both halves answer one question the ranked
+// table cannot: which conversations are running now, and what the ones that
+// just ended concluded.
+type Sitting struct {
+	ID  string `json:"id"`
+	Rig string `json:"rig"`
+	// Subject is the anchor this conversation is about, from the visit's
+	// gc.continuation_group — the same field Facts.Visits keys Tile.Held on.
+	Subject string `json:"subject"`
+	Title   string `json:"title"`
+	// Status is the visit bead's own status. A sitting is finished when this
+	// reads "closed" and running under any other value: a CLAIMED visit is a
+	// held conversation, which is why liveStatuses admits in_progress.
+	Status string `json:"status"`
+
+	// Outcome is gc.outcome, the one-word justification converse stamps on a
+	// visit before closing it (folded, moot, benign, diagnosed, cut-short, or
+	// the word a held sitting signs off with). It is stamped per VISIT and
+	// never rewritten, which is what makes it attributable to this sitting
+	// alone. Empty on a running sitting, and on a closed one whose writer did
+	// not stamp it.
+	Outcome string `json:"outcome"`
+	// Session is the converse session that ran the sitting (gc.session_name),
+	// which is what an operator attaches to while it is still open.
+	Session string `json:"session"`
+
+	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
+	// to the bead's creation time for a visit that was never claimed. ClosedAt
+	// is zero while the sitting runs. The pair is also the span the takeaway
+	// below is attributed by.
+	OpenedAt time.Time `json:"opened_at,omitzero"`
+	ClosedAt time.Time `json:"closed_at,omitzero"`
+
+	// Takeaway is the headline THIS sitting left on its subject, or empty.
+	//
+	// The takeaway lives on the SUBJECT, not on the visit, and each sitting
+	// overwrites the last one's. So it is carried only when gc.takeaway_at
+	// falls inside this sitting's own span: a subject visited three times has
+	// one takeaway, and hanging it on all three rows would credit two sittings
+	// with a conclusion they did not reach. Sittings that overlap on one
+	// subject can both claim a stamp inside their span; the visit claim
+	// serializes them in practice, and the failure is a duplicated headline
+	// rather than a wrong one.
+	Takeaway string `json:"takeaway"`
+}
+
 // Facts are the CROSS-ANCHOR joins one gather pass produces alongside the
 // anchors — the typed form of the three --argjson maps gc-helm.sh hands its
 // render. A zero Facts is legal and means "the gather could not supply these":
@@ -268,6 +320,11 @@ type Facts struct {
 	// OwnerState maps a session name AND its alias to that session's state, so
 	// a child's assignee can be resolved whichever form it was written in.
 	OwnerState map[string]string
+	// Sittings are the converse sittings the same visit read produced — every
+	// open one, plus those closed inside the recent window. Visits above is the
+	// per-anchor boolean derived from them; this is the record itself, which
+	// [BuildBoard] orders and passes through to the envelope.
+	Sittings []Sitting
 	// Prefixes is every rig's issue prefix; RigNames is every rig's name. The
 	// cross-rig-ref scan looks for OTHER rigs' prefixes in an anchor's prose and
 	// discards any hit that is really a rig name (so "signal-loom" is not read
@@ -279,9 +336,13 @@ type Facts struct {
 // Board is the envelope returned by the service. Tiles are sorted by rank_score
 // descending and deduplicated by id; Total is the count before any row cap.
 type Board struct {
-	GeneratedAt   time.Time `json:"generated_at"`
-	Total         int       `json:"total"`
-	Tiles         []Tile    `json:"tiles"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Total       int       `json:"total"`
+	Tiles       []Tile    `json:"tiles"`
+	// Sittings is the conversation record beside the ranked list: running
+	// sittings first, then the recently closed. Like Tiles it is `null` rather
+	// than `[]` when empty, so a consumer narrows before iterating.
+	Sittings      []Sitting `json:"sittings"`
 	Partial       bool      `json:"partial,omitempty"`
 	PartialErrors []string  `json:"partial_errors,omitempty"`
 }

@@ -297,6 +297,10 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 
 	if b.Total == 0 {
 		fmt.Fprint(w, "No open anchors need attention. (Nothing floats.)\n")
+		// The conversation record still prints. A board with no anchor to act
+		// on and a sitting running on it is exactly the state where the ranked
+		// table alone says nothing and the sittings say everything.
+		renderSittings(w, b.Sittings, now)
 		return
 	}
 
@@ -336,12 +340,113 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
 	}
 
+	renderSittings(w, b.Sittings, now)
+
 	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
+}
+
+// Sitting column widths. SUBJECT and OUTCOME are minimums sized to content by
+// colWidth for the same reason the ID column is: a truncated bead id and a
+// truncated outcome word are both unreadable, and HEADLINE is last and unpadded
+// so a wide cell costs nothing.
+const (
+	colSubjectMin  = 12
+	colAge         = 7
+	colOutcomeMin  = 10
+	colHeadlineMax = 96
+)
+
+// renderSittings writes the conversation record under the ranked table: which
+// sittings are running, and what the recently closed ones concluded.
+//
+// The ranked table answers what needs doing. This answers what is being talked
+// about, which is a different question and deliberately not ranked against it —
+// a sitting is an event, not a demand.
+func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
+	if len(sittings) == 0 {
+		return
+	}
+	shown, dropped := board.CapSittings(sittings, board.DefaultMaxSittings)
+
+	var running, closed int
+	for _, s := range sittings {
+		if s.Status == "closed" {
+			closed++
+		} else {
+			running++
+		}
+	}
+
+	fmt.Fprintf(w, "\nSittings — %d running · %d closed recently\n", running, closed)
+	fmt.Fprint(w, "● still running · AGE is time since it started, or since it ended · OUTCOME is what a closed sitting closed on\n")
+
+	// Sized to content for the same reason the ranked table sizes its ID
+	// column: an id or an outcome word loses its meaning when its tail is cut.
+	idW, rigW, subjW, outW := colIDMin, colRigMin, colSubjectMin, colOutcomeMin
+	for _, s := range shown {
+		idW = max(idW, len([]rune(s.ID))+1)
+		rigW = max(rigW, len([]rune(s.Rig))+1)
+		subjW = max(subjW, len([]rune(s.Subject))+1)
+		outW = max(outW, len([]rune(s.Outcome))+1)
+	}
+
+	fmt.Fprint(w, rpad(" ", colHeld)+rpad("ID", idW)+rpad("RIG", rigW)+
+		rpad("SUBJECT", subjW)+rpad("AGE", colAge)+rpad("OUTCOME", outW)+"HEADLINE\n")
+
+	for _, s := range shown {
+		glyph, since, outcome := " ", s.ClosedAt, s.Outcome
+		if s.Status != "closed" {
+			glyph, since = "●", s.OpenedAt
+		}
+		if outcome == "" {
+			// "—" is the same claim the N/M column makes above: this row has no
+			// such value, rather than a value that happens to be empty.
+			outcome = "—"
+		}
+		// The takeaway is what the sitting concluded; the title is what it was
+		// called. Preferring the conclusion means a row says something even
+		// when its title is a truncated escalation subject.
+		headline := s.Takeaway
+		if headline == "" {
+			headline = s.Title
+		}
+		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
+			rpad(s.Subject, subjW)+rpad(shortAge(since, now), colAge)+
+			rpad(outcome, outW)+clip(headline, colHeadlineMax)+"\n")
+	}
+
+	if dropped > 0 {
+		// Never a silent truncation: an elided list that does not say so reads
+		// as the whole record.
+		fmt.Fprintf(w, "  … %d older closed sittings not shown (--json on the service carries them all)\n", dropped)
+	}
+}
+
+// shortAge renders how long ago a stamp was, in the coarsest unit that still
+// says something: minutes under an hour, then hours, then days. A zero stamp is
+// unknown rather than "just now", which is the distinction that keeps a sitting
+// whose source could not read a timestamp from reading as the freshest row.
+func shortAge(stamp, now time.Time) string {
+	if stamp.IsZero() {
+		return "?"
+	}
+	d := now.Sub(stamp)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
 }
 
 // boardMain is the os.Exit-calling wrapper main() dispatches to.
