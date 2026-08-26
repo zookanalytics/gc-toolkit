@@ -65,7 +65,9 @@ obs() { # id created_at provenance category pattern source
 }
 
 # alpha: one category seen three times (two inside the window, one older),
-# one singleton, and one event double-captured under a single provenance key.
+# one singleton, one event double-captured under a single provenance key, and
+# one whole-turn provenance carrying three corrections that are not the same
+# correction — different category, different pattern bead.
 {
   obs a1 "$(ago 80)"  "pr:o/r#1:comment:1" doc-venue ""        self
   obs a2 "$(ago 10)"  "pr:o/r#2:comment:2" doc-venue tk-pat1   miner
@@ -73,6 +75,9 @@ obs() { # id created_at provenance category pattern source
   obs a4 "$(ago 5)"   "bead:x:turn:1"      lone-slug ""        self
   obs a5 "$(ago 4)"   "pr:o/r#9:comment:9" dup-slug  ""        self
   obs a6 "$(ago 4)"   "pr:o/r#9:comment:9" dup-slug  ""        miner
+  obs a7 "$(ago 6)"   "bead:y:turn:2"      turn-one  tk-pat1   self
+  obs a8 "$(ago 6)"   "bead:y:turn:2"      turn-two  tk-pat2   self
+  obs a9 "$(ago 6)"   "bead:y:turn:2"      turn-one  ""        miner
 } | jq -s . > "$STUB_STORE_DIR/alpha.json"
 
 # beta: one event inside the prior window that repeats alpha's oldest category.
@@ -98,33 +103,92 @@ cat > "$REPO/template-fragments/operator-profile.template.md" <<MD
 - An entry with no pattern-bead anchor, so recurrence cannot be attributed.
 {{ end }}
 MD
+# The review-rubric carrier anchors in a TOML comment ledger, not in the step
+# description, so the inventory has to reach a formula file too.
+mkdir -p "$REPO/formulas"
+cat > "$REPO/formulas/mol-review.toml" <<MD
+# <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
+# <!-- rule:tk-rub1 src:audit:tk-test adopted:$ADOPTED --> Contract
+[[steps]]
+id = "review"
+MD
 
 # --- 1. inventory ---------------------------------------------------------
 INV=$(cd "$REPO" && "$SUT" --inventory --repo "$REPO" 2>&1)
-eq "$(grep -c . <<< "$INV")" "3" "inventory lists one row per adopted entry"
+eq "$(grep -c . <<< "$INV")" "4" "inventory lists one row per adopted entry"
 hasnt "$INV" 'rule:<pattern-bead>' "inventory skips the seeded placeholder anchor"
 has "$INV" "tk-pat1" "inventory extracts the pattern bead from a rule: anchor"
 has "$INV" "operator-profile.template.md	-	2026-08-25" "an anchor with no rule: field reports '-' rather than guessing"
+has "$INV" "formulas/mol-review.toml	tk-rub1" "the review-rubric ledger is inventoried beside the fragment carriers"
 
 # --- 2. report over the fixture corpus ------------------------------------
 J=$("$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
-eq "$(jq -r '.corpus.observations' <<< "$J")" "7" "every observation across both stores is read"
-eq "$(jq -r '.corpus.events_after_provenance_dedup' <<< "$J")" "6" "two captures of one provenance key collapse to one event"
+eq "$(jq -r '.corpus.observations' <<< "$J")" "10" "every observation across both stores is read"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$J")" "8" "two captures of one correction collapse to one event"
 eq "$(jq -r '.corpus.stores' <<< "$J")" "2" "both stores counted"
 
 # a2, a3 repeat doc-venue (a1 is older); a4/a5 are firsts of their slug.
 eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$J")" "2" "M1 counts only events whose category was seen earlier"
-eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$J")" "4" "M1 denominator is the window's categorised events"
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$J")" "6" "M1 denominator is the window's categorised events"
 eq "$(jq -r '.m1_category_repeat.prior.repeats' <<< "$J")" "1" "the prior window is scored the same way"
-eq "$(jq -r '.m1_category_repeat.fragmentation.distinct' <<< "$J")" "3" "fragmentation counts distinct slugs"
+eq "$(jq -r '.m1_category_repeat.fragmentation.distinct' <<< "$J")" "5" "fragmentation counts distinct slugs"
 
 # a2 and a3 carry obs.distilled=tk-pat1 and postdate the adoption date.
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$J")" "2" \
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$J")" "3" \
    "M2 attributes post-adoption events through obs.distilled"
 eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-quiet")] | .[0].since_adoption' <<< "$J")" "0" \
    "a rule with no matching observations scores zero, not null"
-eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$J")" "3" "every adopted entry is inventoried"
-eq "$(jq -r '.m2_post_adoption.measurable' <<< "$J")" "2" "an entry without a pattern anchor is not counted as measurable"
+eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$J")" "4" "every adopted entry is inventoried"
+eq "$(jq -r '.m2_post_adoption.measurable' <<< "$J")" "3" "an entry without a pattern anchor is not counted as measurable"
+
+# --- 2b. one provenance key, several distinct corrections -----------------
+# A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made
+# in that turn. Collapsing the group to one row loses real recurrence, and
+# picking the earliest row loses the attribution a later capture carries.
+mkdir -p "$TMP/stores4"
+{
+  obs t1 "$(ago 5)" "bead:z:turn:9" cat-one tk-pat1  self
+  obs t2 "$(ago 5)" "bead:z:turn:9" cat-two tk-quiet self
+  obs t3 "$(ago 4)" "bead:z:turn:9" cat-one ""       miner
+} | jq -s . > "$TMP/stores4/alpha.json"
+cat > "$TMP/rigs4.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores4/alpha.json"}]}
+JSON
+D=$(STUB_RIGS="$TMP/rigs4.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.corpus.observations' <<< "$D")" "3" "all three captures are read"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$D")" "2" \
+   "distinct corrections under one provenance key stay distinct events"
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$D")" "1" \
+   "the survivor keeps the attribution when only one capture in the group carries it"
+
+# --- 2c. a date-only anchor does not count its own adoption day -----------
+# The distiller stamps consumed observations when it files the proposal, so
+# same-day evidence predates the merge as often as it follows it.
+REPO2="$TMP/repo2"; mkdir -p "$REPO2/template-fragments"
+TODAY=$(date -u +%Y-%m-%d)
+TWO_DAYS_AGO=$(date -u -d "-2 days" +%Y-%m-%d)
+cat > "$REPO2/template-fragments/learned-conventions-polecat.template.md" <<MD
+{{ define "learned-conventions-polecat" }}
+<!-- rule:tk-today src:audit:tk-test adopted:$TODAY -->
+- A rule adopted today, on evidence captured today.
+<!-- rule:tk-older src:audit:tk-test adopted:$TWO_DAYS_AGO -->
+- A rule adopted two days ago.
+{{ end }}
+MD
+mkdir -p "$TMP/stores5"
+NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+{
+  obs s1 "$NOW_TS" "pr:o/r#20:comment:20" same-day  tk-today self
+  obs s2 "$NOW_TS" "pr:o/r#21:comment:21" later-day tk-older self
+} | jq -s . > "$TMP/stores5/alpha.json"
+cat > "$TMP/rigs5.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores5/alpha.json"}]}
+JSON
+A=$(STUB_RIGS="$TMP/rigs5.json" "$SUT" --repo "$REPO2" --window-days 30 --json 2>&1)
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-today")] | .[0].since_adoption' <<< "$A")" "0" \
+   "evidence from the adoption day itself is not post-adoption recurrence"
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-older")] | .[0].since_adoption' <<< "$A")" "1" \
+   "evidence after the adoption day still counts"
 
 # --- 3. the qualifiers fire ----------------------------------------------
 T=$("$SUT" --repo "$REPO" --window-days 30 2>&1)
@@ -173,7 +237,36 @@ OUT=$(STUB_RIGS_EMPTY=1 "$SUT" --repo "$REPO" 2>&1); RC=$?
 eq "$RC" "1" "an empty rig enumeration exits 1"
 has "$OUT" "refusing to report on a partial city" "and says why"
 
-# --- 5. usage ------------------------------------------------------------
+# --- 5. --ref pins the carrier read in report mode too --------------------
+# The distiller passes --ref origin/main to the report as well as to
+# --inventory: read from a working tree, a proposal branch counts its own
+# unmerged entries as adopted.
+GREPO="$TMP/grepo"; mkdir -p "$GREPO/template-fragments"
+git -C "$GREPO" init -q >/dev/null 2>&1
+cat > "$GREPO/template-fragments/learned-conventions-polecat.template.md" <<MD
+{{ define "learned-conventions-polecat" }}
+<!-- rule:tk-merged src:audit:tk-test adopted:$ADOPTED -->
+- A rule that is already on the ref.
+{{ end }}
+MD
+git -C "$GREPO" add -A >/dev/null 2>&1
+git -C "$GREPO" -c user.email=t@example.invalid -c user.name=t -c commit.gpgsign=false \
+    commit -q --no-verify -m seed >/dev/null 2>&1
+cat >> "$GREPO/template-fragments/learned-conventions-polecat.template.md" <<MD
+<!-- rule:tk-unmerged src:audit:tk-test adopted:$ADOPTED -->
+- A rule that exists only in the working tree.
+MD
+R=$("$SUT" --inventory --repo "$GREPO" --ref HEAD 2>&1)
+has   "$R" "tk-merged"   "--ref reads the carrier from the ref"
+hasnt "$R" "tk-unmerged" "and not from the working tree"
+R=$(STUB_RIGS="$TMP/rigs2.json" "$SUT" --repo "$GREPO" --ref HEAD --window-days 30 --json 2>&1)
+eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "1" \
+   "report mode honors --ref, so an unmerged entry is not counted as adopted"
+R=$(STUB_RIGS="$TMP/rigs2.json" "$SUT" --repo "$GREPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "2" \
+   "and without --ref the working tree is what it reads"
+
+# --- 6. usage ------------------------------------------------------------
 OUT=$("$SUT" --window-days 0 --repo "$REPO" 2>&1); eq "$?" "2" "--window-days 0 is rejected"
 OUT=$("$SUT" --window-days x --repo "$REPO" 2>&1); eq "$?" "2" "a non-numeric window is rejected"
 OUT=$("$SUT" --nope --repo "$REPO" 2>&1); eq "$?" "2" "an unknown flag is rejected"

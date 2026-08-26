@@ -145,10 +145,11 @@ Choose by what the learning *is*:
 Retirements and hardens use the same vocabulary — a retirement names the
 carrier it removes from, so the retirement pass can walk every surface.
 
-`review-rubric` amendments carry no anchor comment: the formula's step
-description is rendered into step beads, and an HTML comment there is noise
-in the text an agent reads. Provenance for those lives on the pattern bead
-and the PR, the same as for a hardened rule.
+A `review-rubric` amendment anchors in the TOML comment ledger above the
+review step in `formulas/mol-review.toml`, not beside the dimension it
+amends: the step description renders into step beads, where an HTML comment
+is noise in the text an agent reads. The ledger line names the dimension, so
+the retirement pass can find what an anchor refers to.
 
 ## Two gates on promotion into a paid carrier
 
@@ -239,10 +240,9 @@ verification gap, so the exemplar route is not open to it either.
 
 Promotion without pruning is how prompts rot. Walk the adopted entries in
 **every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
-one row per anchored entry — the conventions fragments, the profile, the
-exemplar corpus. `review-rubric` dimensions carry no anchor, so read them
-from `formulas/mol-review.toml` directly; the inventory being short is not
-evidence that carrier is empty. Of each entry, ask:
+one row per anchored entry across all four — the conventions fragments, the
+profile, the exemplar corpus, and the `review-rubric` ledger in
+`formulas/mol-review.toml`. Of each entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose
   the lint or doctor check and **retire the prose bullet in the same

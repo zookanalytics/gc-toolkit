@@ -121,6 +121,14 @@ done
 guessed main), REVIEWED_OID pinned, intent read, this step bead closed.
 """
 
+# Adopted review-rubric entries — the lifecycle record the retirement pass
+# reads through learning-recurrence.sh --inventory. Anchors live here, not
+# beside the dimension: the step description below renders into a step bead,
+# where an HTML comment is noise in the text the reviewer reads. One line per
+# adopted dimension, naming the "What to check" bullet it amended:
+# <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
+# (none adopted yet)
+
 [[steps]]
 id = "review"
 title = "Read the diff, run the tests, write the verdict body"

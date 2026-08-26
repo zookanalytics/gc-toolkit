@@ -169,17 +169,17 @@ step `review`, the "What to check" dimensions. Preferred over `convention`
 whenever the failure is visible in a diff: one dimension reaches every
 agent's version of the mistake through the reviewer, where a bullet reaches
 only the role whose fragment renders it. An amendment is one dimension
-sharpened or added. These carry no anchor comment — the step description is
-rendered into step beads, so provenance stays on the pattern bead and the
-PR, as it does for a hardened rule.
+sharpened or added. The anchor goes in the TOML comment ledger above the
+review step, not beside the dimension: the step description renders into a
+step bead, where an HTML comment is noise in the text a reviewer reads.
 
 **`exemplar` — the exemplar corpus.** `template-fragments/learning-exemplars.md`, at most
 **8** before/after pairs, resolved on demand during a review rather than
 injected into any prompt. For lessons that are a shape rather than a
 statement.
 
-Every entry in the three anchored carriers is immediately preceded by its
-anchor comment:
+Every adopted entry carries an anchor comment — immediately above it in the
+three fragment carriers, in the ledger for `review-rubric`:
 
 ```
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
@@ -194,8 +194,11 @@ in the same PR, or the promotion does not file.
 
 `assets/scripts/learning-recurrence.sh` is the loop's success metric.
 Repeat feedback is the honest one: if the loop works, the same correction
-stops coming back. The report reads observation beads across every store,
-dedups on `obs.provenance`, and gives two numbers:
+stops coming back. The report reads observation beads across every store and
+collapses duplicate captures — one correction read by both self-report and
+the miner. Two observations are the same correction when they share a
+provenance key AND an `obs.category`: a provenance key can name a whole
+turn, and a turn carries several distinct corrections. It gives two numbers:
 
 - **M1, repeat feedback by category.** The share of events in the window
   whose `obs.category` was already seen on an earlier event. `obs.category`
@@ -206,7 +209,10 @@ dedups on `obs.provenance`, and gives two numbers:
   rate when the key does not discriminate, and reports the spread instead.
 - **M2, recurrence after adoption.** Per adopted entry, the observations
   attributed to its pattern bead since its adoption date. Attribution runs
-  through `obs.distilled`, which only the distiller stamps.
+  through `obs.distilled`, which only the distiller stamps. An anchor records
+  a date, not a moment, and the distiller stamps consumed observations when
+  it files the proposal — before merge. Counting therefore starts the day
+  after the anchor date, so a rule cannot recur against its own evidence.
 
 Both can floor out for reasons that are not improvement, so the report
 states its own limits beside each number: near-unique category slugs stop
@@ -217,7 +223,9 @@ exits non-zero rather than reporting a smaller city as a smaller problem.
 
 The script runs standalone and needs no distiller run. The distiller echoes
 it at the end of every run, and `--inventory` is the shared parser its
-retirement pass reads instead of re-deriving the same anchor grep.
+retirement pass reads instead of re-deriving the same anchor grep. Both the
+distiller's calls pass `--ref origin/main`: read from a working tree, the
+inventory counts a proposal branch's unmerged entries as adopted.
 
 ## Retirement and hardening
 

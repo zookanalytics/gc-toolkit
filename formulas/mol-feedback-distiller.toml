@@ -333,9 +333,11 @@ RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO"; do
 done
 if [ -n "$RECUR" ]; then
   "$RECUR" --inventory --repo "$REPO" --ref origin/main
+  # Both calls read origin/main: the working tree of a pack checkout can be
+  # stale, and on a proposal branch it counts unmerged entries as adopted.
   # A non-zero exit is a partial-city refusal, not a missing script: judge
   # the retirement questions without the metric rather than on half of it.
-  "$RECUR" --repo "$REPO" || echo "WARN: recurrence report declined to run; retirement questions answered without it" >&2
+  "$RECUR" --repo "$REPO" --ref origin/main || echo "WARN: recurrence report declined to run; retirement questions answered without it" >&2
 else
   echo "WARN: learning-recurrence.sh not found; retirement pass runs without the inventory or the metric" >&2
 fi
@@ -412,9 +414,9 @@ BODY="## Rule
 ## Target
 - convention    -> template-fragments/learned-conventions-<role>.template.md (cap {{fragment_bullet_cap}})
 - profile       -> template-fragments/operator-profile.template.md (cap {{profile_entry_cap}}); needs an obs.source=operator observation
-- review-rubric -> formulas/mol-review.toml, step review, What to check (no anchor comment; provenance stays on the pattern bead and the PR)
+- review-rubric -> formulas/mol-review.toml, step review, What to check; its anchor goes in that file's TOML comment ledger above the step, never in the step description (rendered text a reviewer reads)
 - exemplar      -> template-fragments/learning-exemplars.md (cap {{exemplar_cap}})
-- learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor
+- learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor and no inventory row: the rubric is the loop's own method, not an adopted rule the retirement pass judges
 - Anchor: <!-- rule:$PATTERN src:<short provenance refs> adopted:<YYYY-MM-DD> -->
 
 ## Evidence
@@ -508,11 +510,14 @@ echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-upda
 # The loop's success metric, in the run log where the run that moved it is
 # visible. It also runs standalone, which is how the metric is read while
 # this order is disabled.
-RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)"; do
+REPO="${REPO:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO"; do
   [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
 done
 if [ -n "$RECUR" ]; then
-  "$RECUR" || echo "WARN: recurrence report declined to run (an unreadable store refuses a partial number)" >&2
+  # --ref origin/main for the same reason the retirement pass passes it: the
+  # working tree can be stale or carry this run's own unmerged proposals.
+  "$RECUR" --repo "$REPO" --ref origin/main || echo "WARN: recurrence report declined to run (an unreadable store refuses a partial number)" >&2
 else
   echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 fi

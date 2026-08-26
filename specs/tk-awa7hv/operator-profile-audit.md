@@ -7,8 +7,10 @@ description: The city-wide feedback audit that populated the operator profile â€
 
 The operator profile is meant to hold what the operator values, derived from
 what they have actually said. Before this audit it held three entries, all
-from one PR review conversation. This is the record of the audit that
-populated it to ten.
+from one PR review conversation. This is the record of the audit that added
+seven. The profile ships with nine: the code-comments entry is a rule about
+a diff, not about operator taste, and moved to
+`template-fragments/learned-conventions-polecat.template.md` in the same PR.
 
 ## The corpus
 
@@ -92,7 +94,7 @@ Entry 7 is an ADD against `tk-xgaeo`, not a duplicate of the two adopted
 shape; this covers tense and venue, which `tk-xgaeo` names and neither
 adopted entry reaches.
 
-The profile now holds 10 of its 12 entries. The two remaining slots are
+The profile now holds 9 of its 12 entries. The three remaining slots are
 deliberate headroom: a surface filled to its cap forces the next promotion
 to displace before the operator has seen it once.
 

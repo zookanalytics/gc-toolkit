@@ -2,8 +2,8 @@
 # learning-recurrence.sh — the feedback-learning loop's success metric.
 # Repeat feedback is the honest measure: if the loop works, the same
 # correction stops coming back. Reads observation beads across every store,
-# dedups on obs.provenance, and reports two numbers plus the coverage that
-# qualifies them.
+# collapses exact duplicate captures, and reports two numbers plus the
+# coverage that qualifies them.
 #   learning-recurrence.sh [--window-days N] [--json]
 #   learning-recurrence.sh --inventory [--ref <git-ref>]
 # Runs standalone — it needs no distiller run and no order. The distiller
@@ -23,8 +23,9 @@ usage: learning-recurrence.sh [--window-days N] [--json] [--repo PATH]
   --inventory    print the adopted-rule inventory (one TSV row per entry) and
                  exit; the retirement pass reads this instead of re-parsing
                  anchors itself
-  --ref          git ref to read fragments from for --inventory; default is
-                 the working tree (the distiller passes origin/main)
+  --ref          git ref to read the adopted-rule carriers from, in report
+                 mode as well as --inventory; default is the working tree
+                 (the distiller passes origin/main)
   --repo         pack checkout to read fragments from; default is the
                  enclosing git worktree
 U
@@ -56,15 +57,18 @@ REPO="$REPO_ARG"
 # entry descends from, which is what makes post-adoption recurrence
 # attributable; an anchor without one is adopted but unmeasurable, and the
 # report says so rather than counting it as zero recurrence.
+# formulas/mol-review.toml is the review-rubric carrier: its anchors sit in
+# a TOML comment ledger, not in the step description a reviewer reads.
 inventory_files() {
   if [ -n "$REF" ]; then
     git -C "$REPO" ls-tree -r --name-only "$REF" 2>/dev/null \
-      | grep -E '^template-fragments/(learned-conventions-|operator-profile|learning-exemplars)'
+      | grep -E '^(template-fragments/(learned-conventions-|operator-profile|learning-exemplars)|formulas/mol-review\.toml$)'
   else
     local f
     for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
              "$REPO"/template-fragments/operator-profile.template.md \
-             "$REPO"/template-fragments/learning-exemplars.md; do
+             "$REPO"/template-fragments/learning-exemplars.md \
+             "$REPO"/formulas/mol-review.toml; do
       [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"
     done
   fi
@@ -135,9 +139,8 @@ done < "$RIGSET"
 
 emit_inventory > "$TMP/inventory.tsv"
 
-# One event per obs.provenance — the same correction captured by self-report
-# and by the miner is one occurrence, not two. Observations with no
-# provenance key stand alone rather than collapsing into each other.
+# One event per correction. Observations with no provenance key stand alone
+# rather than collapsing into each other.
 # The report is process-local: $TMP is the mktemp -d above and the EXIT trap
 # removes it. --json prints it to stdout; nothing here persists an artifact.
 NOW=$(date -u +%s)
@@ -154,12 +157,21 @@ jq -n \
   | ($obs[0] // [])                as $all
   | ($all | length)                as $raw_count
 
-  # Dedup on provenance; keep the earliest capture of each event.
+  # Two observations are one correction when they share a provenance key AND
+  # a category: the self-report and the miner reading of one event. A
+  # provenance key can name a whole turn, and a turn carries several distinct
+  # corrections, so provenance alone is not the key. The survivor keeps the
+  # earliest capture time and any attribution the group carries — the
+  # distiller stamps obs.distilled on one member, not on all of them.
+  # \u001f cannot appear in a value: the reader above strips control
+  # characters from every store.
   | ( $all
       | map(. + {ts: (.created_at | epoch)})
       | map(select(.ts != null))
-      | group_by(if .provenance == "" then "id:" + .id else "prov:" + .provenance end)
-      | map(sort_by(.ts) | .[0]) ) as $events
+      | group_by(if .provenance == "" then "id:" + .id
+                 else "prov:" + .provenance + "\u001f" + .category end)
+      | map( (sort_by(.ts) | .[0])
+             + {pattern: ((map(.pattern) | map(select(. != "")) | first) // "")} ) ) as $events
 
   | ($events | map(select(.ts >= $w_start)))                       as $window_ev
   | ($events | map(select(.ts >= $p_start and .ts < $w_start)))    as $prior_ev
@@ -191,9 +203,13 @@ jq -n \
       | split("\n") | map(select(length > 0))
       | map(split("\t"))
       | map({file: .[0], pattern: .[1], adopted: .[2]}) )          as $rules
+  # An anchor records a date, not a moment, and the distiller stamps consumed
+  # observations at proposal time — before merge. Same-day evidence predates
+  # adoption as often as it follows it, so counting starts the day after.
   | ( $rules
       | map( . as $r
-             | ($r.adopted + "T00:00:00Z" | epoch) as $adopted_ts
+             | ($r.adopted + "T00:00:00Z" | epoch) as $adopted_day
+             | (if $adopted_day == null then null else $adopted_day + 86400 end) as $adopted_ts
              | $r + {
                  measurable: ($r.pattern != "-" and $adopted_ts != null),
                  since_adoption: (
@@ -210,7 +226,7 @@ jq -n \
   | {
       corpus: {
         observations: $raw_count,
-        events_after_provenance_dedup: ($events | length),
+        events_after_dedup: ($events | length),
         stores: ($all | map(.rig) | unique | length)
       },
       window_days: $window,
@@ -250,7 +266,7 @@ jq -r '
                      elif $a < $b then "  (falling)" elif $a > $b then "  (rising)" else "  (flat)" end;
   "feedback-learning recurrence — \(.window_days)d window",
   "",
-  "corpus: \(.corpus.observations) observations across \(.corpus.stores) stores, \(.corpus.events_after_provenance_dedup) events after provenance dedup",
+  "corpus: \(.corpus.observations) observations across \(.corpus.stores) stores, \(.corpus.events_after_dedup) events after duplicate-capture dedup",
   "",
   "M1  repeat feedback by category (measurable with the distiller off)",
   ( if .m1_category_repeat.key_discriminating == false then
@@ -269,7 +285,7 @@ jq -r '
   "",
   "M2  recurrence after adoption (needs obs.distilled — the distiller attributes it)",
   "      adopted entries: \(.m2_post_adoption.adopted_total), of which \(.m2_post_adoption.measurable) carry a rule:<pattern-bead> anchor",
-  "      recurring after adoption: \(.m2_post_adoption.recurring)",
+  "      recurring after adoption: \(.m2_post_adoption.recurring)  (from the day after the adoption date)",
   "      window attribution: \(.m2_post_adoption.window_attribution.attributed)/\(.m2_post_adoption.window_attribution.events) events carry obs.distilled = \(.m2_post_adoption.window_attribution.coverage | pct) coverage",
   ( if (.m2_post_adoption.window_attribution.coverage // 0) < 0.5
     then "      LOW COVERAGE: most of this window is unattributed, so a low M2 reads as unmeasured, not as improvement."
