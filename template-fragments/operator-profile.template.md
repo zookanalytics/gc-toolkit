@@ -7,9 +7,9 @@
      carrying source ref + date. See docs/feedback-learning.md. -->
 
 <!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- Lead operator-facing writing with the decision or the action, stated so it
-  can be accepted or rejected in place. Reasoning comes after it, and bare
-  bead ids are not a decision.
+- State a decision or an action so the operator can accept or reject it
+  without looking anything up. A bare bead id, a title, or a pointer to a
+  queue is not a decision.
 
 <!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
 - The operator's own queues are state, not items to relay: a PR awaiting
@@ -24,8 +24,9 @@
 
 <!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
 - A rename, a re-framing, or a rendering change is not a fix for the thing
-  that produced the symptom. Take a report at the severity it was filed and
-  look for the structural cause.
+  that produced the symptom. Take a report at the severity it was filed,
+  find what allowed it to happen, and prefer a design in which it cannot
+  happen again over a patch for the instance.
 
 <!-- rule:tk-lz8mpv src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Read a standing ruling for its intent. A balance ask is not a freeze and a
@@ -35,15 +36,6 @@
 <!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
 - File work as a bead in the pass that names it, and put the bead id in the
   row that proposed it. A prose promise loses members of a set.
-
-<!-- rule:tk-vbyak0 src:pr:#465:review-conversation, bead:tk-447ql0, pr:#490:comment:3868559694 (operator feedback) adopted:2026-08-27 -->
-- Living code and documents — comments, prompts, formula steps, docs —
-  state what is true now and the constraints it rests on; never narrate
-  what the next line does, restate the diff, or carry incident history,
-  dates, or bead and PR ids. Specs and commit messages are where history
-  belongs; when unsure, omit. Managed provenance anchors are the one
-  exception. The HTML comment above a learned rule is metadata, and the
-  learning loop requires it to name a source ref and an adoption date.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces

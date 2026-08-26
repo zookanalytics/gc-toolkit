@@ -70,7 +70,7 @@ required = false
 default = "12"
 
 [vars.exemplar_cap]
-description = "Entry budget for the exemplar corpus, docs/learning-exemplars.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded."
+description = "Entry budget for the exemplar corpus, template-fragments/learning-exemplars.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded."
 required = false
 default = "8"
 
@@ -413,7 +413,7 @@ BODY="## Rule
 - convention    -> template-fragments/learned-conventions-<role>.template.md (cap {{fragment_bullet_cap}})
 - profile       -> template-fragments/operator-profile.template.md (cap {{profile_entry_cap}}); needs an obs.source=operator observation
 - review-rubric -> formulas/mol-review.toml, step review, What to check (no anchor comment; provenance stays on the pattern bead and the PR)
-- exemplar      -> docs/learning-exemplars.md (cap {{exemplar_cap}})
+- exemplar      -> template-fragments/learning-exemplars.md (cap {{exemplar_cap}})
 - learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor
 - Anchor: <!-- rule:$PATTERN src:<short provenance refs> adopted:<YYYY-MM-DD> -->
 

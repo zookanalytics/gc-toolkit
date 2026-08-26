@@ -201,7 +201,7 @@ if [ -n "$PACK" ]; then cat "$PACK/template-fragments/operator-profile.template.
   echo "operator profile not found in this checkout; note that in the verdict's coverage line"
 fi
 # Absent on an older pack pin, and empty until the first exemplar is adopted.
-[ -n "$PACK" ] && [ -r "$PACK/docs/learning-exemplars.md" ] && cat "$PACK/docs/learning-exemplars.md"
+[ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.md" ] && cat "$PACK/template-fragments/learning-exemplars.md"
 ```
 
 **4. Calibrate severity.** P0 — broken or unsafe as merged: data loss, a

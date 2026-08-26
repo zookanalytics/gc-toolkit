@@ -120,7 +120,7 @@ target file, the budget, and what the adoption costs to keep.
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
 | `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
-| `exemplar` | `docs/learning-exemplars.md` | `exemplar_cap` entries | per review, resolved on demand |
+| `exemplar` | `template-fragments/learning-exemplars.md` | `exemplar_cap` entries | per review, resolved on demand |
 
 Choose by what the learning *is*:
 

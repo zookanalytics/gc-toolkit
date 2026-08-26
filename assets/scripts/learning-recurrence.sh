@@ -59,12 +59,12 @@ REPO="$REPO_ARG"
 inventory_files() {
   if [ -n "$REF" ]; then
     git -C "$REPO" ls-tree -r --name-only "$REF" 2>/dev/null \
-      | grep -E '^(template-fragments/(learned-conventions-|operator-profile)|docs/learning-exemplars\.md)'
+      | grep -E '^template-fragments/(learned-conventions-|operator-profile|learning-exemplars)'
   else
     local f
     for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
              "$REPO"/template-fragments/operator-profile.template.md \
-             "$REPO"/docs/learning-exemplars.md; do
+             "$REPO"/template-fragments/learning-exemplars.md; do
       [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"
     done
   fi
@@ -138,6 +138,8 @@ emit_inventory > "$TMP/inventory.tsv"
 # One event per obs.provenance — the same correction captured by self-report
 # and by the miner is one occurrence, not two. Observations with no
 # provenance key stand alone rather than collapsing into each other.
+# The report is process-local: $TMP is the mktemp -d above and the EXIT trap
+# removes it. --json prints it to stdout; nothing here persists an artifact.
 NOW=$(date -u +%s)
 jq -n \
   --slurpfile obs "$OBS" \
@@ -219,6 +221,8 @@ jq -n \
                   rate: (if ($p_cat|length) == 0 then null else (($p_repeat|length) / ($p_cat|length)) end)},
         fragmentation: {categorised: ($all_cat|length), distinct: $distinct_cats,
                         events_per_category: (if $distinct_cats == 0 then null else (($all_cat|length) / $distinct_cats) end)},
+        key_discriminating: (if $distinct_cats == 0 then null
+                             else ((($all_cat|length) / $distinct_cats) >= 1.5) end),
         top_repeating: ( $w_repeat | group_by(.category)
                          | map({category: .[0].category, count: length})
                          | sort_by(-.count) | .[0:8] )
@@ -249,13 +253,18 @@ jq -r '
   "corpus: \(.corpus.observations) observations across \(.corpus.stores) stores, \(.corpus.events_after_provenance_dedup) events after provenance dedup",
   "",
   "M1  repeat feedback by category (measurable with the distiller off)",
-  "      this window: \(.m1_category_repeat.window.repeats)/\(.m1_category_repeat.window.categorised) events repeat a category already seen  = \(.m1_category_repeat.window.rate | pct)",
-  "      prior window: \(.m1_category_repeat.prior.repeats)/\(.m1_category_repeat.prior.categorised)  = \(.m1_category_repeat.prior.rate | pct)\(arrow(.m1_category_repeat.window.rate; .m1_category_repeat.prior.rate))",
+  ( if .m1_category_repeat.key_discriminating == false then
+      "      this window: \(.m1_category_repeat.window.repeats)/\(.m1_category_repeat.window.categorised) events repeat a category already seen  = rate withheld",
+      "      prior window: \(.m1_category_repeat.prior.repeats)/\(.m1_category_repeat.prior.categorised)  = rate withheld"
+    else
+      "      this window: \(.m1_category_repeat.window.repeats)/\(.m1_category_repeat.window.categorised) events repeat a category already seen  = \(.m1_category_repeat.window.rate | pct)",
+      "      prior window: \(.m1_category_repeat.prior.repeats)/\(.m1_category_repeat.prior.categorised)  = \(.m1_category_repeat.prior.rate | pct)\(arrow(.m1_category_repeat.window.rate; .m1_category_repeat.prior.rate))"
+    end ),
   ( if (.m1_category_repeat.top_repeating | length) == 0 then "      no category recurred this window"
     else "      recurring: " + (.m1_category_repeat.top_repeating | map("\(.category) x\(.count)") | join(", ")) end),
   "      category spread: \(.m1_category_repeat.fragmentation.distinct) distinct categories over \(.m1_category_repeat.fragmentation.categorised) events",
-  ( if (.m1_category_repeat.fragmentation.events_per_category // 9) < 1.5
-    then "      HIGH FRAGMENTATION: capture mints a fresh slug for nearly every event, so M1 floors out — read it with the pattern-bead clusters, not alone."
+  ( if .m1_category_repeat.key_discriminating == false
+    then "      HIGH FRAGMENTATION: capture mints a fresh slug for nearly every event, so repeats is pinned to (categorised - distinct) and M1 restates the category spread instead of measuring recurrence. Its rate is withheld above; read the M2 pattern-bead clusters."
     else empty end),
   "",
   "M2  recurrence after adoption (needs obs.distilled — the distiller attributes it)",

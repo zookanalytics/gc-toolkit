@@ -173,7 +173,7 @@ sharpened or added. These carry no anchor comment — the step description is
 rendered into step beads, so provenance stays on the pattern bead and the
 PR, as it does for a hardened rule.
 
-**`exemplar` — the exemplar corpus.** `docs/learning-exemplars.md`, at most
+**`exemplar` — the exemplar corpus.** `template-fragments/learning-exemplars.md`, at most
 **8** before/after pairs, resolved on demand during a review rather than
 injected into any prompt. For lessons that are a shape rather than a
 statement.
@@ -199,16 +199,20 @@ dedups on `obs.provenance`, and gives two numbers:
 
 - **M1, repeat feedback by category.** The share of events in the window
   whose `obs.category` was already seen on an earlier event. `obs.category`
-  is stamped at capture, so this number survives the distiller being
-  disabled.
+  is stamped at capture, so this half survives the distiller being disabled.
+  The slug is free text minted per capture, so when nearly every event mints
+  its own, the repeat count is pinned to (categorised minus distinct) and the
+  share measures slug reuse rather than recurrence. The report withholds the
+  rate when the key does not discriminate, and reports the spread instead.
 - **M2, recurrence after adoption.** Per adopted entry, the observations
   attributed to its pattern bead since its adoption date. Attribution runs
   through `obs.distilled`, which only the distiller stamps.
 
 Both can floor out for reasons that are not improvement, so the report
-states its own limits beside each number: near-unique category slugs floor
-M1, an unattributed window leaves M2 unmeasured, and an entry with no
-`rule:<pattern-bead>` anchor cannot be scored at all. An unreadable store
+states its own limits beside each number: near-unique category slugs stop
+M1's key discriminating so its rate is withheld, an unattributed window
+leaves M2 unmeasured, and an entry with no `rule:<pattern-bead>` anchor
+cannot be scored at all. An unreadable store
 exits non-zero rather than reporting a smaller city as a smaller problem.
 
 The script runs standalone and needs no distiller run. The distiller echoes
