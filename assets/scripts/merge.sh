@@ -2,9 +2,9 @@
 # merge — arm 3 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
 # repo, not a fork, right head branch, OPEN non-draft), live anchor re-read,
-# then validate in order: merge_hold; unanswered review comments (pr_posture
-# read OFF THE ANCHOR, never re-derived from GitHub here);
-# one-anchor-per-PR (hold + escalate once —
+# then validate in order: merge_hold; unanswered review comments (pr_posture,
+# read OFF THE ANCHOR, never re-derived from GitHub here); one-anchor-per-PR
+# (hold + escalate once —
 # fail-closed defense; the structural check is doctor's); non-empty check_set
 # (empty is never the 'none' opt-out — an unnormalized anchor holds);
 # base == merged_target;
