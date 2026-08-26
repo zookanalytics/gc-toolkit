@@ -10,14 +10,15 @@
 # ONE rework child per head to the fix pool, stamped prepare_mode and routed only
 # once that stamp reads back (dedup: a rework child naming this branch whose
 # rejection_reason names this head; an unstamped orphan is adopted by title,
-# never twinned); gate green at a STALE head -> file one re-review child per
-# head to the review pool, carrying mol-review via gc sling --on (dedup: a
-# live review naming the anchor, or one with review_branch=branch and
-# reviewed_oid=<live head>; same orphan adoption), stamped with fix_target_pool
-# for the rework path; dismissal of our OWN superseded CHANGES_REQUESTED
-# (never a human's; signoff_dismissed read back FIRST; skipped under native
-# auto-merge). A merged record never carries an empty merged_sha — an
-# unreadable mergeCommit records merged_sha=unverified:PR#<n>, loudly.
+# never twinned); a gate green@ or exception@ a STALE head -> file one
+# re-review child per head to the review pool, carrying mol-review via gc
+# sling --on (dedup: a live review naming the anchor, or one with
+# review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
+# stamped with fix_target_pool for the rework path; dismissal of our OWN
+# superseded CHANGES_REQUESTED (never a human's; signoff_dismissed read back
+# FIRST; skipped under native auto-merge). A merged record never carries an
+# empty merged_sha — an unreadable mergeCommit records
+# merged_sha=unverified:PR#<n>, loudly.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
@@ -320,17 +321,21 @@ GATES
     continue
   fi
 
-  # --- gate green at a STALE head: one re-review child per head ------------------
-  stale_gate=""; stale_oid=""
+  # --- a head-bound verdict at a STALE head: one re-review child per head -------
+  # exception@ rides the same path as green@: both bind a verdict to a commit,
+  # and a branch that has moved past either one has had no look at its head.
+  stale_gate=""; stale_oid=""; stale_verb=""
   if [ -n "$head_oid" ]; then
     while IFS= read -r g; do
       [ -n "$g" ] || continue
       case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
       m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
       case "$m" in
-        green@*)
-          o="${m#green@}"
-          if [ -n "$o" ] && [ "$o" != "$head_oid" ]; then stale_gate="$g"; stale_oid="$o"; break; fi ;;
+        green@*|exception@*)
+          o="${m#*@}"
+          if [ -n "$o" ] && [ "$o" != "$head_oid" ]; then
+            stale_gate="$g"; stale_oid="$o"; stale_verb="${m%%@*}"; break
+          fi ;;
       esac
     done <<GATES
 $(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
@@ -359,7 +364,7 @@ GATES
     if [ -n "$live_rev" ] || [ -n "$head_rev" ]; then
       skipped=$((skipped + 1)); continue
     fi
-    NOTE="Stale-gate re-review: check.$stale_gate was green@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
+    NOTE="Stale-gate re-review: check.$stale_gate was $stale_verb@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
     # Orphan adoption BEFORE create (same shape as the rebase arm): an
     # unstamped re-review carries the deterministic title but no anchor_bead.
     REV_TITLE="Review PR#$num: re-review at live head"
@@ -413,7 +418,7 @@ GATES
     fi
     gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
     regated=$((regated + 1))
-    echo "$PROG: $id — PR#$num check.$stale_gate green@$stale_oid is stale (live head $head_oid); filed re-review $RID routed to $REVIEW_POOL"
+    echo "$PROG: $id — PR#$num check.$stale_gate $stale_verb@$stale_oid is stale (live head $head_oid); filed re-review $RID routed to $REVIEW_POOL"
     continue
   fi
 

@@ -112,7 +112,7 @@ gate's verdict is a head-bound marker:
 |---|---|---|
 | `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head |
 | `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
-| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds until the head moves |
+| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>` |
 
 `approval` is satisfied only by an external APPROVED review — never by the
 city's own account. **`signoff.sh` is the single writer of gate verdicts**
@@ -178,13 +178,18 @@ sequenceDiagram
   (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
   `check.<g>=exception@<head>` and the anchor routes to human. One writer,
   one terminal verdict — no second component may touch `check.*`.
+  A head move past that exception buys exactly one dispatch through
+  gate-ensure's `dispatch_count` cap, so a branch someone fixed by hand gets
+  a look. It cannot self-feed: the cap arm files no rework child, so nothing
+  inside the cadence can move that head again.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
-  per head; a gate green at a stale head gets one re-review child per head.
-  Idempotent per head — re-runs never duplicate children.
+  per head; a gate `green@` or `exception@` a stale head gets one re-review
+  child per head. Idempotent per head — re-runs never duplicate children.
 - **Re-gate on head move**: any new commit stales every head-bound marker;
-  gate-ensure sees a declared gate that is neither green at the live head nor
-  in flight and dispatches one review bead (stamp first, then attach
-  `mol-review` via `gc sling --on`, read the pour back).
+  gate-ensure sees a declared gate that is neither settled at the live head
+  (`green@` or `exception@` it) nor in flight and dispatches one review bead
+  (stamp first, then attach `mol-review` via `gc sling --on`, read the pour
+  back).
 
 ## Disposition
 

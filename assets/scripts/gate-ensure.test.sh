@@ -2,13 +2,15 @@
 # Hermetic test for assets/scripts/gate-ensure.sh — arm 1 of the merge cadence.
 # Covers: default check_set stamping (and the rc=3 hold when the stamp does not
 # persist or the enumeration is unreadable); the `none` opt-out; marker
-# classification (green@live head, stale green, exception, fixable, absent,
-# unmappable); in-flight dedup (routed, poured, claimed) + stranded repair
+# classification (green@ and exception@ the live head, stale green, stale
+# exception, fixable, absent, unmappable); in-flight dedup (routed, poured,
+# claimed) + stranded repair
 # (convoy probe: re-sling only a review with no LIVE tracking convoy, and
 # converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold; the
-# dispatch_count cap; and the review-wedge escalation (exec-stamp-only reach
+# dispatch_count cap (and the one dispatch a head move past an exception buys
+# through it); and the review-wedge escalation (exec-stamp-only reach
 # whose poured workflow is spent -> one deduped visit, held one pass first).
 set -uo pipefail
 
@@ -87,12 +89,26 @@ store "[$(anchor B1 pre_open_gate none "" polecat/b1),
         $(anchor B2 pre_open_gate codex "green@sha-b2" polecat/b2),
         $(anchor B3 pull_request codex "exception@sha-b3" polecat/b3)]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
-echo "sha-b3x" > "$GH_DIR/head_polecat_b3"
+echo "sha-b3" > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "opt-out/settled pass exits 0"
 eq "$(meta B1 check_set)" "none" "the none sentinel is left alone"
-has "$out" "0 reviews dispatched" "green@live-head, exception@ and none dispatch nothing"
+has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none, dispatch nothing"
+
+echo "# an exception the head has moved PAST is re-armed, cap or no cap"
+store "[$(anchor B4 pull_request codex "exception@sha-old" polecat/b4),
+        $(anchor B5 pull_request codex "exception@sha-old" polecat/b5 ',"dispatch_count":"3"')]"
+echo "sha-b4" > "$GH_DIR/head_polecat_b4"
+echo "sha-b5" > "$GH_DIR/head_polecat_b5"
+out=$(run); rc=$?
+eq "$rc" 0 "re-gate pass exits 0"
+has "$out" "2 reviews dispatched" "a branch fixed under an exception gets one look"
+has "$out" "advanced to sha-b4" "the dispatch names the head that staled the exception"
+has "$out" "B5 gate 'codex' is past the cap (3/3) but the branch advanced past exception@sha-old" \
+  "the spent cap does not ALSO refuse the head-move re-gate (the second brake)"
+eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
+eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
 
 echo "# stale green / fixable / absent / unmappable all dispatch"
 store "[$(anchor C1 pre_open_gate codex "green@old-oid" polecat/c1),
