@@ -11,7 +11,8 @@
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
 # to (<state-root>/bin/helm-svc — see gc-helm-svc.sh / gc-helm-build.sh),
-# falling back to PATH; absent, the picker shows one clear line and exits.
+# falling back to PATH. A binary that is absent, and a board that cannot be
+# read, each get their own line — neither is ever rendered as an empty board.
 #
 # --city-path is baked in by tmux-bindings.sh at install time so `gc`'s
 # city discovery is deterministic from tmux's bare env.
@@ -59,7 +60,31 @@ if [ -z "$HELM_SVC" ]; then
 fi
 
 # Cap at the hotkey alphabet (a-z0-9 = 36) so every row is one keystroke.
-BOARD=$("$HELM_SVC" board --json --limit=36 2>/dev/null || printf '[]')
+#
+# "The board is empty" and "the board could not be read" are opposite answers,
+# and only one of them means nothing needs you. helm-svc board exits 3 when the
+# gather failed and prints why; discarding that and rendering `[]` turned a
+# three-day outage into the all-clear pixels (tk-00o34c).
+BOARD_ERR="$(mktemp "${TMPDIR:-/tmp}/gc-helm-pick.XXXXXX" 2>/dev/null || printf '')"
+if [ -n "$BOARD_ERR" ]; then trap 'rm -f "$BOARD_ERR"' EXIT; fi
+BOARD_RC=0
+BOARD=$("$HELM_SVC" board --json --limit=36 2>"${BOARD_ERR:-/dev/null}") || BOARD_RC=$?
+
+if [ "$BOARD_RC" -ne 0 ]; then
+    WHY=""
+    if [ -n "$BOARD_ERR" ]; then
+        # One line for a one-line menu bar: the live schema-skew message names
+        # every rig in the city and would push the useful half off the screen.
+        WHY=$(tr '\n\t' '  ' < "$BOARD_ERR" | sed 's/  */ /g; s/^ *//; s/ *$//' | cut -c1-160)
+    fi
+    [ -n "$WHY" ] || WHY="helm-svc board exited $BOARD_RC with no diagnostic"
+    gcmux display-message -d 10000 "Helm: BOARD UNREADABLE — $WHY"
+    # Exit 0 like the missing-binary arm: the key is bound with a foreground
+    # `run-shell`, which pops its own window over the message on a non-zero
+    # status. The message IS the report.
+    exit 0
+fi
+
 COUNT=$(printf '%s' "$BOARD" | jq 'length' 2>/dev/null || echo 0)
 case "$COUNT" in ''|*[!0-9]*) COUNT=0 ;; esac
 

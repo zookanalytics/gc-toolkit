@@ -36,6 +36,8 @@ Two entry points over ONE board. They share `internal/source` (the gather) and
 helm-svc                 serve  — the sidecar (below). Bare invocation, which is
                                   how the supervisor spawns it.
 helm-svc board [--json]  render — the terminal board (tk-134d7). See *CLI view*.
+helm-svc probe           check  — can THIS binary read the city's bead stores?
+                                  See *Readability check*.
 ```
 
 As the sidecar:
@@ -93,6 +95,28 @@ loomington city (5 stores, 55 anchors):
 Same binary as the sidecar on purpose: a separately-built CLI would be a second
 artifact that can go stale on its own, which is the failure that motivated the
 epic (`tk-5nm0p`). Full rationale in `cmd/helm-svc/board.go`.
+
+### Readability check (`helm-svc probe`)
+
+```
+helm-svc probe                     # 0 readable · 3 no store could be opened · 2 usage
+helm-svc probe --timeout=30        # bound the open (default GC_HELM_PROBE_TIMEOUT, else 10s)
+```
+
+One question, cheaply: can the binary running it open a bead store? It opens
+one and gathers nothing — ~0.2s against the loomington city, against 2.7s for
+the board — and one readable store is enough, matching what `Gather` needs to
+return a board at all.
+
+It exists because a binary's ability to read a store is fixed by the beads
+library it embedded at build time, while the store's schema moves under it
+whenever `bd` is upgraded. That drift is invisible to every other signal: the
+sources are older than the binary, `/healthz` answers without gathering, and
+the sidecar itself keeps serving because `selectSource` falls back to the
+supervisor HTTP API. In August 2026 all three read green for three days while
+`helm-svc board` exited 3 on every rig (`tk-00o34c`). `probe` is the one
+question whose answer moves with the store, and the build gate below spends it
+on every tick.
 
 ### Anchor kinds
 
@@ -444,7 +468,7 @@ So the two jobs are separate:
 | build | `assets/scripts/gc-helm-build.sh` | the `helm-build` order, every 5m |
 | start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
 
-`gc-helm-build.sh` rebuilds only when a source is newer than the binary — an
+`gc-helm-build.sh` rebuilds when a source is newer than the binary — an
 ordinary `find -newer` dependency, the same question `make` asks — publishes by
 atomic rename so a failed link can never truncate a serving binary, and in
 `--deploy` mode restarts the service onto what it published. Build and restart
@@ -452,6 +476,35 @@ are one step on purpose: a new binary that nothing restarts onto is the other
 half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
 binary built at 02:40 while three commits touching `services/helm` had landed
 after it, all three inert in the served board.
+
+**Source mtime is not the only way to go stale.** A binary can be newer than
+every source file and still fail every gather, because what it can read is
+fixed by the beads library it embedded and the store's schema moves
+independently. `find -newer` is structurally blind to that: deleting a file
+makes nothing newer, and a dependency that drifts under an unchanged `go.mod`
+never touches a source at all. So the gate also asks `helm-svc probe`, and
+`build-status` records the answer rather than the build:
+
+| `build-status` | meaning |
+|---|---|
+| `ok <ts>` | built or current, **and** the binary can read the stores |
+| `unreadable <ts> <why>` | it cannot; the board will not render |
+| `unprobed <ts>` | no city in the environment to probe against (a hand run) |
+| `failed <ts>` | the build itself failed; the previous binary is untouched |
+
+`ok` is spent in exactly one place, after a passing probe, so nothing
+downstream can read this file as a healthy board while the gather it reports on
+cannot run. An unreadable binary exits the gate non-zero, which is what turns
+the order red.
+
+**A rebuild is the remedy only while it can produce a different binary.** When
+the stale thing is the `go.mod` pin rather than the sources, rebuilding embeds
+the same library and changes nothing, so repeating it every five minutes buys
+a rebuild loop and buries the real fix. The gate records the beads version of
+the binary whose probe failed in `<state_root>/probe-failed`; a later tick that
+would embed that same version reports and stops instead of rebuilding, naming
+the dependency to bump. Moving the pin re-arms it, and a passing probe clears
+the record.
 
 **A publish that was never restarted onto is remembered.** Publishing marks
 `<state_root>/restart-pending`, and only a restart that returns success clears
