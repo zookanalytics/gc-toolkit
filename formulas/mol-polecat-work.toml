@@ -13,8 +13,9 @@ NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
 assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
-own bead, and step-close.sh resolves it from the (assignee, gc.step_ref)
-pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead after a claim.
+own bead, and step-close.sh resolves it from the (gc.root_bead_id,
+gc.step_ref) pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead
+after a claim, and a pool assignee names every molecule the slot ever ran.
 workflow-finalize is the control-dispatcher's — never close it.
 
 Two distinct branch questions: {{base_branch}} is what the worktree is
@@ -401,7 +402,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
   done
-  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
+  : "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
   for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
     "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
   done
@@ -551,7 +552,7 @@ SC=""
 for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-: "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
+: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
 for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
   "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
 done

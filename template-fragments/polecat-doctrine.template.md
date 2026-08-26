@@ -143,9 +143,10 @@ your claimed bead everything else.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
-  `step-close.sh`, which resolves the bead from the `(assignee, gc.step_ref)`
-  pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the wrong bead
-  after a hook-claim and fail silently.
+  `step-close.sh`, which resolves the bead from the `(gc.root_bead_id,
+  gc.step_ref)` pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the
+  wrong bead after a hook-claim and fail silently, and your assignee names
+  every molecule this pool slot has ever run, not this one.
 - **Close the chain in FORWARD order** (first step first, terminal step
   last): each step blocks the next and `bd` refuses to close a blocked
   issue, so the chain only unwinds from the unblocked end. Run the
