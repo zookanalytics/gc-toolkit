@@ -70,6 +70,17 @@ repeatable, writes a `blocks` edge beside the takeaway string
 the durable record of what the sitting concluded, and it is never cleared. The
 edge is what makes the wait *machine-answerable*.
 
+`doctor/check-wait-is-an-edge` holds this clause where it is decidable. An open
+bead that states a wait about **itself** — in a metadata key that declares a
+dependency, or in its own `gc.takeaway` or `*_reason` text — must carry the
+edge as well as the string, in one direction or the other. A target that has
+already closed is reported apart, because that is this failure in its terminal
+form: the wait is over and nothing anywhere can notice. The check reads only
+the surfaces a bead writes about itself; a wait sentence in free-form notes
+usually names some *other* bead as the waiter, and no pattern separates the two
+reliably, so the check declines to guess rather than reporting a correct graph
+as broken.
+
 ### 2. The waiting side re-derives; it never trusts stored state
 
 Whoever needs to know "has this landed yet?" asks the question fresh, at the
