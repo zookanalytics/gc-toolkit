@@ -49,7 +49,10 @@ feedback *says*, not how loud it is.
 For held, diff-scoped evidence there is **no fixed occurrence
 threshold** — not three, not any number. Weigh:
 
-- **recurrence** across *distinct* PRs, beads, and days;
+- **recurrence** across *distinct* PRs, beads, and days, counted by
+  distinct `obs.provenance`. One sitting or one review comment can yield
+  several observations; those are several findings, not several
+  occurrences of one;
 - **source diversity** — operator plus reviewer-agent outweighs one
   voice repeating, and a single source (all-self, or `distinct_sources=1`)
   is a hard block on always-injected promotion (Gate 1), not merely a weak
@@ -123,8 +126,10 @@ endorsement or a second independent source (`distinct_sources ≥ 2`, not
 all-self). Read the rollup's *number*, not the narrative:
 `distinct_sources` counts distinct `obs.source` values, not sessions —
 "four independent sessions" with `distinct_sources=1` is one voice
-repeating. A blocked pattern is **surfaced, not adopted**: hold it on its
-pattern bead with the block stated and do **not** file the
+repeating. It counts over distinct events too, so one correction captured
+by both self-report and the miner is one voice, not two. A blocked pattern
+is **surfaced, not adopted**: hold it on its pattern bead with the block
+stated and do **not** file the
 `prompt-update` bead. It promotes later on corroboration or endorsement.
 
 *Worked example.* `distinct_sources=1`, all observations `obs.source=self`,
