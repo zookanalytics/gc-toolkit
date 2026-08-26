@@ -110,6 +110,22 @@ echo '[]' > "$GH_DIR/reviews_18.json"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M8" "a tracking_only pr_number reference does not hold"
 
+# The comment arm's visit path holds the merge through this probe and nothing
+# else: escalate.sh files the visit DEPENDING on its subject, so a blocks edge
+# back would be a cycle, and pr_number is what is left to hold on.
+store "[$(anchor M9 19), {\"id\":\"vis-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"19\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9\"}}]"
+printf '%s' "$(prview 19 OPEN CLEAN)" > "$GH_DIR/pr_view_19.json"
+echo '[]' > "$GH_DIR/reviews_19.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead vis-1" "an open visit stamped with the PR holds the merge"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 19" "…and nothing merged"
+store "[$(anchor M9b 20), {\"id\":\"vis-2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"20\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9b\"}}]"
+printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
+echo '[]' > "$GH_DIR/reviews_20.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded M9b" "closing the visit is the release, and it performs"
+
 echo "# approval arms"
 store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green@sha-20"')]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"

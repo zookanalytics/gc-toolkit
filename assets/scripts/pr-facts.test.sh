@@ -435,8 +435,19 @@ has "$(cat "$STUB_ESC_LOG")" "a sitting recorded a takeaway on it" "…and why n
 eq "$(meta H1 pr_comment_disposition)" "visit:new-2" "the choice is recorded, and it is the visit"
 eq "$(meta H1 pr_comment_watermark)" "8001" "the comment IS dispositioned — it went to a named party"
 eq "$(meta new-2 task_kind)" "visit" "the visit was really filed"
-grep -qxF "new-2|blocks|H1" "$STUB_DEPS" && ok "the visit blocks the anchor (escalate.sh only tracks it)" || bad "visit blocks edge missing"
+eq "$(meta new-2 pr_number)" "44" "the visit carries the PR, which is what holds the merge"
+hasnt "$(grep -F '|blocks|H1' "$STUB_DEPS" || true)" "new-2" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "no work was routed under the human's decision"
+
+echo "# …a visit that did not take the stamp is NOT watermarked past"
+store "[$(anchor H4 53 ',"gc.routed_to":"human"')]"
+printf '%s' "$(prview 53 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_53.json"
+echo '[]' > "$GH_DIR/reviews_53.json"
+printf '[{"id":8300,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_53.json"
+out=$(STUB_DROP_KEYS="new-2:pr_number" run)
+has "$out" "did not record pr_number=53; NOT watermarking" "an unheld visit fails closed"
+eq "$(meta H4 pr_comment_watermark)" "<absent>" "…the mark never moved past an unheld comment"
+eq "$(meta H4 pr_posture)" "commented@sha-53" "…and the posture still holds the merge"
 
 echo "# …so does an anchor already routed to a human, and one with no fix pool"
 store "[$(anchor H2 47 ',"gc.routed_to":"human"')]"

@@ -264,9 +264,12 @@ visibility.
 **An outstanding comment routes to something.** It becomes a fix-pool rework
 child, or, when a human already holds the anchor (`merge_hold`,
 `gc.routed_to=human`, or a recorded `gc.takeaway`) or there is no fix pool, one
-`escalate.sh` visit per batch. Either way the filed bead **blocks** the anchor,
-so the merge waits on the answer, and `pr_comment_disposition` records which was
-chosen. Silence is not one of the options.
+`escalate.sh` visit per batch. Either way the filed bead holds the merge until
+it closes — the rework child through a `blocks` edge, the visit through the
+`pr_number` stamp that `merge.sh`'s in-flight-holder probe reads. A visit takes
+no `blocks` edge: `escalate.sh` files it *depending on* its subject, so an edge
+back would be a cycle. `pr_comment_disposition` records which was chosen.
+Silence is not one of the options.
 
 ## The handoff
 

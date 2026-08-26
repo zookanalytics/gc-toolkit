@@ -647,10 +647,21 @@ GATES
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      # escalate.sh files its visit on a `tracks` edge, which nothing merges on.
-      # The blocks edge is what makes the merge wait for the answer.
-      gc bd dep "$VID" --blocks "$id" >/dev/null 2>&1 \
-        || echo "$PROG: WARN could not attach visit $VID as a blocks-dep of $id" >&2
+      # A blocks edge would close a cycle: escalate.sh already files the visit
+      # DEPENDING on its subject (tracks), so an edge back is a two-node loop bd
+      # refuses. pr_number is what merge.sh's in-flight-holder probe reads, and
+      # it holds the merge until a human closes the visit. anchor_bead is safe
+      # beside it — every consumer of that key filters on task_kind=review.
+      gc bd update "$VID" \
+        --set-metadata anchor_bead="$id" \
+        --set-metadata pr_url="$live_url" \
+        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+        || echo "$PROG: WARN visit $VID not stamped with PR#$num; it will NOT hold the merge — stamp it by hand" >&2
+      vgot=$(gc bd show "$VID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
+      if [ "$vgot" != "$num" ]; then
+        echo "$PROG: WARN visit $VID did not record pr_number=$num; NOT watermarking (a mark past an unheld comment is the silence this arm exists to stop)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
       DISP="visit:$VID"
     fi
     if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
