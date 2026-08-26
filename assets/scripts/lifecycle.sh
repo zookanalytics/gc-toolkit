@@ -34,7 +34,28 @@
 # another actor holds in_progress is refused by bd, and the refusal drops the
 # WHOLE atomic update — a caller that passes --assignee "" must hold the claim.
 # The detached-state clear reads the status for that reason and stops at open.
+#
+# THE SHELL BELOW IS THE FALLBACK. `gctk lifecycle` (services/gctk) is the
+# ported implementation and answers whenever the build order has published a
+# binary; this script runs when it has not — a fresh city, a build that failed,
+# a rig checkout ahead of the deployed binary. Both must stay correct until the
+# last port lands and the fallback drops, so lifecycle.test.sh runs its whole
+# body against both, and both mirrors of the state table are held against
+# lifecycle/lifecycle.toml.
 set -u
+
+# Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_ROOT/GC_CITY.
+# Never a walk up from this file's own path — the hermetic suite runs from a
+# tree inside a live city, and a filesystem hunt would find that city's binary
+# and stop testing this script. GCTK_BIN=none forces this implementation.
+GCTK_BIN="${GCTK_BIN:-}"
+if [ -z "$GCTK_BIN" ]; then
+    _gctk_city="${GC_CITY_ROOT:-${GC_CITY:-}}"
+    [ -n "$_gctk_city" ] && GCTK_BIN="$_gctk_city/.gc/services/gctk/bin/gctk"
+fi
+if [ "$GCTK_BIN" != "none" ] && [ -n "$GCTK_BIN" ] && [ -x "$GCTK_BIN" ]; then
+    exec "$GCTK_BIN" lifecycle "$@"
+fi
 
 PROG="lifecycle"
 
