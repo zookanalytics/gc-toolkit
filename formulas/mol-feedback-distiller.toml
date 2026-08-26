@@ -14,6 +14,11 @@ arithmetic). Output: at most a few change-unit `prompt-update` beads into
 the pool worker -> refinery -> operator-review pipeline (D3). Base rate:
 ZERO or ONE proposals per run; a chatty run is a smell.
 
+A proposal names a CARRIER before it names rule text: a conventions bullet,
+an operator-profile entry, a review-rubric dimension, or an exemplar pair.
+The carrier decides the target file, the budget, and which gates apply; the
+rubric holds the selection rule.
+
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
@@ -58,6 +63,16 @@ default = "3"
 description = "Bullet budget per learned-conventions fragment. A promotion past the cap must name a displacement in the same proposal or it does not file."
 required = false
 default = "15"
+
+[vars.profile_entry_cap]
+description = "Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap."
+required = false
+default = "12"
+
+[vars.exemplar_cap]
+description = "Entry budget for the exemplar corpus, docs/learning-exemplars.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded."
+required = false
+default = "8"
 
 [vars.rig_list]
 description = "Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set."
@@ -308,22 +323,30 @@ corroboration or operator endorsement), or **route-to-engineering** (Gate 2
 
 ## 5. Retirement pass over adopted rules — EVERY run (gated runs included)
 
-Inventory = the learned-conventions fragments' anchor comments on
-origin/main (skip the seeded placeholder; the honest bullet count is
-`grep -c '^- '`):
+Inventory = every adopted entry across every carrier, read from origin/main.
+`learning-recurrence.sh --inventory` is the shared parser (it skips the
+seeded placeholders); do not re-derive the same anchor grep here:
 ```bash
-git -C "$REPO" ls-tree -r --name-only origin/main -- template-fragments/ 2>/dev/null | grep 'learned-conventions-' | while IFS= read -r f; do
-  FRAG=$(git -C "$REPO" show "origin/main:$f" 2>/dev/null) || continue
-  printf '%s\\n' "$FRAG" | grep '<!-- rule:' | grep -vF 'rule:<pattern-bead>' || true
-  echo "$f: $(printf '%s\\n' "$FRAG" | grep -c '^- ') bullets (cap {{fragment_bullet_cap}})"
+RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO"; do
+  [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
 done
+if [ -n "$RECUR" ]; then
+  "$RECUR" --inventory --repo "$REPO" --ref origin/main
+  "$RECUR" --repo "$REPO"   # M1/M2 with their coverage lines
+else
+  echo "WARN: learning-recurrence.sh not found; retirement pass runs without the inventory or the metric" >&2
+fi
 ```
-Ask of each adopted rule: **hardenable** (mechanically detectable — propose
+Ask of each adopted entry: **hardenable** (mechanically detectable — propose
 the check and retire the prose in one PR)? **still binding** (no recent
-evidence, plausibly obeyed untold — propose retirement)? **subsumed or
-contradicted** (propose the merge)? **over cap** — a promotion that would
-push its fragment past {{fragment_bullet_cap}} bullets must name its
-displacement or it does not file.
+evidence, plausibly obeyed untold — propose retirement)? **still recurring**
+(the report attributes new observations to its pattern bead since its
+adoption date — argue for a different carrier or a mechanism, never a louder
+restatement, and read the coverage line before treating a zero as quiet)?
+**subsumed or contradicted** (propose the merge)? **over cap** — a promotion
+past its carrier's budget ({{fragment_bullet_cap}} conventions bullets,
+{{profile_entry_cap}} profile entries, {{exemplar_cap}} exemplars) must name
+its displacement or it does not file.
 
 ## 6. Dedup proposals against in-flight work, then bound
 
@@ -379,12 +402,16 @@ possibly retirement proposals — file those like any survivor.
 ```bash
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 BODY="## Rule
+- Carrier: <convention | profile | review-rubric | exemplar>
 - Action: <ADD | UPDATE | SUPERSEDE | RETIRE | HARDEN>
-- Exact text: <the bullet to add/rewrite/remove, <= 2 sentences>
+- Exact text: <the bullet, entry, dimension, or before/after pair>
 
 ## Target
-- Fragment: template-fragments/learned-conventions-<role>.template.md
-  (learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor)
+- convention    -> template-fragments/learned-conventions-<role>.template.md (cap {{fragment_bullet_cap}})
+- profile       -> template-fragments/operator-profile.template.md (cap {{profile_entry_cap}}); needs an obs.source=operator observation
+- review-rubric -> formulas/mol-review.toml, step review, What to check (no anchor comment; provenance stays on the pattern bead and the PR)
+- exemplar      -> docs/learning-exemplars.md (cap {{exemplar_cap}})
+- learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor
 - Anchor: <!-- rule:$PATTERN src:<short provenance refs> adopted:<YYYY-MM-DD> -->
 
 ## Evidence
@@ -475,6 +502,13 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
 echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, V visit(s), discarded D, stamped S observation(s)."
+# The loop's success metric, in the run log where the run that moved it is
+# visible. It also runs standalone, which is how the metric is read while
+# this order is disabled.
+RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${REPO:-}"; do
+  [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
+done
+[ -n "$RECUR" ] && "$RECUR" || echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```

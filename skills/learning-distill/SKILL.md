@@ -56,7 +56,7 @@ threshold** — not three, not any number. Weigh:
 - **source diversity** — operator plus reviewer-agent outweighs one
   voice repeating, and a cluster with no external check — entirely
   self-reported, or a lone unendorsed observation — is a hard block on
-  always-injected promotion (Gate 1), not merely a weak input;
+  promotion into a paid carrier (Gate 1), not merely a weak input;
 - **shared cause** — do the instances genuinely fail the same way, or
   merely rhyme?
 
@@ -65,12 +65,16 @@ independent corrections a week apart. Whatever you decide, **state the
 evidence you weighed** — a judgment you didn't write down can't be
 audited or challenged.
 
-### 3. Adjudicate against what exists — never append blind
+### 3. Pick the carrier, then adjudicate against what exists
 
-Adjudication picks the *shape* of the edit; the two promotion gates below
-decide whether it may be always-injected at all. Before proposing any rule
-text, read the target fragment's current bullets and the pattern-bead set,
-then pick exactly one:
+Two decisions, in that order. **Which carrier** the learning belongs in is
+[the carrier table below](#carriers--the-four-shapes-a-promotion-can-take);
+different shapes of learning need different carriers, and a prose bullet is
+one of four, not the default.
+
+Then adjudicate the edit within that carrier. The two promotion gates decide
+whether it may be adopted at all. Read the target surface's current entries
+and the pattern-bead set, then pick exactly one:
 
 - **ADD** — genuinely new; no existing bullet covers it.
 - **UPDATE** — an existing bullet sharpened or widened. One edit, never
@@ -106,24 +110,64 @@ A proposed bullet:
   that fires only on a re-run of its own evidence is scoped too narrowly,
   and the incident belongs in the evidence section.
 
-## Two gates on promotion into always-injected content
+## Carriers — the four shapes a promotion can take
+
+A promotion names a carrier before it names a shape. The carrier decides the
+target file, the budget, and what the adoption costs to keep.
+
+| carrier | target | budget | paid |
+|---|---|---|---|
+| `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
+| `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
+| `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
+| `exemplar` | `docs/learning-exemplars.md` | `exemplar_cap` entries | per review, resolved on demand |
+
+Choose by what the learning *is*:
+
+- **`profile`** when the lesson is about what the operator values — what
+  earns their attention, how a decision reaches them, what they consider
+  already settled. The profile states operator taste, so a cluster with no
+  `obs.source=operator` observation cannot claim it, whatever its
+  recurrence.
+- **`review-rubric`** when the failure is **visible in a diff**. Prefer this
+  over `convention` for anything a reader could catch: one rubric dimension
+  reaches every agent's version of the mistake through the reviewer, where a
+  bullet only reaches the one role whose fragment renders it. An amendment
+  is one dimension sharpened or added, never a checklist bolted on.
+- **`convention`** when the behavior must be carried *into* the turn by one
+  role and no reviewer sees the moment it goes wrong — a claiming rule, a
+  handoff, an escalation choice.
+- **`exemplar`** when the lesson is a shape rather than a statement: two
+  versions of the same artifact where the better one is obvious side by side
+  and mushy in a sentence. Costs the most per read, so it earns its place
+  only when compression genuinely destroys the lesson.
+
+Retirements and hardens use the same vocabulary — a retirement names the
+carrier it removes from, so the retirement pass can walk every surface.
+
+`review-rubric` amendments carry no anchor comment: the formula's step
+description is rendered into step beads, and an HTML comment there is noise
+in the text an agent reads. Provenance for those lives on the pattern bead
+and the PR, the same as for a hardened rule.
+
+## Two gates on promotion into a paid carrier
 
 The five judgments decide whether feedback is a standing rule. These two
-gates decide whether that rule may be **auto-adopted into always-injected
-prompt content** — a bullet in a `learned-conventions-<role>` fragment,
-re-paid by every future agent of that role on every turn. Check both
-**before** any ADD / UPDATE / SUPERSEDE targeting such a fragment. **A
-gate failure never discards the pattern — it redirects it** (gate 1
-surfaces it to the operator; gate 2 files an engineering bead). The gates
-do not apply to `learning-rubric` proposals against this skill, to
-retirements, or to hardens — those remove weight, not add it.
+gates decide whether that rule may be **auto-adopted into content every
+future agent pays for** — a `convention` bullet, a `profile` entry, or a
+`review-rubric` dimension. Check both **before** any ADD / UPDATE /
+SUPERSEDE in those three carriers. **A gate failure never discards the
+pattern — it redirects it** (gate 1 surfaces it to the operator; gate 2
+files an engineering bead, or routes to `exemplar`). The gates do not apply
+to `learning-rubric` proposals against this skill, to retirements, or to
+hardens — those remove weight, not add it.
 
 ### Gate 1 — external check: one voice does not bind everyone
 
-A cluster promotes into always-injected content only when something outside
-the promoting agent has corroborated it. Two things clear the gate: it
-carries `obs.endorsed=operator`, or its evidence is not entirely
-self-reported and spans two or more distinct `obs.provenance` events.
+A cluster promotes into a paid carrier only when something outside the
+promoting agent has corroborated it. Two things clear the gate: it carries
+`obs.endorsed=operator`, or its evidence is not entirely self-reported and
+spans two or more distinct `obs.provenance` events.
 
 A cluster that is **entirely `obs.source=self`** is the loop this gate
 exists to break — self-report, self-promote, self-inject, with no external
@@ -176,15 +220,27 @@ engineering work bead** describing the mechanical fix, routed to the pool
 like any other work, and record on the pattern bead that the remedy is
 structural. Do **not** file a `prompt-update` bead.
 
+**The exhortation half has one out.** A remedy that reads as an exhortation
+only because the right behavior resists compression — the agent knows the
+trigger and would act, but cannot tell which shape is wanted — promotes as
+an `exemplar` instead of an engineering bead, provided a real before/after
+pair exists. The discriminator is unchanged: if an agent that already
+intends the right thing would still fail, the failure is structural and
+needs a mechanism. Only a lesson that a picture would have taught takes this
+route, and a fabricated pair does not count.
+
 *Worked example.* "Enumerate the full set before declaring done" is an
 exhortation; the failure it addresses is a verification gap an agent
 intending to be thorough still trips. The fix is a mechanical done-gate →
-**engineering bead**, not always-injected prose.
+**engineering bead**, not prose — and no before/after pair shows a
+verification gap, so the exemplar route is not open to it either.
 
 ## Retirement questions — every run, for every adopted rule
 
-Promotion without pruning is how prompts rot. Walk the adopted bullets
-(from the fragment's anchor markers) and ask:
+Promotion without pruning is how prompts rot. Walk the adopted entries in
+**every** carrier — `assets/scripts/learning-recurrence.sh --inventory`
+emits one row per adopted entry across the conventions fragments, the
+profile, and the exemplar corpus — and ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose
   the lint or doctor check and **retire the prose bullet in the same
@@ -195,11 +251,19 @@ Promotion without pruning is how prompts rot. Walk the adopted bullets
   retirement. Cheap to reverse — a wrongly retired rule announces itself
   by recurring.
 - **Subsumed or contradicted** by a newer bullet? Propose the merge.
-- **Over cap?** The budget is the poured `fragment_bullet_cap`. At the
+- **Over cap?** The budget is the carrier's, from the carrier table. At the
   cap, the weakest incumbent is your displacement candidate, and **a
   promotion that names no displacement doesn't file.** An
   operator-endorsed promotion never stalls on the cap — name the
   displacement anyway and let the operator adjudicate at the PR.
+- **Still recurring?** `learning-recurrence.sh` reports how often an
+  adopted rule's pattern bead has drawn new observations since its
+  adoption date. Recurrence after adoption is the loop's own failure
+  signal: the rule was adopted and the feedback came back. Read it as an
+  argument for a different carrier or a mechanism, never as a reason to
+  restate the same bullet more loudly. Read the report's coverage line
+  first — a rule with no `rule:<pattern-bead>` anchor is unmeasured, not
+  quiet.
 
 ## Discipline
 
