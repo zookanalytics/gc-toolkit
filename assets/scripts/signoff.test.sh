@@ -4,6 +4,8 @@
 # assertions of the retired signoff-round-cap and first-round-review-body
 # suites: the cap writes exception EXACTLY ONCE and never also unsets the
 # marker; the posted artifact carries the anchor link; --approve is NEVER used.
+# It also pins what a round IS — an attempted rework child, never a review
+# dispatch.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -347,15 +349,15 @@ seed_cap_deps c1
 GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
 eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
 
-echo "# dispatch_count on the ANCHOR (gate-ensure's writer) also counts"
+echo "# dispatch_count is not a round count: reviews of one commit never cap"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "anchor dispatch_count past the cap trips it with no children"
-reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "a stray dispatch_count on the REVIEW bead does not cap (wrong writer)"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "a dispatch_count past the cap with no rework children exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…does not trip the cap"
+eq "$(meta tk-anc gc.routed_to)" "<absent>" "…does not route the anchor to a human"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and the first rework round is filed"
+has "$(meta fix-1 rejection_reason)" "round 1" "…numbered by attempts, not by dispatches"
 
 echo "# an unreadable dep list never caps"
 reset "$ANCHOR_PR"

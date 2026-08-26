@@ -187,7 +187,9 @@ sequenceDiagram
   and slings exactly one rework child per head and clears the gate marker, so
   gate-ensure re-arms the dispatch when the child lands. The round cap
   (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
-  `check.<g>=exception@<head>` and the anchor routes to human. One writer,
+  `check.<g>=exception@<head>` and the anchor routes to human. A round is one
+  attempted rework child, counted off the anchor's own children — a review
+  dispatch is not a round, however many read the same commit. One writer,
   one terminal verdict: no second component writes a verdict. `pr-facts.sh`
   and `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
