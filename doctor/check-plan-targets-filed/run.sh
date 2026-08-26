@@ -39,7 +39,9 @@ FNR == 1 { intable = 0; armed = 0; hdr = 0; fence = 0 }
     if (fline ~ /^(```|~~~)/) { fence = !fence; if (intable) { intable = 0; armed = 0 } next }
     if (fence) next
 }
-/<!--[ \t]*plan-targets[ \t]*-->/ { armed = 1; armed_line = FNR; intable = 0; hdr = 0; next }
+# The marker arms only as a standalone line. Prose naming it, as the rule and
+# the skill both do, is a mention rather than a declaration.
+fline ~ /^<!--[ \t]*plan-targets[ \t]*-->$/ { armed = 1; armed_line = FNR; intable = 0; hdr = 0; next }
 {
     line = trim($0)
     isrow = (substr(line, 1, 1) == "|")

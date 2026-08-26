@@ -158,7 +158,19 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "an unbound row inside a code fence is not a finding"
 has "$OUT" "0 target row(s)" "the fenced example contributes no rows"
 
-# --- 13. live control: the real pack, the real ledger ------------------------
+# --- 13. the marker arms only as a standalone line ---------------------------
+# docs/file-structure.md and the filing skill both name the marker in prose.
+# Arming on a mention would make every document that explains the rule declare
+# a checklist it does not have.
+doc '# Prose that names the marker' '' \
+    'Mark the table with `<!-- plan-targets -->` and bind the last column.' '' \
+    '| # | Not a checklist | Risk |' '|---|---|---|' \
+    '| 1 | must not be scanned | |'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the marker quoted inline in prose does not arm the scanner"
+has "$OUT" "0 target row(s)" "a mention contributes no rows"
+
+# --- 14. live control: the real pack, the real ledger ------------------------
 # The stubs above could drift from the tools they imitate. One unstubbed run
 # proves the check still executes against a real pack and a real store.
 PACK_ROOT="$(cd "$HERE/../.." && pwd)"
