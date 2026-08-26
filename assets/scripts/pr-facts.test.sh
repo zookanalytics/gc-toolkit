@@ -3,7 +3,9 @@
 # authority. Covers: recording an out-of-band merge (never with an empty
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
 # cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
-# branch+head, holds veto, unstamped orphans adopted); stale-gate -> one
+# branch+head, holds veto, unstamped orphans adopted), classified rebase or
+# merge by the head branch and stamped prepare_mode, routed only once that stamp
+# reads back; stale-gate -> one
 # re-review child per head, carrying mol-review via gc sling --on (dedup,
 # pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
@@ -27,13 +29,13 @@ SUT="$SD/pr-facts.sh"
 FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
 run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
 
-anchor() { # id num extra
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"codex","check.codex":"green@sha-%s"%s}}' \
-    "$1" "$2" "$2" "$2" "$2" "${3:-}"
+anchor() { # id num extra [branch]
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"codex","check.codex":"green@sha-%s"%s}}' \
+    "$1" "$2" "$2" "${4:-polecat/x$2}" "$2" "${3:-}"
 }
-prview() { # num state mergeState mergeable extra
-  printf '{"state":"%s","isDraft":false,"baseRefName":"main","headRefName":"polecat/x%s","headRefOid":"sha-%s","headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"isCrossRepository":false,"mergeStateStatus":"%s","mergeable":"%s","reviewDecision":"","url":"https://github.com/zook/gc-toolkit/pull/%s","mergeCommit":{"oid":"merged-sha-%s"},"autoMergeRequest":null%s}' \
-    "$2" "$1" "$1" "$3" "$4" "$1" "$1" "${5:-}"
+prview() { # num state mergeState mergeable extra [headRefName]
+  printf '{"state":"%s","isDraft":false,"baseRefName":"main","headRefName":"%s","headRefOid":"sha-%s","headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"isCrossRepository":false,"mergeStateStatus":"%s","mergeable":"%s","reviewDecision":"","url":"https://github.com/zook/gc-toolkit/pull/%s","mergeCommit":{"oid":"merged-sha-%s"},"autoMergeRequest":null%s}' \
+    "$2" "${6:-polecat/x$1}" "$1" "$3" "$4" "$1" "$1" "${5:-}"
 }
 
 echo "# out-of-band merge is recorded"
@@ -74,13 +76,15 @@ echo "# CONFLICTING -> one rework child per head"
 store "[$(anchor F4 13)]"
 printf '%s' "$(prview 13 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_13.json"
 out=$(run)
-has "$out" "filed rebase new-2 routed to $FIX" "a rework child was filed and routed"
+has "$out" "filed rebase-mode rework new-2 routed to $FIX" "a rework child was filed, classified, and routed"
 eq "$(meta new-2 branch)" "polecat/x13" "child carries the branch"
 eq "$(meta new-2 target)" "main" "child carries the target"
 eq "$(meta new-2 merge_strategy)" "mr" "child is mr-mode"
 eq "$(meta new-2 existing_pr)" "https://github.com/zook/gc-toolkit/pull/13" "child reworks THIS PR"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "child routed to the fix pool"
 has "$(meta new-2 rejection_reason)" "head sha-13" "the rejection reason names the head (the dedup key)"
+eq "$(meta new-2 prepare_mode)" "rebase" "a polecat/* head is classified rebase"
+has "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order names the rewrite"
 grep -qxF "new-2|blocks|F4" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
 eq "$(meta F4 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
 
@@ -93,7 +97,7 @@ echo "# …a closed child at the SAME head still dedups; holds veto the dispatch
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 14 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_14.json"
 out=$(run)
-has "$out" "a hold is set (operator gate); no rebase dispatched" "rebase_hold vetoes the dispatch"
+has "$out" "a hold is set (operator gate); no rework dispatched" "rebase_hold vetoes the dispatch"
 
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
@@ -106,10 +110,41 @@ printf '%s' "$(prview 19 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_19.json"
 out=$(STUB_DROP_KEYS="new-2:branch,target,rejection_reason,merge_strategy,existing_pr,pr_url,pr_number,gc.routed_to" run)
 eq "$(meta new-2 branch)" "<absent>" "first pass left an unstamped orphan (stamp dropped)"
 out=$(run)
-has "$out" "adopting unstamped rebase orphan new-2" "the next pass adopts the orphan by its deterministic title"
+has "$out" "adopting unstamped rework orphan new-2" "the next pass adopts the orphan by its deterministic title"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
+
+echo "# …a SHARED head branch is classified merge, never rebase"
+store "[$(anchor SB 28 '' 'integration/refinery-fixes')]"
+printf '%s' "$(prview 28 OPEN DIRTY CONFLICTING '' 'integration/refinery-fixes')" > "$GH_DIR/pr_view_28.json"
+out=$(run)
+has "$out" "filed merge-mode rework new-2" "the dispatch names the mode it classified"
+eq "$(meta new-2 prepare_mode)" "merge" "an integration/* head is classified merge"
+eq "$(bstatus new-2)" "open" "the child was filed"
+has "$(jq -r '.[] | select(.id == "new-2") | .title' "$STUB_STORE")" "Merge main into PR#28 (shared branch integration/refinery-fixes)" "the TITLE names the mode an operator would act on by hand"
+hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "the merge-mode work order must NOT instruct a force-push"
+hasnt "$(meta new-2 rejection_reason)" "rebase 'integration" "…nor a rebase"
+has "$(meta new-2 rejection_reason)" "MERGING origin/main IN" "…it names the non-destructive remedy instead"
+has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words too"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "the merge-mode child is still dispatched, not stalled on a human"
+
+echo "# …a graduation on a polecat-shaped branch is classified merge anyway"
+store "[$(anchor GD 29 ',"graduation":"true"')]"
+printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_29.json"
+out=$(run)
+eq "$(meta new-2 prepare_mode)" "merge" "the graduation marker overrides the branch name"
+hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order follows the mode, not the prefix"
+
+echo "# …a prepare_mode stamp that does not persist leaves the child UNROUTED"
+store "[$(anchor DM 31)]"
+printf '%s' "$(prview 31 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_31.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
+has "$out" "did not record prepare_mode=rebase; left unrouted" "the lost stamp is caught by the read-back"
+eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routable AND rewriting"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"

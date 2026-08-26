@@ -5,8 +5,10 @@
 # that died after merge.sh landed it) -> lifecycle transition to merged;
 # CLOSED-unmerged -> abandoned + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING -> file ONE rework child per head
-# to the fix pool (dedup: a rework child naming this branch whose
+# nothing about the new base); CONFLICTING -> classify the head branch
+# (allowlist: only polecat/* may be rewritten, and never a graduation) and file
+# ONE rework child per head to the fix pool, stamped prepare_mode and routed only
+# once that stamp reads back (dedup: a rework child naming this branch whose
 # rejection_reason names this head; an unstamped orphan is adopted by title,
 # never twinned); gate green at a STALE head -> file one re-review child per
 # head to the review pool, carrying mol-review via gc sling --on (dedup: a
@@ -99,6 +101,9 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
+  # A graduation is the integration-to-main case whatever its branch is named, so
+  # the CONFLICTING arm classifies on this as well as on the branch.
+  grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
 
   # --- pinned identity read (same shape as merge.sh) ----------------------------
   PR_JSON=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" \
@@ -198,7 +203,7 @@ GATES
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
     if is_held "$hold" || is_held "$rhold"; then
-      echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rebase dispatched"
+      echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
     fix_branch="${head_ref:-$branch}"
@@ -206,12 +211,41 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but branch/fix-pool unavailable; merge stays held (operator must repair)" >&2
       skipped=$((skipped + 1)); continue
     fi
+    # --- WHICH rewrite may be dispatched against this branch. ---------------------
+    # >>> stale-base-dispatch-mode
+    # This arm dispatches a rewrite rather than performing one, so tk-a0hva's
+    # allowlist on the refinery's own prepare step cannot reach it. Same allowlist
+    # as mol-refinery-patrol's `shared-branch-merge-mode`, deliberately one shape
+    # restated rather than a second discriminator invented here. Only polecat/* is
+    # single-author and disposable enough to rewrite; every other shape, including
+    # one invented next year, must fail to MERGE, which a denylist could not do.
+    # Classified on fix_branch, the branch the child is told to bring current, not
+    # on the anchor's recorded branch. See
+    # specs/tk-rvspf/dispatch-site-branch-classification.md.
+    case "$fix_branch" in
+      polecat/*) prepare_mode=rebase ;;
+      *)         prepare_mode=merge ;;
+    esac
+    # Load-bearing only for a graduation carried on a polecat-shaped branch.
+    if [ "$grad" = "true" ]; then prepare_mode=merge; fi
+    # prepare_mode is what stops the rewrite; mol-polecat-work's
+    # `rejected-branch-resume-mode` reads it. The title and instruction are for
+    # whoever works the bead by hand, and must not contradict it: a merge-mode
+    # child titled "Rebase PR#N" invites exactly what the mode prevents.
+    if [ "$prepare_mode" = "merge" ]; then
+      FIX_TITLE="Merge $base into PR#$num (shared branch $fix_branch):"
+      fix_instruction="Resume in prepare_mode=merge: '$fix_branch' is a SHARED branch, so bring it current by MERGING origin/$base IN (git merge --no-edit origin/$base), resolve conflicts, and push as a fast-forward. Do NOT rebase it and do NOT force-push it: rewriting it orphans the already-merged PRs it carries (tk-a0hva)."
+    else
+      FIX_TITLE="Rebase PR#$num onto $base:"
+      fix_instruction="Resume in prepare_mode=rebase: rebase '$fix_branch' onto origin/$base, resolve conflicts, and force-push with --force-with-lease."
+    fi
+    # <<< stale-base-dispatch-mode
     # Dedup on branch+head via the child's own metadata (no bookkeeping key on
     # the anchor): a child of ANY status whose rejection_reason names this head
     # means this head was already routed; a LIVE child on the branch means a
     # force-push is already owned — a second one would race it.
     kids=$(bd_list --metadata-field branch="$fix_branch" --status="$ALL_STATUSES") || {
-      echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rebase dispatched (retry next pass)" >&2
+      echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     }
     dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
@@ -232,45 +266,57 @@ GATES
       [ .[] | ((.metadata.rebase_hold // "") | tostring | ascii_downcase) as $h
         | select($h != "" and $h != "false" and $h != "0" and $h != "null") | .id ] | .[0] // empty' 2>/dev/null)
     if [ -n "$frozen" ]; then
-      echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rebase dispatched"
+      echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
     # Orphan adoption BEFORE create: a child this arm created whose stamp then
     # failed carries the deterministic title but no branch metadata — invisible
-    # to the branch dedup above, so re-creating would mint a twin every pass.
+    # to the branch dedup above, so re-creating would mint a twin every pass. The
+    # title is the classifier's, and stays deterministic for a given head: the
+    # mode is a pure function of the branch name and the graduation marker.
     # An unreadable probe dispatches nothing (retry next pass).
-    FIX_TITLE="Rebase PR#$num onto $base:"
     if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
-      echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rebase dispatched (retry next pass)" >&2
+      echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
     FIX=$(printf '%s' "$forphans" | jq -r '
       [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
     if [ -n "$FIX" ]; then
-      echo "$PROG: $id adopting unstamped rebase orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
+      echo "$PROG: $id adopting unstamped rework orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
     else
       FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
         | jq -r '.id // empty' 2>/dev/null)
     fi
     if [ -z "$FIX" ]; then
-      echo "$PROG: $id could not file the rebase child for PR#$num; retry next pass" >&2
+      echo "$PROG: $id could not file the rework child for PR#$num; retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
+    # The route is stamped separately, after prepare_mode reads back. A dropped
+    # branch or pr_url leaves a child nothing can act on, which is the safe side;
+    # a dropped prepare_mode leaves one that is routable AND rewriting, because
+    # the resume path treats an absent mode as rebase.
     gc bd update "$FIX" \
       --set-metadata branch="$fix_branch" \
       --set-metadata target="$base" \
-      --set-metadata rejection_reason="stale base at head $head_oid: PR#$num conflicts with '$base'. Rebase '$fix_branch' onto origin/$base, resolve, force-push with --force-with-lease. Do NOT open a new PR — this reworks PR#$num." \
+      --set-metadata rejection_reason="stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
+      --set-metadata prepare_mode="$prepare_mode" \
       --set-metadata merge_strategy=mr \
       --set-metadata existing_pr="$live_url" \
       --set-metadata pr_url="$live_url" \
-      --set-metadata pr_number="$num" \
-      --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
-      || echo "$PROG: WARN rebase $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
+      --set-metadata pr_number="$num" >/dev/null 2>&1 \
+      || echo "$PROG: WARN rework $FIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
     gc bd dep "$FIX" --blocks "$id" >/dev/null 2>&1 \
-      || echo "$PROG: WARN could not attach rebase $FIX as a blocks-dep of $id" >&2
+      || echo "$PROG: WARN could not attach rework $FIX as a blocks-dep of $id" >&2
+    mgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty')
+    if [ "$mgot" != "$prepare_mode" ]; then
+      echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
+      || echo "$PROG: WARN rework $FIX not routed to $FIX_POOL; route it by hand" >&2
     gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
     reworked=$((reworked + 1))
-    echo "$PROG: $id — PR#$num conflicts with '$base'; filed rebase $FIX routed to $FIX_POOL"
+    echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
     continue
   fi
 
