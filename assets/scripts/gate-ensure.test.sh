@@ -14,8 +14,10 @@
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold; the
 # dispatch_count cap (and the one dispatch a head move past an exception buys
-# through it); and the review-wedge escalation (exec-stamp-only reach
-# whose poured workflow is spent -> one deduped visit, held one pass first).
+# through it); the refusal to re-review a head a closed request-changes verdict
+# already judged while its rework child is still open; and the review-wedge
+# escalation (exec-stamp-only reach whose poured workflow is spent -> one
+# deduped visit, held one pass first).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +25,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# A hermetic suite must not read the caller's city: an ambient GC_RIG changes
+# the gc sling argv these assertions match on.
+unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
 harness_init
 
 # Private scripts dir: the SUT plus a body-emitter stub (interface unchanged).
@@ -286,6 +291,90 @@ oid f1 > "$GH_DIR/head_polecat_f1"
 out=$(run)
 has "$out" "cap of 3" "the round cap declines further dispatches"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
+
+# --- a head already judged, whose rework has not been attempted -----------------
+# A review of a commit no rework has touched returns the findings that filed
+# the child already waiting, and spends a dispatch round doing it.
+judged_review() { # <id> <anchor> <oid>
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"%s","reviewed_oid":"%s"}}' \
+    "$1" "$2" "$3"
+}
+rework_kid() { # <id> <source-review> <status>
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"source_review_bead":"%s"}}' "$1" "$3" "$2"
+}
+
+echo "# a head already judged, with its rework still open, is never re-reviewed"
+store "[$(anchor R1 pull_request codex "" polecat/r1),
+        $(judged_review rev-r1 R1 sha-r1),
+        $(rework_kid fix-r1 rev-r1 open)]"
+printf 'fix-r1|blocks|R1\n' >> "$STUB_DEPS"
+echo "sha-r1" > "$GH_DIR/head_polecat_r1"
+out=$(run); rc=$?
+eq "$rc" 0 "the refusal exits 0 (gate stays armed, merge held)"
+has "$out" "already judged sha-r1" "the refusal names the commit already judged"
+has "$out" "rework fix-r1 is still open" "…and the rework that has to move first"
+has "$out" "0 reviews dispatched" "…and nothing was dispatched"
+eq "$(meta R1 dispatch_count)" "<absent>" "…and no round was consumed on a question already answered"
+
+echo "# …but a head that MOVED past the verdict re-gates"
+store "[$(anchor R2 pull_request codex "" polecat/r2),
+        $(judged_review rev-r2 R2 old-oid),
+        $(rework_kid fix-r2 rev-r2 open)]"
+printf 'fix-r2|blocks|R2\n' >> "$STUB_DEPS"
+echo "sha-r2" > "$GH_DIR/head_polecat_r2"
+out=$(run)
+has "$out" "1 reviews dispatched" "a commit no verdict has read is reviewed"
+
+echo "# …and a CLOSED rework is an attempt made: the next round dispatches"
+store "[$(anchor R3 pull_request codex "" polecat/r3),
+        $(judged_review rev-r3 R3 sha-r3),
+        $(rework_kid fix-r3 rev-r3 closed)]"
+printf 'fix-r3|blocks|R3\n' >> "$STUB_DEPS"
+echo "sha-r3" > "$GH_DIR/head_polecat_r3"
+out=$(run)
+has "$out" "1 reviews dispatched" "a spent rework re-opens the gate even at an unmoved head"
+
+echo "# a closed review that filed no rework bars nothing"
+store "[$(anchor R4 pull_request codex "" polecat/r4),
+        $(judged_review rev-r4 R4 sha-r4)]"
+echo "sha-r4" > "$GH_DIR/head_polecat_r4"
+out=$(run)
+has "$out" "1 reviews dispatched" "only a request-changes verdict (which files a child) bars a re-review"
+
+echo "# a verdict on ANOTHER gate bars nothing"
+store "[$(anchor R6 pull_request codex "" polecat/r6),
+        {\"id\":\"rev-r6\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"other\",\"anchor_bead\":\"R6\",\"reviewed_oid\":\"sha-r6\"}},
+        $(rework_kid fix-r6 rev-r6 open)]"
+printf 'fix-r6|blocks|R6\n' >> "$STUB_DEPS"
+echo "sha-r6" > "$GH_DIR/head_polecat_r6"
+out=$(run)
+has "$out" "1 reviews dispatched" "the guard is per-gate: another gate's verdict does not answer this one"
+
+echo "# the bar is THIS verdict's own rework, not any open child on the anchor"
+store "[$(anchor R7 pull_request codex "" polecat/r7),
+        $(judged_review rev-r7 R7 sha-r7),
+        $(rework_kid fix-r7 rev-r7 closed),
+        $(rework_kid fix-r7b rev-old open)]"
+printf 'fix-r7|blocks|R7\nfix-r7b|blocks|R7\n' >> "$STUB_DEPS"
+echo "sha-r7" > "$GH_DIR/head_polecat_r7"
+out=$(run)
+has "$out" "1 reviews dispatched" "an open child from another round does not answer this verdict"
+
+echo "# an unreadable child ledger holds the dispatch"
+store "[$(anchor R5 pull_request codex "" polecat/r5),
+        $(judged_review rev-r5 R5 sha-r5),
+        $(rework_kid fix-r5 rev-r5 open)]"
+printf 'fix-r5|blocks|R5\n' >> "$STUB_DEPS"
+echo "sha-r5" > "$GH_DIR/head_polecat_r5"
+out=$(STUB_DEP_GARBAGE=1 run)
+has "$out" "prior-verdict probe unreadable" "an unanswerable probe is reported"
+has "$out" "0 reviews dispatched" "…and dispatches nothing (merge stays held, retry next pass)"
+
+echo "# …but an anchor with no prior verdict never reads that ledger at all"
+store "[$(anchor R8 pull_request codex "" polecat/r8)]"
+echo "sha-r8" > "$GH_DIR/head_polecat_r8"
+out=$(STUB_DEP_GARBAGE=1 run)
+has "$out" "1 reviews dispatched" "a first dispatch is not held by a child-ledger read it does not need"
 
 echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
 store "[$(anchor H1 pull_request codex "" polecat/h1)]"

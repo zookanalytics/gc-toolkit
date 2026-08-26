@@ -205,7 +205,9 @@ sequenceDiagram
   gate-ensure sees a declared gate that is neither settled at the live head
   (`green@` or `exception@` it) nor in flight and dispatches one review bead
   (stamp first, then attach `mol-review` via `gc sling --on`, read the pour
-  back).
+  back). A head a closed request-changes verdict already judged is not
+  re-gated while the rework it filed is still open: the same commit returns
+  the same findings.
 
 ## Disposition
 

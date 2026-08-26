@@ -27,7 +27,7 @@ harness_init() {
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
-  export STUB_SLING_FAIL=""
+  export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
@@ -228,6 +228,7 @@ case "$verb" in
     # dependency rows; up = rows depending on the id) and -t/--type.
     case "${1:-}" in
       list)
+        [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
         id="${2:-}"; shift 2 || true
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do

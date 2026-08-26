@@ -16,7 +16,10 @@
 # Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
-# situation key rather than holding the anchor in silence.
+# situation key rather than holding the anchor in silence. A dispatch that
+# cannot produce a new answer is refused before it is made: a head a closed
+# request-changes verdict already judged, whose rework child is still open,
+# only re-derives that verdict.
 # A head move past a recorded exception@ buys ONE dispatch through the
 # dispatch_count cap.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
@@ -127,6 +130,38 @@ inflight_review() { # <anchor-id> <gate>
     | (if (.reach | not) then ("stranded " + .id)
        elif (.poured and (.routed | not) and (.claimed | not)) then ("poured " + .id)
        else .id end)' 2>/dev/null
+}
+
+# Has this exact head already been judged on this gate, with the rework it
+# asked for still unattempted? Each request-changes signoff files one child
+# stamped source_review_bead, so an open such child is proof that the round it
+# opened has not been tried — and a second review of a commit no rework has
+# touched can only re-derive the findings that filed it. Echoes
+# "<review-bead> <rework-child>". rc: 0 already answered · 2 nothing bars a
+# dispatch · 1 the ledger could not answer.
+already_answered() { # <anchor-id> <gate> <head>
+  local raw judged kids pair
+  raw=$(bd_list --metadata-field anchor_bead="$1" --status=closed) || return 1
+  judged=$(printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
+    .[]
+    | select(((.metadata.task_kind // "") | tostring) == "review")
+    | select(((.metadata.check_name // "") | tostring) == $g)
+    | select(((.metadata.reviewed_oid // "") | tostring) == $h)
+    | .id' 2>/dev/null)
+  [ -n "$judged" ] || return 2
+  kids=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
+  [ -n "$kids" ] || return 1
+  printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  pair=$(printf '%s' "$kids" | jq -r --arg ids "$judged" '
+    ($ids | split("\n")) as $reviews
+    | [ .[]
+        | select(((.status // "open") | tostring) != "closed")
+        | ((.metadata.source_review_bead // "") | tostring) as $src
+        | select($src != "" and (($reviews | index($src)) != null))
+        | ($src + " " + .id) ]
+    | (.[0] // empty)' 2>/dev/null)
+  [ -n "$pair" ] || return 2
+  printf '%s' "$pair"
 }
 
 # The roots of every workflow poured over <review-bead>, one per line, via the
@@ -449,6 +484,18 @@ Two repairs, either of which clears the hold:
         skipped=$((skipped + 1)); continue
       fi
       echo "$PROG: $id gate '$g' is past the cap ($dcount/${GC_MAX_REVIEW_ROUNDS:-3}) but the branch advanced past exception@$oid; dispatching one re-gate at $head"
+    fi
+
+    # An unreadable head names no commit to test a prior verdict against.
+    if [ -n "$head" ]; then
+      ans_rc=0
+      answered=$(already_answered "$id" "$g" "$head") || ans_rc=$?
+      case "$ans_rc" in
+        0) echo "$PROG: $id gate '$g' — review ${answered%% *} already judged $head and its rework ${answered##* } is still open; no dispatch (a re-review of an untouched commit re-derives the same findings)"
+           skipped=$((skipped + 1)); continue ;;
+        1) echo "$PROG: $id gate '$g' prior-verdict probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
+           skipped=$((skipped + 1)); continue ;;
+      esac
     fi
 
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
