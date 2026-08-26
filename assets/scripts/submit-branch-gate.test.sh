@@ -89,11 +89,28 @@ case "$GATE$RESOLVE$CONSUME$CLOSE$HALT$HALT_CLOSE" in
   *)    ok  "snippets are backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
 
+# The declared default is what a source-read reconstruction renders, and it is
+# reached only when the poured step was bypassed — exactly when nothing else is
+# watching. Empty renders `<rig>/refinery`, an address no agent holds, and the
+# refinery's exact-match find-work then never reads the bead (tk-xkz600). Every
+# substitution below pins `gc-toolkit.` explicitly, so none of them can see it.
+BP_DEFAULT="$(awk '
+  /^\[vars\.binding_prefix\]$/ {f=1; next}
+  f && /^\[/                    {exit}
+  f && /^default[ \t]*=/         {sub(/^default[ \t]*=[ \t]*"/, ""); sub(/"$/, ""); print; exit}
+' "$TOML")"
+[ -n "$BP_DEFAULT" ] \
+  && ok "binding_prefix declares a non-empty default ($BP_DEFAULT)" \
+  || bad "binding_prefix default is EMPTY — a source-read renders <rig>/refinery, which names no agent"
+
 # --- Fakes. -------------------------------------------------------------------
 # git   : only `git branch --show-current` is used; it answers $FAKE_BRANCH.
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
+#         `gc agent list --json` answers $FAKE_AGENTS; the value UNREADABLE
+#         makes the call fail, which reaches the guard as a different cause
+#         than an empty roster but must take the same arm.
 mkdir -p "$TMP/bin"
 
 cat > "$TMP/bin/git" <<'GIT'
@@ -111,6 +128,8 @@ case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
+  "agent list")        [ "${FAKE_AGENTS-}" = "UNREADABLE" ] && exit 1
+                       printf '{"agents":%s}\n' "${FAKE_AGENTS:-[]}"; exit 0 ;;
 esac
 exit 0
 GC
@@ -252,11 +271,20 @@ eq "$(run_resolve polecat/tk-work main '{"target":""}')" \
 # the bead between writes, and --notes can never erase the dispatch note.
 # {{binding_prefix}} is substituted the way the materializer does; GC_RIG is
 # controlled per case.
-run_consume() { # <landing-target> [gc-rig]
+# ROSTER_OK is the shape `gc agent list --json` returns: every agent carries a
+# rig-qualified name, and the guard also accepts the binding-qualified tail so a
+# session outside a rig still resolves. Neither form ever yields bare
+# `refinery`, which is what makes the empty-prefix address detectable at all.
+ROSTER_OK='[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},{"qualified_name":"myrig/gc-toolkit.refinery"},{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]'
+
+# $3 is set-but-empty on purpose in the bug case, so `${3-...}` (not `${3:-...}`)
+# is the expansion that renders it.
+run_consume() { # <landing-target> [gc-rig] [binding-prefix] [agents-json|UNREADABLE]
   : > "$TMP/log"
-  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|${3-gc-toolkit.}|g" > "$TMP/consume.sh"
   local rc=0
-  LANDING_TARGET="$1" GC_RIG="${2-}" FAKE_LOG="$TMP/log" bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  LANDING_TARGET="$1" GC_RIG="${2-}" FAKE_AGENTS="${4-$ROSTER_OK}" FAKE_LOG="$TMP/log" \
+    bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 
@@ -284,6 +312,36 @@ eq "$(run_consume '')" \
    "1|DRAIN;" \
    "unset LANDING_TARGET: halts instead of writing an empty target"
 
+# THE BUG (tk-xkz600). {{binding_prefix}} rendered empty, which is what the
+# formula's own declared default produced whenever this command was rebuilt from
+# the .toml instead of read out of the poured step. The address becomes
+# `gc-toolkit/refinery`; the refinery's find-work is exact-match on assignee, so
+# the bead is simply never read and no error is raised anywhere. Two occurrences
+# in one day, one of them found only because the refinery happened to trip over
+# it out of band. The halt must come BEFORE the write, so the log carries DRAIN
+# and no UPDATE at all.
+eq "$(run_consume main gc-toolkit '')" \
+   "1|DRAIN;" \
+   "empty binding prefix: halts on an address no agent holds, writing nothing"
+
+# The check is roster membership, not merely a non-empty prefix — a wrong prefix
+# strands exactly as thoroughly as an absent one.
+eq "$(run_consume main gc-toolkit typo.)" \
+   "1|DRAIN;" \
+   "unbound binding prefix: halts on an address no agent holds, writing nothing"
+
+# The permissive arm. A roster the guard could not read proves nothing about the
+# address, and failing closed there would stall handoffs that are almost always
+# correct. A call that fails and a roster that is genuinely empty arrive by
+# different routes and must both write.
+eq "$(run_consume main myrig gc-toolkit. UNREADABLE)" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "unreadable roster: hands off rather than stalling on what it cannot check"
+
+eq "$(run_consume main myrig gc-toolkit. '[]')" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "empty roster: hands off rather than stalling on what it cannot check"
+
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
 # the gate, and the handoff reads $LANDING_TARGET from the resolver. Run all
@@ -295,7 +353,7 @@ printf '%s\n' "$RESOLVE" | sed "s|{{base_branch}}|polecat/su-uzy9.5|g" >> "$TMP/
 printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/both.sh"
 BOTH_RC=0
 FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":"main"}' \
-  GC_RIG="" FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
+  GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
 eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape"
 eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
    "composed run resolves the landing target to main, not to the pushed branch"
