@@ -166,13 +166,14 @@ Each gate's verdict is a head-bound marker:
 `approval` takes no marker of its own. `merge.sh` satisfies it from an
 external APPROVED review at the live head, never from the city's own account
 and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
-that rule. **`signoff.sh` is the single writer of gate verdicts**
-(component-model I7). It refuses any oid that is not 40 lowercase hex: the
-marker earns its authority from `merge.sh` comparing it to the live head, and
-an abbreviated sha compares equal to nothing. A head move stales every verb at
-once, so a fixed branch re-evaluates fresh with no manual reset — gate-ensure
-re-arms the gate by dispatching a fresh review, whose verdict overwrites the
-stale marker.
+that rule. What the *reviewer* did short of a verdict is posture, not a gate:
+see [Posture](#posture) below. **`signoff.sh` is the single writer of gate
+verdicts** (component-model I7). It refuses any oid that is not 40 lowercase
+hex: the marker earns its authority from `merge.sh` comparing it to the live
+head, and an abbreviated sha compares equal to nothing. A head move stales
+every verb at once, so a fixed branch re-evaluates fresh with no manual reset
+— gate-ensure re-arms the gate by dispatching a fresh review, whose verdict
+overwrites the stale marker.
 
 One shape cannot be re-armed that way. `merge.sh` and gate-ensure both read
 only the gates named in `check_set`, so a `check.<g>` outside it is dispatched
@@ -221,6 +222,51 @@ pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
 fails closed. One anchor per PR is asserted structurally by
 `doctor/check-one-anchor-per-pr`; `merge.sh` still refuses a second anchor on
 sight as fail-closed defense.
+
+## Posture
+
+Gates record what the machine decided. **Posture** records what the pull request
+is doing, in the same `<value>@<oid>` shape, written by `pr-facts.sh` on every
+open non-draft anchor and read off the bead by everything downstream. Declared
+in `lifecycle/lifecycle.toml` `[posture]`.
+
+| Key | Value | Meaning |
+|---|---|---|
+| `pr_posture` | `<posture>@<oid>` | the review posture at `<oid>` |
+| `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
+| `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
+| `pr_review_watermark` | `<id>` | highest routed COMMENTED `pulls/N/reviews` id |
+| `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
+
+The postures, in the precedence the derivation applies:
+
+| Posture | When | Merge effect |
+|---|---|---|
+| `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
+| `commented` | a review comment sits above its watermark | holds |
+| `approved` | GitHub reports `APPROVED` | none |
+| `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
+| `none` | no `reviewDecision` applies | none |
+
+A comment outranks an approval on purpose: one reviewer's approval does not
+answer another reviewer's question. `merge.sh` holds on a recorded `commented`
+whatever head it is pinned to, because a comment survives a head move; an
+**absent** posture never holds, since that is a fact not yet recorded rather
+than a fact recorded as bad.
+
+**The watermarks** separate a comment already routed from a new one. Each is the
+highest id routed in its own id space, and each advances only after the routing
+reads back, so a comment nothing answered cannot fall below the mark. The two
+spaces are never merged: a reply can land on an old review, so review ids cannot
+stand in for comment ids. They rest on one assumption — that ids rise with
+visibility.
+
+**An outstanding comment routes to something.** It becomes a fix-pool rework
+child, or, when a human already holds the anchor (`merge_hold`,
+`gc.routed_to=human`, or a recorded `gc.takeaway`) or there is no fix pool, one
+`escalate.sh` visit per batch. Either way the filed bead **blocks** the anchor,
+so the merge waits on the answer, and `pr_comment_disposition` records which was
+chosen. Silence is not one of the options.
 
 ## The handoff
 

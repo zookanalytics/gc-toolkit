@@ -2,7 +2,9 @@
 # merge — arm 3 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
 # repo, not a fork, right head branch, OPEN non-draft), live anchor re-read,
-# then validate in order: merge_hold; one-anchor-per-PR (hold + escalate once —
+# then validate in order: merge_hold; unanswered review comments (pr_posture
+# read OFF THE ANCHOR, never re-derived from GitHub here);
+# one-anchor-per-PR (hold + escalate once —
 # fail-closed defense; the structural check is doctor's); non-empty check_set
 # (empty is never the 'none' opt-out — an unnormalized anchor holds);
 # base == merged_target;
@@ -186,6 +188,7 @@ while IFS= read -r row; do
   hold=$(printf '%s' "$fresh" | jq -r '.meta.merge_hold // ""')
   dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
+  posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
   if [ -n "$prurl" ] && [ "$(canon_pr_url "$prurl")" != "$live_url" ]; then
     echo "$PROG: anchor $id records pr_url '$prurl' but PR#$num is '$live_url'; merge held — operator must repair"
     held=$((held + 1)); continue
@@ -207,6 +210,16 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num merge_hold set (operator gate); merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
+  # pr-facts.sh records the posture; this reads it. An ABSENT posture never
+  # holds: absence means the fact is not recorded yet — no pr-facts pass has run
+  # on this anchor, or `gh` was unreachable — and holding on it would wedge the
+  # whole queue the first time GitHub could not be read. The value is not
+  # head-matched on purpose: a comment survives a head move.
+  case "$posture" in
+    commented@*)
+      echo "$PROG: PR#$num carries review comments nothing has answered ($posture); merge held (anchor $id, pr-facts routes them)"
+      held=$((held + 1)); continue ;;
+  esac
   # One-anchor-per-PR: fail-closed defense (doctor/check-one-anchor-per-pr is
   # the structural check). Keyed on pr_url so a foreign same-number anchor never
   # holds ours; a duplicate holds EVERY anchor of the PR.
@@ -391,6 +404,7 @@ while IFS= read -r row; do
       elif $mr != "pull_request" then "merge_result is now \($mr)"
       elif $pn != $num then "anchor now claims PR#\($pn)"
       elif (["","false","0","null","False","FALSE"] | index($h)) == null then "merge_hold was set after validation"
+      elif ((($m.pr_posture // "") | tostring) | startswith("commented@")) then "review comments went unanswered after validation"
       elif $d != $dis then "signoff_dismissed changed after the approval gate ran"
       elif ($t != "" and $t != $base) then "retargeted after validation (merged_target=\($t))"
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"

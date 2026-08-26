@@ -4,7 +4,8 @@
 # lifecycle transition closing with merged_sha); every validate hold in order
 # (merge_hold, duplicate anchor + escalate, retarget, non-green gate, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, approval arms + veto,
-# CLEAN/UNSTABLE handling); identity refusals (fork, url/branch mismatch);
+# CLEAN/UNSTABLE handling); the recorded pr_posture hold, read off the anchor;
+# identity refusals (fork, url/branch mismatch);
 # the terminal full-authorization re-read; and the loud non-zero exit when the
 # record half fails after a merge.
 set -uo pipefail
@@ -245,6 +246,61 @@ eq "$rc" 0 "the pass still exits 0 (the merge itself landed)"
 has "$out" "recording merged_sha=unverified:PR#61" "the degraded record is loud"
 eq "$(meta V1 merged_sha)" "unverified:PR#61" "merged_sha is never empty"
 eq "$(bstatus V1)" "closed" "the anchor still closed"
+
+echo "# a recorded `commented` posture holds the merge"
+store "[$(anchor C1 70 ',"pr_posture":"commented@sha-70"')]"
+printf '%s' "$(prview 70 OPEN CLEAN)" > "$GH_DIR/pr_view_70.json"
+echo '[]' > "$GH_DIR/reviews_70.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "carries review comments nothing has answered (commented@sha-70); merge held" "the posture read off the anchor holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 70" "…and nothing merged"
+hasnt "$(cat "$STUB_GH_LOG")" "pulls/70/comments" "…without merge.sh asking GitHub anything about it"
+eq "$(bstatus C1)" "open" "the anchor was not closed"
+
+echo "# …a posture pinned to an OLD head still holds — a comment survives a head move"
+store "[$(anchor C2 71 ',"pr_posture":"commented@sha-STALE"')]"
+printf '%s' "$(prview 71 OPEN CLEAN)" > "$GH_DIR/pr_view_71.json"
+echo '[]' > "$GH_DIR/reviews_71.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "commented@sha-STALE); merge held" "the hold is not head-matched"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 71" "…and nothing merged"
+
+echo "# …every other posture, and an ABSENT one, merge as before"
+store "[$(anchor C3 72 ',"pr_posture":"approved@sha-72"')]"
+printf '%s' "$(prview 72 OPEN CLEAN)" > "$GH_DIR/pr_view_72.json"
+echo '[]' > "$GH_DIR/reviews_72.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded C3" "an approved posture does not hold"
+store "[$(anchor C4 73)]"
+printf '%s' "$(prview 73 OPEN CLEAN)" > "$GH_DIR/pr_view_73.json"
+echo '[]' > "$GH_DIR/reviews_73.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded C4" "an absent posture is a fact not yet recorded, never a hold"
+
+echo "# …a comment landing mid-pass is caught by the terminal re-read"
+store "[$(anchor C5 74)]"
+printf '%s' "$(prview 74 OPEN CLEAN)" > "$GH_DIR/pr_view_74.json"
+echo '[]' > "$GH_DIR/reviews_74.json"
+PHOOK_COUNT="$TMP/phookcount"; : > "$PHOOK_COUNT"
+cat > "$TMP/phook.sh" <<HOOK
+#!/usr/bin/env bash
+# Records the posture on C5 immediately before its SECOND read (the terminal
+# re-read): the validation read saw none, so only the re-read can catch it.
+[ "\${1:-}" = "C5" ] || exit 0
+n=\$(cat "$PHOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$PHOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp)
+  jq -c 'map(if .id == "C5" then .metadata.pr_posture = "commented@sha-74" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+fi
+HOOK
+chmod +x "$TMP/phook.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/phook.sh" "$SUT" 2>&1)
+has "$out" "review comments went unanswered after validation; merge held" "the terminal re-read caught the mid-pass comment"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 74" "…and the merge was withheld"
+eq "$(bstatus C5)" "open" "the anchor was not closed"
 
 echo "# terminal re-read HOLDS on a real mid-pass write (hook mutates the store)"
 store "[$(anchor T2 51)]"

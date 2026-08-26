@@ -181,6 +181,31 @@ marker_verbs = ["green", "fixable", "exception"]
 # review at the live head, never by a check.approval marker.
 approval_member = "approval"
 
+[posture]
+# What the PR is doing, recorded on the anchor by pr-facts.sh in the same
+# `<value>@<oid>` shape the check keys use. merge.sh reads these off the bead;
+# nothing else re-derives them from GitHub.
+posture_key = "pr_posture"
+# The pack's own vocabulary, lowercase, derived in this precedence order: a
+# standing CHANGES_REQUESTED outranks an unanswered comment, which outranks an
+# approval — one reviewer's approval does not answer another reviewer's
+# question. "none" is a PR no reviewDecision applies to.
+postures = ["changes_requested", "commented", "approved", "review_required", "none"]
+# GitHub's mergeStateStatus, recorded verbatim and uppercase: the vocabulary is
+# GitHub's, and a value it adds next year must read as GitHub's, not as ours.
+merge_state_key = "pr_merge_state"
+# The watermarks separate a comment already routed from a new one. Each is the
+# highest id routed in its own id space, and advances only after the routing
+# reads back, so a comment nothing answered cannot fall below the mark. Two
+# spaces, never merged: a reply can land on an old review, so review ids cannot
+# stand in for comment ids.
+comment_watermark_key = "pr_comment_watermark"
+review_watermark_key = "pr_review_watermark"
+# What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
+# child) or "visit:<bead-id>" (a human already holds this anchor). Both block
+# the anchor, so the merge waits on the answer either way.
+disposition_key = "pr_comment_disposition"
+
 # The metadata-key registry: every key the rewritten pack writes, grouped.
 [metadata.merge_identity]
 keys = [
@@ -195,6 +220,12 @@ keys = [
   "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
   "review_branch", "review_base", "reviewed_oid", "review_pool",
   "source_review_bead", "task_kind", "dispatch_count", "fix_target_pool",
+]
+
+[metadata.pr_posture]
+keys = [
+  "pr_posture", "pr_merge_state", "pr_comment_watermark",
+  "pr_review_watermark", "pr_comment_disposition",
 ]
 
 [metadata.holds]

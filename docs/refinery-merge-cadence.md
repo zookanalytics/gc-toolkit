@@ -86,14 +86,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    summary only when the handoff carried none.
 3. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork, head branch matches), re-read the anchor, validate
-   holds/gates/children/approval/base/CLEAN, re-read the full authorization
-   set immediately before merging, `gh pr merge --squash --match-head-commit
-   <validated oid>`, then close + record via one `lifecycle.sh` call.
+   holds/posture/gates/children/approval/base/CLEAN, re-read the full
+   authorization set immediately before merging, `gh pr merge --squash
+   --match-head-commit <validated oid>`, then close + record via one
+   `lifecycle.sh` call. The posture it validates is the value **pr-facts
+   recorded on the anchor**, never a fresh read of GitHub.
 4. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head), a gate
    `green@` or `exception@` at a stale head (one re-review child per head,
-   carrying `mol-review`), hold-resolved retraction.
+   carrying `mol-review`), hold-resolved retraction. It also records every open
+   non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
+   comment watermarks ([state-machine.md](state-machine.md#posture)) — before
+   any of those arms run, and routes an unanswered review comment to a rework
+   child or a visit. Because it is arm 4, `merge.sh` reads a posture at most
+   one pass old: a comment that arrives mid-pass is caught by merge.sh's own
+   terminal re-read, and one that arrives after it is held on the next tick.
 5. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

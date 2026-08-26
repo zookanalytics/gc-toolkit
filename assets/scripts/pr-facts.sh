@@ -20,6 +20,13 @@
 # FIRST; skipped under native auto-merge). A merged record never carries an
 # empty merged_sha — an unreadable mergeCommit records
 # merged_sha=unverified:PR#<n>, loudly.
+# Every OPEN non-draft anchor also gets its POSTURE recorded before any dispatch
+# arm runs (lifecycle/lifecycle.toml [posture]): pr_posture and pr_merge_state
+# pinned to the live head, written only when the value changes, so merge.sh can
+# answer "is a human waiting on this?" off the bead instead of re-deriving it.
+# An unanswered review comment is posture `commented`, and it routes to
+# something — a fix-pool rework child, or a visit when a human already holds the
+# anchor — with the watermarks advancing only once that routing reads back.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
@@ -73,6 +80,12 @@ canon_pr_url() {
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
+# >>> pr-posture-vocabulary
+# Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
+# Listed in the precedence the derivation applies, strongest human signal first.
+PR_POSTURES="changes_requested commented approved review_required none"
+# <<< pr-posture-vocabulary
+
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
@@ -88,6 +101,20 @@ escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
 }
+visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
+  local rows
+  rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$2" \
+           --metadata-field "gc.continuation_group=$1") || return 1
+  printf '%s' "$rows" | jq -r '[ .[] | .id ] | .[0] // empty' 2>/dev/null
+}
+gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
+  # `gh --paginate` emits one array per PAGE; --jq '.[]' flattens the pages and
+  # jq -s makes the whole read an array again. Non-zero = "could not tell".
+  local raw rc
+  raw=$(gh_api_origin --paginate "$1" --jq '.[]' 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  printf '%s' "$raw" | scrub | jq -sc '.' 2>/dev/null
+}
 
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
@@ -96,6 +123,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; regated=0; dismissed_n=0; skipped=0
+postured=0; answered=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -126,6 +154,7 @@ while IFS= read -r row; do
   head_oid=$(printf '%s' "$PR_JSON" | jq -r '.headRefOid // ""')
   merge_state=$(printf '%s' "$PR_JSON" | jq -r '.mergeStateStatus // ""')
   mergeable=$(printf '%s' "$PR_JSON" | jq -r '.mergeable // ""')
+  rd=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
   live_url=$(canon_pr_url "$(printf '%s' "$PR_JSON" | jq -r '.url // ""')")
   head_repo=$(printf '%s' "$PR_JSON" | jq -r '
     ((.headRepositoryOwner.login // "") | tostring) as $o
@@ -183,6 +212,72 @@ while IFS= read -r row; do
   fi
   [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
   [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
+
+  # --- posture: record what the PR is doing (a record, never a dispatch) --------
+  # Placed ahead of every dispatch arm below so an anchor one of them claims
+  # still gets its posture written; merge.sh reads the result off the bead
+  # rather than asking GitHub. Written only when the value changes: this runs
+  # for every anchor every 60s and an unchanged re-write is pure ledger churn.
+  posture=""; max_c=0; max_r=0
+  cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
+  rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
+  case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
+  case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
+  if [ -z "$head_oid" ]; then
+    echo "$PROG: $id — PR#$num live head unresolved; posture not recorded (a posture pins to a head or says nothing)" >&2
+  elif [ -z "$SELF_LOGIN" ]; then
+    # Our own comments are indistinguishable from a human's without the acting
+    # login, and a weaker posture written here would clear a standing
+    # `commented` that is holding the merge. Record nothing; hold what stands.
+    echo "$PROG: $id — PR#$num posture not recorded: the acting login is unresolved" >&2
+  elif [ "$rd" = "CHANGES_REQUESTED" ]; then
+    # The strongest posture there is, and merge.sh already vetoes on the review
+    # itself. The comments underneath belong to signoff.sh's rework loop, which
+    # is why this arm neither reads nor watermarks them here.
+    posture="changes_requested"
+  else
+    revs_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100") || revs_raw=""
+    cmts_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/comments?per_page=100") || cmts_raw=""
+    if [ -z "$revs_raw" ] || [ -z "$cmts_raw" ]; then
+      echo "$PROG: $id — PR#$num review history unreadable; posture not recorded (retry next pass)" >&2
+    else
+      # A COMMENTED review with an empty body carries only its inline comments,
+      # which the comment read below already sees; counting it here would leave
+      # a posture no comment id can ever answer.
+      max_r=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" '
+        [ .[] | select(((.user.login // "") | tostring) != $self)
+          | select(((.state // "") | tostring) == "COMMENTED")
+          | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
+          | (.id // 0) ] | max // 0' 2>/dev/null)
+      max_c=$(printf '%s' "$cmts_raw" | jq -r --arg self "$SELF_LOGIN" '
+        [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
+      case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
+      case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
+      if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ]; then posture="commented"
+      elif [ "$rd" = "APPROVED" ]; then posture="approved"
+      elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
+      else posture="none"
+      fi
+    fi
+  fi
+  case " $PR_POSTURES " in
+    *" $posture "*) : ;;
+    *) [ -z "$posture" ] || { echo "$PROG: $id — refusing to record undeclared posture '$posture'" >&2; posture=""; } ;;
+  esac
+  if [ -n "$posture" ]; then
+    want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
+    have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
+    have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
+    if [ "$have_p" != "$want_p" ] || [ "$have_m" != "$want_m" ]; then
+      if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+           --set "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
+        postured=$((postured + 1))
+        echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
+      else
+        echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
+      fi
+    fi
+  fi
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
@@ -458,6 +553,118 @@ GATES
     continue
   fi
 
+  # --- an unanswered review comment routes to something -------------------------
+  # Reached only when the anchor is otherwise clear: the conflict and stale-gate
+  # arms above already left a child in flight holding the merge, and the comments
+  # get their own dispatch on the pass after that child lands. Whatever this
+  # routes to BLOCKS the anchor, so the merge waits on the answer, and the
+  # watermarks move only once the routing has read back — a comment nothing
+  # answered can never fall below the mark.
+  if [ "$posture" = "commented" ]; then
+    fix_branch="${head_ref:-$branch}"
+    routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
+    takeaway=$(printf '%s' "$row" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
+    # A human already holding this anchor gets the comments; filing work under a
+    # live human decision fights it. Absent that hold, and with a pool to route
+    # to, the comments become work.
+    if is_held "$hold" || [ "$routed" = "human" ] || [ -n "$takeaway" ] \
+       || [ -z "$FIX_POOL" ] || [ -z "$fix_branch" ]; then
+      choice="visit"
+    else
+      choice="rework"
+    fi
+    DISP=""
+    if [ "$choice" = "rework" ]; then
+      # Same allowlist as the CONFLICTING arm's `stale-base-dispatch-mode`: the
+      # child may have to bring the branch current before it can push a fix, and
+      # only polecat/* is disposable enough to rewrite.
+      case "$fix_branch" in
+        polecat/*) prepare_mode=rebase ;;
+        *)         prepare_mode=merge ;;
+      esac
+      if [ "$grad" = "true" ]; then prepare_mode=merge; fi
+      # Deterministic per batch: the same outstanding comments name the same
+      # child, a later batch names a different one. Both halves of the probe
+      # matter — a fully stamped hit means this batch was already dispatched and
+      # only the watermark write failed, an unstamped hit is an orphan from a
+      # pass whose stamp dropped, and re-creating either mints a twin.
+      CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
+      if ! ckids=$(bd_list --status="$ALL_STATUSES" --title-contains "$CTITLE"); then
+        echo "$PROG: $id — PR#$num comment dedup probe failed; nothing dispatched (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      CFIX=$(printf '%s' "$ckids" | jq -r --arg id "$id" '
+        [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $id) | .id ] | .[0] // empty' 2>/dev/null)
+      if [ -n "$CFIX" ]; then
+        echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; recording the watermark only"
+      else
+        CFIX=$(printf '%s' "$ckids" | jq -r '
+          [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+        if [ -n "$CFIX" ]; then
+          echo "$PROG: $id adopting unstamped comment-rework orphan $CFIX for PR#$num (created by a prior pass whose stamp failed)"
+        else
+          CFIX=$(gc bd create "$CTITLE" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+        fi
+        if [ -z "$CFIX" ]; then
+          echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        gc bd update "$CFIX" \
+          --set-metadata anchor_bead="$id" \
+          --set-metadata branch="$fix_branch" \
+          --set-metadata target="$base" \
+          --set-metadata rejection_reason="Review comments on PR#$num are unanswered at head $head_oid. Read them at $live_url/files and answer every one — a fix, or a reply on the PR saying why not — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+          --set-metadata prepare_mode="$prepare_mode" \
+          --set-metadata merge_strategy=mr \
+          --set-metadata existing_pr="$live_url" \
+          --set-metadata pr_url="$live_url" \
+          --set-metadata pr_number="$num" >/dev/null 2>&1 \
+          || echo "$PROG: WARN comment rework $CFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
+        gc bd dep "$CFIX" --blocks "$id" >/dev/null 2>&1 \
+          || echo "$PROG: WARN could not attach comment rework $CFIX as a blocks-dep of $id" >&2
+        # anchor_bead is the dedup key the probe above reads; an unstamped child
+        # is invisible to it, so routing one would twin on the next pass.
+        agot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
+        if [ "$agot" != "$id" ]; then
+          echo "$PROG: WARN comment rework $CFIX did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
+          || echo "$PROG: WARN comment rework $CFIX not routed to $FIX_POOL; route it by hand" >&2
+        gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+      fi
+      DISP="rework:$CFIX"
+    else
+      why="no fix pool is configured"
+      is_held "$hold" && why="merge_hold is set"
+      [ "$routed" = "human" ] && why="the anchor is already routed to a human"
+      [ -n "$takeaway" ] && why="a sitting recorded a takeaway on it"
+      VKEY="pr-comments.$num.$max_r.$max_c"
+      escalate "$id" "$VKEY" \
+        "PR#$num ($live_url) carries review comments nothing has answered (highest: review $max_r, comment $max_c; answered through review $rwm, comment $cwm), and the city cannot route work for them because $why. Answer them on the PR, file the rework by hand, or close this visit once they are addressed — the anchor is blocked until then."
+      VID=$(visit_for "$id" "$VKEY") || VID=""
+      if [ -z "$VID" ]; then
+        echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      # escalate.sh files its visit on a `tracks` edge, which nothing merges on.
+      # The blocks edge is what makes the merge wait for the answer.
+      gc bd dep "$VID" --blocks "$id" >/dev/null 2>&1 \
+        || echo "$PROG: WARN could not attach visit $VID as a blocks-dep of $id" >&2
+      DISP="visit:$VID"
+    fi
+    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+         --set "pr_comment_watermark=$max_c" --set "pr_review_watermark=$max_r" \
+         --set "pr_comment_disposition=$DISP" >/dev/null; then
+      answered=$((answered + 1))
+      echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c)"
+    else
+      echo "$PROG: WARN $id — PR#$num comments routed to $DISP but the watermark did NOT record; the same batch re-dispatches next pass onto $DISP" >&2
+      skipped=$((skipped + 1))
+    fi
+    continue
+  fi
+
   # --- dismiss our OWN superseded CHANGES_REQUESTED when the gate is green -------
   # Only when every declared gate is green at the LIVE head but GitHub is still
   # red on our own stale block. Never a human's review; skipped when native
@@ -471,7 +678,6 @@ GATES
   done <<GATES
 $(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
-  rd=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
   if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \
      && [ -n "$SELF_LOGIN" ]; then
     auto=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json autoMergeRequest 2>/dev/null \
@@ -510,5 +716,5 @@ done <<ROWS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 ROWS_EOF
 
-echo "$PROG: $recorded recorded, $flagged flagged-to-human, $reworked reworks filed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
+echo "$PROG: $recorded recorded, $postured postures recorded, $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
 exit 0
