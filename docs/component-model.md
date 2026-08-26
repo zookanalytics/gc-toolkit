@@ -108,7 +108,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 | # | Proposition | Check |
 |---|---|---|
-| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check. |
+| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | `doctor/check-wait-is-an-edge` (tk-5r1a12): where an OPEN bead states a wait about ITSELF — a dependency-declaring metadata key, or `gc.takeaway`/`*_reason` prose naming a bead — an edge must record it in one direction or the other, and a target that has already closed is reported apart as the terminal form. Free-form notes are out of scope by measurement, not omission: every open bead in this city whose notes carry wait language names a THIRD PARTY as the waiter, so reading them would report the graph as broken where it is correct. Takeaway waits are written as edges by `gc-helm.sh takeaway --waiting-on`, which warns when it could wire only the string; the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits stay head-bound markers by design. |
 | **I2** | The state space is closed: every `merge_result` value and status combo is declared in `lifecycle/lifecycle.toml`, and a bead in a declared detached state rests unheld and offered to no pool. | `doctor/check-state-space` |
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
@@ -127,7 +127,7 @@ resolves in the composed config), `doctor/check-seed-audit-current`
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: the city name
 resolves, the supervisor endpoint carries a numeric `input_tokens` for every
 awake patrol agent, and no refinery's git-op defer guard has been latched past
-a bound). That is the whole set: **13 checks, each asserting a live structural
+a bound). That is the whole set: **14 checks, each asserting a live structural
 property** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
@@ -329,4 +329,4 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
   by construction. If you find the ledger disagreeing with this document, one
-  of the twelve checks is missing a case; fix the check, not the prose.
+  of the fourteen checks is missing a case; fix the check, not the prose.
