@@ -202,8 +202,11 @@ merge_state_key = "pr_merge_state"
 comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
-# child) or "visit:<bead-id>" (a human already holds this anchor). Both block
-# the anchor, so the merge waits on the answer either way.
+# child) or "visit:<bead-id>" (a human already holds this anchor). Either holds
+# the merge until it closes — the child through a blocks edge, the visit through
+# the pr_number stamp merge.sh's in-flight-holder probe reads. A visit takes no
+# blocks edge: escalate.sh files it depending on its subject, so an edge back
+# would be a cycle.
 disposition_key = "pr_comment_disposition"
 
 # The metadata-key registry: every key the rewritten pack writes, grouped.

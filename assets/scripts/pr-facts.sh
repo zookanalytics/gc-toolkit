@@ -102,10 +102,16 @@ escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
 }
 visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
+  # Both stamps are re-checked here as well as queried: this id gets pr_number
+  # written onto it, so a row that came back for another subject would stamp a
+  # stranger's bead and hold the wrong merge.
   local rows
   rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$2" \
            --metadata-field "gc.continuation_group=$1") || return 1
-  printf '%s' "$rows" | jq -r '[ .[] | .id ] | .[0] // empty' 2>/dev/null
+  printf '%s' "$rows" | jq -r --arg s "$1" --arg k "$2" '
+    [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
+          | select(((.metadata.escalation_key // "") | tostring) == $k)
+          | .id ] | .[0] // empty' 2>/dev/null
 }
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
   # `gh --paginate` emits one array per PAGE; --jq '.[]' flattens the pages and
@@ -601,8 +607,15 @@ GATES
       if [ -n "$CFIX" ]; then
         echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; recording the watermark only"
       else
-        CFIX=$(printf '%s' "$ckids" | jq -r '
-          [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+        # Live-only, unlike the batch probe above: a CLOSED orphan would take the
+        # stamp and the route, hold nothing, and still let the watermark advance
+        # past a comment no one ever read.
+        CFIX=$(printf '%s' "$ckids" | jq -r --arg live "$LIVE_STATUSES" '
+          ($live | split(",")) as $ls
+          | [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "")
+                  | ((.status // "open") | tostring | ascii_downcase) as $st
+                  | select(($ls | index($st)) != null)
+                  | .id ] | .[0] // empty' 2>/dev/null)
         if [ -n "$CFIX" ]; then
           echo "$PROG: $id adopting unstamped comment-rework orphan $CFIX for PR#$num (created by a prior pass whose stamp failed)"
         else

@@ -263,7 +263,7 @@ has "$out" "recording merged_sha=unverified:PR#61" "the degraded record is loud"
 eq "$(meta V1 merged_sha)" "unverified:PR#61" "merged_sha is never empty"
 eq "$(bstatus V1)" "closed" "the anchor still closed"
 
-echo "# a recorded `commented` posture holds the merge"
+echo '# a recorded commented posture holds the merge'
 store "[$(anchor C1 70 ',"pr_posture":"commented@sha-70"')]"
 printf '%s' "$(prview 70 OPEN CLEAN)" > "$GH_DIR/pr_view_70.json"
 echo '[]' > "$GH_DIR/reviews_70.json"

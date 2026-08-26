@@ -423,6 +423,21 @@ has "$out" "adopting unstamped comment-rework orphan new-2" "the next pass adopt
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one child"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…now routed"
 
+echo "# …but a CLOSED orphan is never adopted: it holds nothing and still moves the mark"
+store "[$(anchor W3 47)]"
+printf '%s' "$(prview 47 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_47.json"
+echo '[]' > "$GH_DIR/reviews_47.json"
+printf '[{"id":9200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_47.json"
+out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
+has "$out" "did not record anchor_bead=W3; left unrouted" "the dropped stamp leaves an orphan again"
+ctmp=$(mktemp); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
+out=$(run)
+hasnt "$out" "adopting unstamped comment-rework orphan" "a closed orphan is passed over"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
+eq "$(meta new-3 'gc.routed_to')" "$FIX" "…and that one is routed"
+eq "$(meta W3 pr_comment_disposition)" "rework:new-3" "the disposition names the live child"
+grep -qxF "new-3|blocks|W3" "$STUB_DEPS" && ok "…and it is what holds the merge" || bad "blocks edge missing"
+
 echo "# a human already holding the anchor gets the comments, not the fix pool"
 store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"')]"
 printf '%s' "$(prview 44 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_44.json"

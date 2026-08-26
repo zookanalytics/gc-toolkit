@@ -261,6 +261,17 @@ spaces are never merged: a reply can land on an old review, so review ids cannot
 stand in for comment ids. They rest on one assumption — that ids rise with
 visibility.
 
+Both spaces are review spaces: the inline comments on `pulls/N/comments`, and the
+bodies of COMMENTED reviews on `pulls/N/reviews`. A plain conversation comment on
+the PR is an issue comment, carries no review, and raises no posture.
+
+Under `changes_requested` the comment ids are neither read nor watermarked,
+because `signoff.sh`'s rework loop owns the comments underneath a veto. Once the
+veto clears, a batch that loop already answered can therefore be routed a second
+time. Marking those ids answered here would be worse: a comment added after the
+review would fall below the mark, and silence is the one outcome this section
+rules out.
+
 **An outstanding comment routes to something.** It becomes a fix-pool rework
 child, or, when a human already holds the anchor (`merge_hold`, `rebase_hold`,
 `gc.routed_to=human`, or a recorded `gc.takeaway`) or there is nowhere to route
