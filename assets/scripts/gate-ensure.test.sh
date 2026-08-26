@@ -98,7 +98,7 @@ has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none
 
 echo "# an exception the head has moved PAST is re-armed, cap or no cap"
 store "[$(anchor B4 pull_request codex "exception@sha-old" polecat/b4),
-        $(anchor B5 pull_request codex "exception@sha-old" polecat/b5 ',"dispatch_count":"3"')]"
+        $(anchor B5 pull_request codex "exception@sha-old" polecat/b5 ',"dispatch_count":"3","gc.routed_to":"human"')]"
 echo "sha-b4" > "$GH_DIR/head_polecat_b4"
 echo "sha-b5" > "$GH_DIR/head_polecat_b5"
 out=$(run); rc=$?
@@ -107,6 +107,8 @@ has "$out" "2 reviews dispatched" "a branch fixed under an exception gets one lo
 has "$out" "advanced to sha-b4" "the dispatch names the head that staled the exception"
 has "$out" "B5 gate 'codex' is past the cap (3/3) but the branch advanced past exception@sha-old" \
   "the spent cap does not ALSO refuse the head-move re-gate (the second brake)"
+hasnt "$out" "B5 gate 'codex' has spent" \
+  "B5 carries the live shape signoff's cap arm writes — capped AND routed to human"
 eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
 eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
 
