@@ -111,15 +111,17 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
 
-Three further checks guard structure that is not an anchor invariant:
+The remaining checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
-(generated-artifact freshness; warn-only when absent), and
+(generated-artifact freshness; warn-only when absent),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: the city name
 resolves, the supervisor endpoint carries a numeric `input_tokens` for every
 awake patrol agent, and no refinery's git-op defer guard has been latched past
-a bound). That is the whole set: **13 checks, each asserting a live structural
-property** — none greps the source for a past fix.
+a bound), and `doctor/check-plan-targets-filed` (every row of a document's
+declared target list binds to a bead that exists). That is the whole set, and
+every one of them asserts a live structural property — none greps the source
+for a past fix.
 
 ---
 

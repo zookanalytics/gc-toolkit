@@ -30,14 +30,23 @@ propose a rewrite, a language migration, or a new abstraction layer.
 
 Ordered by (lines removed × brittleness removed) / risk. Do them in this order.
 
-| # | Target | Lines out | What stops happening | Risk |
-|---|---|---|---|---|
-| **1** | **Close the graph.v2 step chain** in the local `mol-polecat-work.toml` mirror; retire the quiesce sweeper | **2,099** | 461 stranded beads (62% of this rig's open ledger), growing ~40/day; every polecat's husk-classification toll | Medium |
-| **2** | **Finish the helm consolidation** — `gc-helm.sh`'s board half becomes a thin renderer | **~2,370** | "fixed on one board, not the other" — already recorded 3× | Low-Med |
-| **3** | **Retire `reconcile-refinery-handoffs.sh`** — its root cause was fixed in the formula | **761** | A repair pass for a defect the writer can no longer produce | Low |
-| **4** | **One control-char scrubber** — 7 definitions, 3 names, 2 incompatible byte sets | ~10 | Silent disagreement about whether TAB survives a bd read | Very low |
-| — | ~~Merge the `reconcile-*` family~~ | **0** | **Dropped — already done.** `refinery-reconcile.sh` is the driver | — |
-| — | ~~Add a shared library~~ | **~180** | **Dropped — not worth it.** The duplicates are one-liners | — |
+<!-- plan-targets -->
+
+| # | Target | Lines out | What stops happening | Risk | Bead |
+|---|---|---|---|---|---|
+| **1** | **Close the graph.v2 step chain** in the local `mol-polecat-work.toml` mirror; retire the quiesce sweeper | **2,099** | 461 stranded beads (62% of this rig's open ledger), growing ~40/day; every polecat's husk-classification toll | Medium | `tk-zab6q` (step chain), `tk-eh0r3m` (sweeper) |
+| **2** | **Finish the helm consolidation** — `gc-helm.sh`'s board half becomes a thin renderer | **~2,370** | "fixed on one board, not the other" — already recorded 3× | Low-Med | `tk-clvkf6` |
+| **3** | **Retire `reconcile-refinery-handoffs.sh`** — its root cause was fixed in the formula | **761** | A repair pass for a defect the writer can no longer produce | Low | `tk-qf2l0j` |
+| **4** | **One control-char scrubber** — 7 definitions, 3 names, 2 incompatible byte sets | ~10 | Silent disagreement about whether TAB survives a bd read | Very low | `tk-fdjufq` |
+| — | ~~Merge the `reconcile-*` family~~ | **0** | **Dropped — already done.** `refinery-reconcile.sh` is the driver | — | none — dropped, already done |
+| — | ~~Add a shared library~~ | **~180** | **Dropped — not worth it.** The duplicates are one-liners | — | none — dropped, not worth it |
+
+Target 1 needs two beads because it is two deletions, and separating them is
+what let the second one go unfiled for a day: `tk-zab6q` landed the close path
+in PR #443, while every one of the target's 2,099 lines lives in the sweeper
+that `tk-eh0r3m` retired. The Bead column and `doctor/check-plan-targets-filed`
+were added by `tk-dks4kk` after that gap; `docs/file-structure.md` carries the
+rule.
 
 **Total: ~5,235 lines, ~85% of it in the top two.**
 

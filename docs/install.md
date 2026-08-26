@@ -162,10 +162,12 @@ The pack's checks, and what a failure means:
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare `check_set`; markers are well-formed `verb@oid` (I6+I7) | a hand-written or truncated marker |
 | `check-step-terminal` | no open step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
+| `check-pour-text-current` | a molecule executes the formula text current when it runs (I9) | a rig checkout lagging past the reconciler's self-heal window |
 | `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
 | `check-recycle-capable` | cycle-recycle can fire: the city name resolves, the supervisor endpoint carries a numeric `input_tokens` per awake patrol agent, and no refinery defer guard is latched | the token field left the API schema, or an uncommitted tracked file has latched the refinery's git-op guard |
+| `check-plan-targets-filed` | every row of a declared `<!-- plan-targets -->` table binds to a bead that exists | a plan merged with a target nobody filed |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.

@@ -34,7 +34,20 @@ Unsure? Ask which claim the document makes. *What is true* is central;
 pack's `docs/file-structure.md` carries the tier rules in full, including
 the bead-ID-alone directory naming.
 
-## 3. Commit it
+## 3. Does this document schedule work?
+
+If its output is a *set* of follow-up work — a plan with targets, an audit
+with findings, a ranked shortlist — file each member as a bead now and bind
+every row to it. Mark the table with `<!-- plan-targets -->` and put the
+binding in the last column: a backticked bead ID, `none — <reason>` for a
+member that deliberately gets none, or `landed: <what>` once it is done.
+
+Do this before you commit, because the IDs belong in the file.
+`doctor/check-plan-targets-filed` reads the table back afterwards and errors
+on a row that binds to nothing or names a bead that does not exist.
+`docs/file-structure.md` carries the rule and the measured case.
+
+## 4. Commit it
 
 Write the file on your work branch and commit it with the rest of your
 work. That commit is what makes it durable and reviewable — the point of

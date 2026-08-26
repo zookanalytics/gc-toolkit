@@ -198,6 +198,54 @@ re-chartered or the scope has become inaccurate — never with ordinary content
 churn. Re-chartering is a deliberate human editorial act; agents read the
 scope as the measuring stick but do not rewrite it.
 
+## A document whose output is a set of follow-up work
+
+Some documents schedule work: a plan with targets, an audit with findings, an
+analysis with a ranked shortlist. The work itself becomes beads, because a
+document is not a queue and nothing dispatches from one. Declare that set as a
+table, mark it, and bind every row:
+
+```markdown
+<!-- plan-targets -->
+
+| # | Target | Bead |
+|---|---|---|
+| 1 | Retire the quiesce sweeper | `tk-eh0r3m` |
+| 2 | One control-char scrubber | none — folded into the first target that touches one |
+```
+
+The table's **last column is the binding**, and every row must state one of
+three things:
+
+| Binding | Meaning |
+|---|---|
+| `` `tk-xxxxx` `` | filed as this bead; more than one ID is fine when the target is more than one deletion |
+| `none — <reason>` | deliberately gets no bead, and says why in the same place |
+| `landed: <what>` | done, naming what landed instead of the bead it waited on |
+
+Like the [`## Scope`](#the-scope-section) standard, this constrains what a
+scheduling document must *carry*, not what it may conclude.
+
+**Why the binding goes in the row.** A single promise is either kept or
+obviously absent — one item, asked once. A set is where members vanish,
+because a set can be three-quarters converted and still read as finished and
+nothing records which rows were dealt with. The measured case is
+[`specs/tk-twp697/`](../specs/tk-twp697/plan-targets-never-filed.md): a plan
+merged with four targets, one was filed from it, and the largest waited 21
+hours while 283 lines landed in the very file that target existed to shrink.
+Applying the rule by hand to the same plan found a second target nobody had
+noticed was missing.
+
+**`doctor/check-plan-targets-filed` reads the claim back.** A row that binds to
+nothing is an error, and so is a bead ID that resolves in no store, so a row
+cannot be satisfied by writing a plausible-looking string. The check also
+reports which bound beads are still open, which is what makes a landed plan's
+table a checklist rather than a one-time gate.
+
+The check is opt-in by the marker, and deliberately so: it verifies the
+declarations that exist and cannot know about a set that declared nothing.
+What review looks for is the marker.
+
 ## Cross-doc references
 
 1. **Markdown relative-path links** are the default, used freely between
