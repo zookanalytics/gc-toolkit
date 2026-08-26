@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/molecule-hold.sh (tk-dchq5).
+# Hermetic test for assets/scripts/molecule-hold.sh.
 #
-# THE BUG the script closes: a graph.v2 refusal arm that declines work it must
-# not close, and drains leaving its step `open` and routed. `open` is half the
-# pool's offer predicate, so a fresh worker claims the same step within minutes,
-# re-derives the same refusal, and leaves it open again — one pool slot burned
-# per cycle, indefinitely, until a human notices. Observed twice from two
-# different refusal arms (su-a0fs.1 2026-08-17; tk-hs5rz 2026-08-23).
+# The constraint: a graph.v2 refusal arm that declines work it must not close
+# has to leave its step not-claimable as well as not-closed. `open` is half the
+# pool's offer predicate, so an arm that drains leaving its step open has it
+# re-offered to a fresh worker, which re-derives the same refusal and leaves it
+# open again, one pool slot per cycle.
 #
 # What is exercised here:
 #   * the LOOP ANCHOR — a molecule shaped like the live one (claimed step, a
@@ -20,7 +19,7 @@
 #     drained session and re-stamps a run_target fallback on whatever it finds
 #     unrouted, so a step left open with its route cleared gets re-routed. Only
 #     `blocked` is outside that tier;
-#   * the ATOMICITY anchor (tk-z27pw) — bd's claim guard refuses `--assignee ""`
+#   * the ATOMICITY anchor — bd's claim guard refuses `--assignee ""`
 #     on an in_progress bead and the refusal rolls back the WHOLE update, so the
 #     blocking write must not carry an assignee. Status and route ship together;
 #     the assignee clear is a separate, later call;
@@ -39,7 +38,8 @@
 #   * usage errors, including a value-taking option at the end of argv;
 #   * the FORMULA WIRING — mol-polecat-work's load-context refusal arm is
 #     extracted verbatim and must call the script rather than say "leave it
-#     open".
+#     open", escalate through escalate.sh rather than mail, and drain only
+#     after a hold that landed.
 #
 # No live city, Dolt, network, or beads — only a tmpdir, a `gc` stub over a
 # JSON store, and the script itself.
@@ -358,6 +358,46 @@ has   "$LC_DESC" "never close it" "and the not-closed invariant is still stated"
 bash -n <(printf '%s\n' "$ARM") 2>/dev/null \
   && ok "the refusal arm is syntactically valid bash" \
   || bad "the refusal arm does not parse under bash -n"
+hasnt "$ARM" "gc mail send" "it escalates rather than mails; a polecat's mail budget is zero"
+has "$ARM" "escalate.sh" "and it escalates through escalate.sh"
+
+# The arm executed, against a helper that refuses. A drain on that path leaves
+# the step claimable, which is the loop the hold exists to stop.
+mkdir -p "$TMP/armpack/assets/scripts"
+cat > "$TMP/armpack/assets/scripts/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+printf 'ESCALATE %s\n' "$*" >> "${ARM_LOG:?}"
+exit 0
+ESC
+cat > "$TMP/armpack/assets/scripts/molecule-hold.sh" <<'MHSTUB'
+#!/usr/bin/env bash
+printf 'HOLD %s\n' "$*" >> "${ARM_LOG:?}"
+exit "${ARM_HOLD_RC:-0}"
+MHSTUB
+chmod +x "$TMP/armpack/assets/scripts/escalate.sh" "$TMP/armpack/assets/scripts/molecule-hold.sh"
+
+# run_arm <hold-exit-code> -> "<rc>"; the helper trace is left in $TMP/arm.log
+# and the gc trace in $GC_LOG. {{convoy_id}} is substituted the way the
+# materializer substitutes it before the polecat reads the step.
+run_arm() {
+  : > "$TMP/arm.log"; : > "$GC_LOG"
+  printf '%s\n' "$ARM" | sed 's|{{convoy_id}}|cv-1|g' > "$TMP/arm.sh"
+  local rc=0
+  OWNER_LIVE=1 WORK_BEAD_ID=tk-work WORK_STATUS=in_progress WORK_OWNER=other-session \
+    ARM_LOG="$TMP/arm.log" ARM_HOLD_RC="$1" \
+    GC_PACK_DIR="$TMP/armpack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    bash "$TMP/arm.sh" >/dev/null 2>&1 || rc=$?
+  printf '%s' "$rc"
+}
+
+eq "$(run_arm 0)" "1" "the refusal arm exits 1"
+has "$(cat "$TMP/arm.log")" "ESCALATE --subject tk-work" "it files an escalation on the work bead"
+has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "it holds its own step"
+has "$(gclog)" "runtime drain-ack" "and a hold that landed is followed by the drain"
+
+eq "$(run_arm 1)" "1" "a refused hold still exits 1"
+has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "the hold was attempted"
+hasnt "$(gclog)" "runtime drain-ack" "and nothing drained: the step is still claimable"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
