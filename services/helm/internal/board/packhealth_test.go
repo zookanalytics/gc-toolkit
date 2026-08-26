@@ -107,6 +107,23 @@ func TestNoRevisionRecordedIsLowNotHealthy(t *testing.T) {
 	}
 }
 
+// A build order running without git on PATH produces a record with a build time
+// and no revision. The binary is fine; nothing can say whether it matches the
+// tree, and the row has to distinguish that from having never built at all.
+func TestBuiltWithoutARevisionSaysSo(t *testing.T) {
+	built := packNow.Add(-2 * time.Hour)
+	got := one(t, PackBuild{Component: "gctk", BuiltAt: built})
+	if got.Severity != SevLow {
+		t.Errorf("severity = %s, want LOW", got.Severity)
+	}
+	if strings.Contains(got.Detail, "no build recorded") {
+		t.Errorf("detail %q says nothing was built, but a build time is recorded", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "cannot be checked") {
+		t.Errorf("detail %q does not say currency is unknown", got.Detail)
+	}
+}
+
 func TestRowsSortBySeverityThenComponent(t *testing.T) {
 	rows := DerivePackHealth([]PackBuild{
 		fresh(PackBuild{Component: "zeta", SourceRev: "x", BinaryRev: "x"}),

@@ -107,6 +107,13 @@ func bandBuild(r PackBuild, now time.Time) (Severity, string) {
 		return SevElevated, fmt.Sprintf("serving %s, sources are at %s", shortRev(r.BinaryRev), shortRev(r.SourceRev))
 	}
 	if r.BinaryRev == "" {
+		// Two different silences. A build order that ran without git on PATH
+		// produces a record with a build time and no revision — the binary is
+		// fine, but nothing here can say whether it matches the tree, and
+		// calling that "current" would be a claim nobody measured.
+		if !r.BuiltAt.IsZero() {
+			return SevLow, fmt.Sprintf("built %s, no revision recorded — currency cannot be checked", r.BuiltAt.Format("2006-01-02T15:04Z"))
+		}
 		return SevLow, "no build recorded"
 	}
 	return SevNormal, fmt.Sprintf("current at %s", shortRev(r.BinaryRev))

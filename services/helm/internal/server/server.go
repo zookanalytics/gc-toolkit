@@ -205,6 +205,6 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	// Source interface would oblige every backend to reimplement it.
 	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
 	s.cached = &b
-	s.expiry = s.now().Add(s.ttl)
+	s.expiry = now.Add(s.ttl)
 	return &b, nil
 }

@@ -383,7 +383,9 @@ func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, 
 // nobody measured.
 func renderPackHealth(w io.Writer, rows []board.PackBuild) {
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s%s%s%s\n", rpad("PACK", colHeld+2), rpad(string(r.Severity), colSeverity),
+		// colHeld+4 rather than the label's own width: "PACK" fills a 4-wide
+		// cell exactly, and a cell with no gutter butts against the band.
+		fmt.Fprintf(w, "%s%s%s%s\n", rpad("PACK", colHeld+4), rpad(string(r.Severity), colSeverity),
 			rpad(r.Component, colPackName), clip(r.Detail, colNeedsMax))
 	}
 }

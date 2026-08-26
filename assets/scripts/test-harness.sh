@@ -17,6 +17,13 @@ harness_init() {
   PASS=0; FAIL=0
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
+  # Pin the merge cadence to its shell implementations. The scripts prefer a
+  # deployed `gctk` binary, resolved from the ambient GC_CITY — and these suites
+  # run from a tree INSIDE a live city, so left alone a suite would silently
+  # test whichever implementation that city last built. A suite that means to
+  # exercise the port says so by overriding this after harness_init, the way
+  # lifecycle.test.sh does for its second arm.
+  export GCTK_BIN=none
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_GC_LOG="$TMP/gc.log"
