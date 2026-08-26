@@ -3,7 +3,10 @@
 # Covers: default check_set stamping (and the rc=3 hold when the stamp does not
 # persist or the enumeration is unreadable); the `none` opt-out; marker
 # classification (green@ and exception@ the live head, stale green, stale
-# exception, fixable, absent, unmappable); in-flight dedup (routed, poured,
+# exception, fixable, absent, unmappable, and a malformed green that an
+# unreadable head must not settle); the stray-marker sweep (undeclared +
+# malformed is cleared; well-formed, exception@ and declared markers are not;
+# an unpersisted clear is reported); in-flight dedup (routed, poured,
 # claimed) + stranded repair
 # (convoy probe: re-sling only a review with no LIVE tracking convoy, and
 # converge after a hard sling failure); the dispatch shape
@@ -38,6 +41,9 @@ exit 0
 ESC
 chmod +x "$SD/escalate.sh"
 SUT="$SD/gate-ensure.sh"
+# The SUT forwards GC_RIG into every sling and reads GC_MAX_REVIEW_ROUNDS as the
+# cap; an ambient value would rewrite the assertions below.
+unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
 run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
@@ -49,6 +55,11 @@ anchor() { # id mr checkset marker branch extra-json
     "$( [ -n "$4" ] && printf ',"check.codex":"%s"' "$4" )" \
     "${6:-}"
 }
+
+# sha1sum is exactly 40 lowercase hex, so a labelled fixture oid satisfies the
+# marker grammar. A shorter string is a MALFORMED marker — a different arm.
+oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
+SHORT="8d7f0cf3c"   # the abbreviated-sha shape that wedged gc-na313
 
 echo "# stamping the default"
 store "[$(anchor A1 pre_open_gate "" "" polecat/a1)]"
@@ -125,11 +136,59 @@ out=$(run); rc=$?
 eq "$rc" 0 "dispatch pass exits 0"
 has "$out" "4 reviews dispatched" "stale green, fixable, absent and unmappable each dispatched one review"
 
-echo "# unreadable live head fails soft: a present green marker stays satisfiable"
-store "[$(anchor C5 pre_open_gate codex "green@somewhere" polecat/c5)]"
+echo "# unreadable live head fails soft: a WELL-FORMED green marker stays satisfiable"
+store "[$(anchor C5 pre_open_gate codex "green@$(oid c5)" polecat/c5)]"
 out=$(run); rc=$?
 eq "$rc" 0 "no-head pass exits 0"
-has "$out" "0 reviews dispatched" "green with an unreadable head is not re-gated"
+has "$out" "0 reviews dispatched" "green at a 40-hex oid with an unreadable head is not re-gated"
+
+echo "# …but a MALFORMED green is not evidence, so the soft pass must not settle it"
+store "[$(anchor C6 pre_open_gate codex "green@$SHORT" polecat/c6)]"
+out=$(run); rc=$?
+eq "$rc" 0 "malformed-green pass exits 0"
+has "$out" "no 40-hex oid" "the un-satisfiable marker is named"
+has "$out" "1 reviews dispatched" "…and a signoff is dispatched to rewrite it"
+
+echo "# stray markers: a check.<g> outside check_set that no arm could rewrite"
+store "[$(anchor N1 pull_request codex "green@$(oid n1)" polecat/n1 ',"check.refinery":"green@'"$SHORT"'"')]"
+oid n1 > "$GH_DIR/head_polecat_n1"
+out=$(run); rc=$?
+eq "$rc" 0 "the sweep pass exits 0"
+eq "$(meta N1 check.refinery)" "<absent>" "the undeclared malformed marker is cleared"
+eq "$(meta N1 check.codex)" "green@$(oid n1)" "…and the declared, well-formed marker is untouched"
+has "$out" "cleared undeclared malformed gate marker check.refinery" "the clear is reported"
+has "$out" "1 stray markers cleared" "…and counted"
+has "$out" "0 reviews dispatched" "…and a marker that governs nothing dispatches nothing"
+has "$(jq -r '.[] | select(.id == "N1") | .notes' "$STUB_STORE")" "does not declare that gate" "the anchor records why it was cleared"
+
+echo "# …a WELL-FORMED undeclared marker is history, not damage"
+store "[$(anchor N2 pull_request codex "green@$(oid n2)" polecat/n2 ',"check.refinery":"green@'"$(oid n2r)"'"')]"
+oid n2 > "$GH_DIR/head_polecat_n2"
+out=$(run)
+eq "$(meta N2 check.refinery)" "green@$(oid n2r)" "a narrowed check_set keeps its well-formed history"
+has "$out" "0 stray markers cleared" "…and nothing was swept"
+
+echo "# …exception@ is the operator's verdict — never swept, malformed or not"
+store "[$(anchor N3 pull_request codex "green@$(oid n3)" polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"')]"
+oid n3 > "$GH_DIR/head_polecat_n3"
+out=$(run)
+eq "$(meta N3 check.refinery)" "exception@$SHORT" "an exception verdict survives the sweep"
+has "$out" "0 stray markers cleared" "…and nothing was swept"
+
+echo "# …the none opt-out does not exempt an anchor from the sweep"
+store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
+out=$(run)
+eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
+has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
+
+echo "# …a clear that does not persist is reported, not counted"
+store "[$(anchor N5 pull_request codex "green@$(oid n5)" polecat/n5 ',"check.refinery":"green@'"$SHORT"'"')]"
+oid n5 > "$GH_DIR/head_polecat_n5"
+out=$(STUB_DROP_KEYS="N5:check.refinery" run 2>&1); rc=$?
+eq "$rc" 0 "an unpersisted clear does not hold the merge (the marker gates nothing)"
+eq "$(meta N5 check.refinery)" "green@$SHORT" "the marker is still there"
+has "$out" "still reads" "the failed clear is reported"
+has "$out" "0 stray markers cleared" "…and not counted"
 
 echo "# in-flight dedup"
 store "[$(anchor D1 pull_request codex "" polecat/d1),
