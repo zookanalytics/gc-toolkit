@@ -61,10 +61,12 @@ inventory_files() {
     git -C "$REPO" ls-tree -r --name-only "$REF" 2>/dev/null \
       | grep -E '^(template-fragments/(learned-conventions-|operator-profile)|docs/learning-exemplars\.md)'
   else
-    { ls "$REPO"/template-fragments/learned-conventions-*.template.md 2>/dev/null
-      ls "$REPO"/template-fragments/operator-profile.template.md 2>/dev/null
-      ls "$REPO"/docs/learning-exemplars.md 2>/dev/null
-    } | sed "s#^$REPO/##"
+    local f
+    for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
+             "$REPO"/template-fragments/operator-profile.template.md \
+             "$REPO"/docs/learning-exemplars.md; do
+      [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"
+    done
   fi
 }
 

@@ -146,14 +146,14 @@ bullet is one of four, not the default. The selection rule lives in the
 **`profile` — the operator profile.**
 `template-fragments/operator-profile.template.md`
 (`{{ define "operator-profile" }}`), a "What the operator cares about"
-section rendered by converse, mechanik, witness, deacon, refinery, proactive,
-dog, keeper, and the polecat doctrine fragment. This is the loop's
-ceiling-raising surface: entries state what the operator values and responds
-to — the taste that makes agents present better options and escalations —
-not just mistakes to avoid. Because it states operator taste, a cluster with
-no `obs.source=operator` observation cannot claim it. Hard cap **12
-entries**. `specs/tk-awa7hv/operator-profile-audit.md` records the audit that
-populated it.
+section. It is the most widely injected surface in the pack: every
+coordinating agent renders it, and so does the polecat doctrine fragment.
+This is the loop's ceiling-raising surface — entries state what the operator
+values and responds to, the taste that makes agents present better options
+and escalations, not just mistakes to avoid. Because it states operator
+taste, a cluster with no `obs.source=operator` observation cannot claim it.
+Hard cap **12 entries**. `specs/tk-awa7hv/operator-profile-audit.md` records
+the audit that populated it.
 
 **`convention` — learned conventions, per role.**
 `template-fragments/learned-conventions-<role>` fragments — one per role,

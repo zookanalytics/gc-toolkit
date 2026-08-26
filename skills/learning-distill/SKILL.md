@@ -238,9 +238,11 @@ verification gap, so the exemplar route is not open to it either.
 ## Retirement questions — every run, for every adopted rule
 
 Promotion without pruning is how prompts rot. Walk the adopted entries in
-**every** carrier — `assets/scripts/learning-recurrence.sh --inventory`
-emits one row per adopted entry across the conventions fragments, the
-profile, and the exemplar corpus — and ask:
+**every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
+one row per anchored entry — the conventions fragments, the profile, the
+exemplar corpus. `review-rubric` dimensions carry no anchor, so read them
+from `formulas/mol-review.toml` directly; the inventory being short is not
+evidence that carrier is empty. Of each entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose
   the lint or doctor check and **retire the prose bullet in the same

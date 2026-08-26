@@ -327,12 +327,15 @@ Inventory = every adopted entry across every carrier, read from origin/main.
 `learning-recurrence.sh --inventory` is the shared parser (it skips the
 seeded placeholders); do not re-derive the same anchor grep here:
 ```bash
+REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$REPO"; do
   [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
 done
 if [ -n "$RECUR" ]; then
   "$RECUR" --inventory --repo "$REPO" --ref origin/main
-  "$RECUR" --repo "$REPO"   # M1/M2 with their coverage lines
+  # A non-zero exit is a partial-city refusal, not a missing script: judge
+  # the retirement questions without the metric rather than on half of it.
+  "$RECUR" --repo "$REPO" || echo "WARN: recurrence report declined to run; retirement questions answered without it" >&2
 else
   echo "WARN: learning-recurrence.sh not found; retirement pass runs without the inventory or the metric" >&2
 fi
@@ -505,10 +508,14 @@ echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-upda
 # The loop's success metric, in the run log where the run that moved it is
 # visible. It also runs standalone, which is how the metric is read while
 # this order is disabled.
-RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${REPO:-}"; do
+RECUR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)"; do
   [ -x "$c/assets/scripts/learning-recurrence.sh" ] && { RECUR="$c/assets/scripts/learning-recurrence.sh"; break; }
 done
-[ -n "$RECUR" ] && "$RECUR" || echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
+if [ -n "$RECUR" ]; then
+  "$RECUR" || echo "WARN: recurrence report declined to run (an unreadable store refuses a partial number)" >&2
+else
+  echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
+fi
 "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```
