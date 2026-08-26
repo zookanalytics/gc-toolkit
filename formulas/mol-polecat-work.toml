@@ -49,6 +49,139 @@ description = "Shell-safe command that reads `git diff --name-only origin/{{base
 default = ""
 
 [[steps]]
+id = "load-context"
+title = "Load context and verify assignment"
+description = """
+Initialize your session and understand your assignment.
+
+**1. Prime your environment:**
+```bash
+gc prime                    # Load role context
+gc bd prime                    # Load beads context
+```
+
+**2. Derive your work bead and check your hook:**
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+if [ -z "$WORK_BEAD_ID" ]; then
+  echo "mol-polecat-work requires an input convoy with exactly one tracked member" >&2
+  exit 1
+fi
+gc bd list --assignee=$GC_AGENT --status=in_progress
+```
+
+The work bead is your assigned issue. Read it carefully:
+```bash
+WORK_BEAD_JSON=$(gc bd show "$WORK_BEAD_ID" --json)
+printf '%s' "$WORK_BEAD_JSON" | jq '.[0]'           # Full issue details
+printf '%s' "$WORK_BEAD_JSON" | jq '.[0].metadata'  # Check for existing metadata
+```
+
+**3. Verify nobody else is already working it (FAIL CLOSED):**
+
+Two dispatch surfaces can reach one work bead — this workflow, and a direct
+pool route left on the bead itself. When both fire, two workers set up the same
+branch and one silently destroys the other's commits. Before touching the
+workspace, prove that the bead is not already in flight elsewhere:
+
+```bash
+WORK_STATUS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].status // empty')
+WORK_OWNER=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].assignee // empty')
+if [ -z "$WORK_STATUS" ]; then
+  # An unreadable bead is not proof of safety. Treat it as blocked.
+  WORK_STATUS=unknown
+  WORK_OWNER="${WORK_OWNER:-unreadable}"
+fi
+OWNER_LIVE=0
+case "$WORK_OWNER" in
+  ""|"$GC_SESSION_NAME"|"$GC_SESSION_ID"|"$GC_AGENT"|"$GC_ALIAS") ;;   # unowned, or owned by you
+  *)
+    if [ "$WORK_STATUS" = "in_progress" ] || [ "$WORK_STATUS" = "unknown" ]; then
+      # An assignee can be any of the three forms a claim writes: the session
+      # name (what `gc bd update --claim` sets), the session id, or the agent
+      # address. Match all of them — a session record exposes them as
+      # .session_name, .id and .alias respectively, and has no .name field.
+      OWNER_LIVE=$(gc session list --state all --json 2>/dev/null | jq -r --arg o "$WORK_OWNER" '[.sessions[]? | select(((.alias // "") == $o) or ((.alias // "") | endswith($o)) or ((.session_name // "") == $o) or ((.id // "") == $o))] | length' 2>/dev/null)
+      # No answer means you could not disprove a live owner — assume one.
+      [ -z "$OWNER_LIVE" ] && OWNER_LIVE=1
+    fi ;;
+esac
+# >>> load-context-duplicate-dispatch-hold
+if [ "$OWNER_LIVE" != "0" ]; then
+  gc bd update "$WORK_BEAD_ID" --append-notes "Duplicate dispatch refused: $GC_SESSION_NAME found $WORK_BEAD_ID already $WORK_STATUS under live $WORK_OWNER."
+  gc mail send "${GC_RIG:+$GC_RIG/}witness" -s "ESCALATION: duplicate dispatch on $WORK_BEAD_ID [HIGH]" -m "Work bead: $WORK_BEAD_ID
+Convoy: {{convoy_id}}
+Already held by: $WORK_OWNER (session still live), status=$WORK_STATUS
+This session: $GC_SESSION_NAME
+Held at load-context; no workspace was touched and nothing was closed."
+  MH=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }
+  done
+  : "${MH:?molecule-hold.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  "$MH" --step "mol-polecat-work.load-context" --reason "duplicate dispatch: $WORK_BEAD_ID is already $WORK_STATUS under live $WORK_OWNER"
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< load-context-duplicate-dispatch-hold
+```
+
+**Hold this step; never close it.** Closing advances the workflow into
+workspace-setup, the branch-recreating step that destroys the live worker's
+uncommitted work. `molecule-hold.sh` sets the step `blocked` and clears the
+route on the step, on the molecule root, and on the root's other steps, which
+is the not-closed state that is also not claimable.
+
+Leaving the step `open` instead is what respawns the pool. `open` is half the
+pool's offer predicate, so a fresh polecat claims the same step within minutes,
+re-derives the same refusal, and leaves it open again. Clearing the route
+without changing the status does not help either: gascity's stranded-worker
+repair sweeps `open` and `in_progress` beads assigned to a drained session and
+re-stamps a run_target fallback on any it finds unrouted. `blocked` is outside
+that sweep. The escalation above is what releases the hold.
+
+The same rule covers every other reason you might decline this bead. A polecat
+that judges the work already delivered, or the premise falsified, holds the
+molecule the same way and drains; it never leaves a claimable step behind.
+
+Owner liveness, not staleness, is the gate: an idle pool worker between claims
+looks identical to an abandoned one. Only a session absent from
+`gc session list --state all` is safely gone.
+
+**4. Check for rejection (IMPORTANT):**
+
+If `metadata.rejection_reason` exists, this bead was previously attempted
+and rejected by the refinery. Read the reason carefully:
+- Rebase conflict → you'll resume the existing branch and rebase
+- Test failure → you'll resume the branch and fix the issue
+
+If `metadata.branch` exists, a branch already exists from the prior attempt.
+You will use it in workspace-setup instead of creating a new one.
+
+**5. Check inbox for additional context:**
+```bash
+gc mail inbox
+# Read any HANDOFF or assignment messages, then archive after absorbing context
+# gc mail read <id> → process → gc mail archive <id>
+```
+
+**6. Understand the requirements:**
+- What exactly needs to be done?
+- What files are likely involved?
+- Are there dependencies or blockers?
+- What does "done" look like?
+- If rejected: what specifically needs fixing?
+
+If blocked or unclear, mail Witness:
+```bash
+gc mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: $WORK_BEAD_ID
+Question: <what you need clarified>"
+```
+
+**Exit criteria:** You understand the work and can begin."""
+
+[[steps]]
 id = "workspace-setup"
 title = "Set up worktree and feature branch"
 needs = ["load-context"]
@@ -68,6 +201,8 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 if [ -z "$WORK_BEAD_ID" ]; then
   echo "mol-polecat-work requires an input convoy with exactly one tracked member" >&2
+  MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+  "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"
   gc runtime drain-ack
   exit 1
 fi
@@ -98,7 +233,13 @@ if [ -n "$BRANCH" ]; then
   if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
     if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
       git checkout "$BRANCH" || exit 1
-      git merge --ff-only "origin/$BRANCH" || { echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."; gc runtime drain-ack; exit 1; }
+      if ! git merge --ff-only "origin/$BRANCH"; then
+        echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."
+        MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+        "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --reason "local $BRANCH diverged from origin/$BRANCH; reconcile the two by hand, then re-offer this molecule"
+        gc runtime drain-ack
+        exit 1
+      fi
     else
       git checkout --track -b "$BRANCH" "origin/$BRANCH" || exit 1
     fi
@@ -106,6 +247,8 @@ if [ -n "$BRANCH" ]; then
     git checkout "$BRANCH" || exit 1
   else
     echo "metadata.branch=$BRANCH is set but no local or origin branch exists. STOP — do not create a different branch."
+    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+    "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --reason "metadata.branch=$BRANCH names a branch that exists neither locally nor on origin; restore it or clear metadata.branch, then re-offer this molecule"
     gc runtime drain-ack
     exit 1
   fi
@@ -340,6 +483,8 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     else
         echo "Re-run workspace-setup: create '$EXPECTED_BRANCH' from origin/{{base_branch}}, cherry-pick your commits, re-run submit-and-exit."
     fi
+    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+    "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --reason "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); move the commits onto $EXPECTED_BRANCH, then re-offer this molecule"
     gc runtime drain-ack
     exit 1
 fi
@@ -372,6 +517,8 @@ else
     echo "  current branch:  $CURRENT_BRANCH"
     echo "Nothing names a landing branch, and base_branch is empty or the branch being pushed — recording it would be a self-merge."
     echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
+    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+    "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --reason "no landing branch: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}; set target on $WORK_BEAD_ID, then re-offer this molecule"
     gc runtime drain-ack
     exit 1
 fi
@@ -394,7 +541,13 @@ AUTO_PUSH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata | if has("a
 if [ "$AUTO_PUSH" = "false" ]; then
   echo "auto_push=false: halting at branch-ready (no push, no refinery handoff)"
   BRANCH=$(git branch --show-current)
-  [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
+  if [ -z "${LANDING_TARGET:-}" ]; then
+    echo "LANDING_TARGET unset — run step 1b before this arm."
+    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+    "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --reason "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset; step 1b did not run"
+    gc runtime drain-ack
+    exit 1
+  fi
   gc bd update "$WORK_BEAD_ID" --status=open --assignee="" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
   # >>> submit-halt-chain-close
   SC=""
@@ -496,7 +649,13 @@ still arrives in the single atomic write below.
 
 ```bash
 # >>> submit-target-consume
-[ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
+if [ -z "${LANDING_TARGET:-}" ]; then
+  echo "LANDING_TARGET unset — run step 1b before this arm."
+  MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
+  "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --reason "submit-and-exit reached the handoff with LANDING_TARGET unset; step 1b did not run"
+  gc runtime drain-ack
+  exit 1
+fi
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
 ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
 if [ -z "$ROSTER" ]; then
