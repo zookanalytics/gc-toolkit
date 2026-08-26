@@ -170,7 +170,21 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "the marker quoted inline in prose does not arm the scanner"
 has "$OUT" "0 target row(s)" "a mention contributes no rows"
 
-# --- 14. live control: the real pack, the real ledger ------------------------
+# --- 14. an unreadable document is not a silent under-scan -------------------
+doc '# Plan' '' '<!-- plan-targets -->' '' \
+    '| # | Target | Bead |' '|---|---|---|' '| 1 | X | `tk-real1` |'
+printf 'unreadable\n' > "$P/docs/locked.md"; chmod 000 "$P/docs/locked.md"
+OUT=$(run_check); RC=$?
+if [ "$(id -u)" = "0" ]; then
+    ok "SKIP unreadable-document case (running as root reads it anyway)"
+    ok "SKIP unreadable-document message"
+else
+    eq "$RC" "1" "a document that cannot be read WARNS rather than passing"
+    has "$OUT" "went unexamined" "the message says a checklist may have been missed"
+fi
+rm -f "$P/docs/locked.md"
+
+# --- 15. live control: the real pack, the real ledger ------------------------
 # The stubs above could drift from the tools they imitate. One unstubbed run
 # proves the check still executes against a real pack and a real store.
 PACK_ROOT="$(cd "$HERE/../.." && pwd)"

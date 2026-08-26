@@ -86,7 +86,12 @@ records_file=$(mktemp 2>/dev/null) || {
     exit 1
 }
 trap 'rm -f "$records_file"' EXIT
-printf '%s\n' "${md_files[@]}" | xargs -d '\n' awk -v US="$US" "$scan_awk" > "$records_file" 2>/dev/null
+awk -v US="$US" "$scan_awk" "${md_files[@]}" > "$records_file" 2>/dev/null; scan_rc=$?
+if [ "$scan_rc" -ne 0 ]; then
+    echo "plan-checklist scan failed (awk rc=$scan_rc over ${#md_files[@]} document(s))"
+    detail "A document could not be read, so any checklist in it went unexamined."
+    exit 1
+fi
 expected=$(wc -l < "$records_file" 2>/dev/null | tr -d ' ')
 [ -n "$expected" ] || expected=0
 
