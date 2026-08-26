@@ -120,6 +120,53 @@ eq "$RC" "1" "a failed root resolution warns — a partial root map must not pas
 has "$OUT" "NOT checked" "the warning says the store was skipped"
 clear_fixtures
 
+# --- 9. the resolved root map must not cross argv --------------------------------
+# Linux caps a SINGLE argv string at MAX_ARG_STRLEN (131072 B) independently of
+# the much larger ARG_MAX, and `bd show` answers each root's full description and
+# notes. A map passed through argv fails the exec outright, so the busiest store
+# is skipped on every run while the smaller rigs keep the check green.
+clear_fixtures
+PAD=$(head -c 60000 < /dev/zero | tr '\0' 'x')
+
+# 9a. the join site: three fat roots, one flush, ~180 KB of map.
+steps "$(step s-a1 r-a1)" "$(step s-a2 r-a2)" "$(step s-a3 r-a3)"
+roots "{\"id\":\"r-a1\",\"status\":\"closed\",\"closed_at\":\"$OLD\",\"description\":\"$PAD\"}" \
+      "{\"id\":\"r-a2\",\"status\":\"open\",\"description\":\"$PAD\"}" \
+      "{\"id\":\"r-a3\",\"status\":\"open\",\"description\":\"$PAD\"}"
+OUT=$(run_check); RC=$?
+hasnt "$OUT" "could not be computed" "a root map past the argv cap is still joined"
+eq "$RC" "2" "the finding under the fat root map is REPORTED, not skipped"
+has "$OUT" "r-a1" "the closed molecule under the fat map is named"
+
+# 9b. the flush_chunk accumulator: the same cap, one boundary earlier. It only
+# shows once a store's roots exceed a single chunk, so it stayed hidden behind 9a.
+export GC_DOCTOR_ROOT_CHUNK=1
+OUT=$(run_check); RC=$?
+unset GC_DOCTOR_ROOT_CHUNK
+hasnt "$OUT" "could not resolve molecule roots" "the chunk accumulator does not rebuild the map through argv"
+eq "$RC" "2" "the finding survives a chunked root resolution"
+
+# 9c. count alone, with no fat bead anywhere in the store. This is what makes the
+# staging file load-bearing: a map trimmed to the fields the join reads clears 9a
+# and still breaches the cap a few thousand molecules later.
+clear_fixtures
+seq 1 4500 | awk '{ printf "%s{\"id\":\"s-c%s\",\"status\":\"open\",\"metadata\":{\"gc.root_bead_id\":\"r-c%s\"}}", (NR>1?",":"["), $1, $1 } END { print "]" }' > "$TMP/stores/alpha.json"
+seq 1 4500 | awk '{ printf "%s{\"id\":\"r-c%s\",\"status\":\"open\"}", (NR>1?",":"["), $1 } END { print "]" }' > "$TMP/stores/alpha.show.json"
+export GC_DOCTOR_ROOT_CHUNK=100000
+OUT=$(run_check); RC=$?
+unset GC_DOCTOR_ROOT_CHUNK
+hasnt "$OUT" "NOT checked" "a store past the cap on molecule COUNT is joined"
+eq "$RC" "0" "4500 live molecules report clean, computed rather than skipped"
+
+# 9d. staging must not manufacture a finding by losing the status the join filters on.
+clear_fixtures
+steps "$(step s-d1 r-d1 "" ",\"updated_at\":\"$RECENT\"")"
+roots "{\"id\":\"r-d1\",\"status\":\"open\",\"description\":\"$PAD$PAD$PAD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a fat root map for a LIVE molecule still reports clean"
+hasnt "$OUT" "NOT checked" "and that pass is computed, not a skipped store"
+clear_fixtures
+
 echo
 echo "check-step-terminal: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
