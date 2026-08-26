@@ -6,6 +6,12 @@
 # prompt.template.md is purpose-written and injects shared doctrine from
 # template-fragments/ directly.
 #
+# IMPORT AT RIG SCOPE ONLY. A city-scope import meets the five rig-scope
+# orders below with a registration nothing can claim, and `gc` drops each one
+# with a warning on every invocation. The city-scope half — the warrant
+# executor and the tmux session hooks — is packs/gc-toolkit-city, imported at
+# city scope alongside this pack (docs/install.md).
+#
 # OVERLAY WIRING. Claude-hook overlays (overlays/cycle-recycle,
 # overlays/work-context) are staged into an agent's work dir via
 # `overlay_dir`, which the pack format carries only on [[patches.agent]] —
@@ -17,15 +23,6 @@
 [pack]
 name = "gc-toolkit"
 schema = 2
-
-[global]
-# Ordering is load-bearing: bindings first, then the status-line override,
-# which rewrites status-right to gc-toolkit-status-line.sh (composable title
-# and indicator slots) while preserving the tier theme and %H:%M time slot.
-session_live = [
-    "{{.ConfigDir}}/assets/scripts/tmux-bindings.sh {{.ConfigDir}}",
-    "{{.ConfigDir}}/assets/scripts/tmux-status-line-override.sh {{.Session}} {{.Agent}} {{.ConfigDir}}",
-]
 
 # Deterministic work-bead description delivery: a Claude PostToolUse hook
 # injects the claimed work bead's description right after the claim, so the

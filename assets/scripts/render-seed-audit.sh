@@ -221,8 +221,10 @@ base = "builtin:gemini"
 source = "https://github.com/gastownhall/gascity.git//internal/bootstrap/packs/core"
 [imports.bd]
 source = "https://github.com/gastownhall/gascity.git//examples/bd"
-[imports.gc-toolkit]
-source = "@@ROOT@@"
+# gc-toolkit itself is imported per-rig below. Only its city-scope half is
+# imported here, which is where the dog and the session_live hooks come from.
+[imports.gc-toolkit-city]
+source = "@@ROOT@@/packs/gc-toolkit-city"
 
 # Mirrors the loomington city.toml. These two fragments are 19% of the polecat
 # seed and they are a CITY-level setting, so a pack-only render omits them and

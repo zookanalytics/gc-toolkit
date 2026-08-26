@@ -12,9 +12,9 @@ warrant.target / warrant.reason / warrant.requester ([metadata.warrant] in
 lifecycle/lifecycle.toml) — bare `target` collides with the merge-identity
 registry key of the same name. The ADDRESSING is unchanged from the old
 detectors (it demonstrably worked in this city): city bead store, route
-gc.routed_to={{binding_prefix}}dog, --label=warrant:
+gc.routed_to={{warrant_route}}, --label=warrant:
 
-  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"<reason>","warrant.requester":"<who>","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"<reason>","warrant.requester":"<who>","gc.routed_to":"{{warrant_route}}"}' --label=warrant
 
 The claimed warrant bead is the dance's identity: use $GC_BEAD_ID for
 verification, evidence, and closure. Pardon-biased: one `alive` verdict ends
@@ -35,9 +35,9 @@ the warrant's status, notes, and the target's session state."""
 formula = "mol-dog-shutdown-dance"
 
 [vars]
-[vars.binding_prefix]
-description = "Agent identity prefix, including trailing dot when bound."
-default = ""
+[vars.warrant_route]
+description = "Address of the warrant-executor pool. Qualified by the binding the city imports gc-toolkit-city under, and city-scope, so it carries no rig prefix."
+default = "gc-toolkit-city.dog"
 
 [[steps]]
 id = "receive-warrant"

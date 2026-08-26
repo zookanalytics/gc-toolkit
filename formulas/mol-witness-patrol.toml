@@ -3,7 +3,7 @@ Witness patrol loop — rig work-health RECOVERY only. Poured as a root-only
 wisp on startup (the agent prompt's startup reconcile adopts before it
 pours):
 
-  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var warrant_route='{{warrant_route}}' --var event_timeout='{{event_timeout}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: mail, orphan recovery, refinery queue health,
@@ -28,6 +28,10 @@ formula = "mol-witness-patrol"
 [vars.binding_prefix]
 description = "Agent identity prefix, including trailing dot when bound."
 default = ""
+
+[vars.warrant_route]
+description = "Address of the warrant-executor pool. Qualified by the binding the city imports gc-toolkit-city under, and city-scope, so it carries no rig prefix."
+default = "gc-toolkit-city.dog"
 
 [vars.event_timeout]
 description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep, which removes pacing entirely). Ceiling 600: the harness caps one call at 600s and SIGTERMs past it."
@@ -141,7 +145,7 @@ directly:
 ```bash
 OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
 if [ -z "$OPEN_WARRANT" ]; then
-  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"No progress on <bead> for <duration>","warrant.requester":"witness","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"No progress on <bead> for <duration>","warrant.requester":"witness","gc.routed_to":"{{warrant_route}}"}' --label=warrant
 fi
 ```
 The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
@@ -256,7 +260,7 @@ eats a trailing backslash):
 
 ```bash
 # >>> patrol-wisp-pour
-NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var warrant_route='{{warrant_route}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1

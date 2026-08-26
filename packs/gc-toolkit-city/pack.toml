@@ -1,0 +1,54 @@
+# gc-toolkit-city — the city-scope half of gc-toolkit.
+#
+# gc-toolkit carries orders of both scopes. Imported at city scope it meets
+# its five rig-scope orders with a registration nothing can claim, and `gc`
+# drops each one with a warning on every invocation. Everything that needed
+# that city-scope import lives here instead, so the core pack can be imported
+# at rig scope alone.
+#
+# Two things needed it, and only two:
+#
+#   - `dog`, the warrant-executor pool. It is city-scope on purpose: the
+#     deacon patrols the whole city and has no rig in hand when it files a
+#     warrant, and docs/authority-map.md keeps the kill power in one place.
+#     Its bare name collides with the city-scope `dog` the bd pack ships, and
+#     a collision drops one of the two SILENTLY — only an import-qualified
+#     registration keeps both. That qualifier is why the pool answers to
+#     `gc-toolkit-city.dog` and the patrols address it through the
+#     `warrant_route` formula var.
+#   - The session_live hooks. A city-scope pack's [global] reaches every
+#     agent in the city; a rig-scope pack's reaches only that rig's, which
+#     leaves the city-scope agents (deacon, mechanik, dog) without them.
+#
+# Imports nothing on its own, and composes only alongside the gc-toolkit core
+# pack: the hooks below run scripts from the parent tree, and the dog executes
+# `mol-dog-shutdown-dance`, which the core pack ships. Nothing here is
+# duplicated from that tree.
+#
+# Wiring (city root pack.toml, plus gc-toolkit on each rig in city.toml):
+#
+#   [imports.gc-toolkit-city]
+#   source = "rigs/gc-toolkit/packs/gc-toolkit-city"
+#
+# Bind it under another name and the dog's address moves with it: pass the new
+# address as `warrant_route` when pouring mol-deacon-patrol,
+# mol-witness-patrol and mol-dog-shutdown-dance.
+
+[pack]
+name = "gc-toolkit-city"
+schema = 2
+
+# Ordering is load-bearing: bindings first, then the status-line override,
+# which rewrites status-right to gc-toolkit-status-line.sh (composable title
+# and indicator slots) while preserving the tier theme and %H:%M time slot.
+#
+# `{{.ConfigDir}}/../..` is the gc-toolkit pack root. Both scripts resolve
+# tmux-pick-session.sh and gc-toolkit-status-line.sh under the directory they
+# are handed, so it has to name the parent rather than this pack. ConfigDir is
+# the only token that resolves here — .RigRoot, .CityPath and .PackDir survive
+# literally and silently no-op.
+[global]
+session_live = [
+    "{{.ConfigDir}}/../../assets/scripts/tmux-bindings.sh {{.ConfigDir}}/../..",
+    "{{.ConfigDir}}/../../assets/scripts/tmux-status-line-override.sh {{.Session}} {{.Agent}} {{.ConfigDir}}/../..",
+]

@@ -30,7 +30,7 @@ change, not an implementation detail — amend this table in the same PR.
 |---|---|---|---|
 | Spawn / drain / reap sessions | the Gas City runtime (reconciler) | its own ladders: idle timeout, no-wake-reason drain, max-age restart | — (runtime-owned; the pack works around, never against) |
 | Nudge a parked session | `assets/scripts/quota-park-nudge.sh` (order) | provider quota banner in the pane, closed signature set | kill, file a warrant, or nudge on any other diagnosis |
-| **Kill a wedged session** | **the dog pool** (`agents/dog/`), executing `mol-dog-shutdown-dance` | an open **warrant** bead from a patrol detector, three failed **interrogations** via `dance-probe.sh`, and a quota-park check proving the target is not merely parked | kill without a warrant; kill a quota-parked session; touch the dead session's beads (witness orphan recovery owns them) |
+| **Kill a wedged session** | **the dog pool** (`packs/gc-toolkit-city/agents/dog/`), executing `mol-dog-shutdown-dance` | an open **warrant** bead from a patrol detector, three failed **interrogations** via `dance-probe.sh`, and a quota-park check proving the target is not merely parked | kill without a warrant; kill a quota-parked session; touch the dead session's beads (witness orphan recovery owns them) |
 | Recover a dead session's beads | witness patrol (orphan recovery) | session-ID liveness proof | strip `metadata.branch`; recover from a *live* session |
 | Detect a wedged deacon | `boot-health` order | mechanical reads only | file a warrant (a false nudge-death diagnosis must not feed the executioner) — REPORT-ONLY by design |
 

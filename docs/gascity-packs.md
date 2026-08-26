@@ -304,6 +304,17 @@ artifact**, so future upstream fixes to it are masked.
   qualified name on the same surface **fail loading** outright — there is no
   fallback (pack-spec, *Naming And Collisions*). Imported agents are addressed
   by their binding-qualified name (`gastown.mayor`), not the bare local name.
+- **A city-scope agent reached through a rig-scope import loses its qualifier,
+  and a bare-name clash there is SILENT.** A `scope = "city"` agent hoists to
+  city scope from a rig-level import, but if another city-imported pack already
+  ships that bare name, yours never appears: no warning, no non-zero exit, just
+  one fewer agent in `gc config show`. Measured on gc-toolkit's `dog` against
+  the `bd` pack's own city-scope `dog` — renaming one of them to `warden`, with
+  nothing else changed, brought it back. A city-level import of the owning pack
+  restores the qualifier and both coexist, which is why the warrant executor
+  ships in `packs/gc-toolkit-city` and answers to `gc-toolkit-city.dog`. Count
+  the roster before and after adding a city-scope agent; nothing else reports
+  this.
 - Most gc-toolkit formulas are authored under pack-distinct `mol-*` names and
   shadow nothing. Preserve that: check the basename against the base packs
   before adding any formula, fragment, or script. Five artifacts are the

@@ -23,7 +23,13 @@ For Gas City background, see [`gascity-reference.md`](gascity-reference.md).
 
 ## 1. Importing gc-toolkit
 
-### Per-rig import (most common)
+gc-toolkit is a **rig-scope pack**, and its city-scope half ships as the
+sibling sub-pack `packs/gc-toolkit-city`. A complete install imports both: the
+core pack on each rig, the sub-pack once at the city. Importing gc-toolkit
+itself at city scope meets its five rig-scope orders with a registration
+nothing can claim, and `gc` drops each one with a warning on every invocation.
+
+### Per-rig import
 
 Drop gc-toolkit somewhere reachable from the city root (the convention is
 `rigs/gc-toolkit/`), then add the import to your `city.toml`:
@@ -61,11 +67,38 @@ source = "rigs/gc-toolkit"
 
 Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 
+### The city-scope companion
+
+```toml
+# pack.toml (city root)
+[imports.gc-toolkit-city]
+source = "rigs/gc-toolkit/packs/gc-toolkit-city"
+```
+
+Two things need a city-scope registration, and this is where they live:
+
+- **`dog`** — the warrant-executor pool, the only path to a kill
+  ([`authority-map.md`](authority-map.md)). Its bare name collides with the
+  city-scope `dog` the `bd` pack ships, and a collision drops one of the two
+  silently, so only an import-qualified registration keeps both. It answers to
+  `gc-toolkit-city.dog`; the patrols address it through the `warrant_route`
+  formula var, which defaults to that. Bind the sub-pack under another name and
+  you must pass the new address as `warrant_route` when pouring
+  `mol-deacon-patrol`, `mol-witness-patrol` and `mol-dog-shutdown-dance`.
+- **The `session_live` hooks** — the tmux `S` session-picker binding and the
+  gc-toolkit status line. A city-scope pack's `[global]` reaches every agent in
+  the city; declared on a rig-scope pack it would reach only that rig's agents,
+  leaving the city-scope ones (`deacon`, `mechanik`, `dog`) without them.
+
+Skip the sub-pack and everything else still composes — you lose the kill path
+and the tmux chrome, and nothing reports an error.
+
 ### What the import brings in
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
   codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
-  role (`converse`), and `proactive` (always-on, 2-slot).
+  role (`converse`), and `proactive` (always-on, 2-slot). `dog` comes from the
+  city-scope sub-pack above.
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`.
@@ -115,8 +148,10 @@ The sub-pack ships its own `[[named_session]]` (`scope = "rig"`), so the
 keeper is spawnable without an extra block; it resolves to
 `<rig>/gascity-keeper.keeper` (confirm with `gc config show`).
 
-Sub-pack imports are rig-scoped: declare them inside a `[[rigs]]` block, never
-at the city level, or every rig picks them up.
+Declare this one inside a `[[rigs]]` block, never at the city level, or every
+rig picks it up. Import scope follows what a sub-pack contains, not the fact
+that it is a sub-pack — `gc-toolkit-city` is city-scope for the reasons given
+in section 1.
 
 ---
 
@@ -206,6 +241,13 @@ import composed correctly.
 ## Gotchas
 
 - **`source` paths are city-root-relative**, not rig-root-relative.
+- **Moving an existing install off a city-scope `gc-toolkit` import is one
+  edit, not two steps.** A directory-imported pack is live from the working
+  tree and `reconcile-rig-checkouts` advances that checkout every 15 minutes,
+  so a pack that has split its city-scope half will apply itself before anyone
+  edits `pack.toml`. Between the two you have no `dog` and no `session_live`
+  hooks on any agent, and nothing reports it. Swap the import in the same
+  change that takes the pack.
 - **Rig names must differ in their first two letters** — the bead prefix is
   auto-derived, so set explicit `prefix` values for similar names.
 - **`pack.toml` vs `city.toml`.** Pack-level config (defaults, `[global]`

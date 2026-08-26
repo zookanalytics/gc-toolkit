@@ -1,0 +1,14 @@
+# dog — city warrant-executor pool. Claims warrant beads routed by the
+# deacon/witness detectors (label=warrant, gc.routed_to=gc-toolkit-city.dog —
+# the pack binding qualifies it apart from the bd pack's own city-scope dog)
+# and runs mol-dog-shutdown-dance: due-process recovery of one wedged session
+# per warrant. Demand-scaled 0->2: the pool is empty whenever no warrant is
+# open. Kill authority and prohibitions: docs/authority-map.md.
+scope = "city"
+provider = "codex"
+wake_mode = "fresh"
+work_dir = ".gc/agents/dog/{{.AgentBase}}"
+nudge = "Run gc hook --claim --json; the claimed warrant bead names your target — execute mol-dog-shutdown-dance against it."
+idle_timeout = "30m"
+min_active_sessions = 0
+max_active_sessions = 2
