@@ -105,14 +105,42 @@ recorded onto the integration branch, and no hold or branch vetoes.
 ## Gates
 
 **Vocabulary.** The anchor declares its gates in `check_set` — a comma list of
-gate names, default `codex`; the sentinel `none` is an explicit opt-out. Each
-gate's verdict is a head-bound marker:
+gate names, default `codex,triage`; the sentinel `none` is an explicit opt-out.
+Each gate's verdict is a head-bound marker:
 
 | Marker | Meaning | Merge effect |
 |---|---|---|
 | `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head |
 | `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
-| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>` |
+| `check.<g>=exception@<oid>` | round cap spent, unmappable result, or an escalate verdict; routed to human | holds; re-gated once the head moves past `<oid>` |
+
+**The declared gates.** Two are always dispatched; the rest are added by
+triage from the menu in [review-charter.md](review-charter.md), which is where
+each gate's applies-when, method, mandatory paths, and waiver warrant live.
+
+| Gate | Decides | Satisfied by |
+|---|---|---|
+| `codex` | is the change correct and safe as merged | a review session running `mol-review`'s correctness steps |
+| `triage` | which dedicated gates this change also needs | a review session running `skills/review-triage`, whose approve carries the widening |
+| `arch` | does the change fit the declared layer map and pass the admission test | a review session running `skills/arch-review` |
+| `approval` | a human said yes | an external APPROVED GitHub review at the live head, never a marker |
+
+**The widening rule.** `check_set` grows and never shrinks. `signoff.sh` is
+its only writer, and only from a `triage` review: `--add-gates` is a set union
+with read-back, so no dispatcher, formula or other reviewer can pre-set or
+shrink the set. The one sanctioned narrowing is a triage waiver
+(`--waive-gates`) for a gate the charter marks waivable, recorded as a
+`triage-waive:` note on the anchor rather than a removal; `none` stays a
+human-only opt-out that triage will not touch. Every add and every waiver
+carries a one-line justification on the anchor, which is what makes gate
+inflation countable. `doctor/check-gate-integrity` re-derives each open
+anchor's branch diff and warns when a charter-mandated gate is neither
+declared nor waived.
+
+Review rounds are capped per gate (`dispatch_count.<g>` on the anchor,
+`GC_MAX_REVIEW_ROUNDS`, default 3). Per gate, because one anchor-wide counter
+would let a multi-gate `check_set` spend its whole budget on first dispatches
+and then refuse every re-gate.
 
 `approval` is satisfied only by an external APPROVED review — never by the
 city's own account. **`signoff.sh` is the single writer of gate verdicts**
@@ -175,13 +203,18 @@ sequenceDiagram
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child per head and clears the gate marker, so
   gate-ensure re-arms the dispatch when the child lands. The round cap
-  (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
-  `check.<g>=exception@<head>` and the anchor routes to human. One writer,
+  (default 3, counted per gate) is enforced by `signoff.sh` itself: cap spent
+  ⇒ `check.<g>=exception@<head>` and the anchor routes to human. One writer,
   one terminal verdict — no second component may touch `check.*`.
   A head move past that exception buys exactly one dispatch through
-  gate-ensure's `dispatch_count` cap, so a branch someone fixed by hand gets
-  a look. It cannot self-feed: the cap arm files no rework child, so nothing
-  inside the cadence can move that head again.
+  gate-ensure's `dispatch_count.<g>` cap, so a branch someone fixed by hand
+  gets a look. It cannot self-feed: the cap arm files no rework child, so
+  nothing inside the cadence can move that head again.
+- **Escalation** (review verdict): `signoff.sh --verdict escalate` is for a
+  finding that is a decision rather than a defect. It writes
+  `check.<g>=exception@<head>` and files exactly one visit on the anchor
+  through `escalate.sh`, so the choice reaches a human instead of looping as
+  rework nobody can converge. No rework child is filed.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.

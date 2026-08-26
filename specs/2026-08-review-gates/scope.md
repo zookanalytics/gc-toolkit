@@ -5,7 +5,10 @@ description: Scope for adding an architectural review (and future dedicated revi
 
 # Review gates: triage scan + dedicated reviewers
 
-Status: **scoped, not implemented**. Implement after the rewrite PR lands.
+Status: **implemented under tk-xhwits** (2026-08-26). The nine inventory rows
+below all landed; two corrections the widened default forced are recorded
+under the inventory. The work-feeder half of tk-xhwits is designed, not
+implemented — [work-feeder.md](work-feeder.md).
 
 ## The idea
 
@@ -95,9 +98,32 @@ merge.sh: unchanged — merges when every declared gate is green@live head
 | 8 | `docs/state-machine.md` | Gate table rows for `triage` and `arch`; the widening rule. |
 | 9 | Tests | signoff monotonicity + escalate; gate-ensure triage round-trip (widened set dispatched next pass); charter-parse fixture for the doctor clause. |
 
-No new lifecycle states, no new metadata keys (check_set and check.<g> are
-existing registry entries), no new pools (polecat-codex serves both methods;
+No new lifecycle states, no new pools (polecat-codex serves both methods;
 split later only if load or model choice demands it).
+
+### What the implementation changed beyond this inventory
+
+Two of the three assumptions in the paragraph above did not survive contact,
+both because they were written assuming row 6 was the whole gate-ensure
+change:
+
+- **`dispatch_count` became `dispatch_count.<g>`** (a new registry entry).
+  The counter bounded review rounds anchor-wide. With three gates and a cap
+  of three, the third gate's first dispatch spent the last round, and every
+  later re-gate was refused: a merge held forever with nothing in flight and
+  no exception recorded. `signoff.sh` counts rework children per gate for the
+  same reason, so each rework child now records the gate whose findings it
+  answers.
+- **`gate-ensure.sh` split `check_set` with `tr -d '[:space:]'`**, which
+  deletes the newlines the comma-split just made. A single-gate set was
+  unaffected; `codex,triage` fused into one gate name nothing declares, so
+  every anchor would have held on two markers that could never go green.
+  Fixed to `[:blank:]`, pinned by a test.
+
+One artifact was added beyond the inventory: `assets/scripts/review-charter.sh`,
+the single parser of the menu grammar. Both `signoff.sh` and the doctor clause
+read the table, and a predicate implemented twice is the defect class this
+pack files most often.
 
 ## Costs and open questions
 
@@ -114,4 +140,6 @@ split later only if load or model choice demands it).
   charter-gap observation.
 - Open: where proactive/first-reaction sits in the workflow once triage
   exists — first-reaction is approximately triage-for-conversations, and may
-  become the triage gate's front half. Decide during implementation.
+  become the triage gate's front half. Left open by the implementation: it is
+  a placement decision that outlives this work and the rewrite runbook filed
+  it as its own bead (step 9 item 3).

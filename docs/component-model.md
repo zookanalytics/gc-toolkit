@@ -79,8 +79,11 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   carrying every field of the transition → read back. A single `bd update` is
   atomic ([gascity-routing-model.md](gascity-routing-model.md)); the old
   healer passes existed because writers split transitions across calls.
-- **One gate-verdict writer** — `signoff.sh`. The cadence's gate-ensure arm
-  clears and re-arms; nothing else touches `check.*`.
+- **One gate-verdict writer** — `signoff.sh`, which also owns the `check_set`
+  widening: adding a gate is a set union with read-back, from a `triage`
+  review only, so the checks-needed decision has one auditable writer. The
+  cadence's gate-ensure arm clears and re-arms; nothing else touches
+  `check.*` or grows `check_set`.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
   commit, but the anchor-local authorization set — `check.*`, `merge_hold`,
@@ -101,7 +104,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
 | **I5** | No bead is closed while the work it represents is unlanded: closed anchor ⇒ `merged` + `merged_sha`, or an explicit terminal state. | `doctor/check-closed-implies-landed` |
-| **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is well-formed `verb@oid`. | `doctor/check-gate-integrity` |
+| **I6** | Every gating anchor declares a non-empty `check_set`, every marker is well-formed `verb@oid`, and a gate the repo's charter mandates for a touched path is declared or waived. | `doctor/check-gate-integrity` (the charter clause is warn-only) |
 | **I7** | A gate verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: no other component contains a `check.*` write |
 | **I8** | Every step bead reaches a terminal state: no open step under a closed root, no frontier stalled past its bound. | `doctor/check-step-terminal` |
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
