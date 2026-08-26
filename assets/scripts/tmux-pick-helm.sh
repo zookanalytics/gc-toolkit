@@ -62,9 +62,9 @@ fi
 # Cap at the hotkey alphabet (a-z0-9 = 36) so every row is one keystroke.
 #
 # "The board is empty" and "the board could not be read" are opposite answers,
-# and only one of them means nothing needs you. helm-svc board exits 3 when the
-# gather failed and prints why; discarding that and rendering `[]` turned a
-# three-day outage into the all-clear pixels (tk-00o34c).
+# and only one of them means nothing needs you. helm-svc board exits 3 on a
+# failed gather and prints why; both halves have to reach the operator, so
+# neither the code nor the stderr may be discarded here (tk-00o34c).
 BOARD_ERR="$(mktemp "${TMPDIR:-/tmp}/gc-helm-pick.XXXXXX" 2>/dev/null || printf '')"
 if [ -n "$BOARD_ERR" ]; then trap 'rm -f "$BOARD_ERR"' EXIT; fi
 BOARD_RC=0

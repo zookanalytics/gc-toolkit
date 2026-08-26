@@ -23,7 +23,9 @@
 # <why>` · `unprobed <ts>` no city to probe against · `failed <ts>`.
 # Env: GC_SERVICE_STATE_ROOT / GC_CITY_ROOT / GC_CITY (state root), GC_GO_BIN,
 # GC_HELM_GOTMP, GC_HELM_SERVICE_NAME, GC_HELM_GC_BIN,
-# GC_HELM_BUILD_PROBE_TIMEOUT (seconds, default 60). Caller: orders/helm-build.
+# GC_HELM_CITY_PATH / GC_CITY_PATH / GC_CITY (the city to probe, else the one
+# `gc service list` reports), GC_HELM_BUILD_PROBE_TIMEOUT (seconds, default 60).
+# Caller: orders/helm-build.
 set -euo pipefail
 
 DEPLOY=0
@@ -231,7 +233,7 @@ if [ "$need_build" -eq 0 ]; then
 
     # Newer than every source proves nothing about the store. Ask the binary.
     if [ -z "$CITY_PATH" ]; then
-        echo "gc-helm-build: $BIN is up to date (no city in the environment; readability unprobed)"
+        echo "gc-helm-build: $BIN is up to date (no city resolved; readability unprobed)"
         write_status unprobed
         exit 0
     fi
