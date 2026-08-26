@@ -249,7 +249,7 @@ echo "filed observation $BEAD ($KEY)"
 ```
 
 If candidates remain past the cap, drop them and note the count — they are
-not lost: the window re-covers those PRs next run and the provenance dedup
+not lost: the window re-covers those PRs next run and the §4 pair-key dedup
 keeps everything already filed from double-counting, so a capped run is
 naturally resumable.
 
@@ -273,6 +273,6 @@ The miner records, full stop.
 
 **Exit criteria:** Every window PR's review + issue comments read as data;
 each corrective-of-a-generalizable-kind comment either filed as one closed
-observation bead (§1 contract, `obs.source=miner`), skipped by provenance
+observation bead (§1 contract, `obs.source=miner`), skipped by §4 pair-key
 dedup, or dropped for the cap with a logged count; the session drained.
 """
