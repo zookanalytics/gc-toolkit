@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-gate-integrity (I6+I7 surface). Stub gc/bd.
+# Hermetic test for doctor/check-gate-integrity (I6+I7 surface). Stub gc/bd/git.
+# Third clause covered below: charter-mandated gates — the parse fixture, the
+# `dir/**` and exact-path patterns, the triage waiver that suppresses a
+# finding, and every skip that must never become one.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -30,8 +33,19 @@ name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
 f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
 BD
-chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
-export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# Only `git -C <rig> diff --name-only origin/<base>...origin/<branch>` is
+# reached; the canned answer is keyed on the branch side of the range.
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+range=""
+for a in "$@"; do case "$a" in *...*) range="$a" ;; esac; done
+f="$DIFFS/${range##*...origin/}.txt"
+[ -f "$f" ] && cat "$f"
+exit 0
+GIT
+chmod +x "$TMP/bin/gc" "$TMP/bin/bd" "$TMP/bin/git"
+mkdir -p "$TMP/diffs"
+export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" DIFFS="$TMP/diffs"
 run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 bead() { printf '{"id":"%s","status":"open","metadata":%s}' "$1" "$2"; }
 store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.json"; }
@@ -86,6 +100,95 @@ has "$OUT" "NOT checked" "the warning says the store was skipped"
 printf 'not json' > "$TMP/stores/alpha.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable store listing warns"
+
+# --- 7. charter-mandated gates (warn-only) -----------------------------------------
+mkdir -p "$TMP/alpha/docs"
+cat > "$TMP/alpha/docs/review-charter.md" <<'CHARTER'
+# Fixture charter
+
+Prose before the menu, and a table that is not the menu:
+
+| Thing | Other |
+|---|---|
+| `a` | `b` |
+
+## Gate menu
+
+| Gate | Applies when | Method | Mandatory paths | Waivable |
+|---|---|---|---|---|
+| `codex` | always | `formulas/mol-review.toml` | `-` | no |
+| `triage` | always | `skills/review-triage/SKILL.md` | `-` | no |
+| `arch` | layer changes | `skills/arch-review/SKILL.md` | `lifecycle/**` `assets/scripts/merge.sh` | no |
+| `demo` | operator-visible | `skills/demo-capture/SKILL.md` | `-` | yes |
+
+Trailing prose, which the parse must stop before.
+CHARTER
+
+gated() { # id check_set branch [extra-metadata-json] [notes]
+  printf '{"id":"%s","status":"open","notes":"%s","metadata":{"merge_result":"pull_request","check_set":"%s","branch":"%s","merged_target":"main"%s}}' \
+    "$1" "${5:-}" "$2" "$3" "${4:-}"
+}
+printf 'lifecycle/lifecycle.toml\ndocs/skills.md\n' > "$TMP/diffs/b-arch.txt"
+printf 'docs/skills.md\n'                            > "$TMP/diffs/b-plain.txt"
+printf 'assets/scripts/merge.sh\n'                   > "$TMP/diffs/b-exact.txt"
+printf 'assets/scripts/merge.sh.bak\n'               > "$TMP/diffs/b-near.txt"
+
+printf '[%s]' "$(gated m-1 codex,triage b-arch)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a diff touching a charter-mandated path with the gate undeclared is a WARNING"
+has "$OUT" "m-1" "the anchor is named"
+has "$OUT" "arch" "…and so is the gate the charter mandates"
+has "$OUT" "lifecycle/lifecycle.toml" "…and the file that fired the row"
+
+printf '[%s]' "$(gated m-2 codex,triage,arch b-arch)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "declaring the mandated gate clears the finding"
+
+OID2="89abcdef89abcdef89abcdef89abcdef89abcdef"
+printf '[%s]' "$(gated m-3 codex,triage b-arch ",\"check.triage\":\"green@$OID\"" "triage-waive: arch @$OID — deliberate")" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a triage waiver at the commit triage passed at suppresses the finding"
+
+printf '[%s]' "$(gated m-3b codex,triage b-arch ",\"check.triage\":\"green@$OID2\"" "triage-waive: arch @$OID — deliberate")" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a waiver issued against an older commit than triage last passed at no longer counts"
+has "$OUT" "m-3b" "…and the anchor is named"
+
+printf '[%s]' "$(gated m-3c codex,triage b-arch "" "triage-waive: arch @$OID — deliberate")" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a waiver with no triage verdict behind it does not count"
+
+printf '[%s]' "$(gated m-4 none b-arch)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the none opt-out covers mandatory rows too"
+
+printf '[%s]' "$(gated m-5 codex,triage b-plain)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a diff touching no mandated path warns about nothing"
+
+printf '[%s]' "$(gated m-6 codex,triage b-exact)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an exact-path row fires on its own path"
+printf '[%s]' "$(gated m-7 codex,triage b-near)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "…and not on a path that merely starts with it"
+
+printf '[%s]' "$(gated m-8 codex,triage b-unknown)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an unreadable branch diff is a skip, never a finding"
+has "$OUT" "not checked" "…and the skip is reported"
+
+mv "$TMP/alpha/docs/review-charter.md" "$TMP/alpha/docs/review-charter.md.off"
+printf '[%s]' "$(gated m-9 codex,triage b-arch)" > "$TMP/stores/alpha.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a rig with no charter carries no mandatory-gate obligation"
+mv "$TMP/alpha/docs/review-charter.md.off" "$TMP/alpha/docs/review-charter.md"
+
+echo "# the parser reads the menu, not the decorative table beside it"
+MENU=$("$HERE/../../assets/scripts/review-charter.sh" --file "$TMP/alpha/docs/review-charter.md")
+eq "$(printf '%s\n' "$MENU" | wc -l | tr -d ' ')" "4" "exactly the four menu rows are parsed"
+eq "$(printf '%s\n' "$MENU" | awk -F'\t' '$1 == "demo" { print $4 }')" "yes" "the waivable column round-trips"
+eq "$(printf '%s\n' "$MENU" | awk -F'\t' '$1 == "codex" { print $3 }')" "-" "a row with no mandatory path reads as none"
 
 echo
 echo "check-gate-integrity: $PASS passed, $FAIL failed"
