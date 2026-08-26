@@ -12,12 +12,12 @@
 # without being claimable.
 #
 # The status is the load-bearing write, not the route clear. gascity's
-# stranded-worker repair sweeps `{open, in_progress}` assigned to a retired
+# stranded-worker repair (unclaimWorkAssignedToRetiredSessionInfo,
+# cmd/gc/session_beads.go) sweeps `{open, in_progress}` assigned to a retired
 # session and calls ReleaseWorkBead, which re-stamps a run_target fallback
-# "only when otherwise unrouted" (cmd/gc/session_beads.go, unclaimWorkAssigned-
-# ToRetiredSessionInfo) — so clearing gc.routed_to on a step left open invites
-# the very re-route it was meant to prevent. Outside those two statuses the
-# sweep never looks.
+# "only when otherwise unrouted" — so clearing gc.routed_to on a step left open
+# invites the very re-route it was meant to prevent. Outside those two statuses
+# the sweep never looks.
 #
 # Blocking before touching any assignee also keeps every write ungated: bd's
 # claim guard refuses `--assignee ""` only on an in_progress bead with a live
@@ -257,17 +257,35 @@ SIBLINGS=$(bd_json list --status=open,in_progress --limit=0 \
         | @tsv
       else empty end' 2>/dev/null)
 
+[ -n "$SIBLINGS" ] || exit 0
+
+# A `<<<` here-string is backed by a temp file, and under disk pressure that
+# redirection fails silently and runs the loop zero times — indistinguishable
+# from a molecule with no other steps (tk-lslk2). Route it through a checked
+# mktemp so an enumeration that could not happen says so.
+ROWS=$(mktemp 2>/dev/null) || {
+  echo "$PROG: NOTE — could not create a temp file to enumerate sibling steps; $TARGET is held but its siblings keep their routes and claims" >&2
+  exit 0
+}
+printf '%s\n' "$SIBLINGS" > "$ROWS" || {
+  echo "$PROG: NOTE — could not write the sibling enumeration; $TARGET is held but its siblings keep their routes and claims" >&2
+  rm -f "$ROWS"
+  exit 0
+}
+
 while IFS=$'\t' read -r sid sstep srouted swho; do
   [ -n "${sid:-}" ] || continue
+  QUIET=1
   if [ -n "${srouted:-}" ]; then
     gc bd update "$sid" --unset-metadata gc.routed_to --unset-metadata gc.session_affinity >/dev/null 2>&1 \
-      || echo "$PROG: NOTE — could not de-route sibling step $sid ($sstep)" >&2
+      || { QUIET=0; echo "$PROG: NOTE — could not de-route sibling step $sid ($sstep); it may re-offer" >&2; }
   fi
   if [ -n "${swho:-}" ]; then
     gc bd update "$sid" --assignee "" >/dev/null 2>&1 \
-      || echo "$PROG: NOTE — could not unassign sibling step $sid ($sstep)" >&2
+      || { QUIET=0; echo "$PROG: NOTE — could not unassign sibling step $sid ($sstep); the stranded-worker sweep can still re-route it" >&2; }
   fi
-  echo "$PROG: quiesced sibling step $sid ($sstep)"
-done <<< "$SIBLINGS"
+  [ "$QUIET" = "1" ] && echo "$PROG: quiesced sibling step $sid ($sstep)"
+done < "$ROWS"
+rm -f "$ROWS"
 
 exit 0
