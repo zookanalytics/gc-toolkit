@@ -215,12 +215,18 @@ sweeps open steps assigned to a drained session and re-stamps a route on any it
 finds unrouted. Hold the molecule, then drain:
 
 ```bash
-"$SCRIPTS/molecule-hold.sh" --step "<formula>.<step-id>" --reason "<why you declined, and what releases the hold>"
+"$SCRIPTS/molecule-hold.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined, and what releases the hold>" || { echo "hold did not land; NOT draining" >&2; exit 1; }
+gc runtime drain-ack
 ```
 
 It sets your step `blocked`, which is not-closed and not-claimable, and clears
 the route on the step, on the molecule root, and on the root's other steps. It
 closes nothing, so whatever a live worker is holding stays where it is.
+
+Drain only if the hold landed. It exits non-zero when it cannot prove which
+bead is yours, when duplicate step beads make that ambiguous, or when the
+blocking write is refused, and a drain on any of those paths leaves the step
+claimable.
 
 If the ruling that comes back is stand-down — the premise was falsified, or a
 live sitting owns the decision — the disposal step is the sitting's

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # molecule-hold — hold a graph.v2 molecule at the step this shell is executing,
-# without closing anything (tk-dchq5).
+# without closing anything.
 #
 #   molecule-hold.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [--dry-run]
 #
@@ -21,7 +21,7 @@
 #
 # Blocking before touching any assignee also keeps every write ungated: bd's
 # claim guard refuses `--assignee ""` only on an in_progress bead with a live
-# holder, and that refusal is atomic over the whole update (tk-z27pw), so a
+# holder, and that refusal is atomic over the whole update, so a
 # batched status+assignee call can lose the status too.
 #
 # Callers: mol-polecat-work load-context's duplicate-dispatch arm; any polecat
@@ -261,7 +261,7 @@ SIBLINGS=$(bd_json list --status=open,in_progress --limit=0 \
 
 # A `<<<` here-string is backed by a temp file, and under disk pressure that
 # redirection fails silently and runs the loop zero times — indistinguishable
-# from a molecule with no other steps (tk-lslk2). Route it through a checked
+# from a molecule with no other steps. Route it through a checked
 # mktemp so an enumeration that could not happen says so.
 ROWS=$(mktemp 2>/dev/null) || {
   echo "$PROG: NOTE — could not create a temp file to enumerate sibling steps; $TARGET is held but its siblings keep their routes and claims" >&2

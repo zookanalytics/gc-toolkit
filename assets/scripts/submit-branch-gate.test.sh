@@ -157,7 +157,7 @@ export PATH="$TMP/bin:$PATH"
 export WORK_BEAD_ID=tk-work
 
 # molecule-hold.sh, resolved out of $GC_PACK_DIR exactly as the arms resolve it.
-# Every fail-closed arm HOLDS before it drains (tk-dchq5): a step left `open`
+# Every fail-closed arm HOLDS before it drains: a step left `open`
 # and routed is re-offered to a fresh polecat every cycle, which re-derives the
 # same refusal. The stub records the call so the order can be asserted.
 mkdir -p "$TMP/pack/assets/scripts"
@@ -167,11 +167,11 @@ cat > "$TMP/pack/assets/scripts/molecule-hold.sh" <<'HOLD'
 # assertions can read it without widening every expected log string.
 printf 'HOLD\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_HOLD:-/dev/null}"
-exit 0
+exit "${FAKE_HOLD_RC:-0}"
 HOLD
 chmod +x "$TMP/pack/assets/scripts/molecule-hold.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
-export FAKE_HOLD="$TMP/hold"
+export FAKE_HOLD="$TMP/hold" FAKE_HOLD_RC=0
 : > "$TMP/hold"
 
 # run_gate <current-branch> <metadata-json>
@@ -350,7 +350,7 @@ eq "$(run_consume '')" \
    "unset LANDING_TARGET: holds, then halts instead of writing an empty target"
 has_hold() { grep -q -- "$1" "$TMP/hold"; }
 
-# --- 3b. Fail-closed arms HOLD before they drain (tk-dchq5). ------------------
+# --- 3b. Fail-closed arms HOLD before they drain. -----------------------------
 # `open` is half the pool's offer predicate, so an arm that drains leaving its
 # step open is re-offered to a fresh polecat every cycle, which re-derives the
 # same refusal. Every arm below must name the step it holds; a hold that names
@@ -370,6 +370,8 @@ has_hold "--step mol-polecat-work.submit-and-exit" \
 has_hold "no landing branch" \
   && ok "and names what must be set to release it" \
   || bad "target-resolution hold has no reason: $(cat "$TMP/hold")"
+eq "$(tr '\n' ';' < "$TMP/log")" "HOLD;DRAIN;" \
+   "and holds before it drains"
 
 run_consume '' >/dev/null
 has_hold "LANDING_TARGET unset" \
@@ -633,6 +635,22 @@ eq "$(run_consume_anchor "$TMP/summary-empty.txt" tk-anchor)" \
 eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
    "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
    "fresh work: unchanged single atomic write carrying the summary"
+
+# A hold that did not land must not drain. molecule-hold.sh exits non-zero when
+# it cannot resolve the step, when duplicate step beads make that ambiguous, or
+# when the blocking write is refused; draining there leaves the step claimable,
+# which is the loop the hold exists to stop.
+FAKE_HOLD_RC=1
+eq "$(run_gate polecat/tk-agent-home '{}')" \
+   "1|HOLD;" \
+   "branch-shape refusal: a refused hold halts WITHOUT draining"
+run_resolve polecat/su-uzy9.5 polecat/su-uzy9.5 '{}' >/dev/null
+eq "$(tr '\n' ';' < "$TMP/log")" "HOLD;" \
+   "target resolution: a refused hold halts WITHOUT draining"
+eq "$(run_consume '')" \
+   "1|HOLD;" \
+   "the handoff guard: a refused hold halts WITHOUT draining"
+FAKE_HOLD_RC=0
 
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
