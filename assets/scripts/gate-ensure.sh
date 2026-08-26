@@ -16,8 +16,7 @@
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence.
 # A head move past a recorded exception@ buys ONE dispatch through the
-# dispatch_count cap: signoff.sh's cap arm files no rework child, so only an
-# actor outside the cadence can move that head, and the round cannot self-feed.
+# dispatch_count cap.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -254,7 +253,7 @@ while IFS= read -r row; do
     if [ "$head_read" = 0 ]; then head=$(live_head_for "$branch"); head_read=1; fi
     # Classify: a verdict verb bound to the live head (or bound with no head to
     # test) is settled; everything else needs something able to raise it.
-    capped_ok=0
+    stale_exception=0
     case "$marker" in
       green@*)
         oid="${marker#green@}"
@@ -263,10 +262,7 @@ while IFS= read -r row; do
       exception@*)
         oid="${marker#exception@}"
         if [ -z "$head" ] || [ "$oid" = "$head" ]; then continue; fi
-        # The exception marker IS the record that the round cap was spent, so
-        # the rounds it counted cannot also refuse this dispatch — see the cap
-        # check below.
-        capped_ok=1
+        stale_exception=1  # the cap check below reads this
         why="check.$g is exception@$oid but branch '$branch' has advanced to $head" ;;
       "") why="check.$g is absent (never reviewed, or cleared by a REQUEST_CHANGES signoff)" ;;
       fixable@*) why="check.$g is '$marker' (remediation was in flight); re-dispatching unless one still is" ;;
@@ -373,13 +369,14 @@ Two repairs, either of which clears the hold:
     fi
     # Convergence cap: dispatch_count on the anchor bounds review rounds; at the
     # cap the merge stays held and signoff.sh records the exception verdict.
-    # A head move past that recorded exception buys ONE look and cannot
-    # self-feed: signoff's cap arm files no rework child, so only an actor
-    # outside the cadence can move the head again.
+    # That exception IS the record of the spend, so the rounds behind it cannot
+    # also refuse a dispatch the head move has since earned. Nothing self-feeds:
+    # signoff's cap arm files no rework child, so only an actor outside the
+    # cadence can move that head again.
     dcount=$(meta_of "$row" dispatch_count)
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
     if [ "$dcount" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
-      if [ "$capped_ok" = 0 ]; then
+      if [ "$stale_exception" = 0 ]; then
         echo "$PROG: $id gate '$g' has spent $dcount dispatch round(s) against a cap of ${GC_MAX_REVIEW_ROUNDS:-3}; no further dispatch (merge stays held)"
         skipped=$((skipped + 1)); continue
       fi
