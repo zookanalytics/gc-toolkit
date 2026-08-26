@@ -112,6 +112,12 @@ split later only if load or model choice demands it).
   the triage skill's fallback is "add `arch` when the diff creates a file,
   crosses a top-level directory, or changes a public interface," plus the
   charter-gap observation.
-- Open: where proactive/first-reaction sits in the workflow once triage
-  exists — first-reaction is approximately triage-for-conversations, and may
-  become the triage gate's front half. Decide during implementation.
+- Resolved (tk-j81t84, 2026-08-26): proactive/first-reaction does NOT become
+  this gate's front half. It sits on the filing axis, as the work feeder's
+  "this is a conversation, not work" disposition, and the feeder's candidate
+  query subsumes `tools/gc-proactive.sh scan`. The two mechanisms share a
+  contract and nothing else: triage's subject is a diff and its output is
+  machine-consumed by gate-ensure and merge.sh, while a first reaction's
+  subject is a bead and its output is a framed question for a human. Evidence,
+  and the three constraints this hands the feeder design, in
+  [specs/tk-j81t84/proactive-placement.md](../tk-j81t84/proactive-placement.md).

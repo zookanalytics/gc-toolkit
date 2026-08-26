@@ -63,6 +63,13 @@ Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
 --merge mr` (operator/board one-shot) or `tools/gc-proactive.sh scan --sling`
 (process-scan). NOT a resident loop either way.
 
+Placement, decided under tk-j81t84 (specs/tk-j81t84/proactive-placement.md):
+this pool sits on the filing axis, as the work feeder's "this is a
+conversation, not work" disposition. It is not the front half of the review
+triage gate, whose subject is a diff and whose output the merge cadence reads.
+The `scan` verb stays operator-driven with no order behind it; the feeder owns
+that candidate query once it lands.
+
 The first reaction NEVER closes the target work bead — it advances it (card +
 a filed conversation turn) and releases it open for the human to accept/redirect.
 The `gc.proactive_reaction` marker stops the scan from re-reacting. The card

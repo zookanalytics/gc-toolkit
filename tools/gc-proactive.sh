@@ -137,6 +137,11 @@ cmd_demand() {
 # ready, unassigned, not an epic, and not already reacted-to / hand-raised
 # (so we never re-react). Unions the explicit per-bead opt-in (gc.proactive=1)
 # with the broader movable-forward scan, deduped. Read-only unless --sling.
+#
+# Operator-driven by decision (tk-j81t84): no order schedules this verb. A
+# cadence over it files one visit per candidate bead, which is the shape the
+# P3 batching resolution rejected, and the work feeder owns this candidate
+# query once it lands.
 # ---------------------------------------------------------------------------
 
 scan_candidates() {
