@@ -293,6 +293,11 @@ fi
 META+=(--set-metadata "gc.routed_to=$FIX_POOL")
 gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 
+# The child must BLOCK the anchor. Recorded the other way round it waits on an
+# anchor that closes only once the rework lands, so nothing ever claims it, and
+# count_rounds, which walks the anchor's dependencies, cannot see it either.
+gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
+
 FIX_ROW=$(bd_json show "$FIX_BEAD")
 MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
   --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg p "$FIX_POOL" --arg pr "${POST_OPEN:+$PR_URL}" '
@@ -305,13 +310,15 @@ MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
     (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "pr_fields" end),
     (if (($m["gc.routed_to"] // "") == $p) or (($x.assignee // "") != "") then empty else "gc.routed_to" end)
   ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
+if [ "$MISSING" = "ok" ]; then
+  EDGE=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
+    | jq -r --arg f "$FIX_BEAD" 'if type == "array" and any(.[]; .id == $f) then "ok" else "" end' 2>/dev/null)
+  [ "$EDGE" = "ok" ] || MISSING="blocks_edge"
+fi
 if [ "$MISSING" != "ok" ]; then
   warn "rework child $FIX_BEAD work order incomplete (${MISSING:-unreadable}); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
   exit 2
 fi
-gc bd dep add "$FIX_BEAD" "$ANCHOR" --type=blocks >/dev/null 2>&1 \
-  || warn "could not add the blocks edge $FIX_BEAD -> $ANCHOR; the child is routed and the cleared marker still holds the gate"
-
 close_review
 echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — check.$CHECK_NAME cleared, rework $FIX_BEAD routed to $FIX_POOL"
 exit 0
