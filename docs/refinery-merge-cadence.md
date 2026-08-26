@@ -46,7 +46,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    sentinel is respected), and every declared gate is *raisable*: marker green
    at the live head, or a live routed review bead in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). **rc=3 is the designed
+   back). A review whose only reach is the pour stamp is qualified before it
+   counts as in flight: if its workflow is spent — every step closed but
+   `workflow-finalize`, which belongs to the control-dispatcher — no verdict
+   can still be coming, and the arm escalates through `escalate.sh` under the
+   `review-wedge` key rather than holding the anchor in silence. It escalates
+   on the second consecutive sighting, because `mol-review`'s failure arm
+   closes its chain before it restores the bead's route. **rc=3 is the designed
    interlock**: it holds `merge.sh` for this pass — an anchor whose gates are
    not yet satisfiable must not be mergeable on the same tick — and is
    reported without failing the order.
