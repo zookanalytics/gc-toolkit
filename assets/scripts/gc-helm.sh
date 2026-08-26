@@ -1,16 +1,18 @@
 #!/bin/sh
-# gc-helm.sh — the helm WRITE verbs: takeaway, open, react.
+# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, react.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
 # Contract:
 #   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit (one open visit per subject)
 #   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
 #   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
+#   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
 #   gc-helm dismiss  <bead-id> [--reason "..."]               end the sitting and clear the row
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
-# converse and the proactive worker (takeaway), operators by hand.
+# converse and the proactive worker (takeaway), converse (demand), operators
+# by hand.
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move, tk-lzdty),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
@@ -35,6 +37,7 @@ Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
+  gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  <bead-id> [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -48,6 +51,11 @@ parked molecule's step beads; --route <rig>/<agent> releases it TO a pool
 instead of back to the human, in the same write; --waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
 whether it landed.
+
+demand files what a person owes as its own bead, a SIBLING of the work, and
+blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
+<gated>`, so a caller reads the id back with
+`awk '/^demand /{print $2; exit}'`.
 
 dismiss is the operator's one explicit act for "take this out of my view",
 and both halves of it exist because the alternative is something leaving on
@@ -75,6 +83,30 @@ with_timeout() {
 }
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
+# enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
+# a demand bead's TITLE is the same board headline a takeaway stamp carries, so
+# a cap enforced in only one of them is a cap the other renders past.
+HEADLINE=""
+normalize_headline() {
+    HEADLINE=$(printf '%s' "$1" | tr -s '[:space:]' ' ')
+    HEADLINE="${HEADLINE# }"; HEADLINE="${HEADLINE% }"
+    [ -n "$HEADLINE" ] || { echo "$PROG: $2 needs \"<text>\" (the ≤${TAKEAWAY_MAX}-char one-line headline)" >&2; usage; exit 2; }
+    # >>> takeaway-length-gate
+    # REJECT over the cap, never truncate: only the author knows which clause
+    # is the headline (tk-9tbbk.1). Measured in CODEPOINTS — what both
+    # renderers measure — with a shell-count fallback so the gate cannot
+    # silently fail open on a broken jq.
+    tlen=$(printf '%s' "$HEADLINE" | jq -Rsr 'length' 2>/dev/null || true)
+    case "$tlen" in ''|*[!0-9]*) tlen=${#HEADLINE} ;; esac
+    if [ "$tlen" -gt "$TAKEAWAY_MAX" ]; then
+        echo "$PROG: $2: text is $tlen chars; the cap is $TAKEAWAY_MAX" >&2
+        echo "$PROG: $2: it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in the bead's notes." >&2
+        exit 2
+    fi
+    # <<< takeaway-length-gate
+}
 
 # Sibling tools: assets/scripts/ and tools/ are siblings under the pack root.
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || echo "$0")
@@ -303,24 +335,8 @@ cmd_takeaway() {
     done
     [ -n "$bead" ] || { echo "$PROG: takeaway needs <bead-id>" >&2; usage; exit 2; }
 
-    # Collapse whitespace runs and trim BEFORE the empty check and the cap.
-    text=$(printf '%s' "$text" | tr -s '[:space:]' ' ')
-    text="${text# }"; text="${text% }"
-    [ -n "$text" ] || { echo "$PROG: takeaway needs \"<text>\" (the ≤${TAKEAWAY_MAX}-char one-line headline)" >&2; usage; exit 2; }
-
-    # >>> takeaway-length-gate
-    # REJECT over the cap, never truncate: only the author knows which clause
-    # is the headline (tk-9tbbk.1). Measured in CODEPOINTS — what both
-    # renderers measure — with a shell-count fallback so the gate cannot
-    # silently fail open on a broken jq.
-    tlen=$(printf '%s' "$text" | jq -Rsr 'length' 2>/dev/null || true)
-    case "$tlen" in ''|*[!0-9]*) tlen=${#text} ;; esac
-    if [ "$tlen" -gt "$TAKEAWAY_MAX" ]; then
-        echo "$PROG: takeaway: text is $tlen chars; the cap is $TAKEAWAY_MAX" >&2
-        echo "$PROG: takeaway: it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in the bead's notes." >&2
-        exit 2
-    fi
-    # <<< takeaway-length-gate
+    normalize_headline "$text" takeaway
+    text="$HEADLINE"
 
     [ -n "$by" ] || by="host"
 
@@ -401,6 +417,162 @@ cmd_takeaway() {
         exit 4
     fi
     echo "takeaway set on $bead (by $by)${release:+ [released${route:+ to $route}]}: $text"
+}
+
+# ── Verb: demand ─────────────────────────────────────────────────────
+# What a person owes, filed as a bead the work is blocked by — the replacement
+# for parking a subject on prose. A bead is either ready and therefore moving,
+# or blocked on a named bead by an edge; there is no third state a person has
+# to return and hand-clear.
+#
+# The demand is filed as a SIBLING of <gated-bead>: same parent, or parentless
+# when the gated bead has none. That placement is not tidiness. beads REFUSES a
+# `blocks` edge from a parent to its own descendant, because blocked status
+# cascades and the descendant would inherit the block it is meant to lift, so a
+# demand filed as a CHILD could never gate the thing it is about (tk-2cyxo).
+#
+# The edge is the record here, not a garnish on it. `takeaway --waiting-on`
+# writes its edge beside prose a human reads, so a rejected edge only warns;
+# a demand whose edge did not land leaves the work reading ready while a person
+# still owes an answer, which is the exact failure this verb exists to remove.
+# So it exits 4 on that, having named the repair.
+#
+# One open demand per gated bead: a resumed sitting re-states the same question
+# and gets the existing demand refreshed, never a second blocker for one wait.
+cmd_demand() {
+    gated=""; text=""; by="host"; kind="decision"; who=""; body=""; also=""; npos=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --by=*)          by="${1#--by=}"; shift ;;
+            --by)            shift; [ $# -gt 0 ] || { echo "$PROG: demand: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
+            --kind=*)        kind="${1#--kind=}"; shift ;;
+            --kind)          shift; [ $# -gt 0 ] || { echo "$PROG: demand: --kind requires a value" >&2; exit 2; }; kind="$1"; shift ;;
+            --assignee=*)    who="${1#--assignee=}"; shift ;;
+            --assignee)      shift; [ $# -gt 0 ] || { echo "$PROG: demand: --assignee requires a value" >&2; exit 2; }; who="$1"; shift ;;
+            --body=*)        body="${1#--body=}"; shift ;;
+            --body)          shift; [ $# -gt 0 ] || { echo "$PROG: demand: --body requires a value" >&2; exit 2; }; body="$1"; shift ;;
+            --also-blocks=*) also="$also ${1#--also-blocks=}"; shift ;;
+            --also-blocks)   shift; [ $# -gt 0 ] || { echo "$PROG: demand: --also-blocks requires a bead id" >&2; exit 2; }
+                             also="$also $1"; shift ;;
+            -h|--help)       usage; exit 0 ;;
+            -*) echo "$PROG: demand: unknown flag '$1'" >&2; exit 2 ;;
+            *)
+                npos=$((npos + 1))
+                case "$npos" in
+                    1) gated="$1" ;;
+                    2) text="$1" ;;
+                    *) echo "$PROG: demand takes one <gated-bead> and one \"<text>\"" >&2; exit 2 ;;
+                esac
+                shift ;;
+        esac
+    done
+    [ -n "$gated" ] || { echo "$PROG: demand needs <gated-bead>" >&2; usage; exit 2; }
+    normalize_headline "$text" demand
+    text="$HEADLINE"
+    case "$kind" in
+        decision|task) ;;
+        *) echo "$PROG: demand: --kind is 'decision' (a ruling) or 'task' (work only a person can do); got '$kind'" >&2; exit 2 ;;
+    esac
+    [ -n "$by" ] || by="host"
+    [ -n "$body" ] || body="What a person owes, filed as a bead so the wait is a graph state rather than a comment. Closing this makes $gated ready, and the pool claims it."
+
+    path=$(rig_path_for_bead "$gated")
+    [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+    prefix="${gated%%-*}"
+
+    # >>> demand-sibling-shape
+    # The gated bead must RESOLVE before anything is filed: a demand nothing
+    # gates still reads as a question someone owes an answer to. `bd show`
+    # answers an ARRAY on success and a bare {"error":…} OBJECT otherwise, and
+    # control chars in notes break the parse.
+    gated_raw=$(gc bd show "$gated" --json 2>/dev/null || true)
+    gated_json=$(printf '%s' "$gated_raw" | scrub)
+    gated_id=$(printf '%s' "$gated_json" | jq -r --arg b "$gated" \
+        'if type == "array"
+         then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.id // empty)
+         else empty end' 2>/dev/null || true)
+    [ -n "$gated_id" ] \
+        || { echo "$PROG: demand: '$gated' does not resolve in any rig ledger — nothing filed." >&2; exit 4; }
+    # A parent-child edge is stored on the CHILD with the PARENT in the
+    # depends-on slot, so the gated bead's own row is where its parent is read;
+    # asking the parent for its children answers nothing.
+    parent=$(printf '%s' "$gated_json" | jq -r \
+        '[ .[0].dependencies[]?
+           | select(((.dependency_type // .type // "") | tostring) == "parent-child")
+           | ((.id // .depends_on_id // "") | tostring) ]
+         | map(select(. != "")) | .[0] // ""' 2>/dev/null || true)
+    # <<< demand-sibling-shape
+
+    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
+        | scrub \
+        | jq -r --arg g "$gated" \
+            '[ .[]? | select((.metadata["gc.demand_for"] // "") == $g) | .id ] | first // empty' 2>/dev/null || true)
+
+    if [ -n "$existing" ]; then
+        demand="$existing"
+        set -- --title "$text" \
+               --set-metadata "gc.takeaway=$text" \
+               --set-metadata "gc.takeaway_at=$(iso_now)" \
+               --set-metadata "gc.takeaway_by=$by"
+        [ -n "$who" ] && set -- "$@" --assignee "$who"
+        gc bd update "$demand" "$@" >/dev/null 2>&1 \
+            || { echo "$PROG: demand: could not refresh the open demand $demand on $gated" >&2; exit 4; }
+        echo "$PROG: demand: refreshed the open demand $demand on $gated; no second bead filed" >&2
+    else
+        set -- -t "$kind" --title "$text" -d "$body"
+        [ -n "$parent" ] && set -- "$@" --parent "$parent"
+        demand=$(gc bd create "$@" --json 2>/dev/null \
+            | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+        # A create routed to the wrong ledger returns an id rather than an
+        # error, and that id can never carry an edge to $gated — so the prefix
+        # is checked, not assumed.
+        case "$demand" in
+            ""|null)     echo "$PROG: demand: bd create returned no id — nothing filed on $gated." >&2; exit 4 ;;
+            "$prefix"-*) : ;;
+            *)           echo "$PROG: demand: bd create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Close it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
+        esac
+        set -- --set-metadata "gc.takeaway=$text" \
+               --set-metadata "gc.takeaway_at=$(iso_now)" \
+               --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.demand_for=$gated" \
+               --set-metadata "gc.routed_to=human"
+        [ -n "$who" ] && set -- "$@" --assignee "$who"
+        gc bd update "$demand" "$@" >/dev/null 2>&1 \
+            || { echo "$PROG: demand: filed $demand but could not stamp it — it is not on the operator's queue yet. Re-run this command." >&2; exit 4; }
+    fi
+
+    # `dep add <gated> <demand>` reads "<gated> is blocked by <demand>", so the
+    # row lands on the gated bead — the side that is waiting.
+    for _w in $gated $also; do
+        [ -n "$_w" ] || continue
+        if [ "$_w" = "$demand" ]; then
+            echo "$PROG: demand: --also-blocks $_w is the demand itself; skipped" >&2
+            continue
+        fi
+        if gc bd dep add "$_w" "$demand" -t blocks >/dev/null 2>&1; then
+            echo "blocks edge: $_w depends on $demand"
+        else
+            echo "$PROG: demand: could not wire $_w -> $demand (already wired, a cycle, another store, or $_w is an ancestor of the demand)" >&2
+        fi
+    done
+
+    # Read the primary edge back off the GATED bead. A `dep add` that fails on
+    # an edge already present is indistinguishable from one that wrote nothing,
+    # so its exit status settles neither; the gated bead's own row does.
+    gated_after=$(gc bd show "$gated" --json 2>/dev/null | scrub || true)
+    have_edge=$(printf '%s' "$gated_after" | jq -r --arg d "$demand" \
+        '[ .[0].dependencies[]?
+           | select(((.dependency_type // .type // "") | tostring) == "blocks")
+           | ((.id // .depends_on_id // "") | tostring) ]
+         | map(select(. == $d)) | length' 2>/dev/null || true)
+    case "$have_edge" in ''|*[!0-9]*) have_edge=0 ;; esac
+    if [ "$have_edge" -lt 1 ]; then
+        echo "$PROG: demand: $gated is NOT blocked by $demand — the edge did not land, so the work reads ready while a person owes an answer. Wire it by hand: gc bd dep add $gated $demand -t blocks" >&2
+        exit 4
+    fi
+
+    bust_cache
+    echo "demand $demand blocks $gated (by $by, $kind): $text"
 }
 
 # ── Verb: open ───────────────────────────────────────────────────────
@@ -748,8 +920,9 @@ case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
     react)         shift; cmd_react "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
+    demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, react, takeaway, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, react, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

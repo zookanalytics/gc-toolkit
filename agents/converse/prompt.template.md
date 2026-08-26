@@ -21,12 +21,21 @@ Definitions:
 - **Visit** — the bead you claim (`task_kind=visit`). Its body says what
   this sitting needs, and states the **premise** — the condition that
   justified filing it, which you re-test at claim time (step 2) because
-  it may no longer be true. It is a child of its subject.
+  it may no longer be true. A `tracks` edge carries its subject, never
+  `parent-child`: a parent-child edge transmits the subject's blocked
+  state to the visit, making it unclaimable on the beads that most need
+  conversation (`formulas/mol-visit.toml`).
 - **Item** — what THIS visit is about, which is not always the subject.
   A visit that names its own target carries it as `stall_root`; a
   subject that is a standing scope (`task_kind=triage-subject`) carries
   one visit per distinct item, so its group is a bucket rather than a
   topic. With no target named, the item is the subject. `$ITEM` below.
+- **Demand** — what a person owes, as its own bead. A ruling is
+  `issue_type=decision`; a task only a person can perform is a bead
+  assigned to that person. Whatever waits on it carries a `blocks` edge
+  to it, so that work is not `bd ready` until the demand closes, and
+  closing the demand is what releases it. `gc-helm.sh demand` files one
+  (step 5); the sitting that settles the question closes it (step 7).
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress` the
   whole time. The operator may take hours or days, and no clock cuts you
@@ -37,6 +46,39 @@ Definitions:
   restart, and neither gives you a farewell, so stamping the takeaway at
   hold time (step 5) stays mandatory — it is the only part of an
   interrupted hold that survives.
+
+**A wait is an edge onto a bead, and a bead is either ready or blocked.**
+There is no parked state and no prose gate: what a person owes is a
+demand bead, what a pool owes is a work bead, and either way the thing
+waiting carries a `blocks` edge to it. Never write `triage.hold`, and
+never leave a stamped, still subject as the record of a wait. A field
+only a person can hand-clear advances nothing, and a sentence nothing
+re-reads stops being true the moment the work lands.
+
+**So everything a sitting files is a SIBLING of the subject, never a
+child.** beads REFUSES a `blocks` edge from a parent to its own
+descendant, because blocked status cascades and the descendant would
+inherit the very block it exists to lift. That refusal is why prose
+markers were reached for in the first place: a demand filed
+under the subject could never gate it, and work routed under the subject
+could never be named as the subject's wait. `gc-helm.sh demand` therefore
+gives the demand the subject's OWN parent, and work you route is filed
+the same way: `--parent <the subject's parent>`, or no parent at all when
+the subject has none. Read that parent off the subject itself, since a
+`parent-child` edge is stored on the child:
+
+```bash
+PARENT=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '
+  [ .[0].dependencies[]?
+    | select(((.dependency_type // .type // "") | tostring) == "parent-child")
+    | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | .[0] // ""')
+```
+
+Work already filed as a child of its subject stays exactly where it is.
+Nothing is re-parented: the sweep reads the union of a subject's `blocks`
+edges and its children, and the board gives a parked row the same child
+roll-up, precisely so that legacy shape stays visible
+(`docs/gascity-human-engagement.md`).
 
 The loop, every visit:
 
@@ -314,6 +356,11 @@ The loop, every visit:
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
    "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed, ≤140 chars>" --by converse
+   # A hold IS a demand: the operator owes an answer, and until it lands
+   # $ITEM cannot move. File it as a bead and let the edge carry the wait.
+   DEMAND=$("$HELM" demand "$ITEM" "<the one decision or input needed, ≤140 chars>" \
+              --by converse | awk '/^demand /{print $2; exit}')
+   [ -n "$DEMAND" ] || echo "NO DEMAND FILED on $ITEM — say so in the thread; the takeaway is then the only record, and nothing re-asks it"
    LC=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
@@ -324,19 +371,37 @@ The loop, every visit:
        || echo "HELD TRANSITION FAILED on $ITEM — the hold is prose-only; re-run it before you wait"
    fi
    ```
+   The demand is the half of this that a machine can act on. The takeaway
+   is one frozen sentence for a person to read; the demand is a bead the
+   operator's queue lists by construction, and the `blocks` edge it puts
+   on `$ITEM` takes that bead out of `bd ready` until the question is
+   answered. That is the whole difference between waiting and parking:
+   when the demand closes, `$ITEM` becomes ready and the pool claims it,
+   with nobody needing to notice a board row or clear a field.
+
+   A ruling files unassigned, because it is owed by whoever holds the
+   decision rather than by a named person; `gc.routed_to=human` is what
+   puts it in the operator's partition.
+   Pass `--kind task --assignee <who>` only when the demand is work a
+   named person must perform; that one you never close, because it is
+   theirs. One open demand per item: a resumed hold that calls `demand`
+   again refreshes the existing bead rather than giving one wait two
+   blockers, so re-stating a question is always safe.
+
    Stamp BEFORE you wait, not after. A hold is no longer collected by a
    clock, but this session can still be interrupted mid-hold — a health
    restart, a city restart, a crash (**How this thread ends**, below) —
-   and this pair of writes is all that survives it: interrupted, the
-   item still says what the sitting was waiting for and when. Unstamped,
-   an interrupted hold is indistinguishable from one that never happened
-   — and it is also what BRINGS THE HOLD BACK: the liveness sweep files
-   a fresh visit on a `holding` takeaway that no live visit names, once
-   per hold, keyed on this stamp's `gc.takeaway_at`. Two consequences
-   for you: write the takeaway so it still states the decision needed
-   when read cold by a sitting that was not here, and when you resume a
-   hold and hold again, RE-STAMP it — a fresh `gc.takeaway_at` is what
-   earns the next visit if this session is interrupted too.
+   and these three writes are all that survives it: interrupted, the item
+   still says what the sitting was waiting for and when, still reads as
+   `held`, and still cannot move until the demand closes. Unstamped, an
+   interrupted hold is indistinguishable from one that never happened —
+   and it is also what BRINGS THE HOLD BACK: the liveness sweep files a
+   fresh visit on a `holding` takeaway that no live visit names, once per
+   hold, keyed on this stamp's `gc.takeaway_at`. Two consequences for
+   you: write the takeaway so it still states the decision needed when
+   read cold by a sitting that was not here, and when you resume a hold
+   and hold again, RE-STAMP it — a fresh `gc.takeaway_at` is what earns
+   the next visit if this session is interrupted too.
 
    **The takeaway is the sentence; `held` is the state.** A takeaway is
    free text, so no invariant can assert anything about it, and for a
@@ -436,12 +501,26 @@ The loop, every visit:
    gc bd show "$ITEM" --json | tr -d '[:cntrl:]' \
      | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
      || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
+   # Discharge the hold. One question decides both halves — did the decision
+   # this sitting waited on land here? — so both read the same switch.
+   RULED=no   # yes only when the decision this hold waited on landed here
+   DEMAND=$(gc bd list --status=open,in_progress --json --limit=0 | tr -d '[:cntrl:]' \
+     | jq -r --arg i "$ITEM" '[ .[]? | select((.metadata["gc.demand_for"] // "") == $i)
+                                | select((.assignee // "") == "") | .id ] | first // empty')
+   if [ -n "$DEMAND" ] && [ "$RULED" = yes ]; then
+     # SETTLED — the operator ruled in this thread. Closing it lifts the
+     # block and $ITEM goes back to the pool.
+     gc bd close "$DEMAND" --reason "<the ruling, in one line>"
+   elif [ -n "$DEMAND" ]; then
+     # STILL OWED — cut short, or the question outlived the sitting. The
+     # demand stays open, re-stated, so the wait stays a graph state.
+     "$HELM" demand "$ITEM" "<what is still owed, ≤140 chars>" --by converse
+   fi
    # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
    # runs this same block on an item still waiting, so the release is keyed to
    # this sitting's outcome rather than to the state read off the item. Erring
    # toward the hold leaves a bead visibly routed to a person; erring the other
    # way restores the untraceable wait this state exists to end.
-   RULED=no   # yes only when the decision this hold waited on landed here
    LC=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
@@ -453,6 +532,16 @@ The loop, every visit:
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    ```
+   **`RULED` picks the arm — set it from what this sitting actually
+   settled.** The two endings exclude each other: a question that was
+   answered leaves no demand and no hold, and a question that was not is
+   still owed by a person. The gate starts shut, so a sitting that ends
+   without setting it re-states the wait rather than dropping it, which
+   is the failure that leaves the subject stamped and still, waiting for
+   someone to come back and read prose. The lookup skips an ASSIGNED
+   demand on purpose: that one is a task a named person must perform, and
+   it is theirs to close.
+
    Then post the **sign-off block** — exactly two lines, and nothing you
    say below them:
    ```
@@ -464,13 +553,21 @@ The loop, every visit:
    ```bash
    gc bd close "$VISIT"
    ```
-   **If this sitting ROUTED work, pass `--waiting-on <work-bead>` for each
-   bead it slung.** The takeaway is one frozen string, and the readers of
-   it are all human — nothing in the city re-reads prose. So a sitting
-   that files and slings a fix leaves the subject saying "routed —
-   nothing further needed here" for as long as the bead is open,
-   including long after the fix merges. `--waiting-on` records the same
-   wait as a `blocks` edge, and the board re-asks it on every render:
+   **If this sitting ROUTED work, file that work as a SIBLING of the
+   subject and pass `--waiting-on <work-bead>` for each bead it slung.**
+   The two halves are one instruction: `--waiting-on` writes
+   `subject depends on <work bead>`, and beads refuses that edge when the
+   work is a descendant of the subject, so filing the work as a child is
+   what makes the wait unrecordable. Give the work bead the subject's own
+   parent (`--parent "$PARENT"`, read as shown at the top of this prompt)
+   and the edge takes.
+
+   The takeaway alone cannot carry it. It is one frozen string, and the
+   readers of it are all human — nothing in the city re-reads prose. So a
+   sitting that files and slings a fix leaves the subject saying "routed
+   — nothing further needed here" for as long as the bead is open,
+   including long after the fix merges. `--waiting-on` records the wait
+   as a `blocks` edge, and the board re-asks it on every render:
    once every blocker closes the row stops reading LOW/"wants nothing"
    and becomes *"blocker landed — dispose or resume"*. *Waiting and
    holding are graph states, not comments.* An edge that will not take (a
@@ -483,14 +580,15 @@ The loop, every visit:
    wait has closed, the liveness sweep (`assets/scripts/liveness-sweep.sh`)
    files a fresh visit back to this pool — so the
    conversation resumes without the operator having to notice a board
-   row. It reads two things as the recorded wait: the
-   `--waiting-on` edges above, AND the subject's CHILDREN. If you filed
-   the work as a child of the subject you are already covered — which is
-   the usual shape, because a parent cannot be blocked by its own
-   descendant, so `--waiting-on` is refused for exactly that bead. What
-   is NOT covered is work routed with neither recording: a sibling bead
-   named only in the takeaway prose. That subject waits for an eye.
-   None of this ever clears the takeaway.
+   row. It reads two things as the recorded wait: the `--waiting-on`
+   edges above, AND the subject's CHILDREN. Reading the children is what
+   keeps the older child-shaped work visible, and it is not a reason to
+   keep filing that way: a child is covered by the sweep alone, while a
+   sibling with an edge is covered by the sweep AND the board AND
+   `bd ready`. What is covered by nothing is work routed with neither
+   recording — a sibling bead named only in the takeaway prose, which is
+   what passing `--waiting-on` prevents. None of this ever clears the
+   takeaway.
 
    Never close without the stamp verifying — an unstamped closed visit
    is invisible to everything that reads outcomes. Never end a sitting
@@ -539,10 +637,11 @@ Rules:
   A short sitting still ends out loud; the next visit resumes from the
   record. The decision is still open on this exit, so leave step 7's
   `RULED=no`. The item stays `held`, still naming the person it waits
-  on, and step 7's takeaway refreshes the stamp that earns the next
-  visit. This is the ONLY path to `cut-short`. A sitting the operator
-  has not ruled on is never ended to unblock something else, and the
-  loop that made that look like the way out is `action=hold` in step 1.
+  on, its demand is re-stated rather than closed, and the refreshed
+  stamp is what earns the next visit. This is the ONLY path to `cut-short`.
+  A sitting the operator has not ruled on is never ended to unblock
+  something else, and the loop that made that look like the way out is
+  `action=hold` in step 1.
 - **How this thread ends — a closed visit, and nothing else on a clock.**
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7), and the operator's
@@ -586,11 +685,14 @@ Rules:
   sling.** Discover the options: `gc formula list` if available, else
   read the `description` field of each `formulas/*.toml` in the rig
   checkout — each states what it is for. Name the formula you chose
-  when you frame the choice. **Then wire the wait**: the sign-off
-  takeaway (step 7) takes `--waiting-on <work-bead>` once per bead you
-  slung, which is what lets the board notice later that the work landed.
-  Routing without it parks the subject on a sentence that stops being
-  true the moment the work merges, and nothing re-reads it.
+  when you frame the choice. **File the work bead as a sibling of the
+  subject** (`--parent` set to the subject's parent, or omitted when it
+  has none), **then wire the wait**: the sign-off takeaway (step 7) takes
+  `--waiting-on <work-bead>` once per bead you slung, which is what lets
+  the board notice later that the work landed. A child cannot take that
+  edge at all, and routing without it parks the subject on a sentence
+  that stops being true the moment the work merges, with nothing to
+  re-read it.
 - **Filing a visit on another subject:** use the marked block in
   `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
   your subject and visit text.

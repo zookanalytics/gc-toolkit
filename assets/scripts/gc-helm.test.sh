@@ -5,7 +5,8 @@
 # sessions. Covered:
 #   --release molecule-step quiescing (tk-xypcy, tk-q5r65)
 #   --waiting-on edges (tk-2plde)
-#   the ≤140-codepoint length gate (tk-9tbbk.1)
+#   the ≤140-codepoint length gate (tk-9tbbk.1), shared by takeaway and demand
+#   the demand verb's sibling shape and fail-closed edge (tk-0slbb6)
 #   the retired board verb refuses and names helm-svc board
 #   the dismiss verb: both halves of the operator's explicit clear
 set -euo pipefail
@@ -784,7 +785,183 @@ eq "$(field L-live status)" "closed" \
 [ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
 PATH="$SAVED_PATH"
 
+# ── demand: what a person owes, as a bead the work is blocked by (tk-0slbb6) ──
+# The verb replaces parking a subject on prose. Its whole value is the EDGE, so
+# every assertion here is about the shape that makes the edge possible (a
+# SIBLING demand, never a child) and about failing closed when the edge does
+# not land — a demand with no edge leaves the work reading ready while a person
+# owes an answer, which is the state the verb exists to remove.
+#
+# Its own stub: the release-quiesce fixture above answers `bd list` with step
+# beads, and demand reads `bd list` for an existing open demand.
+mkdir -p "$TMP/bin2"
+cat > "$TMP/bin2/gc" <<'GC2'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$D_LOG"
+case "$1 ${2:-}" in
+  "rig list")
+    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+  "bd show")
+    id="$3"
+    if grep -qx "$id" "$D_MISSING" 2>/dev/null; then printf '{"error":"no issues found"}\n'; exit 0; fi
+    p="$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$D_PARENTS")"
+    blk="$(awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG" | jq -R . | jq -sc .)"
+    jq -n --arg id "$id" --arg p "$p" --argjson blk "$blk" \
+      '[{id: $id,
+         dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
+                        + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
+  "bd list")  cat "$D_LIST" ;;
+  "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
+  "bd update") : ;;
+  "bd dep")
+    # A demand id carrying NOEDGE stands for every edge that cannot be written:
+    # the call fails AND nothing is recorded, so the read-back sees no edge.
+    case "$*" in *NOEDGE*) sed -i '$d' "$D_LOG"; exit 1 ;; esac ;;
+esac
+exit 0
+GC2
+chmod +x "$TMP/bin2/gc"
+
+export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
+       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing"
+printf 'tk-kid|tk-mum\n' > "$D_PARENTS"   # tk-kid has a parent; tk-solo has none
+printf 'tk-gone\n'        > "$D_MISSING"
+printf '[]\n'             > "$D_LIST"
+printf 'tk-dem1\n'        > "$D_NEXTID"
+
+# demand_run <gated> [args...] — fresh log, returns the verb's exit status in DRC
+DRC=0
+demand_run() {
+    : > "$D_LOG"; : > "$TMP/derr"
+    DRC=0
+    DOUT="$(PATH="$TMP/bin2:$PATH" sh "$SCRIPT" demand "$@" 2>"$TMP/derr")" || DRC=$?
+    DERR="$(cat "$TMP/derr")"
+}
+# d_create — the argv of the `bd create` call, or empty
+d_create() { grep -E '^bd create ' "$D_LOG" || true; }
+d_update() { grep -E '^bd update ' "$D_LOG" || true; }
+d_deps()   { grep -E '^bd dep add ' "$D_LOG" || true; }
+
+# (SIBLING) the demand inherits the GATED bead's parent — never becomes its
+# child, which beads would refuse to let it block (tk-2cyxo).
+demand_run tk-kid "operator: pick the storage backend" --by converse
+eq "$DRC" "0" "(SIBLING) a demand on a parented bead succeeds"
+grep -q -- '--parent tk-mum' <<< "$(d_create)" \
+  && ok "(SIBLING) the demand is filed under the gated bead's own parent" \
+  || bad "(SIBLING) no --parent tk-mum in: $(d_create)"
+grep -q -- '--parent tk-kid' <<< "$(d_create)" \
+  && bad "(SIBLING) the demand was filed as a CHILD of the bead it gates" \
+  || ok "(SIBLING) …and not as a child of the bead it gates"
+grep -q -- '-t decision' <<< "$(d_create)" \
+  && ok "(SIBLING) a ruling is issue_type=decision (a typed board anchor)" \
+  || bad "(SIBLING) not -t decision: $(d_create)"
+grep -q -- '--title operator: pick the storage backend' <<< "$(d_create)" \
+  && ok "(SIBLING) the authored headline is the demand's TITLE" \
+  || bad "(SIBLING) headline is not the title: $(d_create)"
+
+# (EDGE) the wait is an edge on the GATED bead: "tk-kid is blocked by tk-dem1".
+eq "$(d_deps)" "bd dep add tk-kid tk-dem1 -t blocks" \
+   "(EDGE) the gated bead is blocked by the demand, in that direction"
+
+# (STAMP) the demand carries what the board and the next sitting read.
+U="$(d_update)"
+grep -q 'gc.demand_for=tk-kid' <<< "$U" \
+  && ok "(STAMP) the demand records what it gates" || bad "(STAMP) gc.demand_for missing: $U"
+grep -q 'gc.routed_to=human' <<< "$U" \
+  && ok "(STAMP) …and that a person owes it" || bad "(STAMP) gc.routed_to=human missing: $U"
+grep -q 'gc.takeaway=operator: pick the storage backend' <<< "$U" \
+  && ok "(STAMP) …and carries the headline as its own takeaway" || bad "(STAMP) gc.takeaway missing: $U"
+grep -q 'gc.takeaway_by=converse' <<< "$U" \
+  && ok "(STAMP) …attributed to the caller" || bad "(STAMP) gc.takeaway_by missing: $U"
+
+# (OUT) the id is readable off stdout — the caller closes this bead later.
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-dem1" \
+   "(OUT) the demand id is the second field of the 'demand …' line"
+
+# (SIBLINGNONE) a parentless gated bead gets a parentless demand: still a
+# sibling, and still able to carry the edge.
+demand_run tk-solo "operator: ratify the cutover" --by converse
+eq "$DRC" "0" "(SIBLINGNONE) a demand on a parentless bead succeeds"
+grep -q -- '--parent' <<< "$(d_create)" \
+  && bad "(SIBLINGNONE) invented a parent: $(d_create)" \
+  || ok "(SIBLINGNONE) no parent is invented for a parentless subject"
+
+# (KIND) work only a person can do is a task assigned to that person.
+demand_run tk-solo "sign the vendor contract" --kind task --assignee zook
+eq "$DRC" "0" "(KIND) --kind task is accepted"
+grep -q -- '-t task' <<< "$(d_create)" \
+  && ok "(KIND) …filed as a task" || bad "(KIND) not -t task: $(d_create)"
+grep -q -- '--assignee zook' <<< "$(d_update)" \
+  && ok "(KIND) …assigned to the person who owes it" || bad "(KIND) no assignee: $(d_update)"
+
+# (KINDBAD) any other kind is a usage error, and files nothing.
+demand_run tk-solo "whatever" --kind epic
+eq "$DRC" "2" "(KINDBAD) an unsupported --kind is a usage error"
+eq "$(d_create)" "" "(KINDBAD) …and nothing is filed"
+
+# (CAP) the ≤140 gate is SHARED with takeaway: the title is the same headline.
+demand_run tk-solo "$T141"
+eq "$DRC" "2" "(CAP) a 141-char demand headline is a usage error"
+eq "$(d_create)" "" "(CAP) …and nothing is filed"
+grep -q 'cap is 140' <<< "$DERR" \
+  && ok "(CAP) …and the refusal names the cap" || bad "(CAP) refusal is silent: $DERR"
+demand_run tk-solo "$T140"
+eq "$DRC" "0" "(CAP) exactly 140 chars is accepted — one boundary, both verbs"
+
+# (RESOLVE) an unresolvable gated bead files nothing: a demand nothing gates
+# still reads on the board as a question someone owes an answer to.
+demand_run tk-gone "operator: decide"
+eq "$DRC" "4" "(RESOLVE) an unresolvable gated bead is a runtime failure"
+eq "$(d_create)" "" "(RESOLVE) …and no demand is filed"
+grep -q 'does not resolve' <<< "$DERR" \
+  && ok "(RESOLVE) …and the refusal says why" || bad "(RESOLVE) refusal is silent: $DERR"
+
+# (IDEM) one open demand per gated bead. A resumed sitting re-states the same
+# question; a second bead would give one wait two blockers.
+printf '[{"id":"tk-old1","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: pick the storage backend (still)" --by converse
+eq "$DRC" "0" "(IDEM) a re-stated demand succeeds"
+eq "$(d_create)" "" "(IDEM) …without filing a second bead"
+grep -q '^bd update tk-old1 ' <<< "$(d_update)" \
+  && ok "(IDEM) …refreshing the open one instead" || bad "(IDEM) the open demand was not refreshed: $(d_update)"
+grep -q -- '--title operator: pick the storage backend (still)' <<< "$(d_update)" \
+  && ok "(IDEM) …with the re-stated headline as its title" || bad "(IDEM) title not refreshed: $(d_update)"
+grep -q 'gc.takeaway_at=' <<< "$(d_update)" \
+  && ok "(IDEM) …and a fresh takeaway_at, which is what earns the next visit" \
+  || bad "(IDEM) takeaway_at not refreshed: $(d_update)"
+eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-old1" "(IDEM) …and it names the bead that already existed"
+printf '[]\n' > "$D_LIST"
+
+# (FAILCLOSED) the edge IS the record here. Unlike takeaway --waiting-on, a
+# demand whose edge did not land must not report success — the work would read
+# ready while a person still owes an answer.
+printf 'tk-NOEDGE9\n' > "$D_NEXTID"
+demand_run tk-kid "operator: decide the cutover order"
+eq "$DRC" "4" "(FAILCLOSED) an edge that did not land is a runtime failure"
+grep -q 'is NOT blocked by' <<< "$DERR" \
+  && ok "(FAILCLOSED) …and the message says the work still reads ready" \
+  || bad "(FAILCLOSED) the failure did not name the state: $DERR"
+grep -q 'gc bd dep add tk-kid tk-NOEDGE9 -t blocks' <<< "$DERR" \
+  && ok "(FAILCLOSED) …and hands over the exact repair" \
+  || bad "(FAILCLOSED) no repair command offered: $DERR"
+
+# (PREFIX) a create routed to another rig's ledger returns an id, not an error,
+# and that id can never carry an edge to the gated bead.
+printf 'sl-wrong1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: decide"
+eq "$DRC" "4" "(PREFIX) a demand filed in the wrong ledger is a runtime failure"
+grep -q "not 'tk'" <<< "$DERR" \
+  && ok "(PREFIX) …and the message names the prefix that was expected" \
+  || bad "(PREFIX) prefix mismatch not reported: $DERR"
+printf 'tk-dem1\n' > "$D_NEXTID"
+
+# (ALSO) --also-blocks gates further work on the same demand.
+demand_run tk-kid "operator: pick the backend" --also-blocks tk-sib1 --also-blocks=tk-sib2
+eq "$DRC" "0" "(ALSO) --also-blocks is accepted in both forms"
+eq "$(grep -c '^bd dep add ' "$D_LOG")" "3" "(ALSO) one edge for the gated bead and one per --also-blocks"
+grep -q '^bd dep add tk-sib2 tk-dem1 -t blocks$' "$D_LOG" \
+  && ok "(ALSO) …each in the depends-on direction" || bad "(ALSO) tk-sib2 edge missing: $(d_deps)"
 
 echo ""
-echo "gc-helm takeaway (release quiesce, waiting-on edges, length gate) + dismiss: $PASS passed, $FAIL failed"
+echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
