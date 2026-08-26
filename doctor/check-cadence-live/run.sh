@@ -9,6 +9,9 @@
 # Condition-triggered orders (no interval) get the registration arm alone.
 # `gc order list` omits disabled orders, so a disabled clock presents as a
 # missing registration — the right thing to say about it either way.
+# A third arm asks whether the DEPLOYED gctk binary is the one this checkout
+# describes: the cadence's data plane is compiled now, so orders that fire on
+# schedule can still be running logic several commits old.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -162,9 +165,42 @@ while IFS=$'\t' read -r name secs scope; do
     fi
 done <<< "$order_rows"
 
+# Arm 3 — the compiled data plane is the one this tree describes.
+#
+# The cadence's data-plane logic now lives in a binary the gctk-build order
+# publishes, so "the orders are firing" stops being the whole question: a build
+# that failed leaves the LAST GOOD gctk running the merge queue while the tree
+# moves on, and every order arm above stays green through it. `gctk version`
+# stamps the revision it was built from, which is the only reading that comes
+# from the binary itself rather than from a record the binary did not write.
+#
+# A mismatch WARNS rather than errors. The build order has minutes of lag by
+# design and the state self-heals on the next tick; what an operator needs is to
+# see it, and the board's PACK row is where a persistent one shows up.
+gctk_bin="${GCTK_BIN:-}"
+if [ -z "$gctk_bin" ]; then
+    gctk_city="${GC_CITY_ROOT:-${GC_CITY:-}}"
+    [ -n "$gctk_city" ] && gctk_bin="$gctk_city/.gc/services/gctk/bin/gctk"
+fi
+tree_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+if [ -z "$gctk_bin" ] || [ ! -x "$gctk_bin" ]; then
+    notes+=("gctk: no binary deployed — the cadence is running the shell fallbacks, which is the supported state until the last port lands")
+elif [ -z "$tree_rev" ]; then
+    warnings+=("gctk: cannot read this checkout's revision (\`git -C $dir rev-parse HEAD\`) — the deployed binary cannot be compared against it")
+else
+    gctk_rev=$(run_bounded "$gctk_bin" version 2>/dev/null | head -1)
+    case "$gctk_rev" in
+        "")        warnings+=("gctk: \`$gctk_bin version\` answered nothing — the deployed binary cannot be identified") ;;
+        unknown)   warnings+=("gctk: the deployed binary carries no VCS stamp (built with -buildvcs=false, or outside a checkout) — it cannot be compared against the tree") ;;
+        "$tree_rev"|"$tree_rev-dirty") notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12})") ;;
+        *)         warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout is at $tree_rev — a gctk-build tick has not caught up, or its last build FAILED and the previous binary is still serving. The board's PACK row says which.") ;;
+    esac
+fi
+
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
 fi
+
 if [ "${#errors[@]}" -ne 0 ]; then
     echo "pack cadence not live (I10): ${#errors[@]} finding(s)"
     detail "${errors[@]}"

@@ -1,13 +1,22 @@
 ---
 name: gctk — promote the merge-cadence cluster from shell to one Go binary
-description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; implement as follow-up work, incrementally, one subcommand at a time.
+description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. Scoped 2026-08-24; lifecycle ported and the build/deploy/status machinery landed 2026-08-26 (tk-utjreo); the remaining subcommands follow one PR at a time.
 ---
 
 # gctk: the compiled data plane
 
-Status: **scoped, not implemented**. Follow-up to the rewrite; independent of
-the review-gates work (same specs dir because both were scoped from the same
+Status: **in progress**. Follow-up to the rewrite; independent of the
+review-gates work (same specs dir because both were scoped from the same
 operator conversation).
+
+Landed 2026-08-26 (tk-utjreo): `services/gctk`, the `lifecycle` port, the
+build/deploy pattern below, the fallback wiring, the build-status file, and its
+board rows. `services/gctk/README.md` carries the operating detail.
+
+Remaining, one subcommand per PR in this order: `merge`, `gate-ensure`,
+`pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
+bead. The shell scripts and the driver's fallback drop when the last one
+lands.
 
 ## The language rule (add to the review charter when it lands)
 

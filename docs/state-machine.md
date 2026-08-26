@@ -16,6 +16,15 @@ back. An unknown `merge_result` value is an error: every reader surfaces it via
 `merge_result` is a non-closed state is repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
 
+`lifecycle.sh` remains the command every caller invokes, and the transition
+semantics below are unchanged, but the implementation behind it is being ported
+to `gctk lifecycle` (`services/gctk`): the script `exec`s the compiled binary
+when a build order has published one, and runs its own shell otherwise. The two
+carry separate mirrors of the table declared here, and
+`assets/scripts/lifecycle.test.sh` holds both against `lifecycle/lifecycle.toml`
+and runs its whole assertion body against each. The shell mirror goes when the
+fallback does.
+
 ## Scope
 
 **Mandate.** The anchor lifecycle: states, transitions, writers, the gate

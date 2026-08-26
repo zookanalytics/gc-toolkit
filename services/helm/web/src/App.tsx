@@ -171,7 +171,7 @@ function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
 // system builds these binaries — the launchers exec what a build order
 // published — so this very page can be rendered by a binary older than the
 // sources that describe it, and every row below would look normal while doing
-// it. That was previously visible only by running a one-shot script.
+// it. Nothing else on the page can say so.
 //
 // Rows are unconditional whenever the city has any record at all: a strip that
 // appears only on trouble is a strip nobody learns to read. A city with no

@@ -1,10 +1,10 @@
 // Package lifecycle holds the anchor lifecycle state machine.
 //
 // lifecycle/lifecycle.toml remains the human- and doctor-readable declaration.
-// This file is the executable copy, and it is the only one: the shell constants
-// that assets/scripts/lifecycle.sh used to mirror are gone from the port path,
-// and `gctk lifecycle --dump-machine` is what the drift test compares the TOML
-// against.
+// This file is the executable copy for the port, and `gctk lifecycle
+// --dump-machine` prints it for the drift test to compare the TOML against.
+// assets/scripts/lifecycle.sh carries a second mirror for as long as the shell
+// fallback ships; lifecycle.test.sh holds both against the TOML.
 package lifecycle
 
 // Edge is one declared transition.

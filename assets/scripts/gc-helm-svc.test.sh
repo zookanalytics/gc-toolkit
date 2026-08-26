@@ -84,6 +84,16 @@
 #   (DEADEND)     a build that cannot read the stores is never restarted onto
 #   (CONDEMNED)   nor is a pending restart carried out onto one
 #
+#   build-status record (what the board's PACK rows read)
+#   (STATUS)      a successful build records source_rev == binary_rev, rc 0
+#   (STATUSFAIL)  a FAILED build moves source_rev, keeps the last good
+#                 binary_rev and built_at, and records the non-zero rc — the
+#                 gap between the two revisions IS the signal
+#   (STATUSNOOP)  an up-to-date tick still writes a record; checked_at is the
+#                 only field that can say the build order itself stopped
+#   (STATUSPEND)  a published-but-not-serving binary is recorded as such
+#   (STATUSTMP)   the record is published by rename, leaving no staging file
+#
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
 #                 the launcher contains no build at all
@@ -277,6 +287,23 @@ CACHED
 }
 
 touch_source() { touch "$ROOT/services/helm/cmd/helm-svc/main.go"; }
+
+# A throwaway repo so the builder's `git rev-parse HEAD` has an answer. The
+# revisions are the whole point of the record, and a fixture with no repo would
+# let every revision assertion pass vacuously against the empty string. Local
+# and never pushed, so the identity here is scaffolding, not provenance.
+commit_fixture() { # <dir> -> the new revision on stdout
+    git -C "$1" init -q >/dev/null 2>&1 || return 1
+    git -C "$1" add -A >/dev/null 2>&1 || return 1
+    git -C "$1" -c user.email=fixture@example.invalid -c user.name=fixture \
+        -c commit.gpgsign=false commit -q -m "fixture" >/dev/null 2>&1 || return 1
+    git -C "$1" rev-parse HEAD 2>/dev/null
+}
+
+# `has`, not `//`: jq's alternative operator treats FALSE as absent, so a
+# `// ""` reader would report restart_pending=false as an empty string and the
+# cleared case would pass against the wrong value.
+status_field() { jq -r --arg k "$1" 'if has($k) then .[$k] else "" end | tostring' "$STATE/build-status.json" 2>/dev/null; }
 
 run_build() { # -> OUT ERR RC
     local err="$TMP/case$CASE/stderr-build"
@@ -805,6 +832,98 @@ eq "$(status_kind)" "unreadable" "(CONDEMNED) build-status says why"
 absent "$RECORD" "(CONDEMNED) the latch means nothing is rebuilt"
 hasnt "$(cat "$GCLOG")" "service restart" "(CONDEMNED) and the pending restart is not run onto it"
 present "$STATE/restart-pending" "(CONDEMNED) the marker is kept for a binary that can serve"
+
+# ==============================================================================
+# BUILD-STATUS RECORD — the seam the board's PACK rows read
+# ==============================================================================
+#
+# Nothing in the running system builds this binary, so a helm-svc older than
+# services/helm serves a stale dashboard in silence. This record is the only
+# thing that can say so, and it is read by services/helm itself — which means a
+# record that lies is a board that lies.
+
+# --- case: a successful build records what it built ---------------------------
+fixture
+REV_A="$(commit_fixture "$ROOT" || true)"
+[ -n "$REV_A" ] && ok "(STATUS) the fixture has a revision to record" \
+                || bad "(STATUS) could not create a fixture repo; the revision assertions would pass vacuously"
+run_build
+eq "$RC" 0 "(STATUS) the build exits 0"
+present "$STATE/build-status.json" "(STATUS) a record is written"
+eq "$(status_field component)" "helm" "(STATUS) it names the component"
+eq "$(status_field last_build_rc)" "0" "(STATUS) rc 0"
+eq "$(status_field source_rev)" "$REV_A" "(STATUS) source_rev is the revision the tick saw"
+eq "$(status_field binary_rev)" "$REV_A" "(STATUS) a successful build makes binary_rev match it"
+eq "$(status_field restart_pending)" "true" "(STATUS) a hand build publishes without restarting, and says so"
+[ -n "$(status_field built_at)" ] && ok "(STATUS) built_at is stamped" || bad "(STATUS) built_at is empty"
+[ -n "$(status_field checked_at)" ] && ok "(STATUS) checked_at is stamped" || bad "(STATUS) checked_at is empty"
+
+# --- case: a failed build keeps the last good binary in the record ------------
+# The binary that is still SERVING is the one the record must name. Moving
+# binary_rev to the revision that failed to build would report the cadence as
+# current at a commit it cannot run.
+BUILT_AT_A="$(status_field built_at)"
+# A content change, not just a touch: `git commit` with nothing staged fails,
+# and REV_B would come back empty with the assertions comparing '' to ''.
+echo '// second revision' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
+REV_B="$(commit_fixture "$ROOT" || true)"
+[ "$REV_B" != "$REV_A" ] && ok "(STATUSFAIL) the tree moved to a second revision" \
+                         || bad "(STATUSFAIL) the fixture did not advance; the gap cannot be shown"
+FAIL_BUILD=1
+run_build
+FAIL_BUILD=""
+eq "$RC" 1 "(STATUSFAIL) a failed build exits 1"
+eq "$(status_field last_build_rc)" "1" "(STATUSFAIL) the failure is recorded"
+eq "$(status_field source_rev)" "$REV_B" "(STATUSFAIL) source_rev follows the tree"
+eq "$(status_field binary_rev)" "$REV_A" "(STATUSFAIL) binary_rev stays on what is still serving"
+eq "$(status_field built_at)" "$BUILT_AT_A" "(STATUSFAIL) and so does built_at"
+
+# --- case: a tick with nothing to do still reports ----------------------------
+# checked_at is the only field a quiet tick moves, so it is the only thing that
+# can distinguish a healthy no-op from a build order that stopped running.
+fixture
+REV_C="$(commit_fixture "$ROOT" || true)"
+run_build
+rm -f "$RECORD"
+CHECKED_1="$(status_field checked_at)"
+sleep 1
+run_build
+eq "$RC" 0 "(STATUSNOOP) the no-op tick exits 0"
+absent "$RECORD" "(STATUSNOOP) and builds nothing"
+eq "$(status_field last_build_rc)" "0" "(STATUSNOOP) it still reports success"
+eq "$(status_field binary_rev)" "$REV_C" "(STATUSNOOP) find -newer proved the binary is this revision"
+[ "$(status_field checked_at)" != "$CHECKED_1" ] \
+    && ok "(STATUSNOOP) checked_at advanced — the build order is demonstrably alive" \
+    || bad "(STATUSNOOP) checked_at did not move; a stopped build order would look healthy"
+
+# --- case: published but not serving -----------------------------------------
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(STATUSPEND) a failed restart exits 1"
+eq "$(status_field restart_pending)" "true" "(STATUSPEND) the record says the new binary is not serving"
+eq "$(status_field last_build_rc)" "0" "(STATUSPEND) the BUILD did not fail — only the restart"
+: > "$GCLOG"
+run_build --deploy
+eq "$RC" 0 "(STATUSPEND) the retry tick exits 0"
+eq "$(status_field restart_pending)" "false" "(STATUSPEND) and the record clears once it is serving"
+
+# --- case: the record is published atomically ---------------------------------
+# A reader polls this file; catching it half-written would be a board that
+# reports a component it cannot parse.
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
+run_build
+if [ -n "$(find "$STATE" -maxdepth 1 -name '.build-status.*' -print -quit)" ]; then
+    bad "(STATUSTMP) a staging file survived the publish"
+else
+    ok "(STATUSTMP) no staging file survives the publish"
+fi
+grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
+    && ok "(STATUSTMP) the record is published by rename, never written in place" \
+    || bad "(STATUSTMP) the record is no longer published by rename"
 
 # ==============================================================================
 # STATIC GUARDS

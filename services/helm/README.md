@@ -831,6 +831,44 @@ If the binary is missing entirely the launcher exits non-zero with a message
 naming the builder, and the service sits `degraded` until the order builds one.
 It deliberately does not build its way out: it has 5 seconds.
 
+### The build-status record, and the PACK rows
+
+Everything above describes a seam the operator could not see. The launcher
+never builds, so a helm-svc older than `services/helm` renders a stale board
+without saying so, and the only reading of that was a one-shot script in the
+cutover runbook.
+
+Each build order now writes `<state_root>/build-status.json`, published by
+atomic rename:
+
+| field | says |
+|---|---|
+| `component` | which binary this record describes |
+| `built_at` | when the binary now on disk was produced |
+| `source_rev` | the revision the last build tick saw in the sources |
+| `binary_rev` | the revision the binary now on disk was built from |
+| `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
+| `restart_pending` | a published binary nothing is running yet |
+| `checked_at` | when the build order last ran at all |
+
+`source_rev` and `binary_rev` diverge exactly when a build failed and the last
+good binary kept serving, which is the gap worth showing. `checked_at` is the
+only field a quiet tick moves, so it is the only one that can say the build
+order itself has stopped.
+
+`internal/source.GatherPackHealth` reads every
+`<city>/.gc/services/*/build-status.json` — helm's own, gctk's, anything else
+the pack builds out of band — and `board.DerivePackHealth` bands each row once,
+in the model, so the dashboard and `helm-svc board` cannot disagree about what
+a row means. The rows ride the envelope as `pack_health`; the CLI prints them
+as `PACK` lines above the anchors, and the dashboard as a "pack builds"
+section. `--json` is untouched: it stays the ranked tiles array that
+`tmux-pick-helm.sh` runs `jq 'length'` over.
+
+Rows are unconditional whenever a record exists — a strip that appears only on
+trouble is a strip nobody learns to read. A city whose build orders have never
+run renders no section at all, rather than an all-clear nobody measured.
+
 ## Web UI
 
 `web/` is a Vite + React + TypeScript app — the operator's board surface —
