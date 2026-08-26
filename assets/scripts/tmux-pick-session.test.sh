@@ -14,42 +14,40 @@
 # to a private dir so its `$(dirname $0)/tmux-keeper-toggle.sh` sibling does
 # not resolve to the live one.
 #
-# What the cases are guarding, and why each was worth a test:
+# What each case pins:
 #
 #   (SLASHED)  a named session's GC_AGENT is a qualified address
 #              ("gascity/gc-toolkit.refinery"). Rig and display both come
-#              from it. This is the shape that always worked and the control
-#              for the other three.
-#   (POOL)     THE defect. A pool instance carries its own tmux session name
-#              in GC_AGENT ("gc-toolkit--gc-toolkit__polecat-1-pool", from
-#              template_resolve.go) rather than an address, and GC_ALIAS
+#              from it.
+#   (POOL)     a pool instance carries its own tmux session name in GC_AGENT
+#              ("gc-toolkit--gc-toolkit__polecat-1-pool", from
+#              template_resolve.go) rather than an address, and the GC_ALIAS
 #              beside it arrives empty in tmux's env. That value is non-empty
-#              and slashless, so the old branch order filed EVERY pool worker
-#              under a synthetic "city" rig before the session-name branch
-#              could run. Three live polecats under a rig that does not exist.
-#   (CITYNAMED) the reason the slashless branch exists at all, and what makes
-#              this a reorder rather than a deletion. `gc-toolkit__deacon`
-#              carries "gc-toolkit.deacon" — slashless, and its session name
-#              has no "--" — so it must still read "city". A fix that routes
-#              all slashless agents through the name would strand it.
+#              and slashless, so it satisfies the session-name rule and the
+#              slashless-GC_AGENT rule at once. The session-name rule has to
+#              be tried first, or a pool worker files under a rig named for
+#              no rig at all.
+#   (CITYNAMED) `gc-toolkit__deacon` carries "gc-toolkit.deacon", which is
+#              slashless, and its session name has no "--". It reads "city".
+#              That is what the slashless rule is for, so a derivation that
+#              sent every slashless agent through the session name would
+#              strand it.
 #   (MANUAL)   a hand-made session with no GC_AGENT and no "--" falls to the
 #              last rule: rig "city", display the raw session name.
 #   (MANUALSEP) a hand-made session that DOES carry "--" takes rule 2 like
 #              any other: the rig column and the display column never repeat
 #              the same rig.
 #   (COUNT)    the per-rig header counts the workers running in THAT rig.
-#              The count and the rig derivation share `rig`, so the phantom
-#              "city" took the polecats with it and every real rig read 0.
+#              The count and the rig derivation share `rig`, so a row that
+#              derives the wrong rig is also counted under the wrong header.
 #   (FOLD)     converse-N-pool and refinery-N-pool are pool workers with the
 #              same short lifetime as a polecat, so the default filter hides
 #              them and the per-rig header counts them. The predicate keys
-#              on the "-<n>-pool" suffix because that is the general shape:
-#              an enumeration of role substrings misses both of these, and
-#              misses every pooled role added after them.
-#   (KEEPNAMED) the other half of FOLD, and what stops the suffix rule from
-#              swallowing the long-lived sessions: `<rig>--<pack>__refinery`
-#              is a named refinery, not a pool instance, and must stay
-#              visible next to the `refinery-1-pool` that is hidden.
+#              on the "-<n>-pool" suffix because that is the general shape,
+#              and it holds for pooled roles added after these two.
+#   (KEEPNAMED) the bound on the suffix rule: `<rig>--<pack>__refinery` is a
+#              named refinery, not a pool instance, and stays visible beside
+#              the `refinery-1-pool` that is hidden.
 #   (NOUN)     the header says what it counts, and the set it counts is
 #              every pool worker in the rig, not only the polecats.
 #   (ALL)      --all is the escape hatch: everything hidden by default is
@@ -144,9 +142,10 @@ label_for() {
     printf '%s\n' "$1" | awk -v want="switch-client -t $2" '
         $0 == want { print p2; exit } { p2 = p1; p1 = $0 }'
 }
-# The two derived columns, pinned exactly rather than by substring: a display
-# that merely CONTAINS the right text (an unstripped "<rig>--" prefix in front
-# of it) is the defect one layer over, and a substring assertion passes it.
+# The two derived columns, pinned exactly rather than by substring. A display
+# that merely CONTAINS the right text, carrying an unstripped "<rig>--" prefix
+# in front of it, is still the wrong display, and a substring assertion passes
+# it.
 rig_col()  { printf '%s' "$1" | sed -e 's/^ *\[//' -e 's/\].*//'; }
 disp_col() { printf '%s' "$1" | sed -e 's/[[:space:]]*$//' -e 's/.*  //'; }
 # derives <menu> <session-name> — "<rig>|<display>", the whole derivation.
