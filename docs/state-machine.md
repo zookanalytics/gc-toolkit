@@ -262,9 +262,9 @@ stand in for comment ids. They rest on one assumption — that ids rise with
 visibility.
 
 **An outstanding comment routes to something.** It becomes a fix-pool rework
-child, or, when a human already holds the anchor (`merge_hold`,
-`gc.routed_to=human`, or a recorded `gc.takeaway`) or there is no fix pool, one
-`escalate.sh` visit per batch. Either way the filed bead holds the merge until
+child, or, when a human already holds the anchor (`merge_hold`, `rebase_hold`,
+`gc.routed_to=human`, or a recorded `gc.takeaway`) or there is nowhere to route
+work, one `escalate.sh` visit per batch. Either way the filed bead holds the merge until
 it closes — the rework child through a `blocks` edge, the visit through the
 `pr_number` stamp that `merge.sh`'s in-flight-holder probe reads. A visit takes
 no `blocks` edge: `escalate.sh` files it *depending on* its subject, so an edge

@@ -439,6 +439,17 @@ eq "$(meta new-2 pr_number)" "44" "the visit carries the PR, which is what holds
 hasnt "$(grep -F '|blocks|H1' "$STUB_DEPS" || true)" "new-2" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "no work was routed under the human's decision"
 
+echo "# …and so does rebase_hold: a child told to answer comments may rewrite the branch"
+store "[$(anchor H5 54 ',"rebase_hold":"true"')]"
+printf '%s' "$(prview 54 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_54.json"
+echo '[]' > "$GH_DIR/reviews_54.json"
+printf '[{"id":8400,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_54.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run)
+has "$(cat "$STUB_ESC_LOG")" "rebase_hold freezes the branch" "an operator branch freeze routes to the human, not the pool"
+eq "$(meta H5 pr_comment_disposition)" "visit:new-2" "…and the visit is what is recorded"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…no work dispatched against the frozen branch"
+
 echo "# …a visit that did not take the stamp is NOT watermarked past"
 store "[$(anchor H4 53 ',"gc.routed_to":"human"')]"
 printf '%s' "$(prview 53 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_53.json"

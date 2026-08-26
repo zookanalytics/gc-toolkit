@@ -557,22 +557,25 @@ GATES
   # Reached only when the anchor is otherwise clear: the conflict and stale-gate
   # arms above already left a child in flight holding the merge, and the comments
   # get their own dispatch on the pass after that child lands. Whatever this
-  # routes to BLOCKS the anchor, so the merge waits on the answer, and the
-  # watermarks move only once the routing has read back — a comment nothing
-  # answered can never fall below the mark.
+  # routes to holds the merge until it closes, and the watermarks move only once
+  # the routing has read back — a comment nothing answered can never fall below
+  # the mark.
   if [ "$posture" = "commented" ]; then
     fix_branch="${head_ref:-$branch}"
     routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     takeaway=$(printf '%s' "$row" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
     # A human already holding this anchor gets the comments; filing work under a
-    # live human decision fights it. Absent that hold, and with a pool to route
-    # to, the comments become work.
-    if is_held "$hold" || [ "$routed" = "human" ] || [ -n "$takeaway" ] \
-       || [ -z "$FIX_POOL" ] || [ -z "$fix_branch" ]; then
-      choice="visit"
-    else
-      choice="rework"
-    fi
+    # live human decision fights it, and a child told to answer comments may have
+    # to bring the branch current, which rebase_hold forbids. Absent any of that,
+    # and with a pool to route to, the comments become work.
+    why=""
+    [ -n "$fix_branch" ] || why="the PR head branch is unresolved"
+    [ -n "$FIX_POOL" ]   || why="no fix pool is configured"
+    is_held "$rhold"        && why="rebase_hold freezes the branch"
+    is_held "$hold"         && why="merge_hold is set"
+    [ "$routed" = "human" ] && why="the anchor is already routed to a human"
+    [ -n "$takeaway" ]      && why="a sitting recorded a takeaway on it"
+    if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
     DISP=""
     if [ "$choice" = "rework" ]; then
       # Same allowlist as the CONFLICTING arm's `stale-base-dispatch-mode`: the
@@ -635,13 +638,9 @@ GATES
       fi
       DISP="rework:$CFIX"
     else
-      why="no fix pool is configured"
-      is_held "$hold" && why="merge_hold is set"
-      [ "$routed" = "human" ] && why="the anchor is already routed to a human"
-      [ -n "$takeaway" ] && why="a sitting recorded a takeaway on it"
       VKEY="pr-comments.$num.$max_r.$max_c"
       escalate "$id" "$VKEY" \
-        "PR#$num ($live_url) carries review comments nothing has answered (highest: review $max_r, comment $max_c; answered through review $rwm, comment $cwm), and the city cannot route work for them because $why. Answer them on the PR, file the rework by hand, or close this visit once they are addressed — the anchor is blocked until then."
+        "PR#$num ($live_url) carries review comments nothing has answered (highest: review $max_r, comment $max_c; answered through review $rwm, comment $cwm), and the city cannot route work for them because $why. Answer them on the PR, file the rework by hand, or close this visit once they are addressed — the merge is held until then."
       VID=$(visit_for "$id" "$VKEY") || VID=""
       if [ -z "$VID" ]; then
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
