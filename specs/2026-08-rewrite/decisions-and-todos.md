@@ -100,10 +100,10 @@ description: The operator's rulings on the nine attention items from the rewrite
      75324 reclaimable bytes. There is no backlog to justify pointing
      destructive `DROP DATABASE` work at a pool that holds kill authority.
      If the duty is ever wanted back, the fix is the conversion every
-     sibling order already got: `mol-dog-stale-db`'s formula body is a
-     single deterministic shell step with two numeric thresholds and no LLM
-     judgment, which is exactly what `mol-dog-backup` converted away from.
-     That file is builtin pack source under
+     sibling order already got. `mol-dog-stale-db`'s formula body is
+     already a single deterministic shell step whose only parameters are
+     two numeric thresholds, so it needs an agent no more than
+     `mol-dog-backup` did. That file is builtin pack source under
      `rigs/gascity/examples/bd/dolt/`, so it would land as a gascity bead,
      not here. Filed as gascity bead gc-t7g1h at low priority; it is an
      operator call, not a repair.
