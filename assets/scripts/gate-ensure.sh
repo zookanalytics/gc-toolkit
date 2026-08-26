@@ -11,6 +11,10 @@
 # head> (signoff.sh binds the verdict) and fix_target_pool (rework route).
 # An unstamped orphan is adopted by its title, never twinned; a failed
 # sling is never retried in-pass (a re-pour mints a second workflow root).
+# Reach carried by the pour ALONE is qualified before it counts: a review
+# whose workflow is spent (every step closed but the finalizer) can never
+# produce a verdict, so it is escalated through escalate.sh under one deduped
+# situation key rather than holding the anchor in silence.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -42,6 +46,8 @@ esac
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
+ESCALATOR="$SCRIPTS_DIR/escalate.sh"
+WEDGE_KEY="review-wedge"
 
 # Origin pin for the live-head read; optional — an unresolvable origin or a
 # missing gh degrades to treating a present marker as satisfiable.
@@ -73,12 +79,18 @@ bd_list() {
 }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+# The step/root reads below must see closed rows too: a spent chain is
+# recognised by its closures, and one repeated --status flag keeps only the
+# last value, so both halves ride a single comma list.
+ALL_STATUSES="$LIVE_STATUSES,closed"
 
 # A live review bead already owed to <anchor> for gate <g>? Echoes its id.
 # Poured (gc.execution_routed_to), routed, or claimed counts; an open,
 # unclaimed, unrouted, unpoured one is stranded — echoed with a "stranded "
-# tag for the repair arm. Non-zero = the ledger could not answer; the caller
-# holds the dispatch.
+# tag for the repair arm. Reach that rests on the pour ALONE is echoed with a
+# "poured " tag: nothing but that workflow can raise the gate, so the wedge
+# arm has to ask whether it is still running. Non-zero = the ledger could not
+# answer; the caller holds the dispatch.
 inflight_review() { # <anchor-id> <gate>
   local raw
   raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
@@ -86,12 +98,71 @@ inflight_review() { # <anchor-id> <gate>
     [ .[]
       | select(((.metadata.task_kind // "") | tostring) == "review")
       | select(((.metadata.check_name // "") | tostring) == $g)
-      | . + {reach: (((((.metadata["gc.routed_to"] // "") | tostring) != "")
-                      or ((((.metadata["gc.execution_routed_to"]) // "") | tostring) != "")
-                      or (((.assignee // "") | tostring) != "")))} ]
+      | . + {routed:  (((.metadata["gc.routed_to"] // "") | tostring) != ""),
+             poured:  (((.metadata["gc.execution_routed_to"] // "") | tostring) != ""),
+             claimed: (((.assignee // "") | tostring) != "")}
+      | . + {reach: (.routed or .poured or .claimed)} ]
     | sort_by(if .reach then 0 else 1 end)
     | (.[0] // empty)
-    | (if .reach then .id else ("stranded " + .id) end)' 2>/dev/null
+    | (if (.reach | not) then ("stranded " + .id)
+       elif (.poured and (.routed | not) and (.claimed | not)) then ("poured " + .id)
+       else .id end)' 2>/dev/null
+}
+
+# The roots of every workflow poured over <review-bead>, one per line, via the
+# tracking convoy each pour mints. A re-pour mints a SECOND root, so all of
+# them must be judged — one spent root proves nothing while a sibling runs.
+# Non-zero = the linkage could not be read.
+pour_roots() { # <review-bead-id>
+  local raw ids rows out=""
+  raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  ids=$(printf '%s' "$raw" | jq -r '
+    .[] | select((.issue_type // .type // "") == "convoy") | .id' 2>/dev/null)
+  [ -n "$ids" ] || return 1
+  while IFS= read -r c; do
+    [ -n "${c:-}" ] || continue
+    rows=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$ALL_STATUSES") || return 1
+    out="$out$(printf '%s' "$rows" | jq -r '.[].id' 2>/dev/null)
+"
+  done <<CONVOYS
+$ids
+CONVOYS
+  out=$(printf '%s' "$out" | sed '/^$/d')
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+# Is every workflow poured over <review-bead> SPENT — each step closed but the
+# finalizer, which is the control-dispatcher's? A spent chain is terminal:
+# nothing re-offers a closed step, so no verdict can still be coming. An open
+# step is the opposite reading — a live claim, or a husk the re-offer path
+# will pick up — and either way not this arm's business.
+# Echoes the spent root. rc: 0 spent · 2 still driven · 1 unanswerable.
+pour_spent() { # <review-bead-id>
+  local roots rows n live last=""
+  roots=$(pour_roots "$1") || return 1
+  while IFS= read -r r; do
+    [ -n "${r:-}" ] || continue
+    rows=$(bd_list --metadata-field "gc.root_bead_id=$r" --status="$ALL_STATUSES") || return 1
+    n=$(printf '%s' "$rows" | jq -r 'length' 2>/dev/null)
+    case "$n" in ''|*[!0-9]*) return 1 ;; esac
+    # A root whose steps do not enumerate says nothing about the pour.
+    [ "$n" -gt 0 ] || return 1
+    live=$(printf '%s' "$rows" | jq -r '
+      [ .[]
+        | select(((((.metadata["gc.step_ref"] // "") | tostring)
+                   | endswith(".workflow-finalize")) | not))
+        | select(((.status // "open") | tostring) != "closed") ] | length' 2>/dev/null)
+    case "$live" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$live" -gt 0 ] && return 2
+    last="$r"
+  done <<ROOTS
+$roots
+ROOTS
+  [ -n "$last" ] || return 1
+  printf '%s' "$last"
 }
 
 # The pour retires gc.routed_to and stamps gc.execution_routed_to in its
@@ -134,7 +205,7 @@ for MR in pre_open_gate pull_request; do
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-stamped=0; dispatched=0; held=0; unsafe=0; skipped=0
+stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -229,6 +300,57 @@ while IFS= read -r row; do
             echo "$PROG: $id stranded review $rid re-sling to $REVIEW_POOL did not read back; merge stays held, retry next pass" >&2
             skipped=$((skipped + 1))
           fi ;;
+        "poured "*)
+          # Reach rests on the pour alone: no route left for the pool to
+          # re-claim, no assignee still holding it. If that workflow is spent
+          # the gate is wedged — the anchor holds for good with nothing open
+          # to say why, which is the one failure this arm cannot leave silent.
+          # The hold for a second sighting is not politeness: mol-review's
+          # failure arm closes its chain BEFORE it restores the route, so a
+          # single read can catch a recovery mid-write and escalate a review
+          # that repairs itself moments later.
+          rid="${FOUND#poured }"
+          spent_root=""
+          spent_rc=0
+          spent_root=$(pour_spent "$rid") || spent_rc=$?
+          case "$spent_rc" in
+            2) : ;;
+            0)
+              row=$(gc bd show "$rid" --json 2>/dev/null | scrub)
+              seen=$(printf '%s' "$row" | jq -r '.[0].metadata.wedge_seen_root // empty' 2>/dev/null)
+              rpool=$(printf '%s' "$row" | jq -r '
+                .[0].metadata.review_pool // .[0].metadata["gc.execution_routed_to"] // empty' 2>/dev/null)
+              [ -n "$rpool" ] || rpool="$REVIEW_POOL"
+              if [ "$seen" != "$spent_root" ]; then
+                gc bd update "$rid" --set-metadata wedge_seen_root="$spent_root" >/dev/null 2>&1
+                echo "$PROG: $id gate '$g' review $rid looks WEDGED (workflow $spent_root spent, no verdict, no route); holding one pass before escalating"
+              elif [ ! -x "$ESCALATOR" ]; then
+                echo "$PROG: $id gate '$g' review $rid is WEDGED (workflow $spent_root spent) but $ESCALATOR is missing; repair by hand: gc bd update $rid --set-metadata gc.routed_to=$rpool" >&2
+              else
+                "$ESCALATOR" --subject "$rid" --key "$WEDGE_KEY" --message \
+"Review $rid is wedged: its poured workflow finished without a verdict, so gate '$g' on $id is held with nothing driving it.
+
+Anchor:   $id — $title
+Gate:     check.$g is ${marker:-absent}
+Branch:   $branch -> $target
+Review:   $rid (open, poured to $rpool; no route, no assignee)
+Workflow: $spent_root — every step closed but the finalizer
+
+The reviewing agent closed its step chain without calling signoff.sh and
+without restoring the review bead's route, so no verdict can still be coming
+and the merge is held indefinitely.
+
+Two repairs, either of which clears the hold:
+  return it to the pool as a formula-less review, the shape mol-review
+  documents for exactly this recovery —
+    gc bd update $rid --set-metadata gc.routed_to=$rpool
+  or drop the abandoned round and let the next pass dispatch a fresh review —
+    gc bd close $rid" >/dev/null \
+                  && { wedged=$((wedged + 1)); echo "$PROG: $id gate '$g' review $rid is WEDGED (workflow $spent_root spent); escalated [$WEDGE_KEY]"; } \
+                  || echo "$PROG: $id gate '$g' review $rid is WEDGED (workflow $spent_root spent) but the escalation did not file; retry next pass" >&2
+              fi ;;
+            *) echo "$PROG: $id gate '$g' review $rid pour-liveness probe unreadable; no escalation this pass (merge stays held)" >&2 ;;
+          esac ;;
         *) : ;;  # live review in flight — it will raise the gate
       esac
       continue
@@ -317,7 +439,7 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
   exit "$UNSAFE_RC"
