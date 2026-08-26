@@ -296,9 +296,18 @@ The loop, every visit:
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
    "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed, ≤140 chars>" --by converse
+   LC=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
+   done
+   if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — this hold records prose and no state"
+   elif [ "$("$LC" state "$ITEM" 2>/dev/null)" = "unanchored" ]; then
+     "$LC" transition "$ITEM" --to held --route human \
+       || echo "HELD TRANSITION FAILED on $ITEM — the hold is prose-only; re-run it before you wait"
+   fi
    ```
    Stamp BEFORE you wait, not after. This session can be reaped mid-hold
-   (**The reap**, below) and the stamp is the only thing that survives
+   (**The reap**, below) and this pair of writes is all that survives
    it: reaped, the item still says what the sitting was waiting for and
    when. Unstamped, a reaped hold is indistinguishable from one that
    never happened — and it is also what BRINGS THE HOLD BACK: the
@@ -309,6 +318,19 @@ The loop, every visit:
    not here, and when you resume a hold and hold again, RE-STAMP it — a
    fresh `gc.takeaway_at` is what earns the next visit if this session is
    reaped too.
+
+   **The takeaway is the sentence; `held` is the state.** A takeaway is
+   free text, so no invariant can assert anything about it, and for a
+   while the only thing that could catch a hold outliving its sitting was
+   an external sweep reading for the word. The transition records the
+   same wait as a declared state that names the person it waits on, in
+   one write, and every reader sees the route without parsing prose.
+   Where `$ITEM` already carries an anchor state the transition is
+   skipped, and refused by the writer if attempted anyway: `merge.sh`,
+   `gate-ensure.sh` and `pr-facts.sh` each enumerate anchors by that
+   state, so moving one to `held` would drop it from all three for as
+   long as the hold lasts. An anchored item is already visible. An
+   unanchored one was not, which is the defect this closes.
 
    (The writer is **searched for**, never assumed:
    `$GC_RIG_ROOT` is the rig that IMPORTED this agent, not the gc-toolkit
@@ -395,6 +417,16 @@ The loop, every visit:
    gc bd show "$ITEM" --json | tr -d '[:cntrl:]' \
      | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
      || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
+   # Ending with a RULING clears the hold a previous sitting recorded. Ending
+   # while still waiting does not: `held` is then the true state.
+   LC=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
+   done
+   if [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" = "held" ]; then
+     "$LC" transition "$ITEM" --to unanchored --route "<the pool that owns it now, or human>" \
+       || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
+   fi
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    ```

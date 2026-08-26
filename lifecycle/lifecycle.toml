@@ -16,10 +16,11 @@ states = [
   "retargeted",
   "blocked",
   "refused_false_completion",
+  "held",
 ]
 # States that also route the bead to a human (lifecycle.sh stamps
 # gc.routed_to=human in the same atomic update).
-human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"]
+human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion", "held"]
 # States the merge cadence drives and no queue offers. lifecycle.sh clears
 # gc.routed_to in the same atomic update unless --route is given or the bead
 # already rests on park_route. A pool route on one of these is demand for work
@@ -69,6 +70,10 @@ meaning = "recorded existing_pr unusable; routed to human"
 status = "open"
 meaning = "no commits on branch; routed to human"
 
+[states.held]
+status = "open"
+meaning = "a sitting is waiting on an operator decision; routed to human"
+
 # Transitions. Every edge names its writer; lifecycle.sh performs the write.
 # A self-edge (from == to) is always legal: an idempotent re-record.
 [[transition]]
@@ -95,6 +100,14 @@ writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable; via lifecycle
 from = "unanchored"
 to = "refused_false_completion"
 writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle.sh)"
+
+# `held` is entered only from `unanchored`. merge.sh, gate-ensure.sh and
+# pr-facts.sh each enumerate anchors by their gating state, so moving one here
+# to record a conversation would drop it from all three for the hold's length.
+[[transition]]
+from = "unanchored"
+to = "held"
+writer = "agents/converse, sitting hold (via lifecycle.sh)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -150,6 +163,11 @@ writer = "human"
 from = "refused_false_completion"
 to = "unanchored"
 writer = "human"
+
+[[transition]]
+from = "held"
+to = "unanchored"
+writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
 
 [gates]
 # check_set: comma list of gate names on the anchor. Default stamped by
