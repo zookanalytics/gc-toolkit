@@ -9,9 +9,12 @@
 # converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold; the
-# dispatch_count cap (and the one dispatch a head move past an exception buys
-# through it); and the review-wedge escalation (exec-stamp-only reach
-# whose poured workflow is spent -> one deduped visit, held one pass first).
+# per-gate dispatch_count cap (and the one dispatch a head move past an
+# exception buys through it); the review-wedge escalation (exec-stamp-only
+# reach whose poured workflow is spent -> one deduped visit, held one pass
+# first); and the multi-gate check_set — the declared default codex,triage,
+# one dispatch per gate, and the widened set's new gate picked up on the next
+# pass.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,11 +23,25 @@ trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
 harness_init
+# An ambient GC_RIG adds `--rig <name>` to every sling, so the log assertions
+# below only hold when the suite owns the variable.
+unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
 
 # Private scripts dir: the SUT plus a body-emitter stub (interface unchanged).
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/gate-ensure.sh"
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
+cat > "$SD/review-dispatch-body.sh" <<'EMIT'
+#!/usr/bin/env bash
+cn=""; note=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check-name) cn="${2:-}"; shift 2 ;;
+    --note) note="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "METHOD gate=$cn${note:+ note: $note}"
+EMIT
 chmod +x "$SD/review-dispatch-body.sh"
 # escalate.sh stub: records subject/key/message so the wedge arm's one-visit
 # contract can be asserted without a live converse pool.
@@ -41,6 +58,8 @@ SUT="$SD/gate-ensure.sh"
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
 run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
+# No --default: the caller-less form, which is what pins the declared default.
+run_declared() { "$SUT" --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
 
 anchor() { # id mr checkset marker branch extra-json
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"main"%s%s%s}}' \
@@ -70,9 +89,34 @@ eq "$(meta "$rid" 'gc.routed_to')" "<absent>" "the pour retired gc.routed_to (ne
 eq "$(meta "$rid" review_pool)" "$POOL" "durable route copy stamped in the metadata stamp"
 grep -qxF "$rid|blocks|A1" "$STUB_DEPS" && ok "review blocks the anchor" || bad "blocks edge missing"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL $rid --on mol-review" "the review formula is attached by an explicit gc sling --on (no default hijack)"
-eq "$(meta A1 dispatch_count)" "1" "dispatch_count incremented on the anchor"
+eq "$(meta A1 'dispatch_count.codex')" "1" "the gate's own dispatch counter is incremented on the anchor"
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
+has "$d" "gate=codex" "…and the emitter was told which gate's method to name"
+
+echo "# the declared default pairs codex with triage"
+store "[$(anchor T1 pre_open_gate "" "" polecat/t1)]"
+echo "sha-t1" > "$GH_DIR/head_polecat_t1"
+out=$(run_declared); rc=$?
+eq "$rc" 0 "the declared-default pass exits 0"
+eq "$(meta T1 check_set)" "codex,triage" "an empty check_set is stamped codex,triage"
+has "$out" "2 reviews dispatched" "each declared gate gets its own review"
+gates=$(jq -r '[.[] | select(.metadata.anchor_bead == "T1") | .metadata.check_name] | sort | join(",")' "$STUB_STORE")
+eq "$gates" "codex,triage" "the two reviews name the two gates — the comma list is split per gate, never fused"
+eq "$(meta T1 'dispatch_count.codex')" "1" "codex spends its own counter"
+eq "$(meta T1 'dispatch_count.triage')" "1" "…and triage spends its own"
+eq "$(meta T1 dispatch_count)" "2" "the anchor-wide total counts both dispatches of the pass"
+
+echo "# a widened check_set dispatches only the gate that is not yet satisfied"
+store "[$(anchor T2 pull_request "codex,triage,arch" "green@sha-t2" polecat/t2 ',"check.triage":"green@sha-t2"')]"
+echo "sha-t2" > "$GH_DIR/head_polecat_t2"
+: > "$STUB_GC_LOG"
+out=$(run_declared)
+has "$out" "1 reviews dispatched" "the two green gates are settled; the gate triage added is dispatched"
+arid=$(jq -r '.[] | select(.metadata.anchor_bead == "T2") | .id' "$STUB_STORE")
+eq "$(meta "$arid" check_name)" "arch" "the dispatched review is for the added gate"
+ad=$(jq -r --arg id "$arid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
+has "$ad" "gate=arch" "…and its dispatch body names the arch method"
 
 echo "# stamp that does not persist holds the merge (rc=3)"
 store "[$(anchor A2 pull_request "" "" polecat/a2)]"
@@ -193,12 +237,23 @@ out=$(run)
 has "$out" "merge_hold is set (operator gate); no dispatch" "an operator hold suppresses the dispatch"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
 
-echo "# dispatch_count cap"
-store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"3"')]"
+echo "# dispatch_count cap, counted per gate"
+store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count.codex":"3"')]"
 echo "sha-f1" > "$GH_DIR/head_polecat_f1"
 out=$(run)
 has "$out" "cap of 3" "the round cap declines further dispatches"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
+
+echo "# …and one gate's spent rounds never cap another's"
+store "[$(anchor F2 pull_request "codex,triage" "" polecat/f2 ',"dispatch_count.codex":"3"')]"
+echo "sha-f2" > "$GH_DIR/head_polecat_f2"
+out=$(run)
+has "$out" "cap of 3" "codex is still capped"
+has "$out" "1 reviews dispatched" "…while triage, which has spent nothing, is dispatched"
+frid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$frid" check_name)" "triage" "the dispatched review is the uncapped gate's"
+eq "$(meta F2 'dispatch_count.triage')" "1" "the counter it spends is its own"
+eq "$(meta F2 'dispatch_count.codex')" "3" "…and the capped gate's is untouched"
 
 echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
 store "[$(anchor H1 pull_request codex "" polecat/h1)]"

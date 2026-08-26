@@ -72,6 +72,12 @@ canon_pr_url() {
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
+# A check_set as one gate per line. Deleting only [:blank:] is load-bearing:
+# [:space:] would take the newlines the comma-split just made and fuse
+# "codex,triage" into one gate name nothing declares — every marker lookup
+# below would then miss, silently.
+gate_tokens() { printf '%s' "${1:-}" | tr ',' '\n' | tr -d '[:blank:]' | sed '/^$/d'; }
+
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
@@ -190,7 +196,7 @@ while IFS= read -r row; do
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(gate_tokens "$checkset")
 GATES
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
          --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
@@ -343,7 +349,7 @@ GATES
           fi ;;
       esac
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(gate_tokens "$checkset")
 GATES
   fi
   if [ -n "$stale_gate" ]; then
@@ -383,7 +389,7 @@ GATES
       echo "$PROG: $id adopting unstamped re-review orphan $RID for PR#$num (created by a prior pass whose stamp failed)"
     else
       body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$NOTE" 2>/dev/null) || body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --check-name "$stale_gate" --note "$NOTE" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" | gc bd create "$REV_TITLE" -t task --body-file - --json 2>/dev/null \
           | jq -r '.id // empty' 2>/dev/null)
@@ -438,7 +444,7 @@ GATES
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
     [ "$m" = "green@$head_oid" ] || all_green=0
   done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(gate_tokens "$checkset")
 GATES
   rd=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
   if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \

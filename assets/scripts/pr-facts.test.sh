@@ -22,7 +22,18 @@ harness_init
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
+cat > "$SD/review-dispatch-body.sh" <<'EMIT'
+#!/usr/bin/env bash
+cn=""; note=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check-name) cn="${2:-}"; shift 2 ;;
+    --note) note="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "METHOD gate=$cn${note:+ note: $note}"
+EMIT
 chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 SUT="$SD/pr-facts.sh"
@@ -70,6 +81,14 @@ has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
 eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
 eq "$(meta F3 'check.codex')" "<absent>" "the pre-retarget gate marker is cleared"
+
+echo "# …and EVERY declared gate's marker is cleared, not one fused token"
+store "[$(anchor F3b 25 ',"check_set":"codex,triage,arch","check.triage":"green@sha-25","check.arch":"green@sha-25"')]"
+printf '%s' "$(prview 25 OPEN CLEAN MERGEABLE ',"x":1')" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_25.json"
+out=$(run)
+eq "$(meta F3b 'check.codex')" "<absent>" "codex's marker is cleared"
+eq "$(meta F3b 'check.triage')" "<absent>" "triage's marker is cleared"
+eq "$(meta F3b 'check.arch')" "<absent>" "arch's marker is cleared"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"
@@ -170,6 +189,8 @@ eq "$(meta new-2 review_pool)" "$REV" "re-review carries the durable review_pool
 has "$(cat "$STUB_GC_LOG")" "sling $REV new-2 --on mol-review" "the review formula is attached by an explicit gc sling --on"
 eq "$(meta new-2 'gc.execution_routed_to')" "$REV" "the pour stamped gc.execution_routed_to (the dispatch read-back)"
 grep -qxF "new-2|blocks|F9" "$STUB_DEPS" && ok "re-review blocks the anchor" || bad "re-review blocks edge missing"
+d=$(jq -r '.[] | select(.id == "new-2") | .description' "$STUB_STORE")
+has "$d" "gate=codex" "the dispatch body names the STALE gate's method, not a fixed one"
 
 echo "# …dedup on second pass"
 out=$(run)
@@ -192,6 +213,15 @@ printf '%s' "$(prview 22 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_22.json"
 out=$(run)
 hasnt "$out" "filed re-review" "a verdict bound to the live head dispatches nothing"
 
+echo "# a non-codex gate going stale carries ITS method into the re-review"
+store "[$(anchor F9d 27 ',"check_set":"codex,triage,arch","check.codex":"green@sha-27","check.triage":"green@sha-27","check.arch":"green@sha-OLD"')]"
+printf '%s' "$(prview 27 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_27.json"
+out=$(run)
+arid=$(jq -r '[.[] | select(.metadata.anchor_bead == "F9d") | .id] | .[0] // ""' "$STUB_STORE")
+eq "$(meta "$arid" check_name)" "arch" "the re-review is filed for the gate that went stale"
+d=$(jq -r --arg id "$arid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
+has "$d" "gate=arch" "…and its body names that gate's method"
+
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"
 printf '%s' "$(prview 20 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_20.json"
@@ -201,6 +231,14 @@ out=$(run)
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"
+
+echo "# …and a multi-gate check_set still reads all-green"
+store "[$(anchor D1b 26 ',"check_set":"codex,triage","check.triage":"green@sha-26"')]"
+printf '%s' "$(prview 26 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_26.json"
+printf '[{"id":904,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_26.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "reviews/904/dismissals" "two green gates read as all-green (the split is per gate)"
 
 echo "# …a human's CHANGES_REQUESTED is never dismissed"
 store "[$(anchor D2 21)]"

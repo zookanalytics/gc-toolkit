@@ -51,7 +51,7 @@ out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
 eq "$order" "gate-ensure.sh,pr-open.sh,merge.sh,pr-facts.sh,convoy-graduate.sh" "the five arms ran in the load-bearing order"
-has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
+has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the declared default + derived review AND fix pools"
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
 facts_line=$(grep '^pr-facts' "$ARM_LOG")

@@ -17,6 +17,8 @@
 # situation key rather than holding the anchor in silence.
 # A head move past a recorded exception@ buys ONE dispatch through the
 # dispatch_count cap.
+# The declared default is codex,triage: codex is the standing correctness
+# review and triage decides which dedicated gates the change also needs.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -31,13 +33,13 @@ UNSAFE_RC=3
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
-DEFAULT_CHECK_SET="codex"
+DEFAULT_CHECK_SET="codex,triage"
 REVIEW_FORMULA="mol-review"
 REVIEW_POOL=""
 FIX_POOL=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)     DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
+    --default)     DEFAULT_CHECK_SET="${2:-codex,triage}"; shift 2 ;;
     --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
     --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
     *) shift ;;
@@ -47,7 +49,7 @@ done
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
 case "$(cs_canon "$DEFAULT_CHECK_SET")" in
-  '')       DEFAULT_CHECK_SET="codex" ;;
+  '')       DEFAULT_CHECK_SET="codex,triage" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
 
@@ -248,7 +250,9 @@ while IFS= read -r row; do
 
   head=""
   head_read=0
-  gates=$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+  # Delete only [:blank:] after the split: [:space:] takes the newlines the
+  # split just made, fusing "codex,triage" into one gate name nothing declares.
+  gates=$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:blank:]' | sed '/^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in
@@ -372,13 +376,16 @@ Two repairs, either of which clears the hold:
       echo "$PROG: $id gate '$g' is armed but no --review-pool was given; no dispatch (merge is HELD until one is)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # Convergence cap: dispatch_count on the anchor bounds review rounds; at the
-    # cap the merge stays held and signoff.sh records the exception verdict.
+    # Convergence cap: dispatch_count.<gate> on the anchor bounds this GATE's
+    # review rounds; at the cap the merge stays held and signoff.sh records the
+    # exception verdict. Per gate, because one anchor-wide counter lets a
+    # multi-gate check_set spend its whole budget on first dispatches and then
+    # refuse every re-gate — a merge held forever with nothing in flight.
     # That exception IS the record of the spend, so the rounds behind it cannot
     # also refuse a dispatch the head move has since earned. Nothing self-feeds:
     # signoff's cap arm files no rework child, so only an actor outside the
     # cadence can move that head again.
-    dcount=$(meta_of "$row" dispatch_count)
+    dcount=$(meta_of "$row" "dispatch_count.$g")
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
     if [ "$dcount" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
       if [ "$stale_exception" = 0 ]; then
@@ -403,7 +410,7 @@ Two repairs, either of which clears the hold:
       echo "$PROG: $id adopting unstamped review orphan $RID for gate '$g' (created by a prior pass whose stamp failed)"
     else
       body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$why" 2>/dev/null) || body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --check-name "$g" --note "$why" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" \
           | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
@@ -446,7 +453,16 @@ Two repairs, either of which clears the hold:
       echo "$PROG: WARN review $RID pour did not read back; dispatch NOT counted, merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
-    gc bd update "$id" --set-metadata dispatch_count="$((dcount + 1))" >/dev/null 2>&1 || true
+    # dispatch_count.<g> is the cap's counter. The bare key stays as the
+    # anchor-wide total: packs/gascity-keeper keys its resume-handoff token on
+    # it, and a token that always reads 0 stops discriminating rounds. Read it
+    # LIVE rather than from $row — with more than one gate armed, this pass has
+    # already incremented it since the row was enumerated.
+    total=$(gc bd show "$id" --json 2>/dev/null | scrub \
+      | jq -r '.[0].metadata.dispatch_count // empty' 2>/dev/null)
+    case "$total" in ''|*[!0-9]*) total=0 ;; esac
+    gc bd update "$id" --set-metadata "dispatch_count.$g=$((dcount + 1))" \
+      --set-metadata "dispatch_count=$((total + 1))" >/dev/null 2>&1 || true
     gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
     gc session nudge "$REVIEW_POOL" "Review bead $RID for anchor $id" >/dev/null 2>&1 || true
     dispatched=$((dispatched + 1))

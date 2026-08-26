@@ -4,6 +4,8 @@
 # assertions of the retired signoff-round-cap and first-round-review-body
 # suites: the cap writes exception EXACTLY ONCE and never also unsets the
 # marker; the posted artifact carries the anchor link; --approve is NEVER used.
+# Also covers the triage widening (monotonic union, closed menu, per-gate
+# justification, waiver warrants) and the escalate verdict.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -328,15 +330,30 @@ seed_cap_deps c1
 GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
 eq "$(meta tk-anc check.codex)" "exception@aaa111" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
 
-echo "# dispatch_count on the ANCHOR (gate-ensure's writer) also counts"
+echo "# dispatch_count.<gate> on the ANCHOR (gate-ensure's writer) also counts"
 reset "$ANCHOR_PR"
-jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+jq -c 'map(if .id == "tk-anc" then .metadata["dispatch_count.codex"] = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "anchor dispatch_count past the cap trips it with no children"
+eq "$(meta tk-anc check.codex)" "exception@aaa111" "anchor dispatch_count.<gate> past the cap trips it with no children"
 reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+jq -c 'map(if .id == "rv-1" then .metadata["dispatch_count.codex"] = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "a stray dispatch_count on the REVIEW bead does not cap (wrong writer)"
+
+echo "# the counter is per gate: another gate's rounds never cap this one"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "tk-anc" then .metadata["dispatch_count.arch"] = "9" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "<absent>" "arch's spent rounds do not cap codex"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and codex still files its rework child"
+eq "$(meta fix-1 check_name)" "codex" "the rework child names the gate whose findings it answers"
+
+echo "# rework children are counted per gate too"
+reset "$ANCHOR_PR" "$(printf ',{"id":"c1","status":"closed","assignee":"","metadata":{"source_review_bead":"r1","check_name":"arch"},"notes":""}')$(printf ',{"id":"c2","status":"closed","assignee":"","metadata":{"source_review_bead":"r2","check_name":"arch"},"notes":""}')$(printf ',{"id":"c3","status":"open","assignee":"","metadata":{"source_review_bead":"r3","check_name":"arch"},"notes":""}')"
+printf 'c1|tk-anc|blocks\nc2|tk-anc|blocks\nc3|tk-anc|blocks\n' > "$STUB_DEPS"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "<absent>" "three arch rework rounds do not cap the codex gate"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and codex files its first child"
 
 echo "# an unreadable dep list never caps"
 reset "$ANCHOR_PR"
@@ -366,6 +383,148 @@ reset "$ANCHOR_PR"
 STUB_AUTOMERGE_JSON='{"autoMergeRequest":{"enabledAt":"x"}}' "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "armed auto-merge blocks the dismissal"
 unset STUB_PR_HEAD STUB_REVIEWS
+
+# --- triage: the check_set widening ------------------------------------------------
+# The charter is a FIXTURE, reached through GC_PACK_DIR (first rung of
+# signoff.sh's ladder), so these cases never read the repo's own menu.
+mkdir -p "$TMP/pack/docs"
+cat > "$TMP/pack/docs/review-charter.md" <<'CHARTER'
+# Fixture charter
+
+| Gate | Applies when | Method | Mandatory paths | Waivable |
+|---|---|---|---|---|
+| `codex` | always | `formulas/mol-review.toml` | `-` | no |
+| `triage` | always | `skills/review-triage/SKILL.md` | `-` | no |
+| `arch` | layer changes | `skills/arch-review/SKILL.md` | `lifecycle/**` `assets/scripts/merge.sh` | no |
+| `demo` | operator-visible | `skills/demo-capture/SKILL.md` | `-` | yes |
+CHARTER
+export GC_PACK_DIR="$TMP/pack"
+
+REVIEW_TRIAGE='{"id":"rv-t","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"triage","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat"},"notes":"triage body"}'
+setcs() { jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata.check_set = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+
+echo "# triage widens check_set and records why"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "diff rewrites merge.sh" 2>&1); rc=$?
+eq "$rc" 0 "an approve carrying --add-gates exits 0"
+eq "$(meta tk-anc check_set)" "codex,triage,arch" "the added gate is unioned into check_set"
+eq "$(meta tk-anc check.triage)" "green@aaa111" "triage's own gate goes green at the reviewed commit"
+has "$(notes tk-anc)" "triage-add: arch @aaa111 — diff rewrites merge.sh" "one justification line per added gate lands on the anchor"
+eq "$(status rv-t)" "closed" "the triage review bead closes"
+has "$out" "check_set now codex,triage,arch" "the summary names the new set"
+
+echo "# widening is a UNION — it can never drop a declared gate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage,demo"
+"$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,demo,arch" "every previously declared gate survives the widen"
+
+echo "# re-running the same widen is a no-op, not a duplicate"
+"$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,demo,arch" "an already-declared gate is not appended twice"
+
+echo "# a whitespace-padded check_set still splits per gate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex, triage"
+"$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,arch" "the split is per gate, not one fused token"
+
+echo "# the menu is CLOSED"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates telepathy --justification "vibes" 2>&1); rc=$?
+eq "$rc" 1 "a gate the charter does not declare is refused"
+eq "$(meta tk-anc check_set)" "codex,triage" "…and check_set is untouched"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and no verdict marker was written"
+eq "$(status rv-t)" "in_progress" "…and the review stays open"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and nothing was posted"
+
+echo "# widening needs a justification, and needs to come from triage"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch 2>&1); rc=$?
+eq "$rc" 1 "--add-gates without --justification is refused"
+has "$out" "not auditable" "…and says why"
+out=$("$SUT" --review-bead rv-1 --verdict approve --add-gates arch --justification "x" 2>&1); rc=$?
+eq "$rc" 1 "a non-triage gate may not widen the check_set"
+out=$("$SUT" --review-bead rv-t --verdict request-changes --add-gates arch --justification "x" 2>&1); rc=$?
+eq "$rc" 1 "--add-gates only rides an approve verdict"
+
+echo "# the none opt-out is human-only: triage records the verdict without widening"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "none"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+eq "$rc" 0 "the verdict is still recorded"
+eq "$(meta tk-anc check_set)" "none" "…and the opt-out is left alone"
+eq "$(meta tk-anc check.triage)" "green@aaa111" "…and triage's marker still lands"
+
+# --- triage: waivers, the one sanctioned narrowing ----------------------------------
+echo "# a waiver is recorded for a gate the charter marks waivable"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates demo --justification "docs only" 2>&1); rc=$?
+eq "$rc" 0 "a waived gate exits 0"
+has "$(notes tk-anc)" "triage-waive: demo @aaa111 — docs only" "the waiver is recorded on the anchor"
+eq "$(meta tk-anc check_set)" "codex,triage" "a waiver never adds to check_set"
+# The doctor honours a waiver only at the commit check.triage passed at, so
+# the two oids have to be the same one.
+eq "$(meta tk-anc check.triage)" "green@aaa111" "the waiver's oid is the one triage's own marker records"
+
+echo "# a gate the charter does NOT mark waivable cannot be waived"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates arch --justification "trust me" 2>&1); rc=$?
+eq "$rc" 1 "waiving a non-waivable gate is refused"
+has "$out" "does not mark 'arch' waivable" "…and names the missing warrant"
+eq "$(status rv-t)" "in_progress" "…and the review stays open"
+
+echo "# a waiver cannot remove a gate already declared"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage,demo"
+out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates demo --justification "changed my mind" 2>&1); rc=$?
+eq "$rc" 1 "waiving a declared gate is refused"
+has "$out" "monotonic" "…because widening is monotonic"
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "…and check_set is untouched"
+
+echo "# with no readable charter: widening is accepted, narrowing is not"
+NOC="$TMP/noc/assets/scripts"
+mkdir -p "$NOC"
+cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$HERE/escalate.sh" "$NOC/"
+chmod +x "$NOC"/*.sh
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_PACK_DIR="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+eq "$rc" 0 "an unvalidated widen is accepted"
+eq "$(meta tk-anc check_set)" "codex,triage,arch" "…and lands"
+has "$out" "unvalidated" "…and says the menu could not be checked"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_PACK_DIR="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --waive-gates demo --justification "why" 2>&1); rc=$?
+eq "$rc" 1 "a waiver with no declared warrant is refused"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and nothing was recorded"
+
+# --- escalate: a decision, not a defect ----------------------------------------------
+echo "# escalate stamps an exception and files ONE visit"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict escalate 2>&1); rc=$?
+eq "$rc" 0 "escalate exits 0"
+eq "$(meta tk-anc check.codex)" "exception@aaa111" "the gate records exception at the reviewed commit"
+has "$(meta tk-anc blocked_reason)" "a decision, not a defect" "the anchor says why it is held"
+eq "$(jq -r '[.[] | select(.metadata.escalation_key == "gate-escalation.codex")] | length' "$STUB_STORE")" "1" "exactly one visit carries the situation key"
+eq "$(jq -r 'first(.[] | select(.metadata.escalation_key == "gate-escalation.codex") | .metadata["gc.continuation_group"])' "$STUB_STORE")" "tk-anc" "the visit is grouped on the anchor"
+eq "$(status rv-1)" "closed" "the review bead closes"
+has "$(cat "$STUB_GH_LOG")" "--comment" "the findings are posted as a comment"
+eq "$(meta tk-anc 'gc.routed_to')" "<absent>" "the anchor is not also routed: the visit is the one human door"
+
+echo "# escalate never files a rework child"
+eq "$(grep -c 'Rework PR#42' "$STUB_CREATED")" "0" "no rework child is filed for a design decision"
+
+echo "# an escalation that cannot reach a human leaves the review open"
+NOESC="$TMP/noesc/assets/scripts"
+mkdir -p "$NOESC"
+cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$NOESC/"
+chmod +x "$NOESC"/*.sh
+reset "$ANCHOR_PR"
+out=$(GC_PACK_DIR="$TMP/pack" "$NOESC/signoff.sh" --review-bead rv-1 --verdict escalate 2>&1); rc=$?
+eq "$rc" 2 "a missing escalate.sh exits 2"
+eq "$(status rv-1)" "in_progress" "…and the review is left open for a retry"
+has "$out" "NO visit was filed" "…and says no human was asked"
+
+echo "# an unknown verdict is still refused"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict maybe 2>&1); rc=$?
+eq "$rc" 1 "an undeclared verdict verb is refused"
+unset GC_PACK_DIR
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then

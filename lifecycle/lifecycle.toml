@@ -143,7 +143,11 @@ writer = "human"
 [gates]
 # check_set: comma list of gate names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
-check_set_default = "codex"
+# The default pairs the standing correctness review with triage, which
+# classifies each change over the menu in docs/review-charter.md and widens
+# check_set to the dedicated gates it needs. Widening is monotonic and
+# signoff.sh is its only writer.
+check_set_default = "codex,triage"
 check_set_sentinel = "none"
 # check.<g> = <verb>@<oid>. green written only by signoff.sh; cleared/re-armed
 # only by the merge cadence. Merge requires every declared gate green@<live head>.
@@ -165,7 +169,8 @@ keys = [
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
   "review_branch", "review_base", "reviewed_oid", "review_pool",
-  "source_review_bead", "task_kind", "dispatch_count", "fix_target_pool",
+  "source_review_bead", "task_kind", "dispatch_count", "dispatch_count.<g>",
+  "fix_target_pool",
 ]
 
 [metadata.holds]
