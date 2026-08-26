@@ -44,27 +44,32 @@ the cadence — the arms run whether or not any refinery session is awake.
 1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
    non-empty `check_set` (the declared default `codex,triage` is stamped when
    absent; the `none` sentinel is respected), and every declared gate is
-   *raisable*: marker green at the live head, or a live routed review bead in
-   flight, else dispatch one (stamp first, then attach `mol-review` via
-   `gc sling --on`; read the pour back). Each dispatch names its gate's method
-   in the body, and each gate spends its own `dispatch_count.<g>` round
-   budget. A triage approve widens `check_set`, so the gates it adds are
-   dispatched on the next pass. A review whose only reach is the pour stamp is
-   qualified before it counts as in flight: if its workflow is spent — every
-   step closed but `workflow-finalize`, which belongs to the
-   control-dispatcher — no verdict can still be coming, and the arm escalates
-   through `escalate.sh` under the `review-wedge` key rather than holding the
-   anchor in silence. It escalates on the second consecutive sighting, because
-   `mol-review`'s failure arm closes its chain before it restores the bead's
-   route. **rc=3 is the designed
+   *raisable*: a head-bound verdict recorded at the live head, or a live
+   routed review bead in flight, else dispatch one (stamp first, then attach
+   `mol-review` via `gc sling --on`; read the pour back). `exception` is
+   head-bound the way `green` is: it holds the merge at its own oid and
+   re-gates once the branch moves past it, so the push that answers an
+   escalation gets a fresh review rather than stranding the branch. Each
+   dispatch names its gate's method in the body, and each gate spends its own
+   `dispatch_count.<g>` round budget. A triage approve widens `check_set`, so
+   the gates it adds are dispatched on the next pass. A review whose only
+   reach is the pour stamp is qualified before it counts as in flight: if its
+   workflow is spent — every step closed but `workflow-finalize`, which
+   belongs to the control-dispatcher — no verdict can still be coming, and the
+   arm escalates through `escalate.sh` under the `review-wedge` key rather
+   than holding the anchor in silence. It escalates on the second consecutive
+   sighting, because `mol-review`'s failure arm closes its chain before it
+   restores the bead's route. **rc=3 is the designed
    interlock**: it holds `merge.sh` for this pass — an anchor whose gates are
    not yet satisfiable must not be mergeable on the same tick — and is
    reported without failing the order.
 2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor with
    `check.codex == green@<live head>`: adopt an existing PR for the branch or
    `gh pr create` non-draft, re-read the created PR by number, refuse a moved
-   head, replay the verdict as a comment (never an approval), then one
-   `lifecycle.sh` transition carrying `pr_url`/`pr_number`/`merged_target`.
+   head, replay the closed `codex` verdict recorded at that head as a comment
+   (never an approval, and never a sibling gate's verdict under the codex
+   label), then one `lifecycle.sh` transition carrying
+   `pr_url`/`pr_number`/`merged_target`.
 3. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork, head branch matches), re-read the anchor, validate
    holds/gates/children/approval/base/CLEAN, re-read the full authorization

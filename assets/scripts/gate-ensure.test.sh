@@ -3,8 +3,8 @@
 # Covers: default check_set stamping (and the rc=3 hold when the stamp does not
 # persist or the enumeration is unreadable); the `none` opt-out; marker
 # classification (green@ and exception@ the live head, stale green, stale
-# exception, fixable, absent, unmappable); in-flight dedup (routed, poured,
-# claimed) + stranded repair
+# exception at a readable and an unreadable head, fixable, absent,
+# unmappable); in-flight dedup (routed, poured, claimed) + stranded repair
 # (convoy probe: re-sling only a review with no LIVE tracking convoy, and
 # converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
@@ -142,7 +142,7 @@ has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none
 
 echo "# an exception the head has moved PAST is re-armed, cap or no cap"
 store "[$(anchor B4 pull_request codex "exception@sha-old" polecat/b4),
-        $(anchor B5 pull_request codex "exception@sha-old" polecat/b5 ',"dispatch_count":"3","gc.routed_to":"human"')]"
+        $(anchor B5 pull_request codex "exception@sha-old" polecat/b5 ',"dispatch_count.codex":"3","dispatch_count":"3","gc.routed_to":"human"')]"
 echo "sha-b4" > "$GH_DIR/head_polecat_b4"
 echo "sha-b5" > "$GH_DIR/head_polecat_b5"
 out=$(run); rc=$?
@@ -153,8 +153,29 @@ has "$out" "B5 gate 'codex' is past the cap (3/3) but the branch advanced past e
   "the spent cap does not ALSO refuse the head-move re-gate (the second brake)"
 hasnt "$out" "B5 gate 'codex' has spent" \
   "B5 carries the live shape signoff's cap arm writes — capped AND routed to human"
-eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
-eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
+eq "$(meta B4 'dispatch_count.codex')" "1" "the re-gate consumes a round"
+eq "$(meta B5 'dispatch_count.codex')" "4" "…and past the cap it keeps counting, never rewinding the record"
+eq "$(meta B5 dispatch_count)" "4" "…the anchor-wide total moves with it"
+
+echo "# a stale exception re-gates the ESCALATED gate, not the green one"
+store "[$(anchor B6 pull_request "codex,arch" "green@sha-b6" polecat/b6 ',"check.arch":"exception@old-oid"')]"
+echo "sha-b6" > "$GH_DIR/head_polecat_b6"
+: > "$STUB_GC_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "stale-exception pass exits 0"
+has "$out" "1 reviews dispatched" "the escalated gate is re-dispatched once its head moves"
+has "$out" "check.arch is exception@old-oid but branch 'polecat/b6' has advanced to sha-b6" \
+  "…and the stale exception is the reason on the record"
+b6rid=$(jq -r '.[] | select(.metadata.anchor_bead == "B6") | .id' "$STUB_STORE")
+eq "$(meta "$b6rid" check_name)" "arch" "the fresh review is for the escalated gate, not the green one"
+eq "$(meta "$b6rid" reviewed_oid)" "sha-b6" "…and it is pinned to the head that moved"
+
+echo "# an exception with an unreadable head stays settled (fail soft, like green)"
+store "[$(anchor B7 pull_request codex "exception@sha-b7" polecat/b7)]"
+: > "$STUB_GC_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "no-head exception pass exits 0"
+has "$out" "0 reviews dispatched" "an exception whose head cannot be read is not re-gated"
 
 echo "# stale green / fixable / absent / unmappable all dispatch"
 store "[$(anchor C1 pre_open_gate codex "green@old-oid" polecat/c1),

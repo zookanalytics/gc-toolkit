@@ -16,8 +16,10 @@
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (METHOD)    --check-name selects the gate's method section; an undeclared
 #               gate gets an explicit "no method declared", never a guess.
-#   (AGREE)     every method the emitter names is the one the charter's menu
-#               declares for that gate, and the file it points at ships.
+#   (AGREE)     no charter-declared gate falls through to the undeclared-method
+#               fallback, every method the emitter names is the one the
+#               charter's menu declares for that gate, and the file it points
+#               at ships.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,7 +92,8 @@ if [ -r "$CHARTER" ]; then
         || bad "(AGREE) the charter names $m for '$g_name', which this pack does not ship"
     done
     bash "$SCRIPT" --check-name "$g_name" > "$TMP/agree.out" 2>/dev/null
-    if grep -qF 'No gate method is declared' "$TMP/agree.out"; then continue; fi
+    notF "$TMP/agree.out" 'No gate method is declared' \
+      "(AGREE) the '$g_name' dispatch declares a method"
     for m in $g_method; do
       case "$m" in +) continue ;; esac
       hasF "$TMP/agree.out" "$m" "(AGREE) the '$g_name' dispatch names the charter's method $m"

@@ -112,6 +112,22 @@ A design objection is a decision, not a defect: use
 the choice) rather than handing back a rework child nobody can converge.
 M
     ;;
+  demo)
+    cat <<'M'
+`skills/gc-demo-script/SKILL.md` then `skills/demo-capture/SKILL.md` (Gas City:
+`gc-toolkit.gc-demo-script`, `gc-toolkit.demo-capture`). One method in two
+steps: the first reads the anchor bead and the diff and writes a
+`demo:capture`-format script, the second drives the browser from that script
+and records the narrated video. Generation never runs the capture, so invoke
+the second skill on the file the first returns.
+
+Judge what the recording proves, not what the diff claims. The gate is green
+when the surface the change touches was watched doing the thing. If no demo
+can be recorded, because no surface is reachable or no state can be seeded,
+that is a finding against the change rather than a reason to approve it.
+Correctness belongs to `codex` on this same commit.
+M
+    ;;
   *)
     cat <<'M'
 No gate method is declared for this gate in the dispatching pack. Follow the

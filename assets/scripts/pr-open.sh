@@ -257,9 +257,14 @@ while IFS= read -r row; do
   fi
 
   # Replay the recorded verdict as a COMMENT — the city never approves (#185).
+  # The comment is labelled the codex signoff, so it must BE that one: the
+  # CLOSED codex review pinned to the head this PR opened at. A check_set can
+  # carry several gates, so the anchor's most recently updated review is as
+  # likely to be a triage or arch verdict, or a round still in progress.
   REVIEW_ID=$(gc bd list --metadata-field task_kind=review --metadata-field anchor_bead="$id" \
-    --status=closed,open,in_progress --limit=0 --json 2>/dev/null | scrub \
-    | jq -r 'sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
+    --metadata-field check_name=codex --status=closed --limit=0 --json 2>/dev/null | scrub \
+    | jq -r --arg oid "$head_oid" '[ .[] | select(((.metadata.reviewed_oid // "") | tostring) == $oid) ]
+             | sort_by(.updated_at // .created_at) | last | .id // empty' 2>/dev/null)
   VERDICT=""
   [ -n "$REVIEW_ID" ] && VERDICT=$(gc bd show "$REVIEW_ID" --json 2>/dev/null | scrub \
     | jq -r '.[0].notes // ""' 2>/dev/null)
