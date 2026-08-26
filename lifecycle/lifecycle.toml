@@ -143,6 +143,8 @@ writer = "human"
 [gates]
 # check_set: comma list of gate names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
+# The default is class-blind on purpose, and only a human departs from it:
+# docs/gate-calibration.md.
 check_set_default = "codex"
 check_set_sentinel = "none"
 # check.<g> = <verb>@<oid>. green written only by signoff.sh; cleared/re-armed

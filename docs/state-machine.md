@@ -22,7 +22,9 @@ back. An unknown `merge_result` value is an error: every reader surfaces it via
 vocabulary, and the merge condition.
 
 **Boundaries.** The cadence that drives the merge-side writers is
-[refinery-merge-cadence.md](refinery-merge-cadence.md). The invariants over
+[refinery-merge-cadence.md](refinery-merge-cadence.md). Which gates an anchor
+should declare, and who may change that, is
+[gate-calibration.md](gate-calibration.md). The invariants over
 this machine and their doctor checks are
 [component-model.md](component-model.md) §3. How completion propagates to a
 waiting conversation is [lifecycle-composition.md](lifecycle-composition.md).
@@ -105,20 +107,24 @@ recorded onto the integration branch, and no hold or branch vetoes.
 ## Gates
 
 **Vocabulary.** The anchor declares its gates in `check_set` — a comma list of
-gate names, default `codex`; the sentinel `none` is an explicit opt-out. Each
-gate's verdict is a head-bound marker:
+gate names, default `codex`; the sentinel `none` is an explicit opt-out. Which
+gates an anchor should declare, and who may change them, is
+[gate-calibration.md](gate-calibration.md). Each gate's verdict is a
+head-bound marker:
 
 | Marker | Meaning | Merge effect |
 |---|---|---|
 | `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head |
 | `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
-| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds until the head moves |
+| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds until a human acts |
 
 `approval` is satisfied only by an external APPROVED review — never by the
 city's own account. **`signoff.sh` is the single writer of gate verdicts**
 (component-model I7); the merge cadence's gate-ensure arm only clears and
-re-arms markers staled by a head move. A head move stales every verb at once,
-so a fixed branch re-evaluates fresh with no manual reset.
+re-arms markers staled by a head move. A head move stales `green` and
+`fixable` at once, so a fixed branch re-evaluates fresh with no manual reset.
+`exception` does not stale: gate-ensure skips it at any head, so a new commit
+does not re-arm the gate and the anchor waits for its human.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -175,9 +181,12 @@ sequenceDiagram
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child per head and clears the gate marker, so
   gate-ensure re-arms the dispatch when the child lands. The round cap
-  (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
-  `check.<g>=exception@<head>` and the anchor routes to human. One writer,
-  one terminal verdict — no second component may touch `check.*`.
+  (default 3) is enforced at both ends: `signoff.sh` at verdict time, where
+  cap spent ⇒ `check.<g>=exception@<head>` and the anchor routes to human;
+  and gate-ensure before dispatch, where a spent `dispatch_count` simply
+  declines the next round and the merge stays held. Only the verdict path
+  writes a marker — one writer, one terminal verdict, and no second
+  component may touch `check.*`.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate green at a stale head gets one re-review child per head.
   Idempotent per head — re-runs never duplicate children.
