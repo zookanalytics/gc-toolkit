@@ -124,6 +124,62 @@ JSON
 
     printf 'pass\nall checks passed (3/3)\n' > "$FXDIR/fx-done.checks.txt"
 
+    # The incident shape (tk-d6ixcw): an approving bot comment on top, a
+    # COMMENTED review whose body is EMPTY, and the objections living only in
+    # the inline review comments. None of it moves state, mergeability or the
+    # check rollup, so it is reachable through the conversation tier alone.
+    cat > "$FXDIR/fx-done.conversation.json" <<'JSON'
+{
+  "number": 1234,
+  "url": "https://github.com/seed/repo/pull/1234",
+  "state": "OPEN",
+  "updatedAt": "2026-08-26T17:06:22Z",
+  "comments": [
+    {"author": {"login": "seed-bot"}, "createdAt": "2026-08-26T08:49:52Z",
+     "body": "Codex signoff: VERDICT approve. The clean-read magic word is MEERKAT."}
+  ],
+  "reviews": [
+    {"author": {"login": "seed-operator"}, "state": "COMMENTED",
+     "submittedAt": "2026-08-26T17:06:21Z", "body": ""}
+  ],
+  "review_comments": [
+    {"user": {"login": "seed-operator"}, "created_at": "2026-08-26T16:46:33Z",
+     "path": "docs/seed.md", "line": 71,
+     "body": "First objection: the inline-only magic word is PANGOLIN."},
+    {"user": {"login": "seed-operator"}, "created_at": "2026-08-26T16:47:10Z",
+     "path": "tools/seed.sh", "original_line": 12,
+     "body": "Second objection, carried on original_line."}
+  ]
+}
+JSON
+
+    # A PR with nothing said on it: the 'no_conversation' arm, distinct from
+    # fx-todo's pre-work null and fx-ghost's unreachable error.
+    cat > "$FXDIR/fx-quiet.show.json" <<'JSON'
+[{
+  "id": "fx-quiet",
+  "title": "PR open, nobody has said anything",
+  "description": "Has a PR; its conversation is empty.",
+  "status": "open",
+  "issue_type": "task",
+  "priority": 2,
+  "comment_count": 0,
+  "metadata": {"pr_number": 4321, "pr_url": "https://github.com/seed/repo/pull/4321"}
+}]
+JSON
+
+    cat > "$FXDIR/fx-quiet.conversation.json" <<'JSON'
+{
+  "number": 4321,
+  "url": "https://github.com/seed/repo/pull/4321",
+  "state": "OPEN",
+  "updatedAt": "2026-08-20T00:00:00Z",
+  "comments": [],
+  "reviews": [],
+  "review_comments": []
+}
+JSON
+
     cat > "$FXDIR/fx-todo.show.json" <<'JSON'
 [{
   "id": "fx-todo",
@@ -154,7 +210,9 @@ JSON
 
     # Validate the seed itself so a malformed fixture fails loudly, not silently.
     local f
-    for f in fx-epic.show fx-epic.children fx-impl.show fx-done.show fx-done.pr fx-todo.show fx-ghost.show; do
+    for f in fx-epic.show fx-epic.children fx-impl.show fx-done.show fx-done.pr \
+             fx-done.conversation fx-todo.show fx-ghost.show fx-quiet.show \
+             fx-quiet.conversation; do
         jq -e . "$FXDIR/$f.json" >/dev/null || { echo "fixture: malformed seed $f.json" >&2; exit 2; }
     done
 }
@@ -195,6 +253,98 @@ eq  "Q10 fetch ci fx-done: state"  "pass" \
 # Bonus: full comment history reach (count surfaced).
 has "Q11 fetch comments fx-done"   "4" "$(U fetch fx-done comments)"
 
+echo "-- CONVERSATION tier: what has been SAID on the PR (tk-d6ixcw) --"
+conv="$(U fetch fx-done conversation --json)"
+# Q11b: the objections are counted, not just the bot's approval.
+eq "Q11b conversation inline count"   "2" "$(printf '%s' "$conv" | jq -r '.counts.review_comments')"
+eq "Q11c conversation total count"    "4" "$(printf '%s' "$conv" | jq -r '.counts.total')"
+# Q11d: a fact that lives ONLY in an inline review comment.
+eq "Q11d inline-only magic word"      "PANGOLIN" \
+    "$(printf '%s' "$conv" | jq -r '.review_comments[].body' | grep -oE 'PANGOLIN' | head -1)"
+# Q11e: an inline comment on a stale hunk reports original_line, not null.
+eq "Q11e original_line fallback"      "12" \
+    "$(printf '%s' "$conv" | jq -r '.review_comments[]|select(.path=="tools/seed.sh").line')"
+# Q11f: a COMMENTED review with an EMPTY body is still surfaced — the review
+# that moved no state field is the one the state view cannot show.
+eq "Q11f COMMENTED review surfaced"   "COMMENTED" \
+    "$(printf '%s' "$conv" | jq -r '.reviews[].state')"
+# Q11g: updated_at is carried, so a moved timestamp under an unmoved state is
+# readable as a reason to look.
+eq "Q11g conversation updated_at"     "2026-08-26T17:06:22Z" \
+    "$(printf '%s' "$conv" | jq -r '.updated_at')"
+# Q11h: reached content is fenced in the human view like every other fetch.
+has "Q11h conversation human view fenced" "UNTRUSTED DATA" "$(U fetch fx-done conversation)"
+# Q11i: the tier is advertised in the fed slice, so a host knows to reach it.
+has "Q11i conversation advertised in fetchable" "conversation" \
+    "$(printf '%s' "$slice" | jq -r '.fetchable | join(" ")')"
+# Q11j: a PR with nothing said on it is 'no_conversation', not an error.
+eq "Q11j quiet PR -> no_conversation" "no_conversation" \
+    "$(U fetch fx-quiet conversation --json | jq -r '.state')"
+
+echo "-- LIVE PATH (stubbed gc/gh): every --paginate page is read --"
+# `gh --paginate` emits ONE JSON ARRAY PER PAGE. A plain `.[]?` over that
+# stream reads page one and drops the rest silently, which on a busy PR is the
+# same blindness as not fetching at all. Driving the LIVE path (fixture hook
+# off) against stubs that emit two pages is what holds the slurp in place; the
+# stubs exit 9 on any call shape the tool is not supposed to make, so a
+# rewritten call fails here rather than passing quietly.
+STUB="$FXDIR/stub"; mkdir -p "$STUB"
+cat > "$STUB/bead.json" <<'JSON'
+[{"id":"fx-live","title":"Live-path bead","description":"b","status":"open","issue_type":"task",
+  "comment_count":0,"metadata":{"pr_number":777,"pr_url":"https://github.com/seed/repo/pull/777"}}]
+JSON
+cat > "$STUB/view.json" <<'JSON'
+{"number":777,"url":"https://github.com/seed/repo/pull/777","state":"OPEN",
+ "updatedAt":"2026-08-26T17:06:22Z","comments":[],"reviews":[]}
+JSON
+cat > "$STUB/page1.json" <<'JSON'
+[{"user":{"login":"a"},"created_at":"2026-08-26T01:00:00Z","path":"p1","line":1,"body":"page one first"},
+ {"user":{"login":"a"},"created_at":"2026-08-26T01:01:00Z","path":"p1","line":2,"body":"page one second"}]
+JSON
+cat > "$STUB/page2.json" <<'JSON'
+[{"user":{"login":"b"},"created_at":"2026-08-26T02:00:00Z","path":"p2","line":3,"body":"page two first"},
+ {"user":{"login":"b"},"created_at":"2026-08-26T02:01:00Z","path":"p2","line":4,"body":"PAGE-TWO-MAGIC"}]
+JSON
+cat > "$STUB/gc" <<'STUBEOF'
+#!/bin/sh
+if [ "$1" != "bd" ] || [ "$2" != "show" ]; then echo "stub gc: unexpected call: $*" >&2; exit 9; fi
+cat "$STUB_DIR/bead.json"
+STUBEOF
+cat > "$STUB/gh" <<'STUBEOF'
+#!/bin/sh
+case "$1" in
+  pr)
+    [ "$2" = "view" ] || { echo "stub gh: unexpected pr subcommand: $*" >&2; exit 9; }
+    case "$*" in
+      *"--repo seed/repo"*) : ;;
+      *) echo "stub gh: pr view must name the repo parsed from pr_url: $*" >&2; exit 9 ;;
+    esac
+    case "$*" in
+      *"--json number,url,state,updatedAt,comments,reviews"*) : ;;
+      *) echo "stub gh: pr view must request the conversation fields: $*" >&2; exit 9 ;;
+    esac
+    cat "$STUB_DIR/view.json" ;;
+  api)
+    case "$*" in
+      *"repos/seed/repo/pulls/777/comments"*) : ;;
+      *) echo "stub gh: unexpected api path: $*" >&2; exit 9 ;;
+    esac
+    case "$*" in
+      *--paginate*) : ;;
+      *) echo "stub gh: inline comments must be paginated: $*" >&2; exit 9 ;;
+    esac
+    cat "$STUB_DIR/page1.json" "$STUB_DIR/page2.json" ;;
+  *) echo "stub gh: unexpected call: $*" >&2; exit 9 ;;
+esac
+STUBEOF
+chmod +x "$STUB/gc" "$STUB/gh"
+
+live_conv="$(STUB_DIR="$STUB" PATH="$STUB:$PATH" GC_BD_UNIVERSE_FIXTURE="" "$TOOL" fetch fx-live conversation --json)" || live_conv='{}'
+eq "Q11k both pages read (2 pages x 2 comments)" "4" \
+    "$(printf '%s' "$live_conv" | jq -r '.counts.review_comments // "none"')"
+eq "Q11l page-two content reached"               "PAGE-TWO-MAGIC" \
+    "$(printf '%s' "$live_conv" | jq -r '.review_comments[]?.body' | grep -oE 'PAGE-TWO-MAGIC' | head -1)"
+
 echo "-- TRIMMING: the one concrete build (heavy dep bodies -> titles) --"
 # The dep's FULL body must NOT leak into the fed slice; only its title may.
 absent "Q12 dep full body trimmed from fed slice" "FULL-DESIGN-BODY" "$human"
@@ -208,6 +358,9 @@ eq "Q14 fetch pr fx-todo (pre-work)" "prework" "$(U fetch fx-todo pr --json | jq
 # pre-work 'null') — so a host can tell "vanished" from "not yet".
 rc=0; U fetch fx-ghost pr >/dev/null 2>&1 || rc=$?
 eq "Q14b fetch pr fx-ghost -> unreachable exit 3" "3" "$rc"
+eq "Q14c fetch conversation fx-todo (pre-work)" "prework" "$(U fetch fx-todo conversation --json | jq -r '.state')"
+rc=0; U fetch fx-ghost conversation >/dev/null 2>&1 || rc=$?
+eq "Q14d fetch conversation fx-ghost -> unreachable exit 3" "3" "$rc"
 
 echo "-- BOUNDARY: >1-hop is out of reach --"
 # fx-stranger is not a 1-hop neighbor of fx-epic -> fetch must refuse.
