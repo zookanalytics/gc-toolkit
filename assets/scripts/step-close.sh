@@ -302,7 +302,7 @@ if [ -n "$HINT" ]; then
   case "$HINT_STATUS" in
     in_progress|open)
       if [ "$N" -gt 1 ]; then
-        echo "step-close: NOTE — $N $TIER beads match $STEP for this session ($(printf '%s' "$FOUND" | tr '\n' ' ')); using the caller's verified --bead $HINT" >&2
+        echo "step-close: NOTE — $N $TIER beads match $STEP in ${ROOT:+molecule $ROOT}${ROOT:-this session} ($(printf '%s' "$FOUND" | tr '\n' ' ')); using the caller's verified --bead $HINT" >&2
       fi
       warn_env_mismatch "$HINT"
       close_bead "$HINT" "--bead, verified" || exit 2
@@ -330,8 +330,8 @@ if [ "$N" -eq 1 ]; then
 fi
 
 if [ "$N" -gt 1 ]; then
-  echo "step-close: FATAL — $N $TIER beads match step '$STEP' for this session: $(printf '%s' "$FOUND" | tr '\n' ' ')" >&2
-  echo "step-close: refusing to guess which one this shell is executing. Close the right one by explicit id (--bead), and treat the duplicate as a graph defect." >&2
+  echo "step-close: FATAL — $N $TIER beads match step '$STEP' in ${ROOT:+molecule $ROOT}${ROOT:-this session}: $(printf '%s' "$FOUND" | tr '\n' ' ')" >&2
+  echo "step-close: refusing to guess which one this shell is executing. Close the right one by explicit id (--bead), and treat the duplicate as a graph defect — one molecule pours one bead per step." >&2
   exit 2
 fi
 
