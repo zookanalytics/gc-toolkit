@@ -11,21 +11,26 @@ says OPERATOR is their decision, not yours. Work the steps in order.
 
 ## Sequence
 
-0. **Verify the dog seam — BEFORE anything else.** The rewrite drops the
-   gastown dog pool, but the `dolt` builtin pack (a required builtin) may
-   still route Dolt maintenance to it. With the city up, record the answers
-   to both:
+0. **ANSWERED (2026-08-26) — no action needed; skip to step 1.** This step
+   was written on two premises that both turned out to be false, and it is
+   kept only so a reader who works the steps in order knows why it is
+   being skipped. The rewrite does not drop the dog pool: `agents/dog/`
+   ships in the new pack as a warrant executor. And the `dolt` builtin
+   pack does not route backups to a pool — every order but
+   `mol-dog-stale-db` is `exec` and runs inline in the controller, with
+   `mol-dog-stale-db` itself already suppressed by `city.toml`. Dolt
+   backups cannot stop for want of an actor, because they never had one.
+   Verified live rather than read off the order shapes: the manifests
+   under `$GC_CITY_PATH/.dolt-backup` were all under two hours old, and no
+   open bead anywhere in the city routes to a dog pool. The full finding,
+   including why `mol-dog-stale-db` stays skipped, is
+   decisions-and-todos.md TODO-4 item 1.
+
+   The original check, if you want to re-run it:
 
        gc order list                                   # any dog/dolt-maintenance orders?
        gc bd list --status open --limit 0 --json \
          | jq -r '.[] | select((.metadata["gc.routed_to"] // "") | test("dog")) | .id'
-
-   Report the results to the operator before proceeding. If a backup or
-   cleanup order routes to a dog pool that no longer exists, its beads will
-   sit unclaimed after cutover and **Dolt backups stop silently** — the
-   deacon will FLAG every database ~12h later with no actor behind the flag.
-   The operator decides the replacement (see decisions-and-todos.md TODO-4)
-   before the quiet window closes.
 
 1. **Quiet the city.** Stop filing new work and let the polecats drain their
    claims. To be extra safe, put open anchors on hold so nothing new enters the
@@ -92,7 +97,9 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    3. Resolve the proactive-placement open question
       (`specs/2026-08-review-gates/scope.md`, Costs and open questions):
       where proactive/first-reaction sits once triage exists.
-   4. The Dolt backup actor decision, from step 0's findings.
+   4. The Dolt backup actor decision, from step 0's findings. Answered by
+      tk-508bx9 (2026-08-26): no replacement actor is needed. See
+      decisions-and-todos.md TODO-4 item 1 and TODO-6.
    5. The `docs/architecture.md` re-ratification conversation with the
       operator.
    6. LAYOUT STABILITY: nothing leaves the operator's view without explicit
