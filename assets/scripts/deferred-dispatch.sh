@@ -14,6 +14,13 @@
 # must never read as an empty one.
 set -u
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 PROG="deferred-dispatch"
 
 # One key is index AND payload: `bd list --has-metadata-key` enumerates armed
@@ -69,7 +76,7 @@ EOF
 show_bead() { # id -> single bead object on stdout, or nothing (rc 1)
     local id="$1" raw
     raw="$(bd_ show "$id" --json 2>/dev/null)" || return 1
-    printf '%s' "$raw" | tr -d '\000-\010\013\014\016-\037' | jq -c '
+    printf '%s' "$raw" | scrub | jq -c '
         if type == "array" then (.[0] // empty)
         elif type == "object" then (if has("error") then empty else . end)
         else empty end' 2>/dev/null

@@ -34,7 +34,12 @@ LIVE_MAX="${GC_DOCTOR_MOLECULE_LIVE_MAX:-86400}"
 errors=(); warnings=(); notes=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 mins() { printf '%s' "$(( $1 / 60 ))"; }
 
 # mtime in epoch seconds, GNU then BSD stat; return 1 when neither reads it.
@@ -223,7 +228,7 @@ for idx in "${!scope_paths[@]}"; do
         warnings+=("$label: \`gc bd list\` over $db returned no output — stale step text was NOT checked here")
         continue
     fi
-    rows=$(printf '%s' "$roots_raw" | strip_ctl | jq -r '
+    rows=$(printf '%s' "$roots_raw" | scrub | jq -r '
         .[]? | [ (.id // "" | tostring),
                  (.created_at // "" | tostring),
                  ((.metadata["gc.formula_source"]) // "" | tostring) ]

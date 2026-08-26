@@ -15,6 +15,13 @@
 # exit: 0 closed (or already closed) · 2 refused, nothing written
 set -uo pipefail
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 usage() {
   cat >&2 <<'USAGE'
 usage: step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>] [--dry-run]
@@ -86,7 +93,7 @@ esac
 # bd JSON with the C0 set stripped (TAB/LF/CR kept): a raw control byte in a
 # note makes jq read the whole payload as "no such bead".
 bd_json() {
-  gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'
+  gc bd "$@" --json 2>/dev/null | scrub
 }
 
 # Identities this session may appear under as an assignee, first spelling wins.

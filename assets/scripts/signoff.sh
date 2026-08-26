@@ -15,6 +15,13 @@
 #       (the review bead is left open so the gate stays owed).
 set -uo pipefail
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
@@ -56,7 +63,7 @@ if [ -n "$NOTES_FILE" ] && [ ! -r "$NOTES_FILE" ]; then
 fi
 
 # bd JSON with the C0 set stripped: a raw control byte in notes breaks jq.
-bd_json()   { gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'; }
+bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }

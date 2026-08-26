@@ -17,7 +17,12 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 errors=(); warnings=(); notes=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
@@ -42,7 +47,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list closed anchors in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
     fi
-    rows=$(printf '%s' "$raw" | strip_ctl | jq -r '
+    rows=$(printf '%s' "$raw" | scrub | jq -r '
         .[]? | (.metadata // {}) as $m
         | ((($m.merge_result // "") | tostring)) as $mr
         | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id

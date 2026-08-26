@@ -11,6 +11,13 @@
 # Exit: 0 filed or already open · 1 could not file/verify · 2 usage
 set -uo pipefail
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 usage() {
   cat >&2 <<'U'
 usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
@@ -46,7 +53,7 @@ case "$KEY" in
   *[!A-Za-z0-9._-]*) warn "--key must contain only [A-Za-z0-9._-] (got '$KEY')"; exit 2 ;;
 esac
 
-bd_json() { gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'; }
+bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 
 # Idempotence: an open (or claimed) visit for this subject+key means the human
 # is already asked. BOTH filters ride the listing itself: a shared key (e.g.
