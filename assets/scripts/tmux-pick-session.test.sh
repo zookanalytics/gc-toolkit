@@ -41,16 +41,17 @@
 #              The count and the rig derivation share `rig`, so the phantom
 #              "city" took the polecats with it and every real rig read 0.
 #   (FOLD)     converse-N-pool and refinery-N-pool are pool workers with the
-#              same short lifetime as a polecat. The default filter used to
-#              enumerate role substrings, so it missed both — they rendered
-#              as attachable rows and went uncounted. The suffix is the
-#              general shape; the role name is not.
+#              same short lifetime as a polecat, so the default filter hides
+#              them and the per-rig header counts them. The predicate keys
+#              on the "-<n>-pool" suffix because that is the general shape:
+#              an enumeration of role substrings misses both of these, and
+#              misses every pooled role added after them.
 #   (KEEPNAMED) the other half of FOLD, and what stops the suffix rule from
 #              swallowing the long-lived sessions: `<rig>--<pack>__refinery`
 #              is a named refinery, not a pool instance, and must stay
 #              visible next to the `refinery-1-pool` that is hidden.
-#   (NOUN)     the header says what it counts. It read "polecats" while
-#              counting a set that now includes converse and refinery pools.
+#   (NOUN)     the header says what it counts, and the set it counts is
+#              every pool worker in the rig, not only the polecats.
 #   (ALL)      --all is the escape hatch: everything hidden by default is
 #              reachable, and the pool rows carry the parsed display form
 #              there too.
