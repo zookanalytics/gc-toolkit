@@ -51,7 +51,7 @@ to reconcile, and there is no reconciliation that leaves both jobs intact.
 | Who reads the output | `gate-ensure.sh` and `merge.sh` | a human, at a converse sitting or on the board |
 | Failure if missed | an unreviewed change lands | a bead sits un-advanced |
 | Where the failure lands | the merge critical path | the human's queue |
-| Staleness model | re-stales when the head moves | freshness-stamped facts, re-validated at claim |
+| Staleness model | re-stales when the head moves | a snapshot, with each fetched fact freshness-stamped |
 | Pool | `polecat-codex`, shared with the dedicated reviewers | `proactive`, its own rig pool, cap 2, mr-only |
 
 Four of those rows are load-bearing on their own.
@@ -66,10 +66,11 @@ gate-ensure dispatches what the widened set names, and merge.sh refuses to
 merge until each named gate is green. First-reaction's card is not read back
 by anything — `specs/2026-08-learning-system/internal-inventory.md` records
 exactly this, that first-reaction "is a reaction loop, not a feedback loop —
-nothing reads the cards back". The one machine-read piece is the takeaway
-line, and what the machine reads it as is "a human is holding this bead"
-(`assets/scripts/liveness-sweep.sh` classifies a `gc.takeaway` stamp as
-held-by-design), not "here are the checks this change needs".
+nothing reads the cards back". Two stamps the reaction leaves are machine-read,
+and both say the same thing: stop surfacing this. `assets/scripts/liveness-sweep.sh`
+classifies a `gc.takeaway` stamp as held-by-design, and the scan drops any bead
+carrying `gc.proactive_reaction`. Neither tells a downstream writer what to do,
+which is the whole of what triage's output does.
 
 **The failure modes want opposite handling.** A missed gate is a correctness
 failure on the merge path and must fail closed. A missed first reaction is a
@@ -92,10 +93,12 @@ cadence.
 
 ## Where it does sit
 
-The work feeder design (`specs/2026-08-review-gates/work-feeder.md`, designed
-under tk-xhwits, not implemented) is the filing-side twin of the review triage
-gate. Its eligibility table has five tests, and the first one already names
-first-reaction's job without naming first-reaction:
+The work feeder is the filing-side twin of the review triage gate. Its design
+was written under tk-xhwits and is not implemented; it arrives at
+`specs/2026-08-review-gates/work-feeder.md` when that branch lands, so the row
+below is quoted rather than only cited. Its eligibility table has five tests,
+and the first one already names first-reaction's job without naming
+first-reaction:
 
 > | Actionable | the bead states no done condition — it is a note, a question, or a link with no ask | escalate: it is a conversation, not work |
 
@@ -132,8 +135,8 @@ The resolution is that the feeder owns the scan. Until the feeder lands,
 `scan` stays what it is now: an operator-driven sweep with no order behind it.
 Nothing in `orders/` or `doctor/` calls it, and that is deliberate rather than
 an omission — wiring it on a cadence would re-litigate the P3 batching
-resolution, which settled that N idle beads cost one conversation and not N
-(`liveness-and-triage-spec.md` §2, sweep addendum 2026-08-08). A scheduled
+resolution, which settled that "N idle beads cost one conversation, not N"
+(`liveness-and-triage-spec.md`, sweep addendum 2026-08-08). A scheduled
 per-bead `scan --sling` files N visits for N beads, which is the design that
 resolution rejected. The runbook's own framing of the status quo — "nothing
 routes beads to it on a schedule" — is therefore kept, and now has a reason
