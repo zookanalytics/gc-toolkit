@@ -51,17 +51,62 @@ description: The operator's rulings on the nine attention items from the rewrite
   as the fail-safe direction, but the framing (and tuning: batch cadence,
   what lands in the operator's triage visit vs. converse) gets a pass after
   the first live week.
-- **TODO-4 — Dog coverage (investigated 2026-08-24; two decisions remain).**
+- **TODO-4 — Dog coverage (investigated 2026-08-24; item 1 resolved
+  2026-08-26).**
   Finding: the rewrite kept every *detector* and dropped every *actuator*.
   Duty-by-duty: hang diagnostics, zombie PIDs, and orphan processes are
   covered (deacon); jsonl-backup/reaper were gastown-internal (N/A). Four
   gaps, with dispositions:
-  1. **Dolt backups** — the backup dog performed them (~6h cadence; the
-     deacon's STALE_H=12 verifier assumes it). UNCOVERED unless the dolt
-     builtin pack still has an actor. Runbook step 0 now verifies against
-     the live city. If unclaimed: cheapest fix is an exec order
-     (`orders/dolt-backup.toml` + ~30-line wrapper, no LLM). **OPERATOR
-     DECISION after the live check.**
+  1. **Dolt backups — RESOLVED (2026-08-26). No replacement actor is
+     needed, and the gap this item feared never existed.** Two premises
+     behind the original wording were wrong. The rewrite did not drop the
+     dog pool: `agents/dog/` ships in the new pack. And the dolt builtin
+     pack does not route backups to a pool at all, so no actor was ever at
+     risk.
+     Checked live against `~/.gc/system/packs/dolt`. Every Dolt order but
+     one is `exec`, which runs inline in the controller with no pool and no
+     actor: `mol-dog-backup` (6h), `mol-dog-compactor` (24h),
+     `mol-dog-doctor` (5m), `mol-dog-phantom-db` (1h), `dolt-health` (30s),
+     `dolt-remotes-patrol` (15m). `mol-dog-backup.toml` carries the header
+     "Converted from formula+pool to exec", so the ~6h cadence the deacon's
+     STALE_H=12 verifier assumes is intact.
+     Observed, not just inferred from the order shapes: every manifest
+     under `$GC_CITY_PATH/.dolt-backup` was written at 2026-08-26 06:00,
+     well inside the 12h threshold, and the five directories carrying them
+     (`gc`, `lx`, `sl`, `su`, `tk`) are exactly the five databases
+     `gc dolt health` reports live. A sixth directory, `sp`, is frozen at
+     2026-07-21 and has no live database behind it, so the deacon's
+     verifier passes it to the extra-directory branch and emits
+     `INFO sp: backup dir with no live database (advisory)` rather than
+     counting it as a stale backup.
+     The one pool-shaped Dolt order is `mol-dog-stale-db` (cron 4h,
+     `pool = "dog"`), which `city.toml` suppresses via
+     `[orders] skip = ["mol-dog-jsonl", "mol-dog-stale-db"]`. **It stays
+     skipped**, because the dog pool that now exists is not the pool that
+     order was written for. `agents/dog/` is a warrant executor: its prompt
+     admits one formula (`mol-dog-shutdown-dance`), and that formula's
+     `receive-warrant` step closes any bead lacking `warrant.target` /
+     `warrant.reason` as `gc.outcome=refused` with a MALFORMED_WARRANT
+     note. A poured `mol-dog-stale-db` bead carries no `warrant.*` fields,
+     so un-skipping the order would refuse and escalate every four hours
+     while no cleanup ran. `docs/authority-map.md` scopes the pool the same
+     way, to killing a wedged session under a warrant. The precedent is
+     already in-pack: `orders/boot-health.toml` notes that the dog pool
+     existing again does not license reusing it.
+     Staying skipped costs almost nothing, which is the other half of the
+     argument. A dry-run `gc dolt-cleanup --json --probe` on 2026-08-26,
+     after months with the order suppressed, found 0 stale databases to
+     drop, 0 orphan processes to reap, 0 errors, 0 force blockers, and
+     75324 reclaimable bytes. There is no backlog to justify pointing
+     destructive `DROP DATABASE` work at a pool that holds kill authority.
+     If the duty is ever wanted back, the fix is the conversion every
+     sibling order already got: `mol-dog-stale-db`'s formula body is a
+     single deterministic shell step with two numeric thresholds and no LLM
+     judgment, which is exactly what `mol-dog-backup` converted away from.
+     That file is builtin pack source under
+     `rigs/gascity/examples/bd/dolt/`, so it would land as a gascity bead,
+     not here. Filed as gascity bead gc-t7g1h at low priority; it is an
+     operator call, not a repair.
   2. **Orphan-database removal** — detection stays advisory in the deacon
      (never --force from a patrol step); a new `dolt-orphan-dbs` escalate
      key routes the finding to a visit. Actual removal stays manual, or
@@ -93,10 +138,37 @@ description: The operator's rulings on the nine attention items from the rewrite
      `assets/scripts/dance-probe.sh`, `[metadata.warrant]` in
      `lifecycle/lifecycle.toml`, warrant filing wired into the
      deacon/witness patrols; boot-health stays report-only).
-  Residue (cosmetic, clean opportunistically): `tmux-pick-session.sh` still
-  filters `dog`; `docs/gascity-agents.md`/`gascity-packs.md` still list dog
-  in the gastown roster tables (they document the runtime/gastown, so
-  arguably correct as-is).
+  Residue (cosmetic, clean opportunistically): `docs/gascity-agents.md`
+  and `gascity-packs.md` still list dog in the gastown roster tables (they
+  document the runtime/gastown, so arguably correct as-is).
+  `tmux-pick-session.sh` filtering `dog` was listed here as residue too;
+  it is not. The pool exists, and the script's own comment now gives the
+  filter its reason — the warrant executor is short-lived and rarely worth
+  attaching to.
 - **TODO-5 — Post-cutover cleanup.** Delete `cutover-2026-08.sh`, its test,
   and the runbook once the cutover completes cleanly; move ruling residue
   from this file into the docs it belongs in.
+- **TODO-6 — RESOLVED (2026-08-26). The stale `bd` embedded-store backup is
+  off by policy, not unattended.** Surfaced while closing TODO-4 item 1:
+  `gc doctor` warns that two scopes have not synced their embedded-store
+  backup in a very long time — `rigs/gascity` at 1625h25m and
+  `rigs/shutupandlisten` at 1902h25m, against a 24h threshold. This is a
+  different pipeline from `mol-dog-backup`, which writes
+  `$GC_CITY_PATH/.dolt-backup`; the warning reads `.beads/backup/` inside
+  each rig.
+  Nothing is broken and nothing needs repair. `backup.enabled: false` is
+  set in the city's own `.beads/config.yaml` and in all four rigs, so the
+  embedded-store backup is disabled uniformly and deliberately. The two
+  flagged scopes are simply the two that had synced before it was turned
+  off, and their frozen `backup_state.json` is what the check reads. The
+  other two rigs never wrote that file, so `BdBackupFreshnessCheck` skips
+  them and the warning names two scopes rather than four. Recovery for all
+  of these stores rests on the Dolt backup, which is current.
+  What the finding does expose is a defect in the check itself:
+  `BdBackupFreshnessCheck` reads only `backup_state.json` and never
+  consults `backup.enabled`, so a deliberately-disabled backup warns
+  forever on its own leftovers. Its `FixHint` tells the operator to
+  "verify backup.enabled", which already, correctly, reads `false`, and
+  `CanFix()` returns false, so the warning has no path to clearing. The
+  check is Go under `rigs/gascity/internal/doctor/`, so the fix lands as a
+  gascity bead: gc-nyy49.
