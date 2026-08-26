@@ -342,6 +342,48 @@ eq "$(run_consume main myrig gc-toolkit. '[]')" \
    "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
    "empty roster: hands off rather than stalling on what it cannot check"
 
+# The polecat pastes this block into a live shell, and `bash "$TMP/consume.sh"`
+# above does not model one that runs strict. Both of the guard's reads are
+# pipefail traps: `... | grep -q` returns 141 when grep matches and exits before
+# the writer finishes, and the roster pipeline returns non-zero whenever `gc`
+# fails, which is the case the permissive arm exists to serve. Either one turns
+# a correct handoff into a halt under `set -euo pipefail`, so run the real
+# snippet under it. run_strict_consume mirrors run_consume with the strict
+# preamble prepended.
+run_strict_consume() { # <landing-target> <gc-rig> <agents-json|UNREADABLE>
+  : > "$TMP/log"
+  printf 'set -euo pipefail\n' > "$TMP/strict.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/strict.sh"
+  local rc=0
+  LANDING_TARGET="$1" GC_RIG="$2" FAKE_AGENTS="$3" FAKE_LOG="$TMP/log" \
+    bash "$TMP/strict.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+# The SIGPIPE half needs a roster larger than the 64K pipe buffer, with the match
+# up front: `grep -q` exits on the first hit while the writer is still blocked,
+# the writer takes SIGPIPE, and pipefail reports 141 for a pipeline that found
+# what it was looking for. A small roster fits in the buffer and never triggers
+# it. The fixture is therefore sized to straddle two limits — the roster it
+# renders must clear the 64K pipe buffer, while the JSON carrying it reaches the
+# fake through the environment and must stay under MAX_ARG_STRLEN (128K), which
+# execve enforces per variable. 1200 entries gives ~97K of roster from ~83K of
+# JSON; overshooting the cap surfaces as a bare rc=126, not as a useful failure.
+ROSTER_BIG="$(jq -cn '[{qualified_name:"gc-toolkit/gc-toolkit.refinery"}]
+  + [range(1200) | {qualified_name:("filler-rig-\(.)/gc-toolkit.polecat-padding-entry")}]')"
+
+eq "$(run_strict_consume main gc-toolkit "$ROSTER_BIG")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "strict shell: a matching address in an oversized roster still writes (the pipe form takes SIGPIPE here)"
+
+eq "$(run_strict_consume main gc-toolkit UNREADABLE)" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "strict shell: a failed roster call still reaches the permissive arm rather than killing the step"
+
+eq "$(run_strict_consume main gc-toolkit '[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]')" \
+   "1|DRAIN;" \
+   "strict shell: a roster without the address still halts, and the diagnostic does not die on an empty grep"
+
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
 # the gate, and the handoff reads $LANDING_TARGET from the resolver. Run all

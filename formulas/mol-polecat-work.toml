@@ -338,11 +338,11 @@ named-session work must not read as pool demand.
 # >>> submit-target-consume
 [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
-ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null)
+ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
 if [ -z "$ROSTER" ]; then
     echo "roster unreadable — handing off to $REFINERY_TARGET unchecked"
-elif ! echo "$ROSTER" | grep -qxF "$REFINERY_TARGET"; then
-    BOUND=$(echo "$ROSTER" | grep 'refinery$' | sort -u | tr '[:space:]' ' ')
+elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
+    BOUND=$(grep 'refinery$' <<< "$ROSTER" | sort -u | tr '[:space:]' ' ') || true
     echo "REFINERY ADDRESS NAMES NO AGENT: $REFINERY_TARGET"
     echo "The refinery reads its queue by exact-match assignee, so a bead sent here is never seen and nothing reports it."
     echo "Bound refineries: $BOUND"
