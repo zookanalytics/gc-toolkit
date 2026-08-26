@@ -69,6 +69,10 @@ case "${1:-}" in
     printf '{"id":"fix-%s"}\n' "$n" ;;
   dep)
     shift
+    # A row is "<dependent>|<blocker>|<type>", matching the real binary:
+    # `dep add A B` is "A depends on B", `dep S --blocks D` is "D depends on S",
+    # --direction=down lists what an id depends on and =up lists what depends
+    # on it. Model these backwards and a reversed edge reads as correct.
     case "${1:-}" in
       add) printf '%s|%s|%s\n' "$2" "$3" "${4#--type=}" >> "$DEPS"; echo "dep added" ;;
       list)
@@ -85,15 +89,31 @@ case "${1:-}" in
           [ -n "$f" ] || continue
           [ "$ty" = "$typ" ] || continue
           other=""
-          if [ "$dir" = "up" ] && [ "$f" = "$id" ]; then other="$t"; fi
-          if [ "$dir" = "down" ] && [ "$t" = "$id" ]; then other="$f"; fi
+          if [ "$dir" = "down" ] && [ "$f" = "$id" ]; then other="$t"; fi
+          if [ "$dir" = "up" ] && [ "$t" = "$id" ]; then other="$f"; fi
           [ -n "$other" ] || continue
           row=$(jq -c --arg id "$other" '(.[] | select(.id == $id)) // {"id":$id,"metadata":{}}' "$STORE")
           [ "$first" = 1 ] || out="$out,"
           out="$out$row"; first=0
         done < "$DEPS"
         printf '%s]\n' "$out" ;;
+      *)
+        src="${1:-}"; shift || true
+        [ -n "${STUB_DEP_NOOP:-}" ] && { echo "dep added"; exit 0; }
+        [ "${1:-}" = "--blocks" ] && printf '%s|%s|blocks\n' "${2:-}" "$src" >> "$DEPS"
+        echo "dep added" ;;
     esac ;;
+  ready)
+    # An open issue is ready when every blocker it depends on is closed.
+    blocked=" "
+    while IFS='|' read -r f t ty; do
+      [ -n "$f" ] || continue
+      [ "$ty" = "blocks" ] || continue
+      st=$(jq -r --arg id "$t" 'first(.[] | select(.id == $id) | .status) // "open"' "$STORE")
+      [ "$st" = "closed" ] || blocked="$blocked$f "
+    done < "$DEPS"
+    jq -c --arg bl "$blocked" '[ .[] | select(.status == "open")
+      | select(.id as $i | ($bl | contains(" " + $i + " ")) | not) ]' "$STORE" ;;
 esac
 STUB
 
@@ -222,7 +242,7 @@ eq "$rc" 1 "post-open with no parseable pr_url refuses (unpinned gh calls)"
 echo "# anchor resolves via the blocks edge when metadata is absent"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "rv-1" then (.metadata |= del(.anchor_bead)) else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-printf 'rv-1|tk-anc|blocks\n' > "$STUB_DEPS"
+printf 'tk-anc|rv-1|blocks\n' > "$STUB_DEPS"
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "edge-resolved anchor accepted"
 eq "$(meta tk-anc check.codex)" "green@aaa111" "marker landed on the edge-resolved anchor"
@@ -252,7 +272,9 @@ eq "$(meta fix-1 existing_pr)" "https://github.com/o/r/pull/42" "child reworks T
 eq "$(meta fix-1 pr_number)" "42" "child carries the PR number"
 eq "$(meta fix-1 gc.routed_to)" "rig/gc-toolkit.polecat" "child routed to the fix pool (stamp, not sling)"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "stamp-don't-sling: no gc sling issued"
-has "$(cat "$STUB_DEPS")" "fix-1|tk-anc|blocks" "child blocks the anchor"
+has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "child blocks the anchor"
+has "$(gc bd ready --json)" '"id":"fix-1"' "the rework child is in bd ready"
+hasnt "$(gc bd ready --json)" '"id":"tk-anc"' "the anchor waits on the child, not the reverse"
 has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the round context"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 
@@ -270,9 +292,16 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 2 "an unstamped child work order exits 2"
 eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
 
+echo "# a child whose blocks edge did not land is caught, not shipped"
+reset "$ANCHOR_PR"
+out=$(STUB_DEP_NOOP=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a child with no blocks edge exits 2"
+has "$out" "blocks_edge" "the refusal names the missing edge"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
+
 # --- the round cap ---------------------------------------------------------------
 kid() { printf ',{"id":"c%s","status":"%s","assignee":"","metadata":{%s},"notes":""}' "$1" "$2" "$3"; }
-seed_cap_deps() { for c in "$@"; do printf '%s|tk-anc|blocks\n' "$c" >> "$STUB_DEPS"; done; }
+seed_cap_deps() { for c in "$@"; do printf 'tk-anc|%s|blocks\n' "$c" >> "$STUB_DEPS"; done; }
 
 echo "# round cap trips at 3 (default)"
 reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
