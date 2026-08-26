@@ -1,0 +1,14 @@
+# gctk-build — keep the deployed gctk binary current with services/gctk.
+# The merge cadence exec's a prebuilt binary and builds nothing, so the build
+# runs here. Staleness is `find -newer`; a tick with nothing to do costs one
+# find and one status write. There is no service to restart: a published gctk is
+# serving the moment it lands.
+# timeout 300s: the module is stdlib-only, so even a cold build is seconds —
+# the bound is for a wedged toolchain, not for the compile.
+[order]
+description = "Build the gctk binary when services/gctk is newer than it"
+trigger = "cooldown"
+interval = "5m"
+exec = "$PACK_DIR/assets/scripts/gc-gctk-build.sh --deploy"
+timeout = "300s"
+scope = "city"

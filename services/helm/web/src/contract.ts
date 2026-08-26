@@ -243,6 +243,39 @@ export interface Sitting {
 }
 
 /**
+ * PackBuild is one compiled component's build state, as its out-of-band build
+ * order last left it.
+ *
+ * Nothing in the running system builds these binaries — the launchers exec what
+ * a build order published — so a component can serve a binary older than its
+ * sources indefinitely. `source_rev` and `binary_rev` diverge exactly when a
+ * build failed and the last good binary kept serving; `checked_at` is the only
+ * field a quiet tick moves, so it is the only one that can say the build order
+ * itself has stopped.
+ *
+ * `severity` and `detail` are DERIVED on the Go side so this view and the
+ * `helm-svc board` CLI cannot disagree about what a row means. Render them;
+ * do not re-derive them from the raw fields.
+ */
+export interface PackBuild {
+  component: string;
+  /** RFC 3339. Omitted when no build has been recorded. */
+  built_at?: string;
+  /** The revision the last build tick saw in the sources. */
+  source_rev: string;
+  /** The revision the binary now on disk was built from. */
+  binary_rev: string;
+  /** Exit status of the last build ATTEMPT; 0 for success. */
+  last_build_rc: number;
+  /** A published binary nothing is running yet — built, but not serving. */
+  restart_pending: boolean;
+  /** RFC 3339. When the build order last ran at all, successful or not. */
+  checked_at?: string;
+  severity: Severity;
+  detail: string;
+}
+
+/**
  * Board is the envelope returned at `<mount>/helm`. Tiles arrive deduplicated
  * by `id` and PARTITIONED: every `owed` row first, oldest-owed first, then
  * everything else by `rank_score` descending. `total` is the count before any
@@ -272,4 +305,10 @@ export interface Board {
   /** True when one or more rigs did not answer; the board is incomplete. */
   partial?: boolean;
   partial_errors?: string[];
+  /**
+   * The build state of the pack's compiled components. Absent in a city whose
+   * build orders have never run — which is why it is optional rather than an
+   * empty array: no rows means nothing was measured, not that all is well.
+   */
+  pack_health?: PackBuild[];
 }

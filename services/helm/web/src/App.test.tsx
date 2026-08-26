@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { Board, Sitting, Tile } from './contract';
+import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // A board carrying all six shapes the sections have to tell apart: an ordinary
 // ranked anchor, an operator-owned bead that is the DEFAULT answer, a parked
@@ -707,4 +707,80 @@ it('gives the all-clear when every PR position was readable', async () => {
 
   const sub = within(owedSection()).getByRole('status');
   expect(sub.textContent).toMatch(/1 pull requests read, all with a position/);
+});
+
+// --- pack builds ---------------------------------------------------------
+//
+// The strip answers a question about the board itself: whether the binary
+// rendering this page is the one the sources describe. Nothing else on the page
+// can be trusted to say so — every anchor row looks normal under a stale
+// binary.
+
+function build(over: Partial<PackBuild> & Pick<PackBuild, 'component'>): PackBuild {
+  return {
+    source_rev: 'aaaaaaaaaaaa1111',
+    binary_rev: 'aaaaaaaaaaaa1111',
+    last_build_rc: 0,
+    restart_pending: false,
+    severity: 'NORMAL',
+    detail: 'current at aaaaaaaaaaaa',
+    ...over,
+  };
+}
+
+function serveBoard(board: Board) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(board), { status: 200 })),
+  );
+}
+
+function packSection(): HTMLElement {
+  return screen.getByRole('region', { name: /pack builds/i });
+}
+
+it('lists every compiled component, including the healthy ones', async () => {
+  serveBoard({
+    ...BOARD,
+    pack_health: [
+      build({ component: 'gctk', severity: 'HIGH', last_build_rc: 1, detail: 'last build FAILED (rc 1); still serving bbbbbbbbbbbb' }),
+      build({ component: 'helm' }),
+    ],
+  });
+
+  render(<App />);
+  await waitFor(() => expect(packSection()).toBeTruthy());
+
+  const section = packSection();
+  expect(within(section).getByText('gctk')).toBeTruthy();
+  expect(within(section).getByText(/last build FAILED/)).toBeTruthy();
+  // The healthy row is present too: a strip that appears only on trouble is a
+  // strip nobody learns to read.
+  expect(within(section).getByText('helm')).toBeTruthy();
+  expect(within(section).getByText(/current at aaaaaaaaaaaa/)).toBeTruthy();
+});
+
+// A city whose build orders have never run has measured nothing. Rendering an
+// empty strip there would read as an all-clear nobody established.
+it('shows no pack-builds section when the city recorded no builds', async () => {
+  serveBoard({ ...BOARD, pack_health: undefined });
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(screen.queryByRole('region', { name: /pack builds/i })).toBeNull();
+});
+
+// The band is derived server-side so this view and the CLI cannot disagree.
+// Rendering it verbatim is what keeps that true.
+it('renders the severity the service assigned, not one it re-derives', async () => {
+  serveBoard({
+    ...BOARD,
+    pack_health: [
+      build({ component: 'helm', severity: 'ELEVATED', binary_rev: 'oldoldoldold', detail: 'serving oldoldoldold, sources are at aaaaaaaaaaaa' }),
+    ],
+  });
+
+  render(<App />);
+  await waitFor(() => expect(packSection()).toBeTruthy());
+  expect(within(packSection()).getByText('ELEVATED')).toBeTruthy();
 });

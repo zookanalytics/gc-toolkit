@@ -19,6 +19,8 @@
 # cannot read the city's bead stores · 2 usage.
 # build-status: `ok <ts>` built/current AND probed readable · `unreadable <ts>
 # <why>` · `unprobed <ts>` no city to probe against · `failed <ts>`.
+# build-status.json: the record the board's PACK rows read — source_rev against
+# binary_rev, built_at, last_build_rc, restart_pending, checked_at.
 # Env: GC_SERVICE_STATE_ROOT / GC_CITY_ROOT / GC_CITY (state root), GC_GO_BIN,
 # GC_HELM_GOTMP, GC_HELM_SERVICE_NAME, GC_HELM_GC_BIN,
 # GC_HELM_CITY_PATH / GC_CITY_PATH / GC_CITY (the city to probe, else the one
@@ -113,6 +115,52 @@ mkdir -p "$BIN_DIR"
 # Present while a published binary has nothing running on it; removed only
 # by a restart that succeeded (see restart_service).
 RESTART_PENDING="$STATE_ROOT/restart-pending"
+
+# >>> build-status-record
+# build-status.json — what this component is SERVING versus what the sources
+# say, beside the one-line build-status that answers readability instead, and
+# written where the board reads it (services/helm reads every
+# .gc/services/*/build-status.json into the PACK rows). Nothing else can answer
+# it — the launcher never builds, so a binary older than its sources renders a
+# stale dashboard in silence, and the only previous way to see that was a
+# one-shot script nobody runs.
+#
+# EVERY EXIT PATH WRITES ONE, including the no-op tick: checked_at is what says
+# the build order itself is still running, and it is the only field a quiet tick
+# moves.
+STATUS="$STATE_ROOT/build-status.json"
+SOURCE_REV="$(git -C "$MOD" rev-parse HEAD 2>/dev/null || true)"
+
+# A field of the previous record, or empty. A build that failed keeps the last
+# good binary serving, so its built_at and binary_rev must survive the failure
+# that did not replace them.
+prev_field() { # <key>
+    [ -f "$STATUS" ] || return 0
+    jq -r --arg k "$1" '(.[$k] // "") | tostring' "$STATUS" 2>/dev/null || true
+}
+
+# Publish by atomic rename: a reader polling this file must never catch it
+# half-written. Every step degrades to leaving the old record in place — a
+# status file is a report, and losing one must not fail a build.
+write_record() { # <last_build_rc> <binary_rev> <built_at>
+    local rc="$1" brev="$2" bat="$3" pending="false" tmp
+    [ -e "$RESTART_PENDING" ] && pending="true"
+    tmp="$(mktemp "$STATE_ROOT/.build-status.XXXXXX" 2>/dev/null)" || return 0
+    if jq -n --arg component "$SERVICE_NAME" --arg built_at "$bat" \
+        --arg source_rev "$SOURCE_REV" --arg binary_rev "$brev" \
+        --argjson last_build_rc "$rc" --argjson restart_pending "$pending" \
+        --arg checked_at "$(date -u +%FT%TZ)" \
+        '{component: $component, built_at: $built_at, source_rev: $source_rev,
+          binary_rev: $binary_rev, last_build_rc: $last_build_rc,
+          restart_pending: $restart_pending, checked_at: $checked_at}' \
+        > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$STATUS" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null
+    else
+        rm -f -- "$tmp" 2>/dev/null
+    fi
+    return 0
+}
+# <<< build-status-record
 
 # Go toolchain: override, PATH, then the conventional system install.
 GO="${GC_GO_BIN:-}"
@@ -219,7 +267,14 @@ elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 0 ]; then
-    # Newer than every source proves nothing about the store. Ask the binary
+    # `find -newer` just proved no source is newer than the binary, so the
+    # binary IS the current revision — that is what makes recording it here
+    # honest rather than a guess. built_at comes off the binary's own mtime when
+    # no earlier record names it.
+    CURRENT_BUILT_AT="$(prev_field built_at)"
+    [ -n "$CURRENT_BUILT_AT" ] || CURRENT_BUILT_AT="$(date -u -r "$BIN" +%FT%TZ 2>/dev/null || true)"
+
+    # Current in revision terms proves nothing about the store. Ask the binary
     # BEFORE any restart: nothing may be put into service on a binary this run
     # has already condemned.
     CURRENT_KIND=unprobed
@@ -232,7 +287,10 @@ if [ "$need_build" -eq 0 ]; then
         # this branch is the only one a later run can reach.
         if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
             echo "gc-helm-build: $BIN is up to date but not yet serving; retrying the restart"
-            restart_service || exit 1
+            if ! restart_service; then
+                write_record 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
+                exit 1
+            fi
         fi
         if [ "$CURRENT_KIND" = "ok" ]; then
             echo "gc-helm-build: $BIN is up to date and can read the city's bead stores"
@@ -242,6 +300,7 @@ if [ "$need_build" -eq 0 ]; then
             echo "gc-helm-build: $BIN is up to date (no city resolved; readability unprobed)"
             write_status unprobed
         fi
+        write_record 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
         exit 0
     fi
 
@@ -252,6 +311,7 @@ if [ "$need_build" -eq 0 ]; then
     if [ "$(cat "$PROBE_LATCH" 2>/dev/null || true)" = "$EMBEDDED" ]; then
         echo "gc-helm-build: $BIN CANNOT READ the city's bead stores, and a rebuild would embed the same $BEADS_MODULE $EMBEDDED; bump it in $MOD/go.mod. Detail: $PROBE_DETAIL" >&2
         write_status unreadable "$PROBE_DETAIL"
+        write_record 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
         exit 1
     fi
     echo "gc-helm-build: $BIN cannot read the city's bead stores; rebuilding. Detail: $PROBE_DETAIL"
@@ -313,11 +373,17 @@ if BIN_TMP="$(mktemp "$BIN_DIR/.helm-svc.build.XXXXXX" 2>/dev/null)"; then
 fi
 
 if [ "$build_ok" -eq 0 ]; then
-    # $BIN was never touched; failing here costs a log line and a retry.
+    # $BIN was never touched; failing here costs a log line and a retry. The
+    # record keeps the LAST GOOD binary's revision and build time, because that
+    # is what is still serving — only source_rev moves, and the gap between the
+    # two is the whole signal.
     echo "gc-helm-build: BUILD FAILED; $BIN left unchanged" >&2
     write_status failed
+    write_record 1 "$(prev_field binary_rev)" "$(prev_field built_at)"
     exit 1
 fi
+
+BUILT_AT="$(date -u +%FT%TZ)"
 echo "gc-helm-build: built $BIN"
 
 # A compiling binary is not a working one: ok is written only behind a passing
@@ -340,6 +406,7 @@ write_status "$STATUS_KIND" "$PROBE_DETAIL"
 # for restart either, or the next run's pending-restart branch serves it.
 if [ "$STATUS_KIND" = "unreadable" ]; then
     echo "gc-helm-build: the binary just built CANNOT READ the city's bead stores; the board will not render. The service is left on the binary it is already running. Detail: $PROBE_DETAIL" >&2
+    write_record 0 "$SOURCE_REV" "$BUILT_AT"
     exit 1
 fi
 
@@ -349,6 +416,13 @@ printf 'published %s\n' "$(date -u +%FT%TZ)" > "$RESTART_PENDING" 2>/dev/null \
     || echo "gc-helm-build: could not write $RESTART_PENDING; a failed restart will not be retried" >&2
 
 # Build and restart are one step: a binary nothing restarts onto is inert.
+# The status record is written AFTER the restart either way — restart_pending
+# is a fact about the moment the record is taken, and a failed restart is
+# exactly the state worth publishing.
 if [ "$DEPLOY" -eq 1 ]; then
-    restart_service || exit 1
+    if ! restart_service; then
+        write_record 0 "$SOURCE_REV" "$BUILT_AT"
+        exit 1
+    fi
 fi
+write_record 0 "$SOURCE_REV" "$BUILT_AT"

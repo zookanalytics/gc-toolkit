@@ -198,7 +198,12 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := board.BuildBoard(res.Anchors, s.now(), res.Partial, res.PartialErrors, res.Facts)
+	now := s.now()
+	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
+	// Read after the gather, not inside it: pack health is a handful of small
+	// local files and belongs to no Source backend, so making it part of the
+	// Source interface would oblige every backend to reimplement it.
+	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
 	s.cached = &b
 	s.expiry = s.now().Add(s.ttl)
 	return &b, nil

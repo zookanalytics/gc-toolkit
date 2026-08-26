@@ -678,6 +678,35 @@ func fixtureBoard() board.Board {
 		},
 		Partial:       true,
 		PartialErrors: []string{"rig shutupandlisten: context canceled"},
+
+		// Both shapes a build row takes: one current, one whose build failed
+		// and left an older binary serving. The second is the state the strip
+		// exists for, so a fixture without it would let the failing branch of
+		// the mirror go unchecked.
+		PackHealth: []board.PackBuild{
+			{
+				Component:      "gctk",
+				BuiltAt:        time.Date(2026, 8, 10, 4, 2, 1, 0, time.UTC),
+				SourceRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+				BinaryRev:      "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+				LastBuildRC:    1,
+				RestartPending: false,
+				CheckedAt:      time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC),
+				Severity:       board.SevHigh,
+				Detail:         "last build FAILED (rc 1); still serving 1a2b3c4d5e6f",
+			},
+			{
+				Component:      "helm",
+				BuiltAt:        time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
+				SourceRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+				BinaryRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+				LastBuildRC:    0,
+				RestartPending: false,
+				CheckedAt:      time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC),
+				Severity:       board.SevNormal,
+				Detail:         "current at 9f1c0b7e5a4d",
+			},
+		},
 	}
 }
 
