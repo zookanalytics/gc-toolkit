@@ -127,7 +127,7 @@ case "$verb" in
       esac
       shift || true
     done
-    tmp="$(mktemp)"; cp "$S" "$tmp"
+    tmp="$S.work.$$"; cp "$S" "$tmp"
     for kv in ${sets[@]+"${sets[@]}"}; do
       jq -c --arg id "$id" --arg k "${kv%%=*}" --arg v "${kv#*=}" \
         'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
@@ -316,6 +316,22 @@ OUT=$("$SCRIPT" --step "bad step" --reason "x" 2>&1); eq "$?" "2" "a step ref wi
 OUT=$(env -u GC_SESSION_NAME -u GC_SESSION_ID -u GC_ALIAS "$SCRIPT" --step "$STEP" --reason "x" 2>&1); RC=$?
 eq "$RC" "2" "no session identity refuses rather than guessing"
 eq "$(bstatus s-load)" "in_progress" "and writes nothing"
+
+echo "== an enumeration that cannot happen says so, rather than going quiet =="
+reset_store
+cat > "$TMP/bin/mktemp" <<'MT'
+#!/usr/bin/env bash
+echo "mktemp: no space left on device (stub)" >&2
+exit 1
+MT
+chmod +x "$TMP/bin/mktemp"
+OUT=$("$SCRIPT" --step "$STEP" --reason "disk pressure" 2>&1); RC=$?
+rm -f "$TMP/bin/mktemp"
+eq "$RC" "0" "the hold still lands when the sibling enumeration cannot be staged"
+eq "$(bstatus s-load)" "blocked" "the load-bearing write happened first"
+eq "$(meta root-1 'gc.routed_to')" "<absent>" "and the root is still de-routed"
+has "$OUT" "siblings keep their routes and claims" "the un-quiesced siblings are named, not silently skipped"
+eq "$(meta s-setup 'gc.routed_to')" "$POOL" "and they demonstrably still carry them"
 
 # --- The formula wiring. ------------------------------------------------------
 # Extracted verbatim, so a wholesale reconciliation against the base formula
