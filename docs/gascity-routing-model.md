@@ -1301,7 +1301,11 @@ Two combinations are idiomatic, and they differ in intent:
   subsection is why, and what to write instead against a held one.
 - **Clear `gc.routed_to` *and* set `status=blocked`** — the
   belt-and-braces park, for when the bead should not read as ready work
-  at all.
+  at all. A stored `blocked` status does not clear when its cause clears
+  (`tk-puh9d`), so this park needs a person to end it. Which of these four
+  to reach for is invariant I1 in
+  [component-model.md](component-model.md); this section is what each one
+  does to the predicate.
 
 Keep the explanatory metadata either way: a `hold_reason` is genuinely
 useful *alongside* a real hold. It is only dangerous as a *substitute*
