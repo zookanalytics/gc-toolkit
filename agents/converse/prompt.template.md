@@ -314,8 +314,13 @@ The loop, every visit:
    fails before writing anything. Both takeaway blocks run the same
    search — and re-resolve `$ITEM` the same way — because each runs in
    its own shell: a variable set in one does not reach the other. Never
-   pass `--release`: it clears the assignee and route, parking a bead you
-   are mid-conversation about.)
+   pass `--release` while the conversation is live: it clears the
+   assignee and route, parking a bead you are mid-conversation about.
+   The one time it IS the move: a stand-down ruling — the dispatch's
+   premise is falsified and the work should not happen — concludes with
+   `takeaway <anchor> "<ruling>" --release`, which parks the anchor AND
+   quiesces the molecule's routed steps so the dead chain stops
+   re-offering to the pool.)
 
    **One sentence, ≤140 characters — the writer refuses a longer one.**
    Both takeaway blocks are bound by it. This is the board's NEEDS cell,

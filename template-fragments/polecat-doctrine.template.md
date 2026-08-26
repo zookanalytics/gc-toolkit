@@ -144,7 +144,12 @@ done
 
 It files (or refreshes) exactly one open visit per situation key, which is
 how a human hears about it. After escalating: continue if possible, otherwise
-leave the bead resumable (branch + notes recorded) and drain.
+leave the bead resumable (branch + notes recorded) and drain. If the ruling
+that comes back is stand-down — the premise was falsified, or a live sitting
+owns the decision — the disposal step is the sitting's
+`gc-helm.sh takeaway <anchor> "<ruling>" --release`: it parks the anchor and
+quiesces the molecule's routed steps in one writer, so the chain stops
+re-offering. Your part stays the same: record, escalate, drain.
 
 ## Communication
 
