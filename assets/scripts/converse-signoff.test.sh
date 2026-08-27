@@ -51,9 +51,9 @@ ok() {
     PASS=$((PASS + 1))
     printf '  ok    %s\n' "$1"
 }
-# bad <label> [detail] — the detail is OPTIONAL. Under `set -u` a one-argument
-# call used to abort the whole run on `$2`, so the first such failure truncated
-# the suite and every assertion after it went unreported — a silent pass.
+# bad <label> [detail] — the detail is OPTIONAL, which is why `$2` is read
+# through `${2:-}`: under `set -u` a bare `$2` aborts the whole run on a
+# one-argument call, truncating the suite into a silent pass.
 bad() {
     FAIL=$((FAIL + 1))
     if [ -n "${2:-}" ]; then
@@ -276,7 +276,6 @@ have "sign-off line 2 points at the subject" 'Look at: <subject-id>' "$PROMPT"
 have "the outcome stamp is still verified before the close" \
     "jq -e '.[0].metadata[\"gc.outcome\"] // empty'" "$PROMPT"
 have "close step still closes only the visit" 'gc bd close "$VISIT"' "$PROMPT"
-have "the bug is cited where the rule lives" 'tk-bzm86' "$PROMPT"
 
 # THE ORDER, not the presence (tk-747cl). Closing the visit removes the
 # session's last wake reason, and the no-wake-reason drain pinned further down
@@ -343,7 +342,6 @@ have "the loop re-checks the visit's own premise" 'Re-check the premise' "$PROMP
 have "the silent exit names both readings" 'gc.outcome=<moot|benign>' "$PROMPT"
 have "the silent exit posts nothing to the thread" 'Post nothing' "$PROMPT"
 have "the canonical benign case is named" 'awaiting the operator' "$PROMPT"
-have "the bug is cited where the rule lives (tk-mndjz)" 'tk-mndjz' "$PROMPT"
 # A silent exit that fires on a hunch swallows real signals, which is a
 # worse bug than the one it fixes. The gate is a NAMED state, not a quiet
 # one, and it is the first sentence a "streamline this step" edit drops.

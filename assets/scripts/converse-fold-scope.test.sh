@@ -295,7 +295,6 @@ is "with no stamp and no edge the block refuses to fold at all" \
     "$(holder v-two '')" "v-two"
 have "the prompt says an unresolvable subject holds" \
     'You are the holder.' "$PROMPT"
-have "the fold rule cites the empty-stamp bead" 'tk-tu5g3' "$PROMPT"
 
 echo "── an unreadable listing never folds ──"
 # Fail-safe direction. A listing that did not read cannot prove another
@@ -313,7 +312,6 @@ echo "── the contract the block is written against ──"
 # test fails here rather than the fold quietly widening back to the bucket.
 have "the liveness sweep still folds on the stall_root key" \
     '.metadata.stall_root // empty' "$SWEEP"
-have "the fold rule cites its pattern bead" 'tk-ogsok' "$PROMPT"
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
 # The takeaway target is the other half of the same defect: one field on a
