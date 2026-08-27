@@ -22,7 +22,7 @@ exist under roots tk-4ffl70, tk-j2ddcs, tk-k7uhme and tk-p0gi4s, each covering
 all six step refs. Any close that failed to find a live bead of its own would
 match one of those.
 
-Two failures follow from the one key, and the hermetic suite reproduces both
+Three failures follow from the one key, and the hermetic suite reproduces each
 against the pre-change script:
 
 - **A close that never happened, reported as a pass.** With no live bead of its
@@ -34,6 +34,11 @@ against the pre-change script:
   an earlier molecule's step still in progress under the same assignee wins over
   this chain's own `open` bead. That is a step removed from a workflow nobody
   was running.
+- **A stale hint, obeyed.** `--bead` carries `.bead_id` from a claim, and a
+  caller resuming after a hook-claim can hold one from an earlier molecule. With
+  the assignee as the only test it verified, so the closed-hint arm printed
+  `already closed — nothing to do` over another chain's bead even when the caller
+  had supplied the correct `--root`.
 
 Only `(gc.root_bead_id, gc.step_ref)` is unique, and the pour stamps
 `gc.root_bead_id` on every step bead. Resolution is scoped to it; the assignee
@@ -42,23 +47,36 @@ now corroborates rather than identifies.
 ## 2. Establishing the molecule
 
 The scope is only as good as the derivation, and the derivation has to survive
-the conditions that made the bug visible — a chain whose assignees are gone.
-Four sources answer in order, each only when it names exactly one root:
+the conditions that made the bug visible — a chain whose assignees are gone. A
+caller-supplied `--root` is taken as given, for a caller holding `root_bead_id`
+from `gc hook --claim --json`. Failing that, four sources answer in order, each
+only when it names exactly one root:
 
-1. `--root`, for a caller holding `root_bead_id` from `gc hook --claim --json`.
-2. A `--bead` hint that already verified.
-3. `gc.session_id`, the stamp a claim leaves on the step it hands out.
-4. This session's live beads: the one for this step first, then any bead of the
-   same formula.
+1. `gc.session_id`, the stamp a claim leaves on the step it hands out.
+2. This session's live bead for this step.
+3. Any live bead of the same formula under this session.
+4. A `--bead` hint that verifies.
 
-Source 3 alone is not enough, because the stamp is not universal: the six steps
+Source 1 alone is not enough, because the stamp is not universal: the six steps
 of root tk-4ffl70 carry `gc.session_id=lx-2rrxb`, and the six of tk-j2ddcs carry
-none. Source 4 covers those, and it is also what closes a step whose own bead is
-no longer at an executable tier — the siblings still open in the same molecule
-answer for it.
+none. Sources 2 and 3 cover those, and source 3 is also what closes a step whose
+own bead is no longer at an executable tier — the siblings still open in the same
+molecule answer for it.
+
+The hint ranks last, and the ordering is load-bearing. `verify()` cannot scope a
+candidate to a molecule while the molecule is still being derived, so at that
+point a same-assignee, same-step bead from an earlier run verifies exactly as
+this chain's own would. A root taken from one would scope every resolution below
+it to the wrong chain, and the closed-hint arm would report that chain's bead as
+already closed. Every source above the hint is either independent of the assignee
+or already inside the molecule.
 
 An ambiguous source is treated as no answer rather than as a refusal, so a
 session carrying husks from earlier runs still resolves through a later source.
+
+Once the molecule is known it gates every answer below it, the hint included: a
+candidate whose `gc.root_bead_id` differs is rejected and named, whatever its
+assignee says.
 
 When nothing establishes the molecule, an executable bead is still closed on the
 old pair — that path is unchanged — but a *closed* match is refused, because a

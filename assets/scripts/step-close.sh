@@ -15,10 +15,11 @@
 # molecule is still ours (tk-xgfhj3).
 #
 # --bead is a HINT (e.g. `.bead_id` from `gc hook --claim --json`): used only if
-# it verifies as this session's bead for this step. A graph.v2 step executes at
-# status `open` (the graph pre-assigns it, so the claim advances nothing);
-# in_progress is resolved first, open only when that tier is empty. Ambiguity is
-# refused — a stalled step is visible, a wrong close corrupts two workflows.
+# it verifies as this session's bead for this step inside the molecule being
+# executed. A graph.v2 step executes at status `open` (the graph pre-assigns
+# it, so the claim advances nothing); in_progress is resolved first, open only
+# when that tier is empty. Ambiguity is refused — a stalled step is visible, a
+# wrong close corrupts two workflows.
 # Callers: formula done arms (mol-feedback-*), mol-polecat-work submit.
 # exit: 0 closed (or already closed) · 2 refused, nothing written
 set -uo pipefail
@@ -39,7 +40,9 @@ usage: step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>]
              (required — it is half of the identity that makes the close safe)
   --outcome  value for metadata gc.outcome, default "pass"
   --bead     candidate id, e.g. `.bead_id` from `gc hook --claim --json`. A
-             HINT: used only if it verifies as this session's bead for --step.
+             HINT: used only if it verifies as this session's bead for --step
+             inside the molecule being executed. A stale one is reported and
+             ignored, never obeyed.
   --root     the molecule's root bead, e.g. `.root_bead_id` from that same
              claim. Skips the derivation; the other half of the unique pair.
   --dry-run  resolve and report; write nothing.
@@ -125,10 +128,12 @@ fi
 
 # Does <id> verify as this session's bead for this step? Echoes its status on a
 # match. `index` is exact element equality — `inside`/`contains` match
-# substrings, which would let session lx-zzk own lx-zzk9's bead. An unassigned
-# bead verifies only once the molecule is known and the bead is inside it;
-# while $ROOT is empty that clause is inert, which is what lets the molecule be
-# derived from a hint without reasoning in a circle.
+# substrings, which would let session lx-zzk own lx-zzk9's bead. A known
+# molecule gates every answer below it: one assignee covers every molecule a
+# pool agent ever ran, so a matching assignee corroborates the candidate and
+# never outranks its root. While $ROOT is empty that gate is inert and the
+# assignee is all there is, which is what lets derive_root reach a hint without
+# reasoning in a circle.
 verify() {
   local cand="$1" json
   [ -n "$cand" ] || return 1
@@ -139,9 +144,9 @@ verify() {
     | .[0] as $b
     | if $b == null then empty
       elif (($b.metadata["gc.step_ref"] // "") != $step) then empty
+      elif ($root != "") and (($b.metadata["gc.root_bead_id"] // "") != $root) then empty
       elif (($me | index($b.assignee // "")) != null) then ($b.status // "")
-      elif (($b.assignee // "") == "") and ($root != "")
-           and (($b.metadata["gc.root_bead_id"] // "") == $root) then ($b.status // "")
+      elif (($b.assignee // "") == "") and ($root != "") then ($b.status // "")
       else empty end
   ' 2>/dev/null
 }
@@ -173,17 +178,15 @@ roots_from() { # <bd list args...>
 # The molecule this shell is executing, empty when nothing proves which it is.
 # Each source answers only when it names exactly one root; an ambiguous source
 # is no answer rather than a refusal, so a session carrying husks from earlier
-# runs still resolves through a later source. Order is most to least direct: a
-# hint the caller verified, the session stamp a claim leaves on the step it
-# hands out, this step's own live bead, then any live bead of this formula —
-# that last one is what closes a step whose own bead is already gone from the
-# executable tiers.
+# runs still resolves through a later source. Order is most to least
+# trustworthy: the session stamp a claim leaves on the step it hands out, this
+# step's own live bead, any live bead of this formula, then the caller's hint.
+# The hint ranks last because $ROOT is still empty here, so verify() cannot yet
+# scope it to a molecule and a pool assignee alone matches another molecule's
+# bead for this same step — a root taken from one would then scope every
+# resolution below to the wrong chain.
 derive_root() {
   local found ident json this_step="" same_formula=""
-  if [ -n "$HINT" ] && [ -n "$(verify "$HINT")" ]; then
-    found=$(root_of "$HINT")
-    [ -n "$found" ] && { printf '%s' "$found"; return 0; }
-  fi
   if [ -n "${GC_SESSION_ID:-}" ]; then
     found=$(roots_from --metadata-field "gc.session_id=$GC_SESSION_ID" \
                        --status=open,in_progress,blocked,closed)
@@ -210,6 +213,10 @@ $(printf '%s' "$json" | jq -r --arg f "$FORMULA." '
   [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
   found=$(printf '%s\n' "$same_formula" | awk 'NF && !seen[$0]++')
   [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
+  if [ -n "$HINT" ] && [ -n "$(verify "$HINT")" ]; then
+    found=$(root_of "$HINT")
+    [ -n "$found" ] && { printf '%s' "$found"; return 0; }
+  fi
   return 0
 }
 
@@ -311,7 +318,12 @@ if [ -n "$HINT" ]; then
       echo "step-close: $HINT ($STEP) is already closed — nothing to do"
       exit 0 ;;
     '')
-      echo "step-close: NOTE — --bead $HINT is not this session's bead for $STEP; ignoring the hint and resolving from the store" >&2 ;;
+      HINT_ROOT=$(root_of "$HINT")
+      if [ -n "$ROOT" ] && [ -n "$HINT_ROOT" ] && [ "$HINT_ROOT" != "$ROOT" ]; then
+        echo "step-close: NOTE — --bead $HINT belongs to molecule $HINT_ROOT, not the one this shell is executing ($ROOT); ignoring the hint and resolving from the store" >&2
+      else
+        echo "step-close: NOTE — --bead $HINT is not this session's bead for $STEP; ignoring the hint and resolving from the store" >&2
+      fi ;;
     *)
       echo "step-close: NOTE — --bead $HINT IS this session's bead for $STEP, but its status is '$HINT_STATUS', which this script does not close; ignoring the hint and resolving from the store" >&2 ;;
   esac

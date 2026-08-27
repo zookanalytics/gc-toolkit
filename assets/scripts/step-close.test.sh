@@ -16,7 +16,9 @@
 #   * resolution by (assignee, gc.step_ref) with no env id at all — the path
 #     that makes the environment irrelevant rather than merely checked;
 #   * --bead as a HINT: honoured when it verifies, ignored (with a note) when it
-#     does not, so a caller carrying a stale claim id cannot re-create the bug;
+#     does not, so a caller carrying a stale claim id cannot re-create the bug —
+#     including a hint that carries this session's assignee and this step's ref
+#     but belongs to an earlier molecule, with the molecule supplied and derived;
 #   * the SUBSTRING trap — jq's `inside`/`contains` match substrings, so a
 #     session named lx-zzk would "own" lx-zzk9's bead. Exact membership only;
 #   * the OPEN-STATUS anchor (tk-jww3y) — a graph.v2 step is assigned by the
@@ -227,12 +229,6 @@ has "$OUT" "GC_TRIGGER_BEAD_ID=tk-step1 is not this step's bead" \
 # it has ever made, so the same gc.step_ref of every earlier molecule matches
 # it — and the earlier ones are all closed. Resolution therefore has to turn on
 # gc.root_bead_id, with the assignee as corroboration rather than as the key.
-#
-# Live shape (2026-08-24, root tk-ginxk4): the six step beads of the running
-# chain had lost their assignee, the same agent's earlier molecules had theirs,
-# and the close loop answered "already closed — nothing to do" six times, exit
-# 0, over ids belonging to two other roots. The chain stayed open and was
-# re-offered as new work; nothing in the log said so.
 FSTEP="mol-polecat-work.load-context"
 
 # (a) Nothing proves which molecule this shell is executing, and the only
@@ -285,6 +281,36 @@ run --step "$FSTEP"
 eq "$RC" "0" "(FOREIGN-LIVE) our own open bead resolves past a foreign in_progress one"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(FOREIGN-LIVE) closed this chain's bead"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(FOREIGN-LIVE) the other molecule's live step was NOT closed"
+
+# (e) A hint carrying this session's assignee and this step's ref, from an
+#     earlier molecule. With the molecule known the root decides, and no
+#     assignee can vouch for a candidate outside it.
+cat > "$FAKE_BEADS" <<B
+tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --root root-mine --bead tk-old111
+eq "$RC" "0" "(STALE-HINT-ROOT) a stale same-assignee hint does not stop the close"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(STALE-HINT-ROOT) closed the bead in the named molecule"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(STALE-HINT-ROOT) the earlier molecule's bead was NOT closed"
+hasnt "$OUT" "nothing to do" "(STALE-HINT-ROOT) the false-green line is not emitted"
+has "$OUT" "belongs to molecule root-old" "(STALE-HINT-ROOT) the hint's own molecule is named"
+
+# (f) The same hint with no --root. The session stamp a claim leaves on the
+#     step it hands out names the molecule; a same-assignee hint must not
+#     outrank it, or the wrong root scopes every resolution below.
+cat > "$FAKE_BEADS" <<B
+tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --bead tk-old111
+eq "$RC" "0" "(STALE-HINT-SESSION) the session root outranks a same-assignee hint"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(STALE-HINT-SESSION) closed this molecule's bead"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(STALE-HINT-SESSION) the earlier molecule's bead was NOT closed"
+hasnt "$OUT" "nothing to do" "(STALE-HINT-SESSION) the false-green line is not emitted"
+has "$OUT" "belongs to molecule root-old" "(STALE-HINT-SESSION) the hint's own molecule is named"
 
 # --- 1d. a step of our own molecule held by another session ------------------
 # Molecule scope answers "which chain", not "who is running it". A second
