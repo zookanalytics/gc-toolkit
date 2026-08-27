@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# doctor/check-claim-advancing — I11: a claimed step is being advanced by the
-# session holding it.
+# doctor/check-claim-advancing — I11: a step a pool is meant to run is being
+# run — either advanced by the session holding it, or claimed at all.
 #
 # A pool session reports active and running whether it is working or parked at
 # an idle prompt, so a claimed step can sit untouched with every other alarm
@@ -8,12 +8,12 @@
 # check-step-terminal's stall arm is bead-clocked at 48h and never looks at who
 # holds the step, so it cannot see a holder that stopped hours ago.
 #
-# Per store, every in_progress bead carrying gc.step_ref whose claim is older
-# than the stall bound is joined to its holder, matched on session id,
-# session_name or alias — the three identities a claim can be stamped with.
-# Claims younger than the bound are never judged, which is also what keeps a
-# pool recycle (the holder's incarnation changes under a live claim) from
-# reading as a fault.
+# Arm 1 — CLAIMED. Per store, every in_progress bead carrying gc.step_ref whose
+# claim is older than the stall bound is joined to its holder, matched on
+# session id, session_name or alias — the three identities a claim can be
+# stamped with. Claims younger than the bound are never judged, which is also
+# what keeps a pool recycle (the holder's incarnation changes under a live
+# claim) from reading as a fault.
 #
 #   UNHELD    the bead carries no assignee at all         -> error
 #   ORPHANED  the assignee names no session at all        -> error
@@ -35,6 +35,29 @@
 # to all of them. Clearing an assignee and setting a status are separate writes,
 # so this state exists briefly during a legitimate release; the bound covers it.
 #
+# Arm 2 — UNCLAIMED. A claim is not the first thing that can fail to happen. A
+# step poured, routed to a pool and never claimed by anybody stays `open`, so
+# arm 1 does not see it, and gate-ensure's pour_spent reads any open step as
+# "still driven" and declines the question by design. Per store, an open step
+# that `bd ready` is offering, carrying a route, with no assignee and no
+# gc.claimed_at ever stamped, untouched past the same bound, is judged against
+# the agent its route names:
+#
+#   route names no agent      -> note   (an unreachable address is I3's finding)
+#   the agent is suspended    -> note   (parked on purpose)
+#   pool max is 0             -> note   (nothing is meant to claim it)
+#   no running session        -> note   (scaled to zero; the demand probe's)
+#   every session is busy     -> note   (a queue behind a full pool is backpressure)
+#   a running session is free -> error  (an idle worker and an offered step)
+#
+# Only the last is a fault, and it is the one shape a backlog cannot explain.
+# Occupancy counts a session holding ANY in-progress bead, not just a formula
+# step, because a singleton agent's work usually is not one. That is why the
+# in-progress listing is filtered for gc.step_ref here rather than server-side:
+# arm 1 wants the steps, arm 2 wants everything, and one probe answers both.
+# The roster supplies liveness here too, so a stale one degrades the error to a
+# warning exactly as it does in arm 1.
+#
 # last_active is derived from tmux pane changes and is hardened upstream
 # against self-inflation (gc's own nudge keystrokes do not ratchet it), so a
 # working agent refreshes it and a parked one does not.
@@ -47,8 +70,10 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 STALL_MINUTES="${GC_DOCTOR_CLAIM_STALL_MINUTES:-30}"
 case "$STALL_MINUTES" in *[!0-9]*|"") STALL_MINUTES=30 ;; esac
 STALL=$((STALL_MINUTES * 60))
+SEP=$'\037'
 
 errors=(); warnings=(); notes=()
+unclaimed=(); occupied_list=(); occupancy_partial=0
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
@@ -76,6 +101,24 @@ fi
 cache_age=$(printf '%s' "$sessions_raw" | scrub \
     | jq -r '(._cache_age_s // 0) | if type == "number" then floor else 0 end' 2>/dev/null)
 case "${cache_age:-}" in *[!0-9]*|"") cache_age=0 ;; esac
+stale_roster=0
+[ "$cache_age" -gt "$STALL" ] && stale_roster=1
+
+# Arm 2 needs the agent registry: an unclaimed step is judged against the pool
+# its route names, and a suspended or session-less pool has to stay quiet.
+agents_raw=$(run_bounded gc agent list --json 2>/dev/null); agents_rc=$?
+agents=$(printf '%s' "$agents_raw" | scrub | jq -c '[.agents[]? | select(type == "object")
+    | ((.qualified_name // "") | tostring) as $n | select($n != "")
+    | {name: $n,
+       state: (if ((.suspended // false) | tostring) == "true" then "suspended"
+               elif (.pool | type) != "object" then "nopool"
+               elif ((.pool.max // 0) | if type == "number" then . else 0 end) == 0 then "nopool"
+               else "pool" end)}]' 2>/dev/null)
+unclaimed_ok=1
+if [ "$agents_rc" -ne 0 ] || [ -z "$agents" ] || [ "$agents" = "[]" ]; then
+    unclaimed_ok=0
+    warnings+=("\`gc agent list --json\` failed (rc=$agents_rc) or listed no agents — the never-claimed arm did NOT run, so a routed step nothing has ever claimed is not covered by this run")
+fi
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
@@ -87,7 +130,7 @@ if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     exit 1
 fi
 
-while IFS=$'\037' read -r rig_name rig_path suspended; do
+while IFS="$SEP" read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
     db="$rig_path/.beads"
@@ -95,9 +138,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    claims_raw=$(run_bounded bd list --db "$db" --status in_progress --has-metadata-key gc.step_ref --json --limit 0 2>/dev/null); rc=$?
+    claims_raw=$(run_bounded bd list --db "$db" --status in_progress --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$claims_raw" ]; then
-        warnings+=("$label: could not list in-progress step beads in $db (rc=$rc) — this store was NOT checked")
+        warnings+=("$label: could not list in-progress beads in $db (rc=$rc) — this store was NOT checked")
         continue
     fi
     rows=$(printf '%s' "$claims_raw" | scrub | jq -r \
@@ -140,27 +183,189 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
                end) ]
         | .[] | [.cls, .bid, .as, (.held | tostring), .ex] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
-        warnings+=("$label: in-progress step listing from $db could not be parsed — this store was NOT checked")
+        warnings+=("$label: in-progress listing from $db could not be parsed — this store was NOT checked")
         continue
     fi
-    [ -n "$rows" ] || continue
-    while IFS=$'\037' read -r cls bid as held ex; do
-        [ -n "$cls" ] || continue
-        case "$cls" in
-            unheld)   errors+=("$label step $bid: in_progress for ${held}m with NO assignee. Nothing holds it, and \`bd ready\` cannot offer it either because its status is not open, so it is reachable by neither path; release it (status=open) so a pool can re-offer it.") ;;
-            orphaned) errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — id, session_name and alias were all tried. Nothing holds this step and nothing will advance it; release it (status=open, assignee=\"\") so a pool can re-offer it.") ;;
-            dead)     errors+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session is not running (state=$ex). The claim outlived its holder; release it so a pool can re-offer it.") ;;
-            stalled)  errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which is running but has produced no output for ${ex}m. A holder quiet past the ${STALL_MINUTES}m bound is parked, not working; nudge it to deliver the step it holds, or release the claim.") ;;
-            orphaned_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have started after that snapshot. Re-run once the cache is fresh.") ;;
-            dead_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session read as not running (state=$ex) — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may be running now. Re-run once the cache is fresh.") ;;
-            stalled_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", last output ${ex}m ago — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have produced output since. Re-run once the cache is fresh.") ;;
-            unknown)  notes+=("$label step $bid: claimed ${held}m ago by \"$as\", whose last_active is \"$ex\" and does not parse as a timestamp — liveness could not be judged for this holder; reported, not judged") ;;
-        esac
-    done <<< "$rows"
+    if [ -n "$rows" ]; then
+        while IFS="$SEP" read -r cls bid as held ex; do
+            [ -n "$cls" ] || continue
+            case "$cls" in
+                unheld)   errors+=("$label step $bid: in_progress for ${held}m with NO assignee. Nothing holds it, and \`bd ready\` cannot offer it either because its status is not open, so it is reachable by neither path; release it (status=open) so a pool can re-offer it.") ;;
+                orphaned) errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — id, session_name and alias were all tried. Nothing holds this step and nothing will advance it; release it (status=open, assignee=\"\") so a pool can re-offer it.") ;;
+                dead)     errors+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session is not running (state=$ex). The claim outlived its holder; release it so a pool can re-offer it.") ;;
+                stalled)  errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which is running but has produced no output for ${ex}m. A holder quiet past the ${STALL_MINUTES}m bound is parked, not working; nudge it to deliver the step it holds, or release the claim.") ;;
+                orphaned_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have started after that snapshot. Re-run once the cache is fresh.") ;;
+                dead_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session read as not running (state=$ex) — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may be running now. Re-run once the cache is fresh.") ;;
+                stalled_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", last output ${ex}m ago — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have produced output since. Re-run once the cache is fresh.") ;;
+                unknown)  notes+=("$label step $bid: claimed ${held}m ago by \"$as\", whose last_active is \"$ex\" and does not parse as a timestamp — liveness could not be judged for this holder; reported, not judged") ;;
+            esac
+        done <<< "$rows"
+    fi
+
+    [ "$unclaimed_ok" -eq 1 ] || continue
+
+    # Occupancy: every identity holding work of ANY kind in this store, read
+    # off the listing arm 1 already fetched.
+    held_ids=$(printf '%s' "$claims_raw" | scrub | jq -r '.[]? | ((.assignee // "") | tostring)
+        | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | select(. != "")' 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        occupancy_partial=1
+        warnings+=("$label: the assignees in $db could not be read — a worker busy in this store reads as free, so never-claimed findings are reported as warnings rather than errors")
+    elif [ -n "$held_ids" ]; then
+        while IFS= read -r h; do
+            [ -n "$h" ] && occupied_list+=("$h")
+        done <<< "$held_ids"
+    fi
+
+    open_raw=$(run_bounded bd list --db "$db" --status open --has-metadata-key gc.step_ref --json --limit 0 2>/dev/null); open_rc=$?
+    if [ "$open_rc" -ne 0 ] || [ -z "$open_raw" ]; then
+        warnings+=("$label: could not list open step beads in $db (rc=$open_rc) — never-claimed steps there were NOT checked")
+        continue
+    fi
+    urows=$(printf '%s' "$open_raw" | scrub | jq -r --argjson stall "$STALL" '
+        def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);
+        def trim: (tostring) | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
+        .[]? | . as $b
+        | (($b.metadata // {})) as $m
+        | (($m["gc.step_ref"] // "") | trim) as $ref
+        | select($ref != "")
+        | (($b.id // "") | tostring) as $raw
+        | select($raw != "")
+        # Any assignee at all means something owns it; a blank-but-present one
+        # is an address fault I3 reports, not an unclaimed step.
+        | select((($b.assignee // "") | tostring) == "")
+        | select((($m["gc.claimed_at"] // "") | tostring) == "")
+        # Routes are compared as stored, so a padded one falls through to the
+        # no-such-agent note rather than being silently repaired here.
+        | (($m["gc.routed_to"] // "") | tostring) as $rt
+        | (($m["gc.execution_routed_to"] // "") | tostring) as $ert
+        | (if $rt != "" then $rt else $ert end) as $route
+        | select($route != "")
+        | ((($b.updated_at // $b.created_at // "") | trim) | ep) as $ue
+        | select($ue != null and (now - $ue) > $stall)
+        | [ ($raw | gsub("[[:cntrl:]]"; " ")), ($route | gsub("[[:cntrl:]]"; " ")),
+            ($ref | gsub("[[:cntrl:]]"; " ")),
+            (((now - $ue) / 60 | floor) | tostring) ]
+        | join("\u001f")' 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        warnings+=("$label: the open step listing from $db could not be parsed — never-claimed steps there were NOT checked")
+        continue
+    fi
+    [ -n "$urows" ] || continue
+
+    # A route is an address, not an offer: a pool claims what `bd ready`
+    # returns, so a step the queue is not offering is waiting on its
+    # predecessor by design and is nobody's fault yet. Probed only once a store
+    # has a candidate, because most stores have none and the offer list is the
+    # expensive half.
+    ready_raw=$(run_bounded bd ready --db "$db" --json --limit 0 2>/dev/null); ready_rc=$?
+    ready_ids=""
+    if [ "$ready_rc" -eq 0 ] && [ -n "$ready_raw" ]; then
+        ready_ids=$(printf '%s' "$ready_raw" | scrub | jq -r '.[]? | (.id // empty) | tostring' 2>/dev/null)
+        ready_rc=$?
+    fi
+    if [ "$ready_rc" -ne 0 ]; then
+        warnings+=("$label: could not read \`bd ready\` in $db (rc=$ready_rc) — never-claimed steps there were NOT checked")
+        continue
+    fi
+    unset -v offerable; declare -A offerable=()
+    while IFS= read -r oid; do
+        [ -n "$oid" ] && offerable["$oid"]=1
+    done <<< "$ready_ids"
+    while IFS="$SEP" read -r uid urest; do
+        [ -n "$uid" ] || continue
+        [ -n "${offerable[$uid]:-}" ] || continue
+        unclaimed+=("${label}${SEP}${uid}${SEP}${urest}")
+    done <<< "$urows"
 done <<< "$scopes"
 
+# Arm 2's verdict. Deferred to here because occupancy is a city-wide question:
+# a pool's workers are busy in whichever store their claim happens to live in.
+if [ "${#unclaimed[@]}" -ne 0 ]; then
+    occupied_json=$(printf '%s\n' ${occupied_list[@]+"${occupied_list[@]}"} \
+        | jq -R -s -c 'split("\n") | map(select(. != "")) | unique' 2>/dev/null)
+    if [ -z "$occupied_json" ]; then
+        occupied_json='[]'
+        occupancy_partial=1
+        warnings+=("the set of identities already holding work could not be assembled — every session reads as free, so never-claimed findings are reported as warnings rather than errors")
+    fi
+    declare -A agent_state=()
+    while IFS="$SEP" read -r aname astate; do
+        [ -n "$aname" ] || continue
+        agent_state["$aname"]="$astate"
+    done <<< "$(printf '%s' "$agents" | jq -r '.[] | [.name, .state] | join("\u001f")' 2>/dev/null)"
+
+    # One row per route that has running sessions: how many, how many of those
+    # hold nothing, and which. `template` is the only field that ties a pool
+    # worker back to the agent it runs — a pool member's alias is empty, and a
+    # codex polecat's alias names the persona rather than the pool.
+    declare -A pool_total=() pool_free=() pool_names=()
+    while IFS="$SEP" read -r ptmpl ptotal pfree pnames; do
+        [ -n "$ptmpl" ] || continue
+        pool_total["$ptmpl"]="$ptotal"; pool_free["$ptmpl"]="$pfree"; pool_names["$ptmpl"]="$pnames"
+    done <<< "$(printf '%s' "$sessions" | jq -r --argjson occ "$occupied_json" '
+        (reduce ($occ[]? | tostring) as $o ({}; .[$o] = 1)) as $O
+        | [ .[] | select(((.running // false) | tostring) == "true")
+            | ((.template // "") | tostring) as $t | select($t != "")
+            | { t: $t,
+                free: (if ($O[((.id // "") | tostring)] != null
+                           or $O[((.session_name // "") | tostring)] != null
+                           or $O[((.alias // "") | tostring)] != null) then 0 else 1 end),
+                nm: ([(.session_name // ""), (.alias // ""), (.id // "")]
+                      | map(tostring) | map(select(. != ""))
+                      | ((.[0] // "?") | gsub("[[:cntrl:]]"; " "))) } ]
+        | group_by(.t)[]
+        | [ .[0].t, (length | tostring), ([.[] | select(.free == 1)] | length | tostring),
+            ([.[] | select(.free == 1) | .nm] | join(", ")) ]
+        | join("\u001f")' 2>/dev/null)"
+
+    declare -A quiet_count=() quiet_age=()
+    # One note per (store, route, reason), not per bead: a queue behind a full
+    # pool is the ordinary state of a busy city, and a line each would bury the
+    # findings that have to be read.
+    quiet() {
+        local key="${1}${SEP}${2}${SEP}${3}"
+        quiet_count["$key"]=$(( ${quiet_count["$key"]:-0} + 1 ))
+        [ "${quiet_age["$key"]:-0}" -lt "$4" ] && quiet_age["$key"]="$4"
+        return 0
+    }
+    while IFS="$SEP" read -r label bid route ref age; do
+        [ -n "$bid" ] || continue
+        case "$age" in *[!0-9]*|"") age=0 ;; esac
+        case "${agent_state[$route]:-unknown}" in
+            suspended)
+                quiet "$label" "$route" "it is suspended, so work waiting on it is parked on purpose" "$age" ;;
+            nopool)
+                quiet "$label" "$route" "it has no sessions configured (pool max 0), so nothing is meant to claim them" "$age" ;;
+            pool)
+                total="${pool_total[$route]:-0}"
+                free="${pool_free[$route]:-0}"
+                if [ "$total" = "0" ]; then
+                    quiet "$label" "$route" "it has no running session — a pool scaled to zero with a queue behind it is the demand probe's business, not a stalled claim" "$age"
+                elif [ "$free" = "0" ]; then
+                    quiet "$label" "$route" "its $total running session(s) are all holding work already — a queue behind a full pool is backpressure, not starvation" "$age"
+                elif [ "$stale_roster" = "1" ]; then
+                    warnings+=("$label step $bid ($ref): offered by \`bd ready\` and never claimed for ${age}m while \"$route\" appeared to have $free of $total running session(s) holding nothing — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so those sessions may have exited or taken work since. Re-run once the cache is fresh.")
+                elif [ "$occupancy_partial" = "1" ]; then
+                    warnings+=("$label step $bid ($ref): offered by \`bd ready\` and never claimed for ${age}m while \"$route\" has $free of $total running session(s) reading as free (${pool_names[$route]:-}) — but at least one store's in-progress beads could not be read, so a busy worker may be counted among them. Re-run once every store answers.")
+                else
+                    errors+=("$label step $bid ($ref): offered by \`bd ready\` and NEVER claimed for ${age}m — no assignee, no gc.claimed_at — while its route \"$route\" has $free of $total running session(s) holding nothing (${pool_names[$route]:-}). An idle worker and an offered step have not met; nudge the pool so it calls \`gc hook --claim\`, or re-sling the molecule root.")
+                fi ;;
+            *)
+                quiet "$label" "$route" "it names no agent — an address nothing answers is check-routed-work-claimable's finding (I3), not this one" "$age" ;;
+        esac
+    done <<< "$(printf '%s\n' "${unclaimed[@]}")"
+    if [ "${#quiet_count[@]}" -ne 0 ]; then
+        while IFS="$SEP" read -r qlabel qroute qreason; do
+            [ -n "$qlabel$qroute" ] || continue
+            qkey="${qlabel}${SEP}${qroute}${SEP}${qreason}"
+            notes+=("$qlabel: ${quiet_count[$qkey]} step(s) offered and unclaimed for up to ${quiet_age[$qkey]}m, routed to \"$qroute\" — $qreason; reported, not judged")
+        done <<< "$(printf '%s\n' "${!quiet_count[@]}" | LC_ALL=C sort)"
+    fi
+fi
+
 if [ "${#errors[@]}" -ne 0 ]; then
-    echo "claimed steps nothing is advancing (I11): ${#errors[@]} finding(s)"
+    echo "steps nothing is running (I11): ${#errors[@]} finding(s)"
     detail "${errors[@]}"
     detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
@@ -172,6 +377,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every step claimed longer than ${STALL_MINUTES}m is held by a running session that is still producing output"
+echo "OK: every step claimed longer than ${STALL_MINUTES}m is held by a running session that is still producing output, and every step offered that long is waiting on a pool that is suspended, empty or busy"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
