@@ -120,8 +120,8 @@ resolves, the supervisor endpoint carries a numeric `input_tokens` for every
 awake patrol agent, and no refinery's git-op defer guard has been latched past
 a bound), and `doctor/check-plan-targets-filed` (every row of a document's
 declared target list binds to a bead that exists). That is the whole set, and
-every one of them asserts a live structural property — none greps the source
-for a past fix.
+**each asserts a live structural property** — none greps the source for a past
+fix.
 
 ---
 
@@ -258,4 +258,4 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
   by construction. If you find the ledger disagreeing with this document, one
-  of the twelve checks is missing a case; fix the check, not the prose.
+  of the checks is missing a case; fix the check, not the prose.

@@ -75,7 +75,7 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
   miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
-- **Doctor checks** — the nine structural checks verified below.
+- **Doctor checks** — the structural checks verified below.
 
 ---
 
@@ -161,9 +161,11 @@ The pack's checks, and what a failure means:
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare `check_set`; markers are well-formed `verb@oid` (I6+I7) | a hand-written or truncated marker |
+| `check-gate-marker-provenance` | every green marker names a commit some recorded verdict covers (I7) | a green marker with no review bead and no approval behind it |
 | `check-step-terminal` | no open step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | a molecule executes the formula text current when it runs (I9) | a rig checkout lagging past the reconciler's self-heal window |
 | `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
+| `check-claim-advancing` | a claimed step is held by a live session, and an offered step gets claimed at all (I11) | a session died holding a step, or the pool its route names is taking no work |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
 | `check-recycle-capable` | cycle-recycle can fire: the city name resolves, the supervisor endpoint carries a numeric `input_tokens` per awake patrol agent, and no refinery defer guard is latched | the token field left the API schema, or an uncommitted tracked file has latched the refinery's git-op guard |
