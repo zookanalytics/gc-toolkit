@@ -116,9 +116,20 @@ gate's verdict is a head-bound marker:
 
 `approval` is satisfied only by an external APPROVED review — never by the
 city's own account. **`signoff.sh` is the single writer of gate verdicts**
-(component-model I7); the merge cadence's gate-ensure arm only clears and
-re-arms markers staled by a head move. A head move stales every verb at once,
-so a fixed branch re-evaluates fresh with no manual reset.
+(component-model I7). It refuses any oid that is not 40 lowercase hex: the
+marker earns its authority from `merge.sh` comparing it to the live head, and
+an abbreviated sha compares equal to nothing. A head move stales every verb at
+once, so a fixed branch re-evaluates fresh with no manual reset — gate-ensure
+re-arms the gate by dispatching a fresh review, whose verdict overwrites the
+stale marker.
+
+One shape cannot be re-armed that way. `merge.sh` and gate-ensure both read
+only the gates named in `check_set`, so a `check.<g>` outside it is dispatched
+against by nothing and overwritten by nothing. When such a marker also fails
+the grammar, it is evidence of nothing that nothing could retire, and
+gate-ensure clears it. A well-formed one stays as history, and an undeclared
+`exception@` is the operator's to retire — the re-gate above reaches only the
+gates `check_set` names.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -177,7 +188,10 @@ sequenceDiagram
   gate-ensure re-arms the dispatch when the child lands. The round cap
   (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
   `check.<g>=exception@<head>` and the anchor routes to human. One writer,
-  one terminal verdict — no second component may touch `check.*`.
+  one terminal verdict: no second component writes a verdict. `pr-facts.sh`
+  and `gate-ensure.sh` also clear a marker, each under a condition
+  [authority-map.md](authority-map.md) states, but a clear withdraws evidence
+  and cannot assert it.
   A head move past that exception buys exactly one dispatch through
   gate-ensure's `dispatch_count` cap, so a branch someone fixed by hand gets
   a look. It cannot self-feed: the cap arm files no rework child, so nothing

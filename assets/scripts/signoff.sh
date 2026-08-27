@@ -10,6 +10,8 @@
 # clear the marker and file ONE routed rework child — or, at the round cap,
 # stamp check.<name>=exception@<head> and route the anchor to a human instead.
 # The city never approves its own PRs: nothing here ever passes --approve.
+# Every oid stamped into a marker is a full 40 lowercase hex; a shorter one is
+# refused, since merge.sh can only read the marker by comparing it to a head.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
 # Exit: 0 recorded · 1 refused, nothing written · 2 a write did not read back
 #       (the review bead is left open so the gate stays owed).
@@ -120,9 +122,17 @@ if [ -z "$REVIEWED_OID" ]; then
   [ -n "$BRANCH" ] || { warn "anchor $ANCHOR names no branch and no --reviewed-oid was given; nothing to bind the verdict to"; exit 1; }
   REVIEWED_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}')
 fi
+# The verdict is stamped into check.<g>, whose grammar is <verb>@<40-hex oid>.
+# An abbreviated sha passes a hex-only test yet equals no live head merge.sh
+# could read it against, so the marker holds the anchor instead of gating it.
+REVIEWED_OID=$(printf '%s' "$REVIEWED_OID" | tr '[:upper:]' '[:lower:]')
 case "$REVIEWED_OID" in
-  ''|*[!0-9a-fA-F]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
+  ''|*[!0-9a-f]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
 esac
+if [ "${#REVIEWED_OID}" -ne 40 ]; then
+  warn "reviewed oid '$REVIEWED_OID' is ${#REVIEWED_OID} hex character(s); check.$CHECK_NAME requires the full 40 — pass the unabbreviated commit; nothing written"
+  exit 1
+fi
 
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.

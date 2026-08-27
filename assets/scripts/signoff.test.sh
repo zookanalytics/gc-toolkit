@@ -159,7 +159,13 @@ export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
 export STUB_GH_LOG="$TMP/gh.log" STUB_GH_BODY="$TMP/gh.body" STUB_CREATED="$TMP/created"
 export STUB_SEQ="$TMP/seq" STUB_UPD_FAIL="$TMP/updfail" STUB_GH_ALL="$TMP/gh.all"
-export STUB_LSREMOTE="aaa111" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
+# Fixture oids are 40 lowercase hex — the grammar signoff.sh enforces before it
+# stamps a marker; sha1sum mints a labelled one.
+oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
+OID_HEAD=$(oid head); OID_OVR1=$(oid ovr1); OID_PIN=$(oid pin)
+OID_OVR2=$(oid ovr2); OID_MOVED=$(oid moved); OID_NEWHEAD=$(oid newhead)
+OID_OLD=$(oid old)
+export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
 unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
 
@@ -184,7 +190,7 @@ eq "$rc" 0 "approve exits 0"
 has "$(cat "$STUB_GH_LOG")" "pr review 42 --repo github.com/o/r --comment" "artifact posted as a pinned COMMENT"
 has "$(cat "$STUB_GH_BODY")" "tk-anc" "the posted body carries the anchor link"
 has "$(cat "$STUB_GH_BODY")" "VERDICT body: findings here" "the posted body carries the verdict notes"
-eq "$(meta tk-anc check.codex)" "green@aaa111" "check.codex stamped green at the live head"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "check.codex stamped green at the live head"
 eq "$(status rv-1)" "closed" "review bead closed"
 eq "$(meta rv-1 gc.outcome)" "recorded" "review bead closed with gc.outcome=recorded"
 
@@ -193,28 +199,41 @@ reset "$ANCHOR_PRE"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "pre-open approve exits 0"
 hasnt "$(cat "$STUB_GH_LOG")" "pr review" "pre-open posts no gh pr review (no PR yet)"
-eq "$(meta rv-1 reviewed_oid)" "aaa111" "pre-open records reviewed_oid on the review bead"
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "pre-open records reviewed_oid on the review bead"
 has "$(notes rv-1)" "tk-anc" "pre-open verdict notes carry the anchor link"
-eq "$(meta tk-anc check.codex)" "green@aaa111" "pre-open still stamps the marker"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "pre-open still stamps the marker"
 eq "$(status rv-1)" "closed" "pre-open closes the review bead"
 
 echo "# --reviewed-oid override"
 reset "$ANCHOR_PR"
-"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid beef01 >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "green@beef01" "the override pins the stamped oid"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR1 >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "green@$OID_OVR1" "the override pins the stamped oid"
 
 echo "# a dispatch-pinned reviewed_oid wins over a moved live head"
 reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.reviewed_oid = "ccc111" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-STUB_LSREMOTE="moved222" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+jq -c --arg o "$OID_PIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_LSREMOTE="$OID_MOVED" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "pinned-oid approve exits 0"
-eq "$(meta tk-anc check.codex)" "green@ccc111" "green is stamped at the PINNED oid, not the moved live head (merge then holds on head mismatch)"
+eq "$(meta tk-anc check.codex)" "green@$OID_PIN" "green is stamped at the PINNED oid, not the moved live head (merge then holds on head mismatch)"
 
 echo "# …and the explicit --reviewed-oid flag still outranks the bead pin"
 reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.reviewed_oid = "ccc111" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid beef02 >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "green@beef02" "the flag outranks the dispatch pin"
+jq -c --arg o "$OID_PIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR2 >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "green@$OID_OVR2" "the flag outranks the dispatch pin"
+
+echo "# the marker grammar is enforced at the writer"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --reviewed-oid 8d7f0cf3c 2>&1); rc=$?
+eq "$rc" 1 "an abbreviated sha refuses — it would mint a marker no live head can match"
+eq "$(meta tk-anc check.codex)" "<absent>" "…and nothing was stamped"
+has "$out" "requires the full 40" "…and the refusal names the grammar"
+
+reset "$ANCHOR_PR"
+UPPER=$(printf '%s' "$OID_HEAD" | tr 'a-f' 'A-F')
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$UPPER" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "an uppercase oid is accepted"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "…and normalized to the lowercase grammar"
 
 echo "# notes-file body"
 reset "$ANCHOR_PR"
@@ -245,7 +264,7 @@ jq -c 'map(if .id == "rv-1" then (.metadata |= del(.anchor_bead)) else . end)' "
 printf 'tk-anc|rv-1|blocks\n' > "$STUB_DEPS"
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "edge-resolved anchor accepted"
-eq "$(meta tk-anc check.codex)" "green@aaa111" "marker landed on the edge-resolved anchor"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "marker landed on the edge-resolved anchor"
 
 echo "# marker read-back failure"
 reset "$ANCHOR_PR"
@@ -308,7 +327,7 @@ reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"
 seed_cap_deps c1 c2 c3
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "the cap path exits 0"
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "the cap records exception@<head>"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "the cap records exception@<head>"
 eq "$(grep -c -- 'check.codex=exception@' "$STUB_GC_LOG")" "1" "exception is written EXACTLY once"
 hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata check.codex" "the cap never ALSO unsets the marker"
 eq "$(meta tk-anc gc.routed_to)" "human" "the anchor is routed to a human"
@@ -326,13 +345,13 @@ echo "# cap is tunable via GC_MAX_REVIEW_ROUNDS"
 reset "$ANCHOR_PR" "$(kid 1 open '"source_review_bead":"r1"')"
 seed_cap_deps c1
 GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
 
 echo "# dispatch_count on the ANCHOR (gate-ensure's writer) also counts"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "anchor dispatch_count past the cap trips it with no children"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "anchor dispatch_count past the cap trips it with no children"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "rv-1" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
@@ -346,19 +365,19 @@ eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "garbage dep list reads as 0 rou
 # --- supersede-dismiss -----------------------------------------------------------
 echo "# supersede: dismiss own stale CHANGES_REQUESTED only"
 reset "$ANCHOR_PR"
-export STUB_PR_HEAD="aaa111"
-export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"old000"}
-{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"old000"}
-{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"aaa111"}'
+export STUB_PR_HEAD="$OID_HEAD"
+export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_HEAD"'"}'
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 has "$(cat "$STUB_GH_LOG")" "reviews/111/dismissals" "own stale CHANGES_REQUESTED is dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/222/dismissals" "a human's block is NEVER dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed commit stands"
-eq "$(meta tk-anc signoff_dismissed)" "111@aaa111" "signoff_dismissed pairs the retraction"
+eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
 echo "# supersede holds on a moved head"
 reset "$ANCHOR_PR"
-STUB_PR_HEAD="bbb222" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+STUB_PR_HEAD="$OID_NEWHEAD" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "a moved head keeps the block"
 
 echo "# supersede holds while auto-merge is armed"

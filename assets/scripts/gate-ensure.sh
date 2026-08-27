@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # gate-ensure — arm 1 of the merge cadence; caller: refinery-reconcile.sh.
 # For every open pre_open_gate/pull_request anchor: canonicalize check_set
-# (empty -> stamp the declared default; a list or `none` is left alone),
-# then ensure every declared unsettled gate is RAISABLE — marker green@ or
+# (empty -> stamp the declared default; a list or `none` is left alone), clear
+# any check.<g> that both fails the marker grammar and names a gate check_set
+# does not declare (nothing else reads it, so nothing else could ever rewrite
+# it), then ensure every declared unsettled gate is RAISABLE — marker green@ or
 # exception@ the live branch head, a live routed/claimed review in flight, or
 # a fresh dispatch: metadata + blocks edge stamped first (fail-closed), body
 # from review-dispatch-body.sh, then formula and route in one call (gc sling
@@ -198,6 +200,13 @@ meta_of() { # <row-json> <key>
   printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
 }
 
+# The oid half of the marker grammar <green|fixable|exception>@<40-hex>.
+is_oid() { # <string>
+  local v="${1:-}"
+  case "$v" in *[!0-9a-f]*|"") return 1 ;; esac
+  [ "${#v}" -eq 40 ]
+}
+
 # --- enumerate the gating set (both sub-states); unreadable = cannot vouch ------
 ROWS=""
 for MR in pre_open_gate pull_request; do
@@ -212,7 +221,7 @@ for MR in pre_open_gate pull_request; do
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0
+stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -244,6 +253,41 @@ while IFS= read -r row; do
     canon=$(cs_canon "$checkset")
     echo "$PROG: $id had no normalized check_set; stamped '$DEFAULT_CHECK_SET'"
   fi
+  # --- retire markers no arm of the cadence can ever rewrite ------------------
+  # merge.sh and the gates loop below both read only the gates named in
+  # check_set, so a check.<g> outside it governs nothing and nothing rewrites
+  # it. Clear it when it also fails the marker grammar: a verdict bound to no
+  # valid oid is not evidence, and check-gate-integrity errors on it forever.
+  # A well-formed marker survives (a narrowed check_set keeps its history), and
+  # exception@ is the operator's to retire.
+  declared=",$(printf '%s' "$checkset" | tr -d '[:space:]'),"
+  stray=$(printf '%s' "$row" | jq -r --arg d "$declared" '
+    (.metadata // {}) | to_entries[]
+    | select(.key | test("^check\\.[^.]+$"))
+    | select((.value | type) == "string")
+    | select((.value | test("^exception@")) | not)
+    | select((.value | test("^(green|fixable)@[0-9a-f]{40}$")) | not)
+    | (.key | sub("^check\\."; "")) as $g
+    | select(($d | contains("," + $g + ",")) | not)
+    | .key' 2>/dev/null)
+  while IFS= read -r k; do
+    [ -n "${k:-}" ] || continue
+    was=$(meta_of "$row" "$k")
+    gc bd update "$id" --unset-metadata "$k" \
+      --append-notes "gate-ensure: cleared $k=\"$was\" — check_set '$checkset' does not declare that gate and the marker is not a well-formed verdict, so no signoff or merge could ever act on it." \
+      >/dev/null 2>&1 </dev/null
+    still=$(gc bd show "$id" --json </dev/null 2>/dev/null | scrub \
+      | jq -r --arg k "$k" '.[0].metadata[$k] // empty' 2>/dev/null)
+    if [ -n "$still" ]; then
+      echo "$PROG: WARN $id $k still reads '$still' after the clear; retry next pass" >&2
+    else
+      cleared=$((cleared + 1))
+      echo "$PROG: $id cleared undeclared malformed gate marker $k=\"$was\" (check_set '$checkset')"
+    fi
+  done <<STRAY
+$stray
+STRAY
+
   case "$canon" in none|off) continue ;; esac
 
   head=""
@@ -262,8 +306,16 @@ while IFS= read -r row; do
     case "$marker" in
       green@*)
         oid="${marker#green@}"
-        if [ -z "$head" ] || [ "$oid" = "$head" ]; then continue; fi
-        why="check.$g is green@$oid but branch '$branch' has advanced to $head" ;;
+        if [ -n "$head" ]; then
+          [ "$oid" = "$head" ] && continue
+          why="check.$g is green@$oid but branch '$branch' has advanced to $head"
+        elif is_oid "$oid"; then
+          continue  # head unreadable: a well-formed green stays satisfiable
+        else
+          # No head can ever equal a malformed oid, so the soft pass above would
+          # settle this gate forever on a marker that is not evidence.
+          why="check.$g is green@$oid, which is no 40-hex oid, and '$branch' has no readable head — nothing could ever satisfy it"
+        fi ;;
       exception@*)
         oid="${marker#exception@}"
         if [ -z "$head" ] || [ "$oid" = "$head" ]; then continue; fi
@@ -458,7 +510,7 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
   exit "$UNSAFE_RC"
