@@ -178,6 +178,23 @@ out=$(run)
 has "$out" "already covers branch" "a claimed child still suppresses the arm"
 eq "$(meta held-rw 'gc.routed_to')" "<absent>" "…and nothing is written under the holder"
 
+echo "# …a strand never overrides a LIVE sibling's claim on the force-push"
+strand='{"id":"strand-rw","status":"open","assignee":"","notes":"",'
+strand="$strand"'"title":"Rebase PR#34 onto main: base rewritten, PR conflicts",'
+strand="$strand"'"metadata":{"branch":"polecat/x34","rejection_reason":"stale base at head sha-34: x"}}'
+livesib='{"id":"live-rw","status":"in_progress","assignee":"rig/gc-toolkit.polecat-3","notes":"",'
+livesib="$livesib"'"title":"Rebase PR#34 onto main: base rewritten, PR conflicts",'
+livesib="$livesib"'"metadata":{"branch":"polecat/x34","rejection_reason":"stale base at head sha-old: x"}}'
+# The strand is listed FIRST: it is open, so it matches the dedup's live arm and
+# would be the one picked as the dup — the veto must not depend on that order.
+store "[$strand, $livesib, $(anchor RT3 34)]"
+printf '%s' "$(prview 34 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_34.json"
+out=$(run)
+has "$out" "rework live-rw already covers branch" "the live sibling still vetoes, strand or no strand"
+has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable strand is named, not silently left"
+eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
 printf '%s' "$(prview 24 MERGED CLEAN MERGEABLE)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_24.json"

@@ -255,18 +255,9 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     }
-    dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
-      ($live | split(",")) as $ls
-      | [ .[] | select(.id != $id)
-          | select(((.metadata.merge_result // "") | tostring) == "")
-          | ((.status // "open") | ascii_downcase) as $st
-          | ((.metadata.rejection_reason // "") | tostring) as $rr
-          | select((($rr | contains("head " + $h)) and ($h != ""))
-                   or (($ls | index($st)) != null))
-          | .id ] | .[0] // empty' 2>/dev/null)
     # A child of a prior pass whose route stamp exited 0 without writing. The
     # route is what makes it reachable — neither `bd ready` nor a pool claim can
-    # see it without one — and the dedup above matches it, so nothing retries it.
+    # see it without one — and the dedup below matches it, so nothing retries it.
     # Narrow to open/unassigned/unrouted at THIS head: a metadata write ignores
     # bd's claim guard, so re-stamping a child someone holds stomps live work.
     stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
@@ -278,8 +269,21 @@ GATES
         | select(((.metadata.merge_result // "") | tostring) == "")
         | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
         | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$dup" ] && [ -z "$stranded" ]; then
-      echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child"
+    # A strand is open, so it matches the live arm below and would veto its own
+    # rescue; it is excluded from its own dedup and from nothing else. Any OTHER
+    # match still vetoes — a second routed child would race the force-push the
+    # first one already owns.
+    dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+      ($live | split(",")) as $ls
+      | [ .[] | select(.id != $id) | select(.id != $s)
+          | select(((.metadata.merge_result // "") | tostring) == "")
+          | ((.status // "open") | ascii_downcase) as $st
+          | ((.metadata.rejection_reason // "") | tostring) as $rr
+          | select((($rr | contains("head " + $h)) and ($h != ""))
+                   or (($ls | index($st)) != null))
+          | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$dup" ]; then
+      echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
       skipped=$((skipped + 1)); continue
     fi
     # Any rebase_hold on a bead naming this branch is an operator freeze.
