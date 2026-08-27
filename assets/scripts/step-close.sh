@@ -16,7 +16,9 @@
 #
 # --bead is a HINT (e.g. `.bead_id` from `gc hook --claim --json`): used only if
 # it verifies as this session's bead for this step inside the molecule being
-# executed. A graph.v2 step executes at status `open` (the graph pre-assigns
+# executed. It never establishes which molecule that is: a hint scoped by a root
+# it supplied itself is scoped by nothing, so pass --root when no other source
+# names one. A graph.v2 step executes at status `open` (the graph pre-assigns
 # it, so the claim advances nothing); in_progress is resolved first, open only
 # when that tier is empty. Ambiguity is refused — a stalled step is visible, a
 # wrong close corrupts two workflows.
@@ -41,7 +43,9 @@ usage: step-close.sh --step <formula.step-id> [--outcome <v>] [--bead <id>]
   --outcome  value for metadata gc.outcome, default "pass"
   --bead     candidate id, e.g. `.bead_id` from `gc hook --claim --json`. A
              HINT: used only if it verifies as this session's bead for --step
-             inside the molecule being executed. A stale one is reported and
+             inside the molecule being executed, and never to establish which
+             molecule that is — with none established it is ignored, and
+             --root is how a caller supplies one. A stale hint is reported and
              ignored, never obeyed.
   --root     the molecule's root bead, e.g. `.root_bead_id` from that same
              claim. Skips the derivation; the other half of the unique pair.
@@ -132,8 +136,8 @@ fi
 # molecule gates every answer below it: one assignee covers every molecule a
 # pool agent ever ran, so a matching assignee corroborates the candidate and
 # never outranks its root. While $ROOT is empty that gate is inert and the
-# assignee is all there is, which is what lets derive_root reach a hint without
-# reasoning in a circle.
+# answer is back to the non-unique pair, so every caller of verify() has to
+# treat an unscoped verdict as unproven.
 verify() {
   local cand="$1" json
   [ -n "$cand" ] || return 1
@@ -180,11 +184,13 @@ roots_from() { # <bd list args...>
 # is no answer rather than a refusal, so a session carrying husks from earlier
 # runs still resolves through a later source. Order is most to least
 # trustworthy: the session stamp a claim leaves on the step it hands out, this
-# step's own live bead, any live bead of this formula, then the caller's hint.
-# The hint ranks last because $ROOT is still empty here, so verify() cannot yet
-# scope it to a molecule and a pool assignee alone matches another molecule's
-# bead for this same step — a root taken from one would then scope every
-# resolution below to the wrong chain.
+# step's own live bead, then any live bead of this formula.
+#
+# --bead is not a source. $ROOT is empty here, so verify() is down to the
+# (assignee, gc.step_ref) pair one pool assignee shares with every molecule it
+# has ever run; a root taken from a hint that matched on it would scope every
+# resolution below to the wrong chain, and then vouch for that same hint on the
+# way back out (tk-xgfhj3).
 derive_root() {
   local found ident json this_step="" same_formula=""
   if [ -n "${GC_SESSION_ID:-}" ]; then
@@ -213,10 +219,6 @@ $(printf '%s' "$json" | jq -r --arg f "$FORMULA." '
   [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
   found=$(printf '%s\n' "$same_formula" | awk 'NF && !seen[$0]++')
   [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
-  if [ -n "$HINT" ] && [ -n "$(verify "$HINT")" ]; then
-    found=$(root_of "$HINT")
-    [ -n "$found" ] && { printf '%s' "$found"; return 0; }
-  fi
   return 0
 }
 
@@ -303,9 +305,27 @@ if [ "$N" -eq 0 ]; then
   N=$(count "$FOUND")
 fi
 
+HINT_STATUS=""
+[ -n "$HINT" ] && HINT_STATUS=$(verify "$HINT")
+
+# A hint is acted on only inside an established molecule. Unscoped, verify() is
+# back to (assignee, gc.step_ref), and an earlier molecule's bead for this same
+# step satisfies that pair exactly as this chain's own would: closing it is a
+# wrong close, calling it already closed is a pass for a chain this shell never
+# ran. Both fall through to the store instead, which closes an executable bead
+# on the old pair and refuses a closed one. Only the two acting verdicts are
+# dropped — the reporting arms below do not act, and a parked hint's status is
+# the fact the reader needs (tk-xgfhj3).
+if [ -z "$ROOT" ]; then
+  case "$HINT_STATUS" in
+    in_progress|open|closed)
+      echo "step-close: NOTE — --bead $HINT carries this session's assignee and $STEP at status '$HINT_STATUS', but no molecule is established, and that pair matches another molecule's bead for this same step too. Pass --root (\`.root_bead_id\` from \`gc hook --claim --json\`) to act on the hint; resolving from the store instead." >&2
+      HINT=""; HINT_STATUS="" ;;
+  esac
+fi
+
 # 1. A hint that verifies wins; one that does not is reported, never obeyed.
 if [ -n "$HINT" ]; then
-  HINT_STATUS=$(verify "$HINT")
   case "$HINT_STATUS" in
     in_progress|open)
       if [ "$N" -gt 1 ]; then

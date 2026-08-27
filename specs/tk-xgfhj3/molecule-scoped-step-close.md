@@ -38,7 +38,9 @@ against the pre-change script:
   caller resuming after a hook-claim can hold one from an earlier molecule. With
   the assignee as the only test it verified, so the closed-hint arm printed
   `already closed — nothing to do` over another chain's bead even when the caller
-  had supplied the correct `--root`.
+  had supplied the correct `--root`. Where no other source named a molecule, the
+  hint supplied one itself, which put the same false green back with the root
+  gate in place: scoped by a root taken from the hint, the gate can only agree.
 
 Only `(gc.root_bead_id, gc.step_ref)` is unique, and the pour stamps
 `gc.root_bead_id` on every step bead. Resolution is scoped to it; the assignee
@@ -49,13 +51,12 @@ now corroborates rather than identifies.
 The scope is only as good as the derivation, and the derivation has to survive
 the conditions that made the bug visible — a chain whose assignees are gone. A
 caller-supplied `--root` is taken as given, for a caller holding `root_bead_id`
-from `gc hook --claim --json`. Failing that, four sources answer in order, each
+from `gc hook --claim --json`. Failing that, three sources answer in order, each
 only when it names exactly one root:
 
 1. `gc.session_id`, the stamp a claim leaves on the step it hands out.
 2. This session's live bead for this step.
 3. Any live bead of the same formula under this session.
-4. A `--bead` hint that verifies.
 
 Source 1 alone is not enough, because the stamp is not universal: the six steps
 of root tk-4ffl70 carry `gc.session_id=lx-2rrxb`, and the six of tk-j2ddcs carry
@@ -63,13 +64,14 @@ none. Sources 2 and 3 cover those, and source 3 is also what closes a step whose
 own bead is no longer at an executable tier — the siblings still open in the same
 molecule answer for it.
 
-The hint ranks last, and the ordering is load-bearing. `verify()` cannot scope a
-candidate to a molecule while the molecule is still being derived, so at that
-point a same-assignee, same-step bead from an earlier run verifies exactly as
-this chain's own would. A root taken from one would scope every resolution below
-it to the wrong chain, and the closed-hint arm would report that chain's bead as
-already closed. Every source above the hint is either independent of the assignee
-or already inside the molecule.
+`--bead` is not among them. `verify()` cannot scope a candidate to a molecule
+while the molecule is still being derived, so at that point a same-assignee,
+same-step bead from an earlier run verifies exactly as this chain's own would. A
+root taken from one scopes every resolution below it to the wrong chain, and
+then vouches for that same hint on the way back out — which is how the
+closed-hint arm reports another chain's bead as already closed at exit 0. Every
+source that does answer is either independent of the assignee or already inside
+the molecule.
 
 An ambiguous source is treated as no answer rather than as a refusal, so a
 session carrying husks from earlier runs still resolves through a later source.
@@ -81,8 +83,30 @@ assignee says.
 When nothing establishes the molecule, an executable bead is still closed on the
 old pair — that path is unchanged — but a *closed* match is refused, because a
 closed match is exactly the shape that cannot be told apart from a foreign one.
+The `--bead` arms that act take the same rule: with no molecule `verify()` is
+back to the non-unique pair, so a hint reading `open` or `in_progress` is not
+closed and one reading `closed` is not reported as done. Both fall through to
+the store, which applies the rule above. The arms that only report still run —
+a hint parked at `blocked` is the fact the reader needs, and naming it acts on
+nothing.
+
 The cost of that refusal is a visible line on a step that was already closed;
 the cost of the alternative is the silent husk this bead is about.
+
+## 2a. What the scoping does not reach
+
+One shape survives all of it. This chain's own bead carries no assignee, no
+`gc.session_id` and no `--root`, while an earlier molecule's bead for the same
+step is still live under the same assignee. Source 2 then names the earlier
+molecule and the close lands there.
+
+Nothing in the store separates that from the ordinary case. A live
+same-assignee bead at this step is precisely what source 2 exists to read, and
+refusing it would stall every close that carries no session stamp — which is
+most of them. The remedy is upstream of this script: the claim stamps
+`gc.session_id`, or the caller passes `--root`. What is removed here is the
+half a hint could reach on its own, where the only thing naming the molecule
+was the bead the molecule was then used to vouch for.
 
 ## 3. The second defect: assignees cleared mid-run
 

@@ -18,7 +18,9 @@
 #   * --bead as a HINT: honoured when it verifies, ignored (with a note) when it
 #     does not, so a caller carrying a stale claim id cannot re-create the bug —
 #     including a hint that carries this session's assignee and this step's ref
-#     but belongs to an earlier molecule, with the molecule supplied and derived;
+#     but belongs to an earlier molecule, with the molecule supplied and derived,
+#     and a hint offered as the only thing naming the molecule that would then
+#     scope it — which is no scope at all, and is refused;
 #   * the SUBSTRING trap — jq's `inside`/`contains` match substrings, so a
 #     session named lx-zzk would "own" lx-zzk9's bead. Exact membership only;
 #   * the OPEN-STATUS anchor (tk-jww3y) — a graph.v2 step is assigned by the
@@ -311,6 +313,39 @@ has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(STALE-HINT-SESSION) closed this m
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(STALE-HINT-SESSION) the earlier molecule's bead was NOT closed"
 hasnt "$OUT" "nothing to do" "(STALE-HINT-SESSION) the false-green line is not emitted"
 has "$OUT" "belongs to molecule root-old" "(STALE-HINT-SESSION) the hint's own molecule is named"
+
+# (g) THE ROUND-3 ANCHOR — a hint may not establish the molecule that is then
+#     used to vouch for it. Our own bead carries neither an assignee nor a
+#     session stamp, so nothing independent names root-mine and the hint is the
+#     only candidate; taking root-old from it scopes verify() straight back onto
+#     the hint, which reports a foreign closed bead as this chain's own.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|
+tk-old111|$MINE|$FSTEP|closed|root-old|
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" --bead tk-old111 2>&1) || RC=$?
+eq "$RC" "2" "(HINT-NOT-A-ROOT) a closed hint from another molecule is not a close"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(HINT-NOT-A-ROOT) nothing was written"
+hasnt "$OUT" "nothing to do" "(HINT-NOT-A-ROOT) the false-green line is not emitted"
+has "$OUT" "no molecule is established" "(HINT-NOT-A-ROOT) the dropped hint is reported"
+has "$OUT" "Pass --root" "(HINT-NOT-A-ROOT) names what would make the hint usable"
+has "$OUT" "root-old" "(HINT-NOT-A-ROOT) the molecule the hint belongs to is named"
+has "$OUT" "still UNCLOSED" "(HINT-NOT-A-ROOT) names the consequence"
+
+# (h) The wrong-close half of the same hint, with the molecule established
+#     independently: being LIVE does not buy a foreign bead past the root gate.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|
+tk-old222|$MINE|$FSTEP|in_progress|root-old|
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --root root-mine --bead tk-old222
+eq "$RC" "0" "(LIVE-HINT-ROOT) a live foreign hint does not stop the close"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-HINT-ROOT) closed the bead in the named molecule"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(LIVE-HINT-ROOT) the other molecule's live step was NOT closed"
+has "$OUT" "belongs to molecule root-old" "(LIVE-HINT-ROOT) the hint's own molecule is named"
 
 # --- 1d. a step of our own molecule held by another session ------------------
 # Molecule scope answers "which chain", not "who is running it". A second
