@@ -4,7 +4,6 @@
 # specs/tk-h9pq5/design-doc.md; session-ending mechanics (idle_timeout DOES
 # end a held sitting; the no-wake-reason drain takes the pane after it) are
 # verified in docs/gascity-human-engagement.md — read that before tuning.
-# Demand is the default routed-pool predicate; a filed visit IS the demand.
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
@@ -19,3 +18,25 @@ idle_timeout = "8h"
 min_active_sessions = 0
 # Bounds concurrently LIVE sittings only; open visits queue at zero cost.
 max_active_sessions = 6
+
+# scale_check = the reconciler's SPAWN predicate, as a count (0 = no demand =
+# no spawn) so a seat is only ever bought for a visit some session can claim.
+#
+# Declaring it is the point. A rig-scope target reads exactly one store, its
+# own rig store, which is the rule `gc sling` enforces when it refuses to route
+# a bead at a target that cannot read the store the bead lives in. The default
+# pool-demand probe does not hold to that rule: it counts the rig store and the
+# CITY store together, so a visit filed into the city store and routed here is
+# counted as demand no converse session can claim. Each such row buys a seat
+# that spawns, reads empty, drains, and is counted again on the next tick.
+#
+# The flags are the serving rules of the query a session is actually offered
+# (gascity internal/config PoolDemandServeRules): a row carrying an assignee, a
+# routed epic, or a bead parked on a dispatch hold is not a seat's worth of
+# work. Count anything the offer would withhold and the seat burns the same way.
+scale_check = '''
+_='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
+target="{{.Rig}}/gc-toolkit.converse"
+n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --exclude-label "hold:mayor" --exclude-label "hold:external" --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
+if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
+'''
