@@ -59,9 +59,10 @@ The scripts are deleted when the last port lands and the fallback drops.
 ## Build and deploy
 
 `orders/gctk-build.toml` runs `assets/scripts/gc-gctk-build.sh --deploy` on a
-5-minute cooldown: build if `find -newer` says a source is newer than the
-binary, publish by atomic rename, write a build-status record. Nothing builds
-in a caller's path — a build inside the cadence would put a Go toolchain
+5-minute cooldown: build if a source is newer than the binary or the last
+record shows the binary was built from another revision, publish by atomic
+rename, write a build-status record. Both tests are needed — `find -newer`
+cannot see an input a commit deleted. Nothing builds in a caller's path — a build inside the cadence would put a Go toolchain
 between a merge and its ledger write.
 
 The module is stdlib-only, so a cold build is seconds. There is no service to

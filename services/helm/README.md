@@ -852,7 +852,10 @@ atomic rename:
 | `checked_at` | when the build order last ran at all |
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
-good binary kept serving, which is the gap worth showing. `checked_at` is the
+good binary kept serving, which is the gap worth showing. A tick that finds the
+two unequal rebuilds for that reason alone: `find -newer` cannot see an input a
+commit deleted, so the mtime test by itself would leave a deletion-only commit
+recorded as current. `checked_at` is the
 only field a quiet tick moves, so it is the only one that can say the build
 order itself has stopped.
 

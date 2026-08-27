@@ -91,6 +91,9 @@
 #                 gap between the two revisions IS the signal
 #   (STATUSNOOP)  an up-to-date tick still writes a record; checked_at is the
 #                 only field that can say the build order itself stopped
+#   (STATUSDEL)   a deletion-only change rebuilds — `find -newer` is blind to an
+#                 input that no longer exists, and the record must never name a
+#                 revision the binary was not built from
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
 #
@@ -891,10 +894,38 @@ run_build
 eq "$RC" 0 "(STATUSNOOP) the no-op tick exits 0"
 absent "$RECORD" "(STATUSNOOP) and builds nothing"
 eq "$(status_field last_build_rc)" "0" "(STATUSNOOP) it still reports success"
-eq "$(status_field binary_rev)" "$REV_C" "(STATUSNOOP) find -newer proved the binary is this revision"
+eq "$(status_field binary_rev)" "$REV_C" "(STATUSNOOP) binary_rev still names the revision the binary was built from"
 [ "$(status_field checked_at)" != "$CHECKED_1" ] \
     && ok "(STATUSNOOP) checked_at advanced — the build order is demonstrably alive" \
     || bad "(STATUSNOOP) checked_at did not move; a stopped build order would look healthy"
+
+# --- case: a deletion-only change still rebuilds ------------------------------
+# `find -newer` can only test files that still exist. Delete a source and
+# nothing remaining has to be newer than the binary, so the mtime test alone
+# takes the no-op path and records the new revision for a binary built from the
+# old one — the board's PACK row then reads "current" exactly when the cadence
+# is serving the previous binary.
+fixture
+echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/doomed.go"
+REV_D="$(commit_fixture "$ROOT" || true)"
+run_build
+eq "$RC" 0 "(STATUSDEL) the first build exits 0"
+eq "$(status_field binary_rev)" "$REV_D" "(STATUSDEL) the binary starts current at its own revision"
+rm -f "$RECORD"
+git -C "$ROOT" rm -q "services/helm/cmd/helm-svc/doomed.go" >/dev/null 2>&1 || true
+REV_E="$(commit_fixture "$ROOT" || true)"
+[ -n "$REV_E" ] && [ "$REV_E" != "$REV_D" ] \
+    && ok "(STATUSDEL) the deletion advanced the tree" \
+    || bad "(STATUSDEL) the fixture did not advance; the stale binary cannot be shown"
+# The control: without it this case would pass through the ordinary mtime arm
+# and prove nothing about the deletion.
+[ -z "$(find "$ROOT/services/helm" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(STATUSDEL) and left nothing newer than the binary — the mtime test is blind here" \
+    || bad "(STATUSDEL) something is newer than the binary; the case would pass without reaching the blind spot"
+run_build
+eq "$RC" 0 "(STATUSDEL) the next tick exits 0"
+present "$RECORD" "(STATUSDEL) the deleted input forces a rebuild"
+eq "$(status_field binary_rev)" "$REV_E" "(STATUSDEL) so binary_rev names a revision the binary was really built from"
 
 # --- case: published but not serving -----------------------------------------
 fixture

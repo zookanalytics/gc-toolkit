@@ -50,8 +50,11 @@ hunt would find that city's binary and silently stop testing the script.
 
 **Build and deploy.** `orders/gctk-build.toml` +
 `assets/scripts/gc-gctk-build.sh`, on the helm-build pattern: cooldown,
-staleness by `find -newer`, atomic publish by rename, never a build in a
-caller's path. No restart step — gctk is a command, not a service.
+staleness by `find -newer` **and** by the recorded `binary_rev`, atomic publish
+by rename, never a build in a caller's path. The second test is not redundant:
+`find -newer` can only compare files that still exist, so a deletion-only
+commit leaves nothing newer than the binary and the mtime test alone would
+record the new revision for a binary built from the old one. No restart step — gctk is a command, not a service.
 
 **The build-status record and the board rows.** Every build order writes
 `<state_root>/build-status.json`; `services/helm` reads them all into
@@ -78,9 +81,17 @@ The suite was mutation-tested rather than trusted:
 | the preference wiring broken, so arm 2 silently ran shell | "lifecycle.sh execs the binary when GCTK_BIN resolves" |
 | a failed build claiming the revision it could not build | `(STATUSFAIL) binary_rev stays on what is still serving` |
 | the no-op tick writing no record | `(STATUSNOOP) checked_at advanced` |
+| a deletion-only commit leaving a stale binary marked current | `(STATUSDEL) the deleted input forces a rebuild` |
 
 The third one is the load-bearing case: without it, a two-arm suite that has
 quietly collapsed into one arm still reports every assertion green.
+
+The build-status rows in that table come from `gc-helm-svc.test.sh`. Both
+builders decide staleness with the same two tests and write the record through
+the same no-op path, so that suite is where the shared pattern is pinned;
+`gc-gctk-build.sh`'s copy was checked by running the deletion-only sequence
+directly — build, delete a source, commit, re-run — against the script before
+and after the fix.
 
 ## Not landed, and why
 

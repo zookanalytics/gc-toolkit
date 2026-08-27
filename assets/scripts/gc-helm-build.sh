@@ -259,15 +259,20 @@ restart_service() {
 # nothing in flight can be swept.
 find "$BIN_DIR" -maxdepth 1 -type f -name '.helm-svc.build.*' -mmin +60 -delete 2>/dev/null || true
 
-# Build when the binary is missing or any source file is newer than it.
+# `find -newer` cannot see a DELETED input: after a deletion-only commit
+# nothing that remains is newer than the binary. binary_rev is the revision the
+# binary was actually built from, so it is what separates a current binary from
+# one the tree has moved past.
 need_build=0
 if [ ! -x "$BIN" ]; then
     need_build=1
 elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
+elif [ -n "$SOURCE_REV" ] && [ "$(prev_field binary_rev)" != "$SOURCE_REV" ]; then
+    need_build=1
 fi
 if [ "$need_build" -eq 0 ]; then
-    # `find -newer` just proved no source is newer than the binary, so the
+    # No input is newer and the record already names this revision, so the
     # binary IS the current revision — that is what makes recording it here
     # honest rather than a guess. built_at comes off the binary's own mtime when
     # no earlier record names it.
