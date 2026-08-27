@@ -20,7 +20,12 @@ unbound=(); nomarker=(); unresolved=()
 docs_seen=0; rows_seen=0; bead_rows=0; none_rows=0; landed_rows=0
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 US=$'\037'
 
@@ -156,7 +161,7 @@ if [ "${#wanted_ids[@]}" -gt 0 ]; then
                 warnings+=("$label: could not list beads in $rig_path/.beads (rc=$rc) — bead references were NOT verified against this store")
                 continue
             fi
-            ids=$(printf '%s' "$raw" | strip_ctl | jq -r '.[]? | "\(.id // "")\t\(.status // "?")"' 2>/dev/null)
+            ids=$(printf '%s' "$raw" | scrub | jq -r '.[]? | "\(.id // "")\t\(.status // "?")"' 2>/dev/null)
             if [ -z "$ids" ]; then
                 warnings+=("$label: bead listing from $rig_path/.beads could not be parsed — bead references were NOT verified against this store")
                 continue
