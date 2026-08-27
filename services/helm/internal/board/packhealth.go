@@ -37,6 +37,15 @@ type PackBuild struct {
 	// built, but not serving.
 	RestartPending bool `json:"restart_pending"`
 
+	// ProbeStatus is what `helm-svc probe` said about the binary this row
+	// describes: "ok", "unreadable", or "unprobed" when no city was resolved to
+	// ask about. A binary that compiles but cannot read the stores it serves
+	// renders no board at all, so the revisions alone cannot say a row is
+	// healthy. ProbeDetail is the probe's one-line reason, empty unless
+	// ProbeStatus is "unreadable".
+	ProbeStatus string `json:"probe_status,omitempty"`
+	ProbeDetail string `json:"probe_detail,omitempty"`
+
 	// CheckedAt is when the build order last ran at all, successful build or
 	// not. It is the only field that moves on a no-op tick, so it is the only
 	// one that can say the builder itself has stopped.
@@ -53,6 +62,11 @@ type PackBuild struct {
 // ordinary lateness never speaks.
 const buildCheckStale = 45 * time.Minute
 
+// probeUnreadable is the ProbeStatus gc-helm-build.sh writes for a binary whose
+// `helm-svc probe` failed. The other values it writes — "ok" and "unprobed" —
+// say nothing this banding acts on.
+const probeUnreadable = "unreadable"
+
 // shortRev trims a revision for display without inventing one: a value that is
 // not a full hash is shown as it stands.
 func shortRev(rev string) string {
@@ -67,7 +81,8 @@ func shortRev(rev string) string {
 //
 // The bands, most severe first:
 //
-//	HIGH      the last build failed, or a published binary is not serving
+//	HIGH      the last build failed, the binary cannot read the stores, or a
+//	          published binary is not serving
 //	ELEVATED  the serving binary predates the tree, or nothing has checked lately
 //	NORMAL    current
 //	LOW       a row that says nothing — no revision was recorded at all
@@ -94,6 +109,20 @@ func bandBuild(r PackBuild, now time.Time) (Severity, string) {
 			return SevHigh, fmt.Sprintf("last build FAILED (rc %d); still serving %s", r.LastBuildRC, shortRev(r.BinaryRev))
 		}
 		return SevHigh, fmt.Sprintf("last build FAILED (rc %d); nothing has ever built", r.LastBuildRC)
+	}
+	// A binary that cannot read the stores renders no board, so this outranks
+	// every currency question below: the revisions can agree perfectly and the
+	// component still serves nothing.
+	if r.ProbeStatus == probeUnreadable {
+		subject := "the binary"
+		if r.BinaryRev != "" {
+			subject = shortRev(r.BinaryRev)
+		}
+		d := fmt.Sprintf("%s CANNOT read the city's bead stores — the board will not render", subject)
+		if r.ProbeDetail != "" {
+			d += ": " + r.ProbeDetail
+		}
+		return SevHigh, d
 	}
 	if r.RestartPending {
 		return SevHigh, fmt.Sprintf("built %s but nothing restarted onto it — the old binary is still serving", shortRev(r.BinaryRev))

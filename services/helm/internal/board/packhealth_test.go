@@ -160,3 +160,53 @@ func TestZeroCheckedAtDoesNotReadAsAncient(t *testing.T) {
 		t.Errorf("severity = %s (%q), want NORMAL", rows[0].Severity, rows[0].Detail)
 	}
 }
+
+func TestCondemnedBinaryIsHighEvenWhenRevisionsAgree(t *testing.T) {
+	// The shape the build order leaves after a rebuild whose probe failed: the
+	// build exited 0, the revisions match, and nothing is pending. Every
+	// currency field says "current" and the component still serves nothing.
+	got := one(t, PackBuild{Component: "helm", SourceRev: "cafe0123456789ab", BinaryRev: "cafe0123456789ab",
+		ProbeStatus: "unreadable", ProbeDetail: "beads schema 14 > binary 12"})
+	if got.Severity != SevHigh {
+		t.Errorf("severity = %s, want HIGH", got.Severity)
+	}
+	if !strings.Contains(got.Detail, "CANNOT read") {
+		t.Errorf("detail %q must say the binary cannot read the stores", got.Detail)
+	}
+	if !strings.Contains(got.Detail, "beads schema 14 > binary 12") {
+		t.Errorf("detail %q must carry the probe's reason", got.Detail)
+	}
+}
+
+func TestCondemnedBinaryOutranksStaleness(t *testing.T) {
+	// A condemned binary that is also out of date: unreadable speaks, because a
+	// board that will not render cannot show the staleness either.
+	got := one(t, PackBuild{Component: "helm", SourceRev: "newnewnewnew1111", BinaryRev: "oldoldoldold2222",
+		ProbeStatus: "unreadable"})
+	if got.Severity != SevHigh || !strings.Contains(got.Detail, "CANNOT read") {
+		t.Errorf("got %s %q, want a HIGH row naming the unreadable binary", got.Severity, got.Detail)
+	}
+}
+
+func TestFailedBuildOutranksACondemnedBinary(t *testing.T) {
+	// Both are HIGH; the build failure is the one worth reading, because the
+	// probe then describes a binary the run never replaced.
+	got := one(t, PackBuild{Component: "helm", SourceRev: "newnewnewnew1111", BinaryRev: "oldoldoldold2222",
+		LastBuildRC: 1, ProbeStatus: "unreadable"})
+	if got.Severity != SevHigh || !strings.Contains(got.Detail, "FAILED") {
+		t.Errorf("got %s %q, want the build failure to speak", got.Severity, got.Detail)
+	}
+}
+
+func TestProbedOkAndUnprobedBandAsBefore(t *testing.T) {
+	// The two other values the build order writes must not disturb the banding:
+	// "unprobed" is what a run with no city resolved records, and it is not
+	// evidence of anything.
+	for _, status := range []string{"ok", "unprobed", ""} {
+		got := one(t, PackBuild{Component: "helm", SourceRev: "cafe0123456789ab", BinaryRev: "cafe0123456789ab",
+			ProbeStatus: status})
+		if got.Severity != SevNormal {
+			t.Errorf("probe_status %q: severity = %s, want NORMAL", status, got.Severity)
+		}
+	}
+}

@@ -37,6 +37,8 @@ type packBuildFile struct {
 	BinaryRev      string `json:"binary_rev"`
 	LastBuildRC    int    `json:"last_build_rc"`
 	RestartPending bool   `json:"restart_pending"`
+	ProbeStatus    string `json:"probe_status"`
+	ProbeDetail    string `json:"probe_detail"`
 	CheckedAt      string `json:"checked_at"`
 }
 
@@ -84,6 +86,8 @@ func GatherPackHealth(cityPath string, now time.Time) []board.PackBuild {
 			BinaryRev:      f.BinaryRev,
 			LastBuildRC:    f.LastBuildRC,
 			RestartPending: f.RestartPending,
+			ProbeStatus:    f.ProbeStatus,
+			ProbeDetail:    f.ProbeDetail,
 			CheckedAt:      checkedAt,
 		})
 	}

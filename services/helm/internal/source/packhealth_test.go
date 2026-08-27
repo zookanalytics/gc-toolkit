@@ -3,6 +3,7 @@ package source
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,5 +110,40 @@ func TestAStoppedBuildOrderIsVisible(t *testing.T) {
 	rows := GatherPackHealth(root, gatherNow)
 	if rows[0].Severity != board.SevElevated {
 		t.Errorf("severity = %s (%q), want ELEVATED for a day-old check", rows[0].Severity, rows[0].Detail)
+	}
+}
+
+func TestGatherCarriesTheProbeOutcomeIntoTheRow(t *testing.T) {
+	// The record gc-helm-build.sh writes when a rebuild succeeds and its probe
+	// fails: rc 0, matching revisions, nothing pending. Only probe_status
+	// separates it from a healthy component, so the decode has to keep it.
+	root := city(t, map[string]string{
+		"helm": `{"component":"helm","built_at":"2026-08-26T11:00:00Z","source_rev":"aaaa","binary_rev":"aaaa","last_build_rc":0,"restart_pending":false,"probe_status":"unreadable","probe_detail":"beads schema 14 > binary 12","checked_at":"2026-08-26T11:58:00Z"}`,
+	})
+	rows := GatherPackHealth(root, gatherNow)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].ProbeStatus != "unreadable" {
+		t.Errorf("probe_status = %q, want unreadable", rows[0].ProbeStatus)
+	}
+	if rows[0].Severity != board.SevHigh {
+		t.Errorf("severity = %s, want HIGH — a condemned binary must not read as current", rows[0].Severity)
+	}
+	if !strings.Contains(rows[0].Detail, "beads schema 14 > binary 12") {
+		t.Errorf("detail %q must carry the probe's reason", rows[0].Detail)
+	}
+}
+
+func TestGatherOnARecordWrittenBeforeProbeStatusExisted(t *testing.T) {
+	// A status file left by the previous build order has no probe_status. It
+	// must decode as the absent value and band exactly as it did before, not as
+	// a condemned binary.
+	root := city(t, map[string]string{
+		"helm": `{"component":"helm","built_at":"2026-08-26T11:00:00Z","source_rev":"aaaa","binary_rev":"aaaa","last_build_rc":0,"restart_pending":false,"checked_at":"2026-08-26T11:58:00Z"}`,
+	})
+	rows := GatherPackHealth(root, gatherNow)
+	if len(rows) != 1 || rows[0].ProbeStatus != "" || rows[0].Severity != board.SevNormal {
+		t.Fatalf("got %+v, want one NORMAL row with no probe status", rows)
 	}
 }

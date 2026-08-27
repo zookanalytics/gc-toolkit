@@ -81,8 +81,11 @@
 #   (RETRY)       a failed restart is retried on the NEXT run, even though the
 #                 binary is by then current — and stops once it is serving
 #   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
-#   (DEADEND)     a build that cannot read the stores is never restarted onto
-#   (CONDEMNED)   nor is a pending restart carried out onto one
+#   (DEADEND)     a build that cannot read the stores is never restarted onto,
+#                 and the record the board reads says so — every other field on
+#                 it reads healthy
+#   (CONDEMNED)   nor is a pending restart carried out onto one, and that
+#                 record says so too
 #
 #   build-status record (what the board's PACK rows read)
 #   (STATUS)      a successful build records source_rev == binary_rev, rc 0
@@ -818,6 +821,15 @@ present "$RECORD" "(DEADEND) the build did happen"
 has "$ERR" "CANNOT READ" "(DEADEND) and the failure it reports is the unreadable one"
 hasnt "$(cat "$GCLOG")" "service restart" "(DEADEND) the service was not restarted onto it"
 absent "$STATE/restart-pending" "(DEADEND) and no later run is told to finish that restart"
+# The one-line file and the JSON record describe the same binary, and only the
+# JSON one reaches the board. Every other field here reads healthy — the build
+# exited 0, the revisions match, nothing is pending — so probe_status is the
+# only thing standing between a condemned binary and a NORMAL PACK row.
+eq "$(status_field probe_status)" "unreadable" "(DEADEND) the record the board reads says so too"
+has "$(status_field probe_detail)" "schema version mismatch" "(DEADEND) and carries the probe's reason"
+eq "$(status_field last_build_rc)" "0" "(DEADEND) the build itself did succeed — rc cannot carry this"
+eq "$(status_field source_rev)" "$(status_field binary_rev)" "(DEADEND) nor can the revision gap: they match"
+eq "$(status_field restart_pending)" "false" "(DEADEND) nor restart_pending"
 
 # --- case: nor is a restart the last run left pending -------------------------
 # The marker outlives the run that wrote it, and the up-to-date branch is the
@@ -835,6 +847,8 @@ eq "$(status_kind)" "unreadable" "(CONDEMNED) build-status says why"
 absent "$RECORD" "(CONDEMNED) the latch means nothing is rebuilt"
 hasnt "$(cat "$GCLOG")" "service restart" "(CONDEMNED) and the pending restart is not run onto it"
 present "$STATE/restart-pending" "(CONDEMNED) the marker is kept for a binary that can serve"
+eq "$(status_field probe_status)" "unreadable" "(CONDEMNED) the board's record says the binary cannot read"
+has "$(status_field probe_detail)" "schema version mismatch" "(CONDEMNED) and carries the probe's reason"
 
 # ==============================================================================
 # BUILD-STATUS RECORD — the seam the board's PACK rows read
@@ -859,6 +873,8 @@ eq "$(status_field source_rev)" "$REV_A" "(STATUS) source_rev is the revision th
 eq "$(status_field binary_rev)" "$REV_A" "(STATUS) a successful build makes binary_rev match it"
 eq "$(status_field restart_pending)" "true" "(STATUS) a hand build publishes without restarting, and says so"
 [ -n "$(status_field built_at)" ] && ok "(STATUS) built_at is stamped" || bad "(STATUS) built_at is empty"
+eq "$(status_field probe_status)" "ok" "(STATUS) the probe passed, and the record says which binary it passed for"
+eq "$(status_field probe_detail)" "" "(STATUS) with no reason to carry"
 [ -n "$(status_field checked_at)" ] && ok "(STATUS) checked_at is stamped" || bad "(STATUS) checked_at is empty"
 
 # --- case: a failed build keeps the last good binary in the record ------------

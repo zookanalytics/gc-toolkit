@@ -269,6 +269,15 @@ export interface PackBuild {
   last_build_rc: number;
   /** A published binary nothing is running yet — built, but not serving. */
   restart_pending: boolean;
+  /**
+   * What `helm-svc probe` said about this binary: "ok", "unreadable", or
+   * "unprobed" when no city was resolved to ask about. A binary that compiles
+   * but cannot read the stores it serves renders no board, which the revisions
+   * alone cannot say.
+   */
+  probe_status?: string;
+  /** The probe's one-line reason. Empty unless `probe_status` is "unreadable". */
+  probe_detail?: string;
   /** RFC 3339. When the build order last ran at all, successful or not. */
   checked_at?: string;
   severity: Severity;

@@ -151,10 +151,12 @@ write_record() { # <last_build_rc> <binary_rev> <built_at>
     if jq -n --arg component "$SERVICE_NAME" --arg built_at "$bat" \
         --arg source_rev "$SOURCE_REV" --arg binary_rev "$brev" \
         --argjson last_build_rc "$rc" --argjson restart_pending "$pending" \
+        --arg probe_status "$PROBE_KIND" --arg probe_detail "$PROBE_DETAIL" \
         --arg checked_at "$(date -u +%FT%TZ)" \
         '{component: $component, built_at: $built_at, source_rev: $source_rev,
           binary_rev: $binary_rev, last_build_rc: $last_build_rc,
-          restart_pending: $restart_pending, checked_at: $checked_at}' \
+          restart_pending: $restart_pending, probe_status: $probe_status,
+          probe_detail: $probe_detail, checked_at: $checked_at}' \
         > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$STATUS" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null
     else
@@ -187,6 +189,11 @@ fi
 # futile rebuild, so a cold Dolt open must be allowed to finish.
 PROBE_TIMEOUT="${GC_HELM_BUILD_PROBE_TIMEOUT:-60}"
 PROBE_DETAIL=""
+# The one variable holding what the probe said about the binary this run
+# reports on. write_record reads it rather than taking it as an argument, so a
+# path that condemns a binary cannot record it as current by omitting one.
+# "unprobed" is also the answer for a run that resolved no city to ask about.
+PROBE_KIND=unprobed
 
 # A rebuild changes what a binary can read only if the embedded beads library
 # moves, which is what separates "retry the build" from "the pin is the problem".
@@ -284,12 +291,11 @@ if [ "$need_build" -eq 0 ]; then
     # Current in revision terms proves nothing about the store. Ask the binary
     # BEFORE any restart: nothing may be put into service on a binary this run
     # has already condemned.
-    CURRENT_KIND=unprobed
     if [ -n "$CITY_PATH" ]; then
-        if probe_binary "$BIN"; then CURRENT_KIND=ok; else CURRENT_KIND=unreadable; fi
+        if probe_binary "$BIN"; then PROBE_KIND=ok; else PROBE_KIND=unreadable; fi
     fi
 
-    if [ "$CURRENT_KIND" != "unreadable" ]; then
+    if [ "$PROBE_KIND" != "unreadable" ]; then
         # Current is not serving: an unrestarted publish leaves its marker, and
         # this branch is the only one a later run can reach.
         if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
@@ -299,7 +305,7 @@ if [ "$need_build" -eq 0 ]; then
                 exit 1
             fi
         fi
-        if [ "$CURRENT_KIND" = "ok" ]; then
+        if [ "$PROBE_KIND" = "ok" ]; then
             echo "gc-helm-build: $BIN is up to date and can read the city's bead stores"
             write_status ok
             rm -f -- "$PROBE_LATCH" 2>/dev/null || true
@@ -396,22 +402,22 @@ echo "gc-helm-build: built $BIN"
 # A compiling binary is not a working one: ok is written only behind a passing
 # probe, so nothing downstream can read build-status as a healthy board while
 # the gather it reports on cannot run.
-STATUS_KIND=unprobed
+PROBE_KIND=unprobed
 if [ -n "$CITY_PATH" ]; then
     if probe_binary "$BIN"; then
-        STATUS_KIND=ok
+        PROBE_KIND=ok
         rm -f -- "$PROBE_LATCH" 2>/dev/null || true
     else
-        STATUS_KIND=unreadable
+        PROBE_KIND=unreadable
         # What was just tried, so the next tick can tell a retry from a loop.
         printf '%s\n' "$(embedded_beads "$BIN")" > "$PROBE_LATCH" 2>/dev/null || true
     fi
 fi
-write_status "$STATUS_KIND" "$PROBE_DETAIL"
+write_status "$PROBE_KIND" "$PROBE_DETAIL"
 
 # Stop before the restart, not after it: a condemned binary must not be marked
 # for restart either, or the next run's pending-restart branch serves it.
-if [ "$STATUS_KIND" = "unreadable" ]; then
+if [ "$PROBE_KIND" = "unreadable" ]; then
     echo "gc-helm-build: the binary just built CANNOT READ the city's bead stores; the board will not render. The service is left on the binary it is already running. Detail: $PROBE_DETAIL" >&2
     write_record 0 "$SOURCE_REV" "$BUILT_AT"
     exit 1
