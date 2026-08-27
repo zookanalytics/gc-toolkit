@@ -3,26 +3,32 @@
 #
 # Usage: tmux-pick-session.sh [--all] [--city-path <path>]
 #
-# Default filter hides polecat-*, control-dispatcher, deacon, witness,
-# dog (the warrant-executor pool — short-lived, rarely worth attaching),
-# boot. The currently-attached session is always shown.
+# Default filter hides the short-lived workers: any pool instance
+# (a "-<n>-pool" suffix), polecat-*, control-dispatcher, deacon, witness,
+# dog (the warrant-executor pool), boot. The currently-attached session
+# is always shown.
 # --all disables the filter; toggle from inside the menu via [.].
 # --city-path is the absolute path of the city this binding belongs
 # to — baked in by tmux-bindings.sh at install time so the API URL is
 # deterministic even though the key fires from tmux's bare env.
 #
-# Rig + identity derivation (per-session GC_AGENT env):
-#   - "<rig>/<pack>.<role>" → rig = <rig>,  display = <pack>.<role>
-#   - "<pack>.<role>"       → rig = "city", display = <pack>.<role>
-#   - empty (manual sessions) → fall back to legacy `--` substring on
-#     the raw session name; display = raw session name.
+# Rig + identity derivation, in the order the awk block tries them:
+#   1. GC_AGENT is "<rig>/<pack>.<role>". Both fields come from it.
+#   2. The session name is "<rig>--<pack>__<agent>". The rig is the part
+#      before "--"; the display is the rest, with "__" rendered as ".".
+#   3. GC_AGENT is set but carries no slash. The agent is city-scoped:
+#      the rig is "city" and the display is GC_AGENT.
+#   4. Nothing answers. The rig is "city" and the display is the raw
+#      session name.
+# Rule 2 must precede rule 3. A pool instance carries its own tmux
+# session name in GC_AGENT rather than an address, so it satisfies both,
+# and rule 3 would file it under a rig that does not exist.
 # `switch-client -t` always targets the raw tmux session_name; the
-# GC_AGENT-derived display is label-only.
+# derived display is label-only.
 #
 # Sort order:
 #   1. [city] group — alphabetical
-#   2. each rig group, rigs alphabetical, polecats last within rig
-#      (`/polecat/` substring on the parsed display name)
+#   2. each rig group, rigs alphabetical, pool workers last within rig
 #   Pane sub-rows always appear directly under their session row.
 #
 # Visual indicators:
@@ -161,39 +167,46 @@ BEGIN {
     name = $1; attached = $2 + 0; sw = $3 + 0; agent = $4
 
     # Derive rig BEFORE the filter so per-rig state (rig_seen,
-    # polecat_count) covers hidden sessions too (spec: count includes
-    # ALL polecat sessions in rig, visible+hidden; rig_seen drives the
-    # always-on per-rig header in the END block).
+    # worker_count) covers hidden sessions too: the count includes ALL
+    # worker sessions in the rig, visible+hidden, and rig_seen drives the
+    # always-on per-rig header in the END block.
     slash = index(agent, "/")
     if (slash > 0) {
         rig = substr(agent, 1, slash - 1)
         display = substr(agent, slash + 1)
         rig_sort = rig
-    } else if (agent != "") {
-        rig = "city"; rig_sort = "0city"
-        display = agent
     } else if (name ~ /--/) {
         rig = name; sub(/--.*/, "", rig)
         rig_sort = rig
-        display = name
+        # substr past "<rig>--" rather than a sub() on the prefix: a rig
+        # name may itself contain "-".
+        display = substr(name, length(rig) + 3)
+        gsub(/__/, ".", display)
+    } else if (agent != "") {
+        rig = "city"; rig_sort = "0city"
+        display = agent
     } else {
         rig = "city"; rig_sort = "0city"
         display = name
     }
 
-    if (name ~ /polecat/) polecat_count[rig]++
+    # One predicate for the count, the hide and the sort rank: they must
+    # agree, and a pool instance is the "-<n>-pool" suffix whatever role
+    # it runs, not an enumeration of role names.
+    is_worker = (name ~ /-[0-9]+-pool$/ || name ~ /polecat/)
+    if (is_worker) worker_count[rig]++
     rig_sort_of[rig] = rig_sort
     rig_seen[rig] = 1
 
     if (!all && name != active) {
-        if (name ~ /polecat/) next
+        if (is_worker) next
         if (name ~ /control-dispatcher/) next
         if (name ~ /deacon/) next
         if (name ~ /witness/) next
         if (name ~ /dog/) next
         if (name ~ /boot/) next
     }
-    sub_pri = (display ~ /polecat/ ? 9 : 5)
+    sub_pri = (is_worker ? 9 : 5)
     marker  = (attached > 0 ? "*" : " ")
     win_marker = (sw > 1 ? "▣" : " ")
     pc = pane_count[name] + 0
@@ -244,12 +257,12 @@ END {
     # Header rows are collapsed-mode only. sub_pri=-1 (col 2) makes them
     # sort ahead of S (5) and P (9) rows within the same rig_sort group.
     # A header renders for every rig with sessions, even all-hidden ones —
-    # the picker is topology awareness, and a hidden-polecat rig must not
-    # vanish from the menu.
+    # the picker is topology awareness, and a rig whose workers are all
+    # hidden must not vanish from the menu.
     if (all) exit
     for (r in rig_seen) {
         rs = rig_sort_of[r]
-        pc = polecat_count[r] + 0
+        pc = worker_count[r] + 0
         printf "%s\t-1\t\t\tH\t%s\t%d\n", rs, r, pc
     }
 }' | sort -t"$TAB" -k1,1 -k2,2n -k3,3 -k4,4 | cut -f5-)
@@ -280,9 +293,9 @@ while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
         fi
         if [ "$count" -gt 0 ]; then
             if [ "$count" -eq 1 ]; then
-                noun="polecat"
+                noun="pool worker"
             else
-                noun="polecats"
+                noun="pool workers"
             fi
             label="-  ── $rig • $count $noun ──  "
         else
