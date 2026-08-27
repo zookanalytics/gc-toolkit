@@ -48,6 +48,10 @@ case "$1 $2" in
   "bd list")
     printf '%s\n' "$*" >> "$LIST_LOG"
     case "$*" in *--json*) ;; *) echo "gc bd list called without --json" >&2; exit 64 ;; esac
+    # A failing listing writes nothing to stdout, the way the real one does.
+    if [ "${LIST_RC:-0}" != "0" ]; then
+      echo "gc bd list: store unavailable" >&2; exit "${LIST_RC}"
+    fi
     [ -n "${QUEUE_STDERR:-}" ] && printf '%s\n' "$QUEUE_STDERR" >&2
     cat "$QUEUE_FIXTURE"
     ;;
@@ -62,15 +66,18 @@ STUB
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# run <script> <fixture-json> [stderr-noise] -> stdout of the nudge log
+# run <script> <fixture-json> [stderr-noise] [list-rc] [shell-prelude]
+#   -> stdout of the nudge log; the run's own transcript lands in $TMP/out.
 run() {
   : > "$TMP/nudges"; : > "$TMP/lists"
   printf '%s' "$2" > "$TMP/queue.json"
+  { printf '%s\n' "${5:-}"; cat "$1"; } > "$TMP/run.sh"
   QUEUE_FIXTURE="$TMP/queue.json" NUDGE_LOG="$TMP/nudges" LIST_LOG="$TMP/lists" \
-  QUEUE_STDERR="${3:-}" GC_RIG="${GC_RIG_OVERRIDE-gc-toolkit}" \
-    bash "$1" >/dev/null 2>&1 || true
+  QUEUE_STDERR="${3:-}" GC_RIG="${GC_RIG_OVERRIDE-gc-toolkit}" LIST_RC="${4:-0}" \
+    bash "$TMP/run.sh" > "$TMP/out" 2>&1 || true
   cat "$TMP/nudges"
 }
+out() { cat "$TMP/out"; }
 
 TWO='[
   {"id":"tk-aaa","updated_at":"2026-08-24T09:00:00Z","title":"handoff one"},
@@ -107,10 +114,12 @@ UNRIGGED="$(GC_RIG_OVERRIDE= run "$TMP/block.sh" "$TWO")"
 has "$UNRIGGED" "gc-toolkit.refinery" "unset GC_RIG still addresses the refinery"
 hasnt "$UNRIGGED" "/gc-toolkit.refinery" "unset GC_RIG emits no leading slash"
 
-render | sed -e 's|^if \[ "$DEPTH" -gt 0 \]; then|if true; then|' > "$TMP/unguarded.sh"
-grep -q '^if true; then' "$TMP/unguarded.sh" \
-  && ok "mutant built — the guard line matched" \
-  || bad "mutant did not build — the guard line changed shape; update this test"
+render \
+  | sed -e 's#^if \[ "$QUEUE_RC" -ne 0 \] || \[ -z "$DEPTH" \]; then#if false; then#' \
+        -e 's#^elif \[ "$DEPTH" -eq 0 \]; then#elif false; then#' > "$TMP/unguarded.sh"
+grep -q '^if false; then' "$TMP/unguarded.sh" && grep -q '^elif false; then' "$TMP/unguarded.sh" \
+  && ok "mutant built — both guard lines matched" \
+  || bad "mutant did not build — a guard line changed shape; update this test"
 bash -n "$TMP/unguarded.sh" 2>/dev/null \
   && ok "mutant (guard removed) is valid bash" \
   || bad "mutant failed bash -n"
@@ -124,6 +133,66 @@ bash -n "$TMP/unguarded.sh" 2>/dev/null \
 [ -n "$(run "$TMP/unguarded.sh" '{"error":"store unavailable"}')" ] \
   && ok "control: unguarded, an error object DOES nudge (case 3b is live)" \
   || bad "control FAILED — error object is silent even unguarded, so case 3b proves nothing"
+
+[ -n "$(run "$TMP/unguarded.sh" '' '' 1)" ] \
+  && ok "control: unguarded, a failed listing DOES nudge (case 4 is live)" \
+  || bad "control FAILED — failed listing is silent even unguarded, so case 4 proves nothing"
+
+eq "$(run "$TMP/block.sh" '' '' 1)" "" \
+   "a failed listing sends no nudge"
+has "$(out)" "unreadable" "a failed listing reports why it is silent"
+eq "$(run "$TMP/block.sh" 'null')" "" "a null listing sends no nudge"
+eq "$(run "$TMP/block.sh" '')" "" "an empty listing sends no nudge"
+eq "$(run "$TMP/block.sh" '[]')" "" "an empty queue sends no nudge"
+has "$(out)" "queue empty" "an empty queue is reported apart from an unreadable one"
+
+# The block is instruction text an agent runs, so it lands in whatever shell
+# the caller has already set up — including a strict one.
+for PRELUDE in 'set -e' 'set -euo pipefail'; do
+  eq "$(run "$TMP/block.sh" '' '' 1 "$PRELUDE")" "" \
+     "$PRELUDE: a failed listing sends no nudge"
+  has "$(out)" "unreadable" "$PRELUDE: a failed listing still reaches the diagnostic"
+
+  eq "$(run "$TMP/block.sh" 'warning: config drift
+[]' '' 0 "$PRELUDE")" "" \
+     "$PRELUDE: an unparseable listing sends no nudge"
+  has "$(out)" "unreadable" "$PRELUDE: an unparseable listing still reaches the diagnostic"
+
+  eq "$(run "$TMP/block.sh" '[]' '' 0 "$PRELUDE")" "" \
+     "$PRELUDE: an empty queue sends no nudge"
+  has "$(run "$TMP/block.sh" "$TWO" '' 0 "$PRELUDE")" "gc-toolkit.refinery" \
+     "$PRELUDE: a real backlog still nudges"
+done
+
+# Reverted to a plain assignment, the capture takes the shell down with the
+# listing, so the arms above never run.
+render | sed -e 's#^if \(QUEUE=$(gc bd list [^)]*)\); then QUEUE_RC=0; else QUEUE_RC=$?; fi#\1#' \
+  > "$TMP/plaincapture.sh"
+grep -q '^QUEUE=$(gc bd list' "$TMP/plaincapture.sh" \
+  && ok "mutant built — the rc-capturing line matched" \
+  || bad "mutant did not build — the capture changed shape; update this test"
+run "$TMP/plaincapture.sh" '' '' 1 'set -e; QUEUE_RC=0' >/dev/null
+hasnt "$(out)" "unreadable" \
+  "control: without the rc capture, set -e exits before the diagnostic (the strict-shell arms are live)"
+
+# The listing and the nudge must read the same queue: gating on a second,
+# separately-run listing is the ungated form wearing a condition.
+eq "$(awk '
+  /# >>> refinery-queue-nudge/ {inside = 1}
+  /# <<< refinery-queue-nudge/ {inside = 0; next}
+  !inside && /gc session nudge/ && /refinery/ {print FNR ": " $0}
+' "$TOML")" "" "no refinery nudge outside the block markers"
+eq "$(printf '%s\n' "$BLOCK" | grep -c 'gc session nudge' || true)" "1" \
+   "the block carries exactly one nudge"
+eq "$(printf '%s\n' "$BLOCK" | grep -c 'gc bd list' || true)" "1" \
+   "the block lists the queue exactly once"
+
+# A TOML basic multi-line string rewrites a backslash, so the block has to stay
+# free of them to survive the pour intact.
+case "$BLOCK" in
+  *'\'*) bad "block contains a backslash — the TOML \"\"\" string mangles it" ;;
+  *)     ok "block is backslash-free" ;;
+esac
 
 echo
 echo "refinery-queue-nudge: $PASS passed, $FAIL failed"
