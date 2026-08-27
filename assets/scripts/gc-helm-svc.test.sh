@@ -16,12 +16,10 @@
 # launcher used to do correctly.
 #
 # THE READABILITY GATE (tk-00o34c). `find -newer` cannot see a binary going
-# stale against its DEPENDENCY. What helm-svc can read is fixed by the beads
-# library it embedded; the store's schema moves under it on a `bd` upgrade. The
-# board died for three days behind a green order, a green build-status and a
-# green /healthz, with every source file older than the binary. The gate now
-# also asks `helm-svc probe`, spends `ok` only on a passing one, and refuses to
-# rebuild a binary whose library a rebuild would not move.
+# stale against its DEPENDENCY: what helm-svc can read is fixed by the beads
+# library it embedded, and the store's schema moves under it on a `bd` upgrade.
+# The gate also asks `helm-svc probe`, spends `ok` only on a passing one, and
+# refuses to rebuild a binary whose library a rebuild would not move.
 #
 # THE SCRATCH BOUNDING (inherited, tk-m18ml). The build pointed TMPDIR/GOTMPDIR
 # at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
@@ -83,6 +81,8 @@
 #   (RETRY)       a failed restart is retried on the NEXT run, even though the
 #                 binary is by then current — and stops once it is serving
 #   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
+#   (DEADEND)     a build that cannot read the stores is never restarted onto
+#   (CONDEMNED)   nor is a pending restart carried out onto one
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -172,9 +172,8 @@ CASE=0
 FAIL_BUILD=""
 fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     CASE=$((CASE + 1))
-    # Readability knobs, reset per case so one case's skew cannot leak into the
-    # next. CITY empty means "no city to probe", which is every case that
-    # predates the readability gate.
+    # Reset per case so one case's skew cannot leak into the next. CITY empty
+    # means "no city to probe".
     CITY=""; PROBE_FAIL_BUILT=""; PROBE_FAIL_CACHED=""; BEADS_VERSION="v0.0.0-stub"
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
@@ -202,9 +201,9 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-# `go version -m <binary>` reads the beads library a binary embedded. It is a
-# read, not a build, so it answers before any of the build-scratch machinery —
-# recording it would make every readability check look like a compile.
+# `go version -m <binary>` is a read, not a build, so it must answer before the
+# build-scratch machinery below: recording it would make every readability check
+# look like a compile.
 if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
     printf '\tpath\thelm-svc\n\tdep\tgithub.com/steveyegge/beads\t%s\th1:stub=\n' \
         "${STUB_BEADS_VERSION:-v0.0.0-stub}"
@@ -425,15 +424,6 @@ present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch i
 
 # ==============================================================================
 # READABILITY — the second staleness axis (tk-00o34c)
-#
-# A binary can be newer than every source file and still fail every gather: what
-# it can read is fixed by the beads library it embedded, and the store's schema
-# moves under it on a `bd` upgrade. `find -newer` is structurally blind to that,
-# which is how the board stayed dead for three days behind a green order, a
-# green build-status and a green /healthz.
-#
-# SKEW is the case the gate exists for; STUCK, NOLOOP and RECOVER are what keeps
-# the remedy from becoming a rebuild every five minutes forever.
 # ==============================================================================
 SKEW_MSG="schema version mismatch: database is at v66, binary knows up to v65 (1 migration ahead)"
 
@@ -464,8 +454,8 @@ eq "$(status_kind)" "ok" "(SKEW) the rebuilt binary reads, so ok is earned"
 absent "$STATE/probe-failed" "(SKEW) and nothing is latched"
 
 # --- case: a rebuild that cannot fix it must not report ok --------------------
-# The live shape: the go.mod pin, not the sources, is what is stale, so the
-# binary that comes out of the build is as blind as the one that went in.
+# The pin, not the sources, is what is stale, so the binary that comes out of
+# the build is as blind as the one that went in.
 fixture
 cache_binary
 CITY="$STATE_CITY"
@@ -488,9 +478,8 @@ eq "$(status_kind)" "unreadable" "(NOLOOP) and it still refuses to say ok"
 has "$ERR" "go.mod" "(NOLOOP) it names the remedy it cannot perform itself"
 
 # --- case: a dependency bump re-arms the rebuild ------------------------------
-# The latch is keyed on the LIBRARY that failed, not on "we already tried", so
-# moving the pin makes the very next tick build again. The skew is left in place
-# here to isolate the one variable: the probe still fails, and it builds anyway.
+# The latch is keyed on the LIBRARY that failed, not on "we already tried". The
+# skew is left in place to isolate that one variable.
 BEADS_VERSION="v1.2.2-0.20260825072917-62d211937bd3"
 run_build
 eq "$RC" 1 "(BUMP) the skew is untouched, so it still fails"
@@ -518,9 +507,7 @@ eq "$(status_kind)" "ok" "(RECOVER) ok returns"
 absent "$STATE/probe-failed" "(RECOVER) and the latch is gone"
 
 # --- case: no city to probe against is not a green light ----------------------
-# A hand run with no city in the environment AND no listing to name one cannot
-# answer the question, and must not answer it with `ok` — that is the word the
-# whole gate exists to protect.
+# A run that cannot ask the question must not answer it with `ok`.
 fixture
 cache_binary
 LIST_FAIL=1
@@ -533,8 +520,7 @@ absent "$RECORD" "(UNPROBED) nothing is built on a question it cannot ask"
 
 # --- case: the city comes from the service listing when the env has none ------
 # The supervisor that runs the helm-build order carries no GC_CITY, so this is
-# the resolution every scheduled tick actually uses. An env-only lookup would
-# leave the gate permanently unprobed and permanently silent.
+# the resolution every scheduled tick uses.
 fixture
 cache_binary
 PROBE_FAIL_CACHED="$SKEW_MSG"
@@ -783,6 +769,42 @@ run_build --deploy
 eq "$RC" 0 "(HANDBUILT) the next deploy tick exits 0"
 absent "$RECORD" "(HANDBUILT) with nothing left to build"
 has "$(cat "$GCLOG")" "service restart helm" "(HANDBUILT) and serves what the hand build left"
+
+# --- case: a deploy never restarts onto a binary it just condemned ------------
+# The gate exists to keep an unreadable binary out of service, so reporting one
+# must not be the step that puts it there. The restart stub is set to fail, so a
+# run that reached it could not go on to report the readability failure instead.
+fixture
+cache_binary
+touch_source
+CITY="$STATE_CITY"
+PROBE_FAIL_BUILT="$SKEW_MSG"
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(DEADEND) exits non-zero"
+eq "$(status_kind)" "unreadable" "(DEADEND) build-status says why"
+present "$RECORD" "(DEADEND) the build did happen"
+has "$ERR" "CANNOT READ" "(DEADEND) and the failure it reports is the unreadable one"
+hasnt "$(cat "$GCLOG")" "service restart" "(DEADEND) the service was not restarted onto it"
+absent "$STATE/restart-pending" "(DEADEND) and no later run is told to finish that restart"
+
+# --- case: nor is a restart the last run left pending -------------------------
+# The marker outlives the run that wrote it, and the up-to-date branch is the
+# only one a later run can reach. So the probe has to be asked there first, or
+# the retry serves what the probe would have condemned.
+fixture
+cache_binary
+CITY="$STATE_CITY"
+PROBE_FAIL_CACHED="$SKEW_MSG"
+printf '%s\n' "$BEADS_VERSION" > "$STATE/probe-failed"   # already tried: no rebuild left
+: > "$STATE/restart-pending"
+run_build --deploy
+eq "$RC" 1 "(CONDEMNED) exits non-zero"
+eq "$(status_kind)" "unreadable" "(CONDEMNED) build-status says why"
+absent "$RECORD" "(CONDEMNED) the latch means nothing is rebuilt"
+hasnt "$(cat "$GCLOG")" "service restart" "(CONDEMNED) and the pending restart is not run onto it"
+present "$STATE/restart-pending" "(CONDEMNED) the marker is kept for a binary that can serve"
 
 # ==============================================================================
 # STATIC GUARDS

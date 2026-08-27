@@ -10,12 +10,10 @@
 #   gc-helm-build.sh --deploy     order mode: skip cities without the helm
 #                                 service; build iff stale; restart onto a
 #                                 published binary not yet serving
-# Staleness has TWO axes. Sources newer than the artifact (find -newer) is the
-# ordinary one. The other is the binary's ability to READ the stores it serves:
-# that is fixed by the beads library it embedded at build time, while the store
-# schema moves under it on a `bd` upgrade, so a binary can be newer than every
-# source and still fail every gather. `helm-svc probe` is the binary's own
-# answer, and this gate will not report ok without it.
+# Staleness has two axes: sources newer than the artifact (find -newer), and
+# whether the binary can READ the stores it serves. The second is fixed by the
+# beads library it embedded, while the store schema moves under it on a `bd`
+# upgrade; `helm-svc probe` asks it, and ok is not reported without it.
 # Exit: 0 current and serving (or nothing to do) · 1 build/restart failed
 # (the previous binary is left exactly as it was), or the published binary
 # cannot read the city's bead stores · 2 usage.
@@ -122,13 +120,11 @@ if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
 fi
 
-# The city whose bead stores the served binary must read. The env chain is what
-# helm-svc itself resolves (source.DiscoverCityPath), so a hand run probes the
-# city its operator meant. The listing is the fallback that makes this work
-# where it matters: the supervisor that runs the helm-build order carries no
-# GC_CITY at all, so an env-only lookup would report "unprobed" on every tick
-# forever — a gate that never fires, which is the shape of the defect it exists
-# to close. Empty means there is genuinely nothing to probe.
+# The city whose bead stores the served binary must read. The env chain mirrors
+# what helm-svc itself resolves (source.DiscoverCityPath). The listing fallback
+# is load-bearing, not decoration: the supervisor that runs the helm-build order
+# carries no GC_CITY, so an env-only lookup would report "unprobed" on every
+# tick forever. Empty means there is nothing to probe against.
 CITY_PATH=""
 for _city_env in "${GC_HELM_CITY_PATH:-}" "${GC_CITY_PATH:-}" "${GC_CITY:-}"; do
     if [ -n "$_city_env" ]; then CITY_PATH="$_city_env"; break; fi
@@ -138,13 +134,12 @@ if [ -z "$CITY_PATH" ] && [ -n "$SERVICES" ]; then
 fi
 
 # Generous on purpose: a false "unreadable" turns a healthy city red and buys a
-# futile rebuild, so a slow cold Dolt open must be allowed to finish.
+# futile rebuild, so a cold Dolt open must be allowed to finish.
 PROBE_TIMEOUT="${GC_HELM_BUILD_PROBE_TIMEOUT:-60}"
 PROBE_DETAIL=""
 
-# The beads library the binary EMBEDDED. A rebuild changes what a binary can
-# read only if this moves, so it is the key that separates "retry the build"
-# from "the go.mod pin is the problem".
+# A rebuild changes what a binary can read only if the embedded beads library
+# moves, which is what separates "retry the build" from "the pin is the problem".
 BEADS_MODULE="github.com/steveyegge/beads"
 PROBE_LATCH="$STATE_ROOT/probe-failed"
 
@@ -154,8 +149,8 @@ PROBE_LATCH="$STATE_ROOT/probe-failed"
 probe_binary() {
     local out=""
     PROBE_DETAIL=""
-    # Handed the city explicitly: the probe must answer for the city this run
-    # resolved, not for whatever the ambient environment happens to name.
+    # Explicit: the probe answers for the city this run resolved, not for
+    # whatever the ambient environment names.
     if out="$(GC_HELM_CITY_PATH="$CITY_PATH" "$1" probe --timeout="$PROBE_TIMEOUT" 2>&1)"; then
         return 0
     fi
@@ -224,30 +219,35 @@ elif [ -n "$(newer_than_binary)" ]; then
     need_build=1
 fi
 if [ "$need_build" -eq 0 ]; then
-    # Current is not serving: an unrestarted publish leaves its marker, and
-    # this branch is the only one a later run can reach.
-    if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
-        echo "gc-helm-build: $BIN is up to date but not yet serving; retrying the restart"
-        restart_service || exit 1
+    # Newer than every source proves nothing about the store. Ask the binary
+    # BEFORE any restart: nothing may be put into service on a binary this run
+    # has already condemned.
+    CURRENT_KIND=unprobed
+    if [ -n "$CITY_PATH" ]; then
+        if probe_binary "$BIN"; then CURRENT_KIND=ok; else CURRENT_KIND=unreadable; fi
     fi
 
-    # Newer than every source proves nothing about the store. Ask the binary.
-    if [ -z "$CITY_PATH" ]; then
-        echo "gc-helm-build: $BIN is up to date (no city resolved; readability unprobed)"
-        write_status unprobed
-        exit 0
-    fi
-    if probe_binary "$BIN"; then
-        echo "gc-helm-build: $BIN is up to date and can read the city's bead stores"
-        write_status ok
-        rm -f -- "$PROBE_LATCH" 2>/dev/null || true
+    if [ "$CURRENT_KIND" != "unreadable" ]; then
+        # Current is not serving: an unrestarted publish leaves its marker, and
+        # this branch is the only one a later run can reach.
+        if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
+            echo "gc-helm-build: $BIN is up to date but not yet serving; retrying the restart"
+            restart_service || exit 1
+        fi
+        if [ "$CURRENT_KIND" = "ok" ]; then
+            echo "gc-helm-build: $BIN is up to date and can read the city's bead stores"
+            write_status ok
+            rm -f -- "$PROBE_LATCH" 2>/dev/null || true
+        else
+            echo "gc-helm-build: $BIN is up to date (no city resolved; readability unprobed)"
+            write_status unprobed
+        fi
         exit 0
     fi
 
-    # Unreadable. Rebuilding is the remedy only while it can produce a
-    # different binary; once it has been tried against this exact library
-    # version, repeating it every five minutes changes nothing and buries the
-    # real remedy — a dependency bump — under a rebuild loop.
+    # Rebuilding is the remedy only while it can produce a different binary;
+    # once it has been tried against this exact library version, repeating it
+    # every five minutes buries the remedy it cannot perform itself.
     EMBEDDED="$(embedded_beads "$BIN")"
     if [ "$(cat "$PROBE_LATCH" 2>/dev/null || true)" = "$EMBEDDED" ]; then
         echo "gc-helm-build: $BIN CANNOT READ the city's bead stores, and a rebuild would embed the same $BEADS_MODULE $EMBEDDED; bump it in $MOD/go.mod. Detail: $PROBE_DETAIL" >&2
@@ -320,9 +320,9 @@ if [ "$build_ok" -eq 0 ]; then
 fi
 echo "gc-helm-build: built $BIN"
 
-# A compiling binary is not a working one. `ok` is spent here and nowhere else,
-# so nothing downstream can read this file as a healthy board while the gather
-# it reports on cannot run.
+# A compiling binary is not a working one: ok is written only behind a passing
+# probe, so nothing downstream can read build-status as a healthy board while
+# the gather it reports on cannot run.
 STATUS_KIND=unprobed
 if [ -n "$CITY_PATH" ]; then
     if probe_binary "$BIN"; then
@@ -336,6 +336,13 @@ if [ -n "$CITY_PATH" ]; then
 fi
 write_status "$STATUS_KIND" "$PROBE_DETAIL"
 
+# Stop before the restart, not after it: a condemned binary must not be marked
+# for restart either, or the next run's pending-restart branch serves it.
+if [ "$STATUS_KIND" = "unreadable" ]; then
+    echo "gc-helm-build: the binary just built CANNOT READ the city's bead stores; the board will not render. The service is left on the binary it is already running. Detail: $PROBE_DETAIL" >&2
+    exit 1
+fi
+
 # Record the unfinished half BEFORE the restart, so whatever stops this run
 # leaves the evidence; it also carries a hand-run build to the next tick.
 printf 'published %s\n' "$(date -u +%FT%TZ)" > "$RESTART_PENDING" 2>/dev/null \
@@ -344,9 +351,4 @@ printf 'published %s\n' "$(date -u +%FT%TZ)" > "$RESTART_PENDING" 2>/dev/null \
 # Build and restart are one step: a binary nothing restarts onto is inert.
 if [ "$DEPLOY" -eq 1 ]; then
     restart_service || exit 1
-fi
-
-if [ "$STATUS_KIND" = "unreadable" ]; then
-    echo "gc-helm-build: the binary just built CANNOT READ the city's bead stores; the board will not render. Detail: $PROBE_DETAIL" >&2
-    exit 1
 fi

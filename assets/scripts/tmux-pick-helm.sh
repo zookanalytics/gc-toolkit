@@ -11,8 +11,8 @@
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
 # to (<state-root>/bin/helm-svc — see gc-helm-svc.sh / gc-helm-build.sh),
-# falling back to PATH. A binary that is absent, and a board that cannot be
-# read, each get their own line — neither is ever rendered as an empty board.
+# falling back to PATH. An absent binary and an unreadable board each get their
+# own line; neither is ever rendered as an empty board.
 #
 # --city-path is baked in by tmux-bindings.sh at install time so `gc`'s
 # city discovery is deterministic from tmux's bare env.
@@ -60,11 +60,8 @@ if [ -z "$HELM_SVC" ]; then
 fi
 
 # Cap at the hotkey alphabet (a-z0-9 = 36) so every row is one keystroke.
-#
-# "The board is empty" and "the board could not be read" are opposite answers,
-# and only one of them means nothing needs you. helm-svc board exits 3 on a
-# failed gather and prints why; both halves have to reach the operator, so
-# neither the code nor the stderr may be discarded here (tk-00o34c).
+# An empty board and an unreadable one are opposite answers, so neither the
+# exit code nor the stderr may be discarded here.
 BOARD_ERR="$(mktemp "${TMPDIR:-/tmp}/gc-helm-pick.XXXXXX" 2>/dev/null || printf '')"
 if [ -n "$BOARD_ERR" ]; then trap 'rm -f "$BOARD_ERR"' EXIT; fi
 BOARD_RC=0
@@ -73,15 +70,15 @@ BOARD=$("$HELM_SVC" board --json --limit=36 2>"${BOARD_ERR:-/dev/null}") || BOAR
 if [ "$BOARD_RC" -ne 0 ]; then
     WHY=""
     if [ -n "$BOARD_ERR" ]; then
-        # One line for a one-line menu bar: the live schema-skew message names
-        # every rig in the city and would push the useful half off the screen.
+        # One line for a one-line menu bar; a gather failure names every rig
+        # in the city over several lines.
         WHY=$(tr '\n\t' '  ' < "$BOARD_ERR" | sed 's/  */ /g; s/^ *//; s/ *$//' | cut -c1-160)
     fi
     [ -n "$WHY" ] || WHY="helm-svc board exited $BOARD_RC with no diagnostic"
     gcmux display-message -d 10000 "Helm: BOARD UNREADABLE — $WHY"
     # Exit 0 like the missing-binary arm: the key is bound with a foreground
     # `run-shell`, which pops its own window over the message on a non-zero
-    # status. The message IS the report.
+    # status.
     exit 0
 fi
 

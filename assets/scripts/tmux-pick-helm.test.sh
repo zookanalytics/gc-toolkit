@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
-# Hermetic tests for the prefix+b Helm picker (tk-00o34c).
-#
-# THE DEFECT. The picker ran the board as `... 2>/dev/null || printf '[]'`, so
-# every failure arrived as an empty array and rendered "nothing needs you". When
-# helm-svc could no longer read the city's bead stores — a schema skew that
-# lasted three days — prefix+b reported the all-clear. An outage and a quiet
-# city were the same pixels, and the exit code and diagnostic that would have
-# separated them were both discarded.
-#
-# helm-svc board already exits 3 on a failed gather and prints why. These pin
-# that the picker keeps both: a distinguishable message carrying the reason, and
-# an empty board that still reads as empty.
+# Hermetic tests for the prefix+b Helm picker (tk-00o34c). helm-svc board exits
+# 3 on a failed gather and prints why. These pin that the picker keeps both: a
+# failed board reaches the operator as a message carrying the reason, and an
+# empty board still reads as empty.
 #
 # The real script runs against a stub tmux (which records every subcommand it is
 # handed) and a stub helm-svc whose exit code and stderr each case controls. No
@@ -122,9 +114,7 @@ has "$CALLS" "tk-abc12" "(ROWS) the row is on it"
 hasnt "$CALLS" "BOARD UNREADABLE" "(ROWS) a readable board says nothing about readability"
 
 # --- case: a failure with NO diagnostic is still distinguishable --------------
-# The picker must not fall back to the quiet-city line just because the binary
-# died without explaining itself — silence is the case that most looks like
-# emptiness and least is.
+# Silence is the failure that most looks like emptiness and least is.
 fixture
 BOARD_RC=3 BOARD_OUT="" BOARD_ERR=""
 run_pick
@@ -134,9 +124,8 @@ has "$CALLS" "exited 3" "(SILENT) naming the exit code, since there is nothing e
 hasnt "$CALLS" "nothing needs you" "(SILENT) not the all-clear"
 
 # --- case: a non-gather failure is caught too ---------------------------------
-# A usage error means the picker and the binary disagree about the flags — a
-# deployment mismatch, and the one failure mode where the board is genuinely
-# fine. It is still not an empty city.
+# A flag mismatch is the one failure where the board itself is fine, and still
+# not an empty city.
 fixture
 BOARD_RC=2 BOARD_OUT="" BOARD_ERR='helm-svc board: unknown flag "--limit=36"'
 run_pick
@@ -144,8 +133,8 @@ has "$CALLS" "BOARD UNREADABLE" "(USAGE) any non-zero exit is a failure, not an 
 has "$CALLS" "unknown flag" "(USAGE) with the binary's own words"
 
 # --- case: a sprawling diagnostic is flattened and bounded --------------------
-# The live message names every rig in the city, over several lines. A menu-bar
-# message is one line; an unbounded one pushes its own useful half off-screen.
+# A menu-bar message is one line; an unbounded one pushes its useful half
+# off-screen.
 fixture
 BOARD_RC=3 BOARD_OUT=""
 BOARD_ERR="$(printf 'helm-svc board: gather failed:\nrig a: %s\nrig b: %s\n' \
@@ -172,9 +161,8 @@ hasnt "$CALLS" "BOARD UNREADABLE" "(NOBIN) which is a different state from a fai
 # ==============================================================================
 # STATIC GUARD — the shape of the original defect must not come back
 # ==============================================================================
-# Anchored on the INVOCATION, not on prose that happens to quote the command —
-# the header names `helm-svc board --json` too, and a guard that matches it
-# passes over the defect it exists to catch.
+# Anchored on the INVOCATION: the header quotes the same command, and a guard
+# that matches prose passes over the defect it exists to catch.
 BOARDLINE="$(grep '"$HELM_SVC" board' "$PICK" || true)"
 [ -n "$BOARDLINE" ] && ok "(STATIC) the board invocation is where it is expected" \
                     || bad "(STATIC) no board invocation found in $PICK"

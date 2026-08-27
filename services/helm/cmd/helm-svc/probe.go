@@ -12,21 +12,12 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
 
-// `helm-svc probe` answers one question about the binary running it: can it
-// read this city's bead stores? It is the readability check on its own, split
-// out from `board` because the only other way to ask was to pay for a whole
-// gather.
-//
-// WHY IT IS NOT `board`. The caller this exists for is a build gate deciding
-// whether the artifact it published is worth serving — a 5-minute cooldown
-// order, where a cross-rig gather (2.7s warm, and unbounded against a wedged
-// Dolt) is too much to spend on a question answered by opening one store.
-// [source.BeadsSource.Probe] opens exactly one, and the schema-mismatch error
-// that motivates this is raised by that open.
-//
-// WHY A SUBCOMMAND RATHER THAN AN EXIT CODE ON `board`. `board` exits 3 for
-// every gather failure, readable-store or not, and it renders. A gate needs the
-// question without the render and without the cost.
+// `helm-svc probe` is the readability check without the board's render or its
+// cost: a build gate on a 5-minute cooldown cannot spend a cross-rig gather
+// (2.7s warm, unbounded against a wedged Dolt) on a question that opening one
+// store answers, and `board` exits 3 for every gather failure alike.
+// [source.BeadsSource.Probe] opens exactly one store, which is where the
+// schema mismatch surfaces.
 
 const probeUsage = `Usage:
   helm-svc probe [--timeout=SECONDS]
@@ -96,7 +87,7 @@ func runProbe(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 
 	if err := probeStores(ctx); err != nil {
-		// The reason is the whole value here — "schema version mismatch" is what
+		// The reason is the whole value here: "schema version mismatch" is what
 		// tells a gate that a rebuild, not a retry, is the remedy.
 		fmt.Fprintf(stderr, "helm-svc probe: cannot read the city's bead stores: %v\n", err)
 		return probeExitUnreadable

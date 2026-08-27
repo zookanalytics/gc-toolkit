@@ -492,10 +492,16 @@ never touches a source at all. So the gate also asks `helm-svc probe`, and
 | `unprobed <ts>` | no city in the environment to probe against (a hand run) |
 | `failed <ts>` | the build itself failed; the previous binary is untouched |
 
-`ok` is spent in exactly one place, after a passing probe, so nothing
-downstream can read this file as a healthy board while the gather it reports on
-cannot run. An unreadable binary exits the gate non-zero, which is what turns
-the order red.
+`ok` is written only behind a passing probe, so nothing downstream can read
+this file as a healthy board while the gather it reports on cannot run. An
+unreadable binary exits the gate non-zero, which is what turns the order red.
+
+Nothing is ever restarted onto a binary the probe has condemned. In `--deploy`
+mode the readability answer comes before the restart, on both paths: a build
+whose artifact fails the probe reports and stops without marking
+`restart-pending`, and an up-to-date binary that fails it is not restarted onto
+even when a previous run left that marker behind. The service keeps running the
+binary it already has.
 
 **A rebuild is the remedy only while it can produce a different binary.** When
 the stale thing is the `go.mod` pin rather than the sources, rebuilding embeds
