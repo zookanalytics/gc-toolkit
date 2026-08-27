@@ -99,7 +99,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         menu=$(run_bounded "$CHARTER_PARSER" --file "$charter" 2>/dev/null)
     fi
     [ -n "$menu" ] || continue
-    anchors=$(printf '%s' "$raw" | strip_ctl | jq -r '
+    anchors=$(printf '%s' "$raw" | scrub | jq -r '
         .[]? | (.metadata // {}) as $m
         | ((($m.merge_result // "") | tostring)) as $mr
         | select($mr == "pre_open_gate" or $mr == "pull_request")

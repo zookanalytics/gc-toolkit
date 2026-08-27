@@ -100,12 +100,14 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 CHARTER_PARSER="$SCRIPTS_DIR/review-charter.sh"
-# The charter belongs to the REPO UNDER REVIEW, so the reviewed checkout
-# outranks the pack here — the reverse of the pack-script ladders elsewhere,
-# which resolve a pack artifact and rightly put GC_PACK_DIR first. Validating
-# one rig's gates against another rig's menu is the failure this order avoids.
+# The parser is a pack artifact, resolved above from $0. The charter is not:
+# it belongs to the REPO UNDER REVIEW, so only the reviewed checkout is a rung.
+# No pack fallback — GC_PACK_DIR or the scripts dir's parent would validate an
+# importing rig's gates against gc-toolkit's menu, silently. A rig that ships
+# no charter must read as no charter (widening unvalidated, narrowing refused),
+# which is what makes the gap visible instead of borrowed.
 CHARTER=""
-for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}" "${GC_PACK_DIR:-}" "$SCRIPTS_DIR/../.."; do
+for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
   [ -n "$c" ] && [ -r "$c/docs/review-charter.md" ] && { CHARTER="$c/docs/review-charter.md"; break; }
 done
 # The gate whose method owns the checks-needed decision; no other gate may

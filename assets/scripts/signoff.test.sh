@@ -385,10 +385,11 @@ hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "armed auto-merge blocks the dismissa
 unset STUB_PR_HEAD STUB_REVIEWS
 
 # --- triage: the check_set widening ------------------------------------------------
-# The charter is a FIXTURE, reached through GC_PACK_DIR (first rung of
-# signoff.sh's ladder), so these cases never read the repo's own menu.
-mkdir -p "$TMP/pack/docs"
-cat > "$TMP/pack/docs/review-charter.md" <<'CHARTER'
+# The charter is a FIXTURE standing in for the REVIEWED CHECKOUT, reached
+# through GC_RIG_ROOT, so these cases never read the repo's own menu. The pack
+# is not a rung: a pack-supplied charter is proven inert further down.
+mkdir -p "$TMP/reviewed/docs"
+cat > "$TMP/reviewed/docs/review-charter.md" <<'CHARTER'
 # Fixture charter
 
 | Gate | Applies when | Method | Mandatory paths | Waivable |
@@ -398,7 +399,7 @@ cat > "$TMP/pack/docs/review-charter.md" <<'CHARTER'
 | `arch` | layer changes | `skills/arch-review/SKILL.md` | `lifecycle/**` `assets/scripts/merge.sh` | no |
 | `demo` | operator-visible | `skills/demo-capture/SKILL.md` | `-` | yes |
 CHARTER
-export GC_PACK_DIR="$TMP/pack"
+export GC_RIG_ROOT="$TMP/reviewed"
 
 REVIEW_TRIAGE='{"id":"rv-t","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"triage","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat"},"notes":"triage body"}'
 setcs() { jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata.check_set = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
@@ -484,13 +485,33 @@ mkdir -p "$NOC"
 cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$HERE/escalate.sh" "$NOC/"
 chmod +x "$NOC"/*.sh
 reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
-out=$(GC_PACK_DIR="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+out=$(GC_RIG_ROOT="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
 eq "$rc" 0 "an unvalidated widen is accepted"
 eq "$(meta tk-anc check_set)" "codex,triage,arch" "…and lands"
 has "$out" "unvalidated" "…and says the menu could not be checked"
 reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
-out=$(GC_PACK_DIR="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --waive-gates demo --justification "why" 2>&1); rc=$?
+out=$(GC_RIG_ROOT="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --waive-gates demo --justification "why" 2>&1); rc=$?
 eq "$rc" 1 "a waiver with no declared warrant is refused"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and nothing was recorded"
+
+echo "# a charter shipped by the PACK is never borrowed for a repo that has none"
+# The gc-toolkit pack menu declares arch and marks demo waivable. The reviewed
+# checkout declares nothing. Reading the pack's copy here would validate one
+# repo's gates against another's menu — the gap has to stay visible.
+PACKONLY="$TMP/packonly"
+mkdir -p "$PACKONLY/assets/scripts" "$PACKONLY/docs"
+cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$HERE/escalate.sh" "$PACKONLY/assets/scripts/"
+chmod +x "$PACKONLY/assets/scripts"/*.sh
+cp "$TMP/reviewed/docs/review-charter.md" "$PACKONLY/docs/"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_PACK_DIR="$PACKONLY" GC_RIG_ROOT="$TMP/noc" "$PACKONLY/assets/scripts/signoff.sh" \
+  --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+eq "$rc" 0 "the widen still lands — widening is safe with or without a menu"
+has "$out" "unvalidated" "…but it is recorded as unvalidated, not validated against the pack menu"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_PACK_DIR="$PACKONLY" GC_RIG_ROOT="$TMP/noc" "$PACKONLY/assets/scripts/signoff.sh" \
+  --review-bead rv-t --verdict approve --waive-gates demo --justification "why" 2>&1); rc=$?
+eq "$rc" 1 "the pack's waivable row does not warrant a narrowing in a repo that never declared it"
 eq "$(meta tk-anc check.triage)" "<absent>" "…and nothing was recorded"
 
 # --- escalate: a decision, not a defect ----------------------------------------------
@@ -515,7 +536,7 @@ mkdir -p "$NOESC"
 cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$NOESC/"
 chmod +x "$NOESC"/*.sh
 reset "$ANCHOR_PR"
-out=$(GC_PACK_DIR="$TMP/pack" "$NOESC/signoff.sh" --review-bead rv-1 --verdict escalate 2>&1); rc=$?
+out=$(GC_RIG_ROOT="$TMP/reviewed" "$NOESC/signoff.sh" --review-bead rv-1 --verdict escalate 2>&1); rc=$?
 eq "$rc" 2 "a missing escalate.sh exits 2"
 eq "$(status rv-1)" "in_progress" "…and the review is left open for a retry"
 has "$out" "NO visit was filed" "…and says no human was asked"
@@ -524,7 +545,7 @@ echo "# an unknown verdict is still refused"
 reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict maybe 2>&1); rc=$?
 eq "$rc" 1 "an undeclared verdict verb is refused"
-unset GC_PACK_DIR
+unset GC_RIG_ROOT
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then

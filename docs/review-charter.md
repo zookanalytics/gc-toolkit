@@ -30,16 +30,17 @@ Four parties, one data plane, and every durable fact is a bead
 workflows — work, review, merge, visit, feedback, patrol — and every
 component belongs to one of them or is a declared shared primitive.
 
-Three write paths carry the whole lifecycle, and each has exactly one writer:
+Four write paths carry the whole lifecycle, and each has exactly one writer:
 
 | Writer | Owns |
 |---|---|
 | `assets/scripts/lifecycle.sh` | every lifecycle transition, as one atomic `bd update` with read-back |
 | `assets/scripts/signoff.sh` | every gate verdict — `check.<g>` markers and the `check_set` widening |
-| `assets/scripts/merge.sh` | opening and merging a PR, against a re-read authorization set |
+| `assets/scripts/pr-open.sh` | opening a PR, against a green gate at the live head |
+| `assets/scripts/merge.sh` | merging a PR, against a re-read authorization set |
 
-A diff that writes lifecycle state, a gate marker, or a merge from anywhere
-else is a layer violation whatever else it does.
+A diff that writes lifecycle state, a gate marker, a PR open, or a merge from
+anywhere else is a layer violation whatever else it does.
 
 ## The admission test
 

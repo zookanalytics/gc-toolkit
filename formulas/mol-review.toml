@@ -270,7 +270,7 @@ REVIEWED_OID=<the OID from the review step>
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes|escalate> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md
 ```
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads, and never run `gh pr review --approve`.

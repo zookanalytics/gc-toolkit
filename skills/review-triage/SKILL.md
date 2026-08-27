@@ -26,15 +26,26 @@ is none.
 ## The menu contract
 
 The charter's gate menu is closed. You may add any gate it declares and you
-may not invent one. Parse it rather than eyeballing it:
+may not invent one. Parse it rather than eyeballing it. The parser and the
+charter come from different places and must be resolved separately: the parser
+is a pack script, the charter is the reviewed repo's own. A pack rung on the
+charter ladder would classify this rig against gc-toolkit's menu:
 
 ```bash
-CHARTER=""
-for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)"; do
-  [ -r "$c/docs/review-charter.md" ] && { CHARTER="$c/docs/review-charter.md"; break; }
+PARSER=""
+for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}"; do
+  [ -n "$c" ] && [ -x "$c/assets/scripts/review-charter.sh" ] && { PARSER="$c/assets/scripts/review-charter.sh"; break; }
 done
-[ -n "$CHARTER" ] && "$(dirname "$CHARTER")/../assets/scripts/review-charter.sh" --file "$CHARTER"
+CHARTER=""
+for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+  [ -n "$c" ] && [ -r "$c/docs/review-charter.md" ] && { CHARTER="$c/docs/review-charter.md"; break; }
+done
+[ -n "$CHARTER" ] && [ -n "$PARSER" ] && "$PARSER" --file "$CHARTER"
 ```
+
+An empty `CHARTER` is the no-charter case below, not a reason to reach for the
+pack's copy. `signoff.sh` resolves it the same way, so a waiver it cannot
+warrant from the reviewed repo's own menu is refused at the verdict.
 
 Each row gives you the gate, when it applies, its method, the paths that make
 it mandatory, and whether it may be waived.
