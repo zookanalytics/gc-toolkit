@@ -20,8 +20,6 @@
 # cannot produce a new answer is refused before it is made: a head a closed
 # request-changes verdict already judged, whose rework child is still open,
 # only re-derives that verdict.
-# A head move past a recorded exception@ buys ONE dispatch through the
-# dispatch_count cap.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -348,7 +346,6 @@ STRAY
     if [ "$head_read" = 0 ]; then head=$(live_head_for "$branch"); head_read=1; fi
     # Classify: a verdict verb bound to the live head (or bound with no head to
     # test) is settled; everything else needs something able to raise it.
-    stale_exception=0
     case "$marker" in
       green@*)
         oid="${marker#green@}"
@@ -365,7 +362,6 @@ STRAY
       exception@*)
         oid="${marker#exception@}"
         if [ -z "$head" ] || [ "$oid" = "$head" ]; then continue; fi
-        stale_exception=1  # the cap check below reads this
         why="check.$g is exception@$oid but branch '$branch' has advanced to $head" ;;
       "") why="check.$g is absent (never reviewed, or cleared by a REQUEST_CHANGES signoff)" ;;
       fixable@*) why="check.$g is '$marker' (remediation was in flight); re-dispatching unless one still is" ;;
@@ -470,21 +466,15 @@ Two repairs, either of which clears the hold:
       echo "$PROG: $id gate '$g' is armed but no --review-pool was given; no dispatch (merge is HELD until one is)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # Convergence cap: dispatch_count on the anchor bounds review rounds; at the
-    # cap the merge stays held and signoff.sh records the exception verdict.
-    # That exception IS the record of the spend, so the rounds behind it cannot
-    # also refuse a dispatch the head move has since earned. Nothing self-feeds:
-    # signoff's cap arm files no rework child, so only an actor outside the
-    # cadence can move that head again.
+    # A tally of the reviews this anchor has consumed, read only for diagnosis.
+    # NOT a cap: the round cap counts attempted rework and is signoff.sh's, the
+    # only writer that can record its terminal exception@ verdict. A refusal
+    # here fires a round early and withholds the review whose verdict settles
+    # the gate, holding the merge with nothing on the anchor saying why. What
+    # bounds the spend is the settled marker: signoff's cap arm files no rework
+    # child, so only an actor outside the cadence can stale exception@<head>.
     dcount=$(meta_of "$row" dispatch_count)
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
-    if [ "$dcount" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
-      if [ "$stale_exception" = 0 ]; then
-        echo "$PROG: $id gate '$g' has spent $dcount dispatch round(s) against a cap of ${GC_MAX_REVIEW_ROUNDS:-3}; no further dispatch (merge stays held)"
-        skipped=$((skipped + 1)); continue
-      fi
-      echo "$PROG: $id gate '$g' is past the cap ($dcount/${GC_MAX_REVIEW_ROUNDS:-3}) but the branch advanced past exception@$oid; dispatching one re-gate at $head"
-    fi
 
     # An unreadable head names no commit to test a prior verdict against.
     if [ -n "$head" ]; then

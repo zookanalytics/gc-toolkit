@@ -193,11 +193,13 @@ sequenceDiagram
   one terminal verdict: no second component writes a verdict. `pr-facts.sh`
   and `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
-  and cannot assert it.
-  A head move past that exception buys exactly one dispatch through
-  gate-ensure's `dispatch_count` cap, so a branch someone fixed by hand gets
-  a look. It cannot self-feed: the cap arm files no rework child, so nothing
-  inside the cadence can move that head again.
+  and cannot assert it. The cadence enforces no cap of its own: a
+  dispatch-side refusal fires a round early and withholds the very review
+  whose verdict settles the gate, so gate-ensure's `dispatch_count` is a tally
+  an operator reads, never a bound. A head move past that exception therefore
+  re-arms one dispatch, and a branch someone fixed by hand gets a look. It
+  cannot self-feed: the cap arm files no rework child, so nothing inside the
+  cadence can move that head again.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.

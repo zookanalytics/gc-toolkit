@@ -12,12 +12,12 @@
 # (convoy probe: re-sling only a review with no LIVE tracking convoy, and
 # converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
-# gc.execution_routed_to read-back, never retried in-pass); merge_hold; the
-# dispatch_count cap (and the one dispatch a head move past an exception buys
-# through it); the refusal to re-review a head a closed request-changes verdict
-# already judged while its rework child is still open; and the review-wedge
-# escalation (exec-stamp-only reach whose poured workflow is spent -> one
-# deduped visit, held one pass first).
+# gc.execution_routed_to read-back, never retried in-pass); merge_hold;
+# dispatch_count as a tally that never withholds a dispatch; the refusal to
+# re-review a head a closed request-changes verdict already judged while its
+# rework child is still open; and the review-wedge escalation (exec-stamp-only
+# reach whose poured workflow is spent -> one deduped visit, held one pass
+# first).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +27,7 @@ trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 # A hermetic suite must not read the caller's city: an ambient GC_RIG changes
 # the gc sling argv these assertions match on.
-unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
+unset GC_RIG 2>/dev/null || true
 harness_init
 
 # Private scripts dir: the SUT plus a body-emitter stub (interface unchanged).
@@ -124,10 +124,10 @@ out=$(run); rc=$?
 eq "$rc" 0 "re-gate pass exits 0"
 has "$out" "2 reviews dispatched" "a branch fixed under an exception gets one look"
 has "$out" "advanced to $(oid b4)" "the dispatch names the head that staled the exception"
-has "$out" "B5 gate 'codex' is past the cap (3/3) but the branch advanced past exception@$(oid old)" \
-  "the spent cap does not ALSO refuse the head-move re-gate (the second brake)"
+has "$out" "advanced to $(oid b5)" \
+  "…including the anchor whose cap is spent and whose gc.routed_to is human"
 hasnt "$out" "B5 gate 'codex' has spent" \
-  "B5 carries the live shape signoff's cap arm writes — capped AND routed to human"
+  "B5 carries the live shape signoff's cap arm writes, and nothing refuses it"
 eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
 eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
 
@@ -285,14 +285,7 @@ out=$(run)
 has "$out" "merge_hold is set (operator gate); no dispatch" "an operator hold suppresses the dispatch"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
 
-echo "# dispatch_count cap"
-store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"3"')]"
-oid f1 > "$GH_DIR/head_polecat_f1"
-out=$(run)
-has "$out" "cap of 3" "the round cap declines further dispatches"
-has "$out" "0 reviews dispatched" "…and nothing was dispatched"
-
-# --- a head already judged, whose rework has not been attempted -----------------
+# --- rework rounds: the ledger the cap is counted from --------------------------
 # A review of a commit no rework has touched returns the findings that filed
 # the child already waiting, and spends a dispatch round doing it.
 judged_review() { # <id> <anchor> <oid>
@@ -302,6 +295,19 @@ judged_review() { # <id> <anchor> <oid>
 rework_kid() { # <id> <source-review> <status>
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"source_review_bead":"%s"}}' "$1" "$3" "$2"
 }
+
+echo "# dispatch_count is a tally, not a cap: cap-many spent rounds still dispatch"
+store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"3"'),
+        $(judged_review rev-f1 F1 old-f1),
+        $(rework_kid fix-f1a rev-f1 closed),
+        $(rework_kid fix-f1b rev-f1 closed),
+        $(rework_kid fix-f1c rev-f1 closed)]"
+printf 'fix-f1a|blocks|F1\nfix-f1b|blocks|F1\nfix-f1c|blocks|F1\n' >> "$STUB_DEPS"
+echo "sha-f1" > "$GH_DIR/head_polecat_f1"
+out=$(run)
+has "$out" "1 reviews dispatched" "the third rework's result still gets the review that settles the gate"
+hasnt "$out" "cap of" "…no dispatch-side cap preempts signoff.sh's terminal verdict"
+eq "$(meta F1 dispatch_count)" "4" "…and the tally advances past the cap it is not"
 
 echo "# a head already judged, with its rework still open, is never re-reviewed"
 store "[$(anchor R1 pull_request codex "" polecat/r1),
