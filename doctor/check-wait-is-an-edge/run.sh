@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # doctor/check-wait-is-an-edge — I1: every wait is a graph edge, not a string.
-# Per bead store: where an OPEN bead's own metadata states that it is waiting
+# Per bead store: where a LIVE bead's own metadata states that it is waiting
 # on another bead, a BLOCKING dependency edge must record that wait in one
-# direction or the other. A string answers no query, so a wait held only in
+# direction or the other. Live is every non-closed status: parking or claiming
+# a bead does not answer the wait it states, it only stops the bead appearing
+# in the narrower listing. A string answers no query, so a wait held only in
 # metadata is invisible to `bd ready` and to every surface that re-derives what
 # is still blocked (docs/lifecycle-composition.md §1). A non-blocking edge is
 # no better: `bd dep add --help` states that type=blocks is what excludes the
 # dependent from `bd ready`, so a tracks, parent-child or related record leaves
 # the wait exactly as unanswerable as the bare string does. Two findings are
-# reported apart because they differ in degree: UNEDGED names an open bead,
-# FROZEN names a closed one, where the wait is over and nothing can notice.
+# reported apart because they differ in degree: UNEDGED names a bead that is
+# still live, FROZEN a closed one, where the wait is over and nothing can
+# notice.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -20,14 +23,27 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 # Candidate ids resolve through a batched `bd show`, split so a store with a
 # large candidate set cannot build an argv past the exec limit.
 CHUNK="${GC_DOCTOR_WAIT_CHUNK:-100}"
+# EVERY NON-CLOSED STATUS. `closed` is the only value that ends a wait; a bead
+# that has been claimed, parked or blocked still states one, and its wait is as
+# unanswerable as an open bead's. `hooked` and `blocked` are bd's "wip"
+# category and `pinned` its "frozen" one, so all three are live — the same set
+# and the same reasoning as docs/gascity-dispatch-containment.md. Not a
+# parameter: an env knob here would let a caller narrow the invariant to a
+# subset of beads and still read as a clean run. One comma-separated value,
+# because repeating `--status` silently overwrites the previous one.
+LIVE_STATUSES='open,in_progress,blocked,deferred,hooked,pinned'
 
 errors=(); warnings=(); notes=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-# Bead prose carries control characters that abort jq mid-parse, which would
-# cost a whole store. This also clears the 0x1F that rows are joined on, so no
-# payload byte can pose as a field separator.
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# Rows below are joined on 0x1F, which this scrub also clears, so no payload
+# byte can pose as a field separator.
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 # ---------------------------------------------------------------------------
 # The wait predicate, as one jq program so the pattern lives in one place.
@@ -35,7 +51,7 @@ strip_ctl() { tr -d '\000-\011\013-\037'; }
 #
 # ONLY SURFACES THE BEAD WRITES ABOUT ITSELF ARE READ, which is what makes a
 # match attributable. Free-form notes are excluded on measurement rather than
-# taste: across this city every open bead whose notes carry wait language names
+# taste: across this city every live bead whose notes carry wait language names
 # a THIRD PARTY as the waiter, because survey and audit beads record other
 # beads' states in the same words a first-person wait uses. Attributing those to
 # whoever wrote them down would report the graph as broken where it is correct.
@@ -54,7 +70,7 @@ strip_ctl() { tr -d '\000-\011\013-\037'; }
 # `.dependency_type` by `bd show`, each command rendering the other field null.
 #
 # THE SOURCE'S EDGE IDS RIDE ALONG as a fourth field, which is a size
-# constraint rather than a convenience: the open listing runs to megabytes and
+# constraint rather than a convenience: the live listing runs to megabytes and
 # passing it to a second jq as --argjson exceeds the single-argument limit,
 # which fails the store closed. The payload crosses once, already reduced to
 # the ids the join needs.
@@ -219,26 +235,26 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
 
-    open_raw=$(run_bounded bd list --db "$db" --status open --json --limit 0 2>/dev/null); open_rc=$?
-    if [ "$open_rc" -ne 0 ]; then
-        warnings+=("$label: could not list open beads in $db (rc=$open_rc) — this store was NOT checked")
+    live_raw=$(run_bounded bd list --db "$db" --status "$LIVE_STATUSES" --json --limit 0 2>/dev/null); live_rc=$?
+    if [ "$live_rc" -ne 0 ]; then
+        warnings+=("$label: could not list live beads in $db (rc=$live_rc) — this store was NOT checked")
         continue
     fi
     # An empty store answers `[]`; an empty STRING is not that answer.
-    if [ -z "$open_raw" ]; then
+    if [ -z "$live_raw" ]; then
         warnings+=("$label: \`bd list\` over $db returned no output — this store was NOT checked")
         continue
     fi
-    open_json=$(printf '%s' "$open_raw" | strip_ctl)
-    if ! printf '%s' "$open_json" | jq -e 'type=="array"' >/dev/null 2>&1; then
-        warnings+=("$label: open listing from $db is not a JSON array — this store was NOT checked")
+    live_json=$(printf '%s' "$live_raw" | scrub)
+    if ! printf '%s' "$live_json" | jq -e 'type=="array"' >/dev/null 2>&1; then
+        warnings+=("$label: live listing from $db is not a JSON array — this store was NOT checked")
         continue
     fi
     checked=$((checked + 1))
 
-    pairs=$(printf '%s' "$open_json" | jq -r --arg prefixes "$PREFIXES" --arg waitkey "$WAITKEY_RE" --arg prosekey "$PROSEKEY_RE" "$WAIT_JQ" 2>/dev/null); pairs_rc=$?
+    pairs=$(printf '%s' "$live_json" | jq -r --arg prefixes "$PREFIXES" --arg waitkey "$WAITKEY_RE" --arg prosekey "$PROSEKEY_RE" "$WAIT_JQ" 2>/dev/null); pairs_rc=$?
     if [ "$pairs_rc" -ne 0 ]; then
-        warnings+=("$label: could not scan open beads in $db for wait language — this store was NOT checked")
+        warnings+=("$label: could not scan live beads in $db for wait language — this store was NOT checked")
         continue
     fi
     [ -n "$pairs" ] || continue
@@ -251,7 +267,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         local cdb="$1" out rc merged
         [ "${#chunk[@]}" -ne 0 ] || return 0
         out=$(run_bounded bd show --db "$cdb" "${chunk[@]}" --json 2>/dev/null); rc=$?
-        out=$(printf '%s' "$out" | strip_ctl)
+        out=$(printf '%s' "$out" | scrub)
         if [ -z "$out" ]; then chunk_failed="rc=$rc, no output from $cdb"; return 1; fi
         # `bd show` EXITS non-zero when nothing in the batch resolved, printing
         # a well-formed no-matches error on stdout. That is a determinate
@@ -388,6 +404,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every wait an open bead states about itself across $checked store(s) is also a graph edge"
+echo "OK: every wait a live bead states about itself across $checked store(s) is also a graph edge"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

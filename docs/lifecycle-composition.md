@@ -70,11 +70,14 @@ repeatable, writes a `blocks` edge beside the takeaway string
 the durable record of what the sitting concluded, and it is never cleared. The
 edge is what makes the wait *machine-answerable*.
 
-`doctor/check-wait-is-an-edge` holds this clause where it is decidable. An open
-bead that states a wait about **itself** — in a metadata key that declares a
-dependency, or in its own `gc.takeaway` or `*_reason` text — must carry the
-`blocks` edge as well as the string, in one direction or the other. Only that
-type is checked, because only that type holds the bead out of `bd ready`. A
+`doctor/check-wait-is-an-edge` holds this clause where it is decidable. A bead
+in any non-closed status that states a wait about **itself** — in a metadata key
+that declares a dependency, or in its own `gc.takeaway` or `*_reason` text —
+must carry the `blocks` edge as well as the string, in one direction or the
+other. Closed is the one status that ends a wait, so every other one is in
+scope. A wait stated by a bead already claimed, blocked or parked is as
+unanswerable as an open bead's. Only that edge type is checked, because only
+that type holds the bead out of `bd ready`. A
 target that has already closed is reported apart, because that is this failure
 in its terminal form: the wait is over and nothing anywhere can notice. The
 check reads only the surfaces a bead writes about itself; a wait sentence in
