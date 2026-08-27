@@ -46,8 +46,15 @@ the cadence — the arms run whether or not any refinery session is awake.
    sentinel is respected), and every declared gate is *raisable*: marker green
    at the live head, or a live routed review bead in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). A review whose only reach is the pour stamp is qualified before it
-   counts as in flight: if its workflow is spent — every step closed but
+   back). An `exception@` marker bound to the live head also ends the arm's
+   interest with no dispatch, because it reads as settled. It holds the merge,
+   and it says so on the anchor: `signoff.sh` set `gc.routed_to=human` and a
+   `blocked_reason` naming the cap in the same act that wrote the marker. No
+   visit is filed for it, so the anchor is parked rather than queued. A head
+   move past a recorded `exception@` undoes that. The gate is no longer
+   settled and one dispatch is re-armed.
+   A review whose only reach is the pour stamp is qualified before it counts
+   as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
    can still be coming, and the arm escalates through `escalate.sh` under the
    `review-wedge` key rather than holding the anchor in silence. It escalates
@@ -78,9 +85,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    <validated oid>`, then close + record via one `lifecycle.sh` call.
 4. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head), gate
-   green at a stale head (one re-review child per head, carrying
-   `mol-review`), hold-resolved retraction.
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head), a gate
+   `green@` or `exception@` at a stale head (one re-review child per head,
+   carrying `mol-review`), hold-resolved retraction.
 5. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

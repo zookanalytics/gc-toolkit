@@ -114,9 +114,32 @@ recorded onto the integration branch, and no hold or branch vetoes.
 
 ## Gates
 
-**Vocabulary.** The anchor declares its gates in `check_set` — a comma list of
-gate names, default `codex`; the sentinel `none` is an explicit opt-out. Each
-gate's verdict is a head-bound marker:
+**Vocabulary.** The anchor declares its gates in `check_set`, a comma list of
+gate names. Three of those names are not review gates, and every reader of
+`check_set` knows them by name. `none` and `off` are sentinels that declare no
+gate at all. `none` is the spelling the rest of this pack uses. `approval` is
+satisfied by GitHub's own review state. `gate-ensure.sh` and `pr-facts.sh`
+skip all three instead of dispatching a review, and `merge.sh` drops them
+before it looks for markers.
+
+Every other name is opaque to the machinery: gate-ensure dispatches whatever
+it finds there, `signoff.sh` writes `check.<name>`, and `merge.sh` requires
+every such name green at the live head. Which names an anchor starts with is
+configuration, not doctrine. Two writers put them there and neither reads the
+diff: `mol-refinery-patrol` stamps its `check_set` var on every transition
+into a gating state, and `gate-ensure.sh --default` normalizes an anchor whose
+set is absent or empty, taking its value from `REFINERY_RECONCILE_CHECK_SET`.
+The registry records the same value at `lifecycle/lifecycle.toml`
+`[gates] check_set_default`. Who may depart from it is
+[authority-map.md](authority-map.md).
+
+`codex` is one such review gate, opaque like the rest, with one coupling of
+its own: `pr-open.sh` requires `check.codex=green@<live head>` by literal name
+and never reads `check_set`. An anchor whose set drops `codex` before its PR
+exists strands at `pre_open_gate`, because gate-ensure raises only the names
+the set does declare and nothing then produces the marker pr-open waits on.
+
+Each gate's verdict is a head-bound marker:
 
 | Marker | Meaning | Merge effect |
 |---|---|---|
@@ -124,8 +147,10 @@ gate's verdict is a head-bound marker:
 | `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
 | `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>` |
 
-`approval` is satisfied only by an external APPROVED review — never by the
-city's own account. **`signoff.sh` is the single writer of gate verdicts**
+`approval` takes no marker of its own. `merge.sh` satisfies it from an
+external APPROVED review at the live head, never from the city's own account
+and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
+that rule. **`signoff.sh` is the single writer of gate verdicts**
 (component-model I7). It refuses any oid that is not 40 lowercase hex: the
 marker earns its authority from `merge.sh` comparing it to the live head, and
 an abbreviated sha compares equal to nothing. A head move stales every verb at
@@ -140,6 +165,15 @@ the grammar, it is evidence of nothing that nothing could retire, and
 gate-ensure clears it. A well-formed one stays as history, and an undeclared
 `exception@` is the operator's to retire — the re-gate above reaches only the
 gates `check_set` names.
+
+At the head it names, an `exception@` gate is held, not decided. `signoff.sh`'s
+approve path stamps `green@<reviewed oid>` and returns before it counts rounds
+against the cap, so one further approving review releases the gate at that very
+head. No cadence pass will start that review, because gate-ensure and
+`pr-facts.sh` both read an exception bound to the live head as settled. The
+human the anchor is routed to has three moves: dispatch a review by hand,
+change the anchor's `check_set`, or move the head and take the one re-gate the
+table above describes.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -223,16 +257,17 @@ sequenceDiagram
   files again. Only an operator clears it, by fixing the cause and clearing
   `dispatch_count`.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
-  per head; a gate `green@` or `exception@` a stale head gets one re-review
+  per head; a gate `green@` or `exception@` at a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.
 - **Re-gate on head move**: any new commit stales every head-bound marker;
   gate-ensure sees a declared gate that is neither settled at the live head
-  (`green@` or `exception@` it) nor in flight and dispatches one review bead
-  (stamp first, then attach `mol-review` via `gc sling --on`, read the pour
-  back). A head a closed request-changes verdict already judged is not
-  re-gated while the rework it filed is still open: the same commit returns
-  the same findings. This binds the stranded-review repair too — re-slinging
-  an inert review buys the same answer a fresh dispatch is refused for.
+  (`green@` or `exception@` at that head) nor in flight and dispatches one
+  review bead (stamp first, then attach `mol-review` via `gc sling --on`,
+  read the pour back). A head a closed request-changes verdict already judged
+  is not re-gated while the rework it filed is still open: the same commit
+  returns the same findings. This binds the stranded-review repair too —
+  re-slinging an inert review buys the same answer a fresh dispatch is
+  refused for.
 
 ## Disposition
 

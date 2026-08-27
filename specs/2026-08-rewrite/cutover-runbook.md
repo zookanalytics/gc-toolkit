@@ -142,7 +142,15 @@ says OPERATOR is their decision, not yours. Work the steps in order.
        ride the code merge gate with a code-calibrated round cap. The
        mechanism exists (per-anchor check_set `none`/`approval`,
        GC_MAX_REVIEW_ROUNDS); write the doctrine/default that applies it to
-       non-code beads.
+       non-code beads. Answered by tk-rbeq4f (2026-08-26), which also
+       rejects this item's framing: no default belongs in a document, and
+       `codex` is a gate label rather than a policy. The power to depart
+       from the configured default is granted and bounded in
+       docs/authority-map.md, the machinery it acts on is corrected in
+       docs/state-machine.md §Gates, and specs/tk-rbeq4f/ carries the
+       reasoning. The cap itself is not the lever and stays where it is;
+       the remaining code-shaped surface is the review rubric, carved out
+       as tk-wigtu9.
 
    Superseded open PRs: when the operator confirms this branch has landed,
    close the open zook-bot PRs it obsoletes, each with a one-line comment
