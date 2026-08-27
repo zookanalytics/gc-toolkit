@@ -7,7 +7,7 @@
 #   --waiting-on edges (tk-2plde)
 #   the ≤140-codepoint length gate (tk-9tbbk.1)
 #   the retired board verb refuses and names helm-svc board
-#   the dismiss verb: both halves of the operator's explicit clear (tk-ghlg1e)
+#   the dismiss verb: both halves of the operator's explicit clear
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -337,11 +337,11 @@ grep -q 'helm-svc board' <<< "$BERRTXT" \
   || bad "(NOBOARD) refusal must name the successor (got: $BERRTXT)"
 
 # ── dismiss: the operator's one explicit "take this out of my view" ─────────
-# tk-ghlg1e. Two surfaces hold a subject in view and, since this change, neither
-# lets go on its own: converse runs with no idle_timeout so a held visit keeps
-# its pane, and a closed anchor keeps a DONE row on the board. dismiss is the
-# single act that releases both, so each half is asserted separately — a verb
-# that did one and silently skipped the other would look like it worked.
+# Two surfaces hold a subject in view and neither lets go on its own: converse
+# runs with no idle_timeout so a held visit keeps its pane, and a closed anchor
+# keeps a DONE row on the board. dismiss is the single act that releases both,
+# so each half is asserted separately — a verb that did one and silently
+# skipped the other would look like it worked.
 
 cat > "$TMP/visits.json" <<'JSON'
 [
@@ -500,8 +500,8 @@ for blind_payload in '' '{"error":"no issues found"}' 'null'; do
 done
 
 # …and the gate must not swallow the honest answer: an EMPTY ARRAY is a subject
-# with no visit, which dismisses. Without this the fix above trades a lost row
-# for a verb that can never clear one.
+# with no visit, which dismisses. Without it the shape gate above trades a lost
+# row for a verb that can never clear one.
 : > "$TMP/updates"; : > "$TMP/closes"
 ERC=0
 EOUT="$(FAKE_LIST_OUT='[]' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || ERC=$?

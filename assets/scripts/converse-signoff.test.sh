@@ -552,12 +552,11 @@ have "ending rule names the operator lever" 'gc-helm dismiss' "$PROMPT"
 
 # The Hold definition is page one, and a definition outranks a rule
 # further down: from "a hold has no timeout" the role reasons straight
-# to "nothing can take this session" — the belief that produced the bug.
-# Correcting the ending rule alone leaves the root cause live in the
-# active role definition, which is where the session reads it first.
-# The bare claim stays banned even now that the idle clock is off: a
-# health restart, a city restart and a crash still end a hold, and the
-# definition has to say so or the mandatory stamp below reads as ritual.
+# to "nothing can take this session", and the definition is where the
+# session reads it first, so correcting the ending rule alone is not
+# enough. The bare claim stays banned with the idle clock off: a health
+# restart, a city restart and a crash still end a hold, and the definition
+# has to say so or the mandatory stamp below reads as ritual.
 lacks "no 'a hold has no timeout' claim in the definition" \
     'A hold has no timeout' "$PROMPT" \
     "no idle clock is not no ending: a restart or a crash still takes a held sitting, with no farewell"
@@ -616,10 +615,9 @@ case "$IDLE_VAL" in
             "idle_timeout is '$IDLE_VAL'; any positive value re-arms the clock that collects a thread the operator is reading" ;;
 esac
 have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
-# Removing the reap without a release valve would leave a held visit nobody
-# answers holding a pool slot with nothing able to reclaim it. The verb IS the
-# mitigation, so its absence is this change half-reverted rather than a missing
-# convenience.
+# With no idle clock and no release valve, a held visit nobody answers holds a
+# pool slot with nothing able to reclaim it. The verb IS that valve, so its
+# absence is not a missing convenience.
 have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
 have "dismiss also clears the board row" 'gc.dismissed_at=' "$HELM"
