@@ -218,16 +218,29 @@ title = "Check refinery queue health"
 needs = ["recover-orphaned-beads"]
 description = """
 ```bash
-gc bd list --assignee=${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery --status=open --json --limit=0
+# >>> refinery-queue-nudge
+REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --json --limit=0)
+printf '%s' "$QUEUE" | jq -r '.[] | [.id, .updated_at, .title] | @tsv'
+DEPTH=$(printf '%s' "$QUEUE" | jq 'if type == "array" then length else empty end' 2>/dev/null)
+# The nudge asserts a backlog, so only a counted one may send it: an
+# unconditional send leaves a real backlog worded exactly like the
+# empty-queue ones. Anything that is not a bead array counts nothing to
+# assert — an error body is an object, whose length is its field count.
+case "${DEPTH:-}" in
+  ''|*[!0-9]*) echo "check-refinery: queue listing did not parse; not nudging" >&2; DEPTH=0 ;;
+esac
+if [ "$DEPTH" -gt 0 ]; then
+  OLDEST=$(printf '%s' "$QUEUE" | jq -r 'sort_by(.updated_at // "") | .[0].updated_at // "unknown"')
+  gc session nudge "$REFINERY" "Merge queue: $DEPTH open bead(s) assigned to you, oldest untouched since $OLDEST."
+fi
+# <<< refinery-queue-nudge
 ```
 Look for: **stale beads** (assigned long ago, untouched — the refinery may
 be stuck), **queue depth** (a pile means stuck or overwhelmed), **empty
 queue** (usually fine — but a near-miss assignee on a handoff is missing
 from this listing, not absent from the city; read the cadence's pass log
-before calling it healthy). Nudge first:
-```bash
-gc session nudge ${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery "Work beads waiting for merge. Please check queue."
-```
+before calling it healthy).
 Escalate only what a human must act on — a stuck queue, never an
 approval-gated one (a PR awaiting the operator is a resting state worth
 zero escalations):
