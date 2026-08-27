@@ -51,7 +51,20 @@ bd_show() {
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 
-# --- origin's live branch names, read once ----------------------------------
+# --- the live review population ----------------------------------------------
+ROWS=$(bd_list --metadata-field task_kind=review --status="$LIVE_STATUSES") || {
+  echo "$PROG: could not enumerate live review beads; failing loudly rather than reporting a false all-clear" >&2
+  exit 1
+}
+CANDS=$(printf '%s' "$ROWS" | jq -r '
+  .[] | [ ((.id // "") | tostring),
+          ((.metadata.anchor_bead // "") | tostring),
+          ((.metadata.review_branch // "") | tostring) ] | @tsv' 2>/dev/null)
+[ -n "$CANDS" ] || { echo "$PROG: no live review beads"; exit 0; }
+
+# --- origin's live branch names, read once -----------------------------------
+# After the enumeration, so a quiet rig costs no network call and a blip there
+# cannot fail a pass that had nothing to sweep.
 REFS=$(git ls-remote --heads origin 2>/dev/null) || REFS=""
 BRANCHES=$(printf '%s\n' "$REFS" \
   | sed -n 's#^[^[:space:]]\{1,\}[[:space:]]\{1,\}refs/heads/##p')
@@ -65,17 +78,6 @@ on_origin() { # <branch> — exact membership; a ref name cannot contain a newli
   case "$NL$BRANCHES$NL" in *"$NL$1$NL"*) return 0 ;; esac
   return 1
 }
-
-# --- the live review population ---------------------------------------------
-ROWS=$(bd_list --metadata-field task_kind=review --status="$LIVE_STATUSES") || {
-  echo "$PROG: could not enumerate live review beads; failing loudly rather than reporting a false all-clear" >&2
-  exit 1
-}
-CANDS=$(printf '%s' "$ROWS" | jq -r '
-  .[] | [ ((.id // "") | tostring),
-          ((.metadata.anchor_bead // "") | tostring),
-          ((.metadata.review_branch // "") | tostring) ] | @tsv' 2>/dev/null)
-[ -n "$CANDS" ] || { echo "$PROG: no live review beads"; exit 0; }
 
 swept=0; held=0; stuck=0
 while IFS=$'\t' read -r rid anchor branch; do

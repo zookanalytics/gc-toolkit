@@ -116,6 +116,13 @@ eq "$rc" 1 "an unreachable origin exits 1"
 eq "$(bstatus RY)" "open" "…and closes nothing (every branch would read as deleted)"
 has "$out" "branch list is unreadable" "…saying why"
 
+echo "# a rig with nothing to sweep never reaches origin"
+store "[$(anchor AZ closed merged)]"
+out=$(STUB_LS_REMOTE_RC=128 run); rc=$?
+eq "$rc" 0 "no live reviews exits 0 even with origin unreachable"
+has "$out" "no live review beads" "…having stopped before the branch read"
+store "[$(review RY AY polecat/gone),$(anchor AY closed merged)]"
+
 echo "# an empty branch listing is unreadable, not an empty repository"
 : > "$REFS"
 out=$(run); rc=$?
