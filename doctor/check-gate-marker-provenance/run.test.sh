@@ -77,8 +77,12 @@ anchors() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.anchors.json"; 
 reviews() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.reviews.json"; }
 # anchor <id> <extra-metadata-json-body>
 anchor() { printf '{"id":"%s","status":"open","metadata":{%s}}' "$1" "$2"; }
-# rbead <id> <status> <anchor> <oid>
-rbead() { printf '{"id":"%s","status":"%s","metadata":{"task_kind":"review","anchor_bead":"%s","reviewed_oid":"%s"}}' "$1" "$2" "$3" "$4"; }
+# rbead <id> <status> <anchor> <oid> [check_name]  (omitted = no check_name key)
+rbead() {
+  local cn=""
+  [ -z "${5:-}" ] || cn=$(printf ',"check_name":"%s"' "$5")
+  printf '{"id":"%s","status":"%s","metadata":{"task_kind":"review","anchor_bead":"%s","reviewed_oid":"%s"%s}}' "$1" "$2" "$3" "$4" "$cn"
+}
 approvals() { printf '%s' "$2" > "$TMP/gh/reviews_$1.json"; }
 
 OID=0123456789abcdef0123456789abcdef01234567
@@ -88,7 +92,7 @@ reviews ""
 
 # --- 1. RESOLVE A clears a green marker ------------------------------------------
 anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
-reviews "$(rbead r-1 closed a-1 "$OID")"
+reviews "$(rbead r-1 closed a-1 "$OID" codex)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a green marker bound by a review bead at the same oid passes"
 has "$OUT" "OK:" "the pass message is the OK line"
@@ -97,12 +101,40 @@ eq "$(wc -l < "$GH_LOG")" "0" "RESOLVE A costs no GitHub call"
 # --- 2. the review bead must be found even though it is CLOSED ----------------------
 # Guard mutation: the same fixture with the bead OPEN must also pass, so the
 # closed case above is proving --all and not merely proving the join.
-reviews "$(rbead r-1 open a-1 "$OID")"
+reviews "$(rbead r-1 open a-1 "$OID" codex)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an open review bead resolves too (the join itself is sound)"
 
+# --- 2b. RESOLVE A binds a verdict to the GATE it was recorded for ------------------
+# merge-skill.sh gates each check_set member separately, so a verdict for one
+# gate is not evidence for another standing at the same commit.
+anchors "$(anchor a-1b "$GATING,\"check_set\":\"codex,ci\",\"pr_number\":\"101\",\"check.codex\":\"green@$OID\",\"check.ci\":\"green@$OID\"")"
+reviews "$(rbead r-1 closed a-1b "$OID" codex)"
+approvals 101 '[]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a codex verdict does not clear a ci marker standing at the same commit"
+has "$OUT" "check.ci=" "the gate nobody reviewed is the one reported"
+hasnt "$OUT" "check.codex=" "the gate that was reviewed is not reported"
+has "$OUT" "check_name=ci" "the finding names the gate the missing verdict was owed for"
+
+anchors "$(anchor a-1c "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+reviews "$(rbead r-1 closed a-1c "$OID" ci)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a review bead naming a different gate leaves the marker unresolved"
+
+# signoff.sh defaults an absent check_name to codex and stamps check.codex for
+# that bead, so the resolver reads it back the same way.
+reviews "$(rbead r-1 closed a-1c "$OID")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a review bead with no check_name resolves the codex gate"
+anchors "$(anchor a-1d "$GATING,\"check_set\":\"ci\",\"pr_number\":\"101\",\"check.ci\":\"green@$OID\"")"
+reviews "$(rbead r-1 closed a-1d "$OID")"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "that default does not let it clear a gate other than codex"
+
 # --- 3. no evidence anywhere is an ERROR ---------------------------------------------
-reviews "$(rbead r-2 closed a-1 "$OTHER")"
+anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+reviews "$(rbead r-2 closed a-1 "$OTHER" codex)"
 approvals 101 '[]'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a green marker no review bead and no approval covers is an ERROR"

@@ -8,13 +8,20 @@
 # carrying a well-formed check.<g>=green@<oid> must produce evidence of a verdict
 # at that same <oid>. Two resolvers, in order:
 #   A (local, no network) — a task_kind=review bead whose anchor_bead is this
-#     anchor and whose reviewed_oid is <oid>.
+#     anchor, whose reviewed_oid is <oid>, and whose check_name is <gate>. The
+#     gate is part of the key because merge-skill.sh gates every check_set member
+#     separately; a key without it lets one recorded verdict clear each marker
+#     standing at that commit, including gates nobody ran. A review bead carrying
+#     no check_name resolves gate codex, mirroring signoff.sh, which defaults an
+#     absent check_name to codex and stamps check.codex for that same bead.
 #   B (network, residue only) — an APPROVED GitHub review on the anchor's
 #     pr_number whose OWN commit_id is <oid>. B exists because the operator
 #     approves a head directly on GitHub, which files no review bead. It compares
 #     the approval's commit, never "the PR is approved": per tk-4yl2c this rig's
 #     human approval is not head-bound, so an approval outlives the head it was
-#     given at, and only the oid comparison makes it evidence.
+#     given at, and only the oid comparison makes it evidence. An approval names
+#     no gate, so B clears every green marker at <oid>: the operator approved the
+#     head itself, not one check standing on it.
 # A bead whose own task_kind is review is not an anchor and is skipped — it may
 # carry a green marker of its own.
 #
@@ -98,14 +105,15 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(((($m.task_kind // "") | tostring)) == "review")
         | ((($m.anchor_bead // "") | tostring)) as $a
         | ((($m.reviewed_oid // "") | tostring)) as $o
+        | (((($m.check_name // "") | tostring)) | if . == "" then "codex" else . end) as $g
         | select($a != "" and $o != "")
-        | {key: ($a + "\u001f" + $o), value: ((.id // "?") | tostring)} ] | from_entries' 2>/dev/null); jrc=$?
+        | {key: ($a + "\u001f" + $o + "\u001f" + $g), value: ((.id // "?") | tostring)} ] | from_entries' 2>/dev/null); jrc=$?
     if [ "$jrc" -ne 0 ] || [ -z "$idx" ]; then
         warnings+=("$label: review-bead index from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
     fi
     residue=$(jq -nr --argjson c "$cands" --argjson m "$idx" '$c[]
-        | select(($m[(.id + "\u001f" + .oid)] // "") == "")
+        | select(($m[(.id + "\u001f" + .oid + "\u001f" + (.gate | ltrimstr("check.")))] // "") == "")
         | [.id, .gate, .oid, .pr] | join("\u001f")' 2>/dev/null); jrc=$?
     if [ "$jrc" -ne 0 ]; then
         warnings+=("$label: could not join anchors to review beads in $rig_path/.beads — this store was NOT checked")
@@ -129,12 +137,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$id" ] || continue
         processed=$((processed + 1))
         short="${oid:0:12}"
+        gname="${gate#check.}"
         if [ -z "$pr" ]; then
-            warnings+=("$label bead $id: $gate=\"green@$short…\" is backed by NO review bead, and the anchor records no pr_number — no GitHub approval could be looked for, so this marker is UNDETERMINED, not cleared")
+            warnings+=("$label bead $id: $gate=\"green@$short…\" is backed by no review bead naming gate $gname, and the anchor records no pr_number — no GitHub approval could be looked for, so this marker is UNDETERMINED, not cleared")
             continue
         fi
         if [ -z "$slug" ] || ! command -v gh >/dev/null 2>&1; then
-            warnings+=("$label bead $id: $gate=\"green@$short…\" is backed by NO review bead, and PR $pr could not be consulted (gh unavailable, or origin is not a github.com remote) — UNDETERMINED, not cleared")
+            warnings+=("$label bead $id: $gate=\"green@$short…\" is backed by no review bead naming gate $gname, and PR $pr could not be consulted (gh unavailable, or origin is not a github.com remote) — UNDETERMINED, not cleared")
             continue
         fi
         key="$slug#$pr"
@@ -153,11 +162,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
         approvals="${REVIEWS_CACHE[$key]}"
         if [ -z "$approvals" ]; then
-            warnings+=("$label bead $id: $gate=\"green@$short…\" is backed by NO review bead, and the review list for PR $pr could not be read — UNDETERMINED, not cleared")
+            warnings+=("$label bead $id: $gate=\"green@$short…\" is backed by no review bead naming gate $gname, and the review list for PR $pr could not be read — UNDETERMINED, not cleared")
             continue
         fi
         [ "$(printf '%s' "$approvals" | jq -r --arg o "$oid" 'any(.[]; . == $o)' 2>/dev/null)" = "true" ] && continue
-        errors+=("$label bead $id: $gate=\"green@$short…\" records a passed gate at a commit nothing reviewed — no review bead carries anchor_bead=$id with reviewed_oid=$oid, and no approval on PR $pr sits at that commit; merge-skill.sh will land this head on the strength of that marker")
+        errors+=("$label bead $id: $gate=\"green@$short…\" records a passed gate at a commit nothing reviewed it for — no review bead carries anchor_bead=$id with reviewed_oid=$oid and check_name=$gname, and no approval on PR $pr sits at that commit; merge-skill.sh will land this head on the strength of that marker")
     done <<< "$residue"
     if [ "$processed" -ne "$expected" ]; then
         warnings+=("$label: enumerated $processed of $expected unresolved marker(s) in $rig_path/.beads — the rest were NOT checked")
