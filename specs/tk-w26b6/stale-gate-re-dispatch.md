@@ -33,8 +33,16 @@ treat "advanced past `<oid>`" as needing a fresh review.
 | `assets/scripts/pr-facts.sh:324-421` | Cadence arm 4. For a PR-bearing anchor, a gate `green@` or `exception@` a stale head files one re-review child per head. Its comment at `:325` states the shared rule: both verbs bind a verdict to a commit, and a branch past either has had no look at its head. |
 
 The behavior is pinned by `assets/scripts/gate-ensure.test.sh:115-126`, which
-asserts a `green@old-oid` anchor at head `sha-c1` dispatches a review. The
-suite passes 108/0.
+stores a `pre_open_gate` anchor carrying `green@old-oid`, sets its live head to
+`sha-c1`, and asserts that the pass dispatches a review for it.
+
+That assertion passes. So does the rest of the suite, 108/0, when `GC_RIG` is
+unset. With `GC_RIG` set, four assertions here fail and a fifth fails in
+`pr-facts.test.sh`: each looks for `sling rig/<pool> <bead> --on mol-review` in
+the stub log and finds `sling --rig <rig> rig/<pool> <bead> --on mol-review`,
+because `gate-ensure.sh:301,439` and `pr-facts.sh:413` add `--rig` whenever the
+variable is set and neither harness clears it. Those five are `tk-097t61`. They
+reproduce unchanged on `origin/main`, and none of them is the assertion above.
 
 It is also observable in production. On 2026-08-27 two gc-toolkit anchors
 carried a green marker behind their branch head, and each already had a
