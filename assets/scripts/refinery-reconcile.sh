@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # refinery-reconcile — one pass of the merge cadence over this rig's queue.
 # Driven by orders/refinery-reconcile.toml (cooldown 60s, scope=rig): the
-# controller supplies the loop, the single-flight gate (ScopedName tracking),
-# cwd = the rig root, and the env (GC_RIG, GC_PACK_STATE_DIR, gh token).
+# controller supplies the loop, cwd = the rig root, and the env (GC_RIG,
+# GC_PACK_STATE_DIR, gh token).
 # Arms, in load-bearing order: gate-ensure (rc=3 = designed HOLD of merge.sh
 # for this pass, not a fault), pr-open, merge (BEADS_ACTOR projected to the
 # refinery: it closes anchors assigned to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy).
-# No lock, loop or sleep here — do NOT add one, and never re-create an
-# out-of-band driver (docs/refinery-merge-cadence.md).
+# Single-flight is the per-rig flock below, NOT the controller's open-tracking
+# gate: the controller watchdog closes any tracking bead older than 2m, which
+# reopens that gate under a pass still running.
+# No loop or sleep here — do NOT add one, and never re-create an out-of-band
+# driver (docs/refinery-merge-cadence.md).
 # NOT set -e / pipefail: arms are independent; a failing arm must not skip the
 # rest, and the next cooldown retries everything.
 set -u
@@ -66,21 +69,79 @@ STATE_DIR="${REFINERY_RECONCILE_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/
 LOG="$STATE_DIR/pass.log"
 LOG_KEEP="${REFINERY_RECONCILE_LOG_KEEP:-2000}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
-PASS_OUT="$(mktemp "${TMPDIR:-/tmp}/$PROG.XXXXXX")" || PASS_OUT=""
-# shellcheck disable=SC2329  # reached through the EXIT trap
-cleanup() { [ -n "$PASS_OUT" ] && rm -f "$PASS_OUT"; return 0; }
-trap cleanup EXIT
+# Arms append to the log as they run, so a pass the controller kills at its
+# timeout still leaves its output behind. An unwritable state dir empties
+# LOG_SINK, never LOG, so a failure report can still name the path it wanted.
+LOG_SINK="$LOG"
+( : >> "$LOG" ) 2>/dev/null || LOG_SINK=""
 TICK="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 FAILED=""
 NOTED=""
 
+# Two merge.sh writers against one rig's anchors is the failure this cadence
+# must never produce, and the controller's open-tracking gate does not prevent
+# it: the watchdog closes tracking beads at 2m, well inside the 300s timeout,
+# and an un-gated tracking bead is a second dispatch. This flock depends on no
+# bead surviving. The arms inherit fd 9, so the lock is held for exactly as
+# long as a writer is live and the kernel releases it on any exit, SIGKILL
+# included.
+LOCK="$STATE_DIR/pass.lock"
+HOLDER="$STATE_DIR/pass.holder"
+# A holder older than this is not a slow pass: the driver is gone and an arm
+# still owns the fd. Merges have stopped, so it is reported, not skipped over.
+LOCK_STALL_SECS="${REFINERY_RECONCILE_LOCK_STALL_SECS:-900}"
+lock_unguarded=""
+lock_held=0
+if ! command -v flock >/dev/null 2>&1; then
+  lock_unguarded="flock not found on PATH"
+elif ! ( : >> "$LOCK" ) 2>/dev/null; then
+  lock_unguarded="cannot create $LOCK"
+else
+  exec 9>>"$LOCK" || lock_unguarded="cannot open $LOCK"
+  if [ -z "$lock_unguarded" ] && flock -n 9; then
+    lock_held=1
+    printf '%s %s\n' "$$" "$(date -u +%s)" > "$HOLDER" 2>/dev/null || true
+  fi
+fi
+
+if [ -z "$lock_unguarded" ] && [ "$lock_held" = 0 ]; then
+  held_pid=""; held_since=""; elapsed=""
+  [ -r "$HOLDER" ] && read -r held_pid held_since < "$HOLDER"
+  case "$held_since" in
+    ''|*[!0-9]*) ;;
+    *) elapsed=$(( $(date -u +%s) - held_since )) ;;
+  esac
+  who="pid ${held_pid:-unknown}"
+  [ -n "$elapsed" ] && who="$who, ${elapsed}s elapsed"
+  if [ -n "$elapsed" ] && [ "$elapsed" -gt "$LOCK_STALL_SECS" ]; then
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s STALLED: pass lock held %ss (%s)\n' \
+      "$TICK" "$RIG" "$elapsed" "$who" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: pass lock held ${elapsed}s (> ${LOCK_STALL_SECS}s) by $who — the cadence is wedged and nothing is landing"
+    echo "${PROG}[$RIG]: pass log: $LOG"
+    exit 1
+  fi
+  [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s SKIPPED: pass already in flight (%s)\n' \
+    "$TICK" "$RIG" "$who" >> "$LOG_SINK"
+  echo "${PROG}[$RIG]: a pass is already in flight ($who) — skipping this tick"
+  exit 0
+fi
+if [ -n "$lock_unguarded" ]; then
+  FAILED="${FAILED}single-flight UNGUARDED ($lock_unguarded); "
+fi
+
+# The controller keeps combined output only on a non-zero exit, so the log is
+# where a healthy pass is readable and the exit code is the alarm. The header
+# goes down before the first arm runs; the END line below closes it, so a
+# header with no END under it is a pass that was killed.
+[ -n "$LOG_SINK" ] && printf '=== %s rig=%s refinery=%s\n' "$TICK" "$RIG" "$AGENT" >> "$LOG_SINK"
+
 # >>> heal-gates-merge
 # Extracted and EXECUTED by refinery-reconcile.test.sh against stub arms: an
 # unsafe gate-ensure must HOLD merge.sh in the same pass. Keep it executable
-# with only a prologue supplying SCRIPTS_DIR, PASS_OUT, NOTED, FAILED, AGENT,
+# with only a prologue supplying SCRIPTS_DIR, LOG_SINK, NOTED, FAILED, AGENT,
 # CHECK_SET_DEFAULT, REVIEW_POOL and FIX_POOL.
 note() { NOTED="${NOTED}$*"$'\n'; }
-log()  { [ -n "$PASS_OUT" ] && printf '%s\n' "$*" >> "$PASS_OUT"; return 0; }
+log()  { [ -n "$LOG_SINK" ] && printf '%s\n' "$*" >> "$LOG_SINK"; return 0; }
 run_pass() { # <label> <script> [args...]
   local label="$1" script="$2"; shift 2
   if [ ! -x "$SCRIPTS_DIR/$script" ]; then
@@ -89,8 +150,8 @@ run_pass() { # <label> <script> [args...]
   fi
   log "-- $label"
   local rc=0
-  if [ -n "$PASS_OUT" ]; then
-    "$SCRIPTS_DIR/$script" "$@" >> "$PASS_OUT" 2>&1 || rc=$?
+  if [ -n "$LOG_SINK" ]; then
+    "$SCRIPTS_DIR/$script" "$@" >> "$LOG_SINK" 2>&1 || rc=$?
   else
     "$SCRIPTS_DIR/$script" "$@" >/dev/null 2>&1 || rc=$?
   fi
@@ -141,16 +202,15 @@ else
     || FAILED="${FAILED}convoy-graduate rc=$?; "
 fi
 
-# The controller keeps combined output only on a non-zero exit, so the log is
-# where a healthy pass is readable and the exit code is the alarm.
-{
-  printf '=== %s rig=%s refinery=%s\n' "$TICK" "$RIG" "$AGENT"
-  [ -n "$PASS_OUT" ] && cat "$PASS_OUT"
-  [ -n "$NOTED" ] && printf '%s' "$NOTED"
-  [ -n "$FAILED" ] && printf 'FAILED: %s\n' "$FAILED"
-} >> "$LOG" 2>/dev/null || true
-if [ -w "$LOG" ]; then
-  tail -n "$LOG_KEEP" "$LOG" > "$LOG.trim" 2>/dev/null && mv "$LOG.trim" "$LOG" 2>/dev/null
+if [ -n "$LOG_SINK" ]; then
+  {
+    [ -n "$NOTED" ] && printf '%s' "$NOTED"
+    [ -n "$FAILED" ] && printf 'FAILED: %s\n' "$FAILED"
+    printf 'END %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >> "$LOG_SINK" 2>/dev/null || true
+  if [ -w "$LOG" ]; then
+    tail -n "$LOG_KEEP" "$LOG" > "$LOG.trim" 2>/dev/null && mv "$LOG.trim" "$LOG" 2>/dev/null
+  fi
 fi
 [ -n "$NOTED" ] && printf '%s' "$NOTED"
 if [ -n "$FAILED" ]; then

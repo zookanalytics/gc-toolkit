@@ -33,7 +33,7 @@ driver, which runs the five arms in order and exits.
 | Scope | `scope = "rig"` — one registration per importing rig |
 | Working directory | the rig's own root, so `git remote get-url origin` resolves |
 | Environment | controller-built: `GC_RIG`, `GC_RIG_ROOT`, `BEADS_DIR`, `GC_BEADS_PREFIX`, `PACK_DIR`, `GC_PACK_STATE_DIR`, the Dolt projection, the `gh` token |
-| Timeout | `300s`, deliberately under core `order-tracking-sweep`'s 10m stale window |
+| Timeout | `300s` — it bounds how long a wedged pass holds the per-rig lock; it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
 
 Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
@@ -92,10 +92,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
 
-## Single-flight: why there is no lock
+## Single-flight: the tracking gate and the pass lock
 
 Two `merge.sh` writers against the same anchors is the failure this
-arrangement exists to prevent, and the controller prevents it:
+arrangement exists to prevent. The controller's open-tracking gate is one half
+of the guarantee and a `flock` in the driver is the other, because the gate can
+be reopened underneath a pass that is still running.
+
+The gate:
 
 - The tracking bead for a run is created **synchronously before** the run
   launches and closed in a `defer` **after** it returns.
@@ -104,28 +108,62 @@ arrangement exists to prevent, and the controller prevents it:
   rig has its own single-flight and co-tenant rigs never serialise against
   each other.
 
+Why that is not sufficient: the controller runs a tracking-sweep watchdog every
+30s which closes **any** order's tracking bead older than 2m
+(`orderTrackingSweepWatchdogStaleAfter`, gascity `cmd/gc/order_dispatch.go`) —
+a separate mechanism from the `order-tracking-sweep` order's own 10m
+`--stale-after`, and much shorter. A pass that runs past two minutes has its
+gate removed while it is still working, and the next tick dispatches a second
+one onto the same anchors. gc-toolkit is where this bites, because it is the
+rig whose pass routinely outruns two minutes.
+
+The lock:
+
+- The driver takes a non-blocking exclusive `flock` on
+  `<state-dir>/<rig>/pass.lock` before the first arm and records the holder's
+  pid and start time in `pass.holder` beside it. It depends on no bead
+  surviving.
+- The arms inherit the descriptor, so the lock is held for exactly as long as a
+  writer is live, and the kernel releases it on any exit, `SIGKILL` included.
+- A tick that finds it held logs one `SKIPPED` line and exits 0 — the cadence
+  is firing and the pass in flight is doing the work.
+- A holder older than `REFINERY_RECONCILE_LOCK_STALL_SECS` (900s default) is
+  not a slow pass: the driver is gone and an arm still owns the descriptor.
+  That tick exits 1, so `order.failed` names the wedge rather than letting a
+  stopped queue look like a firing one.
+
 Two settings must never change, because each would undo the guarantee:
 
 - **Never set `no_work_gate` on this order.** It opts the order out of both
-  open-work gates, and the first of them is the single-flight above.
-- **`timeout` must stay below `order-tracking-sweep --stale-after`** (10m in
-  core). The sweep closes a tracking bead it judges stale, and an un-gated
-  tracking bead is a second dispatch — keeping the kill earlier than the sweep
-  is what makes single-flight hold for a *wedged* pass, not merely a slow one.
+  open-work gates, and the first of them is the tracking gate above.
+- **`timeout` bounds how long a wedged pass can hold the lock.** It does not
+  keep the pass inside the watchdog window — at `300s` it cannot — so the lock
+  is what carries single-flight. `refinery-reconcile.test.sh` asserts the pair
+  mechanically: a timeout above the 2m window passes only in a run that also
+  demonstrates one `merge.sh` writer across two overlapping ticks.
 
-For the same reason, never run a cadence driver out-of-band (by hand, cron,
-or a daemon): it is a second merge writer the controller's gate cannot see.
+Never run a cadence driver out-of-band (by hand, cron, or a daemon). Running
+this script by hand at least serialises against the lock; anything else is a
+second merge writer that neither the gate nor the lock can see.
 
 ## Reading what a pass did
 
 The controller keeps an exec order's output only on non-zero exit, folding a
 bounded tail into the `order.failed` event. So: an unexpected arm failure makes
 the driver exit 1 (the failing arm names reach `order.failed`); gate-ensure's
-rc=3 hold is reported but does not fail the order. A healthy pass logs to
+rc=3 hold is reported but does not fail the order. Every pass logs to
 `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`, trimmed to
-`REFINERY_RECONCILE_LOG_KEEP` lines (2000 default) — each
-`=== <timestamp> rig=<rig>` line is one completed pass, and the log is not
-subject to bead retention.
+`REFINERY_RECONCILE_LOG_KEEP` lines (2000 default) and not subject to bead
+retention. Arms append as they run, so the shape of the log is what tells you
+how a pass ended:
+
+| Line | Meaning |
+|---|---|
+| `=== <ts> rig=<rig> refinery=<agent>` | a pass started |
+| `END <ts>` | that pass finished; a `FAILED:` line sits above it if any arm failed |
+| a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
+| `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |
+| `--- <ts> rig=<rig> STALLED: ...` | the lock has been held past the stall bound; merges have stopped |
 
 **`gc order history` is store-complete only when the read is unbounded.** Any
 positive `--limit` — including the default 50, and a limit larger than the row
