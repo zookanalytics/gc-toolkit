@@ -6,10 +6,35 @@ import (
 	"testing"
 )
 
-func TestScrubKeepsWhitespaceAndDropsControls(t *testing.T) {
+func TestScrubKeepsOnlyLF(t *testing.T) {
 	in := []byte("a\x00b\x1fc\td\ne\rf")
-	if got, want := string(Scrub(in)), "abc\td\ne\rf"; got != want {
+	if got, want := string(Scrub(in)), "abcd\nef"; got != want {
 		t.Fatalf("Scrub = %q, want %q", got, want)
+	}
+}
+
+// The scrubbers are interchangeable or they are not: lifecycle.sh execs this
+// binary when one is available and falls back to shell when it is not, so a
+// payload one accepts and the other rejects is a difference the caller cannot
+// see. Raw TAB and CR are the two bytes where the implementations last drifted.
+func TestScrubAcceptsWhatTheShellFallbackAccepts(t *testing.T) {
+	for _, tc := range []struct{ name, raw string }{
+		{"raw tab in a JSON string", `[{"id":"b-1","notes":"col\tcol","metadata":{}}]`},
+		{"raw CR in a JSON string", `[{"id":"b-1","notes":"line\rline","metadata":{}}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(strings.NewReplacer(`\t`, "\t", `\r`, "\r").Replace(tc.raw))
+			if err := json.Unmarshal(raw, &[]Bead{}); err == nil {
+				t.Fatal("fixture is not actually invalid JSON; the scrubber would prove nothing")
+			}
+			var rows []Bead
+			if err := json.Unmarshal(Scrub(raw), &rows); err != nil {
+				t.Fatalf("scrubbed payload still will not decode: %v", err)
+			}
+			if len(rows) != 1 || rows[0].ID != "b-1" {
+				t.Fatalf("decoded %+v, want one bead b-1", rows)
+			}
+		})
 	}
 }
 

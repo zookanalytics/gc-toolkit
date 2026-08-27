@@ -30,14 +30,15 @@ type Bead struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
-// Scrub strips the control characters that break `--json` parsing, keeping TAB,
-// LF and CR. It is the pack's one scrubber, applied before any decode: bd emits
-// raw control bytes inside string literals often enough that an unscrubbed
-// parse is a real failure mode, not a theoretical one.
+// Scrub strips the control characters that break `--json` parsing, keeping LF
+// alone. It must accept exactly what the shell fallback accepts — lifecycle.sh
+// scrubs with `tr -d '\000-\011\013-\037'` — because a caller cannot tell which
+// implementation answered, and a raw TAB or CR is just as invalid inside a JSON
+// string as any other C0 byte.
 func Scrub(b []byte) []byte {
 	return bytes.Map(func(r rune) rune {
 		switch {
-		case r == '\t' || r == '\n' || r == '\r':
+		case r == '\n':
 			return r
 		case r < 0x20:
 			return -1
