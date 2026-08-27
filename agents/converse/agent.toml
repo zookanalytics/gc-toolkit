@@ -19,21 +19,21 @@ min_active_sessions = 0
 # Bounds concurrently LIVE sittings only; open visits queue at zero cost.
 max_active_sessions = 6
 
-# scale_check = the reconciler's SPAWN predicate, as a count (0 = no demand =
-# no spawn) so a seat is only ever bought for a visit some session can claim.
+# scale_check = the reconciler's SPAWN predicate, in count form (0 = no demand).
 #
-# Declaring it is the point. A rig-scope target reads exactly one store, its
-# own rig store, which is the rule `gc sling` enforces when it refuses to route
-# a bead at a target that cannot read the store the bead lives in. The default
-# pool-demand probe does not hold to that rule: it counts the rig store and the
-# CITY store together, so a visit filed into the city store and routed here is
-# counted as demand no converse session can claim. Each such row buys a seat
-# that spawns, reads empty, drains, and is counted again on the next tick.
+# The --db pin is the load-bearing half. The default probe runs bare `bd ready`,
+# which resolves its store from the pool work_dir, and converse's work_dir is a
+# plain directory under the city root rather than a rig worktree — so it carries
+# no .beads and the read walks up to the CITY store, while a rig-scope session
+# claims from the rig store. City-filed visits routed here are then counted as
+# demand no converse session can claim, and the pool pins at max_active_sessions
+# against them. Every other pool agent in this pack works from a rig worktree,
+# which does carry .beads; moving this work_dir into one would make the pin
+# redundant rather than wrong.
 #
-# The flags are the serving rules of the query a session is actually offered
-# (gascity internal/config PoolDemandServeRules): a row carrying an assignee, a
-# routed epic, or a bead parked on a dispatch hold is not a seat's worth of
-# work. Count anything the offer would withhold and the seat burns the same way.
+# The flags mirror the offer's serving rules (gascity internal/config,
+# PoolDemandServeRules): a row the offer withholds is not a seat's worth of work.
+# A hold label added there and not here re-opens the same gap.
 scale_check = '''
 _='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
 target="{{.Rig}}/gc-toolkit.converse"

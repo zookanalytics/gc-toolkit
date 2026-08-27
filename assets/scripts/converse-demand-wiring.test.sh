@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # Thin wiring check: the converse pool's SPAWN predicate counts only visits a
 # converse session can be offered. Both halves are load-bearing. The --db pin
-# holds the count to the store the rig-scope target reads, which is the store
-# `gc sling` refuses to route across; without it the default probe adds the
-# city store and every city-filed visit buys a seat that reads empty and
-# drains. The flags hold it to the serving rules of the offer itself
-# (PoolDemandServeRules): count a row the offer withholds and the seat burns
-# the same way.
+# holds the count to the rig store; without it bare `bd ready` resolves from
+# converse's work_dir, which carries no .beads, and reads the CITY store a
+# rig-scope session cannot claim from. The flags hold the count to the offer's
+# own serving rules (PoolDemandServeRules).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
@@ -20,7 +18,7 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 BLOCK=$(awk '/^scale_check = /{f=1; next} f && /^'"'''"'$/{exit} f' "$TOML")
 [ -n "$BLOCK" ] \
   && ok "converse declares a scale_check" \
-  || bad "converse declares no scale_check — the default probe counts city-store visits it cannot claim"
+  || bad "converse declares no scale_check — the default probe reads the city store and counts visits no session can claim"
 
 case "$BLOCK" in
   *'--db {{.RigRoot}}/.beads'*)
