@@ -225,6 +225,12 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "a suspended rig is skipped rather than queried"
 has "$OUT" "suspended" "the skip is reported as a note"
 
+# --- 13. the check ships executable ------------------------------------------------
+# Every case above runs the check through bash, which ignores the mode bit. The
+# doctor runner executes the script path itself, so a run.sh committed 100644
+# fails with permission denied.
+if [ -x "$CHECK" ]; then ok "run.sh ships with its execute bit"; else bad "run.sh ships with its execute bit"; fi
+
 echo
 echo "check-gate-marker-provenance: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
