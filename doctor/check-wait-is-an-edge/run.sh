@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # doctor/check-wait-is-an-edge — I1: every wait is a graph edge, not a string.
 # Per bead store: where an OPEN bead's own metadata states that it is waiting
-# on another bead, a dependency edge must record that wait in one direction or
-# the other. A string answers no query, so a wait held only in metadata is
-# invisible to `bd ready` and to every surface that re-derives what is still
-# blocked (docs/lifecycle-composition.md §1). Two findings are reported apart
-# because they differ in degree: UNEDGED names an open bead, FROZEN names a
-# closed one, where the wait is over and nothing anywhere can notice.
+# on another bead, a BLOCKING dependency edge must record that wait in one
+# direction or the other. A string answers no query, so a wait held only in
+# metadata is invisible to `bd ready` and to every surface that re-derives what
+# is still blocked (docs/lifecycle-composition.md §1). A non-blocking edge is
+# no better: `bd dep add --help` states that type=blocks is what excludes the
+# dependent from `bd ready`, so a tracks, parent-child or related record leaves
+# the wait exactly as unanswerable as the bare string does. Two findings are
+# reported apart because they differ in degree: UNEDGED names an open bead,
+# FROZEN names a closed one, where the wait is over and nothing can notice.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -45,6 +48,10 @@ strip_ctl() { tr -d '\000-\011\013-\037'; }
 # THE ID PREFIXES COME FROM THE LIVE ROSTER. A generic "letters, hyphen, token"
 # shape reads ordinary hyphenated English as bead ids, and each non-id becomes
 # its own note in front of the real findings.
+#
+# ONLY BLOCKING EDGES ARE COLLECTED, on both sides of the join. Both spellings
+# are tested because the same edge is keyed `.type` by `bd list` and
+# `.dependency_type` by `bd show`, each command rendering the other field null.
 #
 # THE SOURCE'S EDGE IDS RIDE ALONG as a fourth field, which is a size
 # constraint rather than a convenience: the open listing runs to megabytes and
@@ -99,11 +106,13 @@ def tail: "((?:" + glue + idbare + ")*)";
 # dots for hierarchical ids like tk-yhwfv.3. Trailing dots go, interior dots
 # stay, applied per id because any member of a list can end the sentence.
 def clean: sub("\\.+$"; "");
+def blocking: (.type // "") == "blocks" or (.dependency_type // "") == "blocks";
 .[]?
 | . as $b
 | ($b.id // "" | tostring) as $src
 | ($b.metadata // {}) as $meta
-| ( [ ($b.dependencies // [])[] | ((.depends_on_id // .id) // "")
+| ( [ ($b.dependencies // [])[] | select(blocking)
+      | ((.depends_on_id // .id) // "")
       | select(. != "") ] | join(",") ) as $srcedges
 | (
     # RULE A — the KEY is the wait. A key that declares a dependency needs no
@@ -259,11 +268,15 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         # shape as corruption would fail the store for the ordinary all-non-id
         # batch. PROJECTED before merging: keeping whole bead bodies would
         # rebuild the oversized argv the fourth pair field exists to avoid.
+        # `blocking` mirrors the pairs program's filter, which is what keeps the
+        # two sides of the join asking the same question of an edge.
         merged=$(printf '%s' "$out" | jq -c --argjson a "$resolved" \
-            'if type == "array" then
+            'def blocking: (.type // "") == "blocks" or (.dependency_type // "") == "blocks";
+             if type == "array" then
                  $a + [ .[] | {id: (.id // "" | tostring),
                                status: (.status // "" | tostring),
                                edges: [ (.dependencies // [])[]
+                                        | select(blocking)
                                         | ((.depends_on_id // .id) // "")
                                         | select(. != "") ]} ]
              elif type == "object" then $a
@@ -304,10 +317,11 @@ PFX_EOF
         continue
     fi
 
-    # Each pair carries the SOURCE's edge ids; the projected resolve carries
-    # each candidate's status and ITS edges, which is the reverse direction.
-    # An edge from either side satisfies the invariant, which asks that the
-    # relation be in the graph and states no direction.
+    # Each pair carries the SOURCE's blocking edge ids; the projected resolve
+    # carries each candidate's status and ITS blocking edges, which is the
+    # reverse direction. A blocking edge from either side satisfies the
+    # invariant, which asks that the relation be answerable and states no
+    # direction. Non-blocking edges reached neither list.
     verdicts=$(printf '%s\n' "$pairs" | jq -R -s -r --argjson res "$resolved" '
         ( [ $res[] | {key: .id, value: .} ] | from_entries ) as $resmap
       | split("\n") | map(select(length > 0)) | map(split("\u001f"))
@@ -338,9 +352,9 @@ PFX_EOF
         [ -n "$kind" ] || continue
         case "$kind" in
             frozen)
-                errors+=("$label bead $src: $verb, and $cand is already CLOSED with no edge between them. The wait resolved and nothing surfaced it, so this bead reads as pending for good. Record the edge, and give this bead its disposition (I1).") ;;
+                errors+=("$label bead $src: $verb, and $cand is already CLOSED with no \`blocks\` edge between them. The wait resolved and nothing surfaced it, so this bead reads as pending for good. Record the edge, and give this bead its disposition (I1).") ;;
             unedged)
-                errors+=("$label bead $src: $verb ($cand is $status), but no dependency edge records it, so no query can answer whether this is still waiting. Add the edge (I1).") ;;
+                errors+=("$label bead $src: $verb ($cand is $status), but no \`blocks\` edge records it, so \`bd ready\` cannot answer whether this is still waiting. Add that edge. Any other type records the relation without gating on it (I1).") ;;
             unresolved)
                 # A rig or agent name sharing the id SHAPE names a place, not a
                 # missing bead.

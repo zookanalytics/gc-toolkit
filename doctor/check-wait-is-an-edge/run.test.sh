@@ -91,7 +91,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a wait on a CLOSED bead with no edge is an ERROR"
 has "$OUT" "already CLOSED" "the frozen case is called out separately"
 
-# --- 4. an edge in EITHER direction satisfies the invariant ----------------
+# --- 4. a BLOCKING edge in EITHER direction satisfies the invariant --------
 store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
          "dependencies":[{"type":"blocks","depends_on_id":"aa-202"}]},
         {"id":"aa-202","status":"open","metadata":{}}]'
@@ -100,6 +100,31 @@ store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
         {"id":"aa-202","status":"open","metadata":{},
          "dependencies":[{"type":"blocks","depends_on_id":"aa-101"}]}]'
 eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "an edge from the OTHER side also satisfies it"
+# type=blocks is the only type that holds a bead out of `bd ready`, so every
+# other type records the relation while leaving the wait as unanswerable as the
+# bare string. Both projections are filtered, so both are pinned here.
+for t in tracks parent-child related; do
+    store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
+             "dependencies":[{"type":"'"$t"'","depends_on_id":"aa-202"}]},
+            {"id":"aa-202","status":"open","metadata":{}}]'
+    eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a $t edge on the source does not satisfy the wait"
+    store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
+            {"id":"aa-202","status":"open","metadata":{},
+             "dependencies":[{"type":"'"$t"'","depends_on_id":"aa-101"}]}]'
+    eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a reverse $t edge does not satisfy it either"
+done
+store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
+         "dependencies":[{"type":"tracks","depends_on_id":"aa-202"}]},
+        {"id":"aa-202","status":"open","metadata":{}}]'
+OUT=$(run_check)
+has "$OUT" 'no `blocks` edge records it' "the finding says which edge type is missing, not that there is none"
+# A wait that carries BOTH kinds is satisfied: the filter drops the tracks row,
+# not the whole bead's edge list.
+store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
+         "dependencies":[{"type":"tracks","depends_on_id":"aa-202"},
+                         {"type":"blocks","depends_on_id":"aa-202"}]},
+        {"id":"aa-202","status":"open","metadata":{}}]'
+eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a blocks edge beside a tracks edge still satisfies the wait"
 
 # --- 5. both edge spellings are read --------------------------------------
 # bd list renders {type,depends_on_id}; bd show renders {dependency_type,id}
@@ -111,7 +136,21 @@ cat > "$TMP/stores/alpha.show.json" <<'EOF'
 EOF
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an edge rendered in the bd-show spelling still counts"
+# The type is keyed `.dependency_type` in that spelling. Reading only `.type`
+# would leave every candidate-side edge bd show renders unfiltered.
+cat > "$TMP/stores/alpha.show.json" <<'EOF'
+[{"id":"aa-202","status":"open","metadata":{},"dependencies":[{"dependency_type":"tracks","id":"aa-101"}]}]
+EOF
+eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a NON-blocking edge in that spelling is refused, not passed"
 rm -f "$TMP/stores/alpha.show.json"
+# Both projections read both spellings, so both are pinned to. The source side
+# is fed by bd list today; a source edge keyed the other way must still count,
+# or a change of listing spelling reports every edged wait in the city as
+# unedged.
+store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
+         "dependencies":[{"dependency_type":"blocks","id":"aa-202"}]},
+        {"id":"aa-202","status":"open","metadata":{}}]'
+eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a SOURCE-side edge in the bd-show spelling counts too"
 
 # --- 6. RULE B: the bead's own status prose -------------------------------
 store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"held, waiting on aa-202 to land"}},
