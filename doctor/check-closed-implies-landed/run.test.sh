@@ -160,7 +160,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable store listing warns"
 
 # --- 9. offline-safe: the check never calls gh ----------------------------------
-if grep -vE '^[[:space:]]*#' "$CHECK" | grep -qE '(^|[^a-z])gh[[:space:]]'; then
+if grep -qE '(^|[^a-z])gh[[:space:]]' < <(grep -vE '^[[:space:]]*#' "$CHECK"); then
     bad "the check shells out to gh — it is specified ledger-only"
 else
     ok "the check is ledger-only (no gh calls)"
