@@ -156,7 +156,7 @@ The pack's nine checks, and what a failure means:
 
 | Check | Asserts (invariant) | First-failure cause |
 |---|---|---|
-| `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml` (I2) | a writer minted an undeclared state |
+| `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml`, and a detached state rests unheld and offered to no pool (I2) | a writer minted an undeclared state, or something routed a parked anchor back into pool demand |
 | `check-routed-work-claimable` | every route and assignee names a live target; routed work is in `bd ready` or in `bd blocked`; rig-scoped orders bound (I3) | a pool renamed, an order missing its rig registration, or routed work stranded outside both queues |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |

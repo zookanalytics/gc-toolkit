@@ -20,6 +20,17 @@ states = [
 # States that also route the bead to a human (lifecycle.sh stamps
 # gc.routed_to=human in the same atomic update).
 human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"]
+# States the merge cadence drives and no queue offers. lifecycle.sh clears
+# gc.routed_to in the same atomic update unless --route is given or the bead
+# already rests on park_route. A pool route on one of these is demand for work
+# already in the merge queue, and the claim it invites moves the anchor out of
+# `--status=open`, where merge.sh and pr-facts.sh both stop seeing it.
+detached_states = ["pre_open_gate", "pull_request"]
+# The one route value that is not a queue. No pool claims it, so it parks the
+# bead for a person (docs/gascity-human-engagement.md). A detached state may
+# rest on it, which is where signoff.sh routes a round-capped anchor, and a
+# transition that finds it leaves it alone. Every other route is a pool offer.
+park_route = "human"
 # States whose legal status is closed; every other declared state is open.
 # lifecycle.sh enforces the pairing both ways: --close is accepted only into a
 # closed state, and a transition into a closed state must carry --close.

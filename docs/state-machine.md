@@ -72,6 +72,16 @@ stateDiagram-v2
 anchored states are the `merge_result` values. `merged` is the only state with
 `status = closed`; the four human-terminal states stay open, routed to human.
 
+`pre_open_gate` and `pull_request` are the declared *detached* states
+(`detached_states`). The merge cadence drives them and no queue offers them, so
+the anchor rests unheld and unrouted: `lifecycle.sh` clears `gc.routed_to` on
+entry to one. The exception is `park_route` (`human`), which `signoff.sh` writes
+when the review round cap is spent. No pool claims that value, so a transition
+that finds it leaves it in place. Any other route on a detached anchor is pool
+demand for work that is already in the merge queue. A worker claims it, the
+claim moves the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh`
+both enumerate from there. `doctor/check-state-space` reports the violation.
+
 ## Transition table
 
 | From → To | Writer | Trigger |
