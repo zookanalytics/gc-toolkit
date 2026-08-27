@@ -120,7 +120,7 @@ gate's verdict is a head-bound marker:
 
 | Marker | Meaning | Merge effect |
 |---|---|---|
-| `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head |
+| `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head; re-gated once the head moves past it |
 | `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
 | `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>` |
 
