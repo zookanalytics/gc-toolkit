@@ -4,6 +4,7 @@
 # specs/tk-h9pq5/design-doc.md; session-ending mechanics (idle_timeout DOES
 # end a held sitting; the no-wake-reason drain takes the pane after it) are
 # verified in docs/gascity-human-engagement.md — read that before tuning.
+# Demand is the default routed-pool predicate; a filed visit IS the demand.
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
@@ -18,25 +19,3 @@ idle_timeout = "8h"
 min_active_sessions = 0
 # Bounds concurrently LIVE sittings only; open visits queue at zero cost.
 max_active_sessions = 6
-
-# scale_check = the reconciler's SPAWN predicate, in count form (0 = no demand).
-#
-# The --db pin is the load-bearing half. The default probe runs bare `bd ready`,
-# which resolves its store from the pool work_dir, and converse's work_dir is a
-# plain directory under the city root rather than a rig worktree — so it carries
-# no .beads and the read walks up to the CITY store, while a rig-scope session
-# claims from the rig store. City-filed visits routed here are then counted as
-# demand no converse session can claim, and the pool pins at max_active_sessions
-# against them. Every other pool agent in this pack works from a rig worktree,
-# which does carry .beads; moving this work_dir into one would make the pin
-# redundant rather than wrong.
-#
-# The flags mirror the offer's serving rules (gascity internal/config,
-# PoolDemandServeRules): a row the offer withholds is not a seat's worth of work.
-# A hold label added there and not here re-opens the same gap.
-scale_check = '''
-_='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
-target="{{.Rig}}/gc-toolkit.converse"
-n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --exclude-label "hold:mayor" --exclude-label "hold:external" --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
-if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
-'''
