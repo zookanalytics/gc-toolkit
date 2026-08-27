@@ -29,18 +29,18 @@ treat "advanced past `<oid>`" as needing a fresh review.
 
 | Where | What it does |
 |---|---|
-| `assets/scripts/gate-ensure.sh:258-261` | Cadence arm 1. `green@<oid>` at a head other than `<oid>` falls through to the dispatch block at `:418-448`, which stamps `reviewed_oid=<live head>` and pours `mol-review` onto the review pool. |
-| `assets/scripts/pr-facts.sh:324-421` | Cadence arm 4. For a PR-bearing anchor, a gate `green@` or `exception@` a stale head files one re-review child per head. Its comment at `:325` states the shared rule: both verbs bind a verdict to a commit, and a branch past either has had no look at its head. |
+| `assets/scripts/gate-ensure.sh:263-266` | Cadence arm 1. `green@<oid>` at a head other than `<oid>` falls through to the dispatch block at `:423-453`, which stamps `reviewed_oid=<live head>` and pours `mol-review` onto the review pool. |
+| `assets/scripts/pr-facts.sh:329-426` | Cadence arm 4. For a PR-bearing anchor, a gate `green@` or `exception@` a stale head files one re-review child per head. Its comment at `:330` states the shared rule: both verbs bind a verdict to a commit, and a branch past either has had no look at its head. |
 
 The behavior is pinned by `assets/scripts/gate-ensure.test.sh:115-126`, which
 stores a `pre_open_gate` anchor carrying `green@old-oid`, sets its live head to
 `sha-c1`, and asserts that the pass dispatches a review for it.
 
-That assertion passes. So does the rest of the suite, 108/0, when `GC_RIG` is
-unset. With `GC_RIG` set, four assertions here fail and a fifth fails in
+That assertion passes. With `GC_RIG` unset the whole suite passes, 108/0.
+With `GC_RIG` set, four assertions here fail and a fifth fails in
 `pr-facts.test.sh`: each looks for `sling rig/<pool> <bead> --on mol-review` in
 the stub log and finds `sling --rig <rig> rig/<pool> <bead> --on mol-review`,
-because `gate-ensure.sh:301,439` and `pr-facts.sh:413` add `--rig` whenever the
+because `gate-ensure.sh:306,444` and `pr-facts.sh:418` add `--rig` whenever the
 variable is set and neither harness clears it. Those five are `tk-097t61`. They
 reproduce unchanged on `origin/main`, and none of them is the assertion above.
 
@@ -101,7 +101,7 @@ in the cadence, and it needs the design review the bead's scope asked for.
 ## Residue
 
 The cap interaction is a separate defect and is already filed. At
-`dispatch_count >= GC_MAX_REVIEW_ROUNDS`, `gate-ensure.sh:378-384` grants the
+`dispatch_count >= GC_MAX_REVIEW_ROUNDS`, `gate-ensure.sh:383-389` grants the
 one dispatch a head move past an `exception@` earns, but refuses it for a
 stale `green@`. An anchor approved on its last budgeted round and then
 touched holds with no arm to catch it. That is `tk-n70xmm`, not this bead.
