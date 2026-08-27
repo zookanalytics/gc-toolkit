@@ -550,7 +550,7 @@ cmd_dismiss() {
     # The subject must resolve before anything is written. Same fail-closed
     # reading as `open`: a read that did not answer is not a missing bead, and
     # dismissing an unverified id would stamp a marker nothing ever clears.
-    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+    subject_clean=$(gc bd show "$bead" --json 2>/dev/null | scrub)
     subject=$(printf '%s' "$subject_clean" \
         | jq -r --arg b "$bead" \
             'if type == "array"
