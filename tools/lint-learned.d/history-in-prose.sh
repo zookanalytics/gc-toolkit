@@ -51,14 +51,22 @@
 set -uo pipefail
 
 # ── THE TUNABLE PART: the store prefixes in use ─────────────────────────
-# A bead id is <prefix>-<5-8 base36>. Add a prefix as a rig joins the city.
-BEAD_PREFIXES=(tk gc su sl ga)
+# A bead id is <prefix>-<5-8 base36>, one prefix per store. The live city
+# stores are the ones `gc rig list --json` reports; `ga` is the upstream
+# gascity store, whose ids the tracking ledgers under docs/ cite. A store
+# joining the set needs a prefix here and a fixture in
+# assets/scripts/history-in-prose.test.sh, which fails on drift either way.
+# `lx` is the city's own store, so it also spells session ids and mail
+# wisps; those cite provenance the same way a work-bead id does.
+BEAD_PREFIXES=(lx tk sl gc su ga)
 
 # `gc-` is also this pack's command namespace — gc-toolkit, gc-status,
-# gc-sling. Requiring a digit in the suffix separates gc-8zdml1 from
-# gc-toolkit. The cost is all-alpha gc ids, which is the false negative this
-# rule prefers over lighting up on every file that names the toolkit.
-DIGIT_REQUIRED_PREFIXES=(gc)
+# gc-sling — and `lx-` is the shape tests use for synthetic session names,
+# lx-codex and lx-clean. Requiring a digit in the suffix separates an id
+# from either. The cost is all-alpha ids of those two stores, which is the
+# false negative this rule prefers over lighting up on every file that
+# names the toolkit or stubs a session.
+DIGIT_REQUIRED_PREFIXES=(gc lx)
 
 # Both capitalisations, so "August" and "august" match and "AUGUST" does not.
 MONTHS='([Jj]an(uary)?|[Ff]eb(ruary)?|[Mm]ar(ch)?|[Aa]pr(il)?|[Mm]ay|[Jj]un(e)?|[Jj]ul(y)?|[Aa]ug(ust)?|[Ss]ep(t|tember)?|[Oo]ct(ober)?|[Nn]ov(ember)?|[Dd]ec(ember)?)'

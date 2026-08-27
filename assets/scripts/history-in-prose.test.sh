@@ -34,6 +34,8 @@ else bad "detector is executable" "not found at $DETECTOR"; exit 1; fi
 # Placeholders, resolved after each fixture is written.
 fill() {
     sed -e "s|BEADID|tk-4x9qp|g" -e "s|OTHERID|sl-7m2kd|g" -e "s|GCBEAD|gc-8zdml1|g" \
+        -e "s|LXBEAD|lx-6q3wn|g" -e "s|SUBEAD|su-2k8fp|g" -e "s|GABEAD|ga-5t7wz|g" \
+        -e "s|LXNAME|lx-codex|g" -e "s|NOSTORE|xy-4x9qp|g" \
         -e "s|ISODATE|2026-08-13|g" -e "s|LONGDATE|August 13, 2026|g" \
         -e "s|PRREF|#490|g" -e "s|PULLREF|pull/490|g" "$1" > "$1.filled"
     mv "$1.filled" "$1"
@@ -160,7 +162,32 @@ fill "$TMP/script.sh"
 eq "$(nfind script.sh)" "1" "only the comment line is prose"
 eq "$(run script.sh | sed -n '1s/^[^:]*:\([0-9]*\):.*/\1/p')" "2" "and it is the comment's line"
 
-echo "── 5. a prefix that is also a namespace ──"
+echo "── 5. the store prefixes in use ──"
+# One line per store, so dropping a prefix from the detector fails here
+# rather than silently un-seeing one store's ids.
+cat > "$TMP/docs/stores.md" <<'MD'
+Because of LXBEAD.
+
+Because of BEADID.
+
+Because of OTHERID.
+
+Because of GCBEAD.
+
+Because of SUBEAD.
+
+Because of GABEAD.
+MD
+fill "$TMP/docs/stores.md"
+eq "$(nfind docs/stores.md)" "6" "every store prefix in use is a bead id"
+
+cat > "$TMP/docs/nostore.md" <<'MD'
+Because of NOSTORE.
+MD
+fill "$TMP/docs/nostore.md"
+eq "$(nfind docs/nostore.md)" "0" "a prefix no store uses is not a bead id"
+
+echo "── 6. a prefix that is also a namespace ──"
 cat > "$TMP/ns.sh" <<'SH'
 # The pack is gc-toolkit, the rig is gc-toolkit, the board is gc-visit.
 # The bead behind it is GCBEAD.
@@ -175,7 +202,14 @@ SH
 fill "$TMP/ptr.sh"
 eq "$(nfind ptr.sh)" "1" "a path into specs points at the record; the bare id cites it"
 
-echo "── 6. the allow file ──"
+cat > "$TMP/sess.sh" <<'SH'
+# The fixture session is LXNAME, parked before the sweep runs.
+# The bead behind it is LXBEAD.
+SH
+fill "$TMP/sess.sh"
+eq "$(nfind sess.sh)" "1" "a synthetic session name passes, an lx- bead id does not"
+
+echo "── 7. the allow file ──"
 cp "$DETECTOR" "$TMP/det/history-in-prose.sh"
 chmod +x "$TMP/det/history-in-prose.sh"
 printf '%s\n' 'the one instruction that must name it' > "$TMP/det/history-in-prose.allow"
@@ -189,7 +223,7 @@ eq "$(nfind docs/allowed.md)" "2" "without an allow file both lines are findings
 eq "$( ( cd "$TMP" && ./det/history-in-prose.sh docs/allowed.md ) | grep -c . || true)" "1" \
    "an allow regex suppresses its line and only its line"
 
-echo "── 7. a clean tree is a clean pass ──"
+echo "── 8. a clean tree is a clean pass ──"
 cat > "$TMP/docs/clean.md" <<'MD'
 # Heading with 4 items
 
