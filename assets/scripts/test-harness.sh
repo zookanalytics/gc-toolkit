@@ -321,10 +321,21 @@ case "$sub" in
       */commits/*)
         br="${path##*/commits/}"
         f="$G/head_$(san "$br")"
-        [ -s "$f" ] || { echo "gh: no head" >&2; exit 1; }
+        # No fixture = the ref does not exist (a branch a merge deleted). Real
+        # gh writes the error body to STDOUT, ignores --jq, and exits non-zero.
+        if [ ! -s "$f" ]; then
+          printf '{"message":"No commit found for SHA: %s","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"422"}' "$br"
+          exit 1
+        fi
         sha=$(cat "$f")
         repo="${path#repos/}"; repo="${repo%%/commits/*}"
-        out="{\"sha\":\"$sha\",\"html_url\":\"https://github.com/$repo/commit/$sha\"}" ;;
+        out="{\"sha\":\"$sha\",\"html_url\":\"https://github.com/$repo/commit/$sha\"}"
+        # STUB_GH_COMMIT_RC: a well-formed body delivered with a non-zero exit
+        # — the one failure shape no check on the output can refuse.
+        if [ -n "${STUB_GH_COMMIT_RC:-}" ]; then
+          if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+          exit "$STUB_GH_COMMIT_RC"
+        fi ;;
       */pulls/*/reviews/*/dismissals)
         printf 'DISMISS %s\n' "$path" >> "${STUB_GH_LOG:?}"
         exit "${STUB_DISMISS_RC:-0}" ;;

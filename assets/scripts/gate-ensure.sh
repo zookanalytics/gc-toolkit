@@ -73,8 +73,19 @@ case "$ORIGIN_REPO" in */*/*|/*|*/) ORIGIN_REPO="" ;; */*) : ;; *) ORIGIN_REPO="
 HAVE_GH=0; command -v gh >/dev/null 2>&1 && HAVE_GH=1
 
 live_head_for() { # <branch> -> sha, or nothing when unanswerable
+  # gh writes its error body to STDOUT, and --jq on a body without .sha prints
+  # "null" at rc=0, so neither the exit code nor the output alone separates a
+  # head from a failure. Empty routes the callers to their "no head to test"
+  # arms, which is the safe direction: an unread head cannot prove a branch
+  # moved, and the next pass sees a merged anchor closed and out of scope.
+  # The head is only ever compared against a marker oid, so it is held to that
+  # same grammar.
   [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ] && [ -n "${1:-}" ] || return 0
-  gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null
+  local out
+  out=$(gh api --hostname "$ORIGIN_HOST" \
+    "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null) || return 0
+  is_oid "$out" || return 0
+  printf '%s\n' "$out"
 }
 
 # Guarded list read: non-zero means "could not tell", never "nothing there".
