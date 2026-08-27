@@ -49,8 +49,9 @@ export PATH="$TMP/bin:$PATH" HIST_DIR="$TMP/hist" HIST_ARGS="$TMP/hist-args.log"
 # GCTK_BIN is pinned to a path that does not exist so arm 3 stays out of every
 # order case: unset, it would resolve through the AMBIENT city and read the live
 # binary, which is neither hermetic nor what those cases are about. The gctk
-# cases below override it deliberately.
-run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/no-such-gctk}" bash "$CHECK" 2>&1; }
+# cases below override it deliberately. An order case that hand-rolls its own
+# `bash "$CHECK"` loses that pin, so vary ORDERS_JSON or RIGS_JSON and call this.
+run_check() { : > "$HIST_ARGS"; ORDERS_JSON="${ORDERS_JSON:-$TMP/orders.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" GCTK_BIN="${GCTK_BIN:-$TMP/no-such-gctk}" bash "$CHECK" 2>&1; }
 
 # A pack dir that is its own git repo, so arm 3 has a tree revision to compare
 # against. Local and never pushed; the identity is scaffolding.
@@ -103,7 +104,7 @@ cat > "$TMP/rigs-susp.json" <<'EOF'
 {"rigs":[{"name":"alpha","suspended":false},{"name":"beta","suspended":true}]}
 EOF
 printf '{"entries":[{"rig":"alpha"}]}' > "$TMP/hist/tick.json"
-OUT=$(ORDERS_JSON="$TMP/orders.json" RIGS_JSON="$TMP/rigs-susp.json" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1); RC=$?
+OUT=$(RIGS_JSON="$TMP/rigs-susp.json" run_check); RC=$?
 eq "$RC" "0" "a suspended rig's silence is a note, not an error"
 has "$OUT" "suspended" "the skip is noted"
 printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
