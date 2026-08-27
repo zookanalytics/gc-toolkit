@@ -9,11 +9,12 @@
 # live-session picker (prefix+S = "what's running"; this = "what needs me").
 #
 # TWO MENUS, ONE SCRIPT. Bare, this renders the operator's QUEUE — what is owed
-# by a person, oldest first. --all renders the city overview, and is bound one
-# keystroke away (prefix+B). They are the same rows, ranked to answer different
-# questions, and the queue is the one a keystroke should reach first: the
-# overview sorts by severity then subtree size, where a demand owed by a person
-# has a subtree of one.
+# by a person, oldest first, each row headlined by the demand itself. --all
+# renders the city overview, headlined by the object, and is bound one keystroke
+# away (prefix+B). They are the same rows, ranked and labelled to answer
+# different questions, and the queue is the one a keystroke should reach first:
+# the overview sorts by severity then subtree size, where a demand owed by a
+# person has a subtree of one.
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
 # to (<state-root>/bin/helm-svc — see gc-helm-svc.sh / gc-helm-build.sh),
@@ -108,17 +109,31 @@ CMD_PREFIX=""
 [ -n "$CITY_PATH" ] && CMD_PREFIX="cd $(sq "$CITY_PATH") && "
 SQ_ATTN=$(sq "$ATTN")
 
-# One TSV row per anchor: held, severity, id, rig, title, frontier.
+# One TSV row per anchor: held, severity, id, rig, title, frontier, needs.
+#
+# Every cell carries a placeholder when it is empty. IFS=TAB is IFS WHITESPACE,
+# so an empty field collapses against its neighbour and every later column
+# shifts left — a row with no title would render its frontier as its title.
 ROWS=$(printf '%s' "$BOARD" | jq -r '
-    .[] | [(if .held then "●" else "·" end), (.severity//"?"), .id, (.rig//"?"),
-           ((.title//"")[0:38]), ((.frontier//"")[0:34])] | @tsv')
+    def nz(v; d): (v // "") | if . == "" then d else . end;
+    .[] | [(if .held then "●" else "·" end), nz(.severity; "?"), .id, nz(.rig; "?"),
+           (nz(.title; "—")[0:38]), (nz(.frontier; "—")[0:34]),
+           (nz(.needs; "—")[0:48])] | @tsv')
 
 HOTKEYS="abcdefghijklmnopqrstuvwxyz0123456789"
 set --
 i=1
-while IFS="$TAB" read -r glyph sev id rig title frontier; do
+while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     [ -n "$id" ] || continue
-    label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
+    # The queue's headline is the DEMAND — helm-svc puts the authored
+    # gc.takeaway in `needs`, and what the operator owes is the whole reason the
+    # row is on this menu. The bead's own title names the object and follows it.
+    # The overview asks the other question, so it leads with the object.
+    if [ -n "$ALL" ]; then
+        label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
+    else
+        label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$needs" "$title")
+    fi
 
     # Background the open: a cold visit-file plus converse spawn takes
     # seconds and must never freeze the tmux server.

@@ -218,6 +218,36 @@ has "$CALLS" "schema version mismatch" "(ALL-SKEW) carrying helm-svc's reason"
 hasnt "$CALLS" "no open anchors" "(ALL-SKEW) never the overview's all-clear"
 hasnt "$CALLS" "display-menu" "(ALL-SKEW) no board is rendered"
 
+# --- case: the queue's headline is the demand, not the object -----------------
+# helm-svc already authored the sentence — the takeaway, in `needs`. A menu that
+# spends the row on `.title` renders the OBJECT and drops the question, which is
+# the whole thing the operator opened this menu to read. All three fields are
+# distinct so no assertion can pass on the wrong one.
+DISTINCT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"ELEVATED","title":"OBJECT-TITLE","frontier":"FRONTIER-SHAPE","needs":"DEMAND-SENTENCE","held":false}]'
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$DISTINCT"
+run_pick
+has "$CALLS" "DEMAND-SENTENCE" "(NEEDS) the queue row carries the demand"
+has "$CALLS" "OBJECT-TITLE" "(NEEDS) and keeps the bead title as context"
+has "${CALLS#*DEMAND-SENTENCE}" "OBJECT-TITLE" "(NEEDS) the demand LEADS and the title follows"
+hasnt "$CALLS" "FRONTIER-SHAPE" "(NEEDS) the frontier is not the queue's question"
+
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$DISTINCT"
+run_pick --all
+has "${CALLS#*OBJECT-TITLE}" "FRONTIER-SHAPE" "(ALL-NEEDS) the overview leads with the object and its shape"
+hasnt "$CALLS" "DEMAND-SENTENCE" "(ALL-NEEDS) which is the other menu's headline"
+
+# --- case: an empty cell does not shift the row's later columns ---------------
+# IFS=TAB is IFS *whitespace*, so an empty field collapses against its neighbour
+# and every column after it reads one to the left — a row with no title would
+# render its demand as its title and nothing as its demand.
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"ELEVATED","title":"","frontier":"","needs":"DEMAND-SENTENCE","held":false}]'
+run_pick
+has "$CALLS" "display-menu" "(SHIFT) the row still renders"
+has "$CALLS" "DEMAND-SENTENCE" "(SHIFT) with the demand intact, not shifted out of the label"
+
 # ==============================================================================
 # STATIC GUARD — the shape of the original defect must not come back
 # ==============================================================================
