@@ -188,7 +188,10 @@ sequenceDiagram
   gate-ensure re-arms the dispatch when the child lands. The round cap
   (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
   `check.<g>=exception@<head>` and the anchor routes to human. One writer,
-  one terminal verdict — no second component may touch `check.*`.
+  one terminal verdict: no second component writes a verdict. `pr-facts.sh`
+  and `gate-ensure.sh` also clear a marker, each under a condition
+  [authority-map.md](authority-map.md) states, but a clear withdraws evidence
+  and cannot assert it.
   A head move past that exception buys exactly one dispatch through
   gate-ensure's `dispatch_count` cap, so a branch someone fixed by hand gets
   a look. It cannot self-feed: the cap arm files no rework child, so nothing
