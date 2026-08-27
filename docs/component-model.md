@@ -89,8 +89,10 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   reads it off the anchor instead of re-deriving it from GitHub. It runs twice
   per cadence pass, `--posture-only` before the merge arm and in full after it,
   because a reader that never asks GitHub needs the record to be no older than
-  the decision it feeds. Both runs are the same writer, and the write is
-  idempotent.
+  the decision it feeds. The pre-merge run's exit code carries the other half of
+  that: an anchor it could not make current holds the merge arm for the pass, so
+  the reader is never handed a stale fact in place of a fresh one. Both runs are
+  the same writer, and the write is idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
   commit, but the anchor-local authorization set — `check.*`, `merge_hold`,

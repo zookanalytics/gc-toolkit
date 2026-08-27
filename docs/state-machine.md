@@ -250,15 +250,18 @@ The postures, in the precedence the derivation applies:
 
 A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. `merge.sh` holds on a recorded `commented`
-whatever head it is pinned to, because a comment survives a head move; an
-**absent** posture never holds, since that is a fact not yet recorded rather
-than a fact recorded as bad. What makes reading it off the bead sound is the
-cadence: `pr-facts.sh --posture-only` runs immediately before the merge arm, so
-the value merge validates is the one recorded on that same tick. A posture
-recorded a pass earlier could not see a comment that arrived since, and no
-consumer asks GitHub to find out, merge.sh's own terminal re-read included. A
+whatever head it is pinned to, because a comment survives a head move. An
+**absent** posture never holds there, since that is a fact not yet recorded
+rather than a fact recorded as bad. What refuses the absence is the cadence:
+`pr-facts.sh --posture-only` runs immediately before the merge arm and exits
+non-zero when it could not make an anchor's posture current, which holds the
+merge arm for that pass. Only the arm that did the reading can tell "no comment"
+from "could not read", so the hold lives there rather than in the reader. A
+posture recorded a pass earlier could not see a comment that arrived since, and
+no consumer asks GitHub to find out, merge.sh's own terminal re-read included. A
 read that fails records nothing rather than something weaker, so a standing
-`commented` keeps holding through an unreadable pass.
+`commented` keeps holding through an unreadable pass, and an anchor already held
+that way is not one the arm holds the pass over.
 
 **The watermarks** separate a comment already routed from a new one. Each is the
 highest id routed in its own id space, and each advances only after the routing

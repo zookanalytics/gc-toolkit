@@ -12,7 +12,9 @@
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
 # Also covers --posture-only (the pre-merge arm: records posture, dispatches
-# nothing, leaves MERGED/CLOSED reconciliation to the full pass);
+# nothing, leaves MERGED/CLOSED reconciliation to the full pass, and reports an
+# anchor it could not make current in its EXIT CODE, which is what holds
+# merge.sh for that pass);
 # Also covers the POSTURE record and the comment watermark: the declared
 # vocabulary, posture pinned to the live head and written only on change, an
 # unanswered comment routing to a fix-pool child or (under a human hold) to a
@@ -515,6 +517,46 @@ eq "$(meta PO3 merge_result)" "pull_request" "…with its state untouched"
 out=$(run)
 has "$out" "PR#62 is MERGED" "the full pass still records it"
 eq "$(bstatus PO3)" "closed" "…and closes the anchor"
+
+echo "# --posture-only: an anchor it could not make current holds the merge arm"
+# merge.sh validates the posture recorded here and never asks GitHub. The only
+# signal that a posture is NOT current is this arm's exit code, which
+# refinery-reconcile reads to hold merge.sh for the pass.
+store "[$(anchor PO4 63)]"
+printf '%s' "$(prview 63 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_63.json"
+echo '[]' > "$GH_DIR/reviews_63.json"
+printf '[{"id":9600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_63.json"
+out=$(STUB_UPDATE_FAIL="PO4" run_posture); rc=$?
+eq "$rc" 1 "an unpersisted posture exits non-zero"
+has "$out" "posture is not current" "…naming the anchor merge must not read"
+has "$out" "1 not current" "…and counting it in the summary"
+eq "$(meta PO4 pr_posture)" "<absent>" "…with nothing recorded"
+
+echo "# …a posture it could not even determine holds the merge arm too"
+# Nothing distinguishes our own comment from a human's without the acting login,
+# so this pass cannot tell "no new comment" from "a comment it cannot see".
+store "[$(anchor PO4 63)]"
+out=$(STUB_SELF_LOGIN="" run_posture); rc=$?
+eq "$rc" 1 "an undeterminable posture exits non-zero"
+has "$out" "the acting login is unresolved" "…naming the read that failed"
+
+echo "# …but a standing commented@ is already holding, so it is not the gap"
+store "[$(anchor PO5 64 ',"pr_posture":"commented@sha-64"')]"
+printf '%s' "$(prview 64 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_64.json"
+echo '[]' > "$GH_DIR/reviews_64.json"
+echo '[]' > "$GH_DIR/comments_64.json"
+out=$(STUB_SELF_LOGIN="" run_posture); rc=$?
+eq "$rc" 0 "the arm does not hold the whole queue over an anchor already held"
+eq "$(meta PO5 pr_posture)" "commented@sha-64" "…and the standing posture is untouched"
+
+echo "# …the FULL pass never gates on the same condition (it runs after merge)"
+store "[$(anchor PO6 65)]"
+printf '%s' "$(prview 65 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_65.json"
+echo '[]' > "$GH_DIR/reviews_65.json"
+echo '[]' > "$GH_DIR/comments_65.json"
+out=$(STUB_SELF_LOGIN="" run); rc=$?
+eq "$rc" 0 "the full pass exits 0"
+has "$out" "not current" "…while still reporting the count"
 
 echo "# a human already holding the anchor gets the comments, not the fix pool"
 store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"')]"

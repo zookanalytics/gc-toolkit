@@ -212,10 +212,11 @@ while IFS= read -r row; do
   fi
   # pr-facts.sh records the posture; this reads it and never asks GitHub. What
   # makes that read current is the cadence: refinery-reconcile runs
-  # `pr-facts.sh --posture-only` immediately before this arm. An ABSENT posture
-  # never holds, since the fact is not recorded yet, and holding on it would
-  # wedge the whole queue the first time GitHub could not be read. The value is
-  # not head-matched on purpose: a comment survives a head move.
+  # `pr-facts.sh --posture-only` immediately before this arm, and holds this one
+  # for the pass when that arm could not make a posture current. An ABSENT
+  # posture therefore never holds here — the hold sits in the driver, which is
+  # the only place that can tell "no comment" from "could not read". The value
+  # is not head-matched on purpose: a comment survives a head move.
   case "$posture" in
     commented@*)
       echo "$PROG: PR#$num carries review comments nothing has answered ($posture); merge held (anchor $id, pr-facts routes them)"

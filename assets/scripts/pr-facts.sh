@@ -24,6 +24,9 @@
 # arm runs (lifecycle/lifecycle.toml [posture]): pr_posture and pr_merge_state
 # pinned to the live head, written only when the value changes, so merge.sh can
 # answer "is a human waiting on this?" off the bead instead of re-deriving it.
+# --posture-only exits non-zero when any anchor is left without a current
+# posture and nothing standing already holds it: the caller holds merge.sh for
+# that pass rather than let it validate against a fact from an earlier tick.
 # An unanswered review comment is posture `commented`, and it routes to
 # something — a fix-pool rework child, or a visit when a human already holds the
 # anchor — with the watermarks advancing only once that routing reads back.
@@ -130,7 +133,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; regated=0; dismissed_n=0; skipped=0
-postured=0; answered=0
+postured=0; answered=0; unpostured=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -227,7 +230,7 @@ while IFS= read -r row; do
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0
+  posture=""; max_c=0; max_r=0; pinned=0
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
@@ -273,19 +276,32 @@ while IFS= read -r row; do
     *" $posture "*) : ;;
     *) [ -z "$posture" ] || { echo "$PROG: $id — refusing to record undeclared posture '$posture'" >&2; posture=""; } ;;
   esac
+  have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
   if [ -n "$posture" ]; then
     want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
-    have_p=$(printf '%s' "$row" | jq -r '(.metadata.pr_posture // "") | tostring')
     have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
-    if [ "$have_p" != "$want_p" ] || [ "$have_m" != "$want_m" ]; then
-      if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+    if [ "$have_p" = "$want_p" ] && [ "$have_m" = "$want_m" ]; then
+      pinned=1
+    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
            --set "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
-        postured=$((postured + 1))
-        echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
-      else
-        echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
-      fi
+      pinned=1
+      postured=$((postured + 1))
+      echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"
+    else
+      echo "$PROG: $id posture record failed for PR#$num; retry next pass" >&2
     fi
+  fi
+  # merge.sh validates the posture recorded here and never asks GitHub, so an
+  # anchor this pass could not make current is one it would clear against a
+  # fact from an earlier tick. A standing `commented@` is already holding that
+  # merge; every other shape is the gap, and --posture-only reports it in its
+  # exit code so refinery-reconcile can hold the merge arm for the pass.
+  if [ "$pinned" != 1 ]; then
+    case "$have_p" in
+      commented@*) : ;;
+      *) unpostured=$((unpostured + 1))
+         echo "$PROG: $id — PR#$num posture is not current; merge must not read it this pass" >&2 ;;
+    esac
   fi
 
   # merge.sh reads posture off the bead and never asks GitHub, so the record has
@@ -765,8 +781,12 @@ $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 ROWS_EOF
 
 if [ "$POSTURE_ONLY" = 1 ]; then
-  echo "$PROG: posture-only — $postured postures recorded, $skipped skipped"
+  echo "$PROG: posture-only — $postured postures recorded, $unpostured not current, $skipped skipped"
+  # Only this mode's exit code gates anything: refinery-reconcile runs it
+  # immediately before merge.sh and holds the merge arm on a non-zero. The full
+  # pass runs after merge, where the same rc would gate nothing.
+  [ "$unpostured" -eq 0 ] || exit 1
 else
-  echo "$PROG: $recorded recorded, $postured postures recorded, $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
+  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
 fi
 exit 0

@@ -91,7 +91,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    non-draft anchor, then stops: no dispatch, no watermark, and MERGED/CLOSED
    reconciliation stays with arm 5. A held merge still gets one, because
    recording a fact is not a dispatch, and the pass that finally merges must not
-   be reading a posture from a previous tick.
+   be reading a posture from a previous tick. **A non-zero rc is the second
+   interlock.** An anchor this arm could not make current — an unreadable review
+   history, a posture write that did not persist — is one `merge.sh` would
+   validate against a fact from an earlier tick, so the driver holds arm 4 for
+   the pass. An anchor whose standing posture is already `commented@` is exempt:
+   it is holding its own merge, and failing the arm over it would hold every
+   other anchor's too.
 4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork, head branch matches), re-read the anchor, validate
    holds/posture/gates/children/approval/base/CLEAN, re-read the full
@@ -189,7 +195,9 @@ second merge writer that neither the gate nor the lock can see.
 The controller keeps an exec order's output only on non-zero exit, folding a
 bounded tail into the `order.failed` event. So: an unexpected arm failure makes
 the driver exit 1 (the failing arm names reach `order.failed`); gate-ensure's
-rc=3 hold is reported but does not fail the order. Every pass logs to
+rc=3 hold is reported but does not fail the order. Arm 3 is the one that does
+both, holding the merge arm and failing the order, because a posture that could
+not be recorded is a fault to see rather than a routine gate. Every pass logs to
 `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`, trimmed to
 `REFINERY_RECONCILE_LOG_KEEP` lines (2000 default) and not subject to bead
 retention. Arms append as they run, so the shape of the log is what tells you

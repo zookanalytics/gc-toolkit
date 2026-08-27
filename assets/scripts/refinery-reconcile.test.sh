@@ -6,14 +6,15 @@
 # merge.sh reads posture off the bead and would otherwise read one written a
 # pass ago;
 # the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
-# same pass, without failing the order), exercised by extracting and executing
-# the marked block against stubs; BEADS_ACTOR / GC_AGENT projections scoped to
-# their arms; a failing arm not skipping the arms after it; the exit-1
-# failure report; the per-rig pass lock (one merge.sh writer across two
-# overlapping ticks, a wedged holder reported rather than skipped over, an
-# unobtainable lock refusing the pass before any arm); a killed pass leaving
-# its partial output in pass.log; and the invariant binding the order timeout
-# to the controller's tracking-sweep window.
+# same pass, without failing the order; a non-zero posture arm holds it too,
+# because merge.sh validates the posture that arm records), exercised by
+# extracting and executing the marked block against stubs; BEADS_ACTOR /
+# GC_AGENT projections scoped to their arms; a failing arm not skipping the
+# arms after it; the exit-1 failure report; the per-rig pass lock (one merge.sh
+# writer across two overlapping ticks, a wedged holder reported rather than
+# skipped over, an unobtainable lock refusing the pass before any arm); a
+# killed pass leaving its partial output in pass.log; and the invariant binding
+# the order timeout to the controller's tracking-sweep window.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,6 +94,28 @@ eq "$rc" 0 "the designed hold does not fail the order"
 has "$out" "merge.sh HELD this pass" "the hold is reported"
 if grep -q '^merge.sh' "$ARM_LOG"; then bad "merge.sh RAN despite an unsafe gate-ensure"; else ok "merge.sh did not run"; fi
 grep -q '^pr-facts' "$ARM_LOG" && ok "pr-facts still ran (arms are independent)" || bad "pr-facts was skipped by the hold"
+
+echo "# a non-zero posture arm HOLDS merge.sh — merge validates what it records"
+# merge.sh reads pr_posture off the bead and never asks GitHub, so an anchor the
+# posture arm could not make current is one merge.sh would clear against a fact
+# from an earlier tick.
+mkarm gate-ensure.sh
+cat > "$SD/pr-facts.sh" <<'ARM'
+#!/usr/bin/env bash
+printf '%s|%s|%s|%s\n' pr-facts.sh "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
+case "$*" in *--posture-only*) exit 1 ;; esac
+exit 0
+ARM
+chmod +x "$SD/pr-facts.sh"
+: > "$ARM_LOG"
+out=$(drive); rc=$?
+eq "$rc" 1 "an unrecordable posture fails the order"
+has "$out" "pr-posture rc=1" "…naming the arm"
+has "$out" "merge.sh HELD this pass" "…and reporting the hold"
+if grep -q '^merge.sh' "$ARM_LOG"; then bad "merge.sh RAN on a posture the arm could not record"; else ok "merge.sh did not run"; fi
+grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG" && ok "the full pr-facts arm still ran" || bad "the full pr-facts arm was skipped"
+grep -q '^convoy-graduate' "$ARM_LOG" && ok "convoy-graduate still ran (the hold is merge's alone)" || bad "convoy-graduate was skipped"
+mkarm pr-facts.sh
 
 echo "# a failing arm fails the order but does not skip later arms"
 mkarm gate-ensure.sh
@@ -301,6 +324,15 @@ gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && ok "(block) a clean gate-ensure lets merge.sh run" || bad "(block) merge.sh did not run after a clean gate-ensure"
 has "$gout" "MERGE_HELD=0" "(block) the hold flag is clear"
 eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture --posture-only,merge" "(block) posture is recorded before merge reads it"
+
+# The posture arm's rc is the second half of the same interlock: merge.sh
+# validates the posture this arm records, so an arm that could not record one
+# must not be followed by a merge in the same pass.
+printf '#!/usr/bin/env bash\necho "posture $*" >> "${BLOCK_SENTINEL:?}"\nexit 1\n' > "$GSD/pr-facts.sh"
+: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"
+gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
+[ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite an unrecordable posture" || ok "(block) a non-zero posture arm held merge.sh"
+has "$gout" "MERGE_HELD=1" "(block) the hold flag is set by the posture arm"
 
 echo "# the shipped order stays wired to this runner"
 ORDER="$(cd "$HERE/../.." && pwd)/orders/refinery-reconcile.toml"
