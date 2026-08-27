@@ -152,12 +152,13 @@ something real from the first commit.
 
 The live case is worse than the retrofit suggests. The follow-up list in
 `specs/2026-08-rewrite/cutover-runbook.md` — the document this bead was filed
-from — has thirteen items and cites no bead IDs at all, while at least two of
-those items already have beads (`tk-508bx9` for item 4, and `tk-dks4kk` for
-item 12, which is this one). The diagnosed failure is running in the document
-that reported it. Binding that list is not folded in here: it needs a bead-by-
-bead walk of thirteen items, several of which are large, and the runbook is a
-one-shot document with its own retirement path.
+from — has thirteen items, no target-list marker and no bead column, so
+nothing can read it back. Three items name a bead in passing prose
+(`tk-508bx9` at item 4, `tk-wz4igt` at item 9, `tk-43chr6` at item 13), and
+item 12 is this bead, which the list never names. The diagnosed failure is
+running in the document that reported it. Binding that list is not folded in
+here: it needs a bead-by-bead walk of thirteen items, several of which are
+large, and the runbook is a one-shot document with its own retirement path.
 
 <!-- plan-targets -->
 

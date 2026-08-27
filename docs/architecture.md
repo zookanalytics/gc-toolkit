@@ -162,10 +162,10 @@ corrective feedback into standing behavior, so attention is never spent twice:
    everything else. A lesson is real when it is merged pack content, not when
    it is remembered.
 
-Doctor is the same idea applied to structure: ten of its twelve checks assert
-an invariant from [component-model.md](component-model.md) §3 against the live
-ledger, and the other two guard pack structure, so a property that stops
-holding fails a named check instead of waiting to be rediscovered.
+Doctor is the same idea applied to structure: most of its checks assert an
+invariant from [component-model.md](component-model.md) §3 against the live
+ledger, and the rest guard pack structure, so a property that stops holding
+fails a named check instead of waiting to be rediscovered.
 
 ## The consistency test
 
