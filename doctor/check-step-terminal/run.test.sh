@@ -120,6 +120,96 @@ eq "$RC" "1" "a failed root resolution warns — a partial root map must not pas
 has "$OUT" "NOT checked" "the warning says the store was skipped"
 clear_fixtures
 
+# --- 9. the root map must never cross jq's argv boundary -------------------------
+# MAX_ARG_STRLEN caps a SINGLE argv string at 131072 B independently of ARG_MAX,
+# and `bd show` answers each root's full description and notes. The fixture holds
+# a REAL finding under the oversized map because the failure mode is a silent
+# clean pass on the busiest store, not a crash.
+gt() { if [ "$1" -gt "$2" ]; then ok "$3"; else bad "$3 (got '$1', want > '$2')"; fi; }
+FAT=$(head -c 200000 /dev/zero | tr '\0' 'x')
+# Padding in description/notes: the projection drops it, so §9 alone does not
+# prove the staging file — §10 does.
+root_fat() { # root_fat <id> <status> <closed_at>
+    printf '{"id":"%s","status":"%s","closed_at":"%s","description":"%s","notes":"%s"}' \
+        "$1" "$2" "$3" "$FAT" "$FAT"
+}
+
+steps "$(step s-10 r-10)"
+roots "$(root_fat r-10 closed "$OLD")"
+gt "$(wc -c < "$TMP/stores/alpha.show.json" | tr -d ' ')" 131072 \
+   "positive control: the root fixture really does exceed MAX_ARG_STRLEN"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a root map larger than the argv cap is still JOINED, not skipped"
+has "$OUT" "s-10" "the finding under an oversized root map is reported"
+has "$OUT" "r-10" "the finalized molecule is named"
+hasnt "$OUT" "could not be computed" "the join is not reported as uncomputable"
+hasnt "$OUT" "NOT checked" "the oversized store is not reported as unchecked"
+
+# The same cap falls on the ACCUMULATOR: batching the ids bounds what goes OUT
+# to `bd show`, nothing bounds the map coming BACK.
+steps "$(step s-11 r-11 ',"gc.outcome":"pass"')" "$(step s-12 r-12)"
+roots "$(root_fat r-11 closed "$OLD")" "$(root_fat r-12 closed "$OLD")"
+OUT=$(GC_DOCTOR_ROOT_CHUNK=1 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "2" "the root map survives being accumulated one chunk at a time"
+has "$OUT" "s-11" "the reopened step under a fat multi-chunk map is reported"
+has "$OUT" "s-12" "the never-closed step under a fat multi-chunk map is reported"
+hasnt "$OUT" "could not resolve molecule roots" "accumulating fat roots is not a failed probe"
+hasnt "$OUT" "NOT checked" "a chunked fat root map does not skip the store"
+
+# A fat root that is HEALTHY must stay quiet: the projection must not manufacture
+# a finding by dropping the status the join filters on.
+steps "$(step s-13 r-13 "" ",\"updated_at\":\"$RECENT\"")"
+roots "$(root_fat r-13 in_progress "")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an oversized root map for a LIVE molecule still passes"
+hasnt "$OUT" "s-13" "the live molecule's step is not named as a finding"
+clear_fixtures
+
+# --- 10. ...and molecule COUNT alone breaches it, with no fat bead in sight ------
+# Every bead small, simply a lot of them, so the map is over the cap even after
+# projection. That is what makes the staging file load-bearing: a projection-only
+# fix passes §9 and puts the check back to skipping the busiest store.
+MANY=2500
+jq -nc --arg ca "$OLD" --argjson n "$MANY" \
+   '[range(0;$n) | {id:("m-r"+(.|tostring)), status:"closed", closed_at:$ca}]' \
+   > "$TMP/stores/alpha.show.json"
+jq -nc --argjson n "$MANY" \
+   '[range(0;$n) | {id:("m-s"+(.|tostring)), status:"open",
+                    metadata:{"gc.root_bead_id":("m-r"+(.|tostring))}}]' \
+   > "$TMP/stores/alpha.json"
+gt "$(jq -c '.[] | {id, status, closed_at}' "$TMP/stores/alpha.show.json" | wc -c | tr -d ' ')" 131072 \
+   "positive control: even the PROJECTED root map for this store exceeds the argv cap"
+# One chunk, so the assertion is about size, not about how often the stub is asked.
+OUT=$(GC_DOCTOR_ROOT_CHUNK="$MANY" RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "2" "a store with more molecules than fit on argv is still joined"
+has "$OUT" "$MANY molecule(s)" "every finalized molecule in the large store is reported"
+hasnt "$OUT" "NOT checked" "a large store is not skipped"
+hasnt "$OUT" "could not be computed" "the join over a large store is computed"
+clear_fixtures
+
+# --- 11. an unstageable root map fails CLOSED ------------------------------------
+# Staging trades an argv string for a file, so an unusable file is a new way to
+# lose the join; it must warn like every other broken probe.
+steps "$(step s-14 r-14)"
+roots "{\"id\":\"r-14\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(TMPDIR="$TMP/nonexistent" run_check); RC=$?
+eq "$RC" "1" "an unstageable root map warns, never passes"
+has "$OUT" "stage the molecule-root map" "the staging failure names its cause"
+hasnt "$OUT" "s-14" "no verdict is reported from a join that never ran"
+clear_fixtures
+
+# --- 12. a root payload that is neither array nor object is a failed probe -------
+# Staging rewrote the branch that classifies the payload, so the shape it must
+# still reject gets its own case: corrupt bytes are a broken probe, not an empty
+# root map, which would reclassify every step under them as cross-store.
+steps "$(step s-15 r-15)"
+printf '"neither-array-nor-object"' > "$TMP/stores/alpha.show.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a root payload that is neither array nor object is a WARNING"
+has "$OUT" "could not resolve molecule roots" "corrupt root bytes are reported as a failed probe"
+hasnt "$OUT" "reported, not judged" "corrupt bytes are not downgraded to unresolved-root notes"
+clear_fixtures
+
 echo
 echo "check-step-terminal: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

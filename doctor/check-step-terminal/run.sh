@@ -32,6 +32,21 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
+# The root map cannot ride argv: Linux caps a SINGLE argv string at
+# MAX_ARG_STRLEN (32 pages, 131072 B) independently of the far larger ARG_MAX,
+# and `bd show` answers each root's full description and notes. Staging it in a
+# file is what lifts the cap — a filename does not grow with the store. The
+# projection in flush_chunk bounds jq's working set, not argv, and is no
+# substitute: molecule COUNT alone breaches the cap on the projected map.
+ROOTMAP_DIR=$(mktemp -d 2>/dev/null) || ROOTMAP_DIR=""
+if [ -z "$ROOTMAP_DIR" ] || [ ! -d "$ROOTMAP_DIR" ]; then
+    echo "cannot determine whether step beads reach terminal states (I8)"
+    detail "could not create a temporary directory to stage the molecule-root map; the join this check performs has nowhere to put its input, and a verdict computed without it would be a guess."
+    exit 1
+fi
+trap 'rm -rf "$ROOTMAP_DIR"' EXIT
+roots_file="$ROOTMAP_DIR/roots.jsonl"
+
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)]
@@ -65,19 +80,27 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$root_ids" ] || continue
 
     # Batched root resolution; an unreadable chunk aborts the store — a partial
-    # root map would reclassify real strands as cross-store notes.
-    roots_json='[]'; chunk_failed=""; chunk=()
+    # root map would reclassify real strands as cross-store notes. One staging
+    # file serves every store, so a failed truncate would join this one against
+    # the previous store's roots: it aborts too.
+    if ! : > "$roots_file" 2>/dev/null; then
+        warnings+=("$label: could not stage the molecule-root map at $roots_file — this store was NOT checked")
+        continue
+    fi
+    chunk_failed=""; chunk=()
     flush_chunk() {
         [ "${#chunk[@]}" -ne 0 ] || return 0
-        local out merged
+        local out
         out=$(run_bounded bd show --db "$db" "${chunk[@]}" --json 2>/dev/null) && [ -n "$out" ] || { chunk_failed=yes; return 1; }
         # `bd show` answers an ARRAY normally, an OBJECT when NO id resolves
         # (rc=0 either way); the object's ids surface as unresolved-root notes.
-        merged=$(printf '%s' "$out" | scrub | jq -c --argjson a "$roots_json" '
-            if type == "array" then $a + . elif type == "object" then $a
-            else error("unexpected") end' 2>/dev/null)
-        [ -n "$merged" ] || { chunk_failed=yes; return 1; }
-        roots_json="$merged"; chunk=()
+        # One object per line, so --slurpfile reconstitutes the array the join reads.
+        printf '%s' "$out" | scrub | jq -c '
+            if type == "array" then .[] | select(type == "object") | {id, status, closed_at}
+            elif type == "object" then empty
+            else error("unexpected") end' >> "$roots_file" 2>/dev/null \
+            || { chunk_failed=yes; return 1; }
+        chunk=()
     }
     while IFS= read -r rid; do
         [ -n "$rid" ] || continue
@@ -87,7 +110,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -z "$chunk_failed" ] || { warnings+=("$label: could not resolve molecule roots in $db — this store was NOT checked"); continue; }
 
     # One row per (root, class): a molecule that stranded seven steps is ONE defect.
-    rows=$(printf '%s' "$steps" | jq -r --argjson roots "$roots_json" \
+    rows=$(printf '%s' "$steps" | jq -r --slurpfile roots "$roots_file" \
         --argjson grace "$GRACE" --argjson stall "$STALL" '
         def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);
         ($roots | map(select(type == "object" and ((.id // "") | tostring) != ""))
