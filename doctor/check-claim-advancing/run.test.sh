@@ -6,6 +6,10 @@
 # the same step for hours, which is ordinary for a long implementation step.
 # Also covers identity matching on all three keys, the claim-age gate that
 # keeps a pool recycle quiet, the cache-age degrade, and every fail-closed probe.
+# Section 14 covers arm 2 — the step nobody ever claimed — in the same shape:
+# it fires only when the routed pool has a running session holding nothing, and
+# stays silent for a suspended pool, an empty one, a full one, and a queue that
+# `bd ready` is not offering yet.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -33,12 +37,15 @@ cat > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "session list") rc="${SESSIONS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$SESSIONS_JSON" ;;
   "rig list")     rc="${RIGS_RC:-0}";     [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+  "agent list")   rc="${AGENTS_RC:-0}";   [ "$rc" -eq 0 ] || exit "$rc"; cat "$AGENTS_JSON" ;;
   *) exit 0 ;;
 esac
 GC
 # The stub applies the same --status and --has-metadata-key filters the real bd
 # applies server-side, so a fixture row the real tool would never return cannot
-# reach the check here either.
+# reach the check here either. The in-progress listing is deliberately NOT
+# filtered on gc.step_ref: arm 2 counts a worker holding any bead as busy, so
+# the check does that filtering itself and the fixtures prove it.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
 db=""; status=""; key=""; prev=""
@@ -52,6 +59,13 @@ for a in "$@"; do
 done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
+# `bd ready` answers from a separate fixture: what a store HOLDS and what it
+# OFFERS are different questions, and arm 2 turns on the difference.
+if [ "$1" = "ready" ]; then
+  [ "$name" = "${BD_READY_FAIL_STORE:-}" ] && exit 3
+  r="$STORES/$name.ready.json"; [ -f "$r" ] || { printf '[]'; exit 0; }
+  cat "$r"; exit 0
+fi
 f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
 jq -c --arg s "$status" --arg k "$key" '
   [ .[] | select($s == "" or (.status // "") == $s)
@@ -62,6 +76,7 @@ export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
 
 run_check() {
     SESSIONS_JSON="${SESSIONS_JSON:-$TMP/sessions.json}" RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" \
+    AGENTS_JSON="${AGENTS_JSON:-$TMP/agents.json}" \
     bash "$CHECK" 2>&1
 }
 # claim <id> <assignee> <seconds-ago>
@@ -70,8 +85,19 @@ store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n
 clear_stores() { rm -f "$TMP/stores/"*.json; }
 # sessions <json-rows...> — cache age 0 unless CACHE is set
 sessions() { local IFS=,; printf '{"_cache_age_s":%s,"sessions":[%s]}' "${CACHE:-0}" "$*" > "$TMP/sessions.json"; }
-# live <id> <session_name> <alias> <last_active-seconds-ago>
-live() { printf '{"id":"%s","session_name":"%s","alias":"%s","state":"active","running":true,"last_active":"%s"}' "$1" "$2" "$3" "$(ago "$4")"; }
+# live <id> <session_name> <alias> <last_active-seconds-ago> [template]
+# `template` is the field that ties a session to the agent it runs. A pool
+# member's alias is empty, so it is the only join arm 2 can use.
+live() { printf '{"id":"%s","session_name":"%s","alias":"%s","state":"active","running":true,"last_active":"%s","template":"%s"}' "$1" "$2" "$3" "$(ago "$4")" "${5:-}"; }
+# ready <store> <json-rows...> — what `bd ready` offers from that store
+ready() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.ready.json"; }
+# openstep <id> <route> <seconds-ago> — open, routed, unassigned, never claimed
+openstep() { printf '{"id":"%s","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"%s"}}' "$1" "$(ago "$3")" "$2"; }
+# agent <qualified_name> <suspended> <pool-max>
+agent() { printf '{"qualified_name":"%s","suspended":%s,"pool":{"min":0,"max":%s}}' "$1" "$2" "$3"; }
+agents() { local IFS=,; printf '{"agents":[%s]}' "$*" > "$TMP/agents.json"; }
+# The default registry every arm-1 case runs against.
+agents "$(agent rig/pool.polecat false 2)"
 
 # --- 1. a holder that is running and producing output is SILENT -----------
 # The acceptance case: a long implementation step held for six hours by a
@@ -264,6 +290,186 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "a holder whose last_active does not parse is a note, not an error"
 has "$OUT" "reported, not judged" "the note says liveness could not be judged"
 clear_stores
+
+# --- 14. arm 2: the step nobody ever claimed ------------------------------
+# The acceptance case: a step `bd ready` is offering, routed to a pool that has
+# a running session holding nothing, unclaimed past the bound. An idle worker
+# and an offered step that have not met is the one shape a backlog cannot
+# explain.
+agents "$(agent rig/pool.polecat false 2)"
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an offered step nobody has ever claimed is an ERROR"
+has "$OUT" "a-u1" "the error names the step"
+has "$OUT" "rig/pool.polecat" "the error names the route"
+has "$OUT" "NEVER claimed for 120m" "the error says how long it went unclaimed"
+has "$OUT" "1 of 1 running session(s) holding nothing" "the error reports the pool's session state"
+has "$OUT" "pool-1" "the error names the free session"
+clear_stores
+
+# A step inside the bound is a pour that has not been picked up YET.
+store alpha "$(openstep a-u1 rig/pool.polecat 60)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a freshly poured step inside the bound is silent"
+clear_stores
+
+# `bd ready` is the offer. A step the queue is not offering is waiting on its
+# predecessor by design — every downstream step of every live molecule is in
+# exactly this state, so judging it would report the whole city.
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-other"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an open step bd ready is not offering is silent"
+hasnt "$OUT" "a-u1" "the blocked step is not named"
+clear_stores
+
+# An assignee means something owns it — the continuation group a pool claim
+# pre-assigns looks exactly like this.
+store alpha "$(printf '{"id":"a-u1","status":"open","assignee":"pool-1","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"rig/pool.polecat"}}' "$(ago 7200)")"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an open step that already has an assignee is not never-claimed"
+clear_stores
+
+# gc.claimed_at means it HAS been claimed once. A re-offered husk is
+# check-step-terminal's REOPENED finding, not this one.
+store alpha "$(printf '{"id":"a-u1","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"rig/pool.polecat","gc.claimed_at":"%s"}}' "$(ago 7200)" "$(ago 9000)")"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step that carries gc.claimed_at is not never-claimed"
+clear_stores
+
+# --- 14b. the silence properties, one pool state at a time ----------------
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-u1"}'
+
+agents "$(agent rig/pool.polecat true 2)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step routed to a SUSPENDED agent is silent"
+has "$OUT" "suspended" "the note says the agent is suspended"
+
+agents "$(agent rig/pool.polecat false 0)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step routed to an agent with no sessions configured is silent"
+has "$OUT" "pool max 0" "the note says nothing is meant to claim it"
+
+# A pool scaled to zero with a queue behind it is the demand probe's business.
+agents "$(agent rig/pool.polecat false 2)"
+sessions "$(live lx-1 pool-1 "" 30 rig/other.agent)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step routed to a pool with no running session is silent"
+has "$OUT" "no running session" "the note says the pool is empty"
+
+# A route nothing answers is I3's finding, and reporting it here too would
+# double-report one defect.
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+agents "$(agent rig/other.agent false 2)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a route that names no agent is left to I3"
+has "$OUT" "names no agent" "the note says the address is unreachable"
+has "$OUT" "I3" "the note hands the finding to the check that owns it"
+clear_stores
+
+# --- 14c. a full pool is backpressure, not starvation ---------------------
+# The live shape this had to get right: both polecats running, both holding a
+# step, two more work beads queued. That is a queue, not a strand.
+agents "$(agent rig/pool.polecat false 2)"
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)" "$(claim a-busy pool-1 60)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a queue behind a pool whose every session is busy is silent"
+has "$OUT" "backpressure" "the note says why it is not a fault"
+clear_stores
+
+# Occupancy is a city-wide question: a pool worker is busy in whichever store
+# its claim happens to live in, which is not the store holding the strand.
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-u1"}'
+store beta "$(claim b-busy pool-1 60)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a worker busy in another store still counts as busy"
+clear_stores
+
+# The codex-polecat shape: alias names the persona, template names the pool,
+# and the claim is stamped with the alias.
+agents "$(agent rig/pool.codex false 2)"
+sessions "$(live lx-1 sess-hicks rig/pool.hicks 30 rig/pool.codex)"
+store alpha "$(openstep a-u1 rig/pool.codex 7200)" "$(claim a-busy rig/pool.hicks 60)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a session busy under its ALIAS is not counted free"
+clear_stores
+# ...and the same session idle IS the finding, joined by template alone.
+store alpha "$(openstep a-u1 rig/pool.codex 7200)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the pool is found by template even when no alias matches the route"
+has "$OUT" "sess-hicks" "the error names the idle session"
+clear_stores
+
+# A singleton agent's work is usually not a formula step, which is why
+# occupancy reads every in-progress bead rather than only the ones arm 1 judges.
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)" \
+  '{"id":"a-anchor","status":"in_progress","assignee":"pool-1","metadata":{}}'
+ready alpha '{"id":"a-u1"}'
+agents "$(agent rig/pool.polecat false 2)"
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a session holding a NON-step bead is not counted free"
+has "$OUT" "backpressure" "the non-step holder makes the pool read as full"
+clear_stores
+
+# --- 14d. gc.execution_routed_to is the fallback route --------------------
+agents "$(agent rig/pool.polecat false 2)"
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(printf '{"id":"a-u1","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.execution_routed_to":"rig/pool.polecat"}}' "$(ago 7200)")"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a step routed only by gc.execution_routed_to is judged"
+has "$OUT" "rig/pool.polecat" "the fallback route is the one reported"
+clear_stores
+
+# --- 14e. the bound is the same one, and configurable ---------------------
+store alpha "$(openstep a-u1 rig/pool.polecat 600)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(GC_DOCTOR_CLAIM_STALL_MINUTES=5 run_check); RC=$?
+eq "$RC" "2" "a 5m bound reports a step offered 10m ago"
+OUT=$(GC_DOCTOR_CLAIM_STALL_MINUTES=60 run_check); RC=$?
+eq "$RC" "0" "a 60m bound does not"
+clear_stores
+
+# --- 14f. arm 2 degrades and fails closed ---------------------------------
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-u1"}'
+
+# Liveness comes from the same roster arm 1 uses, so a stale one softens this
+# verdict too: those sessions may have exited or taken work since.
+CACHE=7200 sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a session cache older than the bound degrades the finding to a warning"
+has "$OUT" "a-u1" "the warning still names the step"
+has "$OUT" "cache" "the warning says the observation was cache-limited"
+unset CACHE
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+
+OUT=$(AGENTS_RC=1 run_check); RC=$?
+eq "$RC" "1" "an unreadable agent list WARNS, never passes"
+has "$OUT" "never-claimed arm did NOT run" "the warning says the arm was skipped, not clean"
+hasnt "$OUT" "a-u1" "no verdict is reached on the step without the registry"
+
+printf 'not json' > "$TMP/agents-bad.json"
+OUT=$(AGENTS_JSON="$TMP/agents-bad.json" run_check); RC=$?
+eq "$RC" "1" "an unparseable agent list WARNS"
+
+OUT=$(BD_READY_FAIL_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable \`bd ready\` WARNS and says the store was not checked"
+has "$OUT" "NOT checked" "the warning names the unchecked store"
+clear_stores
+agents "$(agent rig/pool.polecat false 2)"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
