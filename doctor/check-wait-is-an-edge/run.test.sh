@@ -31,18 +31,50 @@ GC
 # in the bd-show spelling ({dependency_type,id}) that bd-list never emits.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 sub="${1:-}"; shift || true
-db=""; prev=""; ids=()
+db=""; status=""; prev=""; ids=()
 for a in "$@"; do
-  if [ "$prev" = "--db" ]; then db="$a"; else
-    case "$a" in --*) ;; *) ids+=("$a") ;; esac
-  fi
+  case "$prev" in
+    --db) db="$a" ;;
+    --status|-s) status="$a" ;;
+    *) case "$a" in --*) ;; *) ids+=("$a") ;; esac ;;
+  esac
   prev="$a"
 done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
 case "$sub" in
-  list) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+  list)
+    f="$STORES/$name.json"; if [ ! -f "$f" ]; then printf '[]'; exit 0; fi
+    # `list` FILTERS BY STATUS, because that is the thing under test: a stub
+    # that served every row would pass this suite just as happily with the scan
+    # narrowed back to open. Unfiltered means open only and an unknown value is
+    # refused, both as real bd behaves — a typo in the status list must fail the
+    # store closed here too, not quietly select nothing.
+    sel="${status:-open}"
+    IFS=, read -ra want <<< "$sel"
+    for one in "${want[@]}"; do
+      case "$one" in
+        open|in_progress|blocked|deferred|closed|pinned|hooked) ;;
+        *) printf 'Error: invalid status "%s"\n' "$one" >&2; exit 1 ;;
+      esac
+    done
+    # The row's status is bound BEFORE the pipe: read as `.status` to the right
+    # of one, it would resolve against the split array and select every row.
+    if out=$(jq -c --arg sel "$sel" '[ .[] | select((.status // "open") as $st | ($sel | split(",")) | index($st) != null) ]' < "$f" 2>/dev/null); then
+      printf '%s' "$out"
+    else
+      # A fixture carrying RAW control bytes is not parseable JSON and cannot be
+      # filtered here. It passes through for run.sh's own scrubber to face,
+      # which is the property such a fixture exists to test.
+      cat "$f"
+    fi ;;
   show)
     f="$STORES/$name.show.json"; [ -f "$f" ] || f="$STORES/$name.json"
     if [ ! -f "$f" ] || [ "${#ids[@]}" -eq 0 ]; then
@@ -51,7 +83,7 @@ case "$sub" in
     echo "${#ids[@]}" >> "${SHOW_CALLS:-/dev/null}"
     # Real bd reads a DB and emits parseable JSON, so the stub scrubs the raw
     # control bytes a fixture puts in the LIST payload before parsing it here.
-    out=$(tr -d '\000-\011\013-\037' < "$f" \
+    out=$(scrub < "$f" \
           | jq -c '[ .[] | select(.id as $i | ($ARGS.positional | index($i))) ]' --args "${ids[@]}")
     if [ "$out" = "[]" ]; then
       printf '{"error":"no issues found matching the provided IDs"}'; exit 1
@@ -294,6 +326,29 @@ printf '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},"note
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a payload carrying raw control characters still yields the finding"
 has "$OUT" "aa-101" "the finding survives the control characters"
+
+# --- 21. the scan covers every LIVE status, not just open -----------------
+# A wait does not become answerable because the bead stating it was claimed or
+# parked. Filtering to `open` drops exactly the waits that have sat long enough
+# for their bead to move status, and calls the store clean.
+for st in in_progress blocked deferred hooked pinned; do
+    store '[{"id":"aa-101","status":"'"$st"'","metadata":{"blocked_on":"aa-202"}},
+            {"id":"aa-202","status":"open","metadata":{}}]'
+    OUT=$(run_check); RC=$?
+    eq "$RC" "2" "an unedged wait stated by a $st bead is reported"
+    has "$OUT" "aa-101" "the $st bead is named as the waiter"
+done
+
+# --- 22. a CLOSED bead's stated wait is not a finding ---------------------
+# Closed is the one status that ends a wait, so the scan stops there rather
+# than reaching for --all. This also pins the stub: were --status ignored, the
+# closed bead below would be listed and reported, and every case in 21 would
+# pass against a scan that never left `open`.
+store '[{"id":"aa-101","status":"closed","metadata":{"blocked_on":"aa-202"}},
+        {"id":"aa-202","status":"open","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a wait stated by a CLOSED bead is not reported"
+hasnt "$OUT" "aa-101" "the closed bead is not named in the output"
 
 echo
 echo "check-wait-is-an-edge: $PASS passed, $FAIL failed"
