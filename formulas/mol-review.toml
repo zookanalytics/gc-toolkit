@@ -244,7 +244,7 @@ required fix.
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, stamping `check.<gate>` with
 read-back, filing and slinging one rework child on request-changes, enforcing
-the round cap, and refusing a head that moved past your pin:
+the round cap, and refusing a pin the branch no longer carries:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -260,10 +260,13 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads, and never run `gh pr review --approve`.
 
-**2. Failure arms.** "Head moved" from signoff.sh is not a failure — it is a
-different commit: re-pin at the new head, redo load-dispatch and review, and
-call it again with the new OID; what you must not do is re-submit the verdict
-you already have. Any other failure, in this order: append your findings to
+**2. Failure arms.** "head moved" from signoff.sh is not a failure — a rework
+rebased your pin off the branch while you were reading it, so your findings
+describe a diff that is no longer there: re-pin at the live head signoff
+names, redo load-dispatch and review, and call it again with the new OID.
+What you must not do is re-submit the verdict you already have. A branch that
+only grew does not refuse — signoff binds at your pin and the merge holds on
+the head mismatch. Any other failure, in this order: append your findings to
 the review bead (`gc bd update "$REVIEW_BEAD" --append-notes ...`); close the
 step chain forward with part 3's step-close loop; then — only after the chain
 is closed — restore the bead's claimability from the dispatch-stamped pool

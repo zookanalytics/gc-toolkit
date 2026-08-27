@@ -182,7 +182,11 @@ The review bead carries the `mol-review` formula (attached at dispatch via
 `--reviewed-oid` outranks it; the live head is only a last-resort fallback) —
 so a push between dispatch and verdict stamps green at the *reviewed* commit
 and correctly fails the merge's live-head condition instead of green-lighting
-an unreviewed head.
+an unreviewed head. That is the branch growing. A rebase, amend or squash
+takes the pinned commit off the branch instead, and `signoff.sh` refuses both
+verdicts and writes nothing: findings about a diff the branch no longer
+carries mint a rework child with nothing to implement. The reviewer re-pins at
+the live head and reviews that commit.
 
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —

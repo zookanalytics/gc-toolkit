@@ -659,4 +659,3 @@ yours is not to filter.
 Operator fast path: "learn this: …" files the same bead with the
 operator's wording as `## Statement`, plus `obs.source=operator` and
 `--set-metadata obs.endorsed=operator`.
-
