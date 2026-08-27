@@ -10,10 +10,12 @@
 #   gc-helm-build.sh --deploy     order mode: skip cities without the helm
 #                                 service; build iff stale; restart onto a
 #                                 published binary not yet serving
-# Staleness has two axes: sources newer than the artifact (find -newer), and
-# whether the binary can READ the stores it serves. The second is fixed by the
-# beads library it embedded, while the store schema moves under it on a `bd`
-# upgrade; `helm-svc probe` asks it, and ok is not reported without it.
+# Staleness has three axes: sources newer than the artifact (find -newer), a
+# recorded binary_rev other than the revision this run sees (find -newer is
+# blind to an input a commit deleted), and whether the binary can READ the
+# stores it serves. The last is fixed by the beads library it embedded, while
+# the store schema moves under it on a `bd` upgrade; `helm-svc probe` asks it,
+# and ok is not reported without it.
 # Exit: 0 current and serving (or nothing to do) · 1 build/restart failed
 # (the previous binary is left exactly as it was), or the published binary
 # cannot read the city's bead stores · 2 usage.

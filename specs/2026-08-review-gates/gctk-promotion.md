@@ -63,7 +63,8 @@ readable as a script.
 ## Build and deploy
 
 Same pattern as helm-svc, same lessons: a `gctk-build` city order (cooldown,
-staleness by `find -newer`, atomic publish, never build in the exec path),
+staleness by `find -newer` and by the recorded revision, atomic publish, never
+build in the exec path),
 launcher resolves the prebuilt binary. Until the binary exists at the
 deployed path, the shell scripts remain — the driver prefers `gctk` when
 present, falls back to the script during migration, and drops the fallback

@@ -759,22 +759,25 @@ So the two jobs are separate:
 | build | `assets/scripts/gc-helm-build.sh` | the `helm-build` order, every 5m |
 | start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
 
-`gc-helm-build.sh` rebuilds when a source is newer than the binary — an
-ordinary `find -newer` dependency, the same question `make` asks — publishes by
-atomic rename so a failed link can never truncate a serving binary, and in
+`gc-helm-build.sh` rebuilds when a source is newer than the binary, an
+ordinary `find -newer` dependency, the same question `make` asks. It also
+rebuilds when the build-status record names a revision other than the one the
+tick sees. It publishes by atomic rename so a failed link can never truncate a
+serving binary, and in
 `--deploy` mode restarts the service onto what it published. Build and restart
 are one step on purpose: a new binary that nothing restarts onto is the other
 half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
 binary built at 02:40 while three commits touching `services/helm` had landed
 after it, all three inert in the served board.
 
-**Source mtime is not the only way to go stale.** A binary can be newer than
-every source file and still fail every gather, because what it can read is
-fixed by the beads library it embedded and the store's schema moves
-independently. `find -newer` is structurally blind to that: deleting a file
-makes nothing newer, and a dependency that drifts under an unchanged `go.mod`
-never touches a source at all. So the gate also asks `helm-svc probe`, and
-`build-status` records the answer rather than the build:
+**Source mtime is not the only way to go stale.** `find -newer` is
+structurally blind twice over. Deleting a file makes nothing newer, which is
+what the recorded `binary_rev` catches. And a dependency that drifts under an
+unchanged `go.mod` never touches a source at all, which leaves a binary newer
+than every source that still fails every gather: what it can read is fixed by
+the beads library it embedded, and the store's schema moves independently. So
+the gate also asks `helm-svc probe`, and `build-status` records the answer
+rather than the build:
 
 | `build-status` | meaning |
 |---|---|
@@ -853,11 +856,10 @@ atomic rename:
 
 `source_rev` and `binary_rev` diverge exactly when a build failed and the last
 good binary kept serving, which is the gap worth showing. A tick that finds the
-two unequal rebuilds for that reason alone: `find -newer` cannot see an input a
-commit deleted, so the mtime test by itself would leave a deletion-only commit
-recorded as current. `checked_at` is the
-only field a quiet tick moves, so it is the only one that can say the build
-order itself has stopped.
+two unequal rebuilds for that reason alone. That is the test that makes a
+deletion-only commit visible, since the mtime test by itself would leave one
+recorded as current. `checked_at` is the only field a quiet tick moves, so it
+is the only one that can say the build order itself has stopped.
 
 `internal/source.GatherPackHealth` reads every
 `<city>/.gc/services/*/build-status.json` — helm's own, gctk's, anything else

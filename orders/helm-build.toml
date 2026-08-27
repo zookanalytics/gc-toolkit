@@ -1,7 +1,10 @@
 # helm-build — keep the served helm binary current with services/helm.
 # The service launcher only exec's a prebuilt binary (a build cannot fit the
 # 5s readiness probe), so the build runs here and build-and-restart is ONE
-# step. Staleness is `find -newer`; a tick with nothing to do costs one find.
+# step. Staleness is `find -newer`, a recorded binary_rev other than the
+# revision the tick sees (find -newer is blind to an input a commit deleted),
+# or a binary that cannot read the city's bead stores; a tick with nothing to
+# do costs one find, one record read and one probe.
 # timeout 900s: a cold build measured 2m29s and must be allowed to finish.
 # No-op in cities that declare no helm service.
 [order]

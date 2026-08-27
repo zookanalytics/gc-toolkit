@@ -1,8 +1,10 @@
 # gctk-build — keep the deployed gctk binary current with services/gctk.
 # The merge cadence exec's a prebuilt binary and builds nothing, so the build
-# runs here. Staleness is `find -newer`; a tick with nothing to do costs one
-# find and one status write. There is no service to restart: a published gctk is
-# serving the moment it lands.
+# runs here. Staleness is `find -newer` OR a recorded binary_rev other than the
+# revision the tick sees, since find -newer is blind to an input a commit
+# deleted; a tick with nothing to do costs one find, one record read and one
+# status write. There is no service to restart: a published gctk is serving the
+# moment it lands.
 # timeout 300s: the module is stdlib-only, so even a cold build is seconds —
 # the bound is for a wedged toolchain, not for the compile.
 [order]

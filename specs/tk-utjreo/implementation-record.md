@@ -90,8 +90,32 @@ The build-status rows in that table come from `gc-helm-svc.test.sh`. Both
 builders decide staleness with the same two tests and write the record through
 the same no-op path, so that suite is where the shared pattern is pinned;
 `gc-gctk-build.sh`'s copy was checked by running the deletion-only sequence
-directly — build, delete a source, commit, re-run — against the script before
-and after the fix.
+directly: build, delete a source, commit, re-run, against the script before and
+after the fix.
+
+`check-cadence-live`'s suite reaches arm 3, which resolves a gctk binary
+through the ambient city when `GCTK_BIN` is unset. Every order case therefore
+runs through the `run_check` helper, which pins `GCTK_BIN` at a path that does
+not exist. A case that writes its own `bash "$CHECK"` silently loses the pin
+and starts reading the operator's deployed binary; the suspended-rig case did,
+and failed against a city carrying a deployed gctk while passing everywhere
+else. Vary an input through the helper instead.
+
+## Two artifacts named build-status
+
+`gc-helm-build.sh` writes both, and they answer different questions.
+`<state_root>/build-status` is one line — `ok`, `unreadable`, `unprobed`,
+`failed` — and reports whether the binary can READ the city's bead stores;
+`write_status` writes it and `gc-helm-svc.test.sh` asserts on its kinds.
+`<state_root>/build-status.json` is the record this bead added, and reports
+what the component is SERVING against what the sources say; `write_record`
+writes it and the board's PACK rows read it. `gc-gctk-build.sh` writes only the
+second — gctk reads no stores, so it has nothing to probe.
+
+Collapsing them was considered and rejected: readability is a property of the
+running binary that only a probe can answer, and revision currency is a
+property of the build that only the build order knows. One record carrying both
+would report a field it cannot always fill.
 
 ## Not landed, and why
 

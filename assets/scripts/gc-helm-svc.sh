@@ -40,7 +40,7 @@ gc-helm-svc: no binary at $BIN — nothing to exec.
 The build runs out of band and has not produced one yet.
   build now: assets/scripts/gc-helm-build.sh
   automatic: the 'helm-build' order (orders/helm-build.toml) builds and restarts
-             this service whenever services/helm is newer than the binary.
+             this service whenever services/helm has moved past the binary.
 Deliberately NOT building here: the readiness window is 5s and this build needs
 12.5s warm / 2m29s cold, so a build started here is always killed with the start.
 MSG

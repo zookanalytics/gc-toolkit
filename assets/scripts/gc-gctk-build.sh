@@ -8,7 +8,9 @@
 #   gc-gctk-build.sh              build iff the binary is missing or stale
 #   gc-gctk-build.sh --deploy     order mode; same work, and the exit status
 #                                 is what the order records
-# Staleness is an ordinary artifact-older-than-sources check (find -newer).
+# Staleness has two axes: sources newer than the artifact (find -newer), and
+# a recorded binary_rev other than the revision this run sees. Both are needed
+# — find -newer is blind to an input a commit deleted.
 # Exit: 0 current (or built) · 1 build failed (the previous binary is left
 # exactly as it was) · 2 usage.
 # Env: GC_SERVICE_STATE_ROOT / GC_CITY_ROOT / GC_CITY (state root), GC_GO_BIN,
