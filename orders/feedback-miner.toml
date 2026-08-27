@@ -1,9 +1,10 @@
 # feedback-miner — daily sweep of THIS rig's merged/closed PR review threads
 # for corrective feedback about standing behavior; files closed observation
-# beads (obs.source=miner), deduped on obs.provenance. Observations only —
-# judging is the distiller's. Rig-scoped with a BARE pool so the wisp lands
-# in, and is claimed from, each importing rig's own polecat store; no home-rig
-# gate on purpose (D5) — a rig without gh/GitHub/auth no-ops on step 1.
+# beads (obs.source=miner), deduped on (obs.provenance, obs.category).
+# Observations only — judging is the distiller's. Rig-scoped with a BARE
+# pool so the wisp lands in, and is claimed from, each importing rig's own
+# polecat store; no home-rig gate on purpose (D5) — a rig without
+# gh/GitHub/auth no-ops on step 1.
 [order]
 description = "learning: mine this rig's merged/closed PR review threads for corrective feedback; file observation beads"
 formula = "mol-feedback-miner"

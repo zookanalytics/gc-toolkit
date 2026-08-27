@@ -49,17 +49,23 @@ routed, never assigned, and never blocks anything.
 | key | values |
 |---|---|
 | `task_kind` | `observation` |
-| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates |
+| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs |
 | `obs.scope` | `repo:<rig>` \| `agent:<role>` \| `global` — guess narrow |
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
+| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 
-**Dedup is on `obs.provenance`, always.** The same event captured by
-self-report and by the miner merges to one occurrence: the miner checks
-before filing, and the distiller checks again before counting.
+**Dedup is on the pair (`obs.provenance`, `obs.category`), always.** The
+same finding captured by self-report and by the miner merges to one
+occurrence: the miner checks before filing, and the distiller checks again
+before counting. The category half is what keeps two findings from one
+sitting or one review comment from collapsing into one, because provenance
+names the event and a single event can produce several findings. Recurrence
+and source-diversity rollups still count distinct `obs.provenance`, so one
+event stays one occurrence and one voice however many findings came out of
+it.
 
 ## Capture channels
 

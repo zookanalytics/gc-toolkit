@@ -35,6 +35,12 @@ The provenance key's `<owner/repo>` is the full slug — derive it with
 `gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
 origin URL.
 
+Provenance names the turn or the comment, not the finding, so it is only
+half of the dedup key and `obs.category` is the other half. One turn can
+bring two separate findings: file a bead for each and give them different
+`obs.category` slugs. Identical slugs collapse the two into one
+occurrence and the second is lost.
+
 Filing is recording, not proposing: never edit a prompt, fragment, or
 skill in response to feedback — the distiller and a reviewed PR do
 that. Set `obs.directive=standing` only when the feedback itself states
