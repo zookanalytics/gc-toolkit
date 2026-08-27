@@ -106,12 +106,13 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I8** | Every step bead reaches a terminal state: no open step under a closed root, no frontier stalled past its bound. | `doctor/check-step-terminal` |
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
+| **I11** | Every claimed step is being advanced: a step in a claimed state is held by a running session that is still producing output. | `doctor/check-claim-advancing` (tk-beecuu): reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps. |
 
 Two further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config) and `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent). That is the whole set:
-**10 checks, each asserting a live structural property** — none greps the
+**11 checks, each asserting a live structural property** — none greps the
 source for a past fix.
 
 ---
