@@ -675,10 +675,23 @@ GATES
       # pool can claim it, and the mark would retire the only signal that could
       # re-file it. A CLOSED child is already dispositioned, so refusing on one
       # could never converge. Only a definitively closed status skips the check;
-      # an unreadable one still demands the route.
+      # an unreadable one still demands both stamps.
       cst=$(gc bd show "$CFIX" --json 2>/dev/null | scrub \
         | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
       if [ "$cst" != "closed" ]; then
+        # An absent prepare_mode resumes as rebase, so a child routed without it
+        # rewrites the very branch the classifier above called shared. Re-stamp
+        # rather than refuse: a batch already covered skips the create block, so
+        # a child stranded by a dropped stamp could take one nowhere else.
+        mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
+        if [ "$mgot" != "$prepare_mode" ]; then
+          gc bd update "$CFIX" --set-metadata prepare_mode="$prepare_mode" >/dev/null 2>&1 || true
+          mgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty' 2>/dev/null)
+        fi
+        if [ "$mgot" != "$prepare_mode" ]; then
+          echo "$PROG: WARN comment rework $CFIX did not record prepare_mode=$prepare_mode; left unrouted and NOT watermarking (an absent mode resumes as rebase, which would rewrite '$fix_branch')" >&2
+          skipped=$((skipped + 1)); continue
+        fi
         rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         if [ "$rgot" != "$FIX_POOL" ]; then
           gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true

@@ -265,10 +265,11 @@ that way is not one the arm holds the pass over.
 
 **The watermarks** separate a comment already routed from a new one. Each is the
 highest id routed in its own id space, and each advances only after the routing
-reads back, so a comment nothing answered cannot fall below the mark. The two
-spaces are never merged: a reply can land on an old review, so review ids cannot
-stand in for comment ids. They rest on one assumption — that ids rise with
-visibility.
+reads back, so a comment nothing answered cannot fall below the mark. For a
+rework child that is two stamps: the `prepare_mode` it must resume in, and the
+route that makes it claimable. The two spaces are never merged: a reply can land
+on an old review, so review ids cannot stand in for comment ids. They rest on
+one assumption — that ids rise with visibility.
 
 Both spaces are review spaces: the inline comments on `pulls/N/comments`, and the
 bodies of COMMENTED reviews on `pulls/N/reviews`. A plain conversation comment on

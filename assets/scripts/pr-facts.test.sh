@@ -18,9 +18,10 @@
 # Also covers the POSTURE record and the comment watermark: the declared
 # vocabulary, posture pinned to the live head and written only on change, an
 # unanswered comment routing to a fix-pool child or (under a human hold) to a
-# visit, the watermark advancing only after that routing reads back, a comment
-# above the mark re-firing while one below it stays answered, and the reads that
-# record nothing rather than clear a standing `commented`.
+# visit, the watermark advancing only after both that child's mode and its route
+# read back, a comment above the mark re-firing while one below it stays
+# answered, and the reads that record nothing rather than clear a standing
+# `commented`.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -460,6 +461,29 @@ has "$out" "already covers this batch; re-checking its route" "the next pass re-
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…repairs it in place"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
 eq "$(meta W4 pr_comment_watermark)" "9300" "…and only then does the mark move"
+
+echo "# …a child whose prepare_mode stamp drops is never routed, nor watermarked past"
+# The classifier called this head SHARED. mol-polecat-work reads an absent mode
+# as rebase, so routing the child without it force-pushes the branch the mode
+# exists to spare — the one failure a blocks edge does not contain.
+store "[$(anchor W6 50 '' 'integration/convoy-77')]"
+printf '%s' "$(prview 50 OPEN BLOCKED MERGEABLE '' 'integration/convoy-77')" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_50.json"
+echo '[]' > "$GH_DIR/reviews_50.json"
+printf '[{"id":9600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_50.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:prepare_mode" run)
+has "$out" "did not record prepare_mode=merge; left unrouted and NOT watermarking" "the lost mode stamp is caught BEFORE the route"
+eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the child is never routable AND rewriting"
+eq "$(meta W6 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
+eq "$(meta W6 pr_comment_disposition)" "<absent>" "…with nothing recorded as its disposition"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+out=$(run)
+has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
+eq "$(meta new-2 prepare_mode)" "merge" "…re-stamps the mode it classified"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(meta W6 pr_comment_watermark)" "9600" "…and only then does the mark move"
 
 echo "# …a CLOSED child is dispositioned, so an unrouted one still converges"
 store "[$(anchor W5 49)]"
