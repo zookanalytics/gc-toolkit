@@ -32,8 +32,8 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix (with trailing dot when bound) for the refinery handoff address."
-default = ""
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: an empty prefix renders `<rig>/refinery`, an address no agent holds, and the refinery's exact-match find-work makes that strand silent."
+default = "gc-toolkit."
 
 [vars.affected_tests_command]
 description = "Shell-safe command that reads `git diff --name-only origin/{{base_branch}}...HEAD` and runs the matching test subset. Empty = run full test_command."
@@ -338,12 +338,26 @@ named-session work must not read as pool demand.
 # >>> submit-target-consume
 [ -n "${LANDING_TARGET:-}" ] || { echo "LANDING_TARGET unset — run step 1b before this arm."; gc runtime drain-ack; exit 1; }
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
+if [ -z "$ROSTER" ]; then
+    echo "roster unreadable — handing off to $REFINERY_TARGET unchecked"
+elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
+    BOUND=$(grep 'refinery$' <<< "$ROSTER" | sort -u | tr '[:space:]' ' ') || true
+    echo "REFINERY ADDRESS NAMES NO AGENT: $REFINERY_TARGET"
+    echo "The refinery reads its queue by exact-match assignee, so a bead sent here is never seen and nothing reports it."
+    echo "Bound refineries: $BOUND"
+    gc runtime drain-ack
+    exit 1
+fi
 gc bd update "$WORK_BEAD_ID" --status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --append-notes "Implemented: <brief summary>"
 # <<< submit-target-consume
 ```
 
-`${GC_RIG:+$GC_RIG/}` renders the rig prefix only inside a rig session; a
-hand-written empty prefix (`/{{binding_prefix}}refinery`) strands beads.
+`${GC_RIG:+$GC_RIG/}` renders the rig prefix only inside a rig session. An
+empty binding prefix renders `<rig>/refinery`, an address no agent holds.
+The refinery's find-work is exact-match on assignee, so a bead sent there is
+never read and nothing reports the strand. The roster check fails closed on
+that address rather than trusting the prefix to have rendered.
 
 **6. Wake the refinery (belt-and-suspenders — it polls anyway):**
 ```bash
