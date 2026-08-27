@@ -90,10 +90,10 @@ case "$GATE$RESOLVE$CONSUME$CLOSE$HALT$HALT_CLOSE" in
 esac
 
 # The declared default is what a source-read reconstruction renders, and it is
-# reached only when the poured step was bypassed — exactly when nothing else is
-# watching. Empty renders `<rig>/refinery`, an address no agent holds, and the
-# refinery's exact-match find-work then never reads the bead (tk-xkz600). Every
-# substitution below pins `gc-toolkit.` explicitly, so none of them can see it.
+# reached only when the poured step was bypassed. Empty renders `<rig>/refinery`,
+# an address no agent holds, and the refinery's exact-match find-work then never
+# reads the bead. Every substitution below pins `gc-toolkit.` explicitly, so none
+# of them can see the default.
 BP_DEFAULT="$(awk '
   /^\[vars\.binding_prefix\]$/ {f=1; next}
   f && /^\[/                    {exit}
@@ -277,8 +277,8 @@ eq "$(run_resolve polecat/tk-work main '{"target":""}')" \
 # `refinery`, which is what makes the empty-prefix address detectable at all.
 ROSTER_OK='[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},{"qualified_name":"myrig/gc-toolkit.refinery"},{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]'
 
-# $3 is set-but-empty on purpose in the bug case, so `${3-...}` (not `${3:-...}`)
-# is the expansion that renders it.
+# $3 is set-but-empty on purpose in the empty-prefix case, so `${3-...}` and not
+# `${3:-...}` is the expansion that renders it.
 run_consume() { # <landing-target> [gc-rig] [binding-prefix] [agents-json|UNREADABLE]
   : > "$TMP/log"
   printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|${3-gc-toolkit.}|g" > "$TMP/consume.sh"
@@ -312,14 +312,12 @@ eq "$(run_consume '')" \
    "1|DRAIN;" \
    "unset LANDING_TARGET: halts instead of writing an empty target"
 
-# THE BUG (tk-xkz600). {{binding_prefix}} rendered empty, which is what the
-# formula's own declared default produced whenever this command was rebuilt from
-# the .toml instead of read out of the poured step. The address becomes
-# `gc-toolkit/refinery`; the refinery's find-work is exact-match on assignee, so
-# the bead is simply never read and no error is raised anywhere. Two occurrences
-# in one day, one of them found only because the refinery happened to trip over
-# it out of band. The halt must come BEFORE the write, so the log carries DRAIN
-# and no UPDATE at all.
+# An empty {{binding_prefix}} is what the formula's declared default renders
+# whenever this command is rebuilt from the .toml instead of read out of the
+# poured step. The address becomes `gc-toolkit/refinery`. The refinery's
+# find-work is exact-match on assignee, so a bead written there is never read
+# and no error is raised anywhere. The halt must come BEFORE the write, so the
+# log carries DRAIN and no UPDATE at all.
 eq "$(run_consume main gc-toolkit '')" \
    "1|DRAIN;" \
    "empty binding prefix: halts on an address no agent holds, writing nothing"
@@ -348,8 +346,7 @@ eq "$(run_consume main myrig gc-toolkit. '[]')" \
 # the writer finishes, and the roster pipeline returns non-zero whenever `gc`
 # fails, which is the case the permissive arm exists to serve. Either one turns
 # a correct handoff into a halt under `set -euo pipefail`, so run the real
-# snippet under it. run_strict_consume mirrors run_consume with the strict
-# preamble prepended.
+# snippet under it.
 run_strict_consume() { # <landing-target> <gc-rig> <agents-json|UNREADABLE>
   : > "$TMP/log"
   printf 'set -euo pipefail\n' > "$TMP/strict.sh"
