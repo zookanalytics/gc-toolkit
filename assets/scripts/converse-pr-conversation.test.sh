@@ -91,6 +91,14 @@ else
     has "no tool: says the conversation is unread" "UNREAD" "$out"
     has "no tool: hands over the paginate slurp, not a plain .[]?" "jq -s '[.[][]?]'" "$out"
     has "no tool: names the PR number it could not read" "475" "$out"
+
+    out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475#discussion_r1"}}]' "$TMPD/nowhere")"
+    has "no tool: a fragment on the pull URL still yields a bare number" "gh pr view 475 --json" "$out"
+    hasnt "no tool: the fragment does not ride into the command" "475#discussion_r1" "$out"
+
+    out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475?w=1"}}]' "$TMPD/nowhere")"
+    has "no tool: a query string on the pull URL still yields a bare number" "pulls/475/comments" "$out"
+    hasnt "no tool: the query string does not ride into the command" "475?w=1" "$out"
 fi
 
 echo "── the seam: the tier the prompt asks for is a tier the tool serves ──"

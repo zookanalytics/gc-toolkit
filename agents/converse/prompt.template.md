@@ -275,7 +275,7 @@ The loop, every visit:
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/tools/gc-bd-universe.sh" ] && { UNIVERSE="$cand/tools/gc-bd-universe.sh"; break; }
    done
-   PR=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata as $m | ($m.pr_number // "" | tostring) as $n | if $n != "" then $n else (($m.pr_url // "") | split("/pull/") | if length > 1 then (.[1] | split("/") | .[0]) else "" end) end')
+   PR=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata as $m | ($m.pr_number // "" | tostring) as $n | if $n != "" then $n else (($m.pr_url // "") | split("/pull/") | if length > 1 then ((.[1] | capture("^(?<d>[0-9]+)") | .d) // "") else "" end) end')
    if [ -n "$PR" ] && [ -n "$UNIVERSE" ]; then
      "$UNIVERSE" fetch "$SUBJECT" conversation
    elif [ -n "$PR" ]; then
