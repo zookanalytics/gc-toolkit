@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# doctor/check-routed-work-claimable — I3: routed and assigned work names a
-# live target. Arm 1: an open, unassigned bead's gc.routed_to is byte-identical
+# doctor/check-routed-work-claimable — I3: routed and assigned work is
+# claimable. Arm 1: an open, unassigned bead's gc.routed_to is byte-identical
 # to a live agent identity or a sentinel — the pool offer is exact string
 # equality (gascity hookClaimMatchesRoute), so a rig-unqualified or padded
 # route is invisible to every pool. Arm 2: an open, ASSIGNED bead's assignee is
 # held to the same test — assignment polls are the same exact-match contract.
 # Arm 3: no scope="rig" order is registered with no rig bound (an unbound copy
-# strands an unclaimable workflow root in the city store every fire).
+# strands an unclaimable workflow root in the city store every fire). Arm 4:
+# an open, unassigned, routed bead appears in `bd ready` or in `bd blocked` —
+# an address arms 1-2 accept still names nobody who can be OFFERED the bead,
+# and a bead in neither list waits where no queue reports it.
 # Values are compared AS STORED; normalization is a diagnostic, never a pass.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
@@ -17,8 +20,12 @@ dir="${GC_PACK_DIR:-.}"
 BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 # Deliberate "a person must decide" markers; exact match only.
 SENTINELS='["human"]'
+# Types `bd ready` never returns (beads sqlbuild.ReadyWorkExcludeTypes + its
+# default infra types); routing one is a different mistake from stranding it.
+READY_EXCLUDES=" merge-request gate molecule rig agent role message "
 
 errors=(); warnings=(); notes=()
+declare -A addr_errors=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
@@ -82,7 +89,6 @@ while IFS=$'\037' read -r rig_name rig_path; do
         warnings+=("$label: open-bead listing from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
     fi
-    [ -n "$rows" ] || continue
     while IFS=$'\037' read -r key class id valjson fix; do
         [ -n "$key" ] || continue
         case "$class" in
@@ -92,7 +98,61 @@ while IFS=$'\037' read -r rig_name rig_path; do
             ambiguous) errors+=("$label bead $id: $key=$valjson names no agent — it is the rig-unqualified form of $fix, none of which reads this store") ;;
             *)         notes+=("$label bead $id: $key=$valjson matches no live identity and no rig-qualified form of one — unreachable, but indistinguishable from an unknown sentinel; reported, not judged") ;;
         esac
+        case "$class" in blank|padded|repair|ambiguous) addr_errors["$id"]=1 ;; esac
     done <<< "$rows"
+
+    # Arm 4 — reachability. A valid address is not an offer: a pool offers what
+    # `bd ready` returns, so a routed bead in neither `bd ready` nor `bd blocked`
+    # is offered by nobody and shows its wait to nobody.
+    ready_raw=$(run_bounded bd ready --db "$rig_path/.beads" --json --limit 0 2>/dev/null); ready_rc=$?
+    blocked_raw=$(run_bounded bd blocked --db "$rig_path/.beads" --json 2>/dev/null); blocked_rc=$?
+    if [ "$ready_rc" -ne 0 ] || [ -z "$ready_raw" ] || [ "$blocked_rc" -ne 0 ] || [ -z "$blocked_raw" ]; then
+        warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability")
+        continue
+    fi
+    offered=$(printf '%s\n%s\n' "$ready_raw" "$blocked_raw" | strip_ctl \
+        | jq -r '.[]? | (.id // empty) | tostring' 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        warnings+=("$label: the \`bd ready\`/\`bd blocked\` listings from $rig_path/.beads could not be parsed — routed work there was NOT checked for reachability")
+        continue
+    fi
+    unset -v offerable; declare -A offerable
+    while IFS= read -r oid; do
+        [ -n "$oid" ] && offerable["$oid"]=1
+    done <<< "$offered"
+    cand=$(printf '%s' "$raw" | strip_ctl | jq -r '
+        .[]?
+        | select(((.assignee // "") | tostring) == "")
+        | select(((((.metadata // {})["gc.routed_to"]) // "") | tostring) != "")
+        | [ (((.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")),
+            ((.issue_type // "") | tostring),
+            ((((.metadata // {})["gc.routed_to"]) // "") | tostring),
+            ((.parent // "") | tostring),
+            ([(.dependencies // [])[] | select(((.type // "") | tostring) == "blocks")
+              | ((.depends_on_id // "") | tostring) | select(. != "")] | join(", "))
+          ] | join("\u001f")' 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        warnings+=("$label: routed beads in $rig_path/.beads could not be enumerated — this store was NOT checked for reachability")
+        continue
+    fi
+    while IFS=$'\037' read -r id btype route parent blockers; do
+        [ -n "$id" ] || continue
+        [ -n "${addr_errors[$id]:-}" ] && continue
+        [ -n "${offerable[$id]:-}" ] && continue
+        case "$READY_EXCLUDES" in
+            *" $btype "*)
+                notes+=("$label bead $id: gc.routed_to=\"$route\" is set on a $btype, a type \`bd ready\` never returns — in neither list by that type's design rather than by a stranded route; reported, not judged")
+                continue ;;
+        esac
+        stranded="$label bead $id: gc.routed_to=\"$route\" is set, but the bead is in neither \`bd ready\` nor \`bd blocked\` — no pool offers it and no queue shows it waiting"
+        if [ -n "$parent" ]; then
+            errors+=("$stranded; it has parent $parent, and a parent-child child inherits its ancestor's blocked flag and drops out of ready — a routed bead must be parentless, or slung so a parentless workflow root carries the demand")
+        elif [ -n "$blockers" ]; then
+            errors+=("$stranded; it depends on $blockers, which \`bd blocked\` does not name as an explaining wait — check the edge direction, since a child blocked BY the bead it exists to unblock never runs (d5cd6fb)")
+        else
+            errors+=("$stranded; it has no parent and no blocks edge, so its blocked flag names nothing to wait for")
+        fi
+    done <<< "$cand"
 done <<< "$scopes"
 
 # Arm 3 — a live registration with no rig bound whose order declares scope="rig".

@@ -2,7 +2,9 @@
 # Hermetic test for doctor/check-routed-work-claimable (I3). Stub gc/bd only.
 # Covers: exact-equality route classification (repair / candidates / padded /
 # blank / unknown), the sentinel and empty exemptions, the widened assignee
-# arm, the folded rig-scoped-order arm, and every fail-closed probe.
+# arm, the folded rig-scoped-order arm, the reachability arm (stranded /
+# legitimate wait / parent shape / dependency shape / excluded type), and
+# every fail-closed probe.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -43,11 +45,21 @@ esac
 GC
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
-db=""; prev=""
+sub="$1"; db=""; prev=""
 for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
-f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
+case "$sub" in
+  list)    f="$STORES/$name.json" ;;
+  # A healthy store offers every open bead, so `ready` serves the `list`
+  # fixture unless a case overrides it, and `blocked` is empty unless one does.
+  ready)   [ "$name" = "${BD_FAIL_READY:-}" ] && exit 3
+           f="$STORES/$name.ready.json"; [ -f "$f" ] || f="$STORES/$name.json" ;;
+  blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && exit 3
+           f="$STORES/$name.blocked.json" ;;
+  *) printf '[]'; exit 0 ;;
+esac
+if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
@@ -59,6 +71,12 @@ routed() { printf '{"id":"%s","status":"open","metadata":{"gc.routed_to":"%s"}}'
 assigned() { printf '{"id":"%s","status":"open","assignee":"%s","metadata":{}}' "$1" "$2"; }
 store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.json"; }
 clear_stores() { rm -f "$TMP/stores/"*.json; }
+routed_parent() { printf '{"id":"%s","status":"open","issue_type":"task","parent":"%s","metadata":{"gc.routed_to":"%s"}}' "$1" "$3" "$2"; }
+routed_dep() { printf '{"id":"%s","status":"open","issue_type":"task","dependencies":[{"issue_id":"%s","depends_on_id":"%s","type":"blocks"}],"metadata":{"gc.routed_to":"%s"}}' "$1" "$1" "$3" "$2"; }
+routed_typed() { printf '{"id":"%s","status":"open","issue_type":"%s","metadata":{"gc.routed_to":"%s"}}' "$1" "$3" "$2"; }
+blocked_row() { printf '{"id":"%s","status":"open","blocked_by":["%s"],"blocked_by_count":1}' "$1" "$2"; }
+ready_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.ready.json"; }
+blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
 
 # --- 1. rig-unqualified route: error, repair named ------------------------
 store alpha "$(routed a-1 pack.polecat)"
@@ -153,6 +171,83 @@ clear_stores
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "empty stores are OK"
 has "$OUT" "OK:" "the pass message is the OK line"
+
+# --- 11. the reachability arm: a valid address is not an offer ---------------
+store alpha "$(routed n-1 alpha/pack.polecat)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a routed bead in neither bd ready nor bd blocked is an ERROR"
+has "$OUT" "n-1" "the finding names the bead"
+has "$OUT" 'gc.routed_to="alpha/pack.polecat"' "the finding names the route"
+has "$OUT" "no parent and no blocks edge" "the finding names the shape it matched"
+clear_stores
+
+store alpha "$(routed n-2 alpha/pack.polecat)"
+ready_store alpha; blocked_store alpha "$(blocked_row n-2 w-9)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a routed bead waiting in bd blocked on an open blocker still PASSES"
+hasnt "$OUT" "n-2" "a legitimate wait is the common case, not a finding"
+clear_stores
+
+store alpha "$(routed_parent n-3 alpha/pack.polecat anc-1)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a routed bead a parent excludes from bd ready is an ERROR"
+has "$OUT" "parent anc-1" "the parent shape names the parent"
+clear_stores
+
+store alpha "$(routed_dep n-4 alpha/pack.polecat anc-2)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a routed bead whose blocks edge explains no reported wait is an ERROR"
+has "$OUT" "depends on anc-2" "the dependency shape names the bead it waits on"
+has "$OUT" "edge direction" "the dependency shape names the inverted edge"
+clear_stores
+
+store alpha "$(assigned n-5 alpha/pack.refinery)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an ASSIGNED bead is claimed, not queued — the arm does not judge it"
+clear_stores
+
+store alpha "$(routed n-6 pack.polecat)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead whose ADDRESS is broken is still an ERROR"
+has "$OUT" "set gc.routed_to=alpha/pack.polecat" "arm 1 names the repair"
+hasnt "$OUT" "no pool offers it" "the arm does not pile onto an address that must be fixed first"
+clear_stores
+
+store alpha "$(routed_typed n-7 alpha/pack.polecat molecule)"
+ready_store alpha; blocked_store alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a routed molecule is not an ERROR — bd ready excludes the type by design"
+has "$OUT" "n-7: gc.routed_to=\"alpha/pack.polecat\" is set on a molecule" "the excluded type is still reported"
+clear_stores
+
+# Nothing makes bead ids unique ACROSS stores, so what one store offers must not
+# vouch for the next store's bead of the same id.
+store alpha "$(routed n-8 alpha/pack.polecat)"
+store beta "$(routed n-8 beta/pack.polecat)"
+ready_store alpha "$(routed n-8 alpha/pack.polecat)"; blocked_store alpha
+ready_store beta; blocked_store beta
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an id offered in one store does not vouch for the same id stranded in the next"
+has "$OUT" "beta bead n-8" "the stranded store is the one named"
+hasnt "$OUT" "alpha bead n-8" "the store that offers it is not named"
+clear_stores
+
+# --- 12. the reachability arm fails CLOSED -----------------------------------
+store alpha "$(routed n-9 alpha/pack.polecat)"
+ready_store alpha "$(routed n-9 alpha/pack.polecat)"; blocked_store alpha
+OUT=$(BD_FAIL_READY=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable \`bd ready\` warns instead of passing the store"
+has "$OUT" "NOT checked for reachability" "the warning says the store was skipped, not clean"
+OUT=$(BD_FAIL_BLOCKED=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable \`bd blocked\` warns"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "with both listings readable the same bead passes — the warning was the probe, not the bead"
+clear_stores
 
 echo
 echo "check-routed-work-claimable: $PASS passed, $FAIL failed"

@@ -157,7 +157,7 @@ The pack's nine checks, and what a failure means:
 | Check | Asserts (invariant) | First-failure cause |
 |---|---|---|
 | `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml` (I2) | a writer minted an undeclared state |
-| `check-routed-work-claimable` | every route and assignee names a live target; rig-scoped orders bound (I3) | a pool renamed, or an order missing its rig registration |
+| `check-routed-work-claimable` | every route and assignee names a live target; routed work is in `bd ready` or in `bd blocked`; rig-scoped orders bound (I3) | a pool renamed, an order missing its rig registration, or routed work stranded outside both queues |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare `check_set`; markers are well-formed `verb@oid` (I6+I7) | a hand-written or truncated marker |
