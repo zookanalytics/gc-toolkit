@@ -98,7 +98,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 |---|---|---|
 | **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check; remainder tracked on tk-wz4igt. |
 | **I2** | The state space is closed: every `merge_result` value and status combo is declared in `lifecycle/lifecycle.toml`. | `doctor/check-state-space` |
-| **I3** | Every routed bead is claimable: route AND assignee name a live target; rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
+| **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
 | **I5** | No bead is closed while the work it represents is unlanded: closed anchor ⇒ `merged` + `merged_sha`, or an explicit terminal state. | `doctor/check-closed-implies-landed` |
 | **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is well-formed `verb@oid`. | `doctor/check-gate-integrity` |
