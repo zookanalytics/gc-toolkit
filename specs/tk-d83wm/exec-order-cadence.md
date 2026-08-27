@@ -20,6 +20,11 @@ guarantee.
 **It does, and by a stronger mechanism.** Read in `rigs/gascity` at the pin this
 work was done against:
 
+> This answer was falsified on 2026-08-27 by tk-8abz4c: the controller's
+> watchdog sweeps every order's tracking bead at 2m, so the gate below is
+> reopened under any pass that runs longer than that. The flock is back. See
+> [specs/tk-8abz4c/single-flight-determination.md](../tk-8abz4c/single-flight-determination.md).
+
 - `cmd/gc/order_dispatch.go`, tick loop: before dispatching, an order is skipped
   when `trackingIndex.hasOpenTracking(...)` reports an open tracking bead for
   its scoped name. A second gate, `hasOpenWork`, checks the same flag and falls
