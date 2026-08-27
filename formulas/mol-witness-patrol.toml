@@ -19,9 +19,9 @@ executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). Escalations go through
 assets/scripts/escalate.sh — one open visit per situation key.
 
-Marked blocks (host-bead-skip, liveness-lookup, husk-guard, patrol-wisp-pour)
-are extracted and executed by their tests; keep markers, keep them
-backslash-free."""
+Marked blocks (host-bead-skip, liveness-lookup, husk-guard, patrol-wisp-pour,
+refinery-queue-nudge) are extracted and executed by their tests; keep markers,
+keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -220,17 +220,24 @@ description = """
 ```bash
 # >>> refinery-queue-nudge
 REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
-QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --json --limit=0)
-printf '%s' "$QUEUE" | jq -r '.[] | [.id, .updated_at, .title] | @tsv'
-DEPTH=$(printf '%s' "$QUEUE" | jq 'if type == "array" then length else empty end' 2>/dev/null)
+# Under a strict shell a plain VAR=$(...) capture exits the step at a failed
+# listing, before the arms below can tell an unreadable queue from an empty
+# one.
+if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --json --limit=0); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+printf '%s' "$QUEUE" | jq -r '.[] | [.id, .updated_at, .title] | @tsv' || true
+DEPTH=$(printf '%s' "$QUEUE" | jq 'if type == "array" then length else empty end' 2>/dev/null) || DEPTH=""
 # The nudge asserts a backlog, so only a counted one may send it: an
 # unconditional send leaves a real backlog worded exactly like the
 # empty-queue ones. Anything that is not a bead array counts nothing to
 # assert — an error body is an object, whose length is its field count.
 case "${DEPTH:-}" in
-  ''|*[!0-9]*) echo "check-refinery: queue listing did not parse; not nudging" >&2; DEPTH=0 ;;
+  ''|*[!0-9]*) DEPTH="" ;;
 esac
-if [ "$DEPTH" -gt 0 ]; then
+if [ "$QUEUE_RC" -ne 0 ] || [ -z "$DEPTH" ]; then
+  echo "check-refinery: queue listing unreadable (rc=$QUEUE_RC); not nudging" >&2
+elif [ "$DEPTH" -eq 0 ]; then
+  echo "check-refinery: queue empty; not nudging" >&2
+else
   OLDEST=$(printf '%s' "$QUEUE" | jq -r 'sort_by(.updated_at // "") | .[0].updated_at // "unknown"')
   gc session nudge "$REFINERY" "Merge queue: $DEPTH open bead(s) assigned to you, oldest untouched since $OLDEST."
 fi
