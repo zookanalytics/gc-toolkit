@@ -29,7 +29,7 @@ treat "advanced past `<oid>`" as needing a fresh review.
 
 | Where | What it does |
 |---|---|
-| `assets/scripts/gate-ensure.sh:258-261` | Cadence arm 1. `green@<oid>` at a head other than `<oid>` falls through to the dispatch block at `:439-448`, which stamps `reviewed_oid=<live head>` and pours `mol-review` onto the review pool. |
+| `assets/scripts/gate-ensure.sh:258-261` | Cadence arm 1. `green@<oid>` at a head other than `<oid>` falls through to the dispatch block at `:418-448`, which stamps `reviewed_oid=<live head>` and pours `mol-review` onto the review pool. |
 | `assets/scripts/pr-facts.sh:324-421` | Cadence arm 4. For a PR-bearing anchor, a gate `green@` or `exception@` a stale head files one re-review child per head. Its comment at `:325` states the shared rule: both verbs bind a verdict to a commit, and a branch past either has had no look at its head. |
 
 The behavior is pinned by `assets/scripts/gate-ensure.test.sh:115-126`, which
