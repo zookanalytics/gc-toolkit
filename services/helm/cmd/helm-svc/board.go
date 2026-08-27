@@ -32,17 +32,26 @@ import (
 //
 // THE --json CONTRACT. The output is a ranked JSON ARRAY of tiles, not the
 // service's {generated_at,total,tiles} envelope, because that array is what
-// gc-helm.sh emits and what assets/scripts/tmux-pick-helm.sh consumes. Field
-// parity with the bash board is pinned by contract_parity_test.go in this
-// package.
+// assets/scripts/tmux-pick-helm.sh consumes: it runs `jq 'length'` and `.[]`
+// over this output, and the envelope would make every row invisible while still
+// parsing cleanly. The fields the picker dereferences are pinned by
+// TestPickerFieldsPresent in main_test.go.
+//
+// WHAT THE DEFAULT ANSWERS. The operator's queue (board.OperatorQueue), not the
+// city overview. The two are different questions and only one of them is asked
+// at a keystroke: the overview ranks every anchor together, where a demand owed
+// by a person carries a subtree of one and a stranded container carries
+// hundreds, so the queue is buried under the overview by construction rather
+// than by accident. `--all` is the overview, and it is the only way to it.
 
 const boardUsage = `Usage:
-  helm-svc board [--json] [--limit=N] [--timeout=SECONDS]
+  helm-svc board [--all] [--json] [--limit=N] [--timeout=SECONDS]
 
-  Cross-rig human-attention board — the CLI view of the same gather and
-  ranking the Helm dashboard serves.
+  What is owed by you, oldest first — the CLI view of the same gather and
+  derivation the Helm dashboard serves.
 
-  --json             Emit the ranked board as a JSON array (stable contract).
+  --all              The city overview instead: every anchor, ranked together.
+  --json             Emit the rows as a JSON array (stable contract).
   --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).
   --timeout=SECONDS  Bound the whole gather (default 120).
   --refresh          Accepted and ignored: this path has no cache to bust.
@@ -50,7 +59,8 @@ const boardUsage = `Usage:
 Exit codes:
   0  board rendered
   2  usage error
-  3  the gather failed (never rendered as an empty "all clear")
+  3  the gather failed, or an empty queue could not be asserted (never
+     rendered as an empty "all clear")
 `
 
 // boardExit* mirror gc-helm.sh's exit codes so a caller can switch on them
@@ -68,6 +78,7 @@ const (
 const defaultBoardTimeout = 120 * time.Second
 
 type boardOpts struct {
+	all     bool
 	json    bool
 	limit   int // -1 = unset (use the default cap); 0 = uncapped
 	timeout time.Duration
@@ -101,6 +112,8 @@ func parseBoardArgs(args []string) (boardOpts, error) {
 			value = ""
 		}
 		switch name {
+		case "--all":
+			o.all = true
 		case "--json":
 			o.json = true
 		case "--refresh":
@@ -173,18 +186,45 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 	if limit < 0 {
 		limit = board.DefaultMaxRows
 	}
-	shown := board.CapRows(b.Tiles, limit, board.DefaultMaxParked)
+
+	v := selectView(b, opts.all, limit)
+	if v.unprovable {
+		fmt.Fprintf(stderr, "helm-svc board: the gather was PARTIAL, so an empty queue proves nothing — %s\n",
+			strings.Join(b.PartialErrors, "; "))
+		return boardExitGather
+	}
 
 	if opts.json {
-		return renderJSON(stdout, stderr, shown)
+		return renderJSON(stdout, stderr, v.rows)
 	}
-	renderTable(stdout, b, shown, now, len(res.Facts.RigNames))
+	v.render(stdout, b, v.rows, now, len(res.Facts.RigNames))
 	if b.Partial {
 		// stderr, not stdout: the table is a contract for human eyes and the
 		// JSON is one for tooling; neither should grow a diagnostic line.
 		fmt.Fprintf(stderr, "helm-svc board: PARTIAL gather — %s\n", strings.Join(b.PartialErrors, "; "))
 	}
 	return boardExitOK
+}
+
+// boardView is the rows one run renders and the renderer that lays them out.
+type boardView struct {
+	rows   []board.Tile
+	render func(io.Writer, board.Board, []board.Tile, time.Time, int)
+	// unprovable marks an empty QUEUE that came out of a partial gather.
+	// "Nothing is owed by you" is the most consequential sentence this surface
+	// prints, and the rows that would have contradicted it are exactly the ones
+	// the unread store was holding — so its emptiness is a failure to look, and
+	// exits like one. A non-empty queue still renders: those rows were read.
+	unprovable bool
+}
+
+// selectView answers the flag: the operator's queue, or the city overview.
+func selectView(b board.Board, all bool, limit int) boardView {
+	if all {
+		return boardView{rows: board.CapRows(b.Tiles, limit, board.DefaultMaxParked), render: renderTable}
+	}
+	rows := board.CapQueue(board.OperatorQueue(b.Tiles), limit)
+	return boardView{rows: rows, render: renderQueue, unprovable: len(rows) == 0 && b.Partial}
 }
 
 // renderJSON writes the ranked array — the gc-helm.sh --json contract.
@@ -284,7 +324,32 @@ func colWidth(floor int, tiles []board.Tile, value func(board.Tile) string) int 
 	return w
 }
 
-// renderTable writes the human board: the header, the ranked table, and the
+// renderQueue writes the DEFAULT view: the rows owed by the operator and no
+// others, plus the conversation record. The overview is one flag away and says
+// so on every render.
+func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, rigCount int) {
+	fmt.Fprint(w, "gc-helm — what is owed by you\n")
+	fmt.Fprintf(w, "%s · %d rigs · %d owed (of %d anchors)\n\n",
+		now.Format("2006-01-02T15:04:05Z"), rigCount, len(queue), b.Total)
+
+	if len(queue) == 0 {
+		// Coverage, not a bare blank line. "Nothing is owed" is a claim about
+		// every store in the city, so the sentence carries what it was checked
+		// against; a partial gather never reaches here (runBoard exits 3).
+		fmt.Fprintf(w, "Nothing is owed by you. %d rigs checked, all reachable.\n", rigCount)
+		renderSittings(w, b.Sittings, now)
+		fmt.Fprint(w, "\nhelm-svc board --all (prefix+B in tmux) for the city overview.\n")
+		return
+	}
+
+	renderRows(w, queue)
+	fmt.Fprint(w, "\nOldest first — this queue is ordered by how long each row has been owed, not by rank\n")
+	fmt.Fprint(w, "helm-svc board --all (prefix+B in tmux) for the city overview\n")
+	renderSittings(w, b.Sittings, now)
+	renderLegend(w)
+}
+
+// renderTable writes the city overview: the header, the ranked table, and the
 // legend that says what the bands and the held glyph mean.
 func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, rigCount int) {
 	fmt.Fprint(w, "gc-helm — cross-rig human-attention board\n")
@@ -304,6 +369,14 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		return
 	}
 
+	renderRows(w, shown)
+	renderSittings(w, b.Sittings, now)
+	renderLegend(w)
+}
+
+// renderRows writes the table proper — the sized header and one line per tile.
+// Shared by both views so a column can never mean two things.
+func renderRows(w io.Writer, shown []board.Tile) {
 	// The two identifier columns are sized to what this board actually holds;
 	// every other column carries prose, where a fixed width and a trimmed tail
 	// are the right trade.
@@ -339,9 +412,11 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 			rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
 			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
 	}
+}
 
-	renderSittings(w, b.Sittings, now)
-
+// renderLegend writes the trailer that says what the bands, the kinds and the
+// held glyph mean.
+func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")

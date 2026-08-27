@@ -82,19 +82,29 @@ th {
  * the ranked table above.
  */
 
-.parked {
+.parked,
+.owed {
   margin-top: 2rem;
 }
 
-.parked h2 {
+.parked h2,
+.owed h2 {
   font-size: 0.9375rem;
   margin: 0;
 }
 
 /*
- * Converse sittings. A third section for the same reason parked is a second
- * one: this is the conversation record, not an attention list, and the ranked
- * table is where things that want doing live.
+ * The operator's queue leads the page. It is the board's default answer, so it
+ * sits above the overview rather than being reachable from it.
+ */
+.owed {
+  margin-top: 0;
+}
+
+/*
+ * Converse sittings. A section of its own for the same reason parked is one:
+ * this is the conversation record, not an attention list, and the ranked table
+ * is where things that want doing live.
  */
 
 .sittings {

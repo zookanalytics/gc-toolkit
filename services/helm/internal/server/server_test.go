@@ -49,6 +49,10 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+// TestBoardEndpointRanks pins the ORDER the endpoint serves: the operator's
+// queue first, then the rank. The fixture is the contest that motivates the
+// partition — a decision nobody has answered (ELEVATED, subtree 0) against a
+// stranded epic (HIGH) — and before the split the epic led on both counts.
 func TestBoardEndpointRanks(t *testing.T) {
 	s := New(newFake(), time.Minute)
 	for _, path := range []string{"/helm", "/"} {
@@ -64,9 +68,13 @@ func TestBoardEndpointRanks(t *testing.T) {
 		if b.Total != 2 || len(b.Tiles) != 2 {
 			t.Fatalf("%s: want 2 tiles, got total=%d tiles=%d", path, b.Total, len(b.Tiles))
 		}
-		// The stranded epic must rank first (HIGH band dominates ELEVATED).
-		if b.Tiles[0].ID != "tk-epic" || b.Tiles[0].Severity != board.SevHigh {
-			t.Errorf("%s: top tile = %s/%s, want tk-epic/HIGH", path, b.Tiles[0].ID, b.Tiles[0].Severity)
+		if b.Tiles[0].ID != "sl-dec" || !b.Tiles[0].Owed {
+			t.Errorf("%s: top tile = %s (owed=%v), want the owed sl-dec", path, b.Tiles[0].ID, b.Tiles[0].Owed)
+		}
+		// The band derivation is unchanged underneath: the epic still ranks
+		// HIGH, it is just no longer what the board answers with.
+		if b.Tiles[1].ID != "tk-epic" || b.Tiles[1].Severity != board.SevHigh {
+			t.Errorf("%s: second tile = %s/%s, want tk-epic/HIGH", path, b.Tiles[1].ID, b.Tiles[1].Severity)
 		}
 		if b.GeneratedAt.IsZero() {
 			t.Errorf("%s: generated_at not stamped", path)

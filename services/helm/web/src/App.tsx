@@ -78,6 +78,15 @@ async function fetchBoard(signal: AbortSignal): Promise<Board> {
   return (await res.json()) as Board;
 }
 
+// The date the row started asking. `gc.takeaway_at` is when a sitting recorded
+// what is owed; `updated_at` only bounds it from below, and a backend may read
+// neither. Display only — the ORDER is the service's, and re-deriving it here
+// is how the two would drift.
+function owedSince(tile: Tile): string {
+  const stamp = tile.takeaway_at ?? tile.updated_at;
+  return stamp ? stamp.slice(0, 10) : 'unknown';
+}
+
 // The drill-in entry point, shared by both tables. A button rather than a
 // clickable row so it is reachable by keyboard and announced as an action.
 function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
@@ -192,8 +201,13 @@ export function App() {
     const t = board ? Date.parse(board.generated_at) : NaN;
     return Number.isNaN(t) ? Date.now() : t;
   }, [board]);
-  const attention = tiles.filter((tile) => !isParked(tile));
-  const parked = tiles.filter(isParked);
+  // The wire arrives partitioned — every `owed` row first, oldest-owed first
+  // (contract.ts). The sections re-read the flag rather than slicing by
+  // position, so a section can never disagree with the order that produced it.
+  const owed = tiles.filter((tile) => tile.owed);
+  const rest = tiles.filter((tile) => !tile.owed);
+  const attention = rest.filter((tile) => !isParked(tile));
+  const parked = rest.filter(isParked);
 
   return (
     <main>
@@ -201,7 +215,7 @@ export function App() {
         <h1>helm</h1>
         <p className="sub">
           {board
-            ? `${attention.length} anchors${
+            ? `${owed.length ? `${owed.length} owed · ` : ''}${attention.length} anchors${
                 parked.length ? ` · ${parked.length} parked` : ''
               } · generated ${board.generated_at}`
             : loading
@@ -226,6 +240,59 @@ export function App() {
           {board.partial_errors?.length ? `: ${board.partial_errors.join('; ')}` : '.'}
         </p>
       )}
+
+      {/* The default answer, and the only section that renders unconditionally.
+          "Nothing is owed by you" is the most consequential sentence on this
+          page and it is also what every failure path produces by default, so
+          this section states its COVERAGE or states the error — never a blank
+          space that reads as an all-clear nobody earned. */}
+      <section className="owed" aria-labelledby="owed-heading">
+        <h2 id="owed-heading">owed by you</h2>
+        {!board ? (
+          <p className="sub" role="status">
+            {error
+              ? 'The board could not be read, so nothing here is proven clear.'
+              : 'reading the board…'}
+          </p>
+        ) : owed.length === 0 ? (
+          <p className="sub" role="status">
+            {board.partial
+              ? 'Nothing is owed by you — but some rigs did not answer, so this is not an all-clear.'
+              : 'Nothing is owed by you. Every store answered.'}
+          </p>
+        ) : (
+          <>
+            <p className="sub">
+              Rows whose next move is a person&apos;s, longest-waiting first. The headline is what
+              was asked; the bead&apos;s own title is secondary.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>id</th>
+                  <th>rig</th>
+                  <th>needs</th>
+                  <th>title</th>
+                  <th>owed since</th>
+                </tr>
+              </thead>
+              <tbody>
+                {owed.map((tile) => (
+                  <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
+                    <td>
+                      <DrillOpen id={tile.id} onOpen={setDrillTarget} />
+                    </td>
+                    <td>{tile.rig}</td>
+                    <td>{tile.needs}</td>
+                    <td>{tile.title}</td>
+                    <td>{owedSince(tile)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </section>
 
       {board && attention.length === 0 && !error && <p>No anchors need attention.</p>}
 

@@ -8,6 +8,7 @@
       "kind": "epic",
       "title": "Attention Canvas — spatial in-canvas operator dashboard",
       "severity": "HIGH",
+      "owed": false,
       "weight": 14,
       "held": true,
       "n_closed": 3,
@@ -39,6 +40,9 @@
       "dead_owner_heads": [
         "tk-eemvf.4"
       ],
+      "parked_heads": [
+        "tk-eemvf.7"
+      ],
       "waiting_on": null,
       "waiting_on_open": null,
       "disposition_due": false,
@@ -46,7 +50,7 @@
       "takeaway_at": "2026-08-07T09:31:00Z",
       "takeaway_by": "host",
       "updated_at": "2026-08-07T09:30:00Z",
-      "frontier": "8 open · 1 in flight · 1 stuck (dead owner)",
+      "frontier": "7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
       "needs": "the drill-in plane needs an operator decision on tile density",
       "rank_score": 3014004
     },
@@ -56,6 +60,7 @@
       "kind": "convoy",
       "title": "A convoy whose source could not read updated_at",
       "severity": "LOW",
+      "owed": false,
       "weight": 3,
       "held": false,
       "n_closed": 2,
@@ -78,6 +83,7 @@
       "cross_rig_refs": [],
       "open_heads": [],
       "dead_owner_heads": [],
+      "parked_heads": [],
       "waiting_on": null,
       "waiting_on_open": null,
       "disposition_due": false,

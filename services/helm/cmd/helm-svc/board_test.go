@@ -120,3 +120,39 @@ func TestShortAge(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryRenderedViewCarriesTheConversationRecord: the sittings section
+// belongs to the board, not to one of its views. `board` answers with the
+// operator's queue and `board --all` with the city overview, and a running
+// sitting is a conversation nobody has ended under either framing. The arms
+// that print no rows are included because that is where the record is the only
+// thing left to say.
+func TestEveryRenderedViewCarriesTheConversationRecord(t *testing.T) {
+	sittings := []board.Sitting{{
+		ID: "tk-live", Rig: "gc-toolkit", Subject: "tk-anchor",
+		Title: "visit: tk-anchor", Status: "in_progress", OpenedAt: minsAgo(41),
+	}}
+	anchors := []board.Anchor{{
+		ID: "tk-owed", Title: "waiting on a person", Kind: "human", Source: "human",
+		Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: renderNow,
+		Metadata: map[string]string{"gc.routed_to": "human"}, WaitingUnknown: true,
+	}}
+	full := board.BuildBoard(anchors, renderNow, false, nil, board.Facts{Sittings: sittings})
+	bare := board.BuildBoard(nil, renderNow, false, nil, board.Facts{Sittings: sittings})
+
+	for _, tc := range []struct {
+		name   string
+		render func(*bytes.Buffer)
+	}{
+		{"queue", func(w *bytes.Buffer) { renderQueue(w, full, full.Tiles, renderNow, 5) }},
+		{"empty queue", func(w *bytes.Buffer) { renderQueue(w, bare, nil, renderNow, 5) }},
+		{"overview", func(w *bytes.Buffer) { renderTable(w, full, full.Tiles, renderNow, 5) }},
+		{"empty overview", func(w *bytes.Buffer) { renderTable(w, bare, nil, renderNow, 5) }},
+	} {
+		var buf bytes.Buffer
+		tc.render(&buf)
+		if !strings.Contains(buf.String(), "tk-live") {
+			t.Errorf("the %s view drops the conversation record:\n%s", tc.name, buf.String())
+		}
+	}
+}
