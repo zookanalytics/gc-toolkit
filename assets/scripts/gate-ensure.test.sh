@@ -49,9 +49,9 @@ exit 0
 ESC
 chmod +x "$SD/escalate.sh"
 SUT="$SD/gate-ensure.sh"
-# The SUT forwards GC_RIG into every sling and reads GC_MAX_REVIEW_ROUNDS as the
-# cap; an ambient value would rewrite the assertions below.
-unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
+# The SUT forwards GC_RIG into every sling and reads GC_MAX_REVIEW_DISPATCHES as
+# the ceiling; an ambient value would rewrite the assertions below.
+unset GC_RIG GC_MAX_REVIEW_DISPATCHES 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
 run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
@@ -383,6 +383,44 @@ store "[$(anchor R8 pull_request codex "" polecat/r8)]"
 oid r8 > "$GH_DIR/head_polecat_r8"
 out=$(STUB_DEP_GARBAGE=1 run)
 has "$out" "1 reviews dispatched" "a first dispatch is not held by a child-ledger read it does not need"
+
+echo "# the stranded-review repair asks the same question, and is refused too"
+store "[$(anchor R9 pull_request codex "" polecat/r9),
+        $(judged_review rev-r9 R9 "$(oid r9)"),
+        $(rework_kid fix-r9 rev-r9 open),
+        {\"id\":\"rev-stray\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R9\",\"reviewed_oid\":\"$(oid r9)\"}}]"
+printf 'fix-r9|blocks|R9\n' >> "$STUB_DEPS"
+oid r9 > "$GH_DIR/head_polecat_r9"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "already judged $(oid r9)" "the stranded repair path reaches the same refusal"
+has "$out" "no re-sling of rev-stray" "…and names the review it declines to re-sling"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…so the stranded review is not sent back to the pool"
+has "$out" "0 reviews dispatched" "…and the pass dispatches nothing"
+
+echo "# …but a stranded review whose head MOVED past the verdict is still repaired"
+store "[$(anchor R10 pull_request codex "" polecat/r10),
+        $(judged_review rev-r10 R10 old-oid),
+        $(rework_kid fix-r10 rev-r10 open),
+        {\"id\":\"rev-stray2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R10\",\"reviewed_oid\":\"old-oid\"}}]"
+printf 'fix-r10|blocks|R10\n' >> "$STUB_DEPS"
+oid r10 > "$GH_DIR/head_polecat_r10"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "STRANDED review rev-stray2" "a commit no verdict has read still earns the repair"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-stray2 --on mol-review" "…and it is re-slung"
+
+echo "# an unreadable head names no commit, so no verdict can be tested against it"
+# No head_polecat_r11: live_head_for reads nothing. The closed review carries no
+# reviewed_oid either, so an unguarded probe would match "" against "" and bar a
+# dispatch on a verdict that never named a commit.
+store "[$(anchor R11 pull_request codex "" polecat/r11),
+        {\"id\":\"rev-r11\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R11\"}},
+        $(rework_kid fix-r11 rev-r11 open)]"
+printf 'fix-r11|blocks|R11\n' >> "$STUB_DEPS"
+out=$(run)
+has "$out" "1 reviews dispatched" "an unreadable head bars nothing, however the ledger reads"
+hasnt "$out" "already judged" "…and no verdict is claimed over a commit nobody named"
 
 # --- dispatch backstop -------------------------------------------------------
 # The ceiling bounds DISPATCHES. already_answered above sees only the rework a

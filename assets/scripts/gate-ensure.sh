@@ -173,6 +173,24 @@ already_answered() { # <anchor-id> <gate> <head>
   printf '%s' "$pair"
 }
 
+# The refusal a prior verdict earns, for both places that would otherwise buy a
+# review of a commit no rework has touched: the stranded re-sling and the fresh
+# dispatch. <action> completes both sentences, because the two arms differ only
+# in what they decline to do. rc: 0 refuse (the reason is printed) · 2 nothing
+# bars it.
+answered_bars() { # <anchor-id> <gate> <head> <action>
+  local answered rc=0
+  # An unreadable head names no commit to test a prior verdict against.
+  [ -n "$3" ] || return 2
+  answered=$(already_answered "$1" "$2" "$3") || rc=$?
+  case "$rc" in
+    0) echo "$PROG: $1 gate '$2' — review ${answered%% *} already judged $3 and its rework ${answered##* } is still open; $4 (a re-review of an untouched commit re-derives the same findings)" ;;
+    1) echo "$PROG: $1 gate '$2' prior-verdict probe unreadable; $4 (merge stays held, retry next pass)" >&2 ;;
+    *) return 2 ;;
+  esac
+  return 0
+}
+
 # The roots of every workflow poured over <review-bead>, one per line, via the
 # tracking convoy each pour mints. A re-pour mints a SECOND root, so all of
 # them must be judged — one spent root proves nothing while a sibling runs.
@@ -408,6 +426,13 @@ STRAY
             echo "$PROG: $id gate '$g' review $rid is convoy-tracked (a pour already drives it); counted in flight, no re-pour"
             continue
           fi
+          # Re-slinging asks the same question the dispatch arm below is
+          # refused for asking: a stranded review can only read the commit a
+          # closed verdict already judged, and its findings would file a
+          # duplicate of the rework child still waiting.
+          if answered_bars "$id" "$g" "$head" "no re-sling of $rid"; then
+            skipped=$((skipped + 1)); continue
+          fi
           gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" >/dev/null 2>&1
           if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
@@ -487,16 +512,8 @@ Two repairs, either of which clears the hold:
     dcount=$(meta_of "$row" dispatch_count)
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
 
-    # An unreadable head names no commit to test a prior verdict against.
-    if [ -n "$head" ]; then
-      ans_rc=0
-      answered=$(already_answered "$id" "$g" "$head") || ans_rc=$?
-      case "$ans_rc" in
-        0) echo "$PROG: $id gate '$g' — review ${answered%% *} already judged $head and its rework ${answered##* } is still open; no dispatch (a re-review of an untouched commit re-derives the same findings)"
-           skipped=$((skipped + 1)); continue ;;
-        1) echo "$PROG: $id gate '$g' prior-verdict probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
-           skipped=$((skipped + 1)); continue ;;
-      esac
+    if answered_bars "$id" "$g" "$head" "no dispatch"; then
+      skipped=$((skipped + 1)); continue
     fi
 
     # Backstop. already_answered() refuses the dispatch a closed verdict has

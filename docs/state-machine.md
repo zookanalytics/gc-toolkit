@@ -221,7 +221,8 @@ sequenceDiagram
   (stamp first, then attach `mol-review` via `gc sling --on`, read the pour
   back). A head a closed request-changes verdict already judged is not
   re-gated while the rework it filed is still open: the same commit returns
-  the same findings.
+  the same findings. This binds the stranded-review repair too — re-slinging
+  an inert review buys the same answer a fresh dispatch is refused for.
 
 ## Disposition
 
