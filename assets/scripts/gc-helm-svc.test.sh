@@ -15,6 +15,12 @@
 # that the launcher cannot build, and that the builder still does everything the
 # launcher used to do correctly.
 #
+# THE READABILITY GATE (tk-00o34c). `find -newer` cannot see a binary going
+# stale against its DEPENDENCY: what helm-svc can read is fixed by the beads
+# library it embedded, and the store's schema moves under it on a `bd` upgrade.
+# The gate also asks `helm-svc probe`, spends `ok` only on a passing one, and
+# refuses to rebuild a binary whose library a rebuild would not move.
+#
 # THE SCRATCH BOUNDING (inherited, tk-m18ml). The build pointed TMPDIR/GOTMPDIR
 # at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
 # storm stranded 222 dirs (33G) and filled the root fs. Each invocation now
@@ -38,6 +44,17 @@
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
 #   (GOMOD)       a go.mod-only change still counts as newer (tk-ohdex)
+#
+#   readability — the second staleness axis (tk-00o34c)
+#   (READABLE)    a current binary that can read the stores reports ok, builds nothing
+#   (SKEW)        sources unchanged + store schema moved -> it REBUILDS
+#   (STUCK)       a rebuild that cannot fix it never writes ok, and exits non-zero
+#   (NOLOOP)      and the next tick does not rebuild the same binary again
+#   (BUMP)        moving the pinned library re-arms the rebuild
+#   (RECOVER)     a store that comes back restores ok and clears the record
+#   (LISTCITY)    the city_path in `gc service list` is enough to probe against
+#   (UNPROBED)    no city to probe against is reported as such, never as ok
+#   (FAILSTATUS)  a failed build still reports failed, not unreadable
 #   (FAILKEEP)    a failed build leaves the previous binary untouched, exits 1
 #   (ATOMIC)      the binary is published by rename, never built in place
 #   (STAGE)       the failed build's staging file does not survive
@@ -64,6 +81,8 @@
 #   (RETRY)       a failed restart is retried on the NEXT run, even though the
 #                 binary is by then current — and stops once it is serving
 #   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
+#   (DEADEND)     a build that cannot read the stores is never restarted onto
+#   (CONDEMNED)   nor is a pending restart carried out onto one
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -153,6 +172,9 @@ CASE=0
 FAIL_BUILD=""
 fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     CASE=$((CASE + 1))
+    # Reset per case so one case's skew cannot leak into the next. CITY empty
+    # means "no city to probe".
+    CITY=""; PROBE_FAIL_BUILT=""; PROBE_FAIL_CACHED=""; BEADS_VERSION="v0.0.0-stub"
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     STATE_CITY="$base/city"
@@ -179,6 +201,14 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
+# `go version -m <binary>` is a read, not a build, so it must answer before the
+# build-scratch machinery below: recording it would make every readability check
+# look like a compile.
+if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
+    printf '\tpath\thelm-svc\n\tdep\tgithub.com/steveyegge/beads\t%s\th1:stub=\n' \
+        "${STUB_BEADS_VERSION:-v0.0.0-stub}"
+    exit 0
+fi
 printf 'TMPDIR=%s\nGOTMPDIR=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" > "$STUB_RECORD"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
@@ -193,7 +223,18 @@ done
 # Record what the build was told to write to, so (ATOMIC) can prove the
 # toolchain was never pointed straight at the published binary.
 printf '%s\n' "$out" >> "$STUB_RECORD.out"
-printf '#!/bin/sh\necho "helm-svc-stub ran: $*"\n' > "$out"
+cat > "$out" <<'BUILT'
+#!/bin/sh
+if [ "$1" = "probe" ]; then
+    if [ -n "${STUB_PROBE_FAIL_BUILT:-}" ]; then
+        echo "helm-svc probe: cannot read the city's bead stores: no rig bead store could be read: rig gc-toolkit: $STUB_PROBE_FAIL_BUILT" >&2
+        exit 3
+    fi
+    echo "helm-svc probe: bead stores are readable"
+    exit 0
+fi
+echo "helm-svc-stub ran: $*"
+BUILT
 chmod +x "$out"
 STUB
     chmod +x "$GOBIN"
@@ -220,7 +261,18 @@ STUB
 
 cache_binary() { # plant a previously-built binary
     mkdir -p "$STATE/bin"
-    printf '#!/bin/sh\necho "cached-binary ran: $*"\n' > "$STATE/bin/helm-svc"
+    cat > "$STATE/bin/helm-svc" <<'CACHED'
+#!/bin/sh
+if [ "$1" = "probe" ]; then
+    if [ -n "${STUB_PROBE_FAIL_CACHED:-}" ]; then
+        echo "helm-svc probe: cannot read the city's bead stores: no rig bead store could be read: rig gc-toolkit: $STUB_PROBE_FAIL_CACHED" >&2
+        exit 3
+    fi
+    echo "helm-svc probe: bead stores are readable"
+    exit 0
+fi
+echo "cached-binary ran: $*"
+CACHED
     chmod +x "$STATE/bin/helm-svc"
 }
 
@@ -232,6 +284,10 @@ run_build() { # -> OUT ERR RC
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" \
            STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" \
            STUB_GC_LIST_FAIL="${LIST_FAIL:-}" STUB_GC_RESTART_FAIL="${RESTART_FAIL:-}" \
+           STUB_PROBE_FAIL_BUILT="${PROBE_FAIL_BUILT:-}" \
+           STUB_PROBE_FAIL_CACHED="${PROBE_FAIL_CACHED:-}" \
+           STUB_BEADS_VERSION="${BEADS_VERSION:-v0.0.0-stub}" \
+           GC_HELM_CITY_PATH="${CITY:-}" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_SERVICE_STATE_ROOT="$STATE" \
            GC_HELM_GC_BIN="$GCBIN" \
            bash "$ROOT/assets/scripts/gc-helm-build.sh" "$@" 2>"$err")"
@@ -365,6 +421,125 @@ eq "$RC" 0 "(CURRENT) exits 0 when the binary is current"
 has "$OUT" "up to date" "(CURRENT) says so"
 absent "$RECORD" "(CURRENT) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch is untouched"
+
+# ==============================================================================
+# READABILITY — the second staleness axis (tk-00o34c)
+# ==============================================================================
+SKEW_MSG="schema version mismatch: database is at v66, binary knows up to v65 (1 migration ahead)"
+
+status_kind() { cut -d' ' -f1 "$STATE/build-status" 2>/dev/null || echo "<no build-status>"; }
+build_count() { grep -c '^' "$RECORD.out" 2>/dev/null || echo 0; }
+
+# --- case: a current binary that CAN read reports ok and builds nothing -------
+fixture
+cache_binary
+CITY="$STATE_CITY"
+run_build
+eq "$RC" 0 "(READABLE) exits 0"
+has "$OUT" "up to date" "(READABLE) still the up-to-date path"
+has "$OUT" "can read the city" "(READABLE) and says the readability was checked"
+absent "$RECORD" "(READABLE) a passing probe builds nothing"
+eq "$(status_kind)" "ok" "(READABLE) build-status is ok"
+
+# --- case: sources unchanged, store schema moved -> REBUILD -------------------
+fixture
+cache_binary                                        # newer than main.go -> current
+CITY="$STATE_CITY"
+PROBE_FAIL_CACHED="$SKEW_MSG"
+run_build
+eq "$RC" 0 "(SKEW) exits 0 after rebuilding"
+has "$OUT" "cannot read the city's bead stores" "(SKEW) says what the mtime check could not see"
+present "$RECORD" "(SKEW) the toolchain WAS invoked — sources unchanged, store moved"
+eq "$(status_kind)" "ok" "(SKEW) the rebuilt binary reads, so ok is earned"
+absent "$STATE/probe-failed" "(SKEW) and nothing is latched"
+
+# --- case: a rebuild that cannot fix it must not report ok --------------------
+# The pin, not the sources, is what is stale, so the binary that comes out of
+# the build is as blind as the one that went in.
+fixture
+cache_binary
+CITY="$STATE_CITY"
+PROBE_FAIL_CACHED="$SKEW_MSG"
+PROBE_FAIL_BUILT="$SKEW_MSG"
+run_build
+eq "$RC" 1 "(STUCK) exits non-zero — the third green light goes red"
+eq "$(build_count)" "1" "(STUCK) it did try the rebuild"
+eq "$(status_kind)" "unreadable" "(STUCK) build-status CANNOT read ok while the board fails"
+has "$(cat "$STATE/build-status")" "schema version mismatch" "(STUCK) and carries the reason"
+has "$ERR" "CANNOT READ" "(STUCK) reported on stderr too"
+present "$STATE/probe-failed" "(STUCK) what was tried is recorded"
+
+# --- case: the next tick does not rebuild the same binary again ---------------
+# Same case, so the state the previous run left is the input to this one.
+run_build
+eq "$RC" 1 "(NOLOOP) still a failure"
+eq "$(build_count)" "1" "(NOLOOP) no second build — a rebuild loop is not a remedy"
+eq "$(status_kind)" "unreadable" "(NOLOOP) and it still refuses to say ok"
+has "$ERR" "go.mod" "(NOLOOP) it names the remedy it cannot perform itself"
+
+# --- case: a dependency bump re-arms the rebuild ------------------------------
+# The latch is keyed on the LIBRARY that failed, not on "we already tried". The
+# skew is left in place to isolate that one variable.
+BEADS_VERSION="v1.2.2-0.20260825072917-62d211937bd3"
+run_build
+eq "$RC" 1 "(BUMP) the skew is untouched, so it still fails"
+eq "$(build_count)" "2" "(BUMP) but a different library version is worth another build"
+eq "$(status_kind)" "unreadable" "(BUMP) and it says so"
+eq "$(cat "$STATE/probe-failed" 2>/dev/null || true)" "$BEADS_VERSION" \
+   "(BUMP) the latch now names what was tried"
+
+# --- case: recovery without a rebuild ----------------------------------------
+# The store can also come back on its own (the rig migrates back, or the skew
+# was a half-finished upgrade). The up-to-date path must notice.
+fixture
+cache_binary
+CITY="$STATE_CITY"
+PROBE_FAIL_CACHED="$SKEW_MSG"
+run_build
+eq "$(status_kind)" "ok" "(RECOVER) setup: rebuilt into a readable binary"
+PROBE_FAIL_BUILT="$SKEW_MSG"
+run_build
+eq "$(status_kind)" "unreadable" "(RECOVER) the store moves again and it says so"
+PROBE_FAIL_BUILT=""
+run_build
+eq "$RC" 0 "(RECOVER) exits 0 once it can read again"
+eq "$(status_kind)" "ok" "(RECOVER) ok returns"
+absent "$STATE/probe-failed" "(RECOVER) and the latch is gone"
+
+# --- case: no city to probe against is not a green light ----------------------
+# A run that cannot ask the question must not answer it with `ok`.
+fixture
+cache_binary
+LIST_FAIL=1
+run_build
+LIST_FAIL=""
+eq "$RC" 0 "(UNPROBED) a hand run still exits 0"
+has "$OUT" "unprobed" "(UNPROBED) and says the readability was not checked"
+eq "$(status_kind)" "unprobed" "(UNPROBED) build-status says so rather than ok"
+absent "$RECORD" "(UNPROBED) nothing is built on a question it cannot ask"
+
+# --- case: the city comes from the service listing when the env has none ------
+# The supervisor that runs the helm-build order carries no GC_CITY, so this is
+# the resolution every scheduled tick uses.
+fixture
+cache_binary
+PROBE_FAIL_CACHED="$SKEW_MSG"
+run_build
+has "$OUT" "cannot read the city's bead stores" \
+    "(LISTCITY) the listing's city_path is enough to probe against"
+present "$RECORD" "(LISTCITY) so the gate still fires with no city in the environment"
+eq "$(status_kind)" "ok" "(LISTCITY) and reports on what it rebuilt"
+
+# --- case: a failed build's status is still the build failure -----------------
+fixture
+cache_binary
+touch_source
+CITY="$STATE_CITY"
+FAIL_BUILD=1
+run_build
+FAIL_BUILD=""
+eq "$RC" 1 "(FAILSTATUS) exits 1"
+eq "$(status_kind)" "failed" "(FAILSTATUS) a build that never produced a binary reports failed, not unreadable"
 
 # --- case: build fails -> previous binary untouched, non-zero -----------------
 fixture
@@ -594,6 +769,42 @@ run_build --deploy
 eq "$RC" 0 "(HANDBUILT) the next deploy tick exits 0"
 absent "$RECORD" "(HANDBUILT) with nothing left to build"
 has "$(cat "$GCLOG")" "service restart helm" "(HANDBUILT) and serves what the hand build left"
+
+# --- case: a deploy never restarts onto a binary it just condemned ------------
+# The gate exists to keep an unreadable binary out of service, so reporting one
+# must not be the step that puts it there. The restart stub is set to fail, so a
+# run that reached it could not go on to report the readability failure instead.
+fixture
+cache_binary
+touch_source
+CITY="$STATE_CITY"
+PROBE_FAIL_BUILT="$SKEW_MSG"
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(DEADEND) exits non-zero"
+eq "$(status_kind)" "unreadable" "(DEADEND) build-status says why"
+present "$RECORD" "(DEADEND) the build did happen"
+has "$ERR" "CANNOT READ" "(DEADEND) and the failure it reports is the unreadable one"
+hasnt "$(cat "$GCLOG")" "service restart" "(DEADEND) the service was not restarted onto it"
+absent "$STATE/restart-pending" "(DEADEND) and no later run is told to finish that restart"
+
+# --- case: nor is a restart the last run left pending -------------------------
+# The marker outlives the run that wrote it, and the up-to-date branch is the
+# only one a later run can reach. So the probe has to be asked there first, or
+# the retry serves what the probe would have condemned.
+fixture
+cache_binary
+CITY="$STATE_CITY"
+PROBE_FAIL_CACHED="$SKEW_MSG"
+printf '%s\n' "$BEADS_VERSION" > "$STATE/probe-failed"   # already tried: no rebuild left
+: > "$STATE/restart-pending"
+run_build --deploy
+eq "$RC" 1 "(CONDEMNED) exits non-zero"
+eq "$(status_kind)" "unreadable" "(CONDEMNED) build-status says why"
+absent "$RECORD" "(CONDEMNED) the latch means nothing is rebuilt"
+hasnt "$(cat "$GCLOG")" "service restart" "(CONDEMNED) and the pending restart is not run onto it"
+present "$STATE/restart-pending" "(CONDEMNED) the marker is kept for a binary that can serve"
 
 # ==============================================================================
 # STATIC GUARDS

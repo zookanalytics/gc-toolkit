@@ -2,6 +2,8 @@ module github.com/zookanalytics/gc-toolkit/services/helm
 
 go 1.26.5
 
+require github.com/steveyegge/beads v1.2.2-0.20260825072917-62d211937bd3
+
 require (
 	cel.dev/expr v0.25.2 // indirect
 	cloud.google.com/go v0.121.6 // indirect
@@ -128,7 +130,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.7.0 // indirect
-	github.com/steveyegge/beads v1.2.2-0.20260812111556-4ad99760b895 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tealeg/xlsx v1.0.5 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
