@@ -96,6 +96,17 @@ neither can date sorts last).
 | tmux | `prefix+b` | `prefix+B` |
 | dashboard | the *owed by you* section, at the top of the page | the ranked table under it |
 
+The wire arrives partitioned, so the overview sorts itself back to `rank_score`
+before it is capped (`board.CityOverview`). Reading the partitioned slice as if
+it were ranked costs twice: the overview leads with the queue it is meant to
+sit behind, and the cap then drops whatever the hoisted rows pushed past the
+limit.
+
+In the queue the row's HEADLINE is the demand — the `needs` sentence — and the
+bead title is secondary; `prefix+b` and the *owed by you* table both read it
+that way. The overview asks what the city's shape is, so it leads with the
+object and its frontier.
+
 **The empty queue is a CLAIM, and it is the most consequential sentence any of
 these print.** So it never renders blank: the CLI prints its coverage
 (`N rigs checked, all reachable`), and an empty queue out of a PARTIAL gather is
@@ -254,7 +265,7 @@ prose — and the board re-derives, per render, whether it has been discharged:
 
 | `waiting_on` | `waiting_on_open` | row |
 |---|---|---|
-| empty | — | LOW, "conversation parked — takeaway recorded" (a childless row; with children the roll-up answers instead) |
+| empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead) |
 | non-empty | non-empty | LOW, "parked · waiting on N" — a live hold, still quiet |
 | non-empty | empty | `disposition_due`: ELEVATED, "parked · blocker landed", and NEEDS becomes "blocker landed — dispose or resume" |
 
@@ -302,7 +313,7 @@ A row is **ruled** when all three hold:
 
 | shape | row |
 |---|---|
-| no takeaway | unchanged: ELEVATED, "human-gated decision" / "operator action" |
+| no takeaway | unchanged: ELEVATED, frontier "human-gated decision"; NEEDS names the silence (below) |
 | takeaway, waits unreadable | unchanged — an unread graph proves nothing |
 | takeaway, a wait still open | unchanged — answering is not finishing |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
@@ -1184,6 +1195,13 @@ same-origin reachability confirmed and detach-not-kill verified — see
   stored before that gate existed. `--json` always carries the whole string, in
   `needs` and in `takeaway`. It is a bound on PROSE only: NEEDS never holds an
   identifier, because the mechanical heads are `--json`-only (`tk-9tbbk.1`).
+- **A demand with no takeaway says so.** A `human` row with no `gc.takeaway`
+  reads "routed to you — no question recorded", and a childless `parked` row
+  "parked for you — no question recorded". Both absent and blank count as
+  silent: `collapseWS` flattens whitespace-only prose to empty. The phrase is
+  the actionable one, because a silent demand means whoever routed or parked
+  the row never finished the handoff; a generic "operator action" reads like a
+  valid ask and leaves the operator nothing to act on.
 - **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
 - **The in-flight / dead-owner join.** A child counts as moving only when its
   owning session is demonstrably live, or a live graph.v2 workflow stands over

@@ -221,7 +221,7 @@ type boardView struct {
 // selectView answers the flag: the operator's queue, or the city overview.
 func selectView(b board.Board, all bool, limit int) boardView {
 	if all {
-		return boardView{rows: board.CapRows(b.Tiles, limit, board.DefaultMaxParked), render: renderTable}
+		return boardView{rows: board.CapRows(board.CityOverview(b.Tiles), limit, board.DefaultMaxParked), render: renderTable}
 	}
 	rows := board.CapQueue(board.OperatorQueue(b.Tiles), limit)
 	return boardView{rows: rows, render: renderQueue, unprovable: len(rows) == 0 && b.Partial}

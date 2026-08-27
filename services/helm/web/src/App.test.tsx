@@ -91,7 +91,7 @@ const BOARD: Board = {
       owed: true,
       takeaway_at: '2026-07-04T09:00:00Z',
       frontier: 'routed to the operator — no agent will take it',
-      needs: 'operator action',
+      needs: 'routed to you — no question recorded',
       rank_score: 2_003_011,
     }),
     tile({
@@ -110,8 +110,8 @@ const BOARD: Board = {
       kind: 'parked',
       title: "gc-toolkit's helm returns the raw script path",
       severity: 'LOW',
-      frontier: 'conversation parked — takeaway recorded',
-      needs: 'resume: prefix+a, then the bead id',
+      frontier: 'conversation parked — no takeaway recorded',
+      needs: 'parked for you — no question recorded',
       rank_score: 2_001,
     }),
     // Parked by kind, but the work it was waiting on has closed. The service
@@ -211,7 +211,7 @@ it('answers with the operator-owned bead, not with the ranked overview', async (
 
   const row = within(owedSection()).getByText(/anchorless open PR/).closest('tr');
   expect(row).not.toBeNull();
-  expect(within(row as HTMLElement).getByText('operator action')).toBeTruthy();
+  expect(within(row as HTMLElement).getByText('routed to you — no question recorded')).toBeTruthy();
   expect(within(row as HTMLElement).getByText('2026-07-04')).toBeTruthy();
 
   // It is in the queue INSTEAD of the overview, not as well as.
@@ -258,11 +258,12 @@ it('lists a parked conversation in its own section, not in the ranked table', as
   const parked = within(parkedSection()).getByText(/helm returns the raw script path/);
   expect(within(attentionTable()).queryByText(/helm returns the raw script path/)).toBeNull();
 
-  // The resume gesture rides on the row itself — the thread was always
-  // resumable, only never findable.
+  // The row carries its own ask. This fixture is the shape a sitting left
+  // without recording one, and the section says so rather than filing it as an
+  // ordinary quiet row.
   const row = parked.closest('tr');
   expect(row).not.toBeNull();
-  expect(within(row as HTMLElement).getByText(/prefix\+a/)).toBeTruthy();
+  expect(within(row as HTMLElement).getByText('parked for you — no question recorded')).toBeTruthy();
 });
 
 it('counts the three sections separately in the header', async () => {
@@ -400,6 +401,35 @@ it('ages a sitting against the board it came from, not the clock', async () => {
 
   const live = within(sittingsSection()).getByText('tk-vst01').closest('tr') as HTMLElement;
   expect(within(live).getByText('2h')).toBeTruthy();
+});
+
+// "No anchors need attention" is a claim about the WHOLE board, and the section
+// directly above it has just listed anchors that need one. On an owed-only board
+// the unqualified sentence contradicts the queue it sits under; the same board
+// with nothing on it at all is the only one it is true of.
+it('does not tell an owed-only board that nothing needs attention', async () => {
+  const owedOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]] };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(owedOnly), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/anchorless open PR/)).toBeTruthy());
+  expect(screen.getByText('No other anchors need attention.')).toBeTruthy();
+  expect(screen.queryByText('No anchors need attention.')).toBeNull();
+});
+
+it('tells a board with no rows at all that nothing needs attention', async () => {
+  const nothing: Board = { ...BOARD, total: 0, tiles: [], sittings: null };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(nothing), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/Nothing is owed by you/)).toBeTruthy());
+  expect(screen.getByText('No anchors need attention.')).toBeTruthy();
 });
 
 // attentionTable() addresses the overview by exclusion, so every other table on

@@ -294,7 +294,11 @@ export function App() {
         )}
       </section>
 
-      {board && attention.length === 0 && !error && <p>No anchors need attention.</p>}
+      {/* An owed row IS an anchor needing attention — it is the one the section
+          above just listed — so the unqualified sentence contradicts it. */}
+      {board && attention.length === 0 && !error && (
+        <p>{owed.length > 0 ? 'No other anchors need attention.' : 'No anchors need attention.'}</p>
+      )}
 
       {attention.length > 0 && (
         <table>

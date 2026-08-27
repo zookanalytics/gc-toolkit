@@ -120,7 +120,7 @@ func TestMetadataKindDerivation(t *testing.T) {
 	if !strings.Contains(human.Frontier, "routed to the operator") {
 		t.Errorf("frontier must say who owns it: %q", human.Frontier)
 	}
-	if human.Needs != "operator action" {
+	if human.Needs != "routed to you — no question recorded" {
 		t.Errorf("needs: %q", human.Needs)
 	}
 
@@ -137,10 +137,13 @@ func TestMetadataKindDerivation(t *testing.T) {
 	if !strings.Contains(parked.Frontier, "parked") {
 		t.Errorf("frontier: %q", parked.Frontier)
 	}
-	// The resume GESTURE, not a sentence derived from the takeaway — that is
-	// tk-x55wt's bead.
-	if !strings.Contains(parked.Needs, "prefix+a") {
-		t.Errorf("needs must name the resume gesture: %q", parked.Needs)
+	// This fixture recorded no takeaway, so both columns say so rather than
+	// dressing an unfinished handoff as a conversation that concluded.
+	if parked.Frontier != "conversation parked — no takeaway recorded" {
+		t.Errorf("frontier: %q", parked.Frontier)
+	}
+	if parked.Needs != "parked for you — no question recorded" {
+		t.Errorf("needs: %q", parked.Needs)
 	}
 }
 
@@ -238,11 +241,11 @@ func TestParkedWithChildren(t *testing.T) {
 	if bare.Severity != SevLow || bare.MTotal != 0 {
 		t.Errorf("a childless parked row is untouched: %s %d children", bare.Severity, bare.MTotal)
 	}
-	if bare.Frontier != "conversation parked — takeaway recorded" {
-		t.Errorf("…and renders exactly as before: %q", bare.Frontier)
+	if bare.Frontier != "conversation parked — no takeaway recorded" {
+		t.Errorf("…and reports what this one actually left: %q", bare.Frontier)
 	}
-	if !strings.Contains(bare.Needs, "prefix+a") {
-		t.Errorf("…including the resume gesture: %q", bare.Needs)
+	if bare.Needs != "parked for you — no question recorded" {
+		t.Errorf("…in both columns: %q", bare.Needs)
 	}
 
 	human, _ := tileByID(b, "tk-human")
@@ -414,7 +417,7 @@ func TestDispositionDueIsParkedOnly(t *testing.T) {
 	if tile.DispositionDue {
 		t.Error("disposition_due is a parked-row distinction")
 	}
-	if tile.Needs != "operator action" {
+	if tile.Needs != "routed to you — no question recorded" {
 		t.Errorf("the human row keeps its own phrase: %q", tile.Needs)
 	}
 }
@@ -735,7 +738,7 @@ func TestTakeawayWinsNeeds(t *testing.T) {
 	if plain.Takeaway != nil {
 		t.Errorf("absent takeaway is null: got %v", plain.Takeaway)
 	}
-	if plain.Needs != "resume: prefix+a, then the bead id" {
+	if plain.Needs != "parked for you — no question recorded" {
 		t.Errorf("fallback NEEDS: got %q", plain.Needs)
 	}
 }
@@ -1017,7 +1020,7 @@ func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {
 	if dec.Severity != SevElevated || dec.Frontier != "human-gated decision" || dec.Needs != "operator decision" {
 		t.Errorf("unanswered decision: %s / %q / %q", dec.Severity, dec.Frontier, dec.Needs)
 	}
-	if hum.Severity != SevElevated || hum.Needs != "operator action" {
+	if hum.Severity != SevElevated || hum.Needs != "routed to you — no question recorded" {
 		t.Errorf("unanswered human row: %s / %q", hum.Severity, hum.Needs)
 	}
 }
@@ -1505,8 +1508,7 @@ func TestParkedWithoutTheHumanMarkerKeepsItsRollUp(t *testing.T) {
 // tk-container is a stranded epic with 300 open children. The epic bands HIGH,
 // the demand bands ELEVATED, so severity alone already files the demand second
 // — and even at equal severity the epic's subtree would win the rank tiebreak
-// 300 to 1. On the live board that is how four beads carrying an authored
-// statement of what was owed sat under twenty-eight container rows.
+// 300 to 1.
 func TestOperatorRowBeatsAHigherSeverityRow(t *testing.T) {
 	kids := make([]Child, 0, 300)
 	for i := 0; i < 300; i++ {
@@ -1516,10 +1518,9 @@ func TestOperatorRowBeatsAHigherSeverityRow(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-container", Title: "big stranded epic", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: fixtureNow, Children: kids},
-		// WaitingUnknown is the shape the supervisor backend produces, and the
-		// one the four live beads that motivated this were in: a takeaway with
-		// unreadable blocker statuses is NOT [ruled], so the row is still
-		// asking.
+		// WaitingUnknown is the shape the supervisor backend produces: a
+		// takeaway whose blocker statuses are unreadable is NOT [ruled], so the
+		// row is still asking.
 		{ID: "tk-owed", Title: "one bead waiting on a person", Kind: "human", Source: "human",
 			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
 			Metadata:       map[string]string{mdRoutedTo: routedHuman, mdTakeaway: "approve the cutover or say no"},
@@ -1663,6 +1664,113 @@ func TestCapQueueDoesNotRationParkedRows(t *testing.T) {
 	}
 	if got := len(CapQueue(tiles, 0)); got != len(tiles) {
 		t.Errorf("limit 0 is uncapped: got %d", got)
+	}
+}
+
+// TestCityOverviewIsRankedNotPartitioned: Board.Tiles leaves BuildBoard
+// partitioned owed-first, so the `--all` view has to sort it back. The
+// partition is what the queue is for; reading it as a ranked list files the
+// city's highest-ranked row behind a one-bead demand.
+func TestCityOverviewIsRankedNotPartitioned(t *testing.T) {
+	kids := make([]Child, 0, 300)
+	for i := 0; i < 300; i++ {
+		kids = append(kids, Child{ID: fmt.Sprintf("tk-c%d", i), Status: "open"})
+	}
+	anchors := []Anchor{
+		{ID: "tk-container", Title: "big stranded epic", Kind: "epic", Source: "epic",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: fixtureNow, Children: kids},
+		{ID: "tk-owed", Title: "one bead waiting on a person", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
+			Metadata:       map[string]string{mdRoutedTo: routedHuman, mdTakeaway: "approve the cutover or say no"},
+			Takeaway:       "approve the cutover or say no",
+			TakeawayAt:     "2026-06-01T00:00:00Z",
+			WaitingUnknown: true},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	if got := ids(b.Tiles); !equalIDs(got, []string{"tk-owed", "tk-container"}) {
+		t.Fatalf("fixture: the board is partitioned owed-first, got %v", got)
+	}
+
+	overview := CityOverview(b.Tiles)
+	if got := ids(overview); !equalIDs(got, []string{"tk-container", "tk-owed"}) {
+		t.Errorf("the overview is ranked, highest first: got %v", got)
+	}
+	// The board is shared with every other view of the same render, so the
+	// re-sort may not reach back into it.
+	if got := ids(b.Tiles); !equalIDs(got, []string{"tk-owed", "tk-container"}) {
+		t.Errorf("CityOverview must not reorder the board it was given: got %v", got)
+	}
+}
+
+// TestSilentDemandNamesItsSilence: the takeaway is the whole reason a row owed
+// by a person carries a sentence, so its ABSENCE is the finding — whoever
+// routed or parked the row never recorded what is owed. A generic phrase reads
+// like a valid ask and leaves the operator nothing to act on. Blank counts as
+// absent: collapseWS flattens whitespace-only prose to empty.
+func TestSilentDemandNamesItsSilence(t *testing.T) {
+	for _, tc := range []struct{ name, takeaway string }{
+		{"absent", ""},
+		{"blank", " \t\n "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchors := []Anchor{
+				{ID: "tk-human", Title: "Disposition: one PR needs the operator", Kind: "human", Source: "human",
+					Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(4),
+					Metadata: map[string]string{mdRoutedTo: routedHuman, mdTakeaway: tc.takeaway},
+					Takeaway: tc.takeaway},
+				{ID: "tk-parked", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
+					Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+					Metadata: map[string]string{mdTakeaway: tc.takeaway},
+					Takeaway: tc.takeaway},
+				// The control. Same kind, same shape, one recorded sentence —
+				// so a phrase that came from anywhere but the takeaway fails
+				// here instead of passing everywhere.
+				{ID: "tk-spoken", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
+					Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+					Metadata: map[string]string{mdTakeaway: "ship it or say why not"},
+					Takeaway: "ship it or say why not"},
+			}
+			b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+			human, ok := tileByID(b, "tk-human")
+			if !ok {
+				t.Fatal("the human-routed tile is missing")
+			}
+			if human.Takeaway != nil {
+				t.Errorf("a silent takeaway is null on the wire, not %q", *human.Takeaway)
+			}
+			if !human.Owed {
+				t.Error("a silent demand is still owed — it is the operator's move either way")
+			}
+			if human.Needs != "routed to you — no question recorded" {
+				t.Errorf("the human row names its silence: %q", human.Needs)
+			}
+
+			parked, ok := tileByID(b, "tk-parked")
+			if !ok {
+				t.Fatal("the parked tile is missing")
+			}
+			if parked.Needs != "parked for you — no question recorded" {
+				t.Errorf("the parked row names its silence: %q", parked.Needs)
+			}
+			// The frontier is a claim about what the sitting left behind, so it
+			// may not say "takeaway recorded" one column from NEEDS saying none
+			// was.
+			if parked.Frontier != "conversation parked — no takeaway recorded" {
+				t.Errorf("the frontier agrees with it: %q", parked.Frontier)
+			}
+
+			spoken, ok := tileByID(b, "tk-spoken")
+			if !ok {
+				t.Fatal("the control tile is missing")
+			}
+			if spoken.Needs != "ship it or say why not" {
+				t.Errorf("a recorded takeaway is still the NEEDS answer: %q", spoken.Needs)
+			}
+			if spoken.Frontier != "conversation parked — takeaway recorded" {
+				t.Errorf("…and the frontier still says one was left: %q", spoken.Frontier)
+			}
+		})
 	}
 }
 

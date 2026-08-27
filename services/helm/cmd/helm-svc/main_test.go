@@ -236,6 +236,41 @@ func TestDefaultViewIsTheQueue(t *testing.T) {
 	}
 }
 
+// TestOverviewLeadsWithTheHighestRankedRow: `--all` is the RANKED city
+// overview, and Board.Tiles reaches it partitioned owed-first — the queue's
+// order, and the one the overview exists to sit behind. Sorting back to rank
+// before the cap is what keeps each view answering its own question; without
+// it the overview both leads with the queue and drops the lowest-ranked rows
+// the hoist pushed past the limit.
+func TestOverviewLeadsWithTheHighestRankedRow(t *testing.T) {
+	b := boardWithAnOwedRow(false)
+	if len(b.Tiles) != 2 || b.Tiles[0].ID != "tk-owed" {
+		t.Fatalf("fixture: the wire is partitioned owed-first, got %v", tileIDs(b.Tiles))
+	}
+	if b.Tiles[1].RankScore <= b.Tiles[0].RankScore {
+		t.Fatalf("fixture no longer sets up the contest: the container must outrank the demand (%d vs %d)",
+			b.Tiles[1].RankScore, b.Tiles[0].RankScore)
+	}
+
+	all := selectView(b, true, board.DefaultMaxRows).rows
+	if got := tileIDs(all); !slices.Equal(got, []string{"tk-container", "tk-owed"}) {
+		t.Errorf("--all is ranked, highest first: got %v", got)
+	}
+
+	def := selectView(b, false, board.DefaultMaxRows).rows
+	if got := tileIDs(def); !slices.Equal(got, []string{"tk-owed"}) {
+		t.Errorf("...and the queue still answers with the demand: got %v", got)
+	}
+}
+
+func tileIDs(tiles []board.Tile) []string {
+	out := make([]string, 0, len(tiles))
+	for _, t := range tiles {
+		out = append(out, t.ID)
+	}
+	return out
+}
+
 // TestEmptyQueueFromAPartialGatherIsNotAnAnswer: the rows that would have
 // contradicted "nothing is owed by you" are exactly the ones an unread store
 // was holding, so the empty queue exits 3 rather than rendering an all-clear.

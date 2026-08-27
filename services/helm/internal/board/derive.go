@@ -500,7 +500,7 @@ func rankScore(sev Severity, w, stale int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRuled bool) string {
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	parked := len(r.parkedHeads)
@@ -539,6 +539,12 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRu
 	// reports its frontier through the same count phrases as every other
 	// roll-up anchor, so the phrase explains the band those counts just gave it.
 	case a.Source == "parked" && r.mTotal == 0:
+		// The phrase is a CLAIM about what the sitting left behind, so it may
+		// not be made on a row that left nothing — NEEDS says the same thing
+		// one column over, and the two must not contradict each other.
+		if takeaway == "" {
+			return "conversation parked — no takeaway recorded"
+		}
 		return "conversation parked — takeaway recorded"
 	case r.mTotal == 0:
 		return "empty — no children"
@@ -608,10 +614,14 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "unowned — assign an owning bead"
 	case a.Source == "decision":
 		return "operator decision"
+	// The two kinds a PERSON put here. On these the empty takeaway is itself
+	// the finding — whoever routed or parked the row never recorded what is
+	// owed — so the phrase names that rather than reading like a valid ask a
+	// silent row cannot support.
 	case humanGated(a):
-		return "operator action"
+		return "routed to you — no question recorded"
 	case a.Source == "parked" && r.mTotal == 0:
-		return "resume: prefix+a, then the bead id"
+		return "parked for you — no question recorded"
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -729,7 +739,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		TakeawayBy: nilIfEmpty(a.TakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
-		Frontier:  frontier(a, r, held, waitingOpen, dispDue, isRuled),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled),
 		RankScore: rankScore(sev, w, stale),
 	}
@@ -751,12 +761,7 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		tiles = append(tiles, computeTile(a, now, facts))
 	}
 
-	sort.SliceStable(tiles, func(i, j int) bool {
-		if tiles[i].RankScore != tiles[j].RankScore {
-			return tiles[i].RankScore > tiles[j].RankScore
-		}
-		return tiles[i].ID < tiles[j].ID
-	})
+	sort.SliceStable(tiles, func(i, j int) bool { return rankFirst(tiles[i], tiles[j]) })
 
 	seen := make(map[string]struct{}, len(tiles))
 	deduped := make([]Tile, 0, len(tiles))
@@ -875,6 +880,17 @@ func CapSittings(in []Sitting, maxClosed int) (kept []Sitting, dropped int) {
 // Apply it STABLY and after the dedup. A bead admitted under two kinds carries
 // the same id in both rows and ties every test below, so only the rank order
 // the dedup already resolved can decide which of the two survives.
+// rankFirst is the board's severity-then-size-then-staleness order, ties broken
+// by id ascending. [BuildBoard] ranks with it, the dedup resolves duplicates by
+// it, and [CityOverview] restores it — one definition, so the overview cannot
+// drift from the order the dedup already spent.
+func rankFirst(a, b Tile) bool {
+	if a.RankScore != b.RankScore {
+		return a.RankScore > b.RankScore
+	}
+	return a.ID < b.ID
+}
+
 func owedFirst(a, b Tile) bool {
 	if a.Owed != b.Owed {
 		return a.Owed
@@ -915,6 +931,21 @@ func OperatorQueue(tiles []Tile) []Tile {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return owedFirst(out[i], out[j]) })
+	return out
+}
+
+// CityOverview is the partition behind `--all`: every tile, in [rankFirst]
+// order.
+//
+// Board.Tiles leaves [BuildBoard] partitioned owed-first, which is the default
+// view's order and the opposite of the question the overview answers. Feeding
+// that slice to [CapRows] costs twice: the overview leads with the operator's
+// queue instead of the city's highest-ranked row, and the cap then drops
+// whatever the hoisted queue pushed past the limit.
+func CityOverview(tiles []Tile) []Tile {
+	out := make([]Tile, len(tiles))
+	copy(out, tiles)
+	sort.SliceStable(out, func(i, j int) bool { return rankFirst(out[i], out[j]) })
 	return out
 }
 
