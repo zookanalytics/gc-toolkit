@@ -11,7 +11,8 @@
 # poll interval (10); DANCE_PROBE_PEEK_LINES (30); DANCE_PROBE_CALL_TIMEOUT
 # per-gc-call bound (15); DANCE_PROBE_QPN quota-park status tool (default:
 # sibling quota-park-nudge.sh).
-# Callers: formulas/mol-dog-shutdown-dance.toml; dance-probe.test.sh.
+# Callers: packs/gc-toolkit-city/formulas/mol-dog-shutdown-dance.toml;
+# dance-probe.test.sh.
 # Exit: 0 verdict printed (every verdict) · 2 usage error only.
 set -u
 

@@ -315,6 +315,15 @@ artifact**, so future upstream fixes to it are masked.
   ships in `packs/gc-toolkit-city` and answers to `gc-toolkit-city.dog`. Count
   the roster before and after adding a city-scope agent; nothing else reports
   this.
+- **A formula is reachable only from the scopes that search its pack's layer.**
+  A city-scope agent searches city-pack formulas and the city's own
+  `formulas/`. A rig-scope agent searches those plus the rig's packs and
+  `formulas/` (`ComputeFormulaLayers`, gascity `internal/config/pack.go`). So a
+  formula shipped in a rig-scope pack is invisible to a city-scope agent:
+  `gc formula show <name>` answers `not found in search paths` while the same
+  call with `--rig <rig>` succeeds. Ship an agent's formula in a pack the
+  agent's own scope searches. `mol-dog-shutdown-dance` lives in
+  `packs/gc-toolkit-city` for that reason, beside the dog that runs it.
 - Most gc-toolkit formulas are authored under pack-distinct `mol-*` names and
   shadow nothing. Preserve that: check the basename against the base packs
   before adding any formula, fragment, or script. Five artifacts are the

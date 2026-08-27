@@ -90,6 +90,11 @@ Two things need a city-scope registration, and this is where they live:
   the city; declared on a rig-scope pack it would reach only that rig's agents,
   leaving the city-scope ones (`deacon`, `mechanik`, `dog`) without them.
 
+`mol-dog-shutdown-dance` ships here too. Formula search paths are
+scope-layered, so a city-scope agent searches city-pack formulas alone and the
+dog cannot resolve a copy that lives in the rig-scope pack. Every rig still
+reaches this one, because a rig's layers start with the city's.
+
 Skip the sub-pack and everything else still composes — you lose the kill path
 and the tmux chrome, and nothing reports an error.
 

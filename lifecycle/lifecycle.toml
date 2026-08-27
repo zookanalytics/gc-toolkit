@@ -180,7 +180,8 @@ keys = [
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
 # request a patrol detector files against a live-but-wedged session
-# (docs/authority-map.md; formulas/mol-dog-shutdown-dance.toml). Renamed from
+# (docs/authority-map.md;
+# packs/gc-toolkit-city/formulas/mol-dog-shutdown-dance.toml). Renamed from
 # the pre-rewrite bare target/reason/requester — bare `target` collides with
 # the merge_identity key above.
 [metadata.warrant]

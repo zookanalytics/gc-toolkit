@@ -112,6 +112,26 @@ and reads the declared default. `{{binding_prefix}}dog` against a default of
 `""` hand-substitutes to a bare `dog`; `{{warrant_route}}` reads as the whole
 address.
 
+**`mol-dog-shutdown-dance` moved with the dog.** Leaving it in the core pack
+made the dog unable to load its own method. Formula search paths are
+scope-layered: `ComputeFormulaLayers` (gascity `internal/config/pack.go`)
+gives a city-scope agent the city packs and the city's `formulas/`, and gives
+each rig those plus the rig's own packs and `formulas/`. A rig-scope pack's
+formulas are therefore invisible at city scope, and the dog's prompt tells it
+to run `gc formula show mol-dog-shutdown-dance` after the claim. In the
+throwaway city that call failed with `not found in search paths` while
+`--rig gc-toolkit` succeeded, so a warrant could wake the dog and leave it with
+no way to reach the only authorized kill path. Warrants are plain routed beads
+carrying no poured molecule, so the prompt command is the dog's only route to
+the method.
+
+The formula now ships at `packs/gc-toolkit-city/formulas/`. Reachability is a
+superset of what it had: city layers are the base of every rig's layers, so
+`gc formula show mol-dog-shutdown-dance` resolves at city scope and on every
+rig, and the rendered recipe is byte-identical to the control's rig-scope
+render. Nothing else pours or extends it — the two patrols only name it in
+prose.
+
 **`[global] session_live` moved rather than being copied.** A city-scope
 pack's `[global]` reaches every agent in the city, so the sub-pack's single
 declaration reproduces the control exactly: 46 of 66 agents on both sides,
@@ -178,7 +198,8 @@ the rigs.
 | `render-seed-audit.sh` output | all 14 agent prompts byte-identical, the dog's included; only the three edited formula recipes differ |
 
 The rendered audit's `INDEX.md` moves every gc-toolkit formula's scope column
-from `city` to `gc-toolkit`. That is the artifact reporting the new install
-shape, since the scenario city it builds now imports the core pack on rigs
-alone. `generated/seed-audit/` itself stays the committed stub, as it is on
+from `city` to `gc-toolkit`, except `mol-dog-shutdown-dance`, which stays at
+`city` because it ships in the sub-pack. That is the artifact reporting the new
+install shape, since the scenario city it builds now imports the core pack on
+rigs alone. `generated/seed-audit/` itself stays the committed stub, as it is on
 main.

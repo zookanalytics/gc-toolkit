@@ -6,7 +6,7 @@
 # that city-scope import lives here instead, so the core pack can be imported
 # at rig scope alone.
 #
-# Two things needed it, and only two:
+# Two registrations needed it, and only two:
 #
 #   - `dog`, the warrant-executor pool. It is city-scope on purpose: the
 #     deacon patrols the whole city and has no rig in hand when it files a
@@ -15,15 +15,19 @@
 #     a collision drops one of the two SILENTLY — only an import-qualified
 #     registration keeps both. That qualifier is why the pool answers to
 #     `gc-toolkit-city.dog` and the patrols address it through the
-#     `warrant_route` formula var.
+#     `warrant_route` formula var. `formulas/mol-dog-shutdown-dance.toml`,
+#     the only method it runs, ships here with it: formula search paths are
+#     scope-layered, and a city-scope agent searches city-pack formulas alone,
+#     so a rig-scope copy is unreachable from the dog. Every rig still reaches
+#     this one, because a rig's layers start with the city's.
 #   - The session_live hooks. A city-scope pack's [global] reaches every
 #     agent in the city; a rig-scope pack's reaches only that rig's, which
 #     leaves the city-scope agents (deacon, mechanik, dog) without them.
 #
 # Imports nothing on its own, and composes only alongside the gc-toolkit core
-# pack: the hooks below run scripts from the parent tree, and the dog executes
-# `mol-dog-shutdown-dance`, which the core pack ships. Nothing here is
-# duplicated from that tree.
+# pack: the hooks below run scripts from the parent tree, and the dance formula
+# calls `assets/scripts/dance-probe.sh` there. Nothing here is duplicated from
+# that tree.
 #
 # Wiring (city root pack.toml, plus gc-toolkit on each rig in city.toml):
 #
