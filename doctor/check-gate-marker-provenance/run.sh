@@ -44,7 +44,12 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 errors=(); warnings=(); notes=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 declare -A REVIEWS_CACHE=()
 
@@ -74,7 +79,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list open anchors in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
     fi
-    cands=$(printf '%s' "$raw" | strip_ctl | jq -c '[
+    cands=$(printf '%s' "$raw" | scrub | jq -c '[
         .[]? | (.metadata // {}) as $m
         | ((($m.merge_result // "") | tostring)) as $mr
         | select($mr == "pre_open_gate" or $mr == "pull_request")
@@ -100,7 +105,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not read the review-bead index in $rig_path/.beads (rc=$irc) — this store was NOT checked")
         continue
     fi
-    idx=$(printf '%s' "$idx_raw" | strip_ctl | jq -c '[
+    idx=$(printf '%s' "$idx_raw" | scrub | jq -c '[
         .[]? | (.metadata // {}) as $m
         | select(((($m.task_kind // "") | tostring)) == "review")
         | ((($m.anchor_bead // "") | tostring)) as $a
@@ -155,7 +160,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
                 # --paginate emits one array PER PAGE, so slurp before flattening:
                 # without -s a second page becomes a second jq output and the
                 # membership test below only ever sees the first.
-                REVIEWS_CACHE[$key]=$(printf '%s' "$body" | strip_ctl | jq -sc '[
+                REVIEWS_CACHE[$key]=$(printf '%s' "$body" | scrub | jq -sc '[
                     .[][]? | select(((.state // "") | tostring) == "APPROVED")
                     | ((.commit_id // "") | tostring) ]' 2>/dev/null)
             fi
