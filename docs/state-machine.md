@@ -263,6 +263,12 @@ sequenceDiagram
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` at a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.
+- **Disposal** (`review-sweep.sh`, cadence arm 6): a review outlives its own
+  subject when the anchor closes and the branch is deleted before any verdict
+  lands. There is no commit left for a marker to bind to, so the arm closes
+  the review with `gc.outcome=moot` and records the reason on it, and writes
+  nothing to the anchor. It requires both the closed anchor and the absent
+  branch, so an unfetched branch and a still-gating anchor each hold.
 - **Re-gate on head move**: any new commit stales every head-bound marker;
   gate-ensure sees a declared gate that is neither settled at the live head
   (`green@` or `exception@` at that head) nor in flight and dispatches one

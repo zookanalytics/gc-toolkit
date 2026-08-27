@@ -28,6 +28,7 @@ harness_init() {
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
+  export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
@@ -367,6 +368,17 @@ set -u
 case "$*" in
   *"remote get-url origin"*) echo "${STUB_ORIGIN_URL:-}" ;;
   *"symbolic-ref"*) echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
+  *"ls-remote"*)
+    # STUB_LS_REMOTE names a file of branch names, one per line, served in
+    # ls-remote's own "<sha>\trefs/heads/<name>" shape. STUB_LS_REMOTE_RC
+    # models the unreachable remote: real git prints nothing and exits
+    # non-zero, which no check on the output alone can tell from "no refs".
+    [ -n "${STUB_LS_REMOTE_RC:-}" ] && exit "$STUB_LS_REMOTE_RC"
+    while IFS= read -r b; do
+      [ -n "$b" ] || continue
+      printf '%s\trefs/heads/%s\n' "$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)" "$b"
+    done < "${STUB_LS_REMOTE:-/dev/null}"
+    exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
