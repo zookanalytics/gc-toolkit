@@ -6,7 +6,7 @@
 #   fed        always in context (`slice`): core fields, curated metadata,
 #              1-hop neighbor COUNTS + a title-only manifest, notes tail
 #   fetchable  loaded on demand (`fetch`): neighbor/parent bodies, full
-#              notes/comments, PR text+diff, CI status
+#              notes/comments, PR text+diff, PR conversation, CI status
 #   out        >1 hop (hop into that neighbor) or another rig
 # Pre-work null-vs-error: no PR yet is "not yet" (`prework`, exit 0), a
 # referenced PR that cannot be reached is `error` (exit 3). Stateless and
@@ -72,6 +72,10 @@ Fetchable tiers ('$PROG fetch <bead-id> <tier>'):
   comments                 Full comment history.
   parent                   The parent's full fields.
   pr [--json]              PR title/body/diff (gh pr view).
+  conversation [--json]    What has been SAID on the PR: issue comments, review
+                           bodies, inline review comments. --json emits a state
+                           enum: prework|no_conversation|present, plus counts
+                           and the PR's updated_at.
   ci [--json]              CI status (gh pr checks). --json emits a state enum:
                            prework|no_checks|pass|fail|pending|error.
 
@@ -121,20 +125,30 @@ acquire_children() {
 }
 
 # pr_ref <bead-json> -> the PR number on stdout, or empty if no PR is
-# referenced. Reads metadata.pr_number, else extracts the trailing number of
-# metadata.pr_url. Empty output = "pre-work, no PR yet" (not an error).
+# referenced. Reads metadata.pr_number, else the digits following `/pull/` in
+# metadata.pr_url — GitHub puts the number there whatever trails it (`/files`,
+# `#discussion_r...`), and the converse prompt's own pr_url parse splits at the
+# same marker, so a stricter parse here reads "pre-work" on a subject the
+# prompt has already decided carries a PR. Empty output = "pre-work, no PR
+# yet" (not an error), which every PR tier treats as nothing to fetch.
 pr_ref() {
-    local bead="$1" num url
+    local bead="$1" num url ref
     num="$(printf '%s' "$bead" | jq -r '.metadata.pr_number // empty')"
     if [ -n "$num" ]; then printf '%s' "$num"; return 0; fi
     url="$(printf '%s' "$bead" | jq -r '.metadata.pr_url // empty')"
-    if [ -n "$url" ]; then
-        local tail="${url##*/}"
-        case "$tail" in
-            ''|*[!0-9]*) : ;;            # non-numeric tail -> no usable ref
-            *) printf '%s' "$tail" ;;
-        esac
-    fi
+    [ -n "$url" ] || return 0
+    case "$url" in
+        */pull/*)
+            ref="${url#*/pull/}"
+            ref="${ref%%[!0-9]*}"
+            ;;
+        *)
+            ref="${url##*/}"
+            case "$ref" in *[!0-9]*) ref="" ;; esac
+            ;;
+    esac
+    if [ -n "$ref" ]; then printf '%s' "$ref"; fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -203,7 +217,7 @@ slice_json() {
             fetchable: (
                 ($children | map("neighbor:" + .id))
                 + ($deps | map("neighbor:" + .id))
-                + ["notes", "comments", "pr", "ci", "parent"]
+                + ["notes", "comments", "pr", "conversation", "ci", "parent"]
                 | unique
             )
         }'
@@ -235,7 +249,7 @@ slice_human() {
         "NOTES (tail):",
         (if .notes_tail == "" then "  (none)" else .notes_tail end),
         "",
-        "FETCHABLE (load on demand): neighbor <id> | notes | comments | pr | ci | parent"
+        "FETCHABLE (load on demand): neighbor <id> | notes | comments | pr | conversation | ci | parent"
     '
 }
 
@@ -324,6 +338,121 @@ fetch_pr() {
         out="$({ gh pr view "$prnum" 2>/dev/null && gh pr diff "$prnum" 2>/dev/null; })" \
             || die_unreachable "fetch pr: #$prnum referenced but unreachable (gh failed)"
         printf '%s\n' "$out" | fence_untrusted "GitHub PR #$prnum"
+    fi
+}
+
+# pr_repo <bead-json> -> "owner/repo" parsed from metadata.pr_url, or empty.
+# A converse session's work_dir sits under the CITY checkout, whose origin is
+# the city repo, not the rig the PR belongs to; gh's cwd inference names the
+# wrong repository there, so an explicit slug is what reaches the PR.
+pr_repo() {
+    local url slug
+    url="$(printf '%s' "$1" | jq -r '.metadata.pr_url // empty')"
+    [ -n "$url" ] || return 0
+    slug="${url#*://}"          # host/owner/repo/pull/N
+    slug="${slug#*/}"           # owner/repo/pull/N
+    case "$slug" in
+        */*/pull/*) printf '%s' "${slug%%/pull/*}" ;;
+    esac
+}
+
+# fetch_conversation — what has been SAID on the PR: issue comments, review
+# bodies, and inline review comments. Tri-state, like fetch_ci:
+#   prework          no PR referenced yet (expected; exit 0)
+#   no_conversation  PR exists, nothing said on it (exit 0)
+#   present          conversation reached (exit 0)
+#   error            PR referenced but unreachable (exit 3)
+# A review submitted as COMMENTED moves no other PR field: state stays OPEN,
+# mergeability stays MERGEABLE, the check rollup stays empty. Objections are
+# reachable through this tier alone, and `updated_at` is the only field on the
+# state side that moves when they land.
+fetch_conversation() {
+    local id="$1" json="${2:-}" bead prnum slug repo_flag view inline combined
+    bead="$(acquire_bead "$id")"
+    prnum="$(pr_ref "$bead")"
+    if [ -z "$prnum" ]; then
+        if [ "$json" = "--json" ]; then
+            echo '{"state":"prework","note":"no PR yet (pre-work)"}'
+        else
+            echo "conversation: none yet (pre-work) — no PR to read"
+        fi
+        return 0
+    fi
+
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/$id.conversation.json" ] \
+            || die_unreachable "fetch conversation: $prnum referenced but unreachable (no fixture data)"
+        view="$(jq '{number, url, state, updatedAt, comments, reviews}' "$FIXTURE/$id.conversation.json")"
+        inline="$(jq '.review_comments // []' "$FIXTURE/$id.conversation.json")"
+    else
+        slug="$(pr_repo "$bead")"
+        if [ -n "$slug" ]; then
+            repo_flag="$slug"
+            view="$(gh pr view "$prnum" --repo "$slug" --json number,url,state,updatedAt,comments,reviews 2>/dev/null)" || view=""
+        else
+            repo_flag="{owner}/{repo}"
+            view="$(gh pr view "$prnum" --json number,url,state,updatedAt,comments,reviews 2>/dev/null)" || view=""
+        fi
+        [ -n "$view" ] || die_unreachable "fetch conversation: #$prnum referenced but unreachable (gh failed)"
+        # `gh --paginate` emits one JSON ARRAY PER PAGE, so a plain `.[]?` over
+        # the stream reads page one and silently drops the rest; slurp with -s
+        # and flatten. Failing to reach the inline comments is an error, never
+        # an empty list — a silent zero here is the blindness this tier exists
+        # to end.
+        inline="$(gh api "repos/$repo_flag/pulls/$prnum/comments?per_page=100" --paginate 2>/dev/null | jq -s '[.[][]?]')" \
+            || die_unreachable "fetch conversation: #$prnum inline review comments unreachable (gh api failed)"
+    fi
+
+    # Both documents go in on stdin: the raw inline-comment objects carry
+    # diff hunks and link blocks, and a busy PR's array overruns the kernel's
+    # single-argument limit if passed as --argjson.
+    combined="$(printf '%s\n%s\n' "$view" "$inline" | jq -s '
+        .[0] as $view | (.[1] // []) as $inline
+        | $view
+        | ((.comments // []) | map({author: (.author.login // .author.name // "?"),
+                                    created_at: (.createdAt // null),
+                                    body: (.body // "")})) as $ic
+        | ((.reviews // []) | map({author: (.author.login // .author.name // "?"),
+                                   state: (.state // ""),
+                                   submitted_at: (.submittedAt // null),
+                                   body: (.body // "")})) as $rv
+        | ($inline | map({author: (.user.login // "?"),
+                          created_at: (.created_at // null),
+                          path: (.path // ""),
+                          line: (.line // .original_line),
+                          body: (.body // "")})) as $rc
+        | (($ic | length) + ($rv | length) + ($rc | length)) as $total
+        | {
+            state: (if $total == 0 then "no_conversation" else "present" end),
+            number: .number,
+            url: .url,
+            pr_state: .state,
+            updated_at: .updatedAt,
+            counts: {issue_comments: ($ic | length), reviews: ($rv | length),
+                     review_comments: ($rc | length), total: $total},
+            issue_comments: $ic,
+            reviews: $rv,
+            review_comments: $rc
+          }')"
+
+    if [ "$json" = "--json" ]; then
+        printf '%s' "$combined" | json_provenance "conversation of PR #$prnum"
+    else
+        printf '%s' "$combined" | jq -r '
+            "PR #\(.number) \(.pr_state) · updated \(.updated_at // "?")",
+            "conversation: \(.counts.total) (issue \(.counts.issue_comments) · reviews \(.counts.reviews) · inline \(.counts.review_comments))",
+            (.url // ""),
+            "",
+            (if (.issue_comments | length) == 0 then "ISSUE COMMENTS: (none)" else "ISSUE COMMENTS:" end),
+            (.issue_comments[] | "  \(.author) · \(.created_at // "?")\n\(.body)\n"),
+            (if (.reviews | length) == 0 then "REVIEWS: (none)" else "REVIEWS:" end),
+            (.reviews[] | "  \(.author) · \(.state) · \(.submitted_at // "?")\n"
+                + (if (.body | length) == 0
+                   then "  (empty body — a COMMENTED review carries its objections in the inline comments below)"
+                   else .body end) + "\n"),
+            (if (.review_comments | length) == 0 then "INLINE REVIEW COMMENTS: (none)" else "INLINE REVIEW COMMENTS:" end),
+            (.review_comments[] | "  \(.author) · \(.path):\(.line // "?") · \(.created_at // "?")\n\(.body)\n")
+        ' | fence_untrusted "GitHub PR #$prnum conversation"
     fi
 }
 
@@ -431,8 +560,9 @@ main() {
                 comments) fetch_comments "$id" ;;
                 parent)   fetch_parent "$id" ;;
                 pr)       fetch_pr "$id" "${1:-}" ;;
+                conversation) fetch_conversation "$id" "${1:-}" ;;
                 ci)       fetch_ci "$id" "${1:-}" ;;
-                *)        die "fetch: unknown tier '$tier' (neighbor|notes|comments|parent|pr|ci)" ;;
+                *)        die "fetch: unknown tier '$tier' (neighbor|notes|comments|parent|pr|conversation|ci)" ;;
             esac
             ;;
         *)
