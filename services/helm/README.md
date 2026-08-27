@@ -41,7 +41,8 @@ helm-svc board [--json]  render — the terminal board (tk-134d7). See *CLI view
 As the sidecar:
 
 ```
-GET /helm   -> { generated_at, total, tiles:[ Tile, ... ], partial?, partial_errors? }
+GET /helm   -> { generated_at, total, tiles:[ Tile, ... ], sittings:[ Sitting, ... ],
+                 partial?, partial_errors? }
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
@@ -268,6 +269,81 @@ row wants is a close or a re-open, not a re-read. The ruling stays on the wire
 in `takeaway`, where nothing truncates it; in the terminal table it was the
 longest cell in that column and the least actionable.
 
+## Converse sittings (`tk-ghlg1e.1`)
+
+Beside the ranked list the envelope carries the **conversation record**: every
+converse sitting that is running, plus those that closed inside a recent window.
+A sitting is a `task_kind=visit` bead — the bead a converse session claims and
+holds a conversation inside — and it is the same read that produces `held`.
+
+Sittings are **not tiles and are not ranked against them**. A tile is an anchor
+that wants something; a sitting is an event. The web app gives them a section of
+their own below the parked one, and `helm-svc board` prints them under the
+table, for the same reason parked conversations get a section: putting an event
+in a queue of demands answers a question nobody asked.
+
+| | gathered | shown |
+|---|---|---|
+| running | `status` open or in_progress | always — a live conversation is never elided |
+| closed | `closed_at` inside `GC_HELM_SITTINGS_WINDOW` (default `24h`) | most recent first, capped at 12 in a rendered view |
+
+`GC_HELM_SITTINGS_WINDOW` takes a Go duration (`6h`, `90m`). `0` gathers no
+closed sittings and leaves the running ones untouched; anything unparseable
+falls back to the default, because a malformed knob must not cost the board a
+section. The bound lives on the QUERY (`ClosedAfter`), not in the renderer:
+closed visits accumulate forever, and reading them all to throw most away would
+grow without limit against a store the whole city shares.
+
+The two passes fail independently. Losing the closed pass costs the recent
+history and nothing else — `held` is derived from the running half of the same
+record, so the glyph and the section can never disagree about what is held.
+
+### The justification a sitting closed on
+
+`gc.outcome` is stamped on the VISIT before it closes (`folded`, `moot`,
+`benign`, `diagnosed`, `cut-short`, or the word a held sitting signs off with).
+It is per-sitting and never rewritten, so it is attributable with no inference
+at all. A running sitting has none, and renders as `—` rather than as blank.
+
+`gc.takeaway` is the harder half, and it is why `Sitting.takeaway` is not a
+copy. **The takeaway lives on the SUBJECT, and each sitting overwrites the last
+one's.** A subject visited three times has one takeaway and two sittings that
+did not write it, so hanging it on all three rows would credit two of them with
+a conclusion they never reached. The service carries it only for the sitting
+whose own span — `gc.claimed_at` (falling back to the bead's creation) to
+`closed_at`, or to now while it runs — contains `gc.takeaway_at`.
+
+Measured on the live city, 2026-08-26: `tk-7linih` was visited twice, by
+`tk-5063jn` (closed 20:52, `diagnosed`) and `tk-eb5cot` (20:58–21:21,
+`unblocked`). Its single takeaway is stamped 21:20:48, inside the second span
+and after the first had ended. The span test is what stops the earlier sitting
+from displaying a headline written half an hour after it closed.
+
+Two sittings that genuinely overlap on one subject could both contain the stamp.
+The visit claim serializes them in practice, and the failure there is a
+duplicated headline rather than a misattributed one. A subject that cannot be
+read at all leaves its sittings showing an outcome and no headline — narrower,
+not wrong — and marks the gather partial.
+
+### Where it shows up
+
+`helm-svc board` prints the section under the ranked table, `●` for a running
+sitting, AGE measured from the start of a running one and from the end of a
+closed one. `--json` is **untouched**: it emits the bare ranked array that
+`gc-helm.sh --json` emits and `tmux-pick-helm.sh` consumes, and growing a second
+shape there would break that contract.
+
+The web app renders the same order — running first, longest-running first, then
+most recently closed — and drills in on a sitting's SUBJECT, since that is the
+anchor the drill plane knows how to open. Because `POST /helm/open` already
+invalidates the cached board, a visit filed from the drill panel appears in this
+section on the next read rather than after the TTL.
+
+**`gc-helm.sh` needs no counterpart.** This adds no field to `Tile` and no
+anchor kind, so the bash board's `--json` contract and the parity test are
+untouched; the bash board simply has no sittings section. Adding one there is a
+separate decision, in the same class as the other bash-only verbs.
+
 ## Architecture
 
 Three packages, a clean dependency line `board <- source <- server <- cmd`:
@@ -331,7 +407,11 @@ of the API, not of the client:
   `GET /beads` filters on status/type/label/assignee/rig and nothing else, and
   its payloads carry no metadata, so `human` and `parked` can be selected
   neither server-side nor client-side — finding them would mean one
-  `/bead/{id}` round trip per open bead in the city.
+  `/bead/{id}` round trip per open bead in the city. The **sittings** record is
+  out of reach for the same two reasons: it selects on `task_kind=visit` and it
+  reads `gc.outcome` off each hit. Under `GC_HELM_SOURCE=supervisor` the
+  envelope's `sittings` is simply `null` and neither view renders the section —
+  the same shape of gap, and the same trade.
 
 `BeadsSource` reads both directly. Choosing it over a new supervisor endpoint —
 the other sanctioned path — is recorded, with the measurements, in
@@ -692,8 +772,8 @@ fixture from decaying into a check that passes because it exercises nothing.
 Two shapes deserve care when mirroring, and the mapping derives both from the
 struct tag rather than leaving them to judgement: `omitempty`/`omitzero` becomes
 a TypeScript `?`, and a slice *without* `omitempty` becomes `T[] | null` because
-`encoding/json` writes `null` for a nil slice. `tiles` really is nullable —
-narrow it (`board.tiles ?? []`) before iterating.
+`encoding/json` writes `null` for a nil slice. `tiles` and `sittings` really are
+nullable — narrow them (`board.tiles ?? []`) before iterating.
 
 Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
 fixture): `specs/tk-eemvf.2/decisions.md`.
@@ -889,6 +969,9 @@ Discovery env:
   and `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`, else the
   `GC_CITY_PATH` basename) — the HTTP backend's target.
 - `GC_HELM_CACHE_TTL` — seconds or a Go duration; default 45s.
+- `GC_HELM_SITTINGS_WINDOW` — a Go duration; default 24h. How far back a CLOSED
+  converse sitting stays on the board; `0` leaves only the running ones. See
+  *Converse sittings* above.
 - `GC_HELM_PROBE_TIMEOUT` — seconds or a Go duration; default 10s. Bounds the
   startup open described under *Picking a backend*. The socket is not created
   until the backend is chosen, so an unbounded probe would turn a wedged Dolt

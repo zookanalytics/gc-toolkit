@@ -1,6 +1,8 @@
 package board
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1136,5 +1138,91 @@ func TestDispositionDueSurvivesForAPlainParkedRow(t *testing.T) {
 	}
 	if tile.Needs != "blocker landed — dispose or resume" {
 		t.Errorf("needs: %q", tile.Needs)
+	}
+}
+
+// --- sittings --------------------------------------------------------------
+
+func sit(id, status string, opened, closed time.Time) Sitting {
+	return Sitting{ID: id, Status: status, OpenedAt: opened, ClosedAt: closed}
+}
+
+// TestSittingsAreOrderedRunningFirst pins the one order both renderers spend:
+// running sittings ahead of finished ones, the longest-running first, then the
+// most recently closed.
+func TestSittingsAreOrderedRunningFirst(t *testing.T) {
+	at := func(h int) time.Time { return time.Date(2026, 8, 1, h, 0, 0, 0, time.UTC) }
+	in := []Sitting{
+		sit("closed-old", "closed", at(1), at(2)),
+		sit("running-new", "open", at(9), time.Time{}),
+		sit("closed-new", "closed", at(3), at(6)),
+		sit("running-old", "in_progress", at(4), time.Time{}),
+	}
+
+	got := BuildBoard(nil, at(10), false, nil, Facts{Sittings: in}).Sittings
+
+	var ids []string
+	for _, s := range got {
+		ids = append(ids, s.ID)
+	}
+	want := []string{"running-old", "running-new", "closed-new", "closed-old"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("sitting order = %v, want %v", ids, want)
+	}
+}
+
+// TestSittingOrderIsDeterministic: equal timestamps must not leave the order to
+// map iteration, or two renders of one board disagree about the sequence.
+func TestSittingOrderIsDeterministic(t *testing.T) {
+	at := time.Date(2026, 8, 1, 5, 0, 0, 0, time.UTC)
+	in := []Sitting{sit("b", "closed", at, at), sit("a", "closed", at, at), sit("c", "closed", at, at)}
+	got := orderSittings(in)
+	if got[0].ID != "a" || got[1].ID != "b" || got[2].ID != "c" {
+		t.Errorf("equal stamps tie-break by id: got %v", []string{got[0].ID, got[1].ID, got[2].ID})
+	}
+	// The input must survive: BuildBoard's caller owns that slice.
+	if in[0].ID != "b" {
+		t.Error("orderSittings sorted its caller's slice in place")
+	}
+}
+
+// TestCapSittingsKeepsEveryRunningOne: the cap is a bound on HISTORY. A running
+// sitting is a live conversation and is never the row that gets dropped.
+func TestCapSittingsKeepsEveryRunningOne(t *testing.T) {
+	at := func(h int) time.Time { return time.Date(2026, 8, 1, h, 0, 0, 0, time.UTC) }
+	var in []Sitting
+	for i := range 5 {
+		in = append(in, sit(fmt.Sprintf("run-%d", i), "open", at(i), time.Time{}))
+	}
+	for i := range 5 {
+		in = append(in, sit(fmt.Sprintf("done-%d", i), "closed", at(i), at(i+1)))
+	}
+
+	kept, dropped := CapSittings(orderSittings(in), 2)
+	if dropped != 3 {
+		t.Errorf("dropped = %d, want 3", dropped)
+	}
+	var running, closed int
+	for _, s := range kept {
+		if s.Status == "closed" {
+			closed++
+		} else {
+			running++
+		}
+	}
+	if running != 5 || closed != 2 {
+		t.Errorf("kept %d running and %d closed, want 5 and 2", running, closed)
+	}
+
+	if kept, dropped := CapSittings(in, 0); dropped != 0 || len(kept) != len(in) {
+		t.Errorf("maxClosed<=0 is uncapped: kept %d dropped %d", len(kept), dropped)
+	}
+}
+
+// TestBoardWithoutSittingsCarriesNone: a gather that supplied no record leaves
+// the field nil rather than an empty slice, matching how Tiles reads on the wire.
+func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
+	if got := BuildBoard(nil, time.Now(), false, nil, Facts{}).Sittings; got != nil {
+		t.Errorf("Sittings = %v, want nil", got)
 	}
 }

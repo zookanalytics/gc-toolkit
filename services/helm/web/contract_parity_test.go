@@ -435,6 +435,31 @@ func fixtureBoard() board.Board {
 	return board.Board{
 		GeneratedAt: time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
 		Total:       2,
+		// One sitting of each half, so the fixture exercises both the running
+		// shape (no outcome, no close stamp) and the finished one.
+		Sittings: []board.Sitting{
+			{
+				ID:       "tk-vst01",
+				Rig:      "gc-toolkit",
+				Subject:  "tk-eemvf",
+				Title:    "visit: tk-eemvf — tile density",
+				Status:   "in_progress",
+				Session:  "gc-toolkit__converse-1",
+				OpenedAt: time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
+			},
+			{
+				ID:       "tk-vst02",
+				Rig:      "gascity",
+				Subject:  "gt-1a2b3",
+				Title:    "visit: gt-1a2b3 — the convoy is complete",
+				Status:   "closed",
+				Outcome:  "diagnosed",
+				Session:  "gascity__converse-2",
+				OpenedAt: time.Date(2026, 8, 11, 9, 12, 0, 0, time.UTC),
+				ClosedAt: time.Date(2026, 8, 11, 9, 48, 0, 0, time.UTC),
+				Takeaway: "the roll-up was right; the convoy's own progress claim was stale",
+			},
+		},
 		Tiles: []board.Tile{
 			{
 				ID:       "tk-eemvf",
@@ -604,6 +629,21 @@ func TestFixtureCoversEveryField(t *testing.T) {
 		}
 	}
 	assertCovers(t, "Tile", mustWireStruct(t, "Tile"), union)
+
+	var sittings []map[string]json.RawMessage
+	if err := json.Unmarshal(decoded["sittings"], &sittings); err != nil {
+		t.Fatalf("decode fixture sittings: %v", err)
+	}
+	if len(sittings) == 0 {
+		t.Fatal("the fixture carries no sittings, so it exercises none of the Sitting contract")
+	}
+	sittingKeys := map[string]bool{}
+	for _, s := range sittings {
+		for k := range s {
+			sittingKeys[k] = true
+		}
+	}
+	assertCovers(t, "Sitting", mustWireStruct(t, "Sitting"), sittingKeys)
 }
 
 func keysOf(m map[string]json.RawMessage) map[string]bool {

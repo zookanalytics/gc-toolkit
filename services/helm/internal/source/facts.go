@@ -2,8 +2,11 @@ package source
 
 import (
 	"context"
+	"os"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/beads"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
@@ -25,25 +28,207 @@ import (
 // exactly as it does in gc-helm.sh's snapshot.
 var liveStatuses = []beads.Status{beads.StatusOpen, beads.StatusInProgress}
 
-// visitSubjects returns the anchor ids that an open visit bead names in its
-// gc.continuation_group — the conversation-is-held fact behind Tile.Held.
-func (s *BeadsSource) visitSubjects(ctx context.Context, st beadStore, r rigRef, g *gatherState) []string {
-	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+// visitFilter selects converse sittings. task_kind is what separates a visit
+// from every other bead: gc.outcome — the field a closed sitting is read for —
+// is stamped on step beads, review beads and dog warrants too, so a query keyed
+// on it would gather most of the city.
+var visitFilter = map[string]string{"task_kind": "visit"}
+
+// defaultSittingWindow is how far back a CLOSED sitting stays on the board.
+// A day covers the shift an operator is actually reconstructing; older
+// conversations are history, and history belongs to the bead, not to a board
+// that re-gathers every render.
+const defaultSittingWindow = 24 * time.Hour
+
+// sittingWindow reads GC_HELM_SITTINGS_WINDOW as a Go duration ("6h", "90m").
+// Zero is honoured and means running sittings only. Anything unparseable or
+// negative falls back to the default rather than erroring: a malformed knob
+// must not cost the board a section it would otherwise render.
+func sittingWindow() time.Duration {
+	v := strings.TrimSpace(os.Getenv("GC_HELM_SITTINGS_WINDOW"))
+	if v == "" {
+		return defaultSittingWindow
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return defaultSittingWindow
+	}
+	return d
+}
+
+// rigSittings gathers one rig's converse sittings: every open visit bead, plus
+// those closed inside the window.
+//
+// The two passes fail INDEPENDENTLY. The open pass is what Tile.Held is derived
+// from, so losing the closed pass must not cost the board its held glyphs, and
+// losing the open pass must not suppress the record of what just finished.
+// Either failure narrows the section and says so in partial_errors.
+//
+// A CLOSED pass is new ground for this gather, which has otherwise only ever
+// read open beads. It is bounded on the query rather than in the renderer:
+// closed visits accumulate forever, and a gather that read them all to throw
+// most away would grow without limit against a store the whole city shares.
+func (s *BeadsSource) rigSittings(ctx context.Context, st beadStore, r rigRef, g *gatherState, now time.Time) []board.Sitting {
+	var out []board.Sitting
+
+	open, err := st.SearchIssues(ctx, "", beads.IssueFilter{
 		Statuses:       liveStatuses,
-		MetadataFields: map[string]string{"task_kind": "visit"},
+		MetadataFields: visitFilter,
 		SkipWisps:      true,
 	})
 	if err != nil {
 		g.note(true, []string{"visits@" + r.name + ": " + err.Error()})
-		return nil
 	}
-	var out []string
-	for _, iss := range issues {
+	for _, iss := range open {
+		if iss != nil {
+			out = append(out, newSitting(iss, r))
+		}
+	}
+
+	if window := sittingWindow(); window > 0 {
+		cutoff := now.Add(-window)
+		status := beads.StatusClosed
+		done, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+			Status:         &status,
+			MetadataFields: visitFilter,
+			ClosedAfter:    &cutoff,
+			SkipWisps:      true,
+		})
+		if err != nil {
+			g.note(true, []string{"closed-visits@" + r.name + ": " + err.Error()})
+		}
+		for _, iss := range done {
+			if iss != nil {
+				out = append(out, newSitting(iss, r))
+			}
+		}
+	}
+
+	s.attributeTakeaways(ctx, st, r, g, out, now)
+	return out
+}
+
+// newSitting projects one visit bead onto the board's record of a sitting.
+func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
+	md := decodeMetadata(iss.Metadata)
+	st := board.Sitting{
+		ID:       iss.ID,
+		Rig:      r.name,
+		Subject:  md["gc.continuation_group"],
+		Title:    iss.Title,
+		Status:   string(iss.Status),
+		Outcome:  md["gc.outcome"],
+		Session:  md["gc.session_name"],
+		OpenedAt: iss.CreatedAt,
+	}
+	// A visit exists from the moment it is filed, but the CONVERSATION starts
+	// when a converse session claims it, and a visit can wait in the pool for
+	// as long as the pool is busy. The claim stamp is the truer start; the
+	// creation time is the fallback for a sitting that has not been claimed.
+	if claimed, ok := parseStamp(md["gc.claimed_at"]); ok {
+		st.OpenedAt = claimed
+	}
+	if iss.ClosedAt != nil {
+		st.ClosedAt = iss.ClosedAt.UTC()
+	}
+	return st
+}
+
+// attributeTakeaways fills in the headline each sitting left, reading the
+// SUBJECT beads in one batch and keeping a takeaway only for the sitting whose
+// span contains its timestamp (see board.Sitting.Takeaway for why the span test
+// is the whole point).
+//
+// Failure is silent in the board's usual direction: a subject that cannot be
+// read leaves its sittings showing an outcome and no headline, which is a
+// narrower row rather than a wrong one. It is still recorded as partial, since
+// a store that will not answer this read is a store the rest of the gather
+// should be doubted on too.
+func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting, now time.Time) {
+	var ids []string
+	for _, sit := range sittings {
+		if sit.Subject != "" {
+			ids = append(ids, sit.Subject)
+		}
+	}
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return
+	}
+
+	// No status scope on purpose: a subject closed since its sitting ended
+	// still owns the takeaway that sitting wrote.
+	subjects, err := st.SearchIssues(ctx, "", beads.IssueFilter{IDs: ids, SkipWisps: true})
+	if err != nil {
+		g.note(true, []string{"sitting-subjects@" + r.name + ": " + err.Error()})
+		return
+	}
+
+	type stamped struct {
+		text string
+		at   time.Time
+	}
+	byID := make(map[string]stamped, len(subjects))
+	for _, iss := range subjects {
 		if iss == nil {
 			continue
 		}
-		if subj := decodeMetadata(iss.Metadata)["gc.continuation_group"]; subj != "" {
-			out = append(out, subj)
+		md := decodeMetadata(iss.Metadata)
+		text := md["gc.takeaway"]
+		if text == "" {
+			continue
+		}
+		// A takeaway with no readable timestamp cannot be placed in any
+		// sitting's span, so it is attributed to none. Crediting the newest
+		// sitting instead would be a guess, and the guess is wrong for exactly
+		// the subject that has been visited more than once.
+		at, ok := parseStamp(md["gc.takeaway_at"])
+		if !ok {
+			continue
+		}
+		byID[iss.ID] = stamped{text: text, at: at}
+	}
+
+	for i := range sittings {
+		s := &sittings[i]
+		got, ok := byID[s.Subject]
+		if !ok {
+			continue
+		}
+		end := s.ClosedAt
+		if end.IsZero() {
+			end = now // a running sitting is still able to write one
+		}
+		if got.at.Before(s.OpenedAt) || got.at.After(end) {
+			continue
+		}
+		s.Takeaway = got.text
+	}
+}
+
+// parseStamp reads one of the RFC 3339 timestamps the city stamps in metadata.
+// Metadata is free text, so an unparseable value is an absence rather than an
+// error — every caller has a defined behaviour for "not known".
+func parseStamp(v string) (time.Time, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
+}
+
+// visitSubjects is the conversation-is-held fact behind Tile.Held: the anchors
+// a RUNNING sitting names. It reads the gathered record rather than re-querying,
+// so the glyph and the sittings section can never disagree about what is held.
+func visitSubjects(sittings []board.Sitting) []string {
+	var out []string
+	for _, s := range sittings {
+		if s.Status != string(beads.StatusClosed) && s.Subject != "" {
+			out = append(out, s.Subject)
 		}
 	}
 	return out
@@ -216,13 +401,14 @@ func sessionStates(ctx context.Context, gc gcClient, g *gatherState) map[string]
 	return states
 }
 
-// buildFacts assembles the three joins into the value BuildBoard consumes.
-func buildFacts(visits []string, inflight map[string][]string, owners map[string]string, rigs []rigRef) board.Facts {
+// buildFacts assembles the joins into the value BuildBoard consumes.
+func buildFacts(sittings []board.Sitting, inflight map[string][]string, owners map[string]string, rigs []rigRef) board.Facts {
 	f := board.Facts{
 		Inflight:   inflight,
 		OwnerState: owners,
+		Sittings:   sittings,
 	}
-	if len(visits) > 0 {
+	if visits := visitSubjects(sittings); len(visits) > 0 {
 		f.Visits = make(map[string]bool, len(visits))
 		for _, v := range visits {
 			f.Visits[v] = true

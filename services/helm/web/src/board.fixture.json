@@ -89,6 +89,31 @@
       "rank_score": 3000
     }
   ],
+  "sittings": [
+    {
+      "id": "tk-vst01",
+      "rig": "gc-toolkit",
+      "subject": "tk-eemvf",
+      "title": "visit: tk-eemvf — tile density",
+      "status": "in_progress",
+      "outcome": "",
+      "session": "gc-toolkit__converse-1",
+      "opened_at": "2026-08-11T14:40:00Z",
+      "takeaway": ""
+    },
+    {
+      "id": "tk-vst02",
+      "rig": "gascity",
+      "subject": "gt-1a2b3",
+      "title": "visit: gt-1a2b3 — the convoy is complete",
+      "status": "closed",
+      "outcome": "diagnosed",
+      "session": "gascity__converse-2",
+      "opened_at": "2026-08-11T09:12:00Z",
+      "closed_at": "2026-08-11T09:48:00Z",
+      "takeaway": "the roll-up was right; the convoy's own progress claim was stale"
+    }
+  ],
   "partial": true,
   "partial_errors": [
     "rig shutupandlisten: context canceled"

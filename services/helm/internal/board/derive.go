@@ -684,9 +684,85 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		GeneratedAt:   now.UTC(),
 		Total:         len(deduped),
 		Tiles:         deduped,
+		Sittings:      orderSittings(facts.Sittings),
 		Partial:       partial,
 		PartialErrors: partialErrors,
 	}
+}
+
+// orderSittings sorts the conversation record: running sittings first, oldest
+// start first, then the closed ones, most recently closed first.
+//
+// Running before closed because only a running sitting can still be joined.
+// Oldest-first WITHIN the running group because the sitting that has been open
+// longest is the one worth a look — a conversation nobody ended is how a
+// converse session wedges — while a newest-first list would bury it under
+// whatever started since. The closed group is the opposite question, "what just
+// concluded", so it reads newest-first.
+//
+// Ordering here rather than in a renderer is what keeps the terminal board and
+// the dashboard showing the same sequence. Both spend the order; neither may
+// invent one.
+func orderSittings(in []Sitting) []Sitting {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Sitting, len(in))
+	copy(out, in)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if ar, br := a.running(), b.running(); ar != br {
+			return ar
+		}
+		if a.running() {
+			if !a.OpenedAt.Equal(b.OpenedAt) {
+				return a.OpenedAt.Before(b.OpenedAt)
+			}
+		} else if !a.ClosedAt.Equal(b.ClosedAt) {
+			return a.ClosedAt.After(b.ClosedAt)
+		}
+		return a.ID < b.ID
+	})
+	return out
+}
+
+// running reports whether this sitting is still holding its conversation. The
+// test is on the status the visit bead actually carries, so a status the city
+// grows later reads as running rather than as finished — the direction that
+// shows a row instead of hiding it.
+func (s Sitting) running() bool { return s.Status != "closed" }
+
+// DefaultMaxSittings bounds the closed half of the conversation record in a
+// rendered view. Running sittings are never elided: there are as many of them
+// as the city has converse sessions, and each one is a live conversation.
+const DefaultMaxSittings = 12
+
+// CapSittings keeps every running sitting and the maxClosed most recently
+// closed, returning the kept rows and how many closed rows were dropped. It
+// assumes the [orderSittings] order, which is the only order the board emits.
+//
+// The count is returned rather than swallowed so a renderer can say the list
+// was shortened. A quiet truncation would read as "these are all the sittings
+// there were", which is the one thing an elided list must not imply.
+func CapSittings(in []Sitting, maxClosed int) (kept []Sitting, dropped int) {
+	if maxClosed <= 0 {
+		return in, 0
+	}
+	kept = make([]Sitting, 0, len(in))
+	closed := 0
+	for _, s := range in {
+		if s.running() {
+			kept = append(kept, s)
+			continue
+		}
+		if closed >= maxClosed {
+			dropped++
+			continue
+		}
+		closed++
+		kept = append(kept, s)
+	}
+	return kept, dropped
 }
 
 // DefaultMaxRows and DefaultMaxParked mirror gc-helm.sh's GC_HELM_MAX_ROWS=50
