@@ -43,11 +43,12 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
 
-FIX_POOL=""; REVIEW_POOL=""
+FIX_POOL=""; REVIEW_POOL=""; POSTURE_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
-    --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
+    --fix-pool)     FIX_POOL="${2:-}"; shift 2 ;;
+    --review-pool)  REVIEW_POOL="${2:-}"; shift 2 ;;
+    --posture-only) POSTURE_ONLY=1; shift ;;
     *) shift ;;
   esac
 done
@@ -177,7 +178,9 @@ while IFS= read -r row; do
   [ -n "$target" ] || target="$base"
 
   # --- PR merged (out-of-band, or a died record): record it ----------------------
-  if [ "$state" = "MERGED" ]; then
+  # Reconciliation is the full pass's; --posture-only writes a posture and
+  # nothing else, so a MERGED or CLOSED anchor falls through to the OPEN filter.
+  if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ]; then
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
     if [ -z "$merge_oid" ]; then
@@ -202,7 +205,7 @@ while IFS= read -r row; do
   fi
 
   # --- PR closed unmerged: out-of-band close -> abandoned + visit ----------------
-  if [ "$state" = "CLOSED" ]; then
+  if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ]; then
     if "$LIFECYCLE" transition "$id" --to abandoned --expect pull_request \
          --assignee "" \
          --set "blocked_reason=PR#$num closed out-of-band without merging"; then
@@ -284,6 +287,12 @@ while IFS= read -r row; do
       fi
     fi
   fi
+
+  # merge.sh reads posture off the bead and never asks GitHub, so the record has
+  # to be no older than the merge arm that reads it. --posture-only is that
+  # earlier pass: it writes the posture and stops here, leaving every dispatch
+  # arm below to the full pass that runs after merge.
+  [ "$POSTURE_ONLY" != 1 ] || continue
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
@@ -605,7 +614,7 @@ GATES
       CFIX=$(printf '%s' "$ckids" | jq -r --arg id "$id" '
         [ .[] | select(((.metadata.anchor_bead // "") | tostring) == $id) | .id ] | .[0] // empty' 2>/dev/null)
       if [ -n "$CFIX" ]; then
-        echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; recording the watermark only"
+        echo "$PROG: $id — PR#$num comment rework $CFIX already covers this batch; re-checking its route before the watermark"
       else
         # Live-only, unlike the batch probe above: a CLOSED orphan would take the
         # stamp and the route, hold nothing, and still let the watermark advance
@@ -645,8 +654,24 @@ GATES
           echo "$PROG: WARN comment rework $CFIX did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
         fi
-        gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
-          || echo "$PROG: WARN comment rework $CFIX not routed to $FIX_POOL; route it by hand" >&2
+      fi
+      # An unrouted child still holds the merge through its blocks edge, but no
+      # pool can claim it, and the mark would retire the only signal that could
+      # re-file it. A CLOSED child is already dispositioned, so refusing on one
+      # could never converge. Only a definitively closed status skips the check;
+      # an unreadable one still demands the route.
+      cst=$(gc bd show "$CFIX" --json 2>/dev/null | scrub \
+        | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
+      if [ "$cst" != "closed" ]; then
+        rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+        if [ "$rgot" != "$FIX_POOL" ]; then
+          gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+          rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+        fi
+        if [ "$rgot" != "$FIX_POOL" ]; then
+          echo "$PROG: WARN comment rework $CFIX is NOT routed to $FIX_POOL; NOT watermarking (an unclaimable child with the mark moved past its comments is the silence this arm exists to stop)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
         gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
       fi
       DISP="rework:$CFIX"
@@ -739,5 +764,9 @@ done <<ROWS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 ROWS_EOF
 
-echo "$PROG: $recorded recorded, $postured postures recorded, $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
+if [ "$POSTURE_ONLY" = 1 ]; then
+  echo "$PROG: posture-only — $postured postures recorded, $skipped skipped"
+else
+  echo "$PROG: $recorded recorded, $postured postures recorded, $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $regated re-reviews filed, $dismissed_n reviews dismissed, $skipped skipped"
+fi
 exit 0

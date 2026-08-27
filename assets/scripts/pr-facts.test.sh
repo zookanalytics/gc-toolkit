@@ -11,6 +11,8 @@
 # pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
+# Also covers --posture-only (the pre-merge arm: records posture, dispatches
+# nothing, leaves MERGED/CLOSED reconciliation to the full pass);
 # Also covers the POSTURE record and the comment watermark: the declared
 # vocabulary, posture pinned to the live head and written only on change, an
 # unanswered comment routing to a fix-pool child or (under a human hold) to a
@@ -406,7 +408,7 @@ out=$(STUB_DROP_KEYS="W1:pr_comment_watermark" run)
 has "$out" "watermark did NOT record" "the lost watermark is caught by the read-back"
 eq "$(meta W1 pr_comment_watermark)" "<absent>" "…the mark really did not move"
 out=$(run)
-has "$out" "already covers this batch; recording the watermark only" "the next pass finds its own child"
+has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
 eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
@@ -437,6 +439,82 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2"
 eq "$(meta new-3 'gc.routed_to')" "$FIX" "…and that one is routed"
 eq "$(meta W3 pr_comment_disposition)" "rework:new-3" "the disposition names the live child"
 grep -qxF "new-3|blocks|W3" "$STUB_DEPS" && ok "…and it is what holds the merge" || bad "blocks edge missing"
+
+echo "# …a child whose ROUTE stamp drops is never watermarked past"
+# The blocks edge holds the merge either way, so the failure is not a silent
+# merge — it is an unclaimable child plus a mark retired past the only comments
+# that could re-file it.
+store "[$(anchor W4 48)]"
+printf '%s' "$(prview 48 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_48.json"
+echo '[]' > "$GH_DIR/reviews_48.json"
+printf '[{"id":9300,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_48.json"
+out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
+has "$out" "is NOT routed to $FIX; NOT watermarking" "a dropped route stamp refuses the watermark"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…the child really is unclaimable"
+eq "$(meta W4 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
+eq "$(meta W4 pr_comment_disposition)" "<absent>" "…with nothing recorded as its disposition"
+out=$(run)
+has "$out" "already covers this batch; re-checking its route" "the next pass re-checks the route it left behind"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…repairs it in place"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(meta W4 pr_comment_watermark)" "9300" "…and only then does the mark move"
+
+echo "# …a CLOSED child is dispositioned, so an unrouted one still converges"
+store "[$(anchor W5 49)]"
+printf '%s' "$(prview 49 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_49.json"
+echo '[]' > "$GH_DIR/reviews_49.json"
+printf '[{"id":9400,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_49.json"
+out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
+has "$out" "NOT watermarking" "the unrouted child holds the mark"
+ctmp=$(mktemp); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
+out=$(run)
+eq "$(meta W5 pr_comment_watermark)" "9400" "a closed child answers the batch even unrouted — refusing forever could not converge"
+
+echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
+# merge.sh reads pr_posture off the bead and never asks GitHub. The full arm
+# runs AFTER merge, so a comment that arrived since the last pass would be
+# invisible to the merge it should have held. This mode closes that window: it
+# records, and dispatches nothing.
+run_posture() { "$SUT" --posture-only 2>&1; }
+store "[$(anchor PO1 60)]"
+printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
+echo '[]' > "$GH_DIR/reviews_60.json"
+printf '[{"id":9500,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_60.json"
+: > "$STUB_SESSION_LOG"
+out=$(run_posture); rc=$?
+eq "$rc" 0 "a posture-only pass exits 0"
+eq "$(meta PO1 pr_posture)" "commented@sha-60" "the posture is recorded"
+eq "$(meta PO1 pr_merge_state)" "BLOCKED@sha-60" "…and the merge state beside it"
+has "$out" "posture-only" "the summary names the mode"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "NOTHING was dispatched"
+eq "$(meta PO1 pr_comment_watermark)" "<absent>" "…and no watermark moved: routing is the full pass's"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake" "…no pool was woken"
+
+echo "# …the full pass that follows still routes the same batch"
+out=$(run)
+eq "$(meta PO1 pr_comment_disposition)" "rework:new-2" "the comment is routed once the full arm runs"
+eq "$(meta PO1 pr_comment_watermark)" "9500" "…and only then is it marked answered"
+
+echo "# …a CONFLICTING anchor is recorded, never reworked, by this mode"
+store "[$(anchor PO2 61)]"
+printf '%s' "$(prview 61 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_61.json"
+echo '[]' > "$GH_DIR/reviews_61.json"
+echo '[]' > "$GH_DIR/comments_61.json"
+out=$(run_posture)
+eq "$(meta PO2 pr_posture)" "none@sha-61" "the posture is still recorded"
+hasnt "$out" "filed rebase-mode rework" "…but no rework child is filed"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…none at all"
+
+echo "# …and MERGED/CLOSED reconciliation is left to the full pass"
+store "[$(anchor PO3 62)]"
+printf '%s' "$(prview 62 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_62.json"
+out=$(run_posture)
+hasnt "$out" "is MERGED" "a merged PR is not reconciled by the posture pass"
+eq "$(bstatus PO3)" "open" "…the anchor is left exactly as it was"
+eq "$(meta PO3 merge_result)" "pull_request" "…with its state untouched"
+out=$(run)
+has "$out" "PR#62 is MERGED" "the full pass still records it"
+eq "$(bstatus PO3)" "closed" "…and closes the anchor"
 
 echo "# a human already holding the anchor gets the comments, not the fix pool"
 store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"')]"

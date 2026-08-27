@@ -1,6 +1,6 @@
 ---
 name: Refinery merge cadence
-description: The exec order that drives the merge queue — the driver and its six arms, the rc=3 interlock, the single-flight guarantee, and how to read what a pass did. Read it to know what drives merges, and why nothing else may.
+description: The exec order that drives the merge queue — the driver and its arms, the rc=3 interlock, the single-flight guarantee, and how to read what a pass did. Read it to know what drives merges, and why nothing else may.
 ---
 
 # Refinery merge cadence
@@ -25,7 +25,7 @@ are not driven by this order.
 
 Every 60s, per rig: `orders/refinery-reconcile.toml` (`trigger = "cooldown"`,
 `scope = "rig"`) execs `assets/scripts/refinery-reconcile.sh`, the ~100-line
-driver, which runs the six arms in order and exits.
+driver, which runs the arms in order and exits.
 
 | | |
 |---|---|
@@ -39,7 +39,7 @@ Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
 the cadence — the arms run whether or not any refinery session is awake.
 
-## The six arms
+## The arms
 
 1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
@@ -84,14 +84,22 @@ the cadence — the arms run whether or not any refinery session is awake.
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
    summary only when the handoff carried none.
-3. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
+3. **pr-facts.sh --posture-only** — the posture record, and nothing else.
+   `merge.sh` answers "is a human waiting on this?" off the bead and never asks
+   GitHub, so the value it reads has to be written in the same pass. This arm
+   writes `pr_posture` and `pr_merge_state` at the live head for every open
+   non-draft anchor, then stops: no dispatch, no watermark, and MERGED/CLOSED
+   reconciliation stays with arm 5. A held merge still gets one, because
+   recording a fact is not a dispatch, and the pass that finally merges must not
+   be reading a posture from a previous tick.
+4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork, head branch matches), re-read the anchor, validate
    holds/posture/gates/children/approval/base/CLEAN, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
    `lifecycle.sh` call. The posture it validates is the value **pr-facts
    recorded on the anchor**, never a fresh read of GitHub.
-4. **pr-facts.sh** — external facts only, no merge authority: PR merged
+5. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head), a gate
    `green@` or `exception@` at a stale head (one re-review child per head,
@@ -99,13 +107,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
    any of those arms run, and routes an unanswered review comment to a rework
-   child or a visit. Because it is arm 4, `merge.sh` reads a posture at most
-   one pass old: a comment that arrives mid-pass is caught by merge.sh's own
-   terminal re-read, and one that arrives after it is held on the next tick.
-5. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
+   child or a visit. The posture write is idempotent, so re-running it here
+   after arm 3 costs nothing when nothing changed. Routing lives only in this
+   arm: arm 3 records, this one decides what answers the comment.
+6. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
-6. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+7. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -116,7 +124,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    left alone. Branch existence comes from one `git ls-remote --heads origin`
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
-   residue is filed by two dispatchers, arm 1 and arm 4.
+   residue is filed by two dispatchers, arm 1 and arm 5.
 
 ## Single-flight: the tracking gate and the pass lock
 

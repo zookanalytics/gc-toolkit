@@ -1,15 +1,15 @@
-# refinery-reconcile — the merge cadence, controller-owned. Runs the five arms
-# (gate-ensure, pr-open, merge, pr-facts, convoy-graduate) once per tick.
-# The dispatcher's open-tracking gate keys on ScopedName() (refinery-reconcile:
-# rig:<rig>) and is the first half of single-flight — never set no_work_gate,
-# that flag opts out of exactly that gate. It is not the whole of it: the
-# controller watchdog closes any tracking bead older than 2m, well inside this
-# timeout, so the driver holds a per-rig flock that a swept bead cannot reopen.
-# `timeout` now bounds how long a wedged pass can hold that lock, and raising
-# it above the watchdog window is safe only while the lock stands
-# (assets/scripts/refinery-reconcile.test.sh asserts the pair).
-# scope=rig: one registration, store, identity and clock per importing rig;
-# per-rig values are derived inside the runner from GC_RIG.
+# refinery-reconcile — the merge cadence, controller-owned. Runs the arms
+# (gate-ensure, pr-open, pr-facts --posture-only, merge, pr-facts,
+# convoy-graduate) once per tick. The dispatcher's open-tracking gate keys on
+# ScopedName() (refinery-reconcile:rig:<rig>) and is the first half of
+# single-flight — never set no_work_gate, that flag opts out of exactly that
+# gate. It is not the whole of it: the controller watchdog closes any tracking
+# bead older than 2m, well inside this timeout, so the driver holds a per-rig
+# flock that a swept bead cannot reopen. `timeout` now bounds how long a wedged
+# pass can hold that lock, and raising it above the watchdog window is safe only
+# while the lock stands (assets/scripts/refinery-reconcile.test.sh asserts the
+# pair). scope=rig: one registration, store, identity and clock per importing
+# rig; per-rig values are derived inside the runner from GC_RIG.
 # Tune the interval from city.toml [[orders.overrides]], not here.
 [order]
 description = "Refinery merge cadence: ensure gates, open pre-open PRs, land approved PRs, record external PR facts, graduate convoys"

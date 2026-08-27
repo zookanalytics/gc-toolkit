@@ -4,8 +4,9 @@
 # controller supplies the loop, cwd = the rig root, and the env (GC_RIG,
 # GC_PACK_STATE_DIR, gh token).
 # Arms, in load-bearing order: gate-ensure (rc=3 = designed HOLD of merge.sh
-# for this pass, not a fault), pr-open, merge (BEADS_ACTOR projected to the
-# refinery: it closes anchors assigned to it), pr-facts (same projection),
+# for this pass, not a fault), pr-open, pr-facts --posture-only (the posture
+# merge reads must be written in the same pass), merge (BEADS_ACTOR projected to
+# the refinery: it closes anchors assigned to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
 # review-sweep (cleanup over closed anchors; no projection, no merge authority).
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
@@ -183,6 +184,14 @@ fi
 
 # (2) pr-open: pre_open_gate -> pull_request.
 run_pass "(2) pr-open" pr-open.sh || FAILED="${FAILED}pr-open rc=$?; "
+
+# (2b) posture: merge.sh answers "is a human waiting on this?" off the bead and
+# never asks GitHub, so the posture it reads has to be written in THIS pass. The
+# full pr-facts arm runs after merge, which leaves a comment that arrived since
+# the last pass invisible to the merge it should have held.
+( export BEADS_ACTOR="$AGENT"
+  run_pass "(2b) pr-posture" pr-facts.sh --posture-only ) \
+  || FAILED="${FAILED}pr-posture rc=$?; "
 
 # (3) merge: BEADS_ACTOR projected in a subshell — the anchors it closes are
 # assigned to the refinery, and bd refuses a close by a different principal.

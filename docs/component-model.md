@@ -86,7 +86,11 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   each under one condition stated in [authority-map.md](authority-map.md).
 - **One posture writer** — `pr-facts.sh`, which records what the PR is doing
   (`pr_posture`, `pr_merge_state`, the comment watermarks) so every consumer
-  reads it off the anchor instead of re-deriving it from GitHub.
+  reads it off the anchor instead of re-deriving it from GitHub. It runs twice
+  per cadence pass, `--posture-only` before the merge arm and in full after it,
+  because a reader that never asks GitHub needs the record to be no older than
+  the decision it feeds. Both runs are the same writer, and the write is
+  idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
   commit, but the anchor-local authorization set — `check.*`, `merge_hold`,

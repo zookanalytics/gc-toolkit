@@ -104,8 +104,8 @@ both enumerate from there. `doctor/check-state-space` reports the violation.
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` is `green@<live head>` |
-| pull_request → merged | `merge.sh` (cadence arm 3) | full authorization set validated; close + record in one call |
-| pull_request → merged | `pr-facts.sh` (cadence arm 4) | GitHub merged the PR out-of-band; record only |
+| pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
+| pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
@@ -120,7 +120,7 @@ anchor stays `pull_request` (or `pre_open_gate`) and the cleared marker holds
 the merge until the child lands and the gate re-evaluates.
 
 Convoy graduation is a separate transition on the convoy bead:
-`convoy-graduate.sh` (cadence arm 5) moves a convoy to refinery-assigned with
+`convoy-graduate.sh` (cadence arm 6) moves a convoy to refinery-assigned with
 `branch=integration/<id>` when all members are closed, at least one merge is
 recorded onto the integration branch, and no hold or branch vetoes.
 
@@ -252,7 +252,13 @@ A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. `merge.sh` holds on a recorded `commented`
 whatever head it is pinned to, because a comment survives a head move; an
 **absent** posture never holds, since that is a fact not yet recorded rather
-than a fact recorded as bad.
+than a fact recorded as bad. What makes reading it off the bead sound is the
+cadence: `pr-facts.sh --posture-only` runs immediately before the merge arm, so
+the value merge validates is the one recorded on that same tick. A posture
+recorded a pass earlier could not see a comment that arrived since, and no
+consumer asks GitHub to find out, merge.sh's own terminal re-read included. A
+read that fails records nothing rather than something weaker, so a standing
+`commented` keeps holding through an unreadable pass.
 
 **The watermarks** separate a comment already routed from a new one. Each is the
 highest id routed in its own id space, and each advances only after the routing
@@ -346,7 +352,7 @@ sequenceDiagram
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` at a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.
-- **Disposal** (`review-sweep.sh`, cadence arm 6): a review outlives its own
+- **Disposal** (`review-sweep.sh`, cadence arm 7): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes
   the review with `gc.outcome=moot` and records the reason on it, and writes

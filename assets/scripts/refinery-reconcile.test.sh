@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
-# the arm ORDER (gate-ensure, pr-open, merge, pr-facts, convoy-graduate,
-# review-sweep);
+# the arm ORDER (gate-ensure, pr-open, pr-facts --posture-only, merge, pr-facts,
+# convoy-graduate, review-sweep) — the posture arm runs BEFORE merge because
+# merge.sh reads posture off the bead and would otherwise read one written a
+# pass ago;
 # the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
 # same pass, without failing the order), exercised by extracting and executing
 # the marked block against stubs; BEADS_ACTOR / GC_AGENT projections scoped to
@@ -55,13 +57,25 @@ for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh revie
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "gate-ensure.sh,pr-open.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh" "the six arms ran in the load-bearing order"
+eq "$order" "gate-ensure.sh,pr-open.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh" "the arms ran in the load-bearing order"
 has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
-facts_line=$(grep '^pr-facts' "$ARM_LOG")
+facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool')
 has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat --review-pool myrig/gc-toolkit.polecat-codex" "pr-facts got both derived pools"
 has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
+
+# merge.sh reads pr_posture off the bead and never asks GitHub, so a posture
+# written by the pass BEFORE it cannot see a comment that arrived since.
+posture_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--posture-only')
+eq "$(printf '%s\n' "$posture_line" | wc -l | tr -d ' ')" 1 "the posture arm ran exactly once"
+has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_ACTOR=<refinery>"
+hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
+posture_at=$(grep -n '^pr-facts.*--posture-only' "$ARM_LOG" | head -1 | cut -d: -f1)
+merge_at=$(grep -n '^merge.sh' "$ARM_LOG" | head -1 | cut -d: -f1)
+[ -n "$posture_at" ] && [ -n "$merge_at" ] && [ "$posture_at" -lt "$merge_at" ] \
+  && ok "posture is recorded BEFORE merge reads it" \
+  || bad "posture arm did not run before merge (posture=$posture_at merge=$merge_at)"
 grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
 has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
 has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
@@ -263,9 +277,11 @@ hasnt "$GATE" '{{' "the block is template-free (executable verbatim)"
 GSD="$TMP/gsd"; mkdir -p "$GSD"
 printf '#!/usr/bin/env bash\nexit 3\n' > "$GSD/gate-ensure.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/pr-open.sh"
-printf '#!/usr/bin/env bash\necho ran >> "${MERGE_SENTINEL:?}"\n' > "$GSD/merge.sh"
+printf '#!/usr/bin/env bash\necho "posture $*" >> "${BLOCK_SENTINEL:?}"\n' > "$GSD/pr-facts.sh"
+printf '#!/usr/bin/env bash\necho ran >> "${MERGE_SENTINEL:?}"\necho merge >> "${BLOCK_SENTINEL:?}"\n' > "$GSD/merge.sh"
 chmod +x "$GSD"/*.sh
 export MERGE_SENTINEL="$TMP/merge-ran"; : > "$MERGE_SENTINEL"
+export BLOCK_SENTINEL="$TMP/block-order"; : > "$BLOCK_SENTINEL"
 {
   printf 'set -u\nSCRIPTS_DIR=%q\nLOG_SINK=""\nNOTED=""\nFAILED=""\n' "$GSD"
   printf 'AGENT=%q\nCHECK_SET_DEFAULT=%q\nREVIEW_POOL=%q\nFIX_POOL=%q\n' \
@@ -276,11 +292,15 @@ export MERGE_SENTINEL="$TMP/merge-ran"; : > "$MERGE_SENTINEL"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && bad "(block) merge.sh RAN despite rc=3" || ok "(block) rc=3 held merge.sh"
 has "$gout" "MERGE_HELD=1" "(block) the hold flag is set"
+# Recording a fact is not a dispatch: a held merge still gets a fresh posture,
+# so the pass that finally merges is not reading a stale one.
+has "$(cat "$BLOCK_SENTINEL")" "posture --posture-only" "(block) the posture arm runs even when merge is HELD"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$GSD/gate-ensure.sh"
-: > "$MERGE_SENTINEL"
+: > "$MERGE_SENTINEL"; : > "$BLOCK_SENTINEL"
 gout=$(bash "$TMP/gaterun.sh" 2>/dev/null)
 [ -s "$MERGE_SENTINEL" ] && ok "(block) a clean gate-ensure lets merge.sh run" || bad "(block) merge.sh did not run after a clean gate-ensure"
 has "$gout" "MERGE_HELD=0" "(block) the hold flag is clear"
+eq "$(paste -sd, - < "$BLOCK_SENTINEL")" "posture --posture-only,merge" "(block) posture is recorded before merge reads it"
 
 echo "# the shipped order stays wired to this runner"
 ORDER="$(cd "$HERE/../.." && pwd)/orders/refinery-reconcile.toml"
