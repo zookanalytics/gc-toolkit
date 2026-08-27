@@ -175,6 +175,23 @@ echo "# …dedup on second pass"
 out=$(run)
 hasnt "$out" "filed re-review" "a live review naming the anchor suppresses a twin"
 
+echo "# an exception at a stale head rides the same re-review path as a stale green"
+store "[$(anchor F9b 21 ',"check.codex":"exception@sha-OLD"')]"
+printf '%s' "$(prview 21 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_21.json"
+out=$(run)
+has "$out" "check.codex exception@sha-OLD is stale (live head sha-21)" \
+  "a head that moved past an exception is re-reviewed, not left terminal"
+eq "$(meta new-2 anchor_bead)" "F9b" "the re-review links the anchor"
+eq "$(meta new-2 reviewed_oid)" "sha-21" "…and pins the live head"
+d=$(jq -r '.[] | select(.id == "new-2") | .description' "$STUB_STORE")
+has "$d" "check.codex was exception@sha-OLD" "the dispatch note names the verb that staled, not a hardcoded green@"
+
+echo "# …and an exception AT the live head is still terminal"
+store "[$(anchor F9c 22 ',"check.codex":"exception@sha-22"')]"
+printf '%s' "$(prview 22 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_22.json"
+out=$(run)
+hasnt "$out" "filed re-review" "a verdict bound to the live head dispatches nothing"
+
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"
 printf '%s' "$(prview 20 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_20.json"
