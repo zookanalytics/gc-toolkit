@@ -9,10 +9,15 @@
 # all asserted against what an operator would actually see, not against a
 # re-implementation of the awk.
 #
-# No live city: GC_CITY_PATH and friends are unset, which makes gc_city_name
-# return empty and skips the supervisor API call entirely. The SUT is copied
-# to a private dir so its `$(dirname $0)/tmux-keeper-toggle.sh` sibling does
-# not resolve to the live one.
+# Two runs, because the picker classifies two ways. The first leaves
+# GC_CITY_PATH and friends unset, which makes gc_city_name return empty and
+# skips the supervisor API call entirely: that is the degraded path, where
+# the session-name shape is all the picker has. The second points GC_HOME
+# and GC_CITY_PATH at throwaway paths and stubs `curl` with a fixture
+# roster: that is the live path, where the agent template names the role.
+# The SUT is copied to a private dir so its
+# `$(dirname $0)/tmux-keeper-toggle.sh` sibling does not resolve to the live
+# one.
 #
 # What each case pins:
 #
@@ -40,22 +45,42 @@
 #   (COUNT)    the per-rig header counts the workers running in THAT rig.
 #              The count and the rig derivation share `rig`, so a row that
 #              derives the wrong rig is also counted under the wrong header.
-#   (FOLD)     converse-N-pool and refinery-N-pool are pool workers with the
-#              same short lifetime as a polecat, so the default filter hides
-#              them and the per-rig header counts them. The predicate keys
-#              on the "-<n>-pool" suffix because that is the general shape,
-#              and it holds for pooled roles added after these two.
+#   (FOLD)     with nothing to answer the role question, every "-<n>-pool"
+#              session is taken for a polecat: hidden, and counted. Keeping
+#              that fallback rather than showing everything is deliberate.
+#              A rig of thirty polecats must not flood the menu because one
+#              curl timed out.
 #   (KEEPNAMED) the bound on the suffix rule: `<rig>--<pack>__refinery` is a
 #              named refinery, not a pool instance, and stays visible beside
 #              the `refinery-1-pool` that is hidden.
-#   (NOUN)     the header says what it counts, and the set it counts is
-#              every pool worker in the rig, not only the polecats.
+#   (NOUN)     the header says what it counts, and what it counts is
+#              polecats. "Pool worker" is the runtime word for any pool
+#              instance, a converse included, so it cannot be the word for
+#              a count a converse is deliberately absent from.
 #   (ALL)      --all is the escape hatch: everything hidden by default is
 #              reachable, and the pool rows carry the parsed display form
 #              there too.
 #   (SWITCH)   the display column is label-only. Whatever the rows say,
 #              `switch-client -t` must still target the RAW tmux session
 #              name, or a prettier label becomes an unattachable row.
+#
+# On the live path:
+#
+#   (CODEX)    a codex polecat takes a character name from the pack and
+#              carries the character address in GC_AGENT, so neither field
+#              names its role. The template does, and it folds into the
+#              count like any other polecat.
+#   (CONVERSE) a converse runs on a pool slot, and a slot is a scheduling
+#              fact. It holds a conversation an operator goes to, so it is
+#              never folded away. The same assertion pins the null title:
+#              a converse row whose API title is null must render no title
+#              at all, not the string "null".
+#   (POOLED)   the rule read the other way. A pooled refinery is a refinery,
+#              and the polecat family is the whole of the worker set.
+#   (UNKNOWN)  a session the supervisor does not answer for falls back to
+#              the name shape per session, not per run.
+#   (TITLE)    template and title ride one API row through one call, so the
+#              title column has to survive the widened projection.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,13 +135,16 @@ cat > "$STUB_SESSIONS" <<'ROSTER'
 gascity--gc-toolkit__refinery|0|1|gascity/gc-toolkit.refinery
 gascity--gc-toolkit__refinery-1-pool|0|1|gascity--gc-toolkit__refinery-1-pool
 gc-toolkit--gc-toolkit__converse-1-pool|0|1|gc-toolkit--gc-toolkit__converse-1-pool
+gc-toolkit--gc-toolkit__hicks|0|1|gc-toolkit/gc-toolkit.hicks
 gc-toolkit--gc-toolkit__polecat-1-pool|0|1|gc-toolkit--gc-toolkit__polecat-1-pool
 gc-toolkit--gc-toolkit__polecat-2-pool|0|1|gc-toolkit--gc-toolkit__polecat-2-pool
 gc-toolkit--gc-toolkit__refinery|0|1|gc-toolkit/gc-toolkit.refinery
+gc-toolkit--gc-toolkit__ripley|0|1|gc-toolkit/gc-toolkit.ripley
 gc-toolkit__deacon|0|1|gc-toolkit.deacon
 signal-loom--gc-toolkit__refinery-1-pool|0|1|signal-loom--gc-toolkit__refinery-1-pool
 scratch|0|1|
 ops--notebook|0|1|
+ops--polecat-9-pool|0|1|
 ROSTER
 
 # Run the picker with no city resolvable (no supervisor API call) and no
@@ -128,8 +156,52 @@ run_picker() {
     cat "$STUB_MENU"
 }
 
+# The API fixture the curl stub serves. Templates for everything the
+# supervisor knows; ops--notebook and ops--polecat-9-pool are absent from it
+# on purpose, and `scratch` carries neither key.
+cat > "$TMP/api.json" <<'API'
+{"items": [
+  {"session_name": "gascity--gc-toolkit__refinery",            "template": "gascity/gc-toolkit.refinery",         "title": ""},
+  {"session_name": "gascity--gc-toolkit__refinery-1-pool",     "template": "gascity/gc-toolkit.refinery",         "title": "gascity/gc-toolkit.refinery-1"},
+  {"session_name": "gc-toolkit--gc-toolkit__converse-1-pool",  "template": "gc-toolkit/gc-toolkit.converse",      "title": null},
+  {"session_name": "gc-toolkit--gc-toolkit__hicks",            "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
+  {"session_name": "gc-toolkit--gc-toolkit__polecat-1-pool",   "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
+  {"session_name": "gc-toolkit--gc-toolkit__polecat-2-pool",   "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
+  {"session_name": "gc-toolkit--gc-toolkit__refinery",         "template": "gc-toolkit/gc-toolkit.refinery",      "title": "landing PR #497"},
+  {"session_name": "gc-toolkit--gc-toolkit__ripley",           "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
+  {"session_name": "gc-toolkit__deacon",                       "template": "gc-toolkit.deacon",                   "title": ""},
+  {"session_name": "signal-loom--gc-toolkit__refinery-1-pool", "template": "signal-loom/gc-toolkit.refinery",     "title": ""},
+  {"session_name": "scratch"}
+]}
+API
+
+# curl stub, not a mocked fetch: the real jq projection is part of what is
+# under test. No STUB_API in the environment exits like a failed connection,
+# which is what the degraded path above sees.
+cat > "$BIN/curl" <<'STUB'
+#!/usr/bin/env bash
+set -u
+[ -f "${STUB_API:-/nonexistent}" ] || exit 7
+cat "$STUB_API"
+STUB
+chmod +x "$BIN/curl"
+
+# GC_HOME has no cities.toml, so gc_city_name falls through to the basename
+# of GC_CITY_PATH and the API URL resolves without touching the operator's
+# config. curl is stubbed, so the URL itself never leaves the process.
+run_picker_api() {
+    : > "$STUB_MENU"
+    env -u GC_CITY -u GC_CITY_ROOT -u GC_TMUX_SOCKET -u GC_AGENT \
+        GC_HOME="$TMP/gchome" GC_CITY_PATH="$TMP/testcity" \
+        STUB_API="$TMP/api.json" \
+        "$SUT" "$@" >/dev/null 2>&1
+    cat "$STUB_MENU"
+}
+
 MENU="$(run_picker)"
 ALLMENU="$(run_picker --all)"
+APIMENU="$(run_picker_api)"
+APIALL="$(run_picker_api --all)"
 
 [ -n "$MENU" ] && ok "default run produced a menu" || { bad "default run produced no menu"; echo "$MENU"; }
 
@@ -182,14 +254,15 @@ hasnt "$ALLMENU" 'gc-toolkit--gc-toolkit__polecat-1-pool  ' \
     "POOL: the raw session name never reaches the display column"
 
 # --- headers ---------------------------------------------------------------
-# gc-toolkit runs converse-1-pool + polecat-1-pool + polecat-2-pool = 3.
-has "$MENU" '── gc-toolkit • 3 pool workers ──' \
+# With no API, the suffix takes converse-1-pool for a polecat: it counts
+# alongside polecat-1-pool and polecat-2-pool = 3.
+has "$MENU" '── gc-toolkit • 3 polecats ──' \
     "COUNT: per-rig header counts the workers in that rig"
 # gascity runs refinery-1-pool = 1.
-has "$MENU" '── gascity • 1 pool worker ──' \
+has "$MENU" '── gascity • 1 polecat ──' \
     "NOUN: singular form, and the noun names what is counted"
-hasnt "$MENU" 'polecats ──' \
-    "NOUN: header no longer claims to count polecats"
+hasnt "$MENU" 'pool worker' \
+    "NOUN: the count is polecats, and every pool instance is a pool worker"
 hasnt "$MENU" '── city • ' \
     "COUNT: city holds no workers"
 
@@ -202,13 +275,49 @@ hasnt "$MENU" 'polecat-1-pool' \
     "FOLD: polecat-N-pool is hidden by default"
 eq "$(derives "$MENU" 'gascity--gc-toolkit__refinery')" 'gascity|gc-toolkit.refinery' \
     "KEEPNAMED: the named refinery stays visible beside its hidden pool"
-has "$MENU" '── signal-loom • 1 pool worker ──' \
+has "$MENU" '── signal-loom • 1 polecat ──' \
     "KEEPNAMED: a rig whose only session is hidden still gets its header"
 hasnt "$MENU" '[signal-loom]' \
     "KEEPNAMED: ...and that header is the rig's only row"
 
 has "$ALLMENU" 'converse-1-pool' "ALL: --all reveals converse-N-pool"
 has "$ALLMENU" 'refinery-1-pool' "ALL: --all reveals refinery-N-pool"
+
+# --- template classification (live path) -----------------------------------
+hasnt "$APIMENU" 'gc-toolkit.hicks' \
+    "CODEX: a codex polecat under a character name is folded away"
+hasnt "$APIMENU" 'gc-toolkit.ripley' \
+    "CODEX: ...and so is the second one"
+eq "$(derives "$APIALL" 'gc-toolkit--gc-toolkit__hicks')" 'gc-toolkit|gc-toolkit.hicks' \
+    "CODEX: --all still reaches it, derived from the character address"
+# gc-toolkit runs polecat-1-pool + polecat-2-pool + hicks + ripley = 4, and
+# the converse that the suffix rule counted is gone from the total.
+has "$APIMENU" '── gc-toolkit • 4 polecats ──' \
+    "CODEX: the count is the polecat family, and only the polecat family"
+
+eq "$(derives "$APIMENU" 'gc-toolkit--gc-toolkit__converse-1-pool')" \
+   'gc-toolkit|gc-toolkit.converse-1-pool' \
+    "CONVERSE: a converse on a pool slot stays a visible row, with no title"
+
+eq "$(derives "$APIMENU" 'gascity--gc-toolkit__refinery-1-pool')" \
+   'gascity|gc-toolkit.refinery-1-pool' \
+    "POOLED: a pooled refinery is a refinery, not a worker"
+# Its API title is the instance alias, which is the display column said
+# twice. The rows this change stops hiding must not arrive carrying it.
+hasnt "$APIMENU" 'gc-toolkit.refinery-1  ' \
+    "POOLED: ...and the alias-shaped title is suppressed, not rendered"
+has "$APIMENU" '── gascity ──' \
+    "POOLED: ...so gascity counts no polecats and its header carries no count"
+
+eq "$(derives "$APIMENU" 'scratch')" 'city|scratch' \
+    "UNKNOWN: an API row with no template at all falls back to the name shape"
+hasnt "$APIMENU" 'polecat-9-pool' \
+    "UNKNOWN: a session the API never mentions falls back too"
+has "$APIMENU" '── ops • 1 polecat ──' \
+    "UNKNOWN: ...and the fallback is per session, not per run"
+
+has "$APIMENU" '│ landing PR #497' \
+    "TITLE: the title column survives the widened projection"
 
 # --- switch target ---------------------------------------------------------
 has "$ALLMENU" 'switch-client -t gc-toolkit--gc-toolkit__polecat-1-pool' \

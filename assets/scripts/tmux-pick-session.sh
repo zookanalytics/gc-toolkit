@@ -3,10 +3,10 @@
 #
 # Usage: tmux-pick-session.sh [--all] [--city-path <path>]
 #
-# Default filter hides the short-lived workers: any pool instance
-# (a "-<n>-pool" suffix), polecat-*, control-dispatcher, deacon, witness,
-# dog (the warrant-executor pool), boot. The currently-attached session
-# is always shown.
+# Default filter hides the sessions an operator does not reach one at a
+# time: the polecats (folded into the per-rig count), control-dispatcher,
+# deacon, witness, dog (the warrant-executor pool), boot. The
+# currently-attached session is always shown.
 # --all disables the filter; toggle from inside the menu via [.].
 # --city-path is the absolute path of the city this binding belongs
 # to — baked in by tmux-bindings.sh at install time so the API URL is
@@ -26,9 +26,15 @@
 # `switch-client -t` always targets the raw tmux session_name; the
 # derived display is label-only.
 #
+# Role comes from the agent template, never from the session name. A codex
+# polecat runs under a character name ("hicks") and a converse runs on a
+# "-<n>-pool" slot, so the name carries the scheduling fact and not the
+# role. The template rides the supervisor-API row already fetched for
+# titles; a session that row does not cover falls back to the name shape.
+#
 # Sort order:
 #   1. [city] group — alphabetical
-#   2. each rig group, rigs alphabetical, pool workers last within rig
+#   2. each rig group, rigs alphabetical, polecats last within rig
 #   Pane sub-rows always appear directly under their session row.
 #
 # Visual indicators:
@@ -113,20 +119,23 @@ gc_city_name() {
 # so the awk pre-pass joins fields 6+ back into the title.
 PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
-# Per-session GC titles (session_name\ttitle) from the supervisor API (tens
-# of ms vs a 5-20s gc subprocess under load); any failure renders without
-# titles, and no resolvable city skips the call.
-TITLES=""
+# Per-session facts (session_name\ttemplate\ttitle) from the supervisor API
+# (tens of ms vs a 5-20s gc subprocess under load); any failure renders
+# without titles and classifies by name shape, and no resolvable city skips
+# the call. One call answers both questions: a second source for the role
+# would put another subprocess on a keypress.
+FACTS=""
 CITY_NAME=$(gc_city_name)
 if [ -n "$CITY_NAME" ]; then
-    TITLES=$(curl -sf --max-time 3 \
+    FACTS=$(curl -sf --max-time 3 \
         "$(gc_api_base)/v0/city/$CITY_NAME/sessions" 2>/dev/null \
-        | jq -r '.items[]? | select(.title != null and .title != "") | "\(.session_name)\t\(.title)"' 2>/dev/null \
+        | jq -r '.items[]? | select(.session_name != null)
+                 | "\(.session_name)\t\(.template // "")\t\(.title // "")"' 2>/dev/null \
         || true)
 fi
 
 LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \
-    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v titles="$TITLES" '
+    -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v facts="$FACTS" '
 BEGIN {
     n_panes = split(panes, P, "\n")
     for (i = 1; i <= n_panes; i++) {
@@ -149,18 +158,28 @@ BEGIN {
         pn_cmd[sn, idx] = cmd
         pn_title[sn, idx] = title
     }
-    # Build session_name -> gc session title map. Lines are "<name>\t<title>";
-    # split on the first tab; strip embedded tabs/CR/LF from the title so the
-    # awk row stays well-formed (mirrors the PANES handler above).
-    n_titles = split(titles, T, "\n")
-    for (i = 1; i <= n_titles; i++) {
+    # Build session_name -> (role, gc title). Lines are
+    # "<name>\t<template>\t<title>": the title takes the whole remainder, so a
+    # tab inside it cannot shift a field, and embedded tabs/CR/LF are stripped
+    # so the awk row stays well-formed (mirrors the PANES handler above).
+    n_facts = split(facts, T, "\n")
+    for (i = 1; i <= n_facts; i++) {
         if (T[i] == "") continue
         tab = index(T[i], "\t")
         if (tab == 0) continue
         sn = substr(T[i], 1, tab - 1)
-        ti = substr(T[i], tab + 1)
+        rest = substr(T[i], tab + 1)
+        tab = index(rest, "\t")
+        if (tab == 0) continue
+        tmpl = substr(rest, 1, tab - 1)
+        ti = substr(rest, tab + 1)
         gsub(/[\t\r\n]/, " ", ti)
         gc_title[sn] = ti
+        # Role is the last dotted component of the template: both
+        # "<rig>/<pack>.<role>" and the slashless "<pack>.<role>" end in it.
+        sub(/^.*\//, "", tmpl)
+        sub(/^.*\./, "", tmpl)
+        gc_role[sn] = tmpl
     }
 }
 {
@@ -191,9 +210,16 @@ BEGIN {
     }
 
     # One predicate for the count, the hide and the sort rank: they must
-    # agree, and a pool instance is the "-<n>-pool" suffix whatever role
-    # it runs, not an enumeration of role names.
-    is_worker = (name ~ /-[0-9]+-pool$/ || name ~ /polecat/)
+    # agree. A worker is a polecat and no other pooled role. A converse and
+    # a pooled refinery hold state an operator goes to, whatever slot they
+    # happen to run on. With no template (API down, or a session the
+    # supervisor does not know) the name shape is all there is.
+    role = gc_role[name]
+    if (role != "") {
+        is_worker = (role == "polecat" || role ~ /^polecat-/)
+    } else {
+        is_worker = (name ~ /-[0-9]+-pool$/ || name ~ /polecat/)
+    }
     if (is_worker) worker_count[rig]++
     rig_sort_of[rig] = rig_sort
     rig_seen[rig] = 1
@@ -214,9 +240,11 @@ BEGIN {
     # Resolve session title with boring-suppression + truncation. Normalize
     # both sides before comparing: strip a leading "<rig>/" from the title
     # (gc titles often carry the rig prefix that the picker collapses out
-    # of the display column) and a trailing "-adhoc-<hex>" from the display
+    # of the display column), and from the display a trailing "-adhoc-<hex>"
     # (ad-hoc sessions get an adhoc-suffix while their canonical title set
-    # by the session-title producer skill does not).
+    # by the session-title producer skill does not) or "-pool" (a pool
+    # instance is aliased "<qualified>-<n>" while its session name carries
+    # the slot suffix too).
     title = gc_title[name]
     if (title != "") {
         title_cmp = title
@@ -226,6 +254,7 @@ BEGIN {
         }
         display_cmp = display
         sub(/-adhoc-[0-9a-f]+$/, "", display_cmp)
+        sub(/-pool$/, "", display_cmp)
         if (title_cmp == display_cmp) {
             title = ""
         } else if (length(title) > 40) {
@@ -293,9 +322,9 @@ while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
         fi
         if [ "$count" -gt 0 ]; then
             if [ "$count" -eq 1 ]; then
-                noun="pool worker"
+                noun="polecat"
             else
-                noun="pool workers"
+                noun="polecats"
             fi
             label="-  ── $rig • $count $noun ──  "
         else
