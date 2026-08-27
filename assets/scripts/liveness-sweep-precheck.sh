@@ -147,15 +147,20 @@ if command -v timeout >/dev/null 2>&1; then
 else
     bounded() { "$@"; }
 fi
-strip_ctrl() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 bd_read() { # bd_read <outfile> <subcommand> <flags...>
     local out="$1"; shift
     local rc
     if [ -n "$DB" ]; then
-        bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | strip_ctrl > "$out"; rc=$?
+        bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | scrub > "$out"; rc=$?
     else
-        bounded gc bd "$@" 2>/dev/null | strip_ctrl > "$out"; rc=$?
+        bounded gc bd "$@" 2>/dev/null | scrub > "$out"; rc=$?
     fi
     # BOTH halves required: a failed call can still print a well-formed array,
     # and [] from a dead store is byte-identical to [] from an idle board.

@@ -68,14 +68,19 @@ if command -v timeout >/dev/null 2>&1; then
 else
     bounded() { "$@"; }
 fi
-strip_ctrl() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 bd_read() { # bd_read <outfile> <subcommand> <flags...>; both rc AND shape checked
     local out="$1"; shift
     local rc
     if [ -n "$DB" ]; then
-        bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | strip_ctrl > "$out"; rc=$?
+        bounded gc bd "$1" --db "$DB" "${@:2}" 2>/dev/null | scrub > "$out"; rc=$?
     else
-        bounded gc bd "$@" 2>/dev/null | strip_ctrl > "$out"; rc=$?
+        bounded gc bd "$@" 2>/dev/null | scrub > "$out"; rc=$?
     fi
     [ "$rc" -eq 0 ] && jq -e 'type == "array"' "$out" >/dev/null 2>&1
 }
@@ -265,7 +270,7 @@ SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subj
 if [ -z "$SWEEP_SUBJECT" ] && [ "$DRY_RUN" -eq 0 ]; then
     SWEEP_SUBJECT=$(bd_write create -t task --title "triage: unnamed waits (this rig)" \
         -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate / kill / park (a real dep edge onto a scope bead) / hold (triage.hold=<reason>)." \
-        --json | strip_ctrl | jq -r '.id // .[0].id')
+        --json | scrub | jq -r '.id // .[0].id')
     [ -n "$SWEEP_SUBJECT" ] && [ "$SWEEP_SUBJECT" != "null" ] \
         || { echo "$PROG: could not create the standing subject — nothing filed" >&2; exit 1; }
     bd_write update "$SWEEP_SUBJECT" --set-metadata "task_kind=triage-subject" \
@@ -328,7 +333,7 @@ sweep_visit() {
     prior_rc=0
     prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; else gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
     if [ "$prior_rc" -eq 0 ]; then
-        refile=$(printf '%s' "$prior" | strip_ctrl | jq -r --arg key "$new_key" '
+        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" '
             if type == "array" then
               [ .[]
                 | select(((.metadata // {}).task_kind // "") == "visit")

@@ -16,6 +16,13 @@
 
 set -eu
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 PROG="gc-helm"
 TAKEAWAY_MAX=140                            # hard cap on a takeaway headline, in CODEPOINTS
 FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replaces `gc rig list`
@@ -356,7 +363,7 @@ cmd_open() {
     # "missing"). Id compared for EQUALITY with what was typed. Deliberately
     # UNPINNED: `gc bd show <id>` resolves across ledgers regardless of
     # BEADS_DIR; pinning --db by prefix would false-refuse a real subject.
-    subject_clean=$(printf '%s' "$subject_raw" | tr -d '\000-\010\013\014\016-\037')
+    subject_clean=$(printf '%s' "$subject_raw" | scrub)
     subject=$(printf '%s' "$subject_clean" \
         | jq -r --arg b "$bead" \
             'if type == "array"

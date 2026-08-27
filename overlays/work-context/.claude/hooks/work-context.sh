@@ -15,6 +15,13 @@
 #   * The common case (not a claim) stays cheap: one jq, then exit.
 
 set -u
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
 
 # --- 1. Self-gate: Claude polecat pools only -----------------------------
@@ -41,10 +48,8 @@ run_bounded() {
   fi
 }
 
-# `bd show --json` can emit raw control characters that make jq abort on
-# otherwise-valid rows; strip them (sparing TAB) before every parse.
 show_bead() {
-  run_bounded gc bd show "$1" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'
+  run_bounded gc bd show "$1" --json 2>/dev/null | scrub
 }
 
 # --- 2. Is this tool call a claim? ---------------------------------------
@@ -88,7 +93,7 @@ if [ -n "${root:-}" ]; then
   convoy="$(show_bead "$root" | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null)"
   if [ -n "${convoy:-}" ]; then
     member="$(run_bounded gc convoy status "$convoy" --json 2>/dev/null \
-      | tr -d '\000-\010\013\014\016-\037' \
+      | scrub \
       | jq -r 'if (.children | length) == 1 then .children[0].id else empty end' 2>/dev/null)"
     [ -n "${member:-}" ] && work="$member"
   fi

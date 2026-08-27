@@ -17,6 +17,13 @@
 # matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
 set -u
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 PROG="gc-visit-open"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
@@ -205,7 +212,7 @@ board; this body is the record. Ask before assuming scope."
     SUBJ_RAW=$(gc bd create -t "$SUBJ_TYPE" --title "$SUBJ_TITLE" -d "$SUBJ_BODY" \
         --db "$RIG_PATH/.beads" --json 2>/dev/null)
     SUBJ_RC=$?
-    SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | tr -d '\000-\010\013\014\016-\037')
+    SUBJ_JSON=$(printf '%s' "$SUBJ_RAW" | scrub)
     SUBJECT=$(printf '%s' "$SUBJ_JSON" | jq -r '.id // .[0].id // empty' 2>/dev/null)
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "null" ]; then
         # A refused create STATES its reason in .error — surface it (tk-wp50s).
@@ -225,7 +232,7 @@ fi
 # open deliberately does not (a board pick is a glance, not a commission).
 # Only when absent, and never fatal: the deliverable is the conversation.
 ORIGIN_NOW=$(gc bd show "$SUBJECT" --json 2>/dev/null \
-    | tr -d '\000-\010\013\014\016-\037' \
+    | scrub \
     | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.origin"] // "") else "" end' 2>/dev/null)
 if [ -z "$ORIGIN_NOW" ]; then
     # shellcheck disable=SC2086  # ${SUBJ_DB:+--db "$SUBJ_DB"} expands to 0 or 2 space-free fields

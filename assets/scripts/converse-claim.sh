@@ -17,6 +17,13 @@
 # Caller: the converse prompt's claim loop.
 set -u
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 PROG="converse-claim"
 
 usage() {
@@ -32,8 +39,7 @@ CURRENT_GROUP="${1-}"
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 2; }
 command -v gc >/dev/null 2>&1 || { echo "$PROG: gc is required" >&2; exit 2; }
 
-# Control characters can ride in on a bead's own text; strip before jq.
-CLAIM=$(gc hook --claim --json 2>/dev/null | tr -d '\000-\037')
+CLAIM=$(gc hook --claim --json 2>/dev/null | scrub)
 
 BEAD=$(printf '%s' "$CLAIM" | jq -r '.bead_id // ""' 2>/dev/null || printf '')
 if [ -z "$BEAD" ]; then
@@ -56,7 +62,7 @@ GROUP=$(printf '%s' "$CLAIM" | jq -r '.continuation_group // ""' 2>/dev/null || 
 # visit carrying neither recording still resolves to the fallback below; the
 # writer-side loss (tk-ax6y4) is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
-    GROUP=$(gc bd show "$BEAD" --json 2>/dev/null | tr -d '\000-\037' \
+    GROUP=$(gc bd show "$BEAD" --json 2>/dev/null | scrub \
         | jq -r 'if type == "array" then (.[0] // {}) else {} end
                  | select(((.metadata // {}).task_kind // "") == "visit")
                  | [ ((.dependencies // [])[]?
@@ -90,7 +96,7 @@ release_turn() {
     gc bd update "$_id" --assignee="" >/dev/null 2>&1 || _ok=0
 
     # Trust the read, not the writes: a partial release still holds the turn.
-    STATE=$(gc bd show "$_id" --json 2>/dev/null | tr -d '\000-\037' \
+    STATE=$(gc bd show "$_id" --json 2>/dev/null | scrub \
             | jq -r 'if type=="array" then "\(.[0].status // "")|\(.[0].assignee // "")" else "|" end' 2>/dev/null || printf '')
     case "$STATE" in
         "open|") ;;                   # back in the pool

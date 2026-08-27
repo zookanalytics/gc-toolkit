@@ -25,7 +25,12 @@ CHUNK="${GC_DOCTOR_ROOT_CHUNK:-100}"   # bd show batch size (argv bound)
 errors=(); warnings=(); notes=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
@@ -50,7 +55,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list open step beads in $db (rc=$rc) — this store was NOT checked")
         continue
     fi
-    steps=$(printf '%s' "$steps_raw" | strip_ctl)
+    steps=$(printf '%s' "$steps_raw" | scrub)
     root_ids=$(printf '%s' "$steps" | jq -r '[ .[]? | (.metadata["gc.root_bead_id"] // "" | tostring)
           | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | select(. != "") ] | unique | .[]' 2>/dev/null)
     if [ $? -ne 0 ]; then
@@ -68,7 +73,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         out=$(run_bounded bd show --db "$db" "${chunk[@]}" --json 2>/dev/null) && [ -n "$out" ] || { chunk_failed=yes; return 1; }
         # `bd show` answers an ARRAY normally, an OBJECT when NO id resolves
         # (rc=0 either way); the object's ids surface as unresolved-root notes.
-        merged=$(printf '%s' "$out" | strip_ctl | jq -c --argjson a "$roots_json" '
+        merged=$(printf '%s' "$out" | scrub | jq -c --argjson a "$roots_json" '
             if type == "array" then $a + . elif type == "object" then $a
             else error("unexpected") end' 2>/dev/null)
         [ -n "$merged" ] || { chunk_failed=yes; return 1; }
