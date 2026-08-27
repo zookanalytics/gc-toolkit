@@ -131,6 +131,10 @@ The lock:
   not a slow pass: the driver is gone and an arm still owns the descriptor.
   That tick exits 1, so `order.failed` names the wedge rather than letting a
   stopped queue look like a firing one.
+- A tick that cannot take the lock at all runs no arm and exits 1. That covers
+  `flock` missing from `PATH` and a lock file the driver cannot create or open.
+  Nothing else carries single-flight, so a pass that ran anyway would be the
+  second writer.
 
 Two settings must never change, because each would undo the guarantee:
 

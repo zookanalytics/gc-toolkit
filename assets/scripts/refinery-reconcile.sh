@@ -125,8 +125,15 @@ if [ -z "$lock_unguarded" ] && [ "$lock_held" = 0 ]; then
   echo "${PROG}[$RIG]: a pass is already in flight ($who) — skipping this tick"
   exit 0
 fi
+# The lock is the whole of single-flight, so an unavailable one leaves nothing
+# serialising the arms. Running them anyway is the second merge.sh writer this
+# driver exists to prevent.
 if [ -n "$lock_unguarded" ]; then
-  FAILED="${FAILED}single-flight UNGUARDED ($lock_unguarded); "
+  [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s UNGUARDED: %s; no arm ran\n' \
+    "$TICK" "$RIG" "$lock_unguarded" >> "$LOG_SINK"
+  echo "${PROG}[$RIG]: single-flight UNGUARDED ($lock_unguarded) — refusing to run any arm without the pass lock"
+  echo "${PROG}[$RIG]: pass log: $LOG"
+  exit 1
 fi
 
 # The controller keeps combined output only on a non-zero exit, so the log is

@@ -7,9 +7,10 @@
 # the marked block against stubs; BEADS_ACTOR / GC_AGENT projections scoped to
 # their arms; a failing arm not skipping the arms after it; the exit-1
 # failure report; the per-rig pass lock (one merge.sh writer across two
-# overlapping ticks, a wedged holder reported rather than skipped over); a
-# killed pass leaving its partial output in pass.log; and the invariant
-# binding the order timeout to the controller's tracking-sweep window.
+# overlapping ticks, a wedged holder reported rather than skipped over, an
+# unobtainable lock refusing the pass before any arm); a killed pass leaving
+# its partial output in pass.log; and the invariant binding the order timeout
+# to the controller's tracking-sweep window.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -212,6 +213,46 @@ drive > /dev/null
 grep -q '^=== .*rig=myrig refinery=myrig/gc-toolkit.refinery' "$PASSLOG" \
   && ok "the pass opens with its === header" || bad "no === header"
 grep -q '^END ' "$PASSLOG" && ok "…and closes with END" || bad "no END line on a clean pass"
+
+echo "# a lock that cannot be established stops the pass before any arm"
+# Both ways the lock goes missing are covered: a lock file the driver cannot
+# open, and no flock on PATH at all.
+NOLOCK="$TMP/state-nolock"
+mkdir -p "$NOLOCK/myrig/pass.lock"
+: > "$ARM_LOG"
+out=$(REFINERY_RECONCILE_STATE_DIR="$NOLOCK" drive); rc=$?
+eq "$rc" 1 "an unobtainable pass lock fails the order"
+has "$out" "single-flight UNGUARDED" "…naming the guarantee it could not take"
+if [ -s "$ARM_LOG" ]; then
+  bad "arms ran unguarded: $(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)"
+else
+  ok "no arm ran without the lock"
+fi
+grep -q 'UNGUARDED: .*no arm ran' "$NOLOCK/myrig/pass.log" \
+  && ok "the refusal is recorded in pass.log" \
+  || bad "the refusal left no trace in pass.log"
+grep -q '^=== ' "$NOLOCK/myrig/pass.log" \
+  && bad "the refused tick opened a pass header — it got past the lock check" \
+  || ok "…with no pass header under it, so nothing started"
+
+# Permissions cannot hide flock from `command -v`, because bash skips a
+# non-executable hit and keeps searching PATH. So this arm needs a PATH carrying
+# every tool the driver reaches for except flock.
+NOFLOCK="$TMP/noflock"
+mkdir -p "$NOFLOCK"
+for c in bash env jq git gc date mkdir mktemp tr head tail mv dirname cat; do
+  p=$(command -v "$c" 2>/dev/null) && ln -sf "$p" "$NOFLOCK/$c"
+done
+: > "$ARM_LOG"
+out=$(PATH="$NOFLOCK" REFINERY_RECONCILE_STATE_DIR="$TMP/state-noflock" \
+  GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" 2>&1); rc=$?
+eq "$rc" 1 "a driver with no flock on PATH fails the order"
+has "$out" "flock not found" "…naming the missing tool"
+if [ -s "$ARM_LOG" ]; then
+  bad "arms ran with no flock available: $(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)"
+else
+  ok "no arm ran without flock"
+fi
 
 echo "# the marked interlock block executes standalone against stubs"
 GATE="$(awk '/# >>> heal-gates-merge/{f=1;next} /# <<< heal-gates-merge/{f=0} f' "$RUNNER")"

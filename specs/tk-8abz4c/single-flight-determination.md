@@ -86,7 +86,9 @@ pid and start epoch into `pass.holder`. A tick that finds the lock held records
 one `SKIPPED` line and exits 0. A holder older than
 `REFINERY_RECONCILE_LOCK_STALL_SECS` (900s) is a wedge rather than a slow pass —
 the driver is gone and an arm still owns the descriptor — so that tick exits 1
-and `order.failed` names it.
+and `order.failed` names it. A tick that cannot take the lock at all runs no arm
+and exits 1: `flock` missing or an unusable lock file leaves nothing carrying
+single-flight, so the pass would be the second writer it exists to prevent.
 
 The arms now append to `pass.log` as they run instead of into a `mktemp` file
 that an `EXIT` trap deleted. Under the old arrangement a pass that was killed
