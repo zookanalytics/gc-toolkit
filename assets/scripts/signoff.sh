@@ -219,17 +219,15 @@ dismiss_superseded() {
 }
 
 # Rework rounds already spent on this anchor: one routed child per round, each
-# stamped source_review_bead by the signoff that filed it (the primary count).
-# The backup is dispatch_count on the ANCHOR — that is where gate-ensure
-# writes it. An unreadable ledger reads 0 — capping on a guess parks live work.
+# stamped source_review_bead by the signoff that filed it. The cap bounds
+# non-convergence, which only an attempted rework can demonstrate, so review
+# dispatches are not rounds however many read the same commit. An unreadable
+# ledger reads 0 — capping on a guess parks live work.
 count_rounds() {
-  local kids n dc
+  local kids n
   kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
   n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
   case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  dc=$(row_meta "$ANCHOR_ROW" dispatch_count)
-  case "$dc" in ''|*[!0-9]*) dc=0 ;; esac
-  [ "$dc" -gt "$n" ] && n="$dc"
   printf '%s' "$n"
 }
 

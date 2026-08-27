@@ -16,9 +16,14 @@
 # Reach carried by the pour ALONE is qualified before it counts: a review
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
-# situation key rather than holding the anchor in silence.
-# A head move past a recorded exception@ buys ONE dispatch through the
-# dispatch_count cap.
+# situation key rather than holding the anchor in silence. A dispatch that
+# cannot produce a new answer is refused before it is made: a head a closed
+# request-changes verdict already judged, whose rework child is still open,
+# only re-derives that verdict. Behind that sits a backstop on the DISPATCH
+# count (GC_MAX_REVIEW_DISPATCHES) for the reviews that end leaving no verdict
+# and no visible rework child: at the ceiling the gate holds and escalates
+# under the dispatch-runaway key. It is not the convergence cap, which counts
+# attempted rework and is signoff.sh's.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -57,6 +62,13 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
 ESCALATOR="$SCRIPTS_DIR/escalate.sh"
 WEDGE_KEY="review-wedge"
+RUNAWAY_KEY="dispatch-runaway"
+# Ceiling on review DISPATCHES per anchor. The legitimate spend is one dispatch
+# per rework round plus the review that records signoff.sh's cap verdict, and
+# each re-gate after a staled green@/exception@ adds a dispatch without a round,
+# so the default leaves headroom for one rebase.
+DISPATCH_CEILING="${GC_MAX_REVIEW_DISPATCHES:-5}"
+case "$DISPATCH_CEILING" in ''|*[!0-9]*) DISPATCH_CEILING=5 ;; esac
 
 # Origin pin for the live-head read; optional — an unresolvable origin or a
 # missing gh degrades to treating a present marker as satisfiable.
@@ -127,6 +139,56 @@ inflight_review() { # <anchor-id> <gate>
     | (if (.reach | not) then ("stranded " + .id)
        elif (.poured and (.routed | not) and (.claimed | not)) then ("poured " + .id)
        else .id end)' 2>/dev/null
+}
+
+# Has this exact head already been judged on this gate, with the rework it
+# asked for still unattempted? Each request-changes signoff files one child
+# stamped source_review_bead, so an open such child is proof that the round it
+# opened has not been tried — and a second review of a commit no rework has
+# touched can only re-derive the findings that filed it. Echoes
+# "<review-bead> <rework-child>". rc: 0 already answered · 2 nothing bars a
+# dispatch · 1 the ledger could not answer.
+already_answered() { # <anchor-id> <gate> <head>
+  local raw judged kids pair
+  raw=$(bd_list --metadata-field anchor_bead="$1" --status=closed) || return 1
+  judged=$(printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
+    .[]
+    | select(((.metadata.task_kind // "") | tostring) == "review")
+    | select(((.metadata.check_name // "") | tostring) == $g)
+    | select(((.metadata.reviewed_oid // "") | tostring) == $h)
+    | .id' 2>/dev/null)
+  [ -n "$judged" ] || return 2
+  kids=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
+  [ -n "$kids" ] || return 1
+  printf '%s' "$kids" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  pair=$(printf '%s' "$kids" | jq -r --arg ids "$judged" '
+    ($ids | split("\n")) as $reviews
+    | [ .[]
+        | select(((.status // "open") | tostring) != "closed")
+        | ((.metadata.source_review_bead // "") | tostring) as $src
+        | select($src != "" and (($reviews | index($src)) != null))
+        | ($src + " " + .id) ]
+    | (.[0] // empty)' 2>/dev/null)
+  [ -n "$pair" ] || return 2
+  printf '%s' "$pair"
+}
+
+# The refusal a prior verdict earns, for both places that would otherwise buy a
+# review of a commit no rework has touched: the stranded re-sling and the fresh
+# dispatch. <action> completes both sentences, because the two arms differ only
+# in what they decline to do. rc: 0 refuse (the reason is printed) · 2 nothing
+# bars it.
+answered_bars() { # <anchor-id> <gate> <head> <action>
+  local answered rc=0
+  # An unreadable head names no commit to test a prior verdict against.
+  [ -n "$3" ] || return 2
+  answered=$(already_answered "$1" "$2" "$3") || rc=$?
+  case "$rc" in
+    0) echo "$PROG: $1 gate '$2' — review ${answered%% *} already judged $3 and its rework ${answered##* } is still open; $4 (a re-review of an untouched commit re-derives the same findings)" ;;
+    1) echo "$PROG: $1 gate '$2' prior-verdict probe unreadable; $4 (merge stays held, retry next pass)" >&2 ;;
+    *) return 2 ;;
+  esac
+  return 0
 }
 
 # The roots of every workflow poured over <review-bead>, one per line, via the
@@ -232,7 +294,7 @@ for MR in pre_open_gate pull_request; do
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0
+stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; capped=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -313,7 +375,6 @@ STRAY
     if [ "$head_read" = 0 ]; then head=$(live_head_for "$branch"); head_read=1; fi
     # Classify: a verdict verb bound to the live head (or bound with no head to
     # test) is settled; everything else needs something able to raise it.
-    stale_exception=0
     case "$marker" in
       green@*)
         oid="${marker#green@}"
@@ -330,7 +391,6 @@ STRAY
       exception@*)
         oid="${marker#exception@}"
         if [ -z "$head" ] || [ "$oid" = "$head" ]; then continue; fi
-        stale_exception=1  # the cap check below reads this
         why="check.$g is exception@$oid but branch '$branch' has advanced to $head" ;;
       "") why="check.$g is absent (never reviewed, or cleared by a REQUEST_CHANGES signoff)" ;;
       fixable@*) why="check.$g is '$marker' (remediation was in flight); re-dispatching unless one still is" ;;
@@ -366,6 +426,13 @@ STRAY
             echo "$PROG: $id gate '$g' review $rid is convoy-tracked (a pour already drives it); counted in flight, no re-pour"
             continue
           fi
+          # Re-slinging asks the same question the dispatch arm below is
+          # refused for asking: a stranded review can only read the commit a
+          # closed verdict already judged, and its findings would file a
+          # duplicate of the rework child still waiting.
+          if answered_bars "$id" "$g" "$head" "no re-sling of $rid"; then
+            skipped=$((skipped + 1)); continue
+          fi
           gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" >/dev/null 2>&1
           if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
@@ -391,9 +458,9 @@ STRAY
           case "$spent_rc" in
             2) : ;;
             0)
-              row=$(gc bd show "$rid" --json 2>/dev/null | scrub)
-              seen=$(printf '%s' "$row" | jq -r '.[0].metadata.wedge_seen_root // empty' 2>/dev/null)
-              rpool=$(printf '%s' "$row" | jq -r '
+              rev_row=$(gc bd show "$rid" --json 2>/dev/null | scrub)
+              seen=$(printf '%s' "$rev_row" | jq -r '.[0].metadata.wedge_seen_root // empty' 2>/dev/null)
+              rpool=$(printf '%s' "$rev_row" | jq -r '
                 .[0].metadata.review_pool // .[0].metadata["gc.execution_routed_to"] // empty' 2>/dev/null)
               [ -n "$rpool" ] || rpool="$REVIEW_POOL"
               if [ "$seen" != "$spent_root" ]; then
@@ -435,20 +502,77 @@ Two repairs, either of which clears the hold:
       echo "$PROG: $id gate '$g' is armed but no --review-pool was given; no dispatch (merge is HELD until one is)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # Convergence cap: dispatch_count on the anchor bounds review rounds; at the
-    # cap the merge stays held and signoff.sh records the exception verdict.
-    # That exception IS the record of the spend, so the rounds behind it cannot
-    # also refuse a dispatch the head move has since earned. Nothing self-feeds:
-    # signoff's cap arm files no rework child, so only an actor outside the
-    # cadence can move that head again.
+    # The reviews this anchor has consumed. NOT the round cap: that counts
+    # attempted rework and is signoff.sh's, the only writer that can record its
+    # terminal exception@ verdict, and refusing a dispatch per round fires the
+    # cap early and withholds the review whose verdict settles the gate. What
+    # bounds a converging anchor is the settled marker, plus the already_answered
+    # refusal below; the ceiling further down is only for the anchors that reach
+    # neither.
     dcount=$(meta_of "$row" dispatch_count)
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
-    if [ "$dcount" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
-      if [ "$stale_exception" = 0 ]; then
-        echo "$PROG: $id gate '$g' has spent $dcount dispatch round(s) against a cap of ${GC_MAX_REVIEW_ROUNDS:-3}; no further dispatch (merge stays held)"
+
+    if answered_bars "$id" "$g" "$head" "no dispatch"; then
+      skipped=$((skipped + 1)); continue
+    fi
+
+    # Backstop. already_answered() refuses the dispatch a closed verdict has
+    # already made pointless, but it can only see a rework child the dep walk
+    # returns. A reviewer that stands down without a verdict, a child filed with
+    # its edge reversed, a death after claim: each leaves the anchor in exactly
+    # the state that triggered the dispatch, so the next pass dispatches again
+    # at the same head, without end. Nothing else in the cadence catches that.
+    # The refusal is as loud as the loop it stops — silence here is what leaves
+    # an anchor stranded with nothing on it saying why — so the ceiling holds
+    # the merge for an operator, stamps the reason on the anchor, and files one
+    # deduped visit. A moved head restates the situation and says it again.
+    if [ "$dcount" -ge "$DISPATCH_CEILING" ]; then
+      situation="$dcount@${head:-unreadable-head}"
+      if [ "$(meta_of "$row" "dispatch_backstop.$g")" = "$situation" ]; then
+        echo "$PROG: $id gate '$g' is held at the dispatch backstop ($situation, ceiling $DISPATCH_CEILING); already escalated [$RUNAWAY_KEY], no dispatch"
+        capped=$((capped + 1)); continue
+      fi
+      runaway_msg="Dispatch backstop: gate '$g' on $id has spent $dcount review dispatches and still has no verdict, so the merge is held.
+
+Anchor:   $id — $title
+Gate:     check.$g is ${marker:-absent}
+Branch:   $branch -> $target
+Head:     ${head:-<unreadable>}
+Spend:    dispatch_count=$dcount against a ceiling of $DISPATCH_CEILING
+
+This is NOT the convergence cap. GC_MAX_REVIEW_ROUNDS counts ATTEMPTED REWORK
+in signoff.sh and ends in its own exception@ verdict; this ceiling bounds
+DISPATCHES. Every dispatch behind it was poured and read back, so the reviews
+were reachable and still left no verdict and no open rework child on the live
+head. That points at one of: a reviewer standing down without a verdict, a
+rework child filed with its dependency edge reversed and so invisible to the
+walk, or a death after claim.
+
+The merge stays held until a human acts. Once the cause is understood:
+  re-arm the cadence by clearing the tally —
+    gc bd update $id --unset-metadata dispatch_count
+  or, if the spend was legitimate, raise the ceiling for the rig by setting
+  GC_MAX_REVIEW_DISPATCHES in the refinery order's environment."
+      filed="escalated [$RUNAWAY_KEY]"
+      if [ ! -x "$ESCALATOR" ]; then
+        filed="NOT escalated: $ESCALATOR is missing"
+        echo "$PROG: $id gate '$g' hit the dispatch backstop but $ESCALATOR is missing; stamping the anchor, no visit filed" >&2
+      elif ! "$ESCALATOR" --subject "$id" --key "$RUNAWAY_KEY" --message "$runaway_msg" >/dev/null; then
+        echo "$PROG: $id gate '$g' hit the dispatch backstop ($situation) but the escalation did not file; anchor not stamped, retry next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      echo "$PROG: $id gate '$g' is past the cap ($dcount/${GC_MAX_REVIEW_ROUNDS:-3}) but the branch advanced past exception@$oid; dispatching one re-gate at $head"
+      # The stamp is what dedups the note; read it back, or an anchor whose
+      # write keeps dropping collects one note per reconcile pass.
+      gc bd update "$id" --set-metadata "dispatch_backstop.$g=$situation" >/dev/null 2>&1
+      got=$(gc bd show "$id" --json 2>/dev/null | scrub \
+        | jq -r --arg k "dispatch_backstop.$g" '.[0].metadata[$k] // empty' 2>/dev/null)
+      if [ "$got" = "$situation" ]; then
+        gc bd update "$id" --append-notes "gate-ensure: gate '$g' has spent $dcount review dispatches against a ceiling of $DISPATCH_CEILING (GC_MAX_REVIEW_DISPATCHES) at head ${head:-<unreadable>}. No further review is dispatched and the merge stays HELD until an operator clears it. Visit: $filed. This ceiling bounds DISPATCHES; it is not GC_MAX_REVIEW_ROUNDS, which counts attempted rework in signoff.sh." >/dev/null 2>&1
+      else
+        echo "$PROG: $id gate '$g' hit the dispatch backstop but the hold stamp did not persist; the visit stands, the anchor does not show it" >&2
+      fi
+      echo "$PROG: $id gate '$g' hit the dispatch backstop ($situation, ceiling $DISPATCH_CEILING); no dispatch, merge HELD ($filed)"
+      capped=$((capped + 1)); continue
     fi
 
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
@@ -521,7 +645,7 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $capped at the dispatch backstop, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
   exit "$UNSAFE_RC"
