@@ -90,8 +90,8 @@ case "$OUTCOME" in
     exit 2 ;;
 esac
 
-# bd JSON with the C0 set stripped (TAB/LF/CR kept): a raw control byte in a
-# note makes jq read the whole payload as "no such bead".
+# A raw control byte in a note makes jq read the whole payload as "no such
+# bead".
 bd_json() {
   gc bd "$@" --json 2>/dev/null | scrub
 }

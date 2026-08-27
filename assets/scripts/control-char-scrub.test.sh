@@ -93,17 +93,17 @@ else bad "a TAB-preserving set loses that same payload (control)" \
         "it parsed as '$GOT_TAB' — the fixture no longer carries a raw TAB, so §3 is unguarded"; fi
 
 echo "── 5. no in-script scrub outside the fence ──"
-STRAY=0
-while IFS= read -r f; do
-    hit="$(awk '
-        /^[[:space:]]*# >>> [A-Za-z0-9_-]+[[:space:]]*$/ { inb = 1; next }
-        /^[[:space:]]*# <<< [A-Za-z0-9_-]+[[:space:]]*$/ { inb = 0; next }
-        inb { next }
-        /^[[:space:]]*#/ { next }
-        /tr -d .[^\x27]*(\\0[0-9]|\[:cntrl:\])/ { print FILENAME ":" FNR }' "$f")"
-    if [ -n "$hit" ]; then STRAY=$((STRAY + 1)); bad "no stray scrub in $(basename "$f")" "$hit"; fi
-done < <(hosts)
-[ "$STRAY" -eq 0 ] && ok "no inline control-character scrub outside the fence"
+# The detector holds the matcher. A second copy of it here would drift from
+# the one it mirrors, which is the failure this suite exists to catch.
+HOST_FILES=()
+while IFS= read -r f; do HOST_FILES+=("$f"); done < <(hosts)
+if [ "${#HOST_FILES[@]}" -eq 0 ]; then
+    bad "no inline control-character scrub outside the fence" "hosts() matched no files"
+elif STRAY_OUT="$("$DETECTOR" "${HOST_FILES[@]}" 2>&1)"; then
+    ok "no inline control-character scrub outside the fence (${#HOST_FILES[@]} files)"
+else
+    bad "no inline control-character scrub outside the fence" "$STRAY_OUT"
+fi
 
 echo "── 6. the detector still catches each shape ──"
 probe() { # <name> <expected-rc> <body>
@@ -117,13 +117,30 @@ if [ -x "$DETECTOR" ]; then
     # assembled from variables: spelled out, this file would fail its own rule.
     CNTRL='[:cntrl:]'
     ALL_C0='\000-\037'
+    TAB="$(printf '\t')"
     probe "flags an octal-range inline scrub" 1 \
         "x=\$(gc bd show z --json | tr -d '$KEEP_TAB')"
     probe "flags a [:cntrl:] inline scrub" 1 \
         "x=\$(gc bd show z --json | tr -d '$CNTRL')"
+    probe "flags a double-quoted octal inline scrub" 1 \
+        "x=\$(gc bd show z --json | tr -d \"$ALL_C0\")"
+    probe "flags a double-quoted [:cntrl:] inline scrub" 1 \
+        "x=\$(gc bd show z --json | tr -d \"$CNTRL\")"
+    probe "flags an unquoted octal inline scrub" 1 \
+        "x=\$(gc bd show z --json | tr -d $ALL_C0)"
+    probe "flags an unquoted [:cntrl:] inline scrub" 1 \
+        "x=\$(gc bd show z --json | tr -d $CNTRL)"
+    probe "flags an inline scrub spelled tr<spaces>-d" 1 \
+        "x=\$(gc bd show z --json | tr    -d '$ALL_C0')"
+    probe "flags an inline scrub spelled tr<tab>-d" 1 \
+        "x=\$(gc bd show z --json | tr${TAB}-d '$ALL_C0')"
     probe "flags a fenced copy with the wrong byte set" 1 \
         "# >>> control-char-scrub
 scrub() { tr -d '$KEEP_TAB'; }
+# <<< control-char-scrub"
+    probe "flags a fenced copy respelled tr<spaces>-d" 1 \
+        "# >>> control-char-scrub
+scrub() { tr    -d '$KEEP_TAB'; }
 # <<< control-char-scrub"
     probe "passes the canonical copy" 0 \
         "# >>> control-char-scrub

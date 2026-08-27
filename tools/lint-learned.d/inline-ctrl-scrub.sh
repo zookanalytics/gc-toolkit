@@ -32,7 +32,8 @@ FENCE="control-char-scrub"
 # scan, so it may state the canonical line literally.
 CANON="scrub() { tr -d '\\000-\\011\\013-\\037'; }"
 # A `tr -d` whose set names C0 bytes, spelled as octal escapes or as the class.
-CTRL_TR="tr[[:space:]]+-d[[:space:]]+'[^']*(\\\\0[0-9]|\[:cntrl:\])[^']*'"
+# A set held in a variable (`tr -d "$SET"`) names no bytes here and is invisible.
+CTRL_TR="tr[[:space:]]+-d[[:space:]]+[\"']?[^\"']*(\\\\0[0-9]|\[:cntrl:\])"
 OPEN_RE='^[[:space:]]*#[[:space:]]*>>>[[:space:]]+([A-Za-z0-9_-]+)[[:space:]]*$'
 CLOSE_RE='^[[:space:]]*#[[:space:]]*<<<[[:space:]]+([A-Za-z0-9_-]+)[[:space:]]*$'
 FIX="fix: use the shared \`scrub\` helper (learned rule: inline-ctrl-scrub)"
@@ -47,12 +48,12 @@ for f in "$@"; do
         *) continue ;;
     esac
     # One cheap read decides whether the file is worth a line scan at all.
-    grep -q "tr -d" "$f" 2>/dev/null || continue
+    grep -Eq 'tr[[:space:]]+-d' "$f" 2>/dev/null || continue
 
     fence="" lineno=0
     while IFS= read -r line || [ -n "$line" ]; do
         lineno=$((lineno + 1))
-        case "$line" in *"tr -d"* | *'>>>'* | *'<<<'*) ;; *) continue ;; esac
+        case "$line" in *tr*-d* | *'>>>'* | *'<<<'*) ;; *) continue ;; esac
 
         if [[ "$line" =~ $OPEN_RE ]]; then fence="${BASH_REMATCH[1]}"; continue; fi
         if [[ "$line" =~ $CLOSE_RE ]]; then fence=""; continue; fi
@@ -64,7 +65,7 @@ for f in "$@"; do
         if [ "$fence" = "$FENCE" ]; then
             # Inside the canonical fence only the canonical helper may appear.
             case "$line" in
-                *"tr -d"*)
+                *tr*-d*)
                     if [ "$line" != "$CANON" ]; then
                         echo "$f:$lineno: the $FENCE block disagrees with the pack's one byte set — copies must be byte-identical; $FIX"
                         found=1
