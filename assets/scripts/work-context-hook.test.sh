@@ -39,7 +39,11 @@
 #   (11) non-polecat template (refinery) -> silent
 #   (12) non-claude provider -> silent
 #   (13) empty/malformed stdin -> silent, exit 0
-#   (14) every case exits 0 — a hook that fails must never block a tool call
+#   (14) a claim whose response carries no bead_id -> silent, even when
+#        $GC_TRIGGER_BEAD_ID names an injectable bead. That variable is
+#        spawn-fixed, so in a pool it names a bead the worker is not working,
+#        and injecting it sends the polecat to do that bead under this claim.
+#   (15) every case exits 0 — a hook that fails must never block a tool call
 
 set -u
 
@@ -231,6 +235,18 @@ out10="$(run_hook "")"
 out11="$(run_hook 'not json at all --claim')"
 [ -z "$out11" ] && ok "malformed stdin: silent" || bad "malformed stdin: silent" "got: ${out11:0:120}"
 [ "$RUN_RC" -eq 0 ] && ok "malformed stdin: exit 0" || bad "malformed stdin: exit 0" "rc=$RUN_RC"
+
+# (14) a claim that printed no bead_id, which is what a redirected or swallowed
+# stdout looks like. $GC_TRIGGER_BEAD_ID is spawn-fixed and survives every later
+# claim, so a pool worker's copy names a bead it is not working.
+noid="$(jq -nc '{session_id: "s7", tool_name: "Bash",
+    tool_input: {command: "gc hook --claim --json > /dev/shm/claim.txt 2>&1"},
+    tool_response: {stdout: "", stderr: "", interrupted: false}}')"
+out12="$(run_hook "$noid" GC_TRIGGER_BEAD_ID="tk-solo")"
+[ -z "$out12" ] && ok "claim with no bead_id: silent despite a stale trigger id" \
+    || bad "claim with no bead_id: silent despite a stale trigger id" "got: ${out12:0:200}"
+[ "$RUN_RC" -eq 0 ] && ok "claim with no bead_id: exit 0" \
+    || bad "claim with no bead_id: exit 0" "rc=$RUN_RC"
 
 echo
 echo "work-context-hook: $PASS passed, $FAIL failed"

@@ -78,9 +78,9 @@ claimed="$(printf '%s' "$response" \
   | grep -o '"bead_id":"[^"]*"' \
   | head -1 \
   | sed 's/.*:"//; s/"$//')"
-# `gc bd update <id> --claim` has no JSON envelope; fall back to the bead this
-# session was spawned on, which resolves to the same workflow root.
-[ -n "$claimed" ] || claimed="${GC_TRIGGER_BEAD_ID:-}"
+# The response is the only sound source for the claimed id. $GC_TRIGGER_BEAD_ID
+# is spawn-fixed and no claim refreshes it, so a pool worker's copy names a bead
+# it is not working; load-context covers a claim that printed no id.
 [ -n "$claimed" ] || exit 0
 
 # --- 4. Claimed bead -> work bead ----------------------------------------
