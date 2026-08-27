@@ -246,7 +246,7 @@ scan_markdown() {
     done
 }
 
-# Comment portion of a source line: text after the LEFTMOST comment leader,
+# Comment portion of a source line: text from the LEFTMOST comment leader,
 # or a block-comment continuation line. A leader counts only at line start or
 # after whitespace — a `#` or `//` mid-token (sed delimiters, URLs, awk
 # patterns) is not a comment.
@@ -264,7 +264,13 @@ scan_comments() {
             if [ "$pre" != "$line" ] && [ "${#pre}" -lt "$best" ] \
                && { [ -z "$pre" ] || [[ "$pre" =~ [[:space:]]$ ]]; }; then
                 best="${#pre}"
-                comment="${line:$((best + ${#l}))}"
+                # `#` is both a comment leader and the PR sigil, so it stays
+                # in the prose; every other leader is dropped.
+                if [ "$l" = '#' ]; then
+                    comment="${line:$best}"
+                else
+                    comment="${line:$((best + ${#l}))}"
+                fi
             fi
         done
         if [ -z "$comment" ] && [[ "$line" =~ $block_cont_re ]]; then

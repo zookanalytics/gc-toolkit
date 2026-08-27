@@ -1,6 +1,6 @@
 ---
 name: history-in-prose whole-tree sweep
-description: What the history-in-prose detector reports when run over every tracked file in gc-toolkit, what those findings are, which false-positive classes were found and removed during calibration, and the two policy questions a wiring decision has to answer first.
+description: What the history-in-prose detector reports when run over every tracked file in gc-toolkit, what those findings are, which false-positive classes calibration removed and which one it kept, and the two policy questions a wiring decision has to answer first.
 ---
 
 # history-in-prose whole-tree sweep
@@ -22,7 +22,7 @@ contract — that lives in the detector's own header.
 ./tools/lint-learned.d/history-in-prose.sh $(git ls-files)
 ```
 
-440 tracked files, 13s wall. A gate-sized run of ten files is ~0.15s; the
+445 tracked files, 13s wall. A gate-sized run of ten files is ~0.15s; the
 runner hands changed files only, so this whole-tree number is the outer
 bound, not the gate cost.
 
@@ -30,27 +30,27 @@ bound, not the gate cost.
 
 | | |
 |---|---|
-| findings | 469 |
-| files with at least one | 96 of 440 |
+| findings | 450 |
+| files with at least one | 96 of 445 |
 | findings in `specs/` | 0 |
 
-By marker: 335 bead ids, 95 absolute dates, 39 PR references.
+By marker: 317 bead ids, 91 absolute dates, 42 PR references.
 
 By area, findings / files:
 
 | Area | Findings | Files |
 |---|---|---|
-| `assets/` | 179 | 48 |
+| `assets/` | 182 | 49 |
 | `services/` | 117 | 20 |
-| `docs/` | 116 | 10 |
-| `agents/` | 25 | 2 |
+| `docs/` | 117 | 10 |
 | `packs/` | 12 | 7 |
 | `tools/` | 10 | 2 |
 | `formulas/` | 6 | 3 |
 | `doctor/` | 3 | 3 |
+| `agents/` | 2 | 1 |
 | `pack.toml` | 1 | 1 |
 
-Concentrated, not diffuse: eight files carry 207 of the 469, and 79 of the
+Concentrated, not diffuse: eight files carry 194 of the 450, and 80 of the
 96 files are source files whose findings are in comments.
 
 ## What the findings are
@@ -66,7 +66,7 @@ tools/helm-surface-fixture.sh:498   # The regression this guards (PR #100 review
 ```
 
 No false positive survived the sampling. That is a statement about the
-sample, not a proof about all 469.
+sample, not a proof about all 450.
 
 ## False-positive classes found during calibration, and removed
 
@@ -82,6 +82,26 @@ exemption with a test that pairs it against a positive control:
 - **Pointers into specs.** `specs/tk-h9pq5/design-doc.md` in a comment names
   where the record lives, which is the rule working. Ten findings.
 
+## Where the comment leader is also a marker
+
+`#` opens a comment and also spells a PR reference, so the comment scanner
+keeps it and hands `#<n>` to the check the way the markdown scanner already
+did. Three findings in the tree depend on it:
+
+```
+assets/scripts/quota-park-nudge.test.sh:172   • Merged PR #242. Queue is empty.
+assets/scripts/tmux-pick-session.test.sh:170  "title": "landing PR #497"
+assets/scripts/tmux-pick-session.test.sh:319  has "$APIMENU" '│ landing PR #497'
+```
+
+All three are real PR numbers in fixture text rather than in an authored
+comment. The scanner reads any whitespace-preceded `#` as a comment leader
+and has no notion of a heredoc or a string literal, so it cannot separate
+the two. The same blindness already governs every other marker, and
+narrowing it to line-initial `#` would buy those three back at the cost of
+the trailing-comment shape, which is the commoner one. They are left as
+findings.
+
 ## The store prefixes
 
 The detector matches six. Five are the live city stores `gc rig list --json`
@@ -91,7 +111,7 @@ the city's own store, so it also spells session ids and mail wisps; those
 cite provenance in prose the same way a work-bead id does.
 
 Two of the six collide with a namespace and carry a standing cost. `gc-` is
-also this pack's command namespace, and `gc-toolkit` alone appears 1596
+also this pack's command namespace, and `gc-toolkit` alone appears 1684
 times. `lx-` is the shape tests use for synthetic session names, and the
 comments in `assets/scripts/quota-park-nudge.test.sh` carry nine of them.
 Both prefixes therefore require a digit in the suffix to be read as an id,
@@ -106,7 +126,7 @@ so inventing one fails.
 ## Two questions a wiring decision has to answer
 
 **The ledger docs.** `docs/gascity-human-engagement.md` (51) and
-`docs/gascity-routing-model.md` (39) are 90 of the 469. Both are
+`docs/gascity-routing-model.md` (39) are 90 of the 450. Both are
 upstream-tracking ledgers; the first says so in its own frontmatter — "every
 claim carries its verification date". Their dates, upstream PR numbers and
 `ga-` ids are load-bearing, and `docs/**` is in scope by design. Either
@@ -116,17 +136,26 @@ cannot decide that, and the `.allow` file is line-shaped, not file-shaped,
 so it is a poor fit for 90 lines.
 
 **The existing tree.** The runner scopes to changed files, so wiring does
-not force a cleanup. It does mean the next edit to any of these 95 files
+not force a cleanup. It does mean the next edit to any of these 96 files
 arrives with findings attached — including files whose findings predate the
-change. `tk-2plde` and its neighbours in `docs/lifecycle-composition.md`
-sit in a table whose whole purpose is closed-work provenance.
+change. Six of them are in `docs/lifecycle-composition.md`, in a table whose
+whole purpose is closed-work provenance: the bead ids there are in inline
+code and exempt, but the PR numbers and closure dates beside them are not.
 
 ## What this detector does not reach
 
 tk-65dyok's acceptance names the tk-ijwsdl case alongside the PR#490
-passages. The PR#490 passages are found, including the exact paragraph the
-operator flagged: `agents/converse/prompt.template.md:277` (`2026-08-13`)
-and `:281` (`tk-gvas6`).
+passages. The PR#490 passages are found. They are no longer in the tree —
+PR#490 landed and removed them, so `agents/converse/prompt.template.md` is
+now clean and the check runs against the blob that carried them:
+
+```
+git show 2e43853:agents/converse/prompt.template.md
+```
+
+23 findings, among them the exact paragraph the operator flagged: line 277
+(`2026-08-13`) and line 281 (`tk-gvas6`). The two findings `agents/` still
+reports are dates in `agents/proactive/PROVENANCE.md`.
 
 The tk-ijwsdl case is not found, and cannot be. Its violation —
 `assets/scripts/refinery-queue-nudge.test.sh` before 8f055f7 — is

@@ -162,6 +162,20 @@ fill "$TMP/script.sh"
 eq "$(nfind script.sh)" "1" "only the comment line is prose"
 eq "$(run script.sh | sed -n '1s/^[^:]*:\([0-9]*\):.*/\1/p')" "2" "and it is the comment's line"
 
+# The comment leader and the PR sigil are the same character, so a PR
+# reference as a comment's first token is the shape most easily lost.
+cat > "$TMP/firsttoken.sh" <<'SH'
+#!/usr/bin/env bash
+PRREF opened the review thread.
+COUNT=1  PRREF was the fix.
+# See PULLREF for the thread.
+echo "PRREF"
+SH
+fill "$TMP/firsttoken.sh"
+eq "$(nfind firsttoken.sh)" "3" "a PR ref is seen as a comment's first token"
+eq "$(run firsttoken.sh | sed -n 's/^[^:]*:\([0-9]*\):.*/\1/p' | tr '\n' ' ')" "2 3 4 " \
+   "leading, trailing and mid-comment alike, and never the string in code"
+
 echo "── 5. the store prefixes in use ──"
 # One line per store, so dropping a prefix from the detector fails here
 # rather than silently un-seeing one store's ids.
