@@ -115,7 +115,7 @@ Two further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config) and `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent). That is the whole set:
-**11 checks, each asserting a live structural property** — none greps the
+**12 checks, each asserting a live structural property** — none greps the
 source for a past fix.
 
 ---
@@ -125,7 +125,21 @@ source for a past fix.
 Design rule 1 of `specs/2026-08-rewrite/plan.md` holds that every component
 belongs to one of six workflows (work, review, merge, visit, feedback, patrol)
 or is a declared shared primitive. Below is that assignment for the tree as it
-stands: every order, formula, script, and service, with nothing unplaced.
+stands: every order, formula, service, and `assets/scripts` entry a running
+city executes, with nothing unplaced and no row carrying any other value.
+
+**What the index does not place.** Four exclusions, each mechanical:
+
+- `*.test.sh` and the fixture library they source,
+  `assets/scripts/test-harness.sh`. Test code is run by a developer, never by
+  a city: no order, formula, or `test_command` invokes it.
+- `assets/scripts/cutover-2026-08.sh`. One-shot tooling that carries its own
+  deletion condition in its header: it goes when
+  `specs/2026-08-rewrite/cutover-runbook.md` goes.
+- `doctor/check-*`. §3 places each check against the invariant it asserts.
+- `tools/`. The command surface a human drives, including the
+  `gc-proactive.sh` entry point that `gc-helm.sh` and `gc-visit-open.sh` shell
+  out to on a human's action.
 
 **The placement rule.** A component belongs to the workflow whose product it
 advances, not the one whose name it carries. `mol-refinery-patrol` is merge
@@ -140,7 +154,7 @@ general it looks.
 
 The table is maintained by hand. A doctor check asserting the property needs a
 machine-readable component list, which does not exist yet; this index is its
-prerequisite.
+prerequisite, and the four exclusions above are what such a check encodes.
 
 | Component | Workflow | Why it sits there |
 |---|---|---|
@@ -201,8 +215,6 @@ prerequisite.
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives; `doctor/check-seed-audit-current` holds its freshness. |
 | `assets/scripts/step-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here. |
 | `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
-| `assets/scripts/cutover-2026-08.sh` | none | One-shot tooling for the 2026-08 cutover, disposable by its own header. Deleted with `specs/2026-08-rewrite/cutover-runbook.md`. |
-| `assets/scripts/test-harness.sh` | none | Stub fixtures sourced by `*.test.sh`. Never runs in production. |
 
 ### The placements worth arguing about
 
@@ -229,8 +241,9 @@ prerequisite.
 ## 5. How to use this
 
 - **Adding a component** — it must answer column 3 of §1, and it takes a row
-  in §4 in the same PR. If it can do neither, it is a repair pass for a writer
-  that should be fixed instead.
+  in §4 in the same PR unless it falls under one of §4's four exclusions. If
+  it can do neither, it is a repair pass for a writer that should be fixed
+  instead.
 - **Adding a state** — declare it in `lifecycle/lifecycle.toml`, name its
   writer in [state-machine.md](state-machine.md)'s table, or it does not
   exist.
@@ -240,4 +253,4 @@ prerequisite.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
   by construction. If you find the ledger disagreeing with this document, one
-  of the ten checks is missing a case; fix the check, not the prose.
+  of the twelve checks is missing a case; fix the check, not the prose.
