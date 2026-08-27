@@ -45,7 +45,7 @@ run()   { ( cd "$TMP" && "$DETECTOR" "$@" ); }
 nfind() { run "$@" | grep -c . || true; }
 rc()    { ( cd "$TMP" && "$DETECTOR" "$@" >/dev/null 2>&1 ); echo $?; }
 
-mkdir -p "$TMP/docs" "$TMP/specs" "$TMP/notes/tk-4x9qp" "$TMP/agents" "$TMP/det"
+mkdir -p "$TMP/docs" "$TMP/specs" "$TMP/notes/tk-4x9qp" "$TMP/det"
 
 echo "── 1. the three markers, in markdown prose ──"
 cat > "$TMP/docs/markers.md" <<'MD'
