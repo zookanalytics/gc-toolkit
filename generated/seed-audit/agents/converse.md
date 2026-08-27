@@ -296,9 +296,18 @@ The loop, every visit:
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the thread before you wait; this hold will leave no trace"
    "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed, ≤140 chars>" --by converse
+   LC=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
+   done
+   if [ -z "$LC" ]; then echo "NO LIFECYCLE WRITER on any candidate root — this hold records prose and no state"
+   elif [ "$("$LC" state "$ITEM" 2>/dev/null)" = "unanchored" ]; then
+     "$LC" transition "$ITEM" --to held --route human \
+       || echo "HELD TRANSITION FAILED on $ITEM — the hold is prose-only; re-run it before you wait"
+   fi
    ```
    Stamp BEFORE you wait, not after. This session can be reaped mid-hold
-   (**The reap**, below) and the stamp is the only thing that survives
+   (**The reap**, below) and this pair of writes is all that survives
    it: reaped, the item still says what the sitting was waiting for and
    when. Unstamped, a reaped hold is indistinguishable from one that
    never happened — and it is also what BRINGS THE HOLD BACK: the
@@ -309,6 +318,19 @@ The loop, every visit:
    not here, and when you resume a hold and hold again, RE-STAMP it — a
    fresh `gc.takeaway_at` is what earns the next visit if this session is
    reaped too.
+
+   **The takeaway is the sentence; `held` is the state.** A takeaway is
+   free text, so no invariant can assert anything about it, and for a
+   while the only thing that could catch a hold outliving its sitting was
+   an external sweep reading for the word. The transition records the
+   same wait as a declared state that names the person it waits on, in
+   one write, and every reader sees the route without parsing prose.
+   Where `$ITEM` already carries an anchor state the transition is
+   skipped, and refused by the writer if attempted anyway: `merge.sh`,
+   `gate-ensure.sh` and `pr-facts.sh` each enumerate anchors by that
+   state, so moving one to `held` would drop it from all three for as
+   long as the hold lasts. An anchored item is already visible. An
+   unanchored one was not, which is the defect this closes.
 
    (The writer is **searched for**, never assumed:
    `$GC_RIG_ROOT` is the rig that IMPORTED this agent, not the gc-toolkit
@@ -395,6 +417,20 @@ The loop, every visit:
    gc bd show "$ITEM" --json | tr -d '[:cntrl:]' \
      | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
      || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
+   # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
+   # runs this same block on an item still waiting, so the release is keyed to
+   # this sitting's outcome rather than to the state read off the item. Erring
+   # toward the hold leaves a bead visibly routed to a person; erring the other
+   # way restores the untraceable wait this state exists to end.
+   RULED=no   # yes only when the decision this hold waited on landed here
+   LC=""
+   for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
+   done
+   if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" = "held" ]; then
+     "$LC" transition "$ITEM" --to unanchored --route "<the pool that owns it now, or human>" \
+       || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
+   fi
    gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
    gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    ```
@@ -480,7 +516,10 @@ Rules:
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then
   step 7 with `gc.outcome=cut-short` — sign-off included — and drain.
   A short sitting still ends out loud; the next visit resumes from the
-  record.
+  record. The decision is still open on this exit, so leave step 7's
+  `RULED=no`. The item stays `held`, still naming the person it waits
+  on, and step 7's takeaway refreshes the stamp that earns the next
+  visit.
 - **The reap — this thread can end without you.** A held sitting is not
   immortal. `idle_timeout` (8h, `agents/converse/agent.toml`) is
   measured from the terminal's last OUTPUT, so an operator who reads

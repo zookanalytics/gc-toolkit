@@ -327,6 +327,61 @@ else
         "cut-short must still end out loud (step 6, not a bare close)"
 fi
 
+# ...and a cut-short exit must not cancel the wait it is leaving unresolved
+# (tk-7k4862). Step 7 both releases a settled hold and carries the cut-short
+# exit, so a release keyed to the item's current state finds "held" on an item
+# nobody has ruled on, and drops the declared wait the hold was written to
+# record.
+signoff_block=$(awk '
+    /^[[:space:]]*```/ {
+        if (infence) { if (hit) { printf "%s", buf; exit } infence = 0 }
+        else { infence = 1; buf = ""; hit = 0 }
+        next
+    }
+    !infence { next }
+    { buf = buf $0 "\n"; if (index($0, "gc.outcome=<one-word-outcome>") > 0) hit = 1 }
+' "$PROMPT")
+if [ -z "$signoff_block" ]; then
+    bad "step 7's writes are a runnable block" \
+        "no fenced block performs the sign-off writes — prose alone leaves the role to improvise them"
+else
+    ok "step 7's writes are a runnable block"
+    if printf '%s' "$signoff_block" | grep -qF -- '--to unanchored'; then
+        ok "step 7 still releases a hold whose ruling landed"
+    else
+        bad "step 7 still releases a hold whose ruling landed" \
+            "without the release an item stays in held after the decision lands, and the state stops meaning waiting"
+    fi
+    rel_guard=$(printf '%s' "$signoff_block" | grep -F 'state "$ITEM"' | grep -F '"held"' | head -1)
+    if [ -z "$rel_guard" ]; then
+        bad "the release from held is guarded at all" \
+            "no conditional in step 7 reads the item's state before transitioning it"
+    elif printf '%s' "$rel_guard" | grep -qF 'RULED'; then
+        ok "the release from held is gated on a ruling, not on the state alone"
+    else
+        bad "the release from held is gated on a ruling, not on the state alone" \
+            "guard is [$rel_guard] — a cut-short sitting reaches step 7 on an item still waiting, and a state-only guard releases it (tk-7k4862)"
+    fi
+    # The gate has to fail CLOSED. An absent or affirmative default releases
+    # every hold that passes through step 7, which is the defect itself.
+    rel_default=$(printf '%s' "$signoff_block" | grep -E '^[[:space:]]*RULED=' | head -1)
+    if printf '%s' "$rel_default" | grep -qE '^[[:space:]]*RULED=no([[:space:]]|$)'; then
+        ok "the ruling gate defaults to leaving the hold in place"
+    else
+        bad "the ruling gate defaults to leaving the hold in place" \
+            "default is [${rel_default:-absent}] — a gate that starts open is not a gate"
+    fi
+fi
+# The cut-short bullet is where the still-waiting exit is taught, so the
+# continued hold has to be stated there too; the gate above is invisible from
+# the rule that sends a sitting through it.
+if grep -A 8 'Low context mid-hold' "$PROMPT" | grep -q 'RULED=no'; then
+    ok "the low-context exit says the hold stays"
+else
+    bad "the low-context exit says the hold stays" \
+        "the cut-short rule must name the gate it leaves shut, or the release reads as unconditional from there"
+fi
+
 echo "── a visit whose premise died closes SILENTLY (tk-mndjz) ──"
 # The instance: a stalled-workflow visit was filed at 02:49, its premise
 # ("no triage.hold and no gc.takeaway on the root") was dispositioned two

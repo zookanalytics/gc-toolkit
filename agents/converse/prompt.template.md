@@ -417,13 +417,17 @@ The loop, every visit:
    gc bd show "$ITEM" --json | tr -d '[:cntrl:]' \
      | jq -e '.[0].metadata["gc.takeaway"] // empty' >/dev/null \
      || echo "NO TAKEAWAY ON $ITEM — do not close until it lands"
-   # Ending with a RULING clears the hold a previous sitting recorded. Ending
-   # while still waiting does not: `held` is then the true state.
+   # `held` is cleared by a ruling, not by a sitting ending. The cut-short exit
+   # runs this same block on an item still waiting, so the release is keyed to
+   # this sitting's outcome rather than to the state read off the item. Erring
+   # toward the hold leaves a bead visibly routed to a person; erring the other
+   # way restores the untraceable wait this state exists to end.
+   RULED=no   # yes only when the decision this hold waited on landed here
    LC=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
    done
-   if [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" = "held" ]; then
+   if [ "$RULED" = yes ] && [ -n "$LC" ] && [ "$("$LC" state "$ITEM" 2>/dev/null)" = "held" ]; then
      "$LC" transition "$ITEM" --to unanchored --route "<the pool that owns it now, or human>" \
        || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
    fi
@@ -512,7 +516,10 @@ Rules:
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then
   step 7 with `gc.outcome=cut-short` — sign-off included — and drain.
   A short sitting still ends out loud; the next visit resumes from the
-  record.
+  record. The decision is still open on this exit, so leave step 7's
+  `RULED=no`. The item stays `held`, still naming the person it waits
+  on, and step 7's takeaway refreshes the stamp that earns the next
+  visit.
 - **The reap — this thread can end without you.** A held sitting is not
   immortal. `idle_timeout` (8h, `agents/converse/agent.toml`) is
   measured from the terminal's last OUTPUT, so an operator who reads
