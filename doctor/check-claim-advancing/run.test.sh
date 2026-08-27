@@ -423,6 +423,19 @@ eq "$RC" "0" "a session holding a NON-step bead is not counted free"
 has "$OUT" "backpressure" "the non-step holder makes the pool read as full"
 clear_stores
 
+# A session names itself with whichever identity it has. Naming one is a pipe
+# away from rebinding `.` to a string, which aborts the whole pool join and
+# silently downgrades every strand to "no running session".
+agents "$(agent rig/pool.polecat false 2)"
+sessions '{"id":"lx-1","session_name":"","alias":"rig/pool.only-alias","state":"active","running":true,"last_active":"'"$(ago 30)"'","template":"rig/pool.polecat"}'
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a session with no session_name still resolves its pool"
+has "$OUT" "rig/pool.only-alias" "the error names it by the identity it does have"
+has "$OUT" "1 of 1 running session(s) holding nothing" "the pool join survived the empty session_name"
+clear_stores
+
 # --- 14d. gc.execution_routed_to is the fallback route --------------------
 agents "$(agent rig/pool.polecat false 2)"
 sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"

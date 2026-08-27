@@ -311,9 +311,9 @@ if [ "${#unclaimed[@]}" -ne 0 ]; then
                 free: (if ($O[((.id // "") | tostring)] != null
                            or $O[((.session_name // "") | tostring)] != null
                            or $O[((.alias // "") | tostring)] != null) then 0 else 1 end),
-                nm: ((((.session_name // "") | tostring)
-                      | if . == "" then (((.alias // .id) // "?") | tostring) else . end)
-                     | gsub("[[:cntrl:]]"; " ")) } ]
+                nm: ([(.session_name // ""), (.alias // ""), (.id // "")]
+                      | map(tostring) | map(select(. != ""))
+                      | ((.[0] // "?") | gsub("[[:cntrl:]]"; " "))) } ]
         | group_by(.t)[]
         | [ .[0].t, (length | tostring), ([.[] | select(.free == 1)] | length | tostring),
             ([.[] | select(.free == 1) | .nm] | join(", ")) ]
