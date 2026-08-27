@@ -434,7 +434,7 @@ func fixtureBoard() board.Board {
 
 	return board.Board{
 		GeneratedAt: time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
-		Total:       2,
+		Total:       3,
 		// One sitting of each half, so the fixture exercises both the running
 		// shape (no outcome, no close stamp) and the finished one.
 		Sittings: []board.Sitting{
@@ -557,6 +557,56 @@ func fixtureBoard() board.Board {
 				Frontier:  "all 2 closed · 0 open",
 				Needs:     "all 2 closed — graduate",
 				RankScore: 3000,
+			},
+			// The DONE row: an anchor whose own bead has closed. It is here to
+			// carry closed_at — the one field only this band ever sets — into
+			// the TypeScript check, which cannot see a field no tile populates.
+			{
+				ID:       "tk-9tbbk",
+				Rig:      "gc-toolkit",
+				Kind:     "parked",
+				Title:    "A conversation the operator watched close",
+				Severity: board.SevDone,
+
+				Weight: 1,
+				Held:   false,
+
+				NClosed:    1,
+				MTotal:     1,
+				Open:       0,
+				InProgress: 0,
+				Assigned:   0,
+
+				InProgressLive: 0,
+				InProgressDead: 0,
+				DeadOwner:      false,
+
+				InFlight:      0,
+				InFlightHeads: []string{},
+
+				Owned: nil,
+
+				Stranded:         false,
+				Empty:            false,
+				Complete:         true,
+				ProgressMismatch: false,
+
+				StaleDays:      1,
+				Priority:       &p3,
+				CrossRigRefs:   []string{},
+				OpenHeads:      []string{},
+				DeadOwnerHeads: []string{},
+				ParkedHeads:    []string{},
+
+				Takeaway:   nil,
+				TakeawayAt: nil,
+				TakeawayBy: nil,
+
+				UpdatedAt: time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC),
+				ClosedAt:  time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC),
+				Frontier:  "closed 1d ago",
+				Needs:     "closed — dismiss to clear",
+				RankScore: -1_000_000 + 998, // the DONE lane: closed 1 day ago
 			},
 		},
 		Partial:       true,

@@ -36,7 +36,7 @@
  * Go type is a plain string type, so an unknown value is representable on the
  * wire even though it is not representable here.
  */
-export type Severity = 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW';
+export type Severity = 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' | 'DONE';
 
 /**
  * Tile is one rendered row of the board.
@@ -130,6 +130,13 @@ export interface Tile {
   takeaway_by: string | null;
   /** RFC 3339. Omitted (Go `omitzero`) when the source could not read it. */
   updated_at?: string;
+  /**
+   * `closed_at` is present exactly on a `DONE` row and carries when the anchor
+   * closed. A closed anchor keeps a place on the board instead of leaving it
+   * the moment it is answered, so this is also the band's order: most recently
+   * closed first.
+   */
+  closed_at?: string;
   frontier: string;
   needs: string;
   rank_score: number;

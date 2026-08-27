@@ -75,7 +75,10 @@ fi
 BOARD_ERR="$(mktemp "${TMPDIR:-/tmp}/gc-helm-pick.XXXXXX" 2>/dev/null || printf '')"
 if [ -n "$BOARD_ERR" ]; then trap 'rm -f "$BOARD_ERR"' EXIT; fi
 BOARD_RC=0
-BOARD=$("$HELM_SVC" board --json --limit=36 ${ALL:+--all} 2>"${BOARD_ERR:-/dev/null}") || BOARD_RC=$?
+# The DONE band keeps an answered row in a view the operator leaves open.
+# Neither menu here is that, and the one action either of them offers is `open`,
+# so a closed row would spend a hotkey on something already answered.
+BOARD=$(GC_HELM_DONE_WINDOW=0 "$HELM_SVC" board --json --limit=36 ${ALL:+--all} 2>"${BOARD_ERR:-/dev/null}") || BOARD_RC=$?
 
 if [ "$BOARD_RC" -ne 0 ]; then
     WHY=""

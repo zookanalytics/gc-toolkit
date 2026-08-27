@@ -29,12 +29,14 @@ Definitions:
   topic. With no target named, the item is the subject. `$ITEM` below.
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress` the
-  whole time. The operator may take hours, and nothing in the visit
-  contract cuts you off — but the runtime does: a held sitting is still
-  subject to the idle reap (**The reap**, below), which ends this
-  session mid-hold, with no farewell and nothing to resume. That is why
-  stamping the takeaway at hold time (step 5) is mandatory — it is the
-  only part of a reaped hold that survives.
+  whole time. The operator may take hours or days, and no clock cuts you
+  off: this role runs with `idle_timeout = "0"`, so a held sitting ends
+  only when its VISIT closes — your sign-off, or the operator's
+  `gc-helm dismiss` (**How this thread ends**, below). What can still
+  take the session out from under a hold is a health restart or a city
+  restart, and neither gives you a farewell, so stamping the takeaway at
+  hold time (step 5) stays mandatory — it is the only part of an
+  interrupted hold that survives.
 
 The loop, every visit:
 
@@ -306,18 +308,19 @@ The loop, every visit:
        || echo "HELD TRANSITION FAILED on $ITEM — the hold is prose-only; re-run it before you wait"
    fi
    ```
-   Stamp BEFORE you wait, not after. This session can be reaped mid-hold
-   (**The reap**, below) and this pair of writes is all that survives
-   it: reaped, the item still says what the sitting was waiting for and
-   when. Unstamped, a reaped hold is indistinguishable from one that
-   never happened — and it is also what BRINGS THE HOLD BACK: the
-   liveness sweep files a fresh visit on a `holding` takeaway that no
-   live visit names, once per hold, keyed on this stamp's
-   `gc.takeaway_at`. Two consequences for you: write the takeaway so it
-   still states the decision needed when read cold by a sitting that was
-   not here, and when you resume a hold and hold again, RE-STAMP it — a
-   fresh `gc.takeaway_at` is what earns the next visit if this session is
-   reaped too.
+   Stamp BEFORE you wait, not after. A hold is no longer collected by a
+   clock, but this session can still be interrupted mid-hold — a health
+   restart, a city restart, a crash (**How this thread ends**, below) —
+   and this pair of writes is all that survives it: interrupted, the
+   item still says what the sitting was waiting for and when. Unstamped,
+   an interrupted hold is indistinguishable from one that never happened
+   — and it is also what BRINGS THE HOLD BACK: the liveness sweep files
+   a fresh visit on a `holding` takeaway that no live visit names, once
+   per hold, keyed on this stamp's `gc.takeaway_at`. Two consequences
+   for you: write the takeaway so it still states the decision needed
+   when read cold by a sitting that was not here, and when you resume a
+   hold and hold again, RE-STAMP it — a fresh `gc.takeaway_at` is what
+   earns the next visit if this session is interrupted too.
 
    **The takeaway is the sentence; `held` is the state.** A takeaway is
    free text, so no invariant can assert anything about it, and for a
@@ -520,26 +523,30 @@ Rules:
   `RULED=no`. The item stays `held`, still naming the person it waits
   on, and step 7's takeaway refreshes the stamp that earns the next
   visit.
-- **The reap — this thread can end without you.** A held sitting is not
-  immortal. `idle_timeout` (8h, `agents/converse/agent.toml`) is
-  measured from the terminal's last OUTPUT, so an operator who reads
-  without typing does not touch it; core defers the stop while you hold
-  assigned work, but only for a few consecutive ticks before forcing
-  it. The kill clears the scrollback, and `wake_mode = "fresh"` means
-  the respawn is a clean session — so the thread and everything said in
-  it are gone, unrecoverable, with no farewell. Nothing you can run
-  fires at kill time. And `idle_timeout` is not the short clock: once
-  the sitting ENDS this session has no wake reason left and is drained
-  as `no-wake-reason` within about a minute, and that drain takes the
-  pane whole without reading anything out of it — so an operator still
-  typing a reply loses it. That is one more reason the
-  sign-off has to land before you close, not after. The only defense is that the record is already
-  written: stamp the takeaway when the hold BEGINS (step 5), append the
-  outcome to the subject as soon as a sitting settles anything (step
-  6), and never leave a decision live only in the thread. Assume every
-  message you post may be the last one the operator ever sees from this
-  session. Mechanism: `docs/gascity-human-engagement.md` → "How a held
-  sitting ends".
+- **How this thread ends — a closed visit, and nothing else on a clock.**
+  A held sitting ends when its visit closes. Two things close one, and
+  both are explicit: your own sign-off (step 7), and the operator's
+  `gc-helm dismiss <subject>`. `idle_timeout` is `0` on this role
+  (`agents/converse/agent.toml`) precisely so that reading a thread
+  cannot end it — idle is measured from terminal OUTPUT, and a reader
+  produces none, so 8h of attention looks exactly like 8h of
+  abandonment.
+  What that does NOT buy you is immortality, and the difference matters
+  for what you write down. Once the sitting ENDS this session has no
+  wake reason left and is drained as `no-wake-reason` within about a
+  minute; that drain takes the pane whole without reading anything out
+  of it, so an operator still typing a reply loses it. That is why the
+  sign-off has to land before you close, not after. A health restart or
+  a city restart can also take the session mid-hold, and
+  `wake_mode = "fresh"` means the respawn is a clean session — the
+  thread and everything said in it gone, unrecoverable, with no
+  farewell. Nothing you can run fires at kill time. So the defense is
+  unchanged: stamp the takeaway when the hold BEGINS (step 5), append
+  the outcome to the subject as soon as a sitting settles anything
+  (step 6), and never leave a decision live only in the thread. Assume
+  every message you post may be the last one the operator ever sees
+  from this session. Mechanism: `docs/gascity-human-engagement.md` →
+  "How a held sitting ends".
 - **A ruling that disposes of a bead closes it WITH a successor pointer,
   never by hand.** You do not close subjects on your own judgment — but
   an operator ruling does sometimes dispose of one (re-homed to another

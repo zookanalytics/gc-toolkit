@@ -40,6 +40,11 @@ const (
 	SevElevated Severity = "ELEVATED" // a human-gated decision (or, with staleness, an aged NORMAL)
 	SevNormal   Severity = "NORMAL"   // healthy in-flight work
 	SevLow      Severity = "LOW"      // empty or fully closed
+	// SevDone is the terminal band: the anchor bead itself has closed. It is
+	// not an attention level, so it ranks below every live band. A row leaves
+	// it on `gc-helm dismiss`, or once the anchor has been closed longer than
+	// the gather's window reaches back.
+	SevDone Severity = "DONE"
 )
 
 // sevRank mirrors gc-helm.sh's `def sevrank`. It is the dominant term in
@@ -53,6 +58,12 @@ func (s Severity) rank() int {
 		return 2
 	case SevNormal:
 		return 1
+	case SevDone:
+		// Negative so a DONE row sorts below every live band without shifting
+		// the four existing ranks: rankScore adds at most rankTermCap to the
+		// lane, which leaves the whole band at or below -1, and the lowest a
+		// live row can reach is 0.
+		return -1
 	default: // SevLow and anything unknown
 		return 0
 	}
@@ -95,6 +106,12 @@ type Anchor struct {
 	Description string            `json:"description,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	Children    []Child           `json:"children,omitempty"`
+
+	// ClosedAt is set only for an anchor whose own bead has CLOSED, and is
+	// what puts the row in the terminal DONE band. A zero value means the
+	// anchor is live, which is every anchor the open queries return, so a
+	// source that gathers no closed anchors renders no DONE band at all.
+	ClosedAt time.Time `json:"closed_at,omitzero"`
 
 	// Owned distinguishes a convoy that an owning bead accounts for from the
 	// orphan exception (kind "unowned"). nil for every non-convoy kind, which
@@ -258,6 +275,10 @@ type Tile struct {
 	TakeawayBy *string `json:"takeaway_by"`
 
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	// ClosedAt is non-zero exactly on a DONE row and carries when the anchor
+	// closed. It also orders the band: most-recently-closed first, so the row
+	// the operator just watched close is the one at the top of it.
+	ClosedAt  time.Time `json:"closed_at,omitzero"`
 	Frontier  string    `json:"frontier"`
 	Needs     string    `json:"needs"`
 	RankScore int       `json:"rank_score"`

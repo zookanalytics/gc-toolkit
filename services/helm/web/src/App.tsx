@@ -61,6 +61,16 @@ function shortAge(stamp: string | undefined, now: number): string {
   if (hours < 48) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
 }
+// The DONE band: the anchor's own bead has closed. It is a section of its own
+// rather than a row in the attention or parked tables, and it is filtered out
+// of both, because a closed anchor of any kind lands here — a closed `parked`
+// subject would otherwise read as a live parked conversation to pick back up.
+// The operator's queue never carries one either: a closed anchor is not `owed`.
+//
+// No row leaves for being answered: `gc-helm dismiss <id>` clears one on the
+// operator's word. A row does age out of the band on a clock, once it has been
+// closed longer than GC_HELM_DONE_WINDOW.
+const isDone = (tile: Tile): boolean => tile.severity === 'DONE';
 
 // Document-relative on purpose. The app is served under a runtime-city-named
 // prefix (/v0/city/<city>/svc/helm/), so an absolute '/helm' would address the
@@ -206,8 +216,9 @@ export function App() {
   // position, so a section can never disagree with the order that produced it.
   const owed = tiles.filter((tile) => tile.owed);
   const rest = tiles.filter((tile) => !tile.owed);
-  const attention = rest.filter((tile) => !isParked(tile));
-  const parked = rest.filter(isParked);
+  const done = rest.filter(isDone);
+  const attention = rest.filter((tile) => !isDone(tile) && !isParked(tile));
+  const parked = rest.filter((tile) => !isDone(tile) && isParked(tile));
 
   return (
     <main>
@@ -217,7 +228,9 @@ export function App() {
           {board
             ? `${owed.length ? `${owed.length} owed · ` : ''}${attention.length} anchors${
                 parked.length ? ` · ${parked.length} parked` : ''
-              } · generated ${board.generated_at}`
+              }${done.length ? ` · ${done.length} closed` : ''} · generated ${
+                board.generated_at
+              }`
             : loading
               ? 'loading the board…'
               : 'no board'}
@@ -385,6 +398,42 @@ export function App() {
       )}
 
       <Sittings sittings={board?.sittings ?? []} now={renderedAt} onOpen={setDrillTarget} />
+
+      {done.length > 0 && (
+        <section className="done" aria-labelledby="done-heading">
+          <h2 id="done-heading">recently closed</h2>
+          <p className="sub">
+            Anchors that closed while you were away. They sit below every live band, and no
+            row leaves for being answered: <code>gc-helm dismiss &lt;id&gt;</code> clears one
+            now. A row does age out of this band on a clock, once it has been closed longer
+            than <code>GC_HELM_DONE_WINDOW</code> (default 7d, <code>0</code> off).
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>id</th>
+                <th>rig</th>
+                <th>kind</th>
+                <th>title</th>
+                <th>closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {done.map((tile) => (
+                <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
+                  <td>
+                    <DrillOpen id={tile.id} onOpen={setDrillTarget} />
+                  </td>
+                  <td>{tile.rig}</td>
+                  <td>{tile.kind}</td>
+                  <td>{tile.title}</td>
+                  <td>{tile.frontier}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
           not a wiring limit. The city still runs a single ttyd, but its attach

@@ -484,8 +484,8 @@ func TestLowSeverity(t *testing.T) {
 func TestRankLanesNonOverlapping(t *testing.T) {
 	// A LOW tile cannot be produced with a huge weight via the normal path
 	// (LOW means m==0 or all-closed), so test the rankScore function directly.
-	lowMax := rankScore(SevLow, 10_000, 10_000) // weight and stale both capped at 999
-	normalMin := rankScore(SevNormal, 0, 0)
+	lowMax := rankScore(SevLow, 10_000, 10_000, 0) // weight and stale both capped at 999
+	normalMin := rankScore(SevNormal, 0, 0, 0)
 	if lowMax >= normalMin {
 		t.Errorf("severity lanes overlap: LOW(maxweight)=%d >= NORMAL(minweight)=%d", lowMax, normalMin)
 	}
@@ -519,12 +519,12 @@ func TestStaleDays(t *testing.T) {
 // report an uncapped age, but rank_score must still cap its units term, or an
 // ancient anchor would borrow into the weight lane and outrank its own band.
 func TestRankStaleLaneStaysBounded(t *testing.T) {
-	ancient := rankScore(SevNormal, 0, 50_000)
-	ceiling := rankScore(SevNormal, 0, rankTermCap)
+	ancient := rankScore(SevNormal, 0, 50_000, 0)
+	ceiling := rankScore(SevNormal, 0, rankTermCap, 0)
 	if ancient != ceiling {
 		t.Errorf("stale term must cap at %d: 50000d scored %d, %dd scored %d", rankTermCap, ancient, rankTermCap, ceiling)
 	}
-	if ancient >= rankScore(SevHigh, 0, 0) {
+	if ancient >= rankScore(SevHigh, 0, 0, 0) {
 		t.Error("a maximally stale NORMAL must never reach the HIGH band")
 	}
 }
@@ -1643,6 +1643,37 @@ func TestRuledRowLeavesTheQueue(t *testing.T) {
 	}
 }
 
+// TestClosedRowLeavesTheQueue: the DONE band and the operator's queue meet on
+// a closed anchor that still carries the human-routed marker. The queue is
+// ordered by how long each row has been owed, so admitting one would file a
+// finished row ahead of every live demand — the exact inverse of the floor the
+// band gives it. The fixture makes the closed row the OLDEST, so that inversion
+// is what fails here if the gate goes.
+func TestClosedRowLeavesTheQueue(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-closed", Title: "answered, then closed", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata:  map[string]string{mdRoutedTo: routedHuman},
+			UpdatedAt: daysAgo(9), ClosedAt: daysAgo(1)},
+		{ID: "tk-asking", Title: "still asking", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdRoutedTo: routedHuman}, UpdatedAt: daysAgo(2)},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	closed, _ := tileByID(b, "tk-closed")
+	if closed.Severity != SevDone {
+		t.Fatalf("fixture: the closed row must band DONE, got %s", closed.Severity)
+	}
+	if closed.Owed {
+		t.Error("a closed row is not owed — the band is where it goes")
+	}
+	if got := ids(OperatorQueue(b.Tiles)); !equalIDs(got, []string{"tk-asking"}) {
+		t.Errorf("queue = %v, want only the live demand", got)
+	}
+	// Sinking, not leaving: it is still on the board, under the live row.
+	if got := ids(CityOverview(b.Tiles)); !equalIDs(got, []string{"tk-asking", "tk-closed"}) {
+		t.Errorf("overview = %v, want the closed row last but present", got)
+	}
+}
+
 // TestCapQueueDoesNotRationParkedRows: CapRows gives `parked` a small separate
 // budget because those rows are floored to LOW and would fall off the end of a
 // ranked board. Inside the queue a parked row is a conversation waiting on the
@@ -1656,7 +1687,7 @@ func TestCapQueueDoesNotRationParkedRows(t *testing.T) {
 	if got := len(CapQueue(tiles, DefaultMaxRows)); got != len(tiles) {
 		t.Errorf("CapQueue kept %d of %d parked rows", got, len(tiles))
 	}
-	if got := len(CapRows(tiles, DefaultMaxRows, DefaultMaxParked)); got != DefaultMaxParked {
+	if got := len(CapRows(tiles, DefaultMaxRows, DefaultMaxParked, DefaultMaxDone)); got != DefaultMaxParked {
 		t.Fatalf("fixture: CapRows must ration these to %d, got %d", DefaultMaxParked, got)
 	}
 	if got := len(CapQueue(tiles, 3)); got != 3 {
@@ -1781,4 +1812,141 @@ func ids(tiles []Tile) []string {
 		out = append(out, t.ID)
 	}
 	return out
+}
+
+// ── The DONE band ────────────────────────────────────────────────────────
+//
+// The rule these pin: a row does not leave the operator's view because it was
+// answered. A closed anchor sinks below every live band and stays there.
+
+// closedAnchor is a live-looking anchor whose own bead has closed d days ago.
+// It deliberately carries OPEN children: run through the live branches, those
+// children band it HIGH and put a finished item at the top of the board.
+func closedAnchor(id string, d int, children ...Child) Anchor {
+	return Anchor{
+		ID: id, Title: id, Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(1), UpdatedAt: daysAgo(d), ClosedAt: daysAgo(d), Children: children,
+	}
+}
+
+func TestClosedAnchorBandsDoneNotByItsChildren(t *testing.T) {
+	a := closedAnchor("tk-done", 1, Child{ID: "tk-c1", Status: "open"}, Child{ID: "tk-c2", Status: "open"})
+	tile := computeTile(a, fixtureNow, Facts{})
+
+	if tile.Severity != SevDone {
+		t.Errorf("a closed anchor bands DONE: got %s", tile.Severity)
+	}
+	if tile.Frontier != "closed 1d ago" {
+		t.Errorf("frontier says when it closed: got %q", tile.Frontier)
+	}
+	if tile.Needs != "closed — dismiss to clear" {
+		t.Errorf("needs names the one act that clears it: got %q", tile.Needs)
+	}
+	if tile.ClosedAt.IsZero() {
+		t.Error("closed_at reaches the wire; without it no consumer can tell the band apart")
+	}
+}
+
+// A DONE row's takeaway would otherwise win the NEEDS cell, and it would be
+// answering the question the row had while it was live.
+func TestClosedAnchorNeedsOutranksItsTakeaway(t *testing.T) {
+	a := closedAnchor("tk-tk", 2)
+	a.Kind, a.Source = "parked", "parked"
+	a.Takeaway = "waiting on the operator to pick a storage backend"
+
+	tile := computeTile(a, fixtureNow, Facts{})
+	if tile.Needs != "closed — dismiss to clear" {
+		t.Errorf("a closed row asks to be cleared, not re-read: got %q", tile.Needs)
+	}
+	if tile.Takeaway == nil || *tile.Takeaway != a.Takeaway {
+		t.Error("the takeaway still travels on the wire; only the NEEDS cell changes")
+	}
+}
+
+// The band's whole promise is that it SINKS. A closed P1 epic with a large
+// subtree is the strongest row the live lanes can build, and it must still land
+// under the weakest live row there is.
+func TestDoneBandSinksBelowEveryLiveRow(t *testing.T) {
+	big := make([]Child, 0, 40)
+	for i := range 40 {
+		big = append(big, Child{ID: "tk-c" + string(rune('a'+i%26)) + string(rune('0'+i/26)), Status: "open"})
+	}
+	done := closedAnchor("tk-heavy", 0, big...)
+	quiet := Anchor{ID: "tk-quiet", Title: "empty", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk"}
+
+	b := BuildBoard([]Anchor{done, quiet}, fixtureNow, false, nil, Facts{})
+	if b.Tiles[len(b.Tiles)-1].ID != "tk-heavy" {
+		t.Fatalf("the DONE row sorts last: got order %s, %s", b.Tiles[0].ID, b.Tiles[1].ID)
+	}
+	heavy, _ := tileByID(b, "tk-heavy")
+	if heavy.RankScore >= 0 {
+		t.Errorf("the DONE lane must stay below the live floor of 0: got %d", heavy.RankScore)
+	}
+}
+
+// Inside the band the useful order is recency: the row the operator just
+// watched close is the one they are looking for.
+func TestDoneBandOrdersByRecency(t *testing.T) {
+	b := BuildBoard([]Anchor{
+		closedAnchor("tk-old", 30),
+		closedAnchor("tk-new", 0),
+		closedAnchor("tk-mid", 3),
+	}, fixtureNow, false, nil, Facts{})
+
+	var got []string
+	for _, tile := range b.Tiles {
+		got = append(got, tile.ID)
+	}
+	want := []string{"tk-new", "tk-mid", "tk-old"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("most recently closed first: got %v, want %v", got, want)
+	}
+}
+
+// An ancient closure must not borrow out of the units lane and cross into a
+// live band, the same invariant the stale term carries on the other side.
+func TestDoneLaneStaysBoundedForAnAncientClosure(t *testing.T) {
+	ancient := rankScore(SevDone, 0, 0, 50_000)
+	floor := rankScore(SevDone, 0, 0, rankTermCap)
+	if ancient != floor {
+		t.Errorf("the closed term caps at %d: 50000d scored %d, %dd scored %d", rankTermCap, ancient, rankTermCap, floor)
+	}
+	if ancient >= rankScore(SevLow, 0, 0, 0) {
+		t.Error("the oldest DONE row must still sort below the quietest live one")
+	}
+}
+
+// CapRows: three budgets, because a shared one drops the whole of the band
+// that sorts last — and the band that sorts last is the one whose rows were
+// about to disappear on their own.
+func TestCapRowsBudgetsAreSeparate(t *testing.T) {
+	var tiles []Tile
+	for i := range 4 {
+		tiles = append(tiles, Tile{ID: "a" + string(rune('0'+i)), Kind: "epic", Severity: SevHigh})
+	}
+	for i := range 4 {
+		tiles = append(tiles, Tile{ID: "p" + string(rune('0'+i)), Kind: "parked", Severity: SevLow})
+	}
+	for i := range 4 {
+		tiles = append(tiles, Tile{ID: "d" + string(rune('0'+i)), Kind: "parked", Severity: SevDone})
+	}
+
+	shown := CapRows(tiles, 2, 1, 3)
+	var attention, parked, done int
+	for _, tile := range shown {
+		switch {
+		case tile.Severity == SevDone:
+			done++
+		case tile.Kind == "parked":
+			parked++
+		default:
+			attention++
+		}
+	}
+	if attention != 2 || parked != 1 || done != 3 {
+		t.Errorf("each budget is spent on its own band: attention=%d parked=%d done=%d, want 2/1/3", attention, parked, done)
+	}
+	if got := len(CapRows(tiles, 0, 1, 1)); got != len(tiles) {
+		t.Errorf("limit<=0 stays uncapped for every band: got %d of %d", got, len(tiles))
+	}
 }

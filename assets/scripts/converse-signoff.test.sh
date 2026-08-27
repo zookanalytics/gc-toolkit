@@ -17,22 +17,28 @@
 # vanished. The work was recorded correctly and the operator was never
 # told. Two endings produce that same disappearance —
 #   1. deliberate close (step 6 → step 7 drains, the session goes), and
-#   2. an idle reap, which clears the scrollback and, under
+#   2. an unattended kill, which clears the scrollback and, under
 #      wake_mode=fresh, respawns a clean session — the thread is
 #      unrecoverable, not hidden.
 # Nothing pack-owned runs at kill time, so the contract has to hold the
 # line in two places, and BOTH are load-bearing:
 #   • the durable trace is stamped when the hold BEGINS, not only at
-#     close — that is the only thing that survives a reap; and
+#     close — that is the only thing that survives an interruption; and
 #   • a deliberate close ends with a sign-off block naming the outcome
 #     and the subject to look at next, so the last line the operator
 #     sees is an ending rather than an unanswered question.
 #
+# Neither ending is a clock. `idle_timeout = "0"` keeps converse off the
+# idle ladder, so a held sitting ends when its visit closes. That
+# is a config value with no other guard, which is the shape that gets
+# tidied back to a plausible-looking "8h", so it is pinned here alongside
+# the operator lever that ends a sitting by hand (`gc-helm dismiss`).
+#
 # Each assertion below is one way the fix silently reverts. A prompt is
 # prose: a well-meaning edit that "tidies" the hold step can drop the
 # stamp, and nothing downstream notices — the sitting still works, the
-# record still lands, and only a reaped operator ever pays. Hence a test
-# rather than a comment.
+# record still lands, and only an interrupted operator ever pays. Hence a
+# test rather than a comment.
 #
 # Hermetic: reads the repo only; no gc, no city, no network.
 
@@ -534,25 +540,39 @@ else
         "out-of-range reference(s):$stale_refs (the loop has $nsteps steps)"
 fi
 
-echo "── the reap is documented where the role can see it ──"
-have "prompt carries a reap rule" 'The reap' "$PROMPT"
-have "reap rule names the real clock" 'idle_timeout' "$PROMPT"
-have "reap rule states the thread is unrecoverable" 'wake_mode' "$PROMPT"
+echo "── how a thread ends is documented where the role can see it ──"
+have "prompt carries an ending rule" 'How this thread ends' "$PROMPT"
+have "ending rule names the clock it is off" 'idle_timeout' "$PROMPT"
+have "ending rule states the thread is unrecoverable" 'wake_mode' "$PROMPT"
+# The rule's whole content is WHICH act ends a sitting. A rule that names
+# neither the visit closing nor the operator's own lever leaves the role
+# believing a clock owns the ending.
+have "ending rule names the visit close as the ending" 'ends when its visit closes' "$PROMPT"
+have "ending rule names the operator lever" 'gc-helm dismiss' "$PROMPT"
 
 # The Hold definition is page one, and a definition outranks a rule
 # further down: from "a hold has no timeout" the role reasons straight
-# to "my held sitting cannot be reaped" — the belief that produced the
-# bug. Correcting the reap rule alone leaves the root cause live in the
+# to "nothing can take this session" — the belief that produced the bug.
+# Correcting the ending rule alone leaves the root cause live in the
 # active role definition, which is where the session reads it first.
+# The bare claim stays banned even now that the idle clock is off: a
+# health restart, a city restart and a crash still end a hold, and the
+# definition has to say so or the mandatory stamp below reads as ritual.
 lacks "no 'a hold has no timeout' claim in the definition" \
     'A hold has no timeout' "$PROMPT" \
-    "false on the runtime: idle_timeout + the assigned-work defer cap do end a held sitting"
+    "no idle clock is not no ending: a restart or a crash still takes a held sitting, with no farewell"
 HOLD_DEF="$(awk '/^- \*\*Hold\*\*/ {f=1} f && /^$/ {exit} f {print}' "$PROMPT")"
-if printf '%s\n' "$HOLD_DEF" | grep -q 'reap'; then
-    ok "the Hold definition carries the reap contract"
+if printf '%s\n' "$HOLD_DEF" | grep -q 'idle_timeout'; then
+    ok "the Hold definition states what does and does not end a hold"
 else
-    bad "the Hold definition carries the reap contract" \
-        "the definition itself must say a hold is reapable, not only the rule further down"
+    bad "the Hold definition states what does and does not end a hold" \
+        "the definition itself must say the clock is off and the visit close is the ending, not only the rule further down"
+fi
+if printf '%s\n' "$HOLD_DEF" | grep -q 'restart'; then
+    ok "the Hold definition still names an ending the role cannot control"
+else
+    bad "the Hold definition still names an ending the role cannot control" \
+        "no clock is not no interruption; drop this and the mandatory stamp below loses its reason"
 fi
 if printf '%s\n' "$HOLD_DEF" | grep -q 'mandatory'; then
     ok "the Hold definition makes the hold-time stamp mandatory"
@@ -575,6 +595,35 @@ have "config points at the verified mechanism" 'gascity-human-engagement.md' "$A
 lacks "config header no longer equates a visit with a sitting" \
     'holds visits: bounded sittings' "$ATOML" \
     "the header states visit == sitting, which is the behaviour tk-mndjz removed"
+
+echo "── the idle reap is OFF for this role, and the operator's lever exists ──"
+# The layout rule on this surface: an operator reading a held thread must not
+# lose it to a clock. Idle is measured from terminal OUTPUT, so a reader
+# produces none, and 8h of attention reads as 8h of abandonment. A template
+# whose idle_timeout is <= 0 is never registered with the idle tracker, so the
+# ladder is never reached. This is a single config VALUE with nothing else
+# guarding it: an edit that puts a plausible-looking duration back removes the
+# rule and passes every other assertion in this file.
+IDLE_VAL="$(sed -n 's/^idle_timeout = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n')"
+case "$IDLE_VAL" in
+    0|0s|0m|0h)
+        ok "agent.toml keeps the idle reap disabled (idle_timeout=$IDLE_VAL)" ;;
+    "")
+        bad "agent.toml keeps the idle reap disabled" \
+            "no idle_timeout line at all; an absent value disables the reap too, but it takes the explanation with it — keep it explicit" ;;
+    *)
+        bad "agent.toml keeps the idle reap disabled" \
+            "idle_timeout is '$IDLE_VAL'; any positive value re-arms the clock that collects a thread the operator is reading" ;;
+esac
+have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
+# Removing the reap without a release valve would leave a held visit nobody
+# answers holding a pool slot with nothing able to reclaim it. The verb IS the
+# mitigation, so its absence is this change half-reverted rather than a missing
+# convenience.
+have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
+have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
+have "dismiss also clears the board row" 'gc.dismissed_at=' "$HELM"
+have "the engagement doc records the switch-off" 'idle reap switched off' "$ENGAGE"
 
 echo "── the verified mechanism is recorded centrally ──"
 have "engagement doc has the ending section" 'How a held sitting ends' "$ENGAGE"

@@ -221,7 +221,7 @@ type boardView struct {
 // selectView answers the flag: the operator's queue, or the city overview.
 func selectView(b board.Board, all bool, limit int) boardView {
 	if all {
-		return boardView{rows: board.CapRows(board.CityOverview(b.Tiles), limit, board.DefaultMaxParked), render: renderTable}
+		return boardView{rows: board.CapRows(board.CityOverview(b.Tiles), limit, board.DefaultMaxParked, board.DefaultMaxDone), render: renderTable}
 	}
 	rows := board.CapQueue(board.OperatorQueue(b.Tiles), limit)
 	return boardView{rows: rows, render: renderQueue, unprovable: len(rows) == 0 && b.Partial}
@@ -324,13 +324,27 @@ func colWidth(floor int, tiles []board.Tile, value func(board.Tile) string) int 
 	return w
 }
 
+// closedRows is how many of the board's rows are the terminal DONE band. Every
+// header that prints a denominator subtracts it: a closed anchor keeps a row,
+// and a total that folded it in would report attention the board is not asking
+// for.
+func closedRows(tiles []board.Tile) int {
+	var n int
+	for _, t := range tiles {
+		if t.Severity == board.SevDone {
+			n++
+		}
+	}
+	return n
+}
+
 // renderQueue writes the DEFAULT view: the rows owed by the operator and no
 // others, plus the conversation record. The overview is one flag away and says
 // so on every render.
 func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, rigCount int) {
 	fmt.Fprint(w, "gc-helm — what is owed by you\n")
-	fmt.Fprintf(w, "%s · %d rigs · %d owed (of %d anchors)\n\n",
-		now.Format("2006-01-02T15:04:05Z"), rigCount, len(queue), b.Total)
+	fmt.Fprintf(w, "%s · %d rigs · %d owed (of %d live anchors)\n\n",
+		now.Format("2006-01-02T15:04:05Z"), rigCount, len(queue), b.Total-closedRows(b.Tiles))
 
 	if len(queue) == 0 {
 		// Coverage, not a bare blank line. "Nothing is owed" is a claim about
@@ -354,10 +368,26 @@ func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, 
 func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, rigCount int) {
 	fmt.Fprint(w, "gc-helm — cross-rig human-attention board\n")
 	stamp := now.Format("2006-01-02T15:04:05Z")
+	// Both sides of "showing N of M" drop the DONE band, per [closedRows].
+	// CapRows returns DONE and parked rows on top of its live budget, so
+	// len(shown) is a whole board and can exceed the live count it would
+	// otherwise be printed against.
+	done := closedRows(b.Tiles)
+	var shownLive int
+	for _, t := range shown {
+		if t.Severity != board.SevDone {
+			shownLive++
+		}
+	}
+	live := b.Total - done
+	closedSfx := ""
+	if done > 0 {
+		closedSfx = fmt.Sprintf(" · %d closed", done)
+	}
 	if len(shown) < b.Total {
-		fmt.Fprintf(w, "%s · %d rigs · showing %d of %d anchors (live)\n\n", stamp, rigCount, len(shown), b.Total)
+		fmt.Fprintf(w, "%s · %d rigs · showing %d of %d anchors (live)%s\n\n", stamp, rigCount, shownLive, live, closedSfx)
 	} else {
-		fmt.Fprintf(w, "%s · %d rigs · %d anchors (live)\n\n", stamp, rigCount, b.Total)
+		fmt.Fprintf(w, "%s · %d rigs · %d anchors (live)%s\n\n", stamp, rigCount, live, closedSfx)
 	}
 
 	if b.Total == 0 {
@@ -417,11 +447,12 @@ func renderRows(w io.Writer, shown []board.Tile) {
 // renderLegend writes the trailer that says what the bands, the kinds and the
 // held glyph mean.
 func renderLegend(w io.Writer) {
-	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled\n")
+	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
+	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. gc-helm.sh dismiss <id> clears one now, and a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
 }
 
