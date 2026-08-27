@@ -17,15 +17,30 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 P="$TMP/pack"; BIN="$TMP/bin"; STORE="$TMP/rig/.beads"
 mkdir -p "$P/docs" "$BIN" "$STORE"
 
-# Stub ledger: `bd list --db <dir>` answers from <dir>/ids, and fails when that
-# store is absent — the real command fails on an unreadable store too.
+# Stub ledger: `bd list --db <dir>` answers from <dir>/ids, whose rows are
+# `id<TAB>status`. It refuses an absent store and it filters by status, because
+# the real command does both. Without --all the default filter is open-only, and
+# a --status list selects exactly its members. A stub that answered every query
+# identically could not tell a status-blind existence query from a narrow one.
 cat > "$BIN/bd" <<'B'
 #!/usr/bin/env bash
-db=""; prev=""
-for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
+db=""; statuses="open"; prev=""
+for a in "$@"; do
+    case "$a" in
+        --all)      statuses="" ;;
+        --status=*) statuses="${a#--status=}" ;;
+        *) [ "$prev" = "--db" ] && db="$a"
+           [ "$prev" = "--status" ] && statuses="$a" ;;
+    esac
+    prev="$a"
+done
 [ -n "$db" ] || { echo "bd: --db is required" >&2; exit 2; }
 [ -f "$db/ids" ] || { echo "bd: cannot open $db" >&2; exit 1; }
-jq -R -s 'split("\n") | map(select(length > 0) | {id: .})' < "$db/ids"
+awk -v want="$statuses" -F'\t' '
+    BEGIN { if (want != "") { n = split(want, w, ","); for (i = 1; i <= n; i++) keep[w[i]] = 1 } }
+    NF { st = ($2 == "" ? "open" : $2); if (want == "" || (st in keep)) printf "%s\t%s\n", $1, st }
+' "$db/ids" |
+    jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {id: .[0], status: .[1]})'
 B
 cat > "$BIN/gc" <<'G'
 #!/usr/bin/env bash
@@ -34,7 +49,7 @@ cat > "$BIN/gc" <<'G'
 cat "$RIGLIST"
 G
 chmod +x "$BIN/bd" "$BIN/gc"
-printf 'tk-real1\ntk-real2\n' > "$STORE/ids"
+printf 'tk-real1\topen\ntk-real2\tclosed\ntk-active\tin_progress\n' > "$STORE/ids"
 cat > "$TMP/riglist.json" <<J
 {"rigs":[{"name":"r1","path":"$TMP/rig","suspended":false}]}
 J
@@ -184,7 +199,47 @@ else
 fi
 rm -f "$P/docs/locked.md"
 
-# --- 15. live control: the real pack, the real ledger ------------------------
+# --- 15. a bead bound while its work is live still exists ---------------------
+# An existence query that names a status subset reports an in_progress bead as
+# never filed — this check's own failure mode, inverted.
+doc '# Plan' '' '<!-- plan-targets -->' '' \
+    '| # | Target | Bead |' '|---|---|---|' \
+    '| 1 | Underway | `tk-active` |'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a row bound to an in_progress bead resolves"
+hasnt "$OUT" "resolve in no reachable store" "a live bead is not reported as unresolved"
+has "$OUT" "tk-active [in_progress]" "a live bead is reported outstanding, with its stored status"
+
+# --- 16. an empty marker in a NON-final document still warns ------------------
+# Marker state resets per file, so a warning held until the end of the whole
+# scan is cleared by the next file and the pack reads as clean.
+doc '# Plan' '' 'Ordinary prose, no checklist.'
+printf '# Targets\n\n<!-- plan-targets -->\n' > "$P/docs/a.md"
+printf '# Later\n\nOrdinary prose.\n' > "$P/docs/z.md"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an empty marker in a non-final document is a WARNING"
+has "$OUT" "docs/a.md:3" "the warning names the document the marker is in, not the one after it"
+rm -f "$P/docs/a.md" "$P/docs/z.md"
+
+# --- 17. an empty marker ending the LAST document still warns -----------------
+# The per-file flush and the end-of-scan flush are separate paths; the last
+# document only ever takes the second.
+doc '# Targets' '' '<!-- plan-targets -->'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an empty marker at end-of-file is a WARNING"
+has "$OUT" "docs/plan.md:3" "the end-of-scan warning names its document"
+
+# A trailing document with no lines never opens a new file's state, so the
+# end-of-scan flush is what reports the marker — while the scanner's idea of
+# "the current file" has already moved past the document holding it.
+doc '# Targets' '' '<!-- plan-targets -->'
+: > "$P/docs/z-empty.md"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an empty marker followed by a document with no lines is a WARNING"
+has "$OUT" "docs/plan.md:3" "that warning names the marker's own document, not the empty one after it"
+rm -f "$P/docs/z-empty.md"
+
+# --- 18. live control: the real pack, the real ledger ------------------------
 # The stubs above could drift from the tools they imitate. One unstubbed run
 # proves the check still executes against a real pack and a real store.
 PACK_ROOT="$(cd "$HERE/../.." && pwd)"

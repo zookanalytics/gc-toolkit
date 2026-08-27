@@ -31,7 +31,13 @@ US=$'\037'
 # the cell is emitted for verification, not just the one that opens it.
 scan_awk='
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-FNR == 1 { intable = 0; armed = 0; hdr = 0; fence = 0 }
+# Marker state resets per file. An armed marker still pending when a file ends
+# must therefore be reported at that boundary, because a report deferred to END
+# is cleared by the next file.
+FNR == 1 {
+    if (armed) print "NOTABLE" US prev_file US armed_line US "" US ""
+    intable = 0; armed = 0; hdr = 0; fence = 0; prev_file = FILENAME
+}
 {
     fline = trim($0)
     # A fenced block showing the convention is documentation of it, not an
@@ -67,7 +73,7 @@ fline ~ /^<!--[ \t]*plan-targets[ \t]*-->$/ { armed = 1; armed_line = FNR; intab
         rest = substr(rest, RSTART + RLENGTH)
     }
 }
-END { if (armed) print "NOTABLE" US FILENAME US armed_line US "" US "" }
+END { if (armed) print "NOTABLE" US prev_file US armed_line US "" US "" }
 '
 
 mapfile -t md_files < <(find "$dir" -name '*.md' -type f -not -path '*/generated/*' -not -path '*/.git/*' 2>/dev/null | sort)
@@ -142,7 +148,10 @@ if [ "${#wanted_ids[@]}" -gt 0 ]; then
                 notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
                 continue
             fi
-            raw=$(run_bounded bd list --db "$rig_path/.beads" --status open,closed --json --limit 0 2>/dev/null); rc=$?
+            # Existence is status-blind. A bound bead is equally filed whether it is
+            # open, in_progress, blocked, deferred, or closed, so a status subset here
+            # would report live work as never filed.
+            raw=$(run_bounded bd list --db "$rig_path/.beads" --all --json --limit 0 2>/dev/null); rc=$?
             if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
                 warnings+=("$label: could not list beads in $rig_path/.beads (rc=$rc) — bead references were NOT verified against this store")
                 continue
