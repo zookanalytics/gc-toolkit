@@ -143,6 +143,9 @@ case "${1:-}" in
     case "$*" in
       *" user "*) printf '%s\n' "${STUB_LOGIN:-city-bot}" ;;
       *"/reviews?"*) [ -n "${STUB_REVIEWS:-}" ] && printf '%s\n' "$STUB_REVIEWS" ;;
+      # The SUT asks with --jq '.merge_base_commit.sha'; serve the extracted
+      # value, as the headRefOid arm above does. Empty = the compare 404'd.
+      *"/compare/"*) [ -n "${STUB_COMPARE_MB:-}" ] && printf '%s\n' "$STUB_COMPARE_MB" ;;
     esac ;;
 esac
 exit 0
@@ -154,6 +157,8 @@ if [ "${1:-}" = "ls-remote" ]; then
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
   exit 0
 fi
+# merge-base --is-ancestor: 0 ancestor, 1 not, 128 a commit git cannot resolve.
+[ "${1:-}" = "merge-base" ] && exit "${STUB_MERGEBASE_RC:-0}"
 exit 0
 STUB
 chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
@@ -167,6 +172,9 @@ oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
 OID_HEAD=$(oid head); OID_OVR1=$(oid ovr1); OID_PIN=$(oid pin)
 OID_OVR2=$(oid ovr2); OID_MOVED=$(oid moved); OID_NEWHEAD=$(oid newhead)
 OID_OLD=$(oid old)
+OID_DEAD=$(oid dead); OID_LIVE=$(oid live); OID_BASE=$(oid base)
+OID_PRELIVE=$(oid prelive); OID_LIVEPIN=$(oid livepin)
+OID_SHORT=$(printf '%s' "$OID_DEAD" | cut -c1-9)
 export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
 unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
@@ -242,6 +250,85 @@ reset "$ANCHOR_PR"
 printf 'P2: nit at foo.sh:3\n' > "$TMP/notes"
 "$SUT" --review-bead rv-1 --verdict approve --notes-file "$TMP/notes" >/dev/null 2>&1
 has "$(cat "$STUB_GH_BODY")" "P2: nit at foo.sh:3" "--notes-file body reaches the artifact"
+
+# --- the pin must still be on the branch ---------------------------------------
+seed_marker() { # <value>: give the anchor a marker the refusal must not touch
+  jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata["check.codex"] = $v else . end)' \
+    "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+}
+
+echo "# a pin the branch no longer carries is refused (post-open)"
+reset "$ANCHOR_PR"; seed_marker "green@old000"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict request-changes --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "a pin rebased off the branch refuses"
+has "$out" "head moved" "the refusal is the phrase mol-review's failure arm keys on"
+has "$out" "$OID_LIVE" "…and names the live head to re-pin at"
+eq "$(meta tk-anc check.codex)" "green@old000" "the marker is untouched — no clear, no stamp"
+hasnt "$(cat "$STUB_GC_LOG")" "update tk-anc" "the anchor is never written"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "no verdict posted to the PR"
+eq "$(cat "$STUB_CREATED")" "" "no rework child minted from a dead pin"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for the re-pin"
+has "$(notes rv-1)" "signoff refused a verdict at $OID_DEAD" "the refusal is recorded on the review bead"
+
+echo "# …and the dead dispatch pin is cleared so a re-claim cannot loop on it"
+reset "$ANCHOR_PR"
+jq -c --arg o "$OID_DEAD" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "the bead-pinned dead oid refuses too"
+eq "$(meta rv-1 reviewed_oid)" "<absent>" "the dead pin is cleared; mol-review re-resolves the live head"
+
+echo "# …but a caller's dead --reviewed-oid never clears a live dispatch pin"
+reset "$ANCHOR_PR"
+jq -c --arg o "$OID_LIVEPIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD >/dev/null 2>&1
+eq "$(meta rv-1 reviewed_oid)" "$OID_LIVEPIN" "the dispatch pin the caller overrode is left alone"
+
+echo "# approve is refused on the same terms"
+reset "$ANCHOR_PR"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "approve at a pin off the branch refuses"
+eq "$(meta tk-anc check.codex)" "<absent>" "no green stamped for a commit the branch lost"
+
+echo "# a branch that only GREW still binds at the reviewed commit"
+reset "$ANCHOR_PR"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_DEAD" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 0 "an ancestor pin is still evidence"
+eq "$(meta tk-anc check.codex)" "green@$OID_DEAD" "green lands on the reviewed commit; merge.sh holds on the head mismatch"
+
+echo "# an unanswerable probe never discards a round that happened"
+reset "$ANCHOR_PR"
+out=$(STUB_PR_HEAD="" STUB_COMPARE_MB="" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 0 "no readable live head proceeds"
+eq "$(meta tk-anc check.codex)" "green@$OID_DEAD" "…binding the pin it was handed"
+
+echo "# pre-open falls back to git ancestry"
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE="$OID_PRELIVE" STUB_MERGEBASE_RC=1 \
+  "$SUT" --review-bead rv-1 --verdict request-changes --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "pre-open refuses a pin git says is no ancestor"
+eq "$(cat "$STUB_CREATED")" "" "…and mints no rework child"
+eq "$(status rv-1)" "in_progress" "…and leaves the review open"
+
+echo "# …and an unresolvable commit is unknown, not gone"
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE="$OID_PRELIVE" STUB_MERGEBASE_RC=128 \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 0 "git rc=128 proceeds"
+eq "$(meta tk-anc check.codex)" "green@$OID_DEAD" "…and the verdict binds"
+
+echo "# an abbreviated pin that has ALSO left the branch is refused on the grammar"
+reset "$ANCHOR_PR"
+jq -c --arg o "$OID_SHORT" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "the grammar refusal wins when both guards would fire"
+has "$out" "requires the full 40" "…and names the grammar, not the head move"
+hasnt "$out" "head moved" "…because the branch probe is never reached"
+eq "$(meta rv-1 reviewed_oid)" "$OID_SHORT" "a malformed pin is left for its writer, not cleared as a dead one"
 
 # --- fail-closed refusals ------------------------------------------------------
 echo "# refusals"

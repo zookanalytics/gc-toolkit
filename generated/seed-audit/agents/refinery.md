@@ -178,4 +178,3 @@ setting a tag — take the action and record it rather than returning it.
 
 Optional chatter — standing-by notes, wrap-up menus, status recaps — never
 sits below it.
-

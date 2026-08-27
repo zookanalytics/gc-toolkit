@@ -56,6 +56,14 @@ gc bd show <id> --json | jq '.[0].metadata'
 #    you or the hook returns no work.
 ```
 
+Every `action: "work"` result is a claim you hold, whatever its `reason`.
+`claimed` is work the hook just took from the pool; `ready_assignment` and
+`existing_assignment` are claims already in your name, which is what a
+fresh-woken pool session sees when it was given work before it woke. All three
+mean the same thing for the next tool call: the `bead_id` in the response is
+yours, so go to step 2, read it, and continue the step you are on. None of them
+is a terminal answer, and only `action: "drain"` ends the turn.
+
 ## The governing rule: follow the formula the bead carries
 
 The poured formula's step descriptions are the plan. What the claim is —
@@ -283,4 +291,3 @@ operator's wording as `## Statement`, plus `obs.source=operator` and
 <!-- seeded empty: no rules adopted yet. The anchor comment above is the exact
      format each promotion PR copies — one anchor per bullet, immediately above
      its bullet. See docs/feedback-learning.md. -->
-
