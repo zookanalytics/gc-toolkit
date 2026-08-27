@@ -86,11 +86,12 @@ performer; the full transition table with writers is
    assignee and claim in one step.
 4. **Implement.** The polecat works in a per-bead worktree on a
    `polecat/<bead>` branch, driven by `mol-polecat-work`.
-5. **Hand off.** Push, verify the push landed, then one atomic `lifecycle.sh`
-   write carries every field of the handoff — branch, target, assignee to the
-   refinery. All-or-nothing: a dead session mid-handoff leaves either the
-   pre-handoff state (witness orphan recovery re-routes it) or the complete
-   post-handoff state, never a half.
+5. **Hand off.** Push, verify the push landed, then one atomic `gc bd update`
+   carries the handoff — target, refinery assignee, cleared route (branch was
+   stamped at workspace-setup). All-or-nothing: a dead session mid-handoff
+   leaves either the pre-handoff state (witness orphan recovery re-routes it)
+   or the complete post-handoff state, never a half. The anchor is still
+   unanchored here; its first lifecycle transition is the refinery's.
 6. **Gate.** The merge cadence's gate-ensure arm makes every declared gate
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` writes the verdict marker or files one rework
@@ -104,11 +105,13 @@ performer; the full transition table with writers is
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying — are handled by exactly three reactive paths: `pr-facts.sh` (an
-arm of the cadence) records PR events and files a visit, the witness patrol
-recovers work orphaned by dead sessions, and the `dog` pool — warrant
-executor: due-process recovery of wedged sessions; demand-scaled 0→2
-([authority-map.md](authority-map.md)). There is no healer category: writers
+session dying, a provider quota park — are handled by five reactive paths:
+`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
+witness patrol recovers work orphaned by dead sessions, the `dog` pool is
+warrant executor for due-process recovery of wedged sessions (demand-scaled
+0-2), `quota-park-nudge.sh` nudges a session parked behind a provider limit,
+and `boot-health.sh` detects a wedged deacon (report-only by design). See
+[authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
 
@@ -123,10 +126,14 @@ The human surface is subject / visit / takeaway on native primitives
   cold, a fresh session reconstitutes from the record. The record is the
   durable thing; sessions are disposable.
 - **A visit is a filed turn** — `mol-visit` and `gc-visit-open.sh` are the
-  canonical entry point. Escalation is unified behind one door:
-  `escalate.sh` files or refreshes **exactly one open visit per situation
-  key**. There is no escalation mail and no mayor; a situation that needs a
-  human is a visit, same as any other.
+  canonical entry point. Two channels carry a signal, and which applies
+  depends on who can answer it. Mail is the agent-to-agent pathway: a worker
+  mails the witness, which unblocks what it can and promotes what needs a
+  person. A visit is the human engagement: `escalate.sh` files or refreshes
+  **exactly one open visit per situation key**, routed to the converse pool.
+  There is no mayor; a situation that needs a human is a visit, same as any
+  other. Patrol formulas escalate rather than mail, because a patrol sits at
+  the top of the agent tier and has no peer to mail.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -155,18 +162,19 @@ corrective feedback into standing behavior, so attention is never spent twice:
    everything else. A lesson is real when it is merged pack content, not when
    it is remembered.
 
-Doctor is the same idea applied to structure: each of its checks asserts an
-invariant from [component-model.md](component-model.md) §3 against the live
-ledger, so a property that stops holding fails a named check instead of
-waiting to be rediscovered.
+Doctor is the same idea applied to structure: ten of its twelve checks assert
+an invariant from [component-model.md](component-model.md) §3 against the live
+ledger, and the other two guard pack structure, so a property that stops
+holding fails a named check instead of waiting to be rediscovered.
 
 ## The consistency test
 
-A proposed capability must trace a
-straight line — a belief in [foundation.md](foundation.md), made concrete
-through a primitive in [component-model.md](component-model.md) §1, placed in
-one of the six workflows above. Concretely
-([component-model.md](component-model.md) §4):
+A proposed capability must trace a straight line from a belief in
+[foundation.md](foundation.md), through a primitive in
+[component-model.md](component-model.md) §1, to one of the six workflows
+above. [component-model.md](component-model.md) §4 indexes where every
+existing component sits. Concretely
+([component-model.md](component-model.md) §5):
 
 - **Adding a component** — it must answer §1's "cost of not having it" column.
   If it cannot, it is a repair pass for a writer that should be fixed instead.
