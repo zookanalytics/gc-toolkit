@@ -332,6 +332,8 @@ eq "$(grep -c -- 'check.codex=exception@' "$STUB_GC_LOG")" "1" "exception is wri
 hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata check.codex" "the cap never ALSO unsets the marker"
 eq "$(meta tk-anc gc.routed_to)" "human" "the anchor is routed to a human"
 has "$(meta tk-anc blocked_reason)" "did not converge" "blocked_reason says why it is held"
+has "$(meta tk-anc blocked_reason)" "after 3 rework round(s) filed under this anchor" \
+  "…and names the ledger count it actually reached"
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no rework child is filed past the cap"
 eq "$(status rv-1)" "closed" "the review bead still closes (verdict recorded)"
 
@@ -347,15 +349,21 @@ seed_cap_deps c1
 GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
 eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
 
-echo "# dispatch_count on the ANCHOR (gate-ensure's writer) also counts"
+echo "# dispatch_count counts reviews SENT and never caps here"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "anchor dispatch_count past the cap trips it with no children"
-reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+eq "$(meta tk-anc check.codex)" "<absent>" "dispatches that filed no rework do not trip the cap"
+eq "$(meta tk-anc gc.routed_to)" "<absent>" "…the anchor is not parked on an operator"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and the round it had not spent is filed as rework"
+
+echo "# the third genuine round is filed, not capped (dispatch_count leads the ledger)"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')"
+seed_cap_deps c1 c2
+jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "3" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "a stray dispatch_count on the REVIEW bead does not cap (wrong writer)"
+eq "$(meta tk-anc check.codex)" "<absent>" "2 rounds spent under a cap of 3 does not trip"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…the third round is filed"
 
 echo "# an unreadable dep list never caps"
 reset "$ANCHOR_PR"

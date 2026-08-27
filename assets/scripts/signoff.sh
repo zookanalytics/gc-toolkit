@@ -219,17 +219,18 @@ dismiss_superseded() {
 }
 
 # Rework rounds already spent on this anchor: one routed child per round, each
-# stamped source_review_bead by the signoff that filed it (the primary count).
-# The backup is dispatch_count on the ANCHOR — that is where gate-ensure
-# writes it. An unreadable ledger reads 0 — capping on a guess parks live work.
+# stamped source_review_bead by the signoff that filed it. That ledger is the
+# whole count. gate-ensure's dispatch_count is not a second reading of it: it
+# counts reviews SENT, and it is incremented at dispatch before any verdict,
+# so it already leads this ledger by one when every round is productive and
+# rises further for every review that drains without filing rework. The cap
+# arm below is terminal, so a round it did not spend is never recovered.
+# An unreadable ledger reads 0 — capping on a guess parks live work.
 count_rounds() {
-  local kids n dc
+  local kids n
   kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
   n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
   case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  dc=$(row_meta "$ANCHOR_ROW" dispatch_count)
-  case "$dc" in ''|*[!0-9]*) dc=0 ;; esac
-  [ "$dc" -gt "$n" ] && n="$dc"
   printf '%s' "$n"
 }
 
@@ -253,7 +254,7 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   stamp_anchor "check.$CHECK_NAME" "exception@$REVIEWED_OID"
   gc bd update "$ANCHOR" \
     --set-metadata gc.routed_to=human \
-    --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor" \
+    --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework round(s) filed under this anchor (cap $CAP); findings are in the review beads under this anchor" \
     >/dev/null 2>&1 || true
   if [ "$(row_meta "$(bd_json show "$ANCHOR")" gc.routed_to)" != "human" ]; then
     warn "gc.routed_to=human did not read back on $ANCHOR; review left open for a retry"

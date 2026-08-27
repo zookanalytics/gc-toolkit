@@ -18,8 +18,10 @@
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence.
 # A head move past a recorded exception@ buys ONE dispatch through the
-# dispatch_count cap.
+# dispatch bound.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
+# env: GC_MAX_REVIEW_DISPATCHES  reviews sent for one gate before this arm
+#      stops dispatching (default: twice GC_MAX_REVIEW_ROUNDS).
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
 set -u
@@ -52,6 +54,19 @@ case "$(cs_canon "$DEFAULT_CHECK_SET")" in
   '')       DEFAULT_CHECK_SET="codex" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
+
+# Two bounds that count different things. signoff.sh owns the CONVERGENCE cap
+# over rework rounds actually filed, and records the exception verdict when
+# they run out. This arm owns the DISPATCH bound over reviews sent, and only
+# stops a gate whose reviews never come back from re-sending forever.
+# The bound has to exceed the cap. The review that reports non-convergence is
+# itself a dispatch, so a bound at or below the cap refuses that last review
+# and the anchor stalls here with no verdict instead of reaching an operator.
+ROUND_CAP="${GC_MAX_REVIEW_ROUNDS:-3}"
+case "$ROUND_CAP" in ''|*[!0-9]*) ROUND_CAP=3 ;; esac
+DISPATCH_BOUND="${GC_MAX_REVIEW_DISPATCHES:-$((ROUND_CAP * 2))}"
+case "$DISPATCH_BOUND" in ''|*[!0-9]*) DISPATCH_BOUND=$((ROUND_CAP * 2)) ;; esac
+[ "$DISPATCH_BOUND" -gt "$ROUND_CAP" ] || DISPATCH_BOUND=$((ROUND_CAP + 1))
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
@@ -435,20 +450,26 @@ Two repairs, either of which clears the hold:
       echo "$PROG: $id gate '$g' is armed but no --review-pool was given; no dispatch (merge is HELD until one is)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # Convergence cap: dispatch_count on the anchor bounds review rounds; at the
-    # cap the merge stays held and signoff.sh records the exception verdict.
-    # That exception IS the record of the spend, so the rounds behind it cannot
-    # also refuse a dispatch the head move has since earned. Nothing self-feeds:
-    # signoff's cap arm files no rework child, so only an actor outside the
-    # cadence can move that head again.
+    # Dispatch bound: reviews sent for this gate, never rework rounds spent.
+    # Tripping it is not a verdict, so it writes none. It records
+    # dispatch_bound to keep the hold legible and leaves check.<g> alone for
+    # the signoff that never came. A recorded exception@ IS the record of a
+    # convergence spend, so the dispatches behind it cannot also refuse a
+    # dispatch the head move has since earned. Nothing self-feeds: signoff's
+    # cap arm files no rework child, so only an actor outside the cadence can
+    # move that head again.
     dcount=$(meta_of "$row" dispatch_count)
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
-    if [ "$dcount" -ge "${GC_MAX_REVIEW_ROUNDS:-3}" ]; then
+    if [ "$dcount" -ge "$DISPATCH_BOUND" ]; then
       if [ "$stale_exception" = 0 ]; then
-        echo "$PROG: $id gate '$g' has spent $dcount dispatch round(s) against a cap of ${GC_MAX_REVIEW_ROUNDS:-3}; no further dispatch (merge stays held)"
+        bound_state="$dcount${head:+@$head}"
+        if [ "$(meta_of "$row" "dispatch_bound.$g")" != "$bound_state" ]; then
+          gc bd update "$id" --set-metadata "dispatch_bound.$g=$bound_state" >/dev/null 2>&1 || true
+        fi
+        echo "$PROG: $id gate '$g' has sent $dcount review(s) against a dispatch bound of $DISPATCH_BOUND and none raised it; no further dispatch (merge stays held). This is the dispatch bound, not signoff's rework-round cap: no round was spent and no exception was recorded."
         skipped=$((skipped + 1)); continue
       fi
-      echo "$PROG: $id gate '$g' is past the cap ($dcount/${GC_MAX_REVIEW_ROUNDS:-3}) but the branch advanced past exception@$oid; dispatching one re-gate at $head"
+      echo "$PROG: $id gate '$g' is past the dispatch bound ($dcount/$DISPATCH_BOUND) but the branch advanced past exception@$oid; dispatching one re-gate at $head"
     fi
 
     # Orphan adoption BEFORE create: a bead this arm created whose stamp then
@@ -509,7 +530,8 @@ Two repairs, either of which clears the hold:
       echo "$PROG: WARN review $RID pour did not read back; dispatch NOT counted, merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
-    gc bd update "$id" --set-metadata dispatch_count="$((dcount + 1))" >/dev/null 2>&1 || true
+    gc bd update "$id" --set-metadata dispatch_count="$((dcount + 1))" \
+      --unset-metadata "dispatch_bound.$g" >/dev/null 2>&1 || true
     gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
     gc session nudge "$REVIEW_POOL" "Review bead $RID for anchor $id" >/dev/null 2>&1 || true
     dispatched=$((dispatched + 1))

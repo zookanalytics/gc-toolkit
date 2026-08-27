@@ -165,7 +165,8 @@ keys = [
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
   "review_branch", "review_base", "reviewed_oid", "review_pool",
-  "source_review_bead", "task_kind", "dispatch_count", "fix_target_pool",
+  "source_review_bead", "task_kind", "dispatch_count", "dispatch_bound.<g>",
+  "fix_target_pool",
 ]
 
 [metadata.holds]

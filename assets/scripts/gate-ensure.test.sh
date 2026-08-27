@@ -110,21 +110,21 @@ eq "$rc" 0 "opt-out/settled pass exits 0"
 eq "$(meta B1 check_set)" "none" "the none sentinel is left alone"
 has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none, dispatch nothing"
 
-echo "# an exception the head has moved PAST is re-armed, cap or no cap"
+echo "# an exception the head has moved PAST is re-armed, bound or no bound"
 store "[$(anchor B4 pull_request codex "exception@$(oid old)" polecat/b4),
-        $(anchor B5 pull_request codex "exception@$(oid old)" polecat/b5 ',"dispatch_count":"3","gc.routed_to":"human"')]"
+        $(anchor B5 pull_request codex "exception@$(oid old)" polecat/b5 ',"dispatch_count":"6","gc.routed_to":"human"')]"
 oid b4 > "$GH_DIR/head_polecat_b4"
 oid b5 > "$GH_DIR/head_polecat_b5"
 out=$(run); rc=$?
 eq "$rc" 0 "re-gate pass exits 0"
 has "$out" "2 reviews dispatched" "a branch fixed under an exception gets one look"
 has "$out" "advanced to $(oid b4)" "the dispatch names the head that staled the exception"
-has "$out" "B5 gate 'codex' is past the cap (3/3) but the branch advanced past exception@$(oid old)" \
-  "the spent cap does not ALSO refuse the head-move re-gate (the second brake)"
-hasnt "$out" "B5 gate 'codex' has spent" \
+has "$out" "B5 gate 'codex' is past the dispatch bound (6/6) but the branch advanced past exception@$(oid old)" \
+  "the spent bound does not ALSO refuse the head-move re-gate (the second brake)"
+hasnt "$out" "B5 gate 'codex' has sent" \
   "B5 carries the live shape signoff's cap arm writes — capped AND routed to human"
-eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
-eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
+eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a dispatch"
+eq "$(meta B5 dispatch_count)" "7" "…and past the bound it keeps counting, never rewinding the record"
 
 echo "# stale green / fixable / absent / unmappable all dispatch"
 store "[$(anchor C1 pre_open_gate codex "green@old-oid" polecat/c1),
@@ -280,12 +280,42 @@ out=$(run)
 has "$out" "merge_hold is set (operator gate); no dispatch" "an operator hold suppresses the dispatch"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
 
-echo "# dispatch_count cap"
-store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"3"')]"
+echo "# the dispatch bound"
+store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"5"')]"
 oid f1 > "$GH_DIR/head_polecat_f1"
 out=$(run)
-has "$out" "cap of 3" "the round cap declines further dispatches"
+has "$out" "F1 dispatched review" "one dispatch short of the bound still goes out"
+eq "$(meta F1 dispatch_count)" "6" "…and it counts"
+
+store "[$(anchor F2 pull_request codex "" polecat/f2 ',"dispatch_count":"6"')]"
+oid f2 > "$GH_DIR/head_polecat_f2"
+out=$(run)
+has "$out" "dispatch bound of 6" "the bound declines further dispatches at twice the round cap"
+has "$out" "not signoff's rework-round cap" "…and says so, since it is not a convergence verdict"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
+eq "$(meta F2 'check.codex')" "<absent>" "the bound writes no gate verdict"
+eq "$(meta F2 gc.routed_to)" "<absent>" "…and parks nothing on an operator"
+eq "$(meta F2 'dispatch_bound.codex')" "6@$(oid f2)" "…it records its own state, pinned to the head it stalled at"
+: > "$STUB_GC_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GC_LOG")" "dispatch_bound.codex" "an unchanged bound state is not rewritten every pass"
+
+echo "# …and the bound state is cleared by the next counted dispatch"
+store "[$(anchor F3 pull_request codex "" polecat/f3 ',"dispatch_count":"6","dispatch_bound.codex":"6@stale"')]"
+oid f3 > "$GH_DIR/head_polecat_f3"
+GC_MAX_REVIEW_DISPATCHES=9 run >/dev/null
+eq "$(meta F3 dispatch_count)" "7" "a raised bound lets the dispatch through"
+eq "$(meta F3 'dispatch_bound.codex')" "<absent>" "…and the dispatch clears the stale bound state"
+
+echo "# a bound at or below the round cap is refused (it would eat the last round)"
+store "[$(anchor F4 pull_request codex "" polecat/f4 ',"dispatch_count":"3"')]"
+oid f4 > "$GH_DIR/head_polecat_f4"
+out=$(GC_MAX_REVIEW_DISPATCHES=2 run)
+has "$out" "F4 dispatched review" "at the round cap the review that reports non-convergence still goes out"
+store "[$(anchor F5 pull_request codex "" polecat/f5 ',"dispatch_count":"4"')]"
+oid f5 > "$GH_DIR/head_polecat_f5"
+out=$(GC_MAX_REVIEW_DISPATCHES=2 run)
+has "$out" "dispatch bound of 4" "…and the bound is clamped to exactly one past the round cap"
 
 echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
 store "[$(anchor H1 pull_request codex "" polecat/h1)]"
