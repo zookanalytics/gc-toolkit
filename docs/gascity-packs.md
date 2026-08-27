@@ -197,6 +197,12 @@ Sibling claims are cleared afterwards, route first, because the reverse order
 leaves a bead briefly `open + unassigned + routed`, which is the offer predicate
 itself.
 
+It reports success only when all of that landed. The caller drains on exit 0,
+and a molecule still routed anywhere is re-offered however quiet its steps are,
+so a route that survived on the root or on a sibling exits non-zero instead. A
+sibling whose route clear failed keeps its claim, because unassigning it there
+writes the offer predicate rather than escaping it.
+
 **The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
 drain-ack without closing anything, so the habit transfers and silently breaks.
 A root-only in-session wisp runs every formula step in one worker session and

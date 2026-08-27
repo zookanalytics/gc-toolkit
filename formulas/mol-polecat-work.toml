@@ -119,7 +119,7 @@ if [ "$OWNER_LIVE" != "0" ]; then
   if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID is already $WORK_STATUS under live $WORK_OWNER"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
   fi
   exit 1
 fi
@@ -142,9 +142,11 @@ that sweep. The escalation above is what releases the hold.
 
 The drain is conditional on the hold. `molecule-hold.sh` exits non-zero when it
 cannot prove which bead this shell is executing, when duplicate step beads make
-that ambiguous, or when the blocking write is refused. Draining on any of those
-paths leaves the step claimable, which is the loop the hold exists to stop, so
-every arm below drains only after a hold that landed.
+that ambiguous, when the blocking write is refused, and when a route it had to
+clear — on the molecule root or on a sibling step — survived. Draining on any of
+those paths leaves this step or the molecule around it claimable, which is the
+loop the hold exists to stop, so every arm below drains only after a hold that
+landed.
 
 `CLAIMED_STEP_BEAD_ID` is the `bead_id` from the `gc hook --claim --json` that
 handed you the step you are running. Set it at the top of each step. It is a
@@ -216,7 +218,7 @@ if [ -z "$WORK_BEAD_ID" ]; then
   if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
   fi
   exit 1
 fi
@@ -253,7 +255,7 @@ if [ -n "$BRANCH" ]; then
         if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "local $BRANCH diverged from origin/$BRANCH; reconcile the two by hand, then re-offer this molecule"; then
           gc runtime drain-ack
         else
-          echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+          echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
         fi
         exit 1
       fi
@@ -268,7 +270,7 @@ if [ -n "$BRANCH" ]; then
     if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "metadata.branch=$BRANCH names a branch that exists neither locally nor on origin; restore it or clear metadata.branch, then re-offer this molecule"; then
       gc runtime drain-ack
     else
-      echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
     fi
     exit 1
   fi
@@ -507,7 +509,7 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); move the commits onto $EXPECTED_BRANCH, then re-offer this molecule"; then
       gc runtime drain-ack
     else
-      echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
     fi
     exit 1
 fi
@@ -544,7 +546,7 @@ else
     if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "no landing branch: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}; set target on $WORK_BEAD_ID, then re-offer this molecule"; then
       gc runtime drain-ack
     else
-      echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
     fi
     exit 1
 fi
@@ -573,7 +575,7 @@ if [ "$AUTO_PUSH" = "false" ]; then
     if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset; step 1b did not run"; then
       gc runtime drain-ack
     else
-      echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+      echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
     fi
     exit 1
   fi
@@ -684,7 +686,7 @@ if [ -z "${LANDING_TARGET:-}" ]; then
   if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the handoff with LANDING_TARGET unset; step 1b did not run"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not land; NOT draining. This step is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
   fi
   exit 1
 fi

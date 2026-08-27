@@ -224,9 +224,10 @@ the route on the step, on the molecule root, and on the root's other steps. It
 closes nothing, so whatever a live worker is holding stays where it is.
 
 Drain only if the hold landed. It exits non-zero when it cannot prove which
-bead is yours, when duplicate step beads make that ambiguous, or when the
-blocking write is refused, and a drain on any of those paths leaves the step
-claimable.
+bead is yours, when duplicate step beads make that ambiguous, when the blocking
+write is refused, or when a route it had to clear — on the molecule root or on a
+sibling step — survived. A drain on any of those paths leaves something in the
+molecule claimable.
 
 If the ruling that comes back is stand-down — the premise was falsified, or a
 live sitting owns the decision — the disposal step is the sitting's

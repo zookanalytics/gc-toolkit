@@ -31,8 +31,13 @@
 #   * NOTHING IS EVER CLOSED, on any path, including the failure arms;
 #   * fail-closed: a refused blocking write exits 1 and touches nothing else,
 #     because a half-held molecule reads as held while it still loops;
+#   * fail-closed on the QUIESCE too — exit 0 is what lets the caller drain, so
+#     a root or sibling route that survived exits 1. A sibling whose route clear
+#     failed keeps its claim: unassigning it there writes the offer predicate
+#     `open + unassigned + routed` rather than escaping it;
 #   * ambiguity and unresolvable identity are refused with no writes;
-#   * idempotence: an already-blocked step is a normal re-run;
+#   * idempotence: an already-blocked step is a normal re-run, and the re-run
+#     still repairs a root or sibling an earlier run failed to quiesce;
 #   * the SUBSTRING trap — session lx-zzk must not own lx-zzk9's bead;
 #   * control characters in bd's JSON, which break an unfiltered `| jq`;
 #   * usage errors, including a value-taking option at the end of argv;
@@ -73,7 +78,10 @@ mkdir -p "$TMP/bin"
 # `bd show`   : the bead as a one-element array (unknown id -> []).
 # `bd list`   : filters on --status= (comma list) and --assignee=.
 # `bd update` : applies --status/--assignee/--set-metadata/--unset-metadata/
-#               --append-notes to the store; refuses ids listed in $FAKE_UPDFAIL.
+#               --append-notes to the store; refuses ids listed in $FAKE_UPDFAIL,
+#               and — for the partial-quiesce arms — refuses only the route
+#               clear for ids in $FAKE_UPDFAIL_ROUTE, only the assignee clear
+#               for ids in $FAKE_UPDFAIL_ASSIGNEE.
 # Every invocation is appended verbatim to $GC_LOG, which is what the ordering
 # assertions read.
 # FAKE_CTRL=1 injects a raw control character into every title, reproducing the
@@ -112,6 +120,20 @@ case "$verb" in
       echo "bd: cannot update $id: held (stub)" >&2
       exit 1
     fi
+    case " $* " in
+      *" --unset-metadata gc.routed_to "*)
+        if [ -f "${FAKE_UPDFAIL_ROUTE:-/dev/null}" ] && grep -qx "$id" "${FAKE_UPDFAIL_ROUTE:-/dev/null}" 2>/dev/null; then
+          echo "bd: cannot clear the route on $id (stub)" >&2
+          exit 1
+        fi ;;
+    esac
+    case " $* " in
+      *" --assignee "*)
+        if [ -f "${FAKE_UPDFAIL_ASSIGNEE:-/dev/null}" ] && grep -qx "$id" "${FAKE_UPDFAIL_ASSIGNEE:-/dev/null}" 2>/dev/null; then
+          echo "bd: cannot unassign $id (stub)" >&2
+          exit 1
+        fi ;;
+    esac
     sets=(); unsets=(); asg=""; asg_set=0; st=""; note=""; note_set=0
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -150,6 +172,7 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" FAKE_UPDFAIL="$TMP/updfail"
+export FAKE_UPDFAIL_ROUTE="$TMP/updfail.route" FAKE_UPDFAIL_ASSIGNEE="$TMP/updfail.assignee"
 
 MINE="gc-toolkit--gc-toolkit__polecat-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
@@ -166,7 +189,7 @@ gclog()    { cat "$GC_LOG"; }
 # The live molecule shape: an in_progress claimed step, a routed root, four
 # pre-assigned open siblings, and a finalize step held by the dispatcher.
 reset_store() {
-  : > "$GC_LOG"; : > "$FAKE_UPDFAIL"
+  : > "$GC_LOG"; : > "$FAKE_UPDFAIL"; : > "$FAKE_UPDFAIL_ROUTE"; : > "$FAKE_UPDFAIL_ASSIGNEE"
   cat > "$FAKE_STORE" <<STORE
 [
  {"id":"root-1","status":"in_progress","assignee":"","metadata":{"gc.routed_to":"$POOL","gc.input_convoy_id":"cv-1"}},
@@ -237,6 +260,34 @@ OUT=$("$SCRIPT" --step "$STEP" --reason "same reason" 2>&1); RC=$?
 eq "$RC" "0" "a re-run over an already-held molecule exits 0"
 has "$OUT" "already blocked" "and says so"
 
+# The re-run is the only repair path once the step is blocked: blocked is not
+# claimable, so nothing else comes back to finish a quiesce that half-landed.
+echo "== idempotence repairs a quiesce that did not finish =="
+reset_store
+printf 'root-1\ns-impl\n' > "$FAKE_UPDFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --reason "first pass" 2>&1); RC=$?
+eq "$RC" "1" "the first pass reports the incomplete quiesce"
+eq "$(meta root-1 'gc.routed_to')" "$POOL" "and leaves the root routed"
+: > "$FAKE_UPDFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --reason "second pass" 2>&1); RC=$?
+eq "$RC" "0" "the re-run over the already-blocked step exits 0 once the writes go through"
+has "$OUT" "already blocked" "it recognises the existing hold"
+eq "$(meta root-1 'gc.routed_to')" "<absent>" "and de-routes the root the first pass could not"
+eq "$(meta s-impl 'gc.routed_to')" "<absent>" "the sibling is de-routed too"
+eq "$(bassignee s-impl)" "" "and unassigned"
+eq "$(bstatus s-load)" "blocked" "the step is still blocked, not re-blocked into some other state"
+
+# The same repair through the hint path: --bead naming an already-blocked step
+# still has to check the root and the siblings.
+reset_store
+printf 'root-1\n' > "$FAKE_UPDFAIL"
+"$SCRIPT" --step "$STEP" --reason "first pass" >/dev/null 2>&1
+: > "$FAKE_UPDFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --bead s-load --reason "second pass" 2>&1); RC=$?
+eq "$RC" "0" "--bead naming an already-blocked step exits 0"
+has "$OUT" "already blocked" "and recognises the existing hold"
+eq "$(meta root-1 'gc.routed_to')" "<absent>" "and repairs the root the first pass left routed"
+
 echo "== fail-closed: a refused blocking write stops there =="
 reset_store
 echo "s-load" > "$FAKE_UPDFAIL"
@@ -248,14 +299,41 @@ eq "$(meta root-1 'gc.routed_to')" "$POOL"       "the ROOT is not de-routed by a
 eq "$(meta s-setup 'gc.routed_to')" "$POOL"      "siblings are not quiesced by a hold that never landed"
 hasnt "$(gclog)" "--status=closed" "the failure arm closes nothing"
 
-echo "== a sibling that refuses its writes does not fail the hold =="
+echo "== fail-closed: a root that stays routed is not a hold =="
 reset_store
-printf 's-impl\n' > "$FAKE_UPDFAIL"
-OUT=$("$SCRIPT" --step "$STEP" --reason "held" 2>&1); RC=$?
-eq "$RC" "0" "one unquiesceable sibling does not fail the hold"
+printf 'root-1\n' > "$FAKE_UPDFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --reason "root resists" 2>&1); RC=$?
+eq "$RC" "1" "a root whose route clear failed exits 1 — draining there re-offers the molecule"
+has "$OUT" "could not de-route root root-1" "the root that resisted is named"
+has "$OUT" "Do not drain" "and the caller is told what not to do"
+eq "$(bstatus s-load)"             "blocked" "the step is still held — the failure is downstream of the load-bearing write"
+eq "$(meta root-1 'gc.routed_to')" "$POOL"   "the root demonstrably still carries the route"
+eq "$(meta s-setup 'gc.routed_to')" "<absent>" "the siblings are still quiesced best-effort"
+hasnt "$(gclog)" "--status=closed" "the incomplete-quiesce arm closes nothing"
+
+echo "== fail-closed: a sibling that stays routed keeps its claim =="
+reset_store
+printf 's-impl\n' > "$FAKE_UPDFAIL_ROUTE"
+OUT=$("$SCRIPT" --step "$STEP" --reason "sibling route resists" 2>&1); RC=$?
+eq "$RC" "1" "an unquiesceable sibling exits 1"
+has "$OUT" "could not de-route sibling step s-impl" "the sibling that resisted is named"
 eq "$(bstatus s-load)" "blocked" "the held step is still held"
-has "$OUT" "could not de-route sibling step s-impl" "and the sibling that resisted is named"
+eq "$(meta s-impl 'gc.routed_to')" "$POOL" "and it demonstrably still carries the route"
+eq "$(bassignee s-impl)" "$MINE" "its claim is RETAINED — an unassigned routed step is exactly what the pool offers"
+hasnt "$(gclog)" "bd update s-impl --assignee" "the assignee clear is not even attempted once the route clear failed"
 eq "$(meta s-setup 'gc.routed_to')" "<absent>" "the other siblings are still quiesced"
+eq "$(bassignee s-setup)"           ""         "and still unassigned"
+hasnt "$(gclog)" "--status=closed" "the partial-quiesce arm closes nothing"
+
+echo "== fail-closed: a sibling that cannot be unassigned =="
+reset_store
+printf 's-setup\n' > "$FAKE_UPDFAIL_ASSIGNEE"
+OUT=$("$SCRIPT" --step "$STEP" --reason "sibling claim resists" 2>&1); RC=$?
+eq "$RC" "1" "a sibling left open AND assigned exits 1 — the stranded-worker sweep re-routes it"
+has "$OUT" "could not unassign sibling step s-setup" "the sibling that resisted is named"
+eq "$(meta s-setup 'gc.routed_to')" "<absent>" "its route did come off"
+eq "$(bassignee s-setup)" "$MINE" "but the claim that puts it in the sweep tier is still there"
+eq "$(bassignee s-impl)"  ""      "the other siblings are still quiesced"
 
 echo "== ambiguity is refused, and writes nothing =="
 reset_store
@@ -327,10 +405,10 @@ MT
 chmod +x "$TMP/bin/mktemp"
 OUT=$("$SCRIPT" --step "$STEP" --reason "disk pressure" 2>&1); RC=$?
 rm -f "$TMP/bin/mktemp"
-eq "$RC" "0" "the hold still lands when the sibling enumeration cannot be staged"
+eq "$RC" "1" "an enumeration that cannot be staged exits 1 — its siblings keep the routes it never cleared"
 eq "$(bstatus s-load)" "blocked" "the load-bearing write happened first"
 eq "$(meta root-1 'gc.routed_to')" "<absent>" "and the root is still de-routed"
-has "$OUT" "siblings keep their routes and claims" "the un-quiesced siblings are named, not silently skipped"
+has "$OUT" "siblings keep the routes and claims" "the un-quiesced siblings are named, not silently skipped"
 eq "$(meta s-setup 'gc.routed_to')" "$POOL" "and they demonstrably still carry them"
 
 # --- The formula wiring. ------------------------------------------------------

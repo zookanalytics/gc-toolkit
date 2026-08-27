@@ -11,25 +11,39 @@
 # fresh worker every cycle. `blocked` satisfies the not-closed invariant
 # without being claimable.
 #
-# The status is the load-bearing write, not the route clear. gascity's
-# stranded-worker repair (unclaimWorkAssignedToRetiredSessionInfo,
-# cmd/gc/session_beads.go) sweeps `{open, in_progress}` assigned to a retired
-# session and calls ReleaseWorkBead, which re-stamps a run_target fallback
-# "only when otherwise unrouted" — so clearing gc.routed_to on a step left open
-# invites the very re-route it was meant to prevent. Outside those two statuses
-# the sweep never looks.
+# The status write comes before any route clear. gascity's stranded-worker
+# repair (unclaimWorkAssignedToRetiredSessionInfo, cmd/gc/session_beads.go)
+# sweeps `{open, in_progress}` assigned to a retired session and calls
+# ReleaseWorkBead, which re-stamps a run_target fallback "only when otherwise
+# unrouted" — so clearing gc.routed_to on a step left open invites the very
+# re-route it was meant to prevent. Outside those two statuses the sweep never
+# looks.
 #
 # Blocking before touching any assignee also keeps every write ungated: bd's
 # claim guard refuses `--assignee ""` only on an in_progress bead with a live
 # holder, and that refusal is atomic over the whole update, so a
 # batched status+assignee call can lose the status too.
 #
+# Every route this script sets out to clear is load-bearing for the caller's
+# drain decision, not just for the log: callers drain on exit 0, and a molecule
+# still routed anywhere is re-offered however quiet its steps are. So any write
+# below the hold that fails exits 1, and a sibling whose route clear failed
+# keeps its assignee — the claim is the last thing holding it out of the pool's
+# `open + unassigned + routed` offer predicate.
+#
 # Callers: mol-polecat-work load-context's duplicate-dispatch arm; any polecat
 # arm that declines work it must not close.
-# exit: 0 held (or already held) · 1 the hold did not land · 2 refused, nothing written
+# exit: 0 the molecule is quiet · 1 the hold did not fully land · 2 refused, nothing written
 set -uo pipefail
 
 PROG="molecule-hold"
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 usage() {
   cat >&2 <<'USAGE'
@@ -48,7 +62,7 @@ env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session; any that are
 Closes nothing, and never touches the work bead — record the reason there and
 escalate separately.
 
-exit: 0 held (or already held) · 1 the hold did not land · 2 refused, nothing written
+exit: 0 the molecule is quiet · 1 the hold did not fully land · 2 refused, nothing written
 USAGE
 }
 
@@ -67,7 +81,7 @@ require_value() {
   esac
 }
 
-STEP=""; REASON=""; HINT=""; DRY_RUN=0
+STEP=""; REASON=""; HINT=""; DRY_RUN=0; HELD_ALREADY=0; QUIESCE_FAILED=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -99,9 +113,8 @@ if [ -z "$REASON" ]; then
   exit 2
 fi
 
-# A raw control byte in a note makes jq read the whole payload as "no such bead".
 bd_json() {
-  gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'
+  gc bd "$@" --json 2>/dev/null | scrub
 }
 
 IDENTITIES=$(printf '%s\n%s\n%s\n' \
@@ -161,8 +174,7 @@ if [ -n "$HINT" ]; then
       fi
       TARGET="$HINT" ;;
     blocked)
-      echo "$PROG: $HINT ($STEP) is already blocked — nothing to do"
-      exit 0 ;;
+      TARGET="$HINT"; HELD_ALREADY=1 ;;
     closed)
       echo "$PROG: $HINT ($STEP) is already closed; a closed step is not re-offered, so there is no hold to place" >&2
       exit 0 ;;
@@ -183,27 +195,33 @@ if [ -z "$TARGET" ]; then
   else
     ALREADY=$(discover blocked | sort -u | head -n 1)
     if [ -n "$ALREADY" ]; then
-      echo "$PROG: $ALREADY ($STEP) is already blocked — nothing to do"
-      exit 0
+      TARGET="$ALREADY"; HELD_ALREADY=1
+    else
+      echo "$PROG: FATAL — cannot identify this session's bead for step '$STEP'." >&2
+      echo "$PROG:   identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')" >&2
+      echo "$PROG:   The step bead is still claimable and will be re-offered until it is held by explicit id." >&2
+      exit 2
     fi
-    echo "$PROG: FATAL — cannot identify this session's bead for step '$STEP'." >&2
-    echo "$PROG:   identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')" >&2
-    echo "$PROG:   The step bead is still claimable and will be re-offered until it is held by explicit id." >&2
-    exit 2
   fi
 fi
 
 ROOT=$(bd_json show "$TARGET" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)
 
 if [ "$DRY_RUN" = "1" ]; then
-  echo "$PROG: DRY RUN — would block $TARGET ($STEP), de-route it and root ${ROOT:-<unresolved>}, and quiesce that root's other steps"
+  if [ "$HELD_ALREADY" = "1" ]; then
+    echo "$PROG: DRY RUN — $TARGET ($STEP) is already blocked; would de-route root ${ROOT:-<unresolved>} and quiesce that root's other steps"
+  else
+    echo "$PROG: DRY RUN — would block $TARGET ($STEP), de-route it and root ${ROOT:-<unresolved>}, and quiesce that root's other steps"
+  fi
   exit 0
 fi
 
 # ── The hold. Status and metadata in one call; both are ungated, so the
-# claim guard cannot roll either back. Nothing else in this script is
-# load-bearing: if this write fails, the loop is not stopped.
-if ! HOLD_ERR=$(gc bd update "$TARGET" \
+# claim guard cannot roll either back. It goes first because every clear below
+# it is pointless while the step itself is still claimable.
+if [ "$HELD_ALREADY" = "1" ]; then
+  echo "$PROG: $TARGET ($STEP) is already blocked; re-checking its root and the root's other steps"
+elif ! HOLD_ERR=$(gc bd update "$TARGET" \
       --status=blocked \
       --set-metadata "blocked_reason=$REASON" \
       --unset-metadata gc.routed_to \
@@ -212,8 +230,9 @@ if ! HOLD_ERR=$(gc bd update "$TARGET" \
   echo "$PROG: FATAL — could not block $TARGET ($STEP); the step is still claimable and the pool will re-offer it." >&2
   [ -n "$HOLD_ERR" ] && echo "$PROG:   $HOLD_ERR" >&2
   exit 1
+else
+  echo "$PROG: held $TARGET ($STEP) at blocked: $REASON"
 fi
-echo "$PROG: held $TARGET ($STEP) at blocked: $REASON"
 
 # The claim on THIS step is deliberately left in place. Every tier that would
 # act on it — the pool offer, the stranded-worker sweep, and drain-ack's
@@ -221,6 +240,16 @@ echo "$PROG: held $TARGET ($STEP) at blocked: $REASON"
 # step is inert whoever holds it, and the retained (assignee, gc.step_ref) pair
 # is what lets a re-run and a later reader resolve this bead at all. Sibling
 # steps stay `open`, so their claims are not inert and are cleared below.
+
+# Reporting 0 is what lets the caller drain, so it has to mean the whole
+# molecule went quiet, not just that the blocking write landed.
+finish() {
+  if [ "$QUIESCE_FAILED" = "1" ]; then
+    echo "$PROG: FATAL — $TARGET ($STEP) is blocked, but the quiesce above is incomplete and this molecule can still be re-offered. Do not drain." >&2
+    exit 1
+  fi
+  exit 0
+}
 
 # ── De-route the root. A routed root re-offers the molecule even with every
 # step quiet. Metadata-only, so the root's status and assignee are untouched.
@@ -230,7 +259,8 @@ if [ -n "$ROOT" ]; then
     if gc bd update "$ROOT" --unset-metadata gc.routed_to >/dev/null 2>&1; then
       echo "$PROG: de-routed root $ROOT (was $ROOT_ROUTE)"
     else
-      echo "$PROG: NOTE — could not de-route root $ROOT (was $ROOT_ROUTE); it may re-offer this molecule" >&2
+      echo "$PROG: FATAL — could not de-route root $ROOT (was $ROOT_ROUTE); it re-offers this molecule however quiet the steps are" >&2
+      QUIESCE_FAILED=1
     fi
   fi
 else
@@ -242,7 +272,7 @@ fi
 # drain-ack with them still assigned is what re-pools the molecule. Route
 # first, assignee second: the reverse order leaves a bead briefly
 # `open + unassigned + routed`, which is exactly the pool's offer predicate.
-[ -n "$ROOT" ] || exit 0
+[ -n "$ROOT" ] || finish
 
 SIBLINGS=$(bd_json list --status=open,in_progress --limit=0 \
   | jq -r --arg root "$ROOT" --arg self "$TARGET" '
@@ -257,20 +287,22 @@ SIBLINGS=$(bd_json list --status=open,in_progress --limit=0 \
         | @tsv
       else empty end' 2>/dev/null)
 
-[ -n "$SIBLINGS" ] || exit 0
+[ -n "$SIBLINGS" ] || finish
 
 # A `<<<` here-string is backed by a temp file, and under disk pressure that
 # redirection fails silently and runs the loop zero times — indistinguishable
 # from a molecule with no other steps. Route it through a checked
 # mktemp so an enumeration that could not happen says so.
 ROWS=$(mktemp 2>/dev/null) || {
-  echo "$PROG: NOTE — could not create a temp file to enumerate sibling steps; $TARGET is held but its siblings keep their routes and claims" >&2
-  exit 0
+  echo "$PROG: FATAL — could not create a temp file to enumerate sibling steps; $TARGET is held but its siblings keep the routes and claims listed above" >&2
+  QUIESCE_FAILED=1
+  finish
 }
 printf '%s\n' "$SIBLINGS" > "$ROWS" || {
-  echo "$PROG: NOTE — could not write the sibling enumeration; $TARGET is held but its siblings keep their routes and claims" >&2
+  echo "$PROG: FATAL — could not write the sibling enumeration; $TARGET is held but its siblings keep the routes and claims listed above" >&2
   rm -f "$ROWS"
-  exit 0
+  QUIESCE_FAILED=1
+  finish
 }
 
 while IFS=$'\t' read -r sid sstep srouted swho; do
@@ -278,14 +310,22 @@ while IFS=$'\t' read -r sid sstep srouted swho; do
   QUIET=1
   if [ -n "${srouted:-}" ]; then
     gc bd update "$sid" --unset-metadata gc.routed_to --unset-metadata gc.session_affinity >/dev/null 2>&1 \
-      || { QUIET=0; echo "$PROG: NOTE — could not de-route sibling step $sid ($sstep); it may re-offer" >&2; }
+      || { QUIET=0; echo "$PROG: FATAL — could not de-route sibling step $sid ($sstep); it re-offers" >&2; }
   fi
   if [ -n "${swho:-}" ]; then
-    gc bd update "$sid" --assignee "" >/dev/null 2>&1 \
-      || { QUIET=0; echo "$PROG: NOTE — could not unassign sibling step $sid ($sstep); the stranded-worker sweep can still re-route it" >&2; }
+    if [ "$QUIET" = "0" ]; then
+      echo "$PROG:   keeping the claim on $sid — unassigning a step whose route survived writes the offer predicate itself" >&2
+    else
+      gc bd update "$sid" --assignee "" >/dev/null 2>&1 \
+        || { QUIET=0; echo "$PROG: FATAL — could not unassign sibling step $sid ($sstep); the stranded-worker sweep can re-route it" >&2; }
+    fi
   fi
-  [ "$QUIET" = "1" ] && echo "$PROG: quiesced sibling step $sid ($sstep)"
+  if [ "$QUIET" = "1" ]; then
+    echo "$PROG: quiesced sibling step $sid ($sstep)"
+  else
+    QUIESCE_FAILED=1
+  fi
 done < "$ROWS"
 rm -f "$ROWS"
 
-exit 0
+finish
