@@ -124,10 +124,11 @@ JSON
 
     printf 'pass\nall checks passed (3/3)\n' > "$FXDIR/fx-done.checks.txt"
 
-    # The incident shape (tk-d6ixcw): an approving bot comment on top, a
-    # COMMENTED review whose body is EMPTY, and the objections living only in
-    # the inline review comments. None of it moves state, mergeability or the
-    # check rollup, so it is reachable through the conversation tier alone.
+    # The objections sit where no other tier can see them: an approving bot
+    # comment on top, a COMMENTED review with an empty body, and the substance
+    # only in the inline review comments. State, mergeability and the check
+    # rollup stay unmoved, so reaching this content proves the conversation
+    # tier reached it.
     cat > "$FXDIR/fx-done.conversation.json" <<'JSON'
 {
   "number": 1234,
