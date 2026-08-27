@@ -7,10 +7,11 @@
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING -> classify the head branch
 # (allowlist: only polecat/* may be rewritten, and never a graduation) and file
-# ONE rework child per head to the fix pool, stamped prepare_mode and routed only
-# once that stamp reads back (dedup: a rework child naming this branch whose
-# rejection_reason names this head; an unstamped orphan is adopted by title,
-# never twinned); a gate green@ or exception@ a STALE head -> file one
+# ONE rework child per head to the fix pool, stamped prepare_mode and counted as
+# dispatched only once that stamp AND the route itself read back (dedup: a rework
+# child naming this branch whose rejection_reason names this head; an unstamped
+# orphan is adopted by title and an unrouted one re-routed, never twinned); a
+# gate green@ or exception@ a STALE head -> file one
 # re-review child per head to the review pool, carrying mol-review via gc
 # sling --on (dedup: a live review naming the anchor, or one with
 # review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
@@ -263,7 +264,21 @@ GATES
           | select((($rr | contains("head " + $h)) and ($h != ""))
                    or (($ls | index($st)) != null))
           | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$dup" ]; then
+    # A child of a prior pass whose route stamp exited 0 without writing. The
+    # route is what makes it reachable — neither `bd ready` nor a pool claim can
+    # see it without one — and the dedup above matches it, so nothing retries it.
+    # Narrow to open/unassigned/unrouted at THIS head: a metadata write ignores
+    # bd's claim guard, so re-stamping a child someone holds stomps live work.
+    stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
+      [ .[] | select(.id != $id)
+        | select(((.status // "open") | ascii_downcase) == "open")
+        | select(((.assignee // "") | tostring) == "")
+        | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+        | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
+        | select(((.metadata.merge_result // "") | tostring) == "")
+        | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
+        | .id ] | .[0] // empty' 2>/dev/null)
+    if [ -n "$dup" ] && [ -z "$stranded" ]; then
       echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child"
       skipped=$((skipped + 1)); continue
     fi
@@ -275,23 +290,28 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # Orphan adoption BEFORE create: a child this arm created whose stamp then
-    # failed carries the deterministic title but no branch metadata — invisible
-    # to the branch dedup above, so re-creating would mint a twin every pass. The
-    # title is the classifier's, and stays deterministic for a given head: the
-    # mode is a pure function of the branch name and the graduation marker.
-    # An unreadable probe dispatches nothing (retry next pass).
-    if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
-      echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    FIX=$(printf '%s' "$forphans" | jq -r '
-      [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$FIX" ]; then
-      echo "$PROG: $id adopting unstamped rework orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
+    if [ -n "$stranded" ]; then
+      FIX="$stranded"
+      echo "$PROG: $id re-routing stranded rework $FIX for PR#$num (a prior pass's route stamp did not land)"
     else
-      FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
-        | jq -r '.id // empty' 2>/dev/null)
+      # Orphan adoption BEFORE create: a child this arm created whose stamp then
+      # failed carries the deterministic title but no branch metadata — invisible
+      # to the branch dedup above, so re-creating would mint a twin every pass.
+      # The title is the classifier's, and stays deterministic for a given head:
+      # the mode is a pure function of the branch name and the graduation marker.
+      # An unreadable probe dispatches nothing (retry next pass).
+      if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
+        echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      FIX=$(printf '%s' "$forphans" | jq -r '
+        [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+      if [ -n "$FIX" ]; then
+        echo "$PROG: $id adopting unstamped rework orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
+      else
+        FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
+          | jq -r '.id // empty' 2>/dev/null)
+      fi
     fi
     if [ -z "$FIX" ]; then
       echo "$PROG: $id could not file the rework child for PR#$num; retry next pass" >&2
@@ -318,8 +338,15 @@ GATES
       echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
-      || echo "$PROG: WARN rework $FIX not routed to $FIX_POOL; route it by hand" >&2
+    # `gc bd update` returns 0 without having written (the claim guard is one
+    # such path), so the exit code does not establish the route, and an unrouted
+    # child reported as dispatched is a rework nothing can reach.
+    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+    rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+    if [ "$rgot" != "$FIX_POOL" ]; then
+      echo "$PROG: WARN rework $FIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
     reworked=$((reworked + 1))
     echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"

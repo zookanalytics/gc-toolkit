@@ -4,8 +4,9 @@
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
 # cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds veto, unstamped orphans adopted), classified rebase or
-# merge by the head branch and stamped prepare_mode, routed only once that stamp
-# reads back; stale-gate -> one
+# merge by the head branch and stamped prepare_mode, counted as dispatched only
+# once that stamp AND the route read back, with a child stranded by a lost route
+# stamp re-routed rather than buried by the dedup; stale-gate -> one
 # re-review child per head, carrying mol-review via gc sling --on (dedup,
 # pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
@@ -145,6 +146,37 @@ has "$out" "did not record prepare_mode=rebase; left unrouted" "the lost stamp i
 eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routable AND rewriting"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …a route stamp that does not persist leaves the rework UNDISPATCHED"
+store "[$(anchor RT 32)]"
+printf '%s' "$(prview 32 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_32.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "the route stamp really was dropped"
+has "$out" "did not record gc.routed_to=$FIX; left unrouted" "the lost route stamp is caught by a read-back"
+hasnt "$out" "filed rebase-mode rework new-2 routed to" "an unreachable rework is never reported as dispatched"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …and the NEXT pass re-routes it, past the branch dedup that would bury it"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the stranded child is adopted, not suppressed as a dup"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and the route lands on the retry"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…with no twin minted"
+has "$out" "filed rebase-mode rework new-2 routed to $FIX" "…and only now is the dispatch reported"
+
+echo "# …once routed, the child dedups normally again"
+out=$(run)
+has "$out" "already covers branch" "a routed child suppresses a twin as before"
+
+echo "# …a stranded rework a polecat has since claimed is never re-stamped under them"
+held='{"id":"held-rw","status":"in_progress","assignee":"rig/gc-toolkit.polecat-2","notes":"",'
+held="$held"'"title":"Rebase PR#33 onto main: base rewritten, PR conflicts",'
+held="$held"'"metadata":{"branch":"polecat/x33","rejection_reason":"stale base at head sha-33: x"}}'
+store "[$(anchor RT2 33), $held]"
+printf '%s' "$(prview 33 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_33.json"
+out=$(run)
+has "$out" "already covers branch" "a claimed child still suppresses the arm"
+eq "$(meta held-rw 'gc.routed_to')" "<absent>" "…and nothing is written under the holder"
 
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
