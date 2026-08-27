@@ -224,6 +224,17 @@ echo "# …dedup on second pass"
 out=$(run)
 hasnt "$out" "filed re-review" "a live review naming the anchor suppresses a twin"
 
+# The stale-gate scan addresses each declared gate by its own name; whitespace
+# around a separator must not join two gates into one.
+echo "# a multi-gate check_set is scanned per gate, never as one joined name"
+store "[$(anchor F9m 19 ',"check_set":"codex, triage","check.triage":"green@sha-OLD"')]"
+printf '%s' "$(prview 19 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_19.json"
+: > "$STUB_GC_LOG"
+out=$(run)
+hasnt "$out" "codextriage" "the comma list is not collapsed into one gate name"
+has "$out" "check.triage green@sha-OLD is stale" "the stale second gate is found under its own name"
+eq "$(meta new-2 check_name)" "triage" "the re-review names the real gate"
+
 echo "# an exception at a stale head rides the same re-review path as a stale green"
 store "[$(anchor F9b 21 ',"check.codex":"exception@sha-OLD"')]"
 printf '%s' "$(prview 21 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_21.json"

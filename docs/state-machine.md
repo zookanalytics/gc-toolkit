@@ -93,7 +93,7 @@ both enumerate from there. `doctor/check-state-space` reports the violation.
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | `check.codex == green@<live head>` |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` is `green@<live head>` |
 | pull_request → merged | `merge.sh` (cadence arm 3) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 4) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
@@ -133,11 +133,15 @@ The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
 [authority-map.md](authority-map.md).
 
-`codex` is one such review gate, opaque like the rest, with one coupling of
-its own: `pr-open.sh` requires `check.codex=green@<live head>` by literal name
-and never reads `check_set`. An anchor whose set drops `codex` before its PR
-exists strands at `pre_open_gate`, because gate-ensure raises only the names
-the set does declare and nothing then produces the marker pr-open waits on.
+`codex` is one such review gate, opaque like the rest. Both transitions read
+the same declared list: `pr-open.sh` publishes once every marker-bearing gate
+in `check_set` is `green@<live head>`, and `merge.sh` merges under the same
+condition. `none`/`off` and `approval` are dropped from both — the first is
+the gateless-by-choice sentinel, and the second is evidenced by an external
+GitHub review, which cannot exist before the PR does and which `merge.sh`
+enforces at the merge. An empty `check_set` is not the opt-out at either
+transition: it means never normalized, and gate-ensure stamps the default
+earlier in the same pass.
 
 Each gate's verdict is a head-bound marker:
 
@@ -220,7 +224,7 @@ sequenceDiagram
   P->>P: step-close + drain
   C->>L: gate-ensure — check_set present, every gate raisable
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
-  C->>G: pr-open.sh — gh pr create when codex green@live head
+  C->>G: pr-open.sh — gh pr create when every check_set gate is green@live head
   C->>G: merge.sh — validate, merge --match-head-commit
   C->>L: close + merged_sha, one lifecycle.sh call
 ```

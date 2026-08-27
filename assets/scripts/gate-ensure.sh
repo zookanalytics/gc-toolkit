@@ -365,7 +365,7 @@ STRAY
 
   head=""
   head_read=0
-  gates=$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+  gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in

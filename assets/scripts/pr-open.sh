@@ -4,7 +4,8 @@
 # branch (flip only — never open a twin); a CLOSED-unmerged-only PR is a
 # headstone — open a fresh PR noting the superseded one (unless the dead head
 # IS the live head: that close was a decision about this exact commit).
-# Otherwise: holds gate the create path; require check.codex green@<live head>;
+# Otherwise: holds gate the create path; require every marker-bearing gate the
+# anchor's check_set declares green@<live head>;
 # `gh pr create` non-draft pinned to origin, read back BY NUMBER, refuse a
 # moved head, replay the recorded verdict as a COMMENT (never an approval);
 # then ONE lifecycle.sh transition to pull_request carrying
@@ -51,6 +52,18 @@ pr_url_canon() {
 }
 is_held() {
   case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac
+}
+
+# The marker-bearing gates a check_set declares, one per line. Same drop list
+# merge.sh's hold_gate applies, so publishing and merging judge one anchor by
+# one rule: none/off is the gateless-by-choice sentinel, and approval is
+# evidenced by an external GitHub review, which cannot exist before the PR
+# does. The drop test is case-insensitive; what survives keeps its case,
+# because it addresses a metadata key.
+gates_of() { # <check_set>
+  printf '%s' "${1:-}" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' \
+    | grep -Eiv '^(none|off|approval)$'
+  return 0
 }
 
 # Certify one PR row as this anchor's: right repo url, right head branch, OUR
@@ -192,16 +205,34 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
 
-  # The gate: check.codex green at the LIVE head, read pinned to origin.
+  # The gate: every gate the anchor's own check_set declares, green at the LIVE
+  # head, read pinned to origin. Same predicate merge.sh applies at the merge,
+  # so one anchor is judged by one rule at both transitions.
   HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
   head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id branch '$branch' head unresolved; skip (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
-  codex=$(printf '%s' "$row" | jq -r '.metadata["check.codex"] // empty')
-  if [ "$codex" != "green@$head_oid" ]; then
-    echo "$PROG: $id branch '$branch' codex not green at live head (have '${codex:-none}', want 'green@$head_oid'); held"
+  checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
+  # Empty is never the gateless opt-out: that is the 'none' sentinel. Empty
+  # means never normalized, and gate-ensure — arm 1 of this same pass — stamps
+  # the declared default. Publishing under it would open the PR ungated.
+  if [ -z "$(printf '%s' "$checkset" | tr -d '[:space:],')" ]; then
+    echo "$PROG: $id branch '$branch' has no normalized check_set (empty is never the 'none' opt-out); no PR opened — gate-ensure stamps the default"
+    held=$((held + 1)); continue
+  fi
+  UNGREEN=""; UNGREEN_HAVE=""
+  while IFS= read -r g; do
+    [ -n "${g:-}" ] || continue
+    marker=$(printf '%s' "$row" | jq -r --arg k "check.$g" '.metadata[$k] // empty')
+    [ "$marker" = "green@$head_oid" ] && continue
+    UNGREEN="$g"; UNGREEN_HAVE="${marker:-none}"; break
+  done <<GATES
+$(gates_of "$checkset")
+GATES
+  if [ -n "$UNGREEN" ]; then
+    echo "$PROG: $id branch '$branch' check '$UNGREEN' not green at live head (have '$UNGREEN_HAVE', want 'green@$head_oid'); held"
     held=$((held + 1)); continue
   fi
 
@@ -227,7 +258,12 @@ while IFS= read -r row; do
     if [ -n "$desc" ]; then printf '%s\n' "$desc"; else printf 'Refinery handoff for `%s`.\n' "$id"; fi
     echo; echo "## Refinery handoff"; echo
     printf -- '- Issue: `%s`\n- Source branch: `%s`\n- Target: `%s`\n' "$id" "$branch" "$target"
-    printf -- '- Codex signed off pre-open at `%.8s`; PR opened codex-green.\n' "$head_oid"
+    GREENED=$(gates_of "$checkset" | paste -sd, -)
+    if [ -n "$GREENED" ]; then
+      printf -- '- Gates `%s` signed off pre-open at `%.8s`; PR opened green.\n' "$GREENED" "$head_oid"
+    else
+      printf -- '- Anchor declares no pre-open gate (`check_set=%s`); opened at `%.8s`.\n' "$checkset" "$head_oid"
+    fi
     [ -n "$SUP_NUM" ] && printf -- '- Supersedes #%s (closed unmerged at `%.8s`); re-implemented and re-gated at `%.8s`.\n' \
       "$SUP_NUM" "$SUP_HEAD" "$head_oid"
   } > "$BODY"
@@ -244,7 +280,7 @@ while IFS= read -r row; do
   fi
   PR_NUMBER=$(printf '%s' "$CREATED_URL" | sed -n 's#.*/pull/\([0-9][0-9]*\)$#\1#p')
   # Read the created PR back BY NUMBER and certify it; refuse a moved head — the
-  # contract is that a PR is codex-green at birth.
+  # contract is that a PR is gate-green at birth.
   NEW_JSON=$(gh pr view "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
     --json number,url,state,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository 2>/dev/null)
   if [ -z "$NEW_JSON" ] || ! certify_row "$id" "$NEW_JSON" "$branch" "$target" "$PR_NUMBER"; then
@@ -265,17 +301,17 @@ while IFS= read -r row; do
     | jq -r '.[0].notes // ""' 2>/dev/null)
   if [ -n "$VERDICT" ]; then
     gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
-      --body "$(printf 'Codex signoff (pre-open, comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
+      --body "$(printf 'Pre-open signoff (comment-only — not an approval):\n\n%s' "$VERDICT")" >/dev/null 2>&1 || true
   else
     gh pr comment "$PR_NUMBER" --repo "$ORIGIN_REPO_Q" \
-      --body "Codex signed off pre-open at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
+      --body "Pre-open gates signed off at \`${head_oid:0:8}\` (comment-only — not an approval)." >/dev/null 2>&1 || true
   fi
   [ -n "$SUP_NUM" ] && gh pr comment "$SUP_NUM" --repo "$ORIGIN_REPO_Q" \
     --body "Superseded by #$PR_NUMBER: branch \`$branch\` was re-implemented and re-gated at \`${head_oid:0:8}\`." >/dev/null 2>&1 || true
 
   if flip "$id" "$CERT_URL" "$CERT_NUM" "$target"; then
     opened=$((opened + 1))
-    echo "$PROG: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (codex-green)${SUP_NUM:+, superseding closed PR#$SUP_NUM}; flipped to pull_request"
+    echo "$PROG: $id opened PR#$PR_NUMBER for '$branch' at ${head_oid:0:8} (check_set '$checkset' green)${SUP_NUM:+, superseding closed PR#$SUP_NUM}; flipped to pull_request"
   else
     echo "$PROG: $id opened PR#$PR_NUMBER but did NOT reach pull_request; anchor stays pre_open_gate and adopts this PR next pass" >&2
     skipped=$((skipped + 1))
