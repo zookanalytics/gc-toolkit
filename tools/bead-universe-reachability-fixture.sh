@@ -300,7 +300,7 @@ eq  "Q10 fetch ci fx-done: state"  "pass" \
 # Bonus: full comment history reach (count surfaced).
 has "Q11 fetch comments fx-done"   "4" "$(U fetch fx-done comments)"
 
-echo "-- CONVERSATION tier: what has been SAID on the PR (tk-d6ixcw) --"
+echo "-- CONVERSATION tier: what has been SAID on the PR --"
 conv="$(U fetch fx-done conversation --json)"
 # Q11b: the objections are counted, not just the bot's approval.
 eq "Q11b conversation inline count"   "2" "$(printf '%s' "$conv" | jq -r '.counts.review_comments')"

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# converse-pr-conversation.test.sh — regression test for the converse Prime
-# step's PR-conversation fetch (bead tk-d6ixcw; precedent:
-# converse-fold-scope.test.sh, liveness-recheck.test.sh).
-#
 # The subject under test is a shell block inside a markdown prompt, so these
 # assertions EXTRACT the marked visit-pr-conversation block and EXECUTE it;
 # prose that only describes the fetch cannot pass them.
