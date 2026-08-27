@@ -637,9 +637,10 @@ eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
    "fresh work: unchanged single atomic write carrying the summary"
 
 # A hold that did not land must not drain. molecule-hold.sh exits non-zero when
-# it cannot resolve the step, when duplicate step beads make that ambiguous, or
-# when the blocking write is refused; draining there leaves the step claimable,
-# which is the loop the hold exists to stop.
+# it cannot resolve the step, when duplicate step beads make that ambiguous,
+# when the blocking write is refused, or when a route on the molecule root or a
+# sibling step survived; draining there leaves something claimable, which is the
+# loop the hold exists to stop.
 FAKE_HOLD_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
    "1|HOLD;" \
