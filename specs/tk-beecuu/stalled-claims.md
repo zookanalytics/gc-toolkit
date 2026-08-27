@@ -95,6 +95,14 @@ joined to the session holding it, matched on session id, session_name or alias.
 | DEAD | the holder is not running |
 | STALLED | the holder runs, but its `last_active` is past the bound too |
 
+UNHELD is read off the bead. The other three are read out of the session
+roster, and `_cache_age_s` sits beside `sessions` rather than inside each one,
+so it ages the whole roster and not just `last_active`. Against a roster older
+than the bound, an absent session may be a holder that started after the
+snapshot, and `running: false` may be a state its holder has since left. So all
+three degrade from error to warning there, and only UNHELD still reports as an
+error. `gc session list` exposes no uncached mode to fall back on.
+
 ### Why holder-clocked
 
 `last_active` is the discriminator the bead says does not exist today. It is
@@ -155,7 +163,7 @@ them and does not fix them.
 ## Verification
 
 `doctor/check-claim-advancing/run.test.sh` is hermetic, stubs `gc` and `bd`
-only, and passes 45 assertions. The `bd` stub applies the same `--status` and
+only, and passes 54 assertions. The `bd` stub applies the same `--status` and
 `--has-metadata-key` filters the real tool applies server-side, so a fixture row
 the real tool would never return cannot reach the check.
 
@@ -164,8 +172,9 @@ within the bound is silent even after holding a step for six hours, and each of
 the four classes fires and names the bead, the holder, and how long it has been
 quiet. It also covers identity matching on all three keys, the claim-age gate,
 the configurable bound including a non-numeric value falling back to the default
-rather than to zero, the suspended-rig skip, the stale-cache degrade to a
-warning, and every probe failing closed to a warning rather than a pass.
+rather than to zero, the suspended-rig skip, the stale-cache degrade of each
+roster-derived class with UNHELD surviving it, and every probe failing closed to
+a warning rather than a pass.
 
 Against the live city the check is silent on both working polecat sessions and
 reports the 23 real strands.

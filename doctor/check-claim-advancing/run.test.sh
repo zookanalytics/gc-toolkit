@@ -169,6 +169,34 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a session cache older than the bound degrades STALLED to a warning"
 has "$OUT" "cache" "the warning says the observation was cache-limited"
 clear_stores
+
+# ORPHANED and DEAD are read out of the same roster, so a stale one degrades
+# them too: an absent session may be a holder that started after the snapshot,
+# and running:false may be a state its holder has since left.
+CACHE=7200 sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+store alpha "$(claim a-1 rig/pool.gone 7200)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a stale cache degrades ORPHANED to a warning"
+has "$OUT" "a-1" "the orphan warning still names the step"
+has "$OUT" "names no session" "the orphan warning still says the holder was not found"
+has "$OUT" "started after that snapshot" "the orphan warning says why it is not judged"
+clear_stores
+
+CACHE=7200 sessions '{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"asleep","running":false,"last_active":""}'
+store alpha "$(claim a-1 rig/pool.polecat 7200)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a stale cache degrades DEAD to a warning"
+has "$OUT" "state=asleep" "the dead warning still names the holder's state"
+has "$OUT" "may be running now" "the dead warning says why it is not judged"
+clear_stores
+
+# UNHELD is read off the bead, not the roster, so a stale cache cannot soften it.
+CACHE=7200 sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+store alpha "$(printf '{"id":"a-unheld","status":"in_progress","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin"}}' "$(ago 7200)")"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a stale cache does not degrade UNHELD"
+has "$OUT" "NO assignee" "the unheld error survives a stale roster"
+clear_stores
 unset CACHE
 
 # --- 9. the bound is configurable ----------------------------------------

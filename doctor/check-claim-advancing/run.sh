@@ -21,6 +21,14 @@
 #   STALLED   the holder runs, but its last_active is     -> error
 #             older than the bound as well
 #
+# UNHELD is read off the bead alone. The other three are read out of the
+# session roster, and `_cache_age_s` sits beside `sessions` rather than inside
+# each one, so it ages the whole roster and not just `last_active`. Against a
+# roster older than the bound, an absent session may be a holder that started
+# after the snapshot, and `running: false` may be a state its holder has since
+# left. So all three degrade to warnings there, and only UNHELD still reports
+# as an error. `gc session list` exposes no uncached mode to fall back on.
+#
 # UNHELD is reachable by neither path: nothing holds it, and `bd ready` skips
 # it because its status is not open. The two checks that would otherwise see it
 # both scan --status open, so an in_progress step with no assignee is invisible
@@ -29,9 +37,7 @@
 #
 # last_active is derived from tmux pane changes and is hardened upstream
 # against self-inflation (gc's own nudge keystrokes do not ratchet it), so a
-# working agent refreshes it and a parked one does not. `gc session list` is
-# served from a cache: when that cache is itself older than the bound the
-# observation cannot outlive it, so STALLED degrades to a warning.
+# working agent refreshes it and a parked one does not.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -45,10 +51,15 @@ STALL=$((STALL_MINUTES * 60))
 errors=(); warnings=(); notes=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-strip_ctl() { tr -d '\000-\011\013-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 sessions_raw=$(run_bounded gc session list --json 2>/dev/null); sessions_rc=$?
-sessions=$(printf '%s' "$sessions_raw" | strip_ctl \
+sessions=$(printf '%s' "$sessions_raw" | scrub \
     | jq -c '[(.sessions // [])[]? | select(type == "object")]' 2>/dev/null)
 if [ "$sessions_rc" -ne 0 ] || [ -z "$sessions" ]; then
     echo "cannot determine whether claimed steps are being advanced (I11)"
@@ -62,7 +73,7 @@ if [ "$sessions" = "[]" ]; then
     detail "\`gc session list --json\` listed no sessions; every claim would classify as ORPHANED against an empty roster."
     exit 1
 fi
-cache_age=$(printf '%s' "$sessions_raw" | strip_ctl \
+cache_age=$(printf '%s' "$sessions_raw" | scrub \
     | jq -r '(._cache_age_s // 0) | if type == "number" then floor else 0 end' 2>/dev/null)
 case "${cache_age:-}" in *[!0-9]*|"") cache_age=0 ;; esac
 
@@ -89,7 +100,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not list in-progress step beads in $db (rc=$rc) — this store was NOT checked")
         continue
     fi
-    rows=$(printf '%s' "$claims_raw" | strip_ctl | jq -r \
+    rows=$(printf '%s' "$claims_raw" | scrub | jq -r \
         --argjson sess "$sessions" --argjson stall "$STALL" --argjson cache "$cache_age" '
         def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);
         def trim: (tostring) | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
@@ -97,6 +108,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         ( reduce ($sess[]? | select(type == "object")) as $s ({};
             reduce ((([$s.id, $s.session_name, $s.alias] | map(tostring)
                       | map(select(. != ""))))[]) as $k (.; .[$k] = $s)) ) as $S
+        | ($cache > $stall) as $stale
         | [ .[]? | . as $b
             | (($b.metadata // {})["gc.step_ref"] // "" | trim) as $ref
             | select($ref != "")
@@ -110,16 +122,18 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             | (if $as == ""
                then {cls: "unheld", bid: $bid, as: "", held: $held, ex: ""}
                elif $s == null
-               then {cls: "orphaned", bid: $bid, as: $as, held: $held, ex: ""}
+               then {cls: (if $stale then "orphaned_cached" else "orphaned" end),
+                     bid: $bid, as: $as, held: $held, ex: ""}
                elif (($s.running // false) | tostring) != "true"
-               then {cls: "dead", bid: $bid, as: $as, held: $held,
+               then {cls: (if $stale then "dead_cached" else "dead" end),
+                     bid: $bid, as: $as, held: $held,
                      ex: (($s.state // "unknown") | tostring | gsub("[[:cntrl:]]"; " "))}
                else (($s.last_active // "") | trim) as $la
                     | ($la | ep) as $le
                     | (if $le == null
                        then {cls: "unknown", bid: $bid, as: $as, held: $held, ex: $la}
                        elif (now - $le) > $stall
-                       then {cls: (if $cache > $stall then "stalled_cached" else "stalled" end),
+                       then {cls: (if $stale then "stalled_cached" else "stalled" end),
                              bid: $bid, as: $as, held: $held,
                              ex: (((now - $le) / 60 | floor) | tostring)}
                        else empty end)
@@ -137,6 +151,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             orphaned) errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — id, session_name and alias were all tried. Nothing holds this step and nothing will advance it; release it (status=open, assignee=\"\") so a pool can re-offer it.") ;;
             dead)     errors+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session is not running (state=$ex). The claim outlived its holder; release it so a pool can re-offer it.") ;;
             stalled)  errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which is running but has produced no output for ${ex}m. A holder quiet past the ${STALL_MINUTES}m bound is parked, not working; nudge it to deliver the step it holds, or release the claim.") ;;
+            orphaned_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have started after that snapshot. Re-run once the cache is fresh.") ;;
+            dead_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session read as not running (state=$ex) — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may be running now. Re-run once the cache is fresh.") ;;
             stalled_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", last output ${ex}m ago — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have produced output since. Re-run once the cache is fresh.") ;;
             unknown)  notes+=("$label step $bid: claimed ${held}m ago by \"$as\", whose last_active is \"$ex\" and does not parse as a timestamp — liveness could not be judged for this holder; reported, not judged") ;;
         esac
