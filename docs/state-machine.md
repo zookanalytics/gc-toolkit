@@ -193,13 +193,25 @@ sequenceDiagram
   one terminal verdict: no second component writes a verdict. `pr-facts.sh`
   and `gate-ensure.sh` also clear a marker, each under a condition
   [authority-map.md](authority-map.md) states, but a clear withdraws evidence
-  and cannot assert it. The cadence enforces no cap of its own: a
-  dispatch-side refusal fires a round early and withholds the very review
-  whose verdict settles the gate, so gate-ensure's `dispatch_count` is a tally
-  an operator reads, never a bound. A head move past that exception therefore
-  re-arms one dispatch, and a branch someone fixed by hand gets a look. It
-  cannot self-feed: the cap arm files no rework child, so nothing inside the
-  cadence can move that head again.
+  and cannot assert it. gate-ensure bounds nothing per round: a dispatch-side
+  refusal there fires the cap early and withholds the very review whose
+  verdict settles the gate, so its `dispatch_count` is a separate number. A
+  head move past that exception therefore re-arms one dispatch, and a branch
+  someone fixed by hand gets a look. It cannot self-feed: the cap arm files no
+  rework child, so nothing inside the cadence can move that head again.
+- **Dispatch backstop** (`gate-ensure.sh`): `dispatch_count` bounds
+  DISPATCHES at `GC_MAX_REVIEW_DISPATCHES` (default 5). It is not the round
+  cap and counts a different thing; it exists for the reviews the round cap
+  never sees. A review that ends writing no marker and leaving no open rework
+  child returns the anchor to exactly the state that triggered the dispatch,
+  so the next reconcile pass dispatches again at the same head, without end —
+  a polecat standing down without a verdict, a rework child filed with its
+  dependency edge reversed and so invisible to the walk, or a death after
+  claim. At the ceiling the gate holds, the anchor is stamped
+  `dispatch_backstop.<g>=<count>@<head>` with a note, and one visit is filed
+  under the `dispatch-runaway` key; a moved head restates the situation and
+  files again. Only an operator clears it, by fixing the cause and clearing
+  `dispatch_count`.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.

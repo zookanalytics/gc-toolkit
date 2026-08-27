@@ -56,7 +56,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    refused outright: a head that a closed request-changes verdict already
    judged, whose rework child is still open, can only be answered the same
    way, so the gate stays armed and the merge held until that rework moves the
-   head. **rc=3 is the designed interlock**: it holds `merge.sh` for this
+   head. Behind that sits a ceiling on DISPATCHES —
+   `GC_MAX_REVIEW_DISPATCHES`, default 5, and not `signoff.sh`'s round cap —
+   for the reviews neither refusal can see: one that ends writing no marker
+   and leaving no open rework child returns the anchor to the state that
+   triggered the dispatch, so the next pass repeats it at the same head. At
+   the ceiling the gate holds, the anchor carries `dispatch_backstop.<gate>`
+   and a note saying why, and one visit is filed under the `dispatch-runaway`
+   key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor with

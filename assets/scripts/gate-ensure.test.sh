@@ -13,11 +13,13 @@
 # converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold;
-# dispatch_count as a tally that never withholds a dispatch; the refusal to
+# dispatch_count as a tally the round cap never reads; the refusal to
 # re-review a head a closed request-changes verdict already judged while its
-# rework child is still open; and the review-wedge escalation (exec-stamp-only
-# reach whose poured workflow is spent -> one deduped visit, held one pass
-# first).
+# rework child is still open; the dispatch backstop (a ceiling on DISPATCHES
+# that refuses loudly -- one deduped visit plus a stamp and a note on the
+# anchor -- restates itself when the head moves, and never preempts the
+# precise refusal); and the review-wedge escalation (exec-stamp-only reach
+# whose poured workflow is spent -> one deduped visit, held one pass first).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -381,6 +383,131 @@ store "[$(anchor R8 pull_request codex "" polecat/r8)]"
 echo "sha-r8" > "$GH_DIR/head_polecat_r8"
 out=$(STUB_DEP_GARBAGE=1 run)
 has "$out" "1 reviews dispatched" "a first dispatch is not held by a child-ledger read it does not need"
+
+# --- dispatch backstop -------------------------------------------------------
+# The ceiling bounds DISPATCHES. already_answered above sees only the rework a
+# verdict actually filed, so a review that ends writing no marker and leaving
+# no visible child returns the anchor to the state that triggered the dispatch
+# and the next pass repeats it. These fixtures pin where the refusal starts,
+# that it is never silent, and that it defers to the precise refusal.
+echo "# under the ceiling nothing is refused"
+store "[$(anchor S1 pull_request codex "" polecat/s1 ',"dispatch_count":"4"')]"
+echo "sha-s1" > "$GH_DIR/head_polecat_s1"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "1 reviews dispatched" "the last dispatch under the ceiling is made"
+eq "$(meta S1 dispatch_count)" "5" "...and counted"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and nothing is escalated below the ceiling"
+eq "$(meta S1 'dispatch_backstop.codex')" "<absent>" "...and the anchor carries no hold"
+
+echo "# at the ceiling the dispatch is refused, and said out loud"
+store "[$(anchor S2 pull_request codex "" polecat/s2 ',"dispatch_count":"5"')]"
+echo "sha-s2" > "$GH_DIR/head_polecat_s2"
+: > "$STUB_ESCALATE_LOG"; : > "$STUB_GC_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "the refusal exits 0 (gate stays armed, merge held)"
+has "$out" "0 reviews dispatched" "nothing is dispatched at the ceiling"
+has "$out" "1 at the dispatch backstop" "...and the pass reports the hold"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "...no review is poured"
+esc=$(cat "$STUB_ESCALATE_LOG")
+has "$esc" "--subject S2" "the visit is filed on the anchor"
+has "$esc" "--key dispatch-runaway" "...under its own situation key, so repeats dedup"
+has "$esc" "GC_MAX_REVIEW_DISPATCHES" "...and names the ceiling's own env var"
+has "$esc" "NOT the convergence cap" "...and says which number it is not"
+eq "$(meta S2 'dispatch_backstop.codex')" "5@sha-s2" "the hold is stamped, keyed to the head it holds"
+has "$(notes S2)" "merge stays HELD" "...and the anchor's notes carry the reason, readable from the anchor alone"
+eq "$(meta S2 dispatch_count)" "5" "a refused dispatch consumes no count"
+
+echo "# ...once per situation: a repeat pass re-reports without re-filing"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "already escalated [dispatch-runaway]" "a second pass names the standing hold"
+has "$out" "1 at the dispatch backstop" "...and keeps counting it, so the hold stays visible every pass"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and files nothing new"
+eq "$(notes S2 | awk '/merge stays HELD/{n++} END{print n+0}')" "1" "...and appends the anchor note exactly once"
+
+echo "# ...and a moved head restates the situation, which says it again"
+echo "sha-s2b" > "$GH_DIR/head_polecat_s2"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "5@sha-s2b" "the hold names the head it now holds"
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject S2" "...and the visit is re-filed against it"
+eq "$(meta S2 'dispatch_backstop.codex')" "5@sha-s2b" "...and the stamp follows the head"
+eq "$(meta S2 dispatch_count)" "5" "...but a moved head buys no dispatch past the ceiling"
+
+echo "# an escalation that does not file leaves the anchor unstamped, and retries"
+store "[$(anchor S3 pull_request codex "" polecat/s3 ',"dispatch_count":"6"')]"
+echo "sha-s3" > "$GH_DIR/head_polecat_s3"
+out=$(STUB_ESCALATE_FAIL=1 run)
+has "$out" "escalation did not file" "a failed visit is reported"
+has "$out" "0 reviews dispatched" "...and the dispatch is still refused"
+eq "$(meta S3 'dispatch_backstop.codex')" "<absent>" "...and the anchor is not stamped"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject S3" "the next pass files it"
+eq "$(meta S3 'dispatch_backstop.codex')" "6@sha-s3" "...and stamps the anchor"
+
+echo "# a hold stamp that does not persist is reported, and appends no note"
+store "[$(anchor S10 pull_request codex "" polecat/s10 ',"dispatch_count":"5"')]"
+echo "sha-s10" > "$GH_DIR/head_polecat_s10"
+: > "$STUB_ESCALATE_LOG"
+out=$(STUB_DROP_KEYS="S10:dispatch_backstop.codex" run)
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject S10" "the visit is filed even when the anchor cannot be stamped"
+has "$out" "hold stamp did not persist" "...and the unstamped anchor is reported"
+eq "$(notes S10)" "" "...and no note is appended, so repeat passes cannot flood the anchor"
+
+echo "# with no escalator the hold is still stamped on the anchor"
+store "[$(anchor S9 pull_request codex "" polecat/s9 ',"dispatch_count":"5"')]"
+echo "sha-s9" > "$GH_DIR/head_polecat_s9"
+chmod -x "$SD/escalate.sh"
+out=$(run)
+chmod +x "$SD/escalate.sh"
+has "$out" "is missing" "a missing escalator is reported"
+has "$out" "0 reviews dispatched" "...and the dispatch is still refused"
+eq "$(meta S9 'dispatch_backstop.codex')" "5@sha-s9" "...and the anchor still carries the hold"
+has "$(notes S9)" "NOT escalated" "...whose note says plainly that no visit was filed"
+
+echo "# the round cap does not reach the dispatch path"
+store "[$(anchor S4 pull_request codex "" polecat/s4 ',"dispatch_count":"3"')]"
+echo "sha-s4" > "$GH_DIR/head_polecat_s4"
+: > "$STUB_ESCALATE_LOG"
+out=$(GC_MAX_REVIEW_ROUNDS=1 run)
+has "$out" "1 reviews dispatched" "GC_MAX_REVIEW_ROUNDS bounds signoff.sh's rework rounds, never this dispatch"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and escalates nothing"
+
+echo "# the ceiling is configurable, and a garbage value falls back to the default"
+store "[$(anchor S5 pull_request codex "" polecat/s5 ',"dispatch_count":"2"')]"
+echo "sha-s5" > "$GH_DIR/head_polecat_s5"
+: > "$STUB_ESCALATE_LOG"
+out=$(GC_MAX_REVIEW_DISPATCHES=2 run)
+has "$out" "at the dispatch backstop" "GC_MAX_REVIEW_DISPATCHES moves the ceiling"
+has "$(cat "$STUB_ESCALATE_LOG")" "--key dispatch-runaway" "...and a lowered ceiling escalates like the default"
+store "[$(anchor S6 pull_request codex "" polecat/s6 ',"dispatch_count":"2"')]"
+echo "sha-s6" > "$GH_DIR/head_polecat_s6"
+out=$(GC_MAX_REVIEW_DISPATCHES=abc run)
+has "$out" "1 reviews dispatched" "a non-numeric ceiling still dispatches"
+hasnt "$out" "integer expression" "...because it fell back to the default, not because the comparison errored"
+
+echo "# a head already answered is not a runaway: the precise refusal wins"
+store "[$(anchor S7 pull_request codex "" polecat/s7 ',"dispatch_count":"9"'),
+        $(judged_review rev-s7 S7 sha-s7),
+        $(rework_kid fix-s7 rev-s7 open)]"
+printf 'fix-s7|blocks|S7\n' >> "$STUB_DEPS"
+echo "sha-s7" > "$GH_DIR/head_polecat_s7"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "already judged sha-s7" "an anchor waiting on the rework it filed is refused for that reason"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and is never paged as a runaway, however high the tally"
+eq "$(meta S7 'dispatch_backstop.codex')" "<absent>" "...and carries no backstop hold"
+
+echo "# a pour that does not read back burns no count, so the ceiling stays where it is"
+store "[$(anchor S8 pull_request codex "" polecat/s8 ',"dispatch_count":"4"')]"
+echo "sha-s8" > "$GH_DIR/head_polecat_s8"
+: > "$STUB_ESCALATE_LOG"
+out=$(STUB_DROP_KEYS="new-2:gc.execution_routed_to" run)
+has "$out" "dispatch NOT counted" "the unread-back pour is not counted"
+eq "$(meta S8 dispatch_count)" "4" "...so the tally does not advance"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and a failed pour never pushes an anchor to the ceiling"
 
 echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
 store "[$(anchor H1 pull_request codex "" polecat/h1)]"
