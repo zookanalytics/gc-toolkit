@@ -65,12 +65,22 @@ stateDiagram-v2
   refused_false_completion --> [*]: human
   abandoned --> [*]: human
   retargeted --> [*]: human
+
+  UN --> held: agents/converse — a sitting holds for an operator decision
+  held --> UN: the ruling landed
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
 (branch recorded, assignee = refinery, `merge_result` still absent); the
 anchored states are the `merge_result` values. `merged` is the only state with
-`status = closed`; the four human-terminal states stay open, routed to human.
+`status = closed`; the human states stay open, routed to human.
+
+`held` is the one human state a sitting writes rather than the refinery, and it
+is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
+each enumerate anchors by their gating state, so moving a live anchor to `held`
+to record a conversation would drop it from all three for as long as the hold
+lasts. An anchor already carries a state and a reader; an unanchored subject
+carried neither, which is what the state exists to fix.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -101,6 +111,8 @@ both enumerate from there. `doctor/check-state-space` reports the violation.
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
 | handed_off / pull_request → routed | `mol-refinery-patrol` (rejection) | `rejection_reason` written, re-routed to the pool |
+| unanchored → held | `agents/converse` hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
+| held → unanchored | `agents/converse` sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` clears
 the gate marker and files one routed rework child that blocks the anchor — the

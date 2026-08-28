@@ -21,7 +21,7 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 
 # The declared enum. "unanchored" (merge_result absent) has no stored value on
 # the ordinary path, but a literal write of it is a declared state, not a drift.
-BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
+BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion held"
 BUILTIN_CLOSED="merged"
 BUILTIN_DETACHED="pre_open_gate pull_request"
 BUILTIN_PARK_ROUTE="human"

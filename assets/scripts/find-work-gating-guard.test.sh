@@ -148,7 +148,7 @@ eq "$(select_work)" "" "(4) parked pre_open_gate anchor is NOT selected"
 #     returns a bead to this queue clears the field first (mr-aware-rejection
 #     folds --unset-metadata merge_result into the repool), so a value present
 #     means some pass recorded a disposition and this queue is not it.
-for mr in merged blocked refused_false_completion abandoned retargeted; do
+for mr in merged blocked refused_false_completion abandoned retargeted held; do
   printf 'tk-d|%s\n' "$mr" > "$FAKE_ROWS"
   eq "$(select_work)" "" "(5) merge_result=$mr is excluded"
 done
