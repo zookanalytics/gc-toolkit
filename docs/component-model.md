@@ -99,7 +99,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 | # | Proposition | Check |
 |---|---|---|
-| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check; remainder tracked on tk-5r1a12 (tk-wz4igt, which this row used to name, closed superseded). |
+| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check. |
 | **I2** | The state space is closed: every `merge_result` value and status combo is declared in `lifecycle/lifecycle.toml`, and a bead in a declared detached state rests unheld and offered to no pool. | `doctor/check-state-space` |
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
@@ -137,7 +137,7 @@ warning may still be printed on stderr, which is not the channel anything
 reads. A wait on work in another rig is filed as a demand bead in the waiting
 bead's own store, naming the foreign bead in its body. And the status stays `open`:
 setting `status=blocked` by hand does not converge, because when the blocker
-closes the stored status is still `blocked` (`tk-puh9d`).
+closes the stored status is still `blocked`.
 
 **The demand** is that what a person owes is a bead, and the dependent work
 blocks on it. A ruling only the operator can give is `issue_type=decision`; a
@@ -173,11 +173,11 @@ which also carries the one dispatch path that reads no edges at all. `gc sling
 dependencies, so a blocked bead dispatched that way is held by nothing. On that
 path the pending dispatch is recorded with `deferred-dispatch.sh arm` instead.
 
-I1 is PARTIAL for two reasons, both filed. `check-wait-is-an-edge` does not
-exist yet (`tk-5r1a12`), and no pass ages a demand: `liveness-sweep.sh`
-classifies over `bd ready`, so an edge-blocked bead is outside its funnel and a
-demand owed for a month is invisible. Until both land, converting a hold to an
-edge makes it quieter than the prose it replaced, not louder.
+I1 is PARTIAL for two reasons. `check-wait-is-an-edge` does not exist yet, and
+no pass ages a demand: `liveness-sweep.sh` classifies over `bd ready`, so an
+edge-blocked bead is outside its funnel and a demand owed for a month is
+invisible. Until both land, converting a hold to an edge makes it quieter than
+the prose it replaced, not louder.
 
 The census of every mechanism the pack had accreted, the measurements behind
 each judgment, and the migration are `specs/tk-s4fg87/`.
