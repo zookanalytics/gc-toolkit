@@ -99,9 +99,12 @@ A proposed bullet:
 - **names its scope** (`repo:<rig>` / `agent:<role>` / `global` — infer
   narrow; explicit operator scope wins);
 - states the *why* only when non-obvious;
-- is a **transferable distillation, never a transcript quote** — the
-  bullet must instruct an agent who never saw the argument that produced
-  it.
+- is a **transferable distillation, never a transcript quote** — it
+  states the general boundary it enforces, not the particulars of the
+  incident that produced it, and must instruct an agent who never saw
+  that argument. Check a draft by asking what else it would catch: a rule
+  that fires only on a re-run of its own evidence is scoped too narrowly,
+  and the incident belongs in the evidence section.
 
 ## Two gates on promotion into always-injected content
 
