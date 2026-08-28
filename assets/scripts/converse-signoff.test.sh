@@ -1393,8 +1393,75 @@ fi
 # The prompt is the half that decides whether the verb is ever called.
 # Matched on the CAPTURE, not on the call: step 7 re-states a demand with the
 # same three tokens, so a looser pattern passes on a hold that files nothing.
-have "the hold files a demand, not only a stamp" 'DEMAND=$("$HELM" demand "$ITEM"' "$PROMPT"
+have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$ITEM"' "$PROMPT"
 have "…and reads the demand id back off stdout" "awk '/^demand /{print \$2; exit}'" "$PROMPT"
+lacks "…and never authorizes a prose-only wait in its place" \
+      'the takeaway is then the only record' "$PROMPT" \
+      "that arm sends the sitting on to post framing for a hold with no demand bead behind it"
+
+# The gate, EXTRACTED AND RUN. A filter between the demand call and the capture
+# answers with its OWN status, so a verb that fails closed on a missing edge
+# reads as a filed demand and the sitting frames a hold nothing is holding.
+# Prose cannot pin that; these assertions run the block rather than describe it.
+awk '/# >>> hold-demand-gate/{inb=1; next} /# <<< hold-demand-gate/{inb=0} inb' \
+    "$PROMPT" | sed 's/^   //' > "$TMPD/hold-gate.sh"
+if [ -s "$TMPD/hold-gate.sh" ]; then ok "the demand write is a marked, extractable block"
+else bad "the demand write is a marked, extractable block" "no hold-demand-gate block in $PROMPT"; fi
+if bash -n "$TMPD/hold-gate.sh" 2>/dev/null; then ok "…and is valid bash"
+else bad "…and is valid bash" "bash -n failed"; fi
+
+# stub_helm <exit-status> <stdout> — stands in for the demand verb. Written to
+# files rather than baked into the stub so the heredoc stays quoted.
+stub_helm() {
+    printf '%s\n' "$2" >"$TMPD/helm.out"
+    printf '%s\n' "$1" >"$TMPD/helm.rc"
+    cat >"$TMPD/helm.sh" <<'STUB'
+#!/usr/bin/env bash
+D="$(dirname "$0")"
+cat "$D/helm.out"
+exit "$(cat "$D/helm.rc")"
+STUB
+    chmod +x "$TMPD/helm.sh"
+}
+GATE_OUT=""
+GATE_RC=0
+run_gate() {
+    GATE_OUT="$(HELM="$TMPD/helm.sh" ITEM=tk-gated bash "$TMPD/hold-gate.sh" 2>&1)"
+    GATE_RC=$?
+}
+
+# THE MASKED CASE, and the whole reason the status is read at all. The verb
+# fails closed AFTER it has printed, so stdout alone says the demand landed.
+stub_helm 4 'demand tk-dem blocks tk-gated (by converse, decision): who owns it'
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then ok "a non-zero demand stops the hold even when stdout names an id"
+else bad "a non-zero demand stops the hold even when stdout names an id" \
+        "the gate read awk's status, not the verb's — a hold with no edge behind it posts as normal"; fi
+has_out() { case "$GATE_OUT" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in: $GATE_OUT" ;; esac; }
+lacks_out() { case "$GATE_OUT" in *"$2"*) bad "$1" "found '$2' in: $GATE_OUT" ;; *) ok "$1" ;; esac; }
+has_out "…and says so, naming the item and the status" "NO DEMAND FILED on tk-gated (status 4)"
+has_out "…and forbids the framing rather than qualifying it" "Do NOT post the framing"
+
+# The plain fail-closed shape: the verb exits 4 having printed nothing.
+stub_helm 4 ''
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then ok "a demand that exits non-zero and prints nothing stops the hold"
+else bad "a demand that exits non-zero and prints nothing stops the hold" "the sitting continues into a prose-only wait"; fi
+
+# Exit 0 is not enough either: an id the block cannot read is a demand it
+# cannot discharge in step 7, and cannot name in the thread.
+stub_helm 0 'gc-helm: demand: refreshed something the parser does not know'
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then ok "an unparsable id stops the hold even at status 0"
+else bad "an unparsable id stops the hold even at status 0" "DEMAND is empty and the sitting holds on nothing"; fi
+
+# THE HAPPY PATH, which is what makes the three above mean anything: a gate
+# wired to refuse everything passes them all and takes every hold with it.
+stub_helm 0 'demand tk-dem blocks tk-gated (by converse, decision): who owns it'
+run_gate
+if [ "$GATE_RC" -eq 0 ]; then ok "a filed demand at status 0 lets the hold proceed"
+else bad "a filed demand at status 0 lets the hold proceed" "rc=$GATE_RC, out: $GATE_OUT"; fi
+lacks_out "…and says nothing about a failure" "NO DEMAND FILED"
 have "the sitting discharges the demand when it settles the question" \
      'gc bd close "$DEMAND"' "$PROMPT"
 have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "<what is still owed' "$PROMPT"

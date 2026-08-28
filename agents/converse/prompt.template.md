@@ -358,9 +358,22 @@ The loop, every visit:
    "$HELM" takeaway "$ITEM" "holding — <the one decision or input needed, ≤140 chars>" --by converse
    # A hold IS a demand: the operator owes an answer, and until it lands
    # $ITEM cannot move. File it as a bead and let the edge carry the wait.
-   DEMAND=$("$HELM" demand "$ITEM" "<the one decision or input needed, ≤140 chars>" \
-              --by converse | awk '/^demand /{print $2; exit}')
-   [ -n "$DEMAND" ] || echo "NO DEMAND FILED on $ITEM — say so in the thread; the takeaway is then the only record, and nothing re-asks it"
+   # >>> hold-demand-gate
+   # A pipeline answers its LAST command's status, so the demand call stays
+   # unpiped and its status is read on its own line. That exit is the only
+   # signal that the bead or the edge did not land, and any filter placed
+   # downstream of the call answers with its own success instead.
+   DEMAND_OUT=$("$HELM" demand "$ITEM" "<the one decision or input needed, ≤140 chars>" \
+                  --by converse)
+   DEMAND_RC=$?
+   DEMAND=$(printf '%s\n' "$DEMAND_OUT" | awk '/^demand /{print $2; exit}')
+   if [ "$DEMAND_RC" -ne 0 ] || [ -z "$DEMAND" ]; then
+     echo "NO DEMAND FILED on $ITEM (status $DEMAND_RC). Nothing here is a hold yet, only a takeaway that nothing re-asks. Do NOT post the framing."
+     echo "The verb printed its reason on stderr, and the repair command when an edge did not land. Repair it, then re-run this block until it names a demand id."
+     echo "If it cannot be repaired, that failure is what the operator needs to hear. Raise it in the thread, and do not describe $ITEM as held."
+     exit 1
+   fi
+   # <<< hold-demand-gate
    LC=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
@@ -378,6 +391,13 @@ The loop, every visit:
    answered. That is the whole difference between waiting and parking:
    when the demand closes, `$ITEM` becomes ready and the pool claims it,
    with nobody needing to notice a board row or clear a field.
+
+   Because it is that half, the write is a gate rather than a garnish. A
+   demand that does not land leaves `$ITEM` parked behind a sentence,
+   which is the state this step exists to stop producing, so the block
+   stops there instead of carrying on into the framing. Repair what the
+   verb reported and run it again. If it cannot be repaired, that failure
+   is itself what the operator has to hear.
 
    A ruling files unassigned, because it is owed by whoever holds the
    decision rather than by a named person; `gc.routed_to=human` is what
