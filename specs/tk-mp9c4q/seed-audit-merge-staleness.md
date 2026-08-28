@@ -1,6 +1,6 @@
 ---
 name: seed-audit staleness at merge time
-description: Why tk-mp9c4q's squash-merge premise is falsified, what the two cited instances actually were, and why the residual merge-time race needs no gate. Read before adding a merge-time or pre-land check for generated/seed-audit/.
+description: Why tk-mp9c4q's squash-merge premise is falsified, what the two cited instances actually were, why the residual merge-time race needs no gate, and the one time the silent path fired (#517) before main carried a render to collide with. Read before adding a merge-time or pre-land check for generated/seed-audit/.
 ---
 
 # seed-audit staleness at merge time
@@ -83,8 +83,11 @@ CLEAN` gate, and the refinery repools the work with `prepare_mode=rebase`. The
 resuming polecat rebases and the hook re-renders against the combined input set.
 
 Main moves an input without re-rendering. `git merge` exits 0 and the stale
-artifact lands with nothing raised. This is the only silent path, and reaching
-it requires main to already be stale, which is the unwired-hook defect again.
+artifact lands with nothing raised. This is the only silent path. Reaching it
+requires main to hold no render that would collide. One way is main being stale
+itself, which is the unwired-hook defect again. The other is main holding no
+`INDEX.md` at all, which is the state #465 left behind. The second way is how
+this path fired at #517, recorded below.
 
 The self-detection depends on `INDEX.md` carrying one whole-tree digest on one
 line. A future `INDEX.md` that dropped that line, or recorded per-file digests
@@ -121,7 +124,45 @@ linked worktrees because the path is relative. #465 made
 That warning is the standing control on the one silent path, and it is
 tk-hq4v3l's ground rather than this bead's.
 
-`generated/seed-audit/` in main currently holds only the `README.md` stub, which
-#465 left in place of the rendered tree. Until a render is committed, there is no
-recorded digest to go stale and `doctor/check-seed-audit-current` reports the
-absent-artifact warning.
+`generated/seed-audit/` in main holds a rendered tree as of #517. The stub state
+#465 left behind is over, so there is a recorded digest to go stale and the
+absent-artifact warning no longer stands.
+
+## What #517 landed
+
+#517 committed the first rendered tree since #465, and it was stale when it
+landed. Its render recorded `356b6788f3b6`, taken at the branch base `70198d8`.
+#516 (`e1bf479`) moved `template-fragments/polecat-doctrine.template.md` between
+that base and the merge. Restoring that one file to its `70198d8` content on top
+of `0c50151` and re-running `--print-digest` returns
+`356b6788f3b637f5c96fcd265c637c3135933f03b225bcd90643bfcdcd921f19`, the recorded
+value in full, so that change is the whole delta.
+
+The squash exited 0 because main still held the `README.md` stub and carried no
+`INDEX.md` to conflict on. `doctor/check-seed-audit-current` went from the
+absent-artifact warning to exit 2 at that commit. Each row below was measured by
+checking the commit out and running the check against it with `GC_PACK_DIR` set
+to that tree.
+
+| commit | PR | recorded | actual | exit |
+|---|---|---|---|---|
+| `8ca3304` | #518 | none | | 1, absent |
+| `0c50151` | #517 | `356b6788f3b6` | `4c57bb1500d3` | 2 |
+| `0514729` | #503 | `356b6788f3b6` | `4c57bb1500d3` | 2 |
+| `c66b054` | #515 | `356b6788f3b6` | `8a7421219dc6` | 2 |
+| `b5169c3` | #506 | `356b6788f3b6` | `8a7421219dc6` | 2 |
+| `ba5e093` | #488 | `356b6788f3b6` | `8a7421219dc6` | 2 |
+| `cb8393e` | #523 | `356b6788f3b6` | `8a7421219dc6` | 2 |
+| `2057968` | #510 | `b75dd6222f76` | `b75dd6222f76` | 0 |
+| `d73daef` | #525 | `b75dd6222f76` | `b75dd6222f76` | 0 |
+
+main sat at exit 2 for six commits, from 2026-08-27T21:26:03Z to
+2026-08-27T23:16:04Z. `pack.toml` moved at `c66b054`, which changed the actual
+digest while the recorded one stayed pinned. #510 closed the window without
+being about the audit: it edited the renderer and `formulas/mol-review.toml`, its
+branch rendered against main's current inputs, and the artifact matched at land.
+
+This does not reopen the gate question. The collision that holds the race is a
+conflict on the single `- source digest:` line, and it needs a render on both
+sides. Main carries one now, so a branch that renders against an input set main
+has moved past conflicts rather than landing silently.
