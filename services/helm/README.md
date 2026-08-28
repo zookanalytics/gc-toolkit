@@ -9,10 +9,10 @@ the bash dies).
 > **The bash board is gone; the bash WRITE VERBS are what is left.**
 > `tmux-pick-helm.sh:60` invokes `"$HELM_SVC" board --json --limit=36`, this
 > binary. `gc-helm.sh` no longer renders a board at all: it carries `open`,
-> `react` and `takeaway`, and `gc-helm.sh --json` exits 2 with `unknown verb`.
-> Its own usage text points at `helm-svc board`. Retiring the remaining verbs is
-> a separate decision recorded under "Two helm boards, and they diverge" in
-> `docs/gascity-human-engagement.md`.
+> `react`, `takeaway` and `demand`, and `gc-helm.sh --json` exits 2 with
+> `unknown verb`. Its own usage text points at `helm-svc board`. Retiring the
+> remaining verbs is a separate decision recorded under "Two helm boards, and
+> they diverge" in `docs/gascity-human-engagement.md`.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -1246,9 +1246,9 @@ Session liveness and convoy ownership come from the `gc` CLI — see
 
 **Still deferred** (and *why*):
 
-- **Retiring `gc-helm.sh`.** Its `open`, `react` and `takeaway` verbs have no Go
-  equivalent, so the script stays. Retirement is a follow-up once the board view
-  is proven at parity in daily use.
+- **Retiring `gc-helm.sh`.** Its `open`, `react`, `takeaway` and `demand` verbs
+  have no Go equivalent, so the script stays. Retirement is a follow-up once the
+  board view is proven at parity in daily use.
 - **A CLI cache.** `helm-svc board` re-gathers every run (~2.7-3.3s). The bash
   board's 45s file cache makes a repeat glance ~1.8s. Caching here would buy
   about a second and re-introduce a staleness surface, which is the thing this

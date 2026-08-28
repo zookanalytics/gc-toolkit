@@ -814,8 +814,10 @@ case "$1 ${2:-}" in
   "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
   "bd update") : ;;
   "bd dep")
-    # A demand id carrying NOEDGE stands for every edge that cannot be written:
+    # NOEDGE in any id of the call stands for an edge that cannot be written:
     # the call fails AND nothing is recorded, so the read-back sees no edge.
+    # On a demand id that is every edge; on a TARGET id it is that one edge,
+    # while the rest of the call's edges land.
     case "$*" in *NOEDGE*) sed -i '$d' "$D_LOG"; exit 1 ;; esac ;;
 esac
 exit 0
@@ -961,6 +963,25 @@ eq "$DRC" "0" "(ALSO) --also-blocks is accepted in both forms"
 eq "$(grep -c '^bd dep add ' "$D_LOG")" "3" "(ALSO) one edge for the gated bead and one per --also-blocks"
 grep -q '^bd dep add tk-sib2 tk-dem1 -t blocks$' "$D_LOG" \
   && ok "(ALSO) …each in the depends-on direction" || bad "(ALSO) tk-sib2 edge missing: $(d_deps)"
+
+# (ALSOCLOSED) every requested blocker fails closed, not just the primary one.
+# The gated bead's edge lands here and one --also-blocks target's does not:
+# reporting success would leave that target reading ready against a demand it
+# was named to wait on, which is the same state (FAILCLOSED) refuses.
+demand_run tk-kid "operator: pick the backend" --also-blocks tk-NOEDGE1 --also-blocks tk-sib2
+eq "$DRC" "4" "(ALSOCLOSED) an --also-blocks edge that did not land is a runtime failure"
+grep -q 'tk-NOEDGE1 is NOT blocked by tk-dem1' <<< "$DERR" \
+  && ok "(ALSOCLOSED) …and the failure names the target left unwired" \
+  || bad "(ALSOCLOSED) the unwired target was not named: $DERR"
+grep -q 'gc bd dep add tk-NOEDGE1 tk-dem1 -t blocks' <<< "$DERR" \
+  && ok "(ALSOCLOSED) …with the repair for that target, not for the gated bead" \
+  || bad "(ALSOCLOSED) no repair command for the unwired target: $DERR"
+grep -q 'tk-kid is NOT blocked by' <<< "$DERR" \
+  && bad "(ALSOCLOSED) the primary edge landed but was reported unwired: $DERR" \
+  || ok "(ALSOCLOSED) …and the primary edge, which did land, is not accused"
+grep -q '^demand tk-dem1 blocks tk-kid' <<< "$DOUT" \
+  && bad "(ALSOCLOSED) success was printed while a requested edge was missing: $DOUT" \
+  || ok "(ALSOCLOSED) …and no success line is printed"
 
 echo ""
 echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape): $PASS passed, $FAIL failed"

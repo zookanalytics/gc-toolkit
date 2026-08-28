@@ -433,9 +433,11 @@ cmd_takeaway() {
 #
 # The edge is the record here, not a garnish on it. `takeaway --waiting-on`
 # writes its edge beside prose a human reads, so a rejected edge only warns;
-# a demand whose edge did not land leaves the work reading ready while a person
-# still owes an answer, which is the exact failure this verb exists to remove.
-# So it exits 4 on that, having named the repair.
+# any requested edge that did not land leaves that work reading ready while a
+# person still owes an answer, which is the exact failure this verb exists to
+# remove. So it exits 4 unless every bead it was asked to gate reads back
+# blocked. An --also-blocks target is held to the same terms as the gated bead,
+# and every missing edge is named with its own repair command.
 #
 # One open demand per gated bead: a resumed sitting re-states the same question
 # and gets the existing demand refreshed, never a second blocker for one wait.
@@ -556,18 +558,29 @@ cmd_demand() {
         fi
     done
 
-    # Read the primary edge back off the GATED bead. A `dep add` that fails on
-    # an edge already present is indistinguishable from one that wrote nothing,
-    # so its exit status settles neither; the gated bead's own row does.
-    gated_after=$(gc bd show "$gated" --json 2>/dev/null | scrub || true)
-    have_edge=$(printf '%s' "$gated_after" | jq -r --arg d "$demand" \
-        '[ .[0].dependencies[]?
-           | select(((.dependency_type // .type // "") | tostring) == "blocks")
-           | ((.id // .depends_on_id // "") | tostring) ]
-         | map(select(. == $d)) | length' 2>/dev/null || true)
-    case "$have_edge" in ''|*[!0-9]*) have_edge=0 ;; esac
-    if [ "$have_edge" -lt 1 ]; then
-        echo "$PROG: demand: $gated is NOT blocked by $demand — the edge did not land, so the work reads ready while a person owes an answer. Wire it by hand: gc bd dep add $gated $demand -t blocks" >&2
+    # Read every requested edge back off the bead that carries it. A `dep add`
+    # that fails on an edge already present is indistinguishable from one that
+    # wrote nothing, so its exit status settles neither; the row does. An
+    # --also-blocks target is read back on the same terms as the gated bead:
+    # an edge missing there leaves that work reading ready against a demand
+    # that was supposed to gate it, which is what this verb exists to remove.
+    unwired=""
+    for _w in $gated $also; do
+        [ -n "$_w" ] || continue
+        if [ "$_w" = "$demand" ]; then continue; fi
+        w_after=$(gc bd show "$_w" --json 2>/dev/null | scrub || true)
+        have_edge=$(printf '%s' "$w_after" | jq -r --arg d "$demand" \
+            '[ .[0].dependencies[]?
+               | select(((.dependency_type // .type // "") | tostring) == "blocks")
+               | ((.id // .depends_on_id // "") | tostring) ]
+             | map(select(. == $d)) | length' 2>/dev/null || true)
+        case "$have_edge" in ''|*[!0-9]*) have_edge=0 ;; esac
+        if [ "$have_edge" -lt 1 ]; then unwired="$unwired $_w"; fi
+    done
+    if [ -n "$unwired" ]; then
+        for _w in $unwired; do
+            echo "$PROG: demand: $_w is NOT blocked by $demand — the edge did not land, so the work reads ready while a person owes an answer. Wire it by hand: gc bd dep add $_w $demand -t blocks" >&2
+        done
         exit 4
     fi
 

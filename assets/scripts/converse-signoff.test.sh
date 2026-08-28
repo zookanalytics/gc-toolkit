@@ -1379,7 +1379,16 @@ else
     bad "a demand whose edge did not land fails the verb" \
         "reporting success on a missing edge leaves the gated work reading ready"
 fi
-have "…having read the edge back off the GATED bead" 'gated_after=' "$HELM"
+# The verdict comes from the row, never from `dep add`'s exit status, and it is
+# read off EVERY bead the call was asked to gate. An --also-blocks target left
+# unwired reads ready against a demand named to gate it: the same state, one
+# bead over.
+if demand_body | grep -qF -- 'w_after=$(gc bd show "$_w"'; then
+    ok "…having read the edge back off each bead it was asked to gate"
+else
+    bad "…having read the edge back off each bead it was asked to gate" \
+        "a read-back that checks only the gated bead passes an --also-blocks target that never got its edge"
+fi
 
 # The prompt is the half that decides whether the verb is ever called.
 # Matched on the CAPTURE, not on the call: step 7 re-states a demand with the

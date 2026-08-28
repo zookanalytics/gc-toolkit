@@ -902,8 +902,9 @@ operator's *own* unsent words have no such protection, and until
 
   **What is still open is retirement, and `prefix+b` still runs the
   bash.** `tmux-pick-helm.sh` was deliberately NOT repointed: `gc-helm.sh`
-  keeps verbs (`open`, `react`, `takeaway`) that have no Go equivalent, so
-  retiring it is a separate piece of work and still the operator's call.
+  keeps verbs (`open`, `react`, `takeaway`, `demand`) that have no Go
+  equivalent, so retiring it is a separate piece of work and still the
+  operator's call.
   Until the script is gone there are still two programs, and the tripwire
   stands — but it is now cheaper to honour, because the field sets are
   pinned against each other by
