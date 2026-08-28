@@ -38,7 +38,10 @@ index() { # <digest>
 }
 printf 'p\n' > "$P/generated/seed-audit/agents/worker.md"
 printf 'f\n' > "$P/generated/seed-audit/formulas/mol-x.md"
-run_check() { DIGEST="${DIGEST:-}" GCVER="${GCVER:-gc v1}" GC_PACK_DIR="$P" PATH="$TMP/bin:$PATH" bash "$CHECK" 2>&1; }
+# core.hooksPath resolves local-then-global, so an operator with a global one
+# set would answer case 9's unset read; /dev/null pins the fixture to local.
+run_check() { DIGEST="${DIGEST:-}" GCVER="${GCVER:-gc v1}" GC_PACK_DIR="$P" PATH="$TMP/bin:$PATH" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$CHECK" 2>&1; }
 
 # --- 1. current digest passes -------------------------------------------------
 index d1
@@ -100,7 +103,14 @@ has "$OUT" 'core.hooksPath is ".githooks", not assets/hooks' "the configured pat
 has "$OUT" "upkeep is not fully wired" "the summary separates upkeep from content"
 git -C "$P" config core.hooksPath assets/hooks
 
-# --- 9. no renderer shipped = nothing to keep current -------------------------------------
+# --- 9. no hook wired at all warns ------------------------------------------------
+git -C "$P" config --unset core.hooksPath
+OUT=$(DIGEST=d1 run_check); RC=$?
+eq "$RC" "1" "an unset hooksPath warns"
+has "$OUT" "core.hooksPath is unset, not assets/hooks" "the unset case reads as one value"
+git -C "$P" config core.hooksPath assets/hooks
+
+# --- 10. no renderer shipped = nothing to keep current -------------------------------------
 rm "$P/assets/scripts/render-seed-audit.sh"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a pack shipping no renderer has nothing to keep current"
