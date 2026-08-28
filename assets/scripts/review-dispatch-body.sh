@@ -51,7 +51,10 @@ no parallel review pass.
 `review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
 **Where the verdict goes**: `signoff.sh --review-bead <this bead> --verdict
 approve|request-changes` exactly once — it owns the mechanics. Never
-`gh pr review --approve` — the city does not approve PRs.
+`gh pr review --approve` — the city does not approve PRs. If it refuses
+because a rebase took your pinned commit off the branch, do not re-submit the
+same verdict: review the head it names and write the verdict that commit
+earns.
 H
 
 if [ -n "$NOTE" ]; then
