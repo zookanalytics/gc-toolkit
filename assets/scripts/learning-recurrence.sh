@@ -12,6 +12,13 @@
 # Exit: 0 report written · 1 a store was unreadable (no partial number) · 2 usage
 set -uo pipefail
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 usage() {
   cat >&2 <<'U'
 usage: learning-recurrence.sh [--window-days N] [--json] [--repo PATH]
@@ -121,7 +128,7 @@ while IFS="$TAB" read -r R RPATH; do
   else
     gc bd --rig "$R" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
   fi
-  tr -d '\000-\010\013\014\016-\037' < "$RAW" > "$RAW.clean" 2>/dev/null && mv "$RAW.clean" "$RAW"
+  scrub < "$RAW" > "$RAW.clean" 2>/dev/null && mv "$RAW.clean" "$RAW"
   if ! jq -e 'type=="array"' "$RAW" >/dev/null 2>&1; then
     warn "observation listing for store '$R' unreadable — refusing to report on a partial city"
     exit 1
