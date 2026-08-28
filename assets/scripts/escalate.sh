@@ -71,8 +71,9 @@ bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 # pass. A patrol wisp is burned and re-poured every cycle, so its id cannot
 # identify a situation from one call to the next and the conjunction can never
 # match. The key alone is the identity there, and a key-only listing cannot be
-# truncated past its own match. Either way the matched row is re-checked field by field, because
-# a listing that silently ignored a filter would suppress everything.
+# truncated past its own match. Either way the matched row is re-checked
+# field by field, because a listing that silently ignored a filter would
+# suppress everything.
 #
 # An unreadable listing files anyway — a duplicate visit is a bounded nuisance,
 # a silent mute is the failure this replaces.

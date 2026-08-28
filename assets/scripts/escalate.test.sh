@@ -160,8 +160,8 @@ has "$out" "already open" "the existing visit was found"
 has "$(cat "$STUB_GC_LOG")" "--metadata-field gc.continuation_group=tk-a" "the subject filter rides the listing itself"
 
 echo "# an ephemeral subject dedups on the key alone"
-# A patrol wisp is burned and re-poured every cycle, so subject+key could never
-# match across cycles: every pass filed another visit for a finding already open.
+# A patrol wisp is burned and re-poured every cycle, so its id names no durable
+# subject. A situation it raises is identified by its key alone.
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"doctor-fork-rate","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
 out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
 eq "$rc" 0 "a differing ephemeral subject exits 0"
@@ -191,7 +191,8 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key"
 "$SUT" --subject tk-wispy --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a bead id merely containing 'wisp' is still durable"
 
-# The pileup this replaces: 20 cycles of the same finding, each on its own wisp.
+# A key crowded with open visits on distinct ephemeral subjects is still one
+# open situation.
 crowd="["
 for i in $(seq 1 20); do
   crowd="$crowd{\"id\":\"other-$i\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"doctor-fork-rate\",\"gc.continuation_group\":\"lx-wisp-c$i\"},\"notes\":\"\"},"
