@@ -79,7 +79,8 @@ fi
 if command -v git >/dev/null 2>&1 && git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
     hookspath=$(git -C "$dir" config --get core.hooksPath 2>/dev/null)
     if [ "$hookspath" != "assets/hooks" ]; then
-        warnings+=("core.hooksPath is ${hookspath:+\"$hookspath\", }${hookspath:-unset,} not assets/hooks — nothing regenerates the audit on commit, so it goes stale silently between doctor runs; wire it: assets/scripts/render-seed-audit.sh --install-hook (deliberate on rigs that disable hooks — there, this check IS the mechanism)")
+        shown="${hookspath:+\"$hookspath\"}"
+        warnings+=("core.hooksPath is ${shown:-unset}, not assets/hooks — nothing regenerates the audit on commit, so it goes stale silently between doctor runs; wire it: assets/scripts/render-seed-audit.sh --install-hook (deliberate on rigs that disable hooks — there, this check IS the mechanism)")
     fi
 fi
 
