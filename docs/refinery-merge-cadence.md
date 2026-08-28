@@ -73,8 +73,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
-2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor with
-   `check.codex == green@<live head>`: adopt an existing PR for the branch or
+2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor whose
+   every marker-bearing `check_set` gate reads `green@<live head>` (the same
+   predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
+   set is held, never read as ungated): adopt an existing PR for the branch or
    `gh pr create` non-draft, re-read the created PR by number, refuse a moved
    head, replay the verdict as a comment (never an approval), then one
    `lifecycle.sh` transition carrying `pr_url`/`pr_number`/`merged_target`.

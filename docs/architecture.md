@@ -96,8 +96,8 @@ performer; the full transition table with writers is
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` writes the verdict marker or files one rework
    child.
-7. **PR.** With the gate green at the live head, `pr-open.sh` opens (or adopts)
-   the pull request.
+7. **PR.** With every declared gate green at the live head, `pr-open.sh` opens
+   (or adopts) the pull request.
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
    `lifecycle.sh` call.

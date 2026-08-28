@@ -191,7 +191,7 @@ while IFS= read -r row; do
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
          --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
@@ -374,7 +374,7 @@ GATES
           fi ;;
       esac
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
   fi
   if [ -n "$stale_gate" ]; then
@@ -469,7 +469,7 @@ GATES
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
     [ "$m" = "green@$head_oid" ] || all_green=0
   done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
   rd=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
   if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \

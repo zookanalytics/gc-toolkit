@@ -8,6 +8,7 @@
 # without .sha, and a failed read are all unanswerable, never "advanced"); the
 # stray-marker sweep (undeclared + malformed is cleared; well-formed,
 # exception@ and declared markers are not; an unpersisted clear is reported);
+# a multi-gate check_set split per gate rather than joined into one name;
 # in-flight dedup (routed, poured, claimed) + stranded repair
 # (convoy probe: re-sling only a review with no LIVE tracking convoy, and
 # converge after a hard sling failure); the dispatch shape
@@ -116,6 +117,19 @@ out=$(run); rc=$?
 eq "$rc" 0 "opt-out/settled pass exits 0"
 eq "$(meta B1 check_set)" "none" "the none sentinel is left alone"
 has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none, dispatch nothing"
+
+# check_set is a comma list and each gate is addressed by its own name, so the
+# split has to survive whitespace around the separators.
+echo "# a multi-gate check_set is raised per gate, never as one joined name"
+store "[$(anchor M1 pull_request "codex, triage" "green@$(oid m1)" polecat/m1)]"
+oid m1 > "$GH_DIR/head_polecat_m1"
+: > "$STUB_GC_LOG"
+out=$(run)
+hasnt "$out" "codextriage" "the comma list is not collapsed into one gate name"
+has "$out" "gate 'triage'" "the second declared gate is raised under its own name"
+mrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$mrid" check_name)" "triage" "the dispatched review names the real gate"
+eq "$(meta M1 dispatch_count)" "1" "the gate already green at the live head bought no dispatch"
 
 echo "# an exception the head has moved PAST is re-armed, cap or no cap"
 store "[$(anchor B4 pull_request codex "exception@$(oid old)" polecat/b4),
