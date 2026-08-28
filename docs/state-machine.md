@@ -202,7 +202,14 @@ an unreviewed head. That is the branch growing. A rebase, amend or squash
 takes the pinned commit off the branch instead, and `signoff.sh` refuses both
 verdicts and writes nothing: findings about a diff the branch no longer
 carries mint a rework child with nothing to implement. The reviewer re-pins at
-the live head and reviews that commit.
+the live head and reviews that commit. Clearing that dead pin is the whole of
+the recovery path, so `signoff.sh` reads it back and exits 2 naming the manual
+repair rather than reporting a clear that did not happen.
+
+`signoff.sh` closes the review bead itself, last. A bead that is already
+closed therefore had its verdict recorded, or was retired unjudged by
+`review-sweep.sh`, and either verdict against it is refused on the same terms:
+nothing written, no round spent.
 
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —

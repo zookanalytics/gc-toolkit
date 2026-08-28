@@ -13,6 +13,8 @@
 # Every oid stamped into a marker is a full 40 lowercase hex; a shorter one is
 # refused, since merge.sh can only read the marker by comparing it to a head.
 # Both verdicts are refused when the reviewed commit has left the branch.
+# Both are refused on an already-closed review bead: signoff closes the bead
+# itself, last, so a closed one was recorded or retired before it was judged.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
 # Exit: 0 recorded · 1 refused, no verdict written · 2 a write did not read back
 #       (the review bead is left open so the gate stays owed).
@@ -74,6 +76,14 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
 is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; nothing written"; exit 1; }
+
+# A verdict answering a closed bead may not clear a marker or spend a round:
+# the dispatch it answers was already recorded, or retired unjudged.
+REVIEW_STATUS=$(printf '%s' "$REVIEW_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
+if [ "$REVIEW_STATUS" = "closed" ]; then
+  warn "review bead $REVIEW_BEAD is already closed (gc.outcome='$(row_meta "$REVIEW_ROW" gc.outcome)'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the gate if it is still owed."
+  exit 1
+fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 [ -n "$CHECK_NAME" ] || CHECK_NAME=codex
 
@@ -181,6 +191,12 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   # the refusal stands either way.
   if [ "$(row_meta "$REVIEW_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
     gc bd update "$REVIEW_BEAD" --unset-metadata reviewed_oid >/dev/null 2>&1 || true
+    # A denied or raced delete does not always fail the call, and the note and
+    # warning below both state the pin as cleared. Read it back.
+    if [ "$(row_meta "$(bd_json show "$REVIEW_BEAD")" reviewed_oid)" = "$REVIEWED_OID" ]; then
+      warn "head moved to ${LIVE_HEAD:-unknown}, but clearing the dead dispatch pin did not read back on $REVIEW_BEAD: reviewed_oid is still $REVIEWED_OID. Nothing was written and no round was spent. The pin stands, so the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Clear it by hand: gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
+      exit 2
+    fi
   fi
   gc bd update "$REVIEW_BEAD" --append-notes \
     "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No marker written, no rework filed; the dispatch pin is cleared for a re-review at the live head." \
