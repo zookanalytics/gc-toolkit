@@ -78,7 +78,8 @@ rows=$(printf '%s' "$status_json" | jq -r "$patrol_jq"'
   | [$qn, $role, ((.running // false) | tostring), ((.suspended // false) | tostring)] | @tsv' 2>/dev/null)
 expected=$(printf '%s' "$status_json" | jq -r "[ $patrol_jq | 1 ] | length" 2>/dev/null)
 
-absent=(); nonnumeric=(); unreachable=(); measured=0; seen=0; refinery_rigs=""
+absent=(); nonnumeric=(); unreachable=(); unreadable=(); measured=0; seen=0; refinery_rigs=""
+total_agents=$(printf '%s' "$status_json" | jq -r '(.agents | length)' 2>/dev/null)
 while IFS=$'\t' read -r qn role running suspended; do
     [ -n "$qn" ] || continue
     seen=$((seen + 1))
@@ -92,17 +93,24 @@ while IFS=$'\t' read -r qn role running suspended; do
     fi
     body=$(run_bounded curl -sf --max-time 5 "$API_URL/v0/city/$city_name/agent/$qn" 2>/dev/null)
     if [ -z "$body" ]; then unreachable+=("$qn"); continue; fi
+    # A body jq cannot read leaves this empty, which is a different claim from
+    # an object that carries no such key — only the latter indicts the schema.
     tokens=$(printf '%s' "$body" | jq -r \
         'if (has("input_tokens") | not) or (.input_tokens == null) then "<none>" else (.input_tokens | tostring) end' 2>/dev/null)
     case "$tokens" in
-        '<none>' | '') absent+=("$qn") ;;
-        *[!0-9]*)      nonnumeric+=("$qn (input_tokens=$tokens)") ;;
-        *)             measured=$((measured + 1)) ;;
+        '')       unreadable+=("$qn") ;;
+        '<none>') absent+=("$qn") ;;
+        *[!0-9]*) nonnumeric+=("$qn (input_tokens=$tokens)") ;;
+        *)        measured=$((measured + 1)) ;;
     esac
 done <<< "$rows"
 
 # A silently short enumeration would report the same OK as a healthy city — the
-# failure this whole check exists to refuse.
+# failure this whole check exists to refuse. `expected` is the same filter as
+# `rows`, so it catches a partial loss but agrees with a total one.
+if [ "$seen" -eq 0 ] && [ "${total_agents:-0}" -gt 0 ] 2>/dev/null; then
+    warnings+=("none of the $total_agents agent(s) in \`gc --city $city status --json\` carries a witness, deacon or refinery role, which is what the hook self-gates to — either this city runs no patrol agent or the roster's naming moved and nothing was measured")
+fi
 if [ "${expected:-0}" -ne "$seen" ] 2>/dev/null; then
     warnings+=("the patrol roster enumerated $seen of $expected agent(s) — the measurement arm is incomplete, so a dead endpoint would not be visible for the rest")
 fi
@@ -115,6 +123,9 @@ if [ "${#nonnumeric[@]}" -ne 0 ]; then
 fi
 if [ "${#unreachable[@]}" -ne 0 ]; then
     warnings+=("$API_URL/v0/city/$city_name/agent/<agent> returned nothing for $(commas "${unreachable[@]}") — the supervisor API is the hook's only measurement, and whether it carries input_tokens is undetermined for these agents")
+fi
+if [ "${#unreadable[@]}" -ne 0 ]; then
+    warnings+=("$API_URL/v0/city/$city_name/agent/<agent> answered with a body jq could not read as a JSON object for $(commas "${unreadable[@]}") — the hook reads it with jq too and would measure nothing, but whether the field is gone or the answer is a transient gateway page is undetermined")
 fi
 
 # --- Arm 2: the refinery's git-op defer guard is not latched ---------------

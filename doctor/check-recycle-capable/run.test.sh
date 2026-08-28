@@ -84,7 +84,7 @@ run_check() {
   API_DIR="$TMP/api" CURL_LOG="$TMP/curl.log" bash "$CHECK" 2>&1
 }
 
-# --- 1. healthy and idle: silent --------------------------------------------
+# --- 1. healthy and idle: silent ---------------------------------------------
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a numeric input_tokens and a clean rig tree is OK"
 has "$OUT" "3 patrol agent(s)" "the three awake patrol agents were measured"
@@ -125,13 +125,21 @@ eq "$RC" "1" "an unreachable endpoint warns — the field's presence is undeterm
 has "$OUT" "returned nothing" "the warning says the probe came back empty"
 healthy_api
 
-# --- 6. the city path resolves to no city name -------------------------------
+# --- 6. a body that is not a JSON object -------------------------------------
+printf '<html>502 Bad Gateway</html>\n' > "$TMP/api/alpha_gc-toolkit.refinery.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unparseable body warns — it is not evidence the field was removed"
+has "$OUT" "could not read as a JSON object" "the warning says the body could not be read"
+hasnt "$OUT" "no input_tokens field" "and does not accuse the endpoint of dropping the field"
+healthy_api
+
+# --- 7. the city path resolves to no city name -------------------------------
 printf '{"cities":[{"name":"other","path":"/somewhere/else"}]}\n' > "$TMP/cities-miss.json"
 OUT=$(CITIES_JSON="$TMP/cities-miss.json" run_check); RC=$?
 eq "$RC" "2" "a city path that resolves to no name is an ERROR"
 has "$OUT" "exits before measuring" "the finding states the hook's own silent exit"
 
-# --- 7. fail-CLOSED on unreadable rosters ------------------------------------
+# --- 8. fail-CLOSED on unreadable rosters ------------------------------------
 OUT=$(CITIES_RC=1 run_check); RC=$?
 eq "$RC" "1" "an unreadable city roster warns, never passes"
 OUT=$(STATUS_RC=1 run_check); RC=$?
@@ -141,7 +149,20 @@ OUT=$(RIGS_RC=1 run_check); RC=$?
 eq "$RC" "1" "an unreadable rig roster warns — a latched guard would be invisible"
 has "$OUT" "defer-guard arm did not run" "the warning names the arm that was skipped"
 
-# --- 8. LATCHED defer guard — the other live failure -------------------------
+# --- 9. a roster that carries agents but no patrol role ----------------------
+# `expected` is the same filter as `rows`, so a total enumeration loss agrees
+# with itself; only the roster's own size tells it from a city that runs none.
+cat > "$TMP/status-norole.json" <<'EOF'
+{"agents":[{"name":"gc-toolkit.polecat-1","qualified_name":"alpha/gc-toolkit.polecat-1","scope":"rig","running":true,"suspended":false}]}
+EOF
+OUT=$(STATUS_JSON="$TMP/status-norole.json" run_check); RC=$?
+eq "$RC" "1" "a roster with agents but no patrol role warns, never reports OK"
+has "$OUT" "roster's naming moved" "the warning names the drift it cannot rule out"
+printf '{"agents":[]}\n' > "$TMP/status-empty.json"
+OUT=$(STATUS_JSON="$TMP/status-empty.json" run_check); RC=$?
+eq "$RC" "0" "a city that runs no agent at all measures nothing and stays silent"
+
+# --- 10. LATCHED defer guard — the other live failure ------------------------
 printf 'dolt.mode: server\n' > "$TMP/rigs/alpha/.beads/config.yaml"
 age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
 OUT=$(run_check); RC=$?
@@ -151,12 +172,12 @@ has "$OUT" "23d" "the finding states how long the guard has been true"
 has "$OUT" "rig alpha" "the finding names the rig whose refinery is stuck"
 has "$OUT" "24h bound" "the finding states the bound it crossed"
 
-# --- 9. the bound is configurable --------------------------------------------
+# --- 11. the bound is configurable -------------------------------------------
 OUT=$(GC_DOCTOR_RECYCLE_LATCH_HOURS=$((30 * 24)) run_check); RC=$?
 eq "$RC" "0" "a bound wider than the age reads the same tree as a git op in flight"
 has "$OUT" "inside the 720h bound" "the override is the bound the note reports"
 
-# --- 10. a TRANSIENT dirty tree is not a latch -------------------------------
+# --- 12. a TRANSIENT dirty tree is not a latch -------------------------------
 touch "$TMP/rigs/alpha/.beads/config.yaml"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a freshly dirtied tree is a git op in flight, not a latch"
@@ -164,7 +185,7 @@ has "$OUT" "defer guard true" "the transient deferral is noted"
 hasnt "$OUT" "cannot fire" "and it is not a finding"
 git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml
 
-# --- 11. an in-flight git-op marker is recognised ----------------------------
+# --- 13. an in-flight git-op marker is recognised ----------------------------
 : > "$TMP/rigs/alpha/.git/MERGE_HEAD"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a fresh merge marker defers normally"
@@ -175,7 +196,7 @@ eq "$RC" "2" "a merge marker older than the bound is a latch, not an op in fligh
 has "$OUT" "MERGE_HEAD" "the stale marker is named"
 rm -f "$TMP/rigs/alpha/.git/MERGE_HEAD"
 
-# --- 12. untracked files never latch the guard -------------------------------
+# --- 14. untracked files never latch the guard -------------------------------
 # The hook passes --untracked-files=no, so scratch must not read as a git op.
 echo scratch > "$TMP/rigs/alpha/scratch.tmp"
 age_file "$TMP/rigs/alpha/scratch.tmp" $((40 * 86400))
@@ -184,7 +205,7 @@ eq "$RC" "0" "an untracked file is scratch, not a defer guard"
 hasnt "$OUT" "scratch.tmp" "and it is named in no finding"
 rm -f "$TMP/rigs/alpha/scratch.tmp"
 
-# --- 13. a rig with no refinery is not read ----------------------------------
+# --- 15. a rig with no refinery is not read ----------------------------------
 cat > "$TMP/status-nowork.json" <<'EOF'
 {"agents":[{"name":"gc-toolkit.witness","qualified_name":"alpha/gc-toolkit.witness","scope":"rig","running":true,"suspended":false}]}
 EOF
@@ -195,7 +216,7 @@ eq "$RC" "0" "the guard is refinery-only — a witness-only rig is not read"
 hasnt "$OUT" "config.yaml" "no dirty-tree finding is raised for it"
 git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml
 
-# --- 14. a pack that ships no hook has nothing to assert ---------------------
+# --- 16. a pack that ships no hook has nothing to assert ---------------------
 mkdir -p "$TMP/emptypack"
 OUT=$(GC_PACK_DIR="$TMP/emptypack" GC_CITY_PATH="$TMP/city" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a pack with no cycle-recycle overlay is OK"
