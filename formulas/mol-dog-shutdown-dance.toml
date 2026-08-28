@@ -59,9 +59,17 @@ requester_endpoint="${requester%/}/"
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/dance-probe.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
+# Every escalate.sh call below is rig-bound because this pool is city-scoped:
+# with GC_RIG unset the script's default converse pool renders bare, an
+# address no rig-scoped pool holds, and it refuses before filing anything.
+# The warrant's own route names the rig whose store it lives in, which is the
+# store the visit must land in for its tracks edge to reach the warrant.
+warrant_route="$(printf '%s' "$warrant_json" | jq -r '.[0].metadata["gc.routed_to"] // empty')"
+ESC_RIG=""; case "$warrant_route" in */*) ESC_RIG="${warrant_route%%/*}" ;; esac
+ESC_RIG="${ESC_RIG:-${GC_RIG:-gc-toolkit}}"
 if [ -z "$target" ] || [ -z "$reason" ]; then
   gc bd update "$warrant_id" --set-metadata gc.outcome=refused --append-notes "MALFORMED_WARRANT: missing warrant.target or warrant.reason" --status=closed
-  "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key dog-malformed-warrant --message "Warrant $warrant_id was malformed (missing warrant.target or warrant.reason); closed refused. Check the detector that filed it."
+  GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key dog-malformed-warrant --message "Warrant $warrant_id was malformed (missing warrant.target or warrant.reason); closed refused. Check the detector that filed it."
   gc session nudge "$requester_endpoint" "DOG_DONE: warrant $warrant_id - REFUSED (malformed warrant)" || true
   gc runtime drain-ack
   exit 1
@@ -71,7 +79,7 @@ fi
 A `warrant.target` dance-probe.sh rejects as unsafe (its usage error, exit
 2) is malformed too — same stop path, same REFUSED notice. Otherwise
 continue to interrogate-1 carrying $target, $reason, $requester_endpoint,
-$SCRIPTS."""
+$ESC_RIG, $SCRIPTS."""
 
 [[steps]]
 id = "interrogate-1"
@@ -136,7 +144,7 @@ warrant:
 
 ```bash
 warrant_id="$(gc hook current --id-only)" || exit 1
-"$SCRIPTS/escalate.sh" --subject "$warrant_id" --key "wedged-$target" --message "Shutdown dance for $target: three silent interrogations but gc session kill failed. Warrant $warrant_id left open; a human owns this session now."
+GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$warrant_id" --key "wedged-$target" --message "Shutdown dance for $target: three silent interrogations but gc session kill failed. Warrant $warrant_id left open; a human owns this session now."
 gc runtime drain-ack
 ```
 
@@ -161,6 +169,7 @@ gc session nudge "$requester_endpoint" "DOG_DONE: warrant $warrant_id - <PARDONE
 
 `DOG_DONE:` is a protocol token — the deacon/witness inbox steps consume it;
 keep the prefix verbatim. If the close itself fails, escalate
-(`--key "wedged-$target"`) instead of leaving a silent open claim. Then
+(`GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --key "wedged-$target"`) instead
+of leaving a silent open claim. Then
 close any poured step beads (step-close.sh, forward order — refusal on a
 plain warrant is the designed no-op) and `gc runtime drain-ack`."""

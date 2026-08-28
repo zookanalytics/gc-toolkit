@@ -48,9 +48,9 @@ agents/witness/prompt.template.md
 assets/scripts/render-seed-audit.sh
 1865d17ae05668fa5d9209582e70ed6bef68bb4673d278c2e101e938596d08fc
 formulas/mol-deacon-patrol.toml
-f326813d9aa5b190325520b1495a6d48f4bbcee07f5d87273790ef1d92906b64
+eca93e7b29a881e8fcaa2a83f35347c4f01310e542e84920067f76a9e139bbd9
 formulas/mol-dog-shutdown-dance.toml
-2186194ddd48e47dd97b6b3526c40c2cef60b0003a48e229b7781b7771791bca
+e9c1f8d467a71138bf943cd00d87aeae51243820285ba852a9bd5fc30a9f3d8d
 formulas/mol-feedback-distiller.toml
 febf753cca232a6fab3c696b6428aa4a03ebfe812db73d9bc9438876391dc0ff
 formulas/mol-feedback-miner.toml
@@ -66,7 +66,7 @@ formulas/mol-review.toml
 formulas/mol-visit.toml
 ee39c6a655dd3af79d5dcfa76b637c2e94fbe529028d8efc168d86e07ed74e77
 formulas/mol-witness-patrol.toml
-52639c590400270ea2c3de7cdee340762263cc0405cad43f104d82d67bb07476
+14c4511d5a5ac588d791999cbedb50856389bf2bc2196b13829b310271d03dd0
 pack.toml
 3658b4eb8cc4d0b008e24f3f20148f9695c9b1145b651ecfca7b2be922db6c70
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
