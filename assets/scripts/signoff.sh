@@ -192,8 +192,15 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   if [ "$(row_meta "$REVIEW_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
     gc bd update "$REVIEW_BEAD" --unset-metadata reviewed_oid >/dev/null 2>&1 || true
     # A denied or raced delete does not always fail the call, and the note and
-    # warning below both state the pin as cleared. Read it back.
-    if [ "$(row_meta "$(bd_json show "$REVIEW_BEAD")" reviewed_oid)" = "$REVIEWED_OID" ]; then
+    # warning below both state the pin as cleared. Read it back. row_meta
+    # answers '' for a key that is gone and for a row it could not read, so
+    # absence is proof only from a row that resolved.
+    AFTER_ROW=$(bd_json show "$REVIEW_BEAD")
+    if ! is_rows "$AFTER_ROW"; then
+      warn "head moved to ${LIVE_HEAD:-unknown}, but $REVIEW_BEAD would not resolve on the read-back after clearing the dead dispatch pin, so whether reviewed_oid=$REVIEWED_OID is gone is unproven. Nothing was written and no round was spent. If the pin survived, the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Check it by hand: gc bd show $REVIEW_BEAD --json, then gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
+      exit 2
+    fi
+    if [ "$(row_meta "$AFTER_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
       warn "head moved to ${LIVE_HEAD:-unknown}, but clearing the dead dispatch pin did not read back on $REVIEW_BEAD: reviewed_oid is still $REVIEWED_OID. Nothing was written and no round was spent. The pin stands, so the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Clear it by hand: gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
       exit 2
     fi

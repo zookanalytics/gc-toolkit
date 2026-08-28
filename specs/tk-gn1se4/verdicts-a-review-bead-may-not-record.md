@@ -88,18 +88,32 @@ code) naming the surviving pin, the loop it causes, and the manual
 `gc bd update <bead> --unset-metadata reviewed_oid` repair, instead of the
 note that would claim the clear happened.
 
+**A read-back that could not read.** The clear is the one guard whose proof is
+an *absence*, and `row_meta` answers `''` both for a key that is gone and for a
+row it could not parse — `gc bd show` returning no rows, invalid JSON, or
+nothing at all. Comparing that empty answer against the dead oid therefore
+passes a failed read straight through to the note and warning claiming the pin
+was cleared, which is the same silent recovery-path failure one paragraph up,
+reached by a different route. The arm now reads the bead into `AFTER_ROW` and
+requires `is_rows "$AFTER_ROW"` before absence counts as evidence; a row that
+will not resolve exits 2 naming the unproven clear and the by-hand
+`gc bd show` / `--unset-metadata` check. It fails closed on purpose: refusing a
+clear that in fact worked costs one operator read, while accepting one that did
+not costs every later claim a re-review of the departed commit.
+
 ## Verification
 
-`signoff.test.sh`: 125 assertions, 18 new, all green.
+`signoff.test.sh`: 137 assertions, 30 new, all green.
 
-Against `origin/main`'s `signoff.sh` the new suite fails 12 — 6 per guard —
-so neither is vacuous. Among them is `the bead is never told the pin was
-cleared`, which fails on main's own `gone` arm: the read-back defect this
-bead's second commit diagnosed is live in what landed, not only in the arm
-this branch originally wrote.
+Against `origin/main`'s `signoff.sh` the new suite fails 19 — 6 for the
+closed-review-bead refusal, 6 for the dead-pin read-back, 7 for requiring a
+resolved row before absence proves the clear — so none of the three is vacuous.
+Among them is `the bead is never told the pin was cleared`, which fails on
+main's own `gone` arm: the read-back defect this bead's second commit diagnosed
+is live in what landed, not only in the arm this branch originally wrote.
 
-Mutating each guard out in isolation fails exactly that guard's 6 assertions
-and nothing else.
+Mutating each guard out in isolation fails exactly that guard's assertions and
+nothing else.
 
 ## Provenance
 
