@@ -2,6 +2,8 @@
 # doctor/check-plan-targets-filed — a landed plan's targets are a filing
 # checklist. A table marked `<!-- plan-targets -->` claims that every one of its
 # rows became tracked work; this check reads that claim back against the ledger.
+# The claim is carried by the column headed `Bead`, named rather than positional
+# so that adding a column to a bound table cannot re-point the binding.
 # An unbound row is the silent drop the check exists to catch: a set can be
 # three-quarters converted and still read as finished, because nothing else
 # records which rows were dealt with.
@@ -16,7 +18,7 @@ dir="${GC_PACK_DIR:-.}"
 BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 
 errors=(); warnings=(); notes=(); still_open=()
-unbound=(); nomarker=(); unresolved=()
+unbound=(); nomarker=(); unresolved=(); nobind=()
 docs_seen=0; rows_seen=0; bead_rows=0; none_rows=0; landed_rows=0
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
@@ -31,9 +33,10 @@ US=$'\037'
 
 # Emits US-separated records: KIND, path, line, payload, extra.
 # A ROW carries its binding state; a REF carries one bead ID cited in the
-# binding cell. A row may cite more than one bead — a target whose halves were
-# filed separately is exactly the shape that lost one of them — so every ID in
-# the cell is emitted for verification, not just the one that opens it.
+# binding cell; a NOBIND reports a marked table with no binding column.
+# A row may cite more than one bead — a target whose halves were filed
+# separately is exactly the shape that lost one of them — so every ID in the
+# cell is emitted for verification, not just the one that opens it.
 scan_awk='
 function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 # Marker state resets per file. An armed marker still pending when a file ends
@@ -41,7 +44,7 @@ function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
 # is cleared by the next file.
 FNR == 1 {
     if (armed) print "NOTABLE" US prev_file US armed_line US "" US ""
-    intable = 0; armed = 0; hdr = 0; fence = 0; prev_file = FILENAME
+    intable = 0; armed = 0; hdr = 0; fence = 0; bindcol = 0; prev_file = FILENAME
 }
 {
     fline = trim($0)
@@ -62,11 +65,21 @@ fline ~ /^<!--[ \t]*plan-targets[ \t]*-->$/ { armed = 1; armed_line = FNR; intab
         next
     }
     if (!armed && !intable) next
-    if (armed && !intable) { intable = 1; armed = 0; hdr = 1; next }
+    # Growing a bound table by one column must not re-point what its rows
+    # bind to, so the column is resolved by header name and a table naming
+    # none is reported rather than read by position.
+    if (armed && !intable) {
+        intable = 1; armed = 0; hdr = 1; bindcol = 0
+        n = split(line, f, "|")
+        last = (substr(line, length(line), 1) == "|") ? n - 1 : n
+        for (i = 2; i <= last; i++) if (tolower(trim(f[i])) == "bead") { bindcol = i; break }
+        if (!bindcol) print "NOBIND" US FILENAME US FNR US "" US line
+        next
+    }
     if (hdr) { hdr = 0; next }
+    if (!bindcol) next
     n = split(line, f, "|")
-    last = (substr(line, length(line), 1) == "|") ? n - 1 : n
-    cell = (last >= 2) ? trim(f[last]) : ""
+    cell = (n >= bindcol) ? trim(f[bindcol]) : ""
     state = "UNBOUND"
     if (match(cell, /^`[a-z][a-z0-9]*-[a-z0-9]+(\.[0-9]+)?`/)) state = "BEAD"
     else if (tolower(cell) ~ /^none[^a-z0-9]/ && trim(substr(cell, 5)) ~ /[a-z0-9]/) state = "NONE"
@@ -123,6 +136,7 @@ while IFS="$US" read -r kind path line payload extra; do
             esac ;;
         REF)
             wanted_ids["$payload"]="${wanted_ids[$payload]:-}${wanted_ids[$payload]:+, }$rel:$line" ;;
+        NOBIND)  nobind+=("$rel:$line: ${extra:0:120}") ;;
         NOTABLE) nomarker+=("$rel:$line") ;;
     esac
 done < "$records_file"
@@ -194,6 +208,10 @@ if [ "${#wanted_ids[@]}" -gt 0 ]; then
 fi
 
 # --- report -------------------------------------------------------------------
+if [ "${#nobind[@]}" -gt 0 ]; then
+    errors+=("${#nobind[@]} declared table(s) have no \`Bead\` column, so no row in them binds to anything:")
+    for u in "${nobind[@]}"; do errors+=("    $u"); done
+fi
 if [ "${#unbound[@]}" -gt 0 ]; then
     errors+=("${#unbound[@]} target row(s) bind to nothing — the row schedules work that nothing tracks:")
     for u in "${unbound[@]}"; do errors+=("    $u"); done

@@ -203,7 +203,7 @@ scope as the measuring stick but do not rewrite it.
 Some documents schedule work: a plan with targets, an audit with findings, an
 analysis with a ranked shortlist. The work itself becomes beads, because a
 document is not a queue and nothing dispatches from one. Declare that set as a
-table, mark it, and bind every row:
+table, mark it, and give it a `Bead` column:
 
 ```markdown
 <!-- plan-targets -->
@@ -214,8 +214,8 @@ table, mark it, and bind every row:
 | 2 | One control-char scrubber | none — folded into the first target that touches one |
 ```
 
-The table's **last column is the binding**, and every row must state one of
-three things:
+The **`Bead` column is the binding**, wherever it sits in the row, and every
+row must state one of three things:
 
 | Binding | Meaning |
 |---|---|
@@ -226,25 +226,11 @@ three things:
 Like the [`## Scope`](#the-scope-section) standard, this constrains what a
 scheduling document must *carry*, not what it may conclude.
 
-**Why the binding goes in the row.** A single promise is either kept or
-obviously absent — one item, asked once. A set is where members vanish,
-because a set can be three-quarters converted and still read as finished and
-nothing records which rows were dealt with. The measured case is
-[`specs/tk-twp697/`](../specs/tk-twp697/plan-targets-never-filed.md): a plan
-merged with four targets, one was filed from it, and the largest waited 21
-hours while 283 lines landed in the very file that target existed to shrink.
-Applying the rule by hand to the same plan found a second target nobody had
-noticed was missing.
-
-**`doctor/check-plan-targets-filed` reads the claim back.** A row that binds to
-nothing is an error, and so is a bead ID that resolves in no store, so a row
-cannot be satisfied by writing a plausible-looking string. The check also
-reports which bound beads are still open, which is what makes a landed plan's
-table a checklist rather than a one-time gate.
-
-The check is opt-in by the marker, and deliberately so: it verifies the
-declarations that exist and cannot know about a set that declared nothing.
-What review looks for is the marker.
+`doctor/check-plan-targets-filed` reads the declaration back, and errors on a
+row that binds to nothing, on a marked table that has no `Bead` column, and on
+a bead ID that resolves in no store. Why the binding lives in the row, what it
+was measured against, and what the marker's opt-in leaves uncovered are in
+[`specs/tk-dks4kk/plan-to-beads-mechanism.md`](../specs/tk-dks4kk/plan-to-beads-mechanism.md).
 
 ## Cross-doc references
 

@@ -10,12 +10,13 @@ description: Decision for tk-dks4kk on what makes a landed plan's target list a 
 A scheduling document declares its target set as a marked table, and a doctor
 check reads that declaration back against the ledger.
 
-The document marks the table with `<!-- plan-targets -->`. The table's last
-column binds each row to one of three things: a backticked bead ID, `none —
-<reason>` for a member that deliberately gets none, or `landed: <what>` once it
-is done. `doctor/check-plan-targets-filed` errors on a row that binds to
-nothing and on a bead ID that resolves in no reachable store, and reports which
-bound beads are still open.
+The document marks the table with `<!-- plan-targets -->` and gives it a column
+headed `Bead`, which binds each row to one of three things: a backticked bead
+ID, `none — <reason>` for a member that deliberately gets none, or `landed:
+<what>` once it is done. `doctor/check-plan-targets-filed` errors on a row that
+binds to nothing, on a marked table carrying no `Bead` column, and on a bead ID
+that resolves in no reachable store, and reports which bound beads are still
+open.
 
 The rule is in `docs/file-structure.md`, applied at write time by
 `skills/filing-documentation`, and retrofitted onto
@@ -33,11 +34,46 @@ wording — *"the mechanism, not the doc convention"* — settles the question
 `tk-twp697` left open, so the options that bead rejected on the grounds that
 they were more than a documentation change are reopened here and re-judged.
 
-The measurements are not repeated here.
-[`specs/tk-twp697/plan-targets-never-filed.md`](../tk-twp697/plan-targets-never-filed.md)
-holds them: the 21-hour window, the controlled comparison across three
-set-shaped documents, and the second dropped target that applying the rule by
-hand uncovered.
+## The measured case
+
+`tk-twp697`'s own record never landed — PR #455 closed unmerged when this bead
+superseded it — so its measurements are restated here rather than cited.
+
+`specs/tk-z9nln/consolidation-plan.md` merged at 2026-08-23T07:33:31Z (PR #435)
+with four targets, three of them fileable. The plan converted **one**. Target
+1's bead `tk-zab6q` predated the plan by 25 hours, so the plan never filed it;
+Target 3 was filed 5 h 37 m after the merge; Target 2 — the largest, and next
+in the plan's own sequence — became `tk-clvkf6` only 20 h 55 m later, when a
+sitting tripped over it.
+
+The window was not hypothetical. Four minutes after the plan merged, `tk-sfg2e`
+was filed to *add* to `gc-helm.sh`, and 64 minutes after, its first commit put
+283 lines into the very file Target 2 existed to cut by ~2,370. PR #439 was
+closed unmerged 41 seconds after Target 2 finally became a bead: the bead and
+the cancellation were the same act of human attention, and nothing systemic
+produced either.
+
+Three set-shaped documents in the repo differ in one thing, which is what
+locates the defect rather than merely correlating with it:
+
+| Document | Bead IDs in the rows? | Converted |
+|---|---|---|
+| `docs/component-model.md` §3 | yes, at authoring time | 6 of 6, the day it was written |
+| `specs/tk-23wdf/context-budget-ledger.md` §7 | yes, maintained in place | all |
+| `specs/tk-z9nln/consolidation-plan.md` | no | 1 of 3 filed from the plan |
+
+The plan cites twelve bead IDs in its body as provenance and not one in a
+target row, so the convention was not unknown to its author; it was never
+applied to the document's own output. A single promise is either kept or
+obviously absent — one item, asked once. A set can be three-quarters converted
+and still read as finished, because a four-row table has no memory of which
+rows were dealt with.
+
+Applying the rule by hand to that plan found a second dropped target. Target 1
+reads "close the graph.v2 step chain *and retire the quiesce sweeper*" and
+carries the whole 2,099-line figure; those lines are the sweeper, and `tk-zab6q`
+/ PR #443 landed only the close path. The deletion had no bead at all. Filed as
+`tk-eh0r3m`.
 
 ## 1. What had to become answerable
 
@@ -77,22 +113,28 @@ Two parts, and neither works alone.
 The marker makes identification exact and opt-in, which matters because
 guessing which documents schedule work is a heuristic with no good answer — a
 plan, an audit and a ranked shortlist are the same shape as any other table.
-The last column carries the binding, so the rule does not depend on a column
-name; the live precedents in this repo call that column `Bead` in one document
-and `Check` in another.
+A column headed `Bead` carries the binding, and a marked table that has none is
+an error rather than a table read some other way.
 
 **The reader.** `doctor/check-plan-targets-filed`, ledger-only and read-only,
-in the same idiom as the pack's other ten checks. It runs after the fact, on
-the checkout, which is what the bead asked for: the failure it catches happened
-in the window *after* a plan merged, and a pre-merge gate would not have been
-looking then.
+in the same idiom as the pack's other structural checks. It runs after the
+fact, on the checkout, which is what the bead asked for: the failure it catches
+happened in the window *after* a plan merged, and a pre-merge gate would not
+have been looking then.
 
-Four decisions inside the check that are load-bearing:
+The decisions inside the check that are load-bearing:
 
 - **Every bead in a cell is verified, not just the first.** Target 1 of the
   consolidation plan was two deletions filed as two beads, and that split is
   what let one half go unfiled for a day. A binding that could name only one
   bead would have reproduced the original defect.
+- **The binding column is named, not positional.** The first draft read
+  whichever cell came last, so that the rule would not constrain the header.
+  Extending a table is an ordinary edit, and under that rule it silently
+  re-points every row: a table given a trailing `Status` column read
+  `landed: done elsewhere` as the binding while the `Bead` cell beside it was
+  empty, and the check passed. The binding has to be what the header names,
+  and a table that names nothing has to fail rather than fall back to a guess.
 - **A bead ID must resolve.** Without this the check degenerates into "the cell
   is not blank", and a row could be satisfied by a plausible-looking string.
 - **Code fences are skipped.** `docs/file-structure.md` shows the convention in

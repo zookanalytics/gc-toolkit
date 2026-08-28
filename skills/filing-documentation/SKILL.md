@@ -38,14 +38,16 @@ the bead-ID-alone directory naming.
 
 If its output is a *set* of follow-up work — a plan with targets, an audit
 with findings, a ranked shortlist — file each member as a bead now and bind
-every row to it. Mark the table with `<!-- plan-targets -->` and put the
-binding in the last column: a backticked bead ID, `none — <reason>` for a
-member that deliberately gets none, or `landed: <what>` once it is done.
+every row to it. Mark the table with `<!-- plan-targets -->` and give it a
+`Bead` column, in which each row carries a backticked bead ID, `none —
+<reason>` for a member that deliberately gets none, or `landed: <what>` once
+it is done.
 
 Do this before you commit, because the IDs belong in the file.
 `doctor/check-plan-targets-filed` reads the table back afterwards and errors
-on a row that binds to nothing or names a bead that does not exist.
-`docs/file-structure.md` carries the rule and the measured case.
+on a row that binds to nothing, on a marked table with no `Bead` column, and
+on a row naming a bead that does not exist. `docs/file-structure.md` carries
+the rule.
 
 ## 4. Commit it
 

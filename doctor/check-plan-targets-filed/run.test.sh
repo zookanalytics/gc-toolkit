@@ -78,6 +78,48 @@ eq "$RC" "2" "a row that binds to nothing is an ERROR"
 has "$OUT" "docs/plan.md:8" "the unbound row is named by file and line"
 has "$OUT" "The dropped one" "the unbound row's text is shown"
 
+# --- 2b. the binding is the `Bead` column, not whichever cell is last ---------
+# Growing a bound table by one column is an ordinary edit. Reading the last
+# cell instead re-points the binding to the new column, and a row that had
+# stopped naming a bead then reads as bound by whatever the new column says.
+doc '# Plan' '' '<!-- plan-targets -->' '' \
+    '| # | Target | Bead | Status |' '|---|---|---|---|' \
+    '| 1 | Do the thing | `tk-real1` | in review |' \
+    '| 2 | The dropped one | | landed: done elsewhere |'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an empty Bead cell behind a trailing column is still an ERROR"
+has "$OUT" "The dropped one" "the row whose Bead cell is empty is named"
+has "$OUT" "2 target row(s): 1 bead-bound, 0 deliberate none, 0 landed" \
+    "each row is classified by its Bead cell, not by the trailing column"
+
+# --- 2c. a bound table survives being extended -------------------------------
+doc '# Plan' '' '<!-- plan-targets -->' '' \
+    '| # | Target | Bead | Status |' '|---|---|---|---|' \
+    '| 1 | Do the thing | `tk-real1` | landed: done elsewhere |'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "adding a trailing column to a fully bound table is still OK"
+has "$OUT" "1 bead-bound, 0 deliberate none, 0 landed" "the added column does not become the binding"
+
+# --- 2d. the Bead column need not be last ------------------------------------
+doc '# Plan' '' '<!-- plan-targets -->' '' \
+    '| # | Bead | Target |' '|---|---|---|' \
+    '| 1 | `tk-real1` | Do the thing |'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the Bead column binds wherever it sits in the header"
+
+# --- 2e. a declared table with no Bead column is an ERROR --------------------
+# Fails closed: the marker claims every row became tracked work, and a table
+# with no binding column states that claim about nothing. Passing it would let
+# a document opt into the check and out of its content in the same edit.
+doc '# Plan' '' '<!-- plan-targets -->' '' \
+    '| # | Target | Status |' '|---|---|---|' \
+    '| 1 | Do the thing | landed: done elsewhere |'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a declared table with no Bead column is an ERROR"
+has "$OUT" 'no `Bead` column' "the message names the binding column that is missing"
+has "$OUT" "docs/plan.md:5" "the table is named by the line its header sits on"
+has "$OUT" "0 target row(s)" "rows under an unbound header are not counted as examined"
+
 # --- 3. a bead ID that resolves nowhere is an ERROR ---------------------------
 doc '# Plan' '' '<!-- plan-targets -->' '' \
     '| # | Target | Bead |' '|---|---|---|' \
@@ -178,7 +220,7 @@ has "$OUT" "0 target row(s)" "the fenced example contributes no rows"
 # Arming on a mention would make every document that explains the rule declare
 # a checklist it does not have.
 doc '# Prose that names the marker' '' \
-    'Mark the table with `<!-- plan-targets -->` and bind the last column.' '' \
+    'Mark the table with `<!-- plan-targets -->` and bind its `Bead` column.' '' \
     '| # | Not a checklist | Risk |' '|---|---|---|' \
     '| 1 | must not be scanned | |'
 OUT=$(run_check); RC=$?
