@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # escalate.sh — one open visit per situation. Files a board-visible visit on
 # the subject bead (the canonical gate-visit shape from formulas/mol-visit.toml)
-# stamped with an escalation_key; a later call with the same subject+key finds
+# stamped with an escalation_key; a later call naming the same situation finds
 # the open visit and files nothing. Replaces escalation-gate.sh and every
 # patrol `gc mail send` — escalations are visits a human can claim and close.
 #   escalate.sh --subject <bead-id> --key <situation-key> --message <text>
@@ -23,9 +23,14 @@ usage() {
 usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
                    [--pool <rig-qualified converse pool>]
 
-  --subject  the bead the escalation is about; the visit tracks it (required)
-  --key      names the SITUATION, not the wording: one open visit per
-             subject+key, [A-Za-z0-9._-] only (required)
+  --subject  the bead the escalation is about; the visit tracks it (required).
+             A durable bead also narrows the dedup to that bead; an ephemeral
+             one (a patrol wisp) cannot, so there the key alone is the identity
+  --key      names the SITUATION, not the wording: one open visit per key,
+             narrowed to the subject when the subject is durable.
+             [A-Za-z0-9._-] only (required). To keep two situations apart
+             under an ephemeral subject, encode what distinguishes them in
+             the key (`wedged-<target>`)
   --message  what the visit needs from a human; first line becomes the
              visit title's headline (required)
   --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse
@@ -55,20 +60,43 @@ esac
 
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 
-# Idempotence: an open (or claimed) visit for this subject+key means the human
-# is already asked. BOTH filters ride the listing itself: a shared key (e.g.
-# triage-recurrence across many subjects) must dedup exactly even when more
-# than the row window carry it — subject-side filtering of a truncated window
-# would re-file a duplicate every pass. An unreadable listing files anyway —
-# a duplicate visit is a bounded nuisance, a silent mute is the failure this
-# replaces.
-OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" \
-    --metadata-field "gc.continuation_group=$SUBJECT" --limit=20 \
-  | jq -r --arg s "$SUBJECT" \
-      'if type == "array" then (.[] | select((.metadata["gc.continuation_group"] // "") == $s) | .id) else empty end' 2>/dev/null \
-  | head -n 1)
+# Idempotence: an open (or claimed) visit for this situation means the human is
+# already asked. What "this situation" is depends on whether the subject
+# carries identity from one call to the next.
+#
+# A durable subject narrows the situation to one bead — `polecat-blocked` on
+# two work beads is two situations — and both filters ride the listing so a
+# shared key dedups exactly even when more than the row window carry it;
+# subject-side filtering of a truncated window would re-file a duplicate every
+# pass. A patrol wisp is burned and re-poured every cycle, so its id cannot
+# identify a situation from one call to the next and the conjunction can never
+# match. The key alone is the identity there, and a key-only listing cannot be
+# truncated past its own match. Either way the matched row is re-checked
+# field by field, because a listing that silently ignored a filter would
+# suppress everything.
+#
+# An unreadable listing files anyway — a duplicate visit is a bounded nuisance,
+# a silent mute is the failure this replaces.
+case "$SUBJECT" in
+  *-wisp-*) SUBJECT_IS_EPHEMERAL=1 ;;
+  *)        SUBJECT_IS_EPHEMERAL=0 ;;
+esac
+if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
+  DEDUP_SCOPE="[$KEY]"
+  OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" --limit=20 \
+    | jq -r --arg k "$KEY" \
+        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k) | .id) else empty end' 2>/dev/null \
+    | head -n 1)
+else
+  DEDUP_SCOPE="$SUBJECT [$KEY]"
+  OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" \
+      --metadata-field "gc.continuation_group=$SUBJECT" --limit=20 \
+    | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
+        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id) else empty end' 2>/dev/null \
+    | head -n 1)
+fi
 if [ -n "$OPEN" ]; then
-  echo "escalate: visit $OPEN already open for $SUBJECT [$KEY] — not filing another"
+  echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another"
   exit 0
 fi
 
@@ -93,7 +121,7 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # empty: it can land present-but-empty while every sibling stamp in the
 # same update lands, and an empty group disables converse's group-scoped
 # re-claim fence (tk-ax6y4, tk-msfmu) — and here also this script's own
-# subject+key dedup listing. Repair and warn, never exit — this
+# dedup listing for a durable subject. Repair and warn, never exit — this
 # block files the one visit for its scope, and on a persistent miss the
 # tracks edge still carries the subject for guards that read the union
 # (tk-d6ddn).
