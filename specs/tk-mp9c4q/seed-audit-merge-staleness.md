@@ -146,7 +146,7 @@ to that tree.
 
 | commit | PR | recorded | actual | exit |
 |---|---|---|---|---|
-| `8ca3304` | #518 | none | | 1, absent |
+| `8ca3304` | #518 | none | n/a | 1, absent |
 | `0c50151` | #517 | `356b6788f3b6` | `4c57bb1500d3` | 2 |
 | `0514729` | #503 | `356b6788f3b6` | `4c57bb1500d3` | 2 |
 | `c66b054` | #515 | `356b6788f3b6` | `8a7421219dc6` | 2 |
@@ -158,9 +158,10 @@ to that tree.
 
 main sat at exit 2 for six commits, from 2026-08-27T21:26:03Z to
 2026-08-27T23:16:04Z. `pack.toml` moved at `c66b054`, which changed the actual
-digest while the recorded one stayed pinned. #510 closed the window without
-being about the audit: it edited the renderer and `formulas/mol-review.toml`, its
-branch rendered against main's current inputs, and the artifact matched at land.
+digest while the recorded one stayed pinned. #510 closed the window
+incidentally. It was not about the audit, but it edited the renderer and
+`formulas/mol-review.toml`, so its branch re-rendered against main's current
+inputs and the artifact matched at land.
 
 This does not reopen the gate question. The collision that holds the race is a
 conflict on the single `- source digest:` line, and it needs a render on both
