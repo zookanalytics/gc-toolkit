@@ -99,7 +99,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 | # | Proposition | Check |
 |---|---|---|
-| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check; remainder tracked on tk-wz4igt. |
+| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check. |
 | **I2** | The state space is closed: every `merge_result` value and status combo is declared in `lifecycle/lifecycle.toml`, and a bead in a declared detached state rests unheld and offered to no pool. | `doctor/check-state-space` |
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
@@ -120,6 +120,70 @@ resolves, the supervisor endpoint carries a numeric `input_tokens` for every
 awake patrol agent, and no refinery's git-op defer guard has been latched past
 a bound). That is the whole set: **13 checks, each asserting a live structural
 property** — none greps the source for a past fix.
+
+### I1 in full: the hold, the demand, and the shape law
+
+The rule is three sentences:
+
+> A bead is either ready, and therefore moving, or blocked on a named bead by
+> an edge. There is no parked state. What a person owes is itself a bead, and
+> closing it makes the dependent work ready.
+
+**The hold** is a `blocks` edge from the waiting bead to an open bead in the
+same store. Closing the blocker recomputes `is_blocked`, and the bead re-enters
+`bd ready` and the pool's Tier-3 offer on the next read, with nothing to
+remember to clear. Two limits are load-bearing. The blocker must be in the same
+store. A `bd dep add` naming a bead in another rig's store returns `✓ Added
+dependency` and exit 0, and holds nothing. `bd dep list --json` omits the row,
+so every consumer reading stdout sees no wait and the bead stays ready; a
+warning may still be printed on stderr, which is not the channel anything
+reads. A wait on work in another rig is filed as a demand bead in the waiting
+bead's own store, naming the foreign bead in its body. And the status stays `open`:
+setting `status=blocked` by hand does not converge, because when the blocker
+closes the stored status is still `blocked`.
+
+**The demand** is that what a person owes is a bead, and the dependent work
+blocks on it. A ruling only the operator can give is `issue_type=decision`; a
+task only a named human can perform is a bead assigned to them; a question that
+needs a conversation is the visit `escalate.sh` files. Filing the demand
+without wiring the edge is the common failure, and a demand that gates nothing
+is a note.
+
+**The shape law** is that a bead which will ever carry a `blocks` edge must
+have no `parent-child` children. Containers do not block; blockers do not
+parent.
+
+The reason is what `parent-child` means. It is decomposition: the child is part
+of the parent's work, so the parent's blocked state cascades down to it. That
+cascade is the correct reading of containment and is not a defect to route
+around. It only does damage where the edge has been used for something that is
+not decomposition, and routed work is that case. Work `W` handed out by a
+sitting on subject `S` is not a part of `S`; it is what `S` is waiting for.
+Filing `W` as a child of `S` therefore states a containment that is not true,
+and the stranding follows from the false statement rather than from the
+cascade. Filed as the graph actually is, `W` sits beside `S` and `S` blocks on
+`W`. That reads correctly, and `W` stays claimable. beads enforces the sharpest
+case of this directly, refusing an edge that would make a parent wait on its
+own descendant. Where a container is wanted for roll-up, it is a bead that
+never blocks.
+
+Two boundaries. A conclusion is prose, stored once and never cleared, and it
+does not become a wait by being written down; that seam is
+[lifecycle-composition.md](lifecycle-composition.md). Which query term each
+mechanism falsifies is [gascity-routing-model.md](gascity-routing-model.md),
+which also carries the one dispatch path that reads no edges at all. `gc sling
+--on <formula>` pours a workflow root carrying none of the work bead's
+dependencies, so a blocked bead dispatched that way is held by nothing. On that
+path the pending dispatch is recorded with `deferred-dispatch.sh arm` instead.
+
+I1 is PARTIAL for two reasons. `check-wait-is-an-edge` does not exist yet, and
+no pass ages a demand: `liveness-sweep.sh` classifies over `bd ready`, so an
+edge-blocked bead is outside its funnel and a demand owed for a month is
+invisible. Until both land, converting a hold to an edge makes it quieter than
+the prose it replaced, not louder.
+
+The census of every mechanism the pack had accreted, the measurements behind
+each judgment, and the migration are `specs/tk-s4fg87/`.
 
 ---
 
