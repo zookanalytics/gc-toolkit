@@ -136,7 +136,7 @@ carries the exact block.
 | Bead | Closed by |
 |---|---|
 | the work bead | the refinery, after a verified merge — **NEVER you** |
-| a review bead | `signoff.sh`, after the verdict — **NEVER you** |
+| a review bead | `signoff.sh` after the verdict, or the cadence's `review-sweep.sh` when there is none to give — **NEVER you** |
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
