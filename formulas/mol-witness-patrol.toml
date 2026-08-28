@@ -119,8 +119,12 @@ cycle from `gc session list --state=all --json` (an OBJECT — iterate
 **Fail safe — never orphan on an empty map.** An empty map while sessions
 exist is schema drift; acting on it false-orphans live agents. Skip orphan
 recovery this cycle and escalate
-(`escalate.sh --subject <this wisp> --key witness-empty-liveness-map ...`),
-then continue to check-refinery.
+(`escalate.sh --subject <the standing subject> --key witness-empty-liveness-map ...`),
+then continue to check-refinery. The subject is never this wisp: next-iteration
+burns it, and the converse sitting writes its takeaway to the subject the visit
+tracks, so a subject that dies each cycle loses its disposition. Use
+this rig's standing subject — the open bead carrying `task_kind=triage-subject`
+and `triage.scope=witness-findings`, created once if no open one exists.
 
 Resolve the `.owner` the filter stamped on each bead — the loop's `OWNER` —
 exact-first, with exactly ONE narrow fallback: the last `/`-segment, resolved
