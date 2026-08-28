@@ -340,6 +340,72 @@ eq "$(run_consume main myrig gc-toolkit. '[]')" \
    "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
    "empty roster: hands off rather than stalling on what it cannot check"
 
+# --- 3b. The PR summary the handoff carries. ----------------------------------
+# pr-open.sh publishes metadata.pr_summary as the PR's ## Summary and falls back
+# to the anchor's description, which is dispatch text. Only the polecat has read
+# the diff, so the summary rides the SAME atomic write as the rest of the
+# transition; a second write is a second thing a crash can lose.
+#
+# run_consume_file <summary-file-path> [strict]
+#   -> prints "<rc>|<log>" with PR_SUMMARY_FILE pointed at the given path. The
+#      path is passed unconditionally, so an absent file is tested as the
+#      polecat's shell actually presents it: the variable set, the file gone.
+run_consume_file() {
+  : > "$TMP/log"
+  : > "$TMP/summary-consume.sh"
+  if [ "${2:-}" = "strict" ]; then printf 'set -euo pipefail\n' > "$TMP/summary-consume.sh"; fi
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/summary-consume.sh"
+  local rc=0
+  LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+    PR_SUMMARY_FILE="$1" bash "$TMP/summary-consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+printf 'Compares heads instead of names.' > "$TMP/summary.txt"
+eq "$(run_consume_file "$TMP/summary.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "a carried summary rides the one atomic write as pr_summary"
+
+# A real summary is prose, not a line. The fake logs argv verbatim, so an
+# embedded newline shows up as a second logged line — which is the proof that
+# the value reaches gc unmangled rather than truncated at the first line.
+printf 'Line one.\nLine two.' > "$TMP/summary-multiline.txt"
+eq "$(run_consume_file "$TMP/summary-multiline.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Line one.;Line two. --append-notes Implemented: <brief summary>;" \
+   "a multi-line summary reaches the write whole"
+
+# Both no-summary shapes fall back to the unsummarized handoff
+# BYTE-IDENTICALLY. An empty metadata value round-trips as set-but-empty rather
+# than absent, so writing one asserts a summary that was never composed;
+# pr-open.sh's whitespace guard is a second line of defence, not a licence to
+# write the key.
+: > "$TMP/summary-empty.txt"
+eq "$(run_consume_file "$TMP/summary-empty.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "an empty summary file writes no pr_summary key at all"
+
+eq "$(run_consume_file "$TMP/summary-absent.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "a PR_SUMMARY_FILE naming no file hands off unsummarized rather than halting"
+
+# The step's own blocks run before this one under one shell, and a polecat that
+# skipped 4b leaves PR_SUMMARY_FILE unset. Under `set -u` an unguarded read
+# would kill the handoff after the push — the branch pushed, the bead never
+# handed off.
+: > "$TMP/log"
+printf 'set -euo pipefail\n' > "$TMP/nosummary.sh"
+printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/nosummary.sh"
+NOSUM_RC=0
+LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+  bash "$TMP/nosummary.sh" > "$TMP/out" 2>&1 || NOSUM_RC=$?
+eq "$NOSUM_RC|$(tr '\n' ';' < "$TMP/log")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "strict shell, PR_SUMMARY_FILE never set: hands off unsummarized, no set -u crash"
+
+eq "$(run_consume_file "$TMP/summary.txt" strict)" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "strict shell: a carried summary still writes"
+
 # The polecat pastes this block into a live shell, and `bash "$TMP/consume.sh"`
 # above does not model one that runs strict. Both of the guard's reads are
 # pipefail traps: `... | grep -q` returns 141 when grep matches and exits before

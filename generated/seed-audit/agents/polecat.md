@@ -124,6 +124,7 @@ read "landed in the refinery" as "main moved".
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
+| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text |
 | `prepare_mode` | refinery | `rebase` (disposable branch) or `merge` (shared) — honor it on resume |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |

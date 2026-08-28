@@ -300,6 +300,13 @@ case "$sub" in
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment) exit 0 ;;
       create)
+        # The composed body reaches the log only as a temp path, so keep a copy
+        # of what the reviewer would read.
+        : > "$G/pr_create_body.txt"
+        while [ $# -gt 0 ]; do
+          case "$1" in --body-file) shift; [ -f "${1:-}" ] && cat "$1" > "$G/pr_create_body.txt" ;; esac
+          shift || true
+        done
         [ -n "${STUB_PR_CREATE_URL:-}" ] && echo "$STUB_PR_CREATE_URL"
         exit "${STUB_PR_CREATE_RC:-0}" ;;
       *) echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;

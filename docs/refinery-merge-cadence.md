@@ -80,6 +80,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    `gh pr create` non-draft, re-read the created PR by number, refuse a moved
    head, replay the verdict as a comment (never an approval), then one
    `lifecycle.sh` transition carrying `pr_url`/`pr_number`/`merged_target`.
+   The body's `## Summary` is the polecat's `pr_summary`, written at handoff
+   by the only actor that has read the diff; the anchor's description is
+   dispatch text, demoted to a collapsed section and standing in as the
+   summary only when the handoff carried none.
 3. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
    (same repo, not a fork, head branch matches), re-read the anchor, validate
    holds/gates/children/approval/base/CLEAN, re-read the full authorization
