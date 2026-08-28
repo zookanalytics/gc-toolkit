@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
-# the arm ORDER (gate-ensure, pr-open, merge, pr-facts, convoy-graduate);
+# the arm ORDER (gate-ensure, pr-open, merge, pr-facts, convoy-graduate,
+# review-sweep);
 # the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
 # same pass, without failing the order), exercised by extracting and executing
 # the marked block against stubs; BEADS_ACTOR / GC_AGENT projections scoped to
@@ -49,12 +50,12 @@ eq "$rc" 2 "no GC_RIG exits 2"
 has "$out" "GC_RIG is unset" "…and says why"
 
 echo "# arms run in order with derived pools and scoped identities"
-for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "gate-ensure.sh,pr-open.sh,merge.sh,pr-facts.sh,convoy-graduate.sh" "the five arms ran in the load-bearing order"
+eq "$order" "gate-ensure.sh,pr-open.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh" "the six arms ran in the load-bearing order"
 has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
@@ -96,6 +97,7 @@ out=$(REFINERY_RECONCILE_INTEGRATION_AUTO_LAND=false drive); rc=$?
 eq "$rc" 0 "the disabled pass exits 0"
 if grep -q '^convoy-graduate' "$ARM_LOG"; then bad "convoy-graduate ran despite the kill-switch"; else ok "convoy-graduate disabled"; fi
 grep -q '^merge.sh' "$ARM_LOG" && ok "the merge arm is untouched by the switch" || bad "merge arm missing"
+grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep is untouched by the switch" || bad "review-sweep was skipped"
 
 echo "# no refinery bound = nothing to reconcile"
 printf '{"agents":[]}' > "$STUB_AGENTS"

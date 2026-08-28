@@ -6,7 +6,8 @@
 # Arms, in load-bearing order: gate-ensure (rc=3 = designed HOLD of merge.sh
 # for this pass, not a fault), pr-open, merge (BEADS_ACTOR projected to the
 # refinery: it closes anchors assigned to it), pr-facts (same projection),
-# convoy-graduate (GC_AGENT projected: graduation assigns the convoy).
+# convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
+# review-sweep (cleanup over closed anchors; no projection, no merge authority).
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
 # gate: the controller watchdog closes any tracking bead older than 2m, which
 # reopens that gate under a pass still running.
@@ -208,6 +209,11 @@ else
     run_pass "(5) convoy-graduate" convoy-graduate.sh --target "$TARGET" ) \
     || FAILED="${FAILED}convoy-graduate rc=$?; "
 fi
+
+# (6) review-sweep: close reviews whose anchor and branch are both gone. Last,
+# because it reads only closed anchors — nothing earlier in the pass can see
+# them, and the residue this pass's merges create drains on the same tick.
+run_pass "(6) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
 
 if [ -n "$LOG_SINK" ]; then
   {

@@ -1,6 +1,6 @@
 ---
 name: Refinery merge cadence
-description: The exec order that drives the merge queue — the driver and its five arms, the rc=3 interlock, the single-flight guarantee, and how to read what a pass did. Read it to know what drives merges, and why nothing else may.
+description: The exec order that drives the merge queue — the driver and its six arms, the rc=3 interlock, the single-flight guarantee, and how to read what a pass did. Read it to know what drives merges, and why nothing else may.
 ---
 
 # Refinery merge cadence
@@ -25,7 +25,7 @@ are not driven by this order.
 
 Every 60s, per rig: `orders/refinery-reconcile.toml` (`trigger = "cooldown"`,
 `scope = "rig"`) execs `assets/scripts/refinery-reconcile.sh`, the ~100-line
-driver, which runs the five arms in order and exits.
+driver, which runs the six arms in order and exits.
 
 | | |
 |---|---|
@@ -39,7 +39,7 @@ Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
 the cadence — the arms run whether or not any refinery session is awake.
 
-## The five arms
+## The six arms
 
 1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
@@ -91,6 +91,18 @@ the cadence — the arms run whether or not any refinery session is awake.
 5. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
+6. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+   dispatched review whose anchor is closed and whose `review_branch` is gone
+   from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
+   marker to a commit and there is no commit, and `request-changes` would
+   additionally file a rework child against work that already landed. The arm
+   closes such a review with `gc.outcome=moot` and the reason recorded on the
+   bead, and writes nothing to the anchor. Both conditions are required, so a
+   branch that is merely unfetched and an anchor that still gates are each
+   left alone. Branch existence comes from one `git ls-remote --heads origin`
+   per pass, and a listing that could not be read sweeps nothing. The release
+   verb lives here rather than as a third `signoff.sh` verdict because the
+   residue is filed by two dispatchers, arm 1 and arm 4.
 
 ## Single-flight: the tracking gate and the pass lock
 
