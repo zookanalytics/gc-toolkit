@@ -152,7 +152,7 @@ rendering is `helm-svc board --json`. See
 gc doctor
 ```
 
-The pack's nine checks, and what a failure means:
+The pack's checks, and what a failure means:
 
 | Check | Asserts (invariant) | First-failure cause |
 |---|---|---|
@@ -165,6 +165,7 @@ The pack's nine checks, and what a failure means:
 | `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
+| `check-recycle-capable` | cycle-recycle can fire: the city name resolves, the supervisor endpoint carries a numeric `input_tokens` per awake patrol agent, and no refinery defer guard is latched | the token field left the API schema, or an uncommitted tracked file has latched the refinery's git-op guard |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.

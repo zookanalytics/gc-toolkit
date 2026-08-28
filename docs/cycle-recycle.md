@@ -71,6 +71,28 @@ reactive safety net at the model's own compaction edge. The same applies
 when the supervisor API is unreachable or `input_tokens` is unknown — the
 check skips silently rather than guessing. There is no fallback heuristic.
 
+## Whether it can fire
+
+Every skip is silent, so a mechanism that can never fire looks exactly like
+one that has had nothing to do. `doctor/check-recycle-capable` closes that
+gap. It asserts the capability rather than the installation:
+
+- The city path resolves to a city name in `gc cities`. That name is what
+  the hook builds its API URL from, and an unmatched path is its first
+  silent exit.
+- `$GC_API_URL/v0/city/<city>/agent/<agent>` carries a numeric
+  `input_tokens` for every awake witness, deacon, and refinery. Without
+  that field the hook reads 0 tokens and exits under the threshold on every
+  turn.
+- No refinery's git-op defer guard has been continuously true past a bound
+  (24h by default, `GC_DOCTOR_RECYCLE_LATCH_HOURS`). The guard cannot tell
+  a rebase in flight from a tracked file nobody has committed, so the check
+  ages it by the oldest currently-dirty path and names the file holding it.
+
+The check is silent when the mechanism is healthy and merely idle. It reads
+the rig's canonical checkout. The hook also defers on its own working
+directory, which nothing outside that session can address.
+
 ## Invariants
 
 - **Never prompt the operator.** The threshold *is* the directive. No
@@ -80,10 +102,9 @@ check skips silently rather than guessing. There is no fallback heuristic.
   sits unanswered. That fragment is the wider rule and the hook is one
   instance of it: it prohibits blocking consent UI from a heartbeat agent
   about *anything*, not only about recycling. It is injected onto the same
-  three roles this overlay is wired to, and
-  `doctor/check-cycle-recycle-hook` asserts both halves together, because a
-  role that has the hook but not the doctrine has a boundary that will not
-  prompt and an agent that was never told not to (tk-17wggn).
+  three roles this overlay is wired to, because a role that has the hook but
+  not the doctrine has a boundary that will not prompt and an agent that was
+  never told not to. **UNCHECKED**: no check asserts the two halves together.
 - **Always exit 0**, so the `Stop` event is never blocked.
 - **Keep stdout empty** — all diagnostics go to stderr, so Claude never
   parses a stray block decision.
