@@ -84,7 +84,7 @@ bd_list() { # guarded array read; non-zero = "could not tell"
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   printf '%s' "$raw"
 }
-escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups per subject+key
+escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
 }

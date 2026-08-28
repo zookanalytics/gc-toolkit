@@ -121,7 +121,7 @@ reset
 "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
 
-echo "# idempotent: one open visit per subject+key"
+echo "# idempotent: one open visit per key per durable subject"
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-a","task_kind":"visit"},"notes":""}]'
 out=$("$SUT" --subject tk-a --key k1 --message "again" 2>&1); rc=$?
 eq "$rc" 0 "an already-open situation exits 0"
@@ -158,6 +158,54 @@ eq "$rc" 0 "the crowded-key situation exits 0"
 eq "$(visits)" "0" "no duplicate filed past the 20-row window"
 has "$out" "already open" "the existing visit was found"
 has "$(cat "$STUB_GC_LOG")" "--metadata-field gc.continuation_group=tk-a" "the subject filter rides the listing itself"
+
+echo "# an ephemeral subject dedups on the key alone"
+# A patrol wisp is burned and re-poured every cycle, so subject+key could never
+# match across cycles: every pass filed another visit for a finding already open.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"doctor-fork-rate","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
+eq "$rc" 0 "a differing ephemeral subject exits 0"
+eq "$(visits)" "0" "the next cycle's wisp files no duplicate"
+has "$out" "already open" "the previous cycle's visit was found"
+hasnt "$(grep '^bd list' "$STUB_GC_LOG")" "gc.continuation_group" "the wisp subject does not ride the dedup listing"
+
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-wisp-aaa"},"notes":""}]'
+"$SUT" --subject tk-wisp-bbb --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "0" "a rig store's tk-wisp- ids are ephemeral too"
+
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+"$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "0" "the same wisp subject still dedups"
+
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k2","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+"$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a different key still files, ephemeral subject or not"
+
+reset '[{"id":"vis-0","status":"closed","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+"$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a closed visit re-opens the situation for a wisp subject too"
+
+# Only the -wisp- infix is ephemeral: a durable id that merely contains the
+# letters keeps per-subject dedup.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-other"},"notes":""}]'
+"$SUT" --subject tk-wispy --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a bead id merely containing 'wisp' is still durable"
+
+# The pileup this replaces: 20 cycles of the same finding, each on its own wisp.
+crowd="["
+for i in $(seq 1 20); do
+  crowd="$crowd{\"id\":\"other-$i\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"doctor-fork-rate\",\"gc.continuation_group\":\"lx-wisp-c$i\"},\"notes\":\"\"},"
+done
+reset "${crowd%,}]"
+"$SUT" --subject lx-wisp-fresh --key doctor-fork-rate --message m >/dev/null 2>&1
+eq "$(visits)" "0" "20 cycles of one key file no 21st visit"
+
+echo "# an ephemeral subject still records what raised the visit"
+reset
+"$SUT" --subject lx-wisp-aaaaa --key doctor-fork-rate --message "fork rate high" >/dev/null 2>&1
+eq "$(meta vis-1 gc.continuation_group)" "lx-wisp-aaaaa" "the raising wisp is still stamped"
+has "$(cat "$STUB_DEPS")" "vis-1|lx-wisp-aaaaa|tracks" "the visit still tracks the raising wisp"
+has "$(field vis-1 title)" "visit: lx-wisp-aaaaa" "and the title still names it"
 
 echo "# an unreadable listing files anyway (a duplicate beats a mute)"
 reset
