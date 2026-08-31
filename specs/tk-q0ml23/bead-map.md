@@ -1,6 +1,6 @@
 ---
 name: How the PR round-trip design lands against the beads already in flight
-description: For each bead the tk-xns4d8 initiative already carries, whether this design supersedes it, depends on it, or leaves it alone — so nobody rediscovers the overlap by building the same thing twice.
+description: For each bead the tk-xns4d8 initiative already carries, whether this design amends it, depends on it, or leaves it alone — so nobody rediscovers the overlap by building the same thing twice.
 ---
 
 # Disposition of the beads already in flight
@@ -9,28 +9,47 @@ tk-xns4d8 maps the beads that each fix one leak in the operator's PR
 round-trip. This document says what `state-model.md` and `surface.md` do to
 each of them, and to the ones adjacent.
 
-## Superseded, in one narrow place
+## Amended, in two narrow places
 
 **tk-jus6e4** — PR review posture is read and discarded every pass. Not
-superseded as a bead. It owns the writer and the watermark, and the
-conversation axis is unbuildable without it.
+superseded as a bead. It owns the writer and the watermarks, and the
+conversation axis is unbuildable without it. Two of its clauses change.
 
-What is superseded is the **value set** in its direction, item 2: that
-`COMMENTED` becomes one of the recorded values. `COMMENTED` is GitHub's
-vocabulary for what a reviewer did, and it does not answer whose turn it is.
-Two `COMMENTED` reviews on one pull request, one answered and one not, are the
-same value. Record the conversation position from `state-model.md` instead:
-`quiet`, `outstanding`, `covered`, `asking`, `answered`. Every other clause of
-tk-jus6e4 stands unchanged, including the `<value>@<oid>` shape, the
-monotonicity requirement on the watermark, the routing requirement on an
+The first is the **value set** in its direction, item 2: that `COMMENTED`
+becomes one of the recorded values. `COMMENTED` is GitHub's vocabulary for what
+a reviewer did, and it does not answer whose turn it is. Two `COMMENTED`
+reviews on one pull request, one answered and one not, are the same value.
+Record the conversation position from `state-model.md` instead: `quiet`,
+`outstanding`, `covered`, `asking`, `answered`.
+
+The second is the **set of id spaces**. tk-jus6e4 watermarks the two review
+spaces, the inline comments on `pulls/N/comments` and the bodies of `COMMENTED`
+reviews on `pulls/N/reviews`, and rules that a plain issue comment carries no
+review and raises no posture. That is right for posture, which records what a
+reviewer did. It is too narrow for the conversation axis, which records whether
+the operator is waiting. Measured across the repository, 23 of the 447 issue
+comments come from a non-city account, and every one of them sits on a pull
+request. `SELF_LOGIN` classifies all 23 as human, and `pr-facts.sh` sees none
+of them, because the endpoint they arrive on is not one it fetches. Under the
+two-space set they fall outside `outstanding`, `covered` and `answered` while
+remaining inside what `quiet` excludes, which leaves the state the bead calls
+"operator commented, city has not yet noticed" with nowhere to be recorded. So
+tk-jus6e4 watermarks `issues/N/comments` as a third space, on the same terms as
+the other two and never merged with them. Whether an outstanding
+issue comment also holds the merge, the way a recorded `commented` posture does,
+stays tk-jus6e4's call.
+
+Every other clause stands unchanged, including the `<value>@<oid>` shape, the
+monotonicity requirement on each watermark, the routing requirement on an
 outstanding comment, and both constraints — no ruleset change, no new scheduled
-scanner.
+scanner. The third space adds one endpoint to a pass `pr-facts.sh` already
+makes for every open anchor.
 
 Whoever implements tk-jus6e4 should read `state-model.md` first and write the
 position, not the posture. GitHub's `reviewDecision` remains an input to that
 derivation; it stops being the thing stored.
 
-Nothing else in the initiative is superseded.
+Nothing else in the initiative is amended.
 
 ## Depended on
 
@@ -72,8 +91,8 @@ and the anchor stays at `pull_request` where the cadence can still see it.
 **tk-d6ixcw** — closed. Made converse's Prime step read the PR conversation
 when its subject carries `pr_number`. Complementary rather than overlapping:
 that step reads GitHub because a sitting needs the comment text, while this
-surface reads the bead because a board needs a position. Once the watermark
-exists, both consume it, and a sitting can say which comments are outstanding
+surface reads the bead because a board needs a position. Once the watermarks
+exist, both consume them, and a sitting can say which comments are outstanding
 instead of counting them.
 
 **tk-qs1j6, tk-t46nq, tk-w26b6** — closed. The 2x2 of an absent or stale codex

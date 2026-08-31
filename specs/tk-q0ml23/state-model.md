@@ -114,7 +114,14 @@ Where the exchange with the operator stands. Five values. "Human" throughout
 means an account that is not the city's own GitHub identity, which
 `pr-facts.sh` already resolves as `SELF_LOGIN`.
 
-**`quiet`** — no review and no issue comment from a human account.
+An utterance is anything a human account said on the pull request, and GitHub
+puts those in three id spaces that share no counter: inline review comments on
+`pulls/N/comments`, the bodies of `COMMENTED` reviews on `pulls/N/reviews`, and
+plain conversation comments on `issues/N/comments`. The axis covers all three.
+tk-jus6e4 watermarks the first two and rules that an issue comment raises no
+posture, so the third space is an addition this design makes to it.
+
+**`quiet`** — no human utterance in any of the three spaces.
 
 The bead's phrasing for this cell is "open and never looked at by the
 operator", and that is not derivable. GitHub exposes no read receipt, so an
@@ -122,10 +129,12 @@ operator who read the PR and had nothing to say is indistinguishable from one
 who never opened it. The honest name is that nothing has been said, and the
 surface must say that rather than the stronger claim.
 
-**`outstanding`** — a human utterance sits above the acknowledgement
-watermark. The watermark is tk-jus6e4's deliverable: the highest review-comment
-id the city has dispositioned, monotonic by construction, so anything above it
-is unanswered and anything below it is answered.
+**`outstanding`** — a human utterance sits above the acknowledgement watermark
+for its own space. A watermark is the highest id the city has dispositioned in
+one space, monotonic by construction, so anything above it is unanswered and
+anything below it is answered. There is one per space and they are never
+merged: a reply can land on an old review, and the three counters are unrelated
+to begin with. tk-jus6e4 owns two of them, and this design adds the third.
 
 **`covered`** — outstanding, and an open bead is on it. The link must be
 recorded when the bead is filed, not guessed afterwards. An open review child
@@ -137,10 +146,10 @@ This is tk-s4fg87's hold, with no additions: the anchor carries an open
 `blocks` edge to a demand bead in the same store, and closing that bead is what
 ends the state.
 
-**`answered`** — the watermark has advanced past every human utterance and the
-branch head has moved since the last one. Both halves are needed. The watermark
-alone says the city dispositioned the comment; the head move is what says the
-disposition produced something for the operator to look at.
+**`answered`** — every watermark stands at the high water of its own space and
+the branch head has moved since the last utterance. Both halves are needed. The
+watermarks alone say the city dispositioned the comments; the head move is what
+says the disposition produced something for the operator to look at.
 
 ## Whose move it is
 
@@ -178,20 +187,20 @@ copies.
 | machine `progressing` | open `anchor_bead` children; marker versus live head | inferred |
 | machine `settled` | every gate `green@<live head>`, no open child | inferred |
 | machine `wedged` | `exception@<live head>`, or standing veto at cap | inferred, by re-implementing two scripts |
-| conversation `quiet` | no human review or comment | inferred, from a complete bounded list |
-| conversation `outstanding` | utterance id above the watermark | **not derivable** — no watermark exists |
+| conversation `quiet` | no human utterance in any space | inferred, from complete bounded lists |
+| conversation `outstanding` | utterance id above its space's watermark | **not derivable** — no watermark exists |
 | conversation `covered` | utterance linked to an open bead | **not derivable** — no link is recorded |
 | conversation `asking` | open `blocks` edge to a demand bead | **asserted** |
-| conversation `answered` | watermark at high water, head moved since | **not derivable** |
+| conversation `answered` | every watermark at high water, head moved since | **not derivable** |
 
 One of the eight is asserted today, and it is the one tk-s4fg87 already
-specifies. Three cannot be derived at all: they depend on a watermark and a
+specifies. Three cannot be derived at all: they depend on the watermarks and a
 comment-to-bead link that do not exist yet, which are tk-jus6e4's and
 tk-01n5cc's deliverables.
 
 That is the sequencing answer this document owes. The machine axis can be
 rendered honestly now. The conversation axis cannot be rendered at all until
-the watermark lands, and a surface that guesses it will be wrong in the
+the watermarks land, and a surface that guesses it will be wrong in the
 direction that matters: it will report `quiet` for a PR the operator commented
 on, because silence is what every failed derivation looks like.
 
@@ -237,8 +246,16 @@ pack writes:
 - `pr.conversation = <quiet|outstanding|covered|asking|answered>@<head-oid>` —
   written by `pr-facts.sh`, which is already the stage that reads the PR
   conversation.
-- `pr.ack_watermark` — tk-jus6e4's monotonic acknowledgement mark. This
-  document does not specify it; it depends on it.
+- The acknowledgement watermarks, one per id space, never merged. tk-jus6e4
+  specifies two of the three, `pr_comment_watermark` over `pulls/N/comments`
+  and `pr_review_watermark` over `pulls/N/reviews`, and this document does not
+  restate them. The third is `pr_issue_watermark` over `issues/N/comments`, on
+  the same monotonic construction and registered beside the other two. Its
+  writer is `pr-facts.sh`, which already reads the two review endpoints for
+  every open anchor, so it is one more read on a pass that is already
+  happening. Whether an outstanding issue comment also holds the merge, the way
+  a recorded `commented` posture does, stays tk-jus6e4's call; the axis renders
+  the utterance either way.
 
 `asking` needs no key of its own. It is the presence of the edge, and the
 derivation reads the graph.
@@ -263,7 +280,7 @@ is the closest thing to an outstanding-comment count that today's signals
 support. It is a poor proxy and it is offered as evidence of the gap rather
 than as a number to build on: a city review is a codex signoff, not a reply, so
 its presence after a comment says nothing about whether the comment was
-answered. Establishing that is precisely what the watermark is for.
+answered. Establishing that is precisely what the watermarks are for.
 
 Seven anchors are wedged, and six of them have no pull request at all. Those
 six are the `pre_open_gate` anchors, sitting at
@@ -284,6 +301,14 @@ say so rather than inventing a reason.
 
 Six of the fourteen open PRs have an open review child, which is machine
 `progressing`.
+
+The issue-comment space, measured 2026-08-31 across the repository rather than
+across the open set. `issues/comments` returns 447 comments, 424 from the city's
+own account and 23 from a non-city account, which is what `SELF_LOGIN`
+classifies as human. All 23 sit on pull requests, spread over 21 of them. None
+of the eleven pull requests open on that date carries one, so a snapshot of the
+open set reads the space as unused, and the count was taken across the
+repository for that reason.
 
 A single `gh pr list` returning the list-level fields takes about two seconds
 and reports `mergeStateStatus=UNKNOWN` for nine of the fourteen rows, because

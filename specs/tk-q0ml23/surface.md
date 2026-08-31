@@ -63,9 +63,9 @@ its state from that field would render two thirds of its rows unknown on a cold
 read and change its answer on the next one, with nothing having happened.
 
 Duplication. Deriving the conversation axis from raw comments means
-re-implementing the watermark inside the board, beside the copy tk-jus6e4 puts
-in `pr-facts.sh`. Two implementations of a monotonicity rule is one more than
-can be kept honest.
+re-implementing the watermarks inside the board, across all three id spaces,
+beside the copies tk-jus6e4 puts in `pr-facts.sh`. Two implementations of a
+monotonicity rule is one more than can be kept honest.
 
 So the rows render from `pr.machine`, `pr.conversation` and the existing merge
 identity keys, all read from the anchor. A `gh pr list` is permitted as an
@@ -115,8 +115,8 @@ Five things, in one line, and nothing more:
 - how long the current turn has been running;
 - the demand, when there is one. For `asking` that is the demand bead's title,
   which is tk-s4fg87's authored headline;
-- the count of unanswered human comments, once the watermark makes that number
-  real.
+- the count of unanswered human utterances, summed across the three id spaces,
+  once the watermarks make that number real.
 
 No comment bodies, no thread state, no reviewer avatars, no diff summary. The
 link is how the operator gets to all of that, and it is one click from the row.
@@ -158,11 +158,16 @@ awaiting a ruling and for one frozen at `exception@<live head>` where the only
 release is a head move nobody is going to make. The machine axis is that
 sentence.
 
-**Phase 2, blocked on tk-jus6e4.** The conversation axis. `outstanding`,
-`covered` and `answered` all resolve to the watermark, and none of them can be
-inferred without it. Building this before tk-jus6e4 lands means guessing, and
-every failed guess resolves to `quiet`, which is the one answer that tells the
-operator to stop looking.
+**Phase 2, blocked on tk-jus6e4 across all three id spaces.** The
+conversation axis. `outstanding`, `covered` and `answered` all resolve to the
+watermarks, and none of them can be inferred without them. tk-jus6e4 as written
+covers the two review spaces, so phase 2 also needs `pr_issue_watermark` over
+`issues/N/comments`, specified in `state-model.md` and dispositioned against
+tk-jus6e4 in `bead-map.md`. Shipping on two spaces renders `quiet` for a pull
+request the operator commented on in the conversation tab, which is the one
+mistake this axis exists to prevent. Building any of it before the watermarks
+land means guessing, and every failed guess resolves to `quiet`, which is the
+one answer that tells the operator to stop looking.
 
 Do not merge the two phases into one pull request. Phase 1 is honest about what
 it does not know; phase 2 is what removes the not-knowing.
@@ -177,8 +182,8 @@ itself when the partition it renders into lands. Its shape:
 - Register `pr.machine` in `lifecycle/lifecycle.toml` and write it through
   `lifecycle.sh`, from the points in `gate-ensure.sh` and `merge.sh` that
   already reach the verdict. No new pass, no new GitHub read.
-  `pr.conversation` is registered by phase 2, alongside the writer that fills
-  it.
+  `pr.conversation` and `pr_issue_watermark` are registered by phase 2,
+  alongside the writer that fills them.
 - Add the five `Tile` fields, the source gather that fills them from the
   anchor, and the `Owed` contribution. `pr_conversation` ships in phase 1 as a
   field that always reads `unknown`, so the wire contract does not change
