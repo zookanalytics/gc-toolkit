@@ -5,8 +5,8 @@
 # sessions. Covered:
 #   --release molecule-step quiescing (tk-xypcy, tk-q5r65)
 #   --waiting-on edges (tk-2plde)
-#   the ≤140-codepoint length gate (tk-9tbbk.1), shared by takeaway and demand
-#   the demand verb's sibling shape and fail-closed edge (tk-0slbb6)
+#   the ≤140-codepoint length gate, shared by takeaway and demand
+#   the demand verb's sibling shape and fail-closed edge
 #   the retired board verb refuses and names helm-svc board
 #   the dismiss verb: both halves of the operator's explicit clear
 set -euo pipefail
@@ -785,7 +785,7 @@ eq "$(field L-live status)" "closed" \
 [ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
 PATH="$SAVED_PATH"
 
-# ── demand: what a person owes, as a bead the work is blocked by (tk-0slbb6) ──
+# ── demand: what a person owes, as a bead the work is blocked by ──────────────
 # The verb replaces parking a subject on prose. Its whole value is the EDGE, so
 # every assertion here is about the shape that makes the edge possible (a
 # SIBLING demand, never a child) and about failing closed when the edge does
@@ -845,7 +845,7 @@ d_update() { grep -E '^bd update ' "$D_LOG" || true; }
 d_deps()   { grep -E '^bd dep add ' "$D_LOG" || true; }
 
 # (SIBLING) the demand inherits the GATED bead's parent — never becomes its
-# child, which beads would refuse to let it block (tk-2cyxo).
+# child, which beads would refuse to let it block.
 demand_run tk-kid "operator: pick the storage backend" --by converse
 eq "$DRC" "0" "(SIBLING) a demand on a parented bead succeeds"
 grep -q -- '--parent tk-mum' <<< "$(d_create)" \

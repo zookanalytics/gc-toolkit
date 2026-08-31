@@ -95,7 +95,7 @@ normalize_headline() {
     [ -n "$HEADLINE" ] || { echo "$PROG: $2 needs \"<text>\" (the ≤${TAKEAWAY_MAX}-char one-line headline)" >&2; usage; exit 2; }
     # >>> takeaway-length-gate
     # REJECT over the cap, never truncate: only the author knows which clause
-    # is the headline (tk-9tbbk.1). Measured in CODEPOINTS — what both
+    # is the headline. Measured in CODEPOINTS — what both
     # renderers measure — with a shell-count fallback so the gate cannot
     # silently fail open on a broken jq.
     tlen=$(printf '%s' "$HEADLINE" | jq -Rsr 'length' 2>/dev/null || true)
@@ -429,7 +429,7 @@ cmd_takeaway() {
 # when the gated bead has none. That placement is not tidiness. beads REFUSES a
 # `blocks` edge from a parent to its own descendant, because blocked status
 # cascades and the descendant would inherit the block it is meant to lift, so a
-# demand filed as a CHILD could never gate the thing it is about (tk-2cyxo).
+# demand filed as a CHILD could never gate the thing it is about.
 #
 # The edge is the record here, not a garnish on it. `takeaway --waiting-on`
 # writes its edge beside prose a human reads, so a rejected edge only warns;

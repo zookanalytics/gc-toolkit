@@ -253,7 +253,7 @@ its frontier is stranded, NORMAL when something is moving, and LOW again once
 every child has closed.
 
 That relation is the ONLY one that can see work filed as a CHILD of its
-subject. A sitting used to route work that way, and beads refuses a
+subject. Work filed that way exists in the tree, and beads refuses a
 `blocks` edge from a parent to its own descendant —
 
     $ bd dep add tk-z9nln tk-wvrga -t blocks
@@ -267,7 +267,7 @@ open children were on no board anywhere. Measured on `tk-z9nln`, 2026-08-22 —
 the row read `m_total=0 · conversation parked`, while the deliverable it was
 waiting for sat open, unassigned and unrouted, invisible.
 
-Converse now files routed work, and the demand beads that record what a person
+Converse files routed work, and the demand beads that record what a person
 owes, as SIBLINGS of the subject (`docs/gascity-human-engagement.md`, "How a
 sitting ends"), so the `waiting_on` edge takes and the disposition rule below
 fires for them. The child roll-up stays exactly as it is: it is what keeps the

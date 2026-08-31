@@ -398,7 +398,7 @@ agent-origin park, by the ruling's own scope. Both wait for an eye.
 That gap is what the next section closes, by making the sibling the
 canonical shape and the edge mandatory rather than optional.
 
-## How a sitting ends: a demand bead and an edge (2026-08-26)
+## How a sitting ends: a demand bead and an edge
 
 A bead is either ready, and therefore moving, or blocked on a named bead
 by an edge. There is no third state. A sitting that reaches an open
@@ -467,10 +467,10 @@ sweep alone; a sibling with an edge is covered by the sweep, by the board,
 and by `bd ready` — which is the one that makes the work move without a
 person in the loop.
 
-The converted backlog — existing parked subjects and `triage.hold` prose —
-is `tk-lb3u4m`'s, which makes the edge the board's primary source and
-leaves the metadata as a derived view. `gc.routed_to=human` and
-`gc.takeaway` stay readable throughout; nothing here breaks a live hold.
+Converting the existing backlog of parked subjects and `triage.hold` prose
+is separate work. It makes the edge the board's primary source and leaves
+the metadata as a derived view. `gc.routed_to=human` and `gc.takeaway`
+stay readable throughout; nothing here breaks a live hold.
 
 ### Where prose alone is still correct
 

@@ -1340,7 +1340,7 @@ else
     ok "a failed edge does not abort the verb"
 fi
 
-echo "── a wait is a bead and an edge, never a parked subject (tk-0slbb6) ──"
+echo "── a wait is a bead and an edge, never a parked subject ──"
 # The takeaway above records a wait for a HUMAN to read. This section is the
 # other half: the machine-readable one. A sitting that reaches an open question
 # files what the person owes as a bead and blocks the work on it, so the work
@@ -1358,7 +1358,7 @@ if demand_body | grep -q -- '--parent "$parent"'; then
     ok "the demand inherits the gated bead's parent (a sibling, not a child)"
 else
     bad "the demand inherits the gated bead's parent (a sibling, not a child)" \
-        "filed under the gated bead, the demand can never carry a blocks edge to it (tk-2cyxo)"
+        "filed under the gated bead, the demand can never carry a blocks edge to it"
 fi
 if demand_body | grep -q -- '--parent "$gated"'; then
     bad "…and never the gated bead itself as parent" \
@@ -1470,8 +1470,9 @@ have "the prompt states the sibling rule for everything a sitting files" \
 
 # THE POINT OF ALL OF IT. A prose hold is a dispatch only a person can resume:
 # it requires someone to come back, read a sentence, and hand-clear a field.
-# No agent in this pack may write one. The readers stay — live holds predate
-# this and keep working (tk-lb3u4m converts them) — so this pins the WRITE.
+# No agent in this pack may write one. The readers stay, because live holds
+# predate this rule and keep working. Converting them is separate work, so
+# this pins the WRITE.
 holdwriters=""
 for f in "$PROMPT" "$REPO"/agents/*/prompt.template.md "$REPO"/formulas/*.toml \
          "$REPO"/assets/scripts/*.sh "$REPO"/template-fragments/*.md; do
