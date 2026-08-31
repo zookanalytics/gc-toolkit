@@ -131,10 +131,29 @@ if [ "$FORCE" -eq 0 ] && [ -f "$STAMP" ]; then
         exit 1
     fi
 fi
-# The window is closed by a write to $STAMP, the pass's or this check's. If
-# that write is impossible the cadence has no floor and every dispatch tick
-# would run a pass, so probe it here and refuse rather than storm.
-if ! ( mkdir -p "$STATE_DIR" 2>/dev/null && : > "$STAMP.probe" 2>/dev/null ); then
+# Both writers of $STAMP — this check and liveness-sweep.sh — replace it
+# atomically, a temp file in $STATE_DIR renamed over the stamp. rename(2)
+# consults the DIRECTORY's mode and never the stamp's own, so creating a file
+# in $STATE_DIR probes exactly the permission the real write needs and a
+# last-pass left read-only still takes the window. What rename cannot replace
+# is a $STAMP that is not a regular file, so that is refused here too. With
+# neither the stamp nor the refusal the cadence has no floor and every
+# dispatch tick would run a pass.
+spend_window() { # spend_window <epoch-seconds>
+    local tmp="$STAMP.$$.tmp"
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    if printf '%s\n' "$1" > "$tmp" 2>/dev/null && mv -f "$tmp" "$STAMP" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$tmp" 2>/dev/null
+    return 1
+}
+STAMP_WRITABLE=0
+if ( mkdir -p "$STATE_DIR" 2>/dev/null && : > "$STAMP.probe" 2>/dev/null ); then
+    { [ ! -e "$STAMP" ] || [ -f "$STAMP" ]; } && STAMP_WRITABLE=1
+fi
+rm -f "$STAMP.probe" 2>/dev/null || true
+if [ "$STAMP_WRITABLE" -eq 0 ]; then
     say "liveness-sweep precheck: CANNOT WRITE the cooldown stamp at $STAMP."
     say "  Refusing to run the pass: with no cadence this check would dispatch a pass"
     say "  on every dispatch tick. Fix the state directory — the sweep is OFF"
@@ -142,7 +161,6 @@ if ! ( mkdir -p "$STATE_DIR" 2>/dev/null && : > "$STAMP.probe" 2>/dev/null ); th
     DECISION=skip; REASON="cooldown stamp unwritable"; DECIDED=1
     exit 1
 fi
-rm -f "$STAMP.probe" 2>/dev/null || true
 
 TMP="$(mktemp -d)"
 
@@ -314,7 +332,7 @@ if [ "$DECISION" = "skip" ]; then
     # skips never reach here: one is already inside a window, the other could
     # not write.
     if [ "$FORCE" -eq 0 ]; then
-        mkdir -p "$STATE_DIR" 2>/dev/null && printf '%s\n' "$NOW" > "$STAMP" 2>/dev/null \
+        spend_window "$NOW" \
             || say "  WARN: cannot stamp the cadence window at $STAMP — the next tick reclassifies."
     fi
     exit 1

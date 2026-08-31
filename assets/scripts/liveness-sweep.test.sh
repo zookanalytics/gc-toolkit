@@ -380,6 +380,26 @@ rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
 bash "$SCRIPT" --dry-run >/dev/null 2>&1
 [ -f "$STAMP_FILE" ] && bad "--dry-run does not spend the window" "it wrote $STAMP_FILE" \
     || ok "--dry-run does not spend the window"
+# liveness-sweep-precheck.sh's writability guard probes the state DIRECTORY;
+# the write it stands for is this one. A last-pass whose own mode is read-only
+# must still take the new window, or the guard passes, the pass runs, the
+# window never closes, and the order dispatches another pass on every tick.
+if [ "$(id -u)" -eq 0 ]; then
+    ok "a read-only last-pass still takes the window (skipped: running as root)"
+else
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+    STALE="$(( $(date -u +%s) - 99999 ))"
+    printf '%s\n' "$STALE" > "$STAMP_FILE"
+    chmod 400 "$STAMP_FILE"
+    bash "$SCRIPT" >/dev/null 2>"$TMP/err"
+    chmod 600 "$STAMP_FILE" 2>/dev/null || true
+    [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$STALE" ] \
+        && ok "a read-only last-pass still takes the window" \
+        || bad "a read-only last-pass still takes the window" "still reads $STALE — the cadence has no floor"
+    grep -q "cannot stamp the cadence window" "$TMP/err" \
+        && bad "and never reached the warn arm" "$(cat "$TMP/err")" \
+        || ok "and never reached the warn arm"
+fi
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"

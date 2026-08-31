@@ -61,9 +61,21 @@ STAMP="$STATE_DIR/last-pass"
 # never spends it on a RUN verdict: a check is evaluated by callers that never
 # dispatch, so a RUN has to survive until the pass it dispatches starts.
 # Stamped before the reads, so a pass that aborts costs one window instead of
-# re-offering itself on every tick.
+# re-offering itself on every tick. The replace is atomic and matches the
+# check's, whose guard probes $STATE_DIR: rename(2) consults the directory's
+# mode and never the stamp's own, so a last-pass left read-only still takes
+# the window rather than leaving the cadence with no floor.
+spend_window() { # spend_window <epoch-seconds>
+    local tmp="$STAMP.$$.tmp"
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    if printf '%s\n' "$1" > "$tmp" 2>/dev/null && mv -f "$tmp" "$STAMP" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$tmp" 2>/dev/null
+    return 1
+}
 if [ "$DRY_RUN" -eq 0 ]; then
-    mkdir -p "$STATE_DIR" 2>/dev/null && printf '%s\n' "$(date -u +%s)" > "$STAMP" 2>/dev/null \
+    spend_window "$(date -u +%s)" \
         || echo "$PROG: WARN: cannot stamp the cadence window at $STAMP" >&2
 fi
 

@@ -36,7 +36,9 @@
 #      sweep dark while its check logged RUN. Repeated evaluation is pinned to
 #      keep answering RUN until a pass actually runs, a quiet board is pinned to
 #      answer from the window rather than reclassify on every tick, and the two
-#      scripts are pinned to one stamp path.
+#      scripts are pinned to one stamp path written one way — an atomic replace,
+#      which is the only write the check's guard can probe without spending the
+#      window it is guarding.
 #      The state directory is city+pack scoped while the order is rig-scoped,
 #      so a window without a rig component would let the first rig through the
 #      check silence every other rig for six hours — section 4b runs two rigs
@@ -420,11 +422,16 @@ rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 grep -q 'STAMP="\$STATE_DIR/last-pass"' "$SCRIPT" && grep -q 'STAMP="\$STATE_DIR/last-pass"' "$SWEEP" \
     && ok "check and exec name the same stamp path" \
     || bad "check and exec name the same stamp path" "one of them keys the window elsewhere"
-grep -qE '> *"\$STAMP"' "$SWEEP" \
-    && ok "the exec redirects into the stamp" \
-    || bad "the exec redirects into the stamp" "no write to \$STAMP in $SWEEP"
-eq "$(grep -cE '> *"\$STAMP"' "$SCRIPT")" "1" \
-   "the check writes the stamp in exactly one place"
+# And both must write it the same way. An in-place truncate needs the STAMP's
+# own write bit, which the guard below cannot probe without spending the very
+# window it guards; the atomic replace needs only the directory's, which it can.
+grep -q '^spend_window() {' "$SCRIPT" && grep -q '^spend_window() {' "$SWEEP" \
+    && ok "check and exec share the atomic-replace writer" \
+    || bad "check and exec share the atomic-replace writer" "one of them stamps the window its own way"
+eq "$(grep -cE '> *"\$STAMP"' "$SCRIPT")$(grep -cE '> *"\$STAMP"' "$SWEEP")" "00" \
+   "neither script truncates the stamp in place"
+eq "$(grep -c 'spend_window "' "$SCRIPT")" "1" \
+   "the check spends the window in exactly one place"
 # A degraded store must still reach a RUN verdict — the storm guard is the
 # exec's stamp now, not a verdict the check withholds.
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -449,6 +456,15 @@ else
     has "$OUT" "CANNOT WRITE the cooldown stamp" "and says exactly what is broken"
     has "$OUT" "the sweep is OFF" "and that the sweep is off until it is fixed"
 fi
+# The directory is writable here, so the probe passes; a rename still cannot
+# replace a $STAMP that is not a regular file, and a guard that let this
+# through would pass a write that never lands.
+rm -rf "$LIVENESS_SWEEP_STATE_DIR"
+mkdir -p "$STATE/last-pass"
+OUT="$("$SCRIPT" 2>&1)"; RC=$?
+eq "$RC" "1" "a non-regular last-pass refuses to run rather than storm"
+has "$OUT" "CANNOT WRITE the cooldown stamp" "and says exactly what is broken"
+rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 
 # The other end of the window. A SKIP dispatches nothing, so the exec never
 # runs and nothing else can advance the stamp; an unspent window leaves the
@@ -480,6 +496,26 @@ OUT3="$("$SCRIPT" --force 2>&1)"; RC3=$?
 eq "$RC3" "1" "--force reclassifies the quiet board"
 has "$OUT3" "SKIP:" "and reaches the same verdict"
 eq "$(cat "$STATE/last-pass")" "$STAMPED_AT" "--force leaves the window where it found it"
+# The guard probes $STATE_DIR, and the write it stands for is a rename into
+# that directory — so a last-pass whose own mode is read-only must still take
+# the window. A writer that truncated in place instead left the stale value
+# there and every later tick reclassified a board it had already proved quiet.
+if [ "$(id -u)" -eq 0 ]; then
+    ok "a read-only last-pass still takes the window (skipped: running as root)"
+else
+    rm -rf "$LIVENESS_SWEEP_STATE_DIR"
+    mkdir -p "$STATE"
+    STALE="$(( $(date -u +%s) - 21601 ))"
+    printf '%s\n' "$STALE" > "$STATE/last-pass"
+    chmod 400 "$STATE/last-pass"
+    OUT4="$("$SCRIPT" 2>&1)"; RC4=$?
+    chmod 600 "$STATE/last-pass" 2>/dev/null || true
+    eq "$RC4" "1" "the quiet board still skips with a read-only stamp"
+    hasnt "$OUT4" "WARN: cannot stamp" "and never reached the warn arm"
+    [ "$(cat "$STATE/last-pass" 2>/dev/null)" != "$STALE" ] \
+        && ok "a read-only last-pass still takes the window" \
+        || bad "a read-only last-pass still takes the window" "still reads $STALE — every tick would reclassify"
+fi
 cp "$TMP/ready.bak" "$FIX/ready.json"
 
 echo "── the report survives the controller discarding stdout ──"
