@@ -7,3 +7,8 @@ work_dir = ".gc/worktrees/{{.Rig}}/refinery/{{.AgentBase}}"
 nudge = "Run gc prime, then the startup wisp reconcile; process the merge queue."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
+# work_dir is per-instance, so the routed-pool path can materialize numbered
+# refineries alongside the named singleton. The patrol reconcile in
+# prompt.template.md collects one wisp per rig by title. Two refineries on a rig
+# therefore burn each other's in-flight wisps, and this cap is what prevents it.
+max_active_sessions = 1
