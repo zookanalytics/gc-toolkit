@@ -21,9 +21,9 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 [ -s "$DOCTRINE" ] || { echo "missing $DOCTRINE" >&2; exit 1; }
 [ -s "$WITNESS" ]  || { echo "missing $WITNESS" >&2; exit 1; }
 
-grep -q 'gc mail send .*witness' "$DOCTRINE" \
-  && ok "doctrine routes a blocker to the witness by mail" \
-  || bad "doctrine no longer tells the polecat to mail the witness"
+grep -qF 'gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness"' "$DOCTRINE" \
+  && ok "doctrine mails the blocker to the binding-qualified witness address" \
+  || bad "doctrine's witness address must carry the rig and binding prefixes; a bare <rig>/witness names no configured agent"
 
 grep -q 'HELP:' "$DOCTRINE" \
   && ok "doctrine names the HELP: subject prefix the witness triages on" \

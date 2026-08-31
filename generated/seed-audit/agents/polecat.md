@@ -185,7 +185,7 @@ duplicate dispatch on your bead. Use `HELP:` when you need an answer and
 `NOTICE:` when you are reporting a fact.
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}witness" -s "HELP: <one line>" -m "Issue: <work-bead>
+gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <work-bead>
 Hit: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
 
