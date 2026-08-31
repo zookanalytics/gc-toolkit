@@ -362,7 +362,7 @@ echo "── the pass owns the cadence window and spends it before it reads ─�
 # liveness-sweep-precheck.sh, the order's `check`, only READS this stamp. A
 # check is evaluated by callers that never dispatch — the controller tick, the
 # API order evaluator, `gc order check` — so a check that stamped its own
-# window hands the RUN verdict to whichever caller asks first (bead tk-q3h04r).
+# window hands the RUN verdict to whichever caller asks first.
 STAMP_FILE="$TMP/state/testrig/last-pass"
 run_sweep ABSENT
 STAMPED="$(cat "$STAMP_FILE" 2>/dev/null)"

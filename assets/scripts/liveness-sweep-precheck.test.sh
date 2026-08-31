@@ -31,14 +31,13 @@
 #      callers that never dispatch — the controller tick, the API order
 #      evaluator, `gc order check` — so a check that stamped its own window
 #      would spend the RUN verdict on whichever caller asked first and report a
-#      cooldown to the dispatcher; that is how the sweep went dark for 3.6 days
-#      while its check logged RUN daily. Repeated evaluation is pinned to keep
-#      answering RUN until a pass actually runs, and the two scripts are pinned
-#      to one stamp path. The state directory is city+pack scoped while the
-#      order is rig-scoped, so a window without a rig component would let the
-#      first rig through the check silence every other rig for six hours —
-#      section 4b runs two rigs against one shared state directory, which is
-#      the only way to see that.
+#      cooldown to the dispatcher, leaving the sweep dark while its check
+#      logged RUN. Repeated evaluation is pinned to keep answering RUN until a
+#      pass actually runs, and the two scripts are pinned to one stamp path.
+#      The state directory is city+pack scoped while the order is rig-scoped,
+#      so a window without a rig component would let the first rig through the
+#      check silence every other rig for six hours — section 4b runs two rigs
+#      against one shared state directory, which is the only way to see that.
 #
 #   5. THE SUBSET PROPERTY, which is the soundness argument itself. The precheck
 #      is only safe because its exclusions are a strict subset of the sweep's
@@ -386,12 +385,11 @@ eq "$RC" "0" "first evaluation in a fresh window classifies and runs"
 [ -f "$STATE/last-pass" ] \
     && bad "evaluating the check does not spend the window" "the check wrote $STATE/last-pass" \
     || ok "evaluating the check does not spend the window"
-# THE REGRESSION (bead tk-q3h04r). Three evaluators call this check — the
-# controller tick, the API order evaluator, `gc order check` — and only one of
-# them dispatches. When the check owned the window, whichever asked first got
-# the single RUN and the dispatcher got a cooldown for the next 24h; the sweep
-# logged RUN daily and never ran for 3.6 days. Every evaluation must return the
-# same verdict until a pass actually runs.
+# Three evaluators call this check — the controller tick, the API order
+# evaluator, `gc order check` — and only one of them dispatches. A verdict
+# spent on an evaluator that dispatches nothing is a window the pass never
+# gets, so every evaluation must return the same verdict until a pass actually
+# runs.
 "$SCRIPT" >/dev/null 2>&1; RC2=$?
 "$SCRIPT" >/dev/null 2>&1; RC3=$?
 eq "$RC2/$RC3" "0/0" "repeated evaluation still reports RUN — the check is not a one-shot latch"
