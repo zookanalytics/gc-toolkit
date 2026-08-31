@@ -128,6 +128,47 @@ has "$ghlog" "pr view 77 --repo github.com/zook/gc-toolkit" "read back BY NUMBER
 has "$ghlog" "pr comment 77" "the verdict was replayed as a comment"
 hasnt "$ghlog" "pr review" "never an approval"
 
+echo "# the body summarizes the diff, and demotes the dispatch text"
+# A reviewer who was not in the originating conversation opens this body. The
+# anchor's description is dispatch text — what the work was asked to do — so
+# the polecat's pr_summary is the ## Summary and the description survives one
+# level down.
+store "[$(pre E1 polecat/e1 ',"check.codex":"green@sha-e1","pr_summary":"Compares heads instead of branch names, so a moved head is refused."')]"
+echo "sha-e1" > "$GH_DIR/head_polecat_e1"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/81"
+printf '%s' "$(prrow 81 OPEN polecat/e1 sha-e1 main)" > "$GH_DIR/pr_view_81.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#81" "the PR was opened"
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"Compares heads instead of branch names, so a moved head is refused." \
+    "pr_summary is the summary a reviewer reads first"
+has "$body" "<summary>Dispatch — what this work was asked to do</summary>" "the dispatch text is demoted, not dropped"
+has "$body" "d E1" "…and it is still in the body"
+has "$body" "## Refinery handoff" "the handoff block is unchanged"
+
+echo "# no carried summary keeps today's body"
+# The current text is a poor summary, not an empty one: an anchor whose handoff
+# carried nothing must still open with a body.
+store "[$(pre E2 polecat/e2 ',"check.codex":"green@sha-e2"')]"
+echo "sha-e2" > "$GH_DIR/head_polecat_e2"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/82"
+printf '%s' "$(prrow 82 OPEN polecat/e2 sha-e2 main)" > "$GH_DIR/pr_view_82.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#82" "the PR was opened"
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"d E2" "the description is the summary when nothing was carried"
+hasnt "$body" "<details>" "no empty demotion section when there is nothing to demote"
+
+echo "# a whitespace-only summary is the absent case"
+store "[$(pre E3 polecat/e3 ',"check.codex":"green@sha-e3","pr_summary":"   \n  "')]"
+echo "sha-e3" > "$GH_DIR/head_polecat_e3"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/83"
+printf '%s' "$(prrow 83 OPEN polecat/e3 sha-e3 main)" > "$GH_DIR/pr_view_83.json"
+out=$("$SUT" 2>&1)
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"d E3" "blank prose falls back rather than publishing an empty summary"
+hasnt "$body" "<details>" "…and demotes nothing"
+
 echo "# a head that moved between gate and create refuses the stamp"
 store "[$(pre C2 polecat/c2 ',"check.codex":"green@sha-c2"')]"
 echo "sha-c2" > "$GH_DIR/head_polecat_c2"

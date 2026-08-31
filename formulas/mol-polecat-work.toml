@@ -327,9 +327,28 @@ fi
 git checkout --detach && git branch -D "$CURRENT_BRANCH"
 ```
 
+**4b. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
+as the PR's `## Summary`, and falls back to the anchor's description — the
+dispatch text, written before the diff existed and addressed to you, not to a
+reviewer. You are the only actor that has read the diff, so say what changed
+and why, for a reviewer who was not in the originating conversation:
+
+```bash
+PR_SUMMARY_FILE=$(mktemp)
+cat > "$PR_SUMMARY_FILE" <<'PRSUMMARY'
+<the behavior before, the behavior now, and the shape of the change — a short
+paragraph or a few bullets of markdown>
+PRSUMMARY
+wc -c "$PR_SUMMARY_FILE"
+```
+
+Quote the delimiter as written: an unquoted `<<PRSUMMARY` runs any backticks
+in your prose. Leaving the file empty carries no summary and the PR body
+falls back to the dispatch text.
+
 **5. ONE atomic handoff.** A single `gc bd update` carries the whole
-transition — target, notes, refinery assignee, cleared route — so no partial
-handoff can strand the bead between writes. `--append-notes`, never
+transition — target, PR summary, notes, refinery assignee, cleared route — so
+no partial handoff can strand the bead between writes. `--append-notes`, never
 `--notes` (which REPLACES and erases the dispatch note). The empty
 `gc.routed_to` is deliberate: the direct assignment IS the handoff, and
 named-session work must not read as pool demand.
@@ -349,7 +368,11 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
     gc runtime drain-ack
     exit 1
 fi
-gc bd update "$WORK_BEAD_ID" --status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --append-notes "Implemented: <brief summary>"
+PR_SUMMARY=""
+if [ -s "${PR_SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$PR_SUMMARY_FILE"); fi
+HANDOFF=(--status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="")
+if [ -n "$PR_SUMMARY" ]; then HANDOFF+=(--set-metadata pr_summary="$PR_SUMMARY"); fi
+gc bd update "$WORK_BEAD_ID" "${HANDOFF[@]}" --append-notes "Implemented: <brief summary>"
 # <<< submit-target-consume
 ```
 

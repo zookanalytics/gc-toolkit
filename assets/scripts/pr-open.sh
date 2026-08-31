@@ -6,8 +6,10 @@
 # IS the live head: that close was a decision about this exact commit).
 # Otherwise: holds gate the create path; require every marker-bearing gate the
 # anchor's check_set declares green@<live head>;
-# `gh pr create` non-draft pinned to origin, read back BY NUMBER, refuse a
-# moved head, replay the recorded verdict as a COMMENT (never an approval);
+# `gh pr create` non-draft pinned to origin, body summarizing the polecat's
+# `pr_summary` with the dispatch text demoted (the description only when no
+# summary was carried), read back BY NUMBER, refuse a moved head, replay the
+# recorded verdict as a COMMENT (never an approval);
 # then ONE lifecycle.sh transition to pull_request carrying
 # pr_url/pr_number/merged_target. Every failure leaves pre_open_gate.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
@@ -252,10 +254,25 @@ GATES
   # --- create, pinned and non-draft ----------------------------------------------
   title=$(printf '%s' "$row" | jq -r '.title // empty')
   desc=$(printf '%s' "$row" | jq -r '.description // empty')
+  # The summary is the polecat's account of the diff, carried in pr_summary by
+  # the refinery handoff. The anchor's description is dispatch text — what the
+  # work was asked to do, addressed to the agent that did it and never revised
+  # once the diff exists — so it is demoted to a collapsed section and stands
+  # in as the summary only when the handoff carried no account. Whitespace is
+  # the absent case, as it is for check_set above.
+  summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty')
+  [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || summary=""
   BODY=$(mktemp) || { echo "$PROG: cannot create a temp file for the PR body" >&2; exit 1; }
   {
     echo "## Summary"; echo
-    if [ -n "$desc" ]; then printf '%s\n' "$desc"; else printf 'Refinery handoff for `%s`.\n' "$id"; fi
+    if [ -n "$summary" ]; then printf '%s\n' "$summary"
+    elif [ -n "$desc" ]; then printf '%s\n' "$desc"
+    else printf 'Refinery handoff for `%s`.\n' "$id"; fi
+    if [ -n "$summary" ] && [ -n "$desc" ]; then
+      echo; echo "<details>"; echo "<summary>Dispatch — what this work was asked to do</summary>"; echo
+      printf '%s\n' "$desc"
+      echo; echo "</details>"
+    fi
     echo; echo "## Refinery handoff"; echo
     printf -- '- Issue: `%s`\n- Source branch: `%s`\n- Target: `%s`\n' "$id" "$branch" "$target"
     GREENED=$(gates_of "$checkset" | paste -sd, -)
