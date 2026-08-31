@@ -372,16 +372,26 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 	// CapRows returns DONE and parked rows on top of its live budget, so
 	// len(shown) is a whole board and can exceed the live count it would
 	// otherwise be printed against.
+	//
+	// The band carries its own budget, so it can be capped while the live rows
+	// are not. Printing the closed TOTAL against a capped band says the whole
+	// of it is on screen, which is the completeness this band exists to stop a
+	// reader assuming — so a capped band names both numbers.
 	done := closedRows(b.Tiles)
-	var shownLive int
+	var shownLive, shownDone int
 	for _, t := range shown {
-		if t.Severity != board.SevDone {
-			shownLive++
+		if t.Severity == board.SevDone {
+			shownDone++
+			continue
 		}
+		shownLive++
 	}
 	live := b.Total - done
 	closedSfx := ""
-	if done > 0 {
+	switch {
+	case shownDone < done:
+		closedSfx = fmt.Sprintf(" · showing %d of %d closed", shownDone, done)
+	case done > 0:
 		closedSfx = fmt.Sprintf(" · %d closed", done)
 	}
 	if len(shown) < b.Total {

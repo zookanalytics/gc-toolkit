@@ -118,6 +118,51 @@ func TestRenderTableCappedHeaderCountsOnlyTheLiveRowsShown(t *testing.T) {
 	}
 }
 
+// The DONE band draws on its own budget, so it can be capped while the live
+// rows are not. A header that prints the closed TOTAL beside a capped band
+// reports a complete record of what closed while showing part of it.
+func TestRenderTableHeaderNamesTheClosedCap(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	var tiles []board.Tile
+	tiles = append(tiles, board.Tile{
+		ID: "tk-live", Rig: "gc-toolkit", Kind: "epic", Title: "still open",
+		Severity: board.SevHigh, MTotal: 2, Open: 2, RankScore: 3_002_000,
+	})
+	for i := range 4 {
+		tiles = append(tiles, board.Tile{
+			ID: fmt.Sprintf("tk-done%d", i), Rig: "gc-toolkit", Kind: "epic", Title: "answered",
+			Severity: board.SevDone, MTotal: 1, NClosed: 1, ClosedAt: now.Add(-26 * time.Hour),
+			RankScore: -999_002 - i,
+		})
+	}
+	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
+	shown := board.CapRows(tiles, 50, 0, 2)
+
+	var out strings.Builder
+	renderTable(&out, b, shown, b.GeneratedAt, 1)
+	got := out.String()
+
+	if !strings.Contains(got, "showing 2 of 4 closed") {
+		t.Errorf("a capped DONE band must name both numbers; got:\n%s", firstLines(got, 3))
+	}
+	if strings.Contains(got, "· 4 closed") {
+		t.Errorf("the closed total alone reads as a complete band; got:\n%s", firstLines(got, 3))
+	}
+}
+
+// An uncapped band is complete, and saying "showing 2 of 2" there invites the
+// operator to look for rows that are already all on screen.
+func TestRenderTableHeaderStaysPlainWhenTheBandIsWhole(t *testing.T) {
+	b, tiles := doneBoard()
+	var out strings.Builder
+	renderTable(&out, b, tiles, b.GeneratedAt, 1)
+	got := out.String()
+
+	if !strings.Contains(got, "· 1 closed") || strings.Contains(got, "of 1 closed") {
+		t.Errorf("a whole band names one number; got:\n%s", firstLines(got, 3))
+	}
+}
+
 func firstLines(s string, n int) string {
 	lines := strings.SplitN(s, "\n", n+1)
 	if len(lines) > n {
