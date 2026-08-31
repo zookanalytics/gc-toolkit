@@ -119,12 +119,21 @@ the cadence — the arms run whether or not any refinery session is awake.
    pre-commit hook is branch-local, a rebase replays commits without running
    it, and `-diff` in `.gitattributes` keeps the clobber out of the PR diff.
    So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
-   `render-seed-audit.sh --check-merge` compares the digest of the merged
-   tree's inputs against the digest that tree's own `INDEX.md` records. That
-   costs hashes rather than a render, and needs no `gc` binary. A mismatch, or
-   a probe that cannot answer, holds the merge and files one visit per PR under
-   `seed-audit-merge-gate.<n>`. Nothing is routed from here: the way out is to
-   bring the head branch current with its base, re-render, and push.
+   `render-seed-audit.sh --check-merge` re-hashes the merged tree's inputs and
+   compares them against `generated/seed-audit/SOURCES.txt` in that same tree.
+   That costs hashes rather than a render, and needs no `gc` binary. A drifting
+   input, or a probe that cannot answer, holds the merge and files one visit per
+   PR under `seed-audit-merge-gate.<n>`, naming the inputs that moved. Nothing
+   is routed from here: the way out is to bring the head branch current with
+   its base, re-render, and push.
+
+   That manifest is one record per input rather than one digest over all of
+   them, and the shape is what keeps this artifact out of the queue's way. A
+   repo-global value in a per-branch committed file moves on every seed-input
+   edit, so two PRs touching two unrelated agents collide on it whatever else
+   they do; per-input records move only where the input moved. The record is
+   two lines, path then hash, because git needs one unchanged line between two
+   changes to merge them and neighbouring entries in a flat list leave none.
 5. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head), a gate
