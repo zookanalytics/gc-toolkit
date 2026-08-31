@@ -1809,14 +1809,14 @@ func TestDoneSince(t *testing.T) {
 // TestMergeAnchorsAreGathered is the PR round-trip's gather (specs/tk-q0ml23).
 //
 // `doctor/check-one-anchor-per-pr` asserts one open gating anchor per pull
-// request, so the anchor already IS the PR's row — but a merge anchor is an
-// ordinary task or bug, and until now only the ones a person had been routed
-// were gathered at all. That left every `progressing` and `settled` row off the
-// board, and left the wedged ones reading as bare "routed to a person".
+// request, so the anchor already IS the PR's row. A merge anchor is otherwise
+// an ordinary task or bug: `merge_result` is the only marker that tells it from
+// the rest of the store, and a `progressing` or `settled` anchor carries no
+// human route for any other gather kind to select on.
 //
-// Keyed on merge_result PRESENCE, never on pr_number: six of the seven wedged
-// anchors measured on 2026-08-28 sat at pre_open_gate with no pull request
-// open, so a number-keyed query would omit the majority of the condition.
+// Keyed on merge_result PRESENCE, never on pr_number: an anchor that wedges at
+// pre_open_gate has no pull request open, so a number-keyed query would omit
+// the bulk of the condition.
 func mergeStore() *fakeStore {
 	return &fakeStore{
 		issues: map[string][]*beads.Issue{

@@ -546,11 +546,11 @@ function serve(tiles: Tile[]) {
   );
 }
 
-// A wedged anchor reached the board before this change — it is routed to a
-// person, so the gather found it — and said nothing about WHY nothing was
-// moving. "Routed to a person" reads identically for an anchor awaiting a
-// ruling and for one frozen at exception@<live head>, where the only release is
-// a head move nobody is going to make.
+// A wedged anchor is routed to a person, so the gather finds it either way. The
+// row has to say WHY nothing is moving: "routed to a person" alone reads
+// identically for an anchor awaiting a ruling and for one frozen at
+// exception@<live head>, where the only release is a head move nobody is going
+// to make.
 it('names the wedge and links the pull request', async () => {
   serve([
     prTile({

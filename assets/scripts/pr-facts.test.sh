@@ -706,7 +706,7 @@ printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"S
   > "$GH_DIR/reviews_57.json"
 printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3"}]' > "$GH_DIR/comments_57.json"
 out=$(run)
-eq "$(meta R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
+eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
 eq "$(meta R3 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
 eq "$(meta R3 'check.codex')" "exception@sha-57" "…the cap's exception stands"
 eq "$(meta R3 'gc.routed_to')" "human" "…and the anchor stays parked for the person it was given to"
@@ -718,7 +718,7 @@ printf '%s' "$(prview 52 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "RE
 echo '[]' > "$GH_DIR/reviews_52.json"
 echo '[]' > "$GH_DIR/comments_52.json"
 out=$(run)
-eq "$(meta R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
+eq "$(meta_pinned R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
 eq "$(meta R7 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
 eq "$(meta R7 'check.codex')" "exception@sha-52" "…and the cap's exception stands"
 eq "$(meta R7 'gc.routed_to')" "human" "…with the park it belongs to"

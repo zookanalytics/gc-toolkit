@@ -807,9 +807,9 @@ oid x3 > "$GH_DIR/head_polecat_x3"
 oid x4 > "$GH_DIR/head_polecat_x4"
 out=$(run); rc=$?
 eq "$rc" 0 "the recording pass exits 0"
-# The live shape of six of the seven wedged anchors: the convergence cap stamped
-# the exception at the head the branch still carries, and routed the anchor to a
-# person. Nothing raises it, and nothing said so until now.
+# The commonest wedge: the convergence cap stamped the exception at the head the
+# branch still carries and routed the anchor to a person. Only a head move
+# releases it, and no actor is going to make one.
 eq "$(pinned X1)" "wedged-exception@$(oid x1)" "exception@<live head> records the wedge, with its shape named"
 eq "$(pinned X2)" "settled@$(oid x2)" "every gate green at the live head records settled"
 eq "$(pinned X3)" "progressing@$(oid x3)" "a marker the head has moved past records progressing"

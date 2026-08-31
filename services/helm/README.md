@@ -196,9 +196,10 @@ Six kinds are gathered. The first three are selected by the bead's issue
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number
-yet, and most wedged anchors are in that state. It is gathered LAST, so a wedged
-anchor — which carries `gc.routed_to=human` too — keeps its `human` row through
-the dedup instead of flipping kind between passes.
+yet, so a number-keyed query cannot see a gate that wedges before the PR opens.
+It is gathered LAST, so a wedged anchor — which carries `gc.routed_to=human` too
+— keeps its `human` row through the dedup instead of flipping kind between
+passes.
 
 All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
@@ -417,7 +418,7 @@ Measured on the live board the day this landed: `sl-kg9z6.1` had been reporting
 named operator ruling, and `tk-eemvf` and `tk-9tbbk` were reading `decomposed,
 idle — assign or visit` with nothing under them but a parked child.
 
-### The PR round-trip (`tk-nnx2gd`, phase 1)
+### The PR round-trip
 
 A pull request has two things going on at once and they move independently. The
 merge cadence is somewhere in its own loop; separately, a conversation is running
@@ -438,12 +439,12 @@ marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Bot
 record it through `lifecycle.sh`, in the head-pinned `<value>@<oid>@<since>`
 shape the gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
 
-**No per-PR GitHub call.** Reading the conversation for the fourteen pull
-requests open when this was designed cost about twenty seconds against a
-45-second cache TTL, and a cold `gh pr list` reported `mergeStateStatus=UNKNOWN`
-for nine of them — so a surface derived from that field would render two thirds
-of its rows unknown on a cold read and change its answer on the next one with
-nothing having happened. The rows render from the bead, and
+**No per-PR GitHub call.** A conversation read costs one GitHub round trip per
+open pull request, and a backlog of ordinary size spends the board's whole cache
+TTL on them. A cold `gh pr list` also reports `mergeStateStatus=UNKNOWN` for much
+of that backlog, so a surface derived from that field would render most of its
+rows unknown on a cold read and change its answer on the next one with nothing
+having happened. The rows render from the bead, and
 `TestPRRowsCostNoCallPerPullRequest` pins that the gather's subprocess count does
 not grow with the number of pull requests.
 
@@ -464,10 +465,10 @@ returns as `review_required` once the fix moves the head.
 
 **`pr_conversation` is a constant `unknown`.** Its other values — `quiet`,
 `outstanding`, `covered`, `answered` — all resolve to acknowledgement watermarks
-that do not exist yet (`tk-jus6e4`). Building them before those land means
-guessing, and every failed guess resolves to silence, which is the one answer
-that tells the operator to stop looking. The field ships now so the wire contract
-does not change shape when phase 2 fills it.
+the city does not record. Deriving them without those marks means guessing, and
+every failed guess resolves to silence, which is the one answer that tells the
+operator to stop looking. The field is on the wire so the contract does not
+change shape once the marks exist.
 
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false

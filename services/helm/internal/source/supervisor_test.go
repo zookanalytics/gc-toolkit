@@ -474,9 +474,9 @@ func TestMetadataAnchorPredicateMatchesTheStoreFilter(t *testing.T) {
 // the selector list is shared, so a kind added on one side cannot go missing on
 // the other — and the axes are read off the scanned bead's own metadata.
 //
-// It is NARROWER here, and that is the backend's standing posture rather than a
-// gap in this change: it cannot resolve a blocker's status, so it never claims
-// `asking` and never upgrades a row to `progressing` on a pool-routed child.
+// It is NARROWER here, and that is the backend's standing posture: it cannot
+// resolve a blocker's status, so it never claims `asking` and never upgrades a
+// row to `progressing` on a pool-routed child.
 // Every such row reads what the merge cadence recorded, which is the honest
 // answer for a backend that did not read the graph.
 func TestSupervisorBackendReadsThePRAxes(t *testing.T) {

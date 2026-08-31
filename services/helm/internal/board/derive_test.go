@@ -1953,10 +1953,10 @@ func TestCapRowsBudgetsAreSeparate(t *testing.T) {
 
 // --- the PR round-trip (specs/tk-q0ml23) --------------------------------------
 //
-// Every case below is built from a shape the design measured on live gc-toolkit
-// on 2026-08-28, because the failure this surface exists to prevent is a board
-// that reports a wedged pull request as nobody's problem, and only the real
-// shapes prove it does not.
+// Every case below is built from a shape the design measured on a live city,
+// because the failure this surface exists to prevent is a board that reports a
+// wedged pull request as nobody's problem, and only the real shapes prove it
+// does not.
 
 const (
 	// A 40-hex oid, the grammar the gate markers and the dated keys share.
@@ -2093,8 +2093,8 @@ func TestProgressingIsNotOwed(t *testing.T) {
 }
 
 // TestAskingIsOwedAndCarriesTheDemand: the city formed a question and is waiting
-// on the answer. That is tk-s4fg87's hold primitive with nothing added — an open
-// `blocks` edge to a demand bead — and closing the bead is what ends it.
+// on the answer. The hold is an open `blocks` edge to a demand bead with
+// nothing added, and closing the bead is what ends it.
 // TestPositionYieldsToTheHandSetRoute: the PR position outranks the
 // human-routed phrase only when the position is what puts the row in the queue.
 //
@@ -2430,9 +2430,9 @@ func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
 	}
 }
 
-// TestOwedPRRowLeadsTheQueue. The partition and its ordering are tk-lb3u4m's;
-// this asserts a PR row participates in them rather than needing a surface of
-// its own.
+// TestOwedPRRowLeadsTheQueue. The owed partition and its ordering are the
+// queue's own; this asserts a PR row participates in them rather than needing a
+// surface of its own.
 func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 	old := fixtureNow.Add(-96 * time.Hour)
 	recent := fixtureNow.Add(-2 * time.Hour)
@@ -2508,19 +2508,17 @@ func TestWedgedAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	}
 }
 
-// TestCappedAnchorBlockerIsADemandToday is the live shape this rule was
-// measured against, and it is the one case where the demand test is wider than
-// tk-s4fg87's three authored shapes.
+// TestCappedAnchorBlockerIsADemandToday is the one case where the demand test
+// is wider than the `decision` issue type.
 //
-// On live gc-toolkit, tk-j81t84 blocks on tk-dchq5: a `bug` at pre_open_gate,
-// routed to a person by the convergence cap, open for thirteen days. It is not
-// a `decision` and not a visit, so a narrow reading calls it an ordinary
-// prerequisite and the waiting row stays out of the queue — which is where it
-// had been sitting, banded LOW, with a takeaway saying the work was finished and
-// only an operator could open its PR.
+// The shape it is built from: an anchor blocks on a `bug` at pre_open_gate that
+// the convergence cap routed to a person and left open for days. It is not a
+// `decision` and not a visit, so a narrow reading calls it an ordinary
+// prerequisite and the waiting row stays out of the queue — banded LOW, under a
+// takeaway saying the work was finished and only an operator could open its PR.
 //
-// tk-s4fg87's phase 3 converts capped anchors into exactly the decision bead a
-// narrow reading would want. Until it runs, this IS that bead.
+// The route is what makes it a demand: nothing but a person closes a bead held
+// by a person, whether or not that wait has been expressed as a decision bead.
 func TestCappedAnchorBlockerIsADemandToday(t *testing.T) {
 	cappedAt := fixtureNow.Add(-13 * 24 * time.Hour)
 	a := mergeAnchor("tk-waiter", map[string]string{"pr_number": "473"},

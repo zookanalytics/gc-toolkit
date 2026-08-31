@@ -818,20 +818,16 @@ func poolRouted(b Blocker) bool {
 
 // demand reports whether an open blocker is something a PERSON owes.
 //
-// tk-s4fg87's demand primitive, read with the board's own vocabulary: a ruling
-// only the operator can give is a `decision`, and anything else a person holds
-// carries the route that says so. Either way no automated actor will close it,
-// which is what makes the anchor `asking` rather than busy.
+// Read with the board's own vocabulary: a ruling only the operator can give is
+// a `decision`, and anything else a person holds carries the route that says
+// so. Either way no automated actor will close it, which is what makes the
+// anchor `asking` rather than busy.
 //
-// The route clause is deliberately wider than the proposal's three authored
-// shapes, and it is the COMPATIBILITY PATH the design asks for. tk-s4fg87's
-// phase 3 converts a capped anchor into a decision bead plus an edge, after
-// which `wedged` and `asking` are one primitive read two ways. Until that
-// conversion reaches them, a capped anchor is the unconverted form of exactly
-// that bead — so an anchor blocked on one is waiting on a person today, and
-// narrowing this to `decision` alone would hide the wait until a migration
-// nobody has run yet. The row names what it is waiting on, so a reader can see
-// that two rows in the queue share one cause.
+// The route clause is deliberately wider than the `decision` type alone. An
+// anchor parked for the operator is a person's to answer whether or not that
+// wait has been expressed as a decision bead, so narrowing this to the type
+// would hide every wait that has not been. The row names what it is waiting
+// on, so a reader can see that two rows in the queue share one cause.
 //
 // A visit never reaches here: escalate.sh attaches one with a `tracks` edge, so
 // it is not a blocker at all.
@@ -912,8 +908,8 @@ func prApproval(a Anchor) string {
 
 // askingDemand is the open demand bead this anchor is waiting on, or nil.
 //
-// `asking` needs no key of its own: it IS the edge, which is tk-s4fg87's hold
-// primitive with nothing added, and closing the bead is what ends the state.
+// `asking` needs no key of its own: it IS the edge, and closing the bead is
+// what ends the state.
 // The OLDEST demand wins, because it is the one whose turn started first and
 // the queue is ordered by how long a row has been owed.
 func askingDemand(blockers []Blocker) *Blocker {
@@ -992,8 +988,8 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 // PRCoverage is what the board could and could not read about the pull requests
 // it holds — the counts the owed section states alongside its store coverage.
 //
-// tk-lb3u4m made that section's empty state a contract: it renders its coverage
-// or it renders the error, never a blank. PR rows add a way for it to go quietly
+// That section's empty state is a contract: it renders its coverage or it
+// renders the error, never a blank. PR rows add a way for it to go quietly
 // wrong that beads alone did not have, because an axis nothing has recorded
 // looks exactly like an axis with nothing to say.
 type PRCoverage struct {

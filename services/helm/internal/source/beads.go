@@ -458,10 +458,9 @@ var metadataAnchors = []metadataAnchor{
 	// second queue.
 	//
 	// Keyed on `merge_result` PRESENCE, never on `pr_number`. An anchor at
-	// `pre_open_gate` has a machine axis and no PR number yet, and six of the
-	// seven wedged anchors measured on 2026-08-28 were in exactly that state,
-	// so a query keyed on the number would omit the majority of the condition
-	// this row exists to show.
+	// `pre_open_gate` has a machine axis and no PR number yet, and a gate that
+	// wedges before the PR opens leaves it there, so a query keyed on the
+	// number cannot see the bulk of the condition this row exists to show.
 	//
 	// LAST in this list on purpose. A wedged anchor carries `gc.routed_to=human`
 	// too and is therefore gathered twice; [board.BuildBoard]'s id-dedup keeps
