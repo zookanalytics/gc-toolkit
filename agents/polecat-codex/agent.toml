@@ -6,11 +6,11 @@ scope = "rig"
 provider = "codex"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
-# A pool slot's first turn carries this nudge and nothing else: there is no
-# behavioral prime in the launch, so whatever the nudge omits is absent. It
-# opens with gc prime because a codex session reaches this point with none of
-# its rendered doctrine loaded, and it states the task rather than a command
-# because a command is all a session without doctrine will do.
+# The nudge is the whole instruction a pool slot acts on when it wakes, so it
+# names the task and not just the command to run. A session that reads it as a
+# command runs the claim and stops, holding a claim on work that nothing will
+# re-offer. It opens with gc prime because a codex session arrives with none of
+# its rendered doctrine loaded, leaving the nudge as the only thing in context.
 nudge = """
 Run gc prime to load your doctrine before you act. Then claim and complete one \
 work item: gc hook --claim --json returns assigned work first and routed pool \
