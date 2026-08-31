@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # lifecycle.sh — THE writer of anchor lifecycle transitions (lifecycle/lifecycle.toml).
 #   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
-#     [--unset k]... [--assignee <a>] [--route <pool>] [--close] [--append-notes <t>] [--json]
+#     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>]
+#     [--close] [--append-notes <t>] [--json]
 #   lifecycle.sh state <bead-id>
 #   lifecycle.sh reopen <bead-id>
 # transition: validate the edge against the declared machine, perform ONE atomic
 # `gc bd update` carrying every field, re-read and verify each written field.
+# --set-dated writes a key in the dated shape <value>@<oid>@<since>, appending
+# the third component under compare-and-preserve: the existing instant survives
+# while value and oid both hold, and a change to either stamps a fresh one. The
+# reconcile cadence re-derives the same verdict at the same head every few
+# minutes, so a naive clock would restart a three-day wait on every pass.
 # --close only into a closed state, and a closed state requires --close (status
 # and merge_result move together). A state's declared routing rides in the same
 # call unless --route is given: human states stamp gc.routed_to=human, and
@@ -97,6 +103,23 @@ state_of() { # <bead-json>; echoes state, or "?<raw>" for an undeclared value
   return 1
 }
 
+# The `since` write rule, in one place so two writers cannot disagree about
+# when a turn began: keep the existing instant while both the value and the oid
+# hold, and stamp the current one when either differs. A value that is not
+# already in the three-component shape has no instant to keep.
+dated_since() { # <existing-value> <wanted "value@oid"> -> RFC 3339 UTC
+  local have="${1:-}" want="${2:-}" rest
+  case "$have" in
+    "$want@"*)
+      rest="${have#"$want@"}"
+      case "$rest" in
+        ""|*@*) : ;;
+        *) printf '%s' "$rest"; return 0 ;;
+      esac ;;
+  esac
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
 cmd_state() { # <bead-id>
   local id="${1:-}" bead st
   [ -n "$id" ] || { echo "$PROG: state needs a bead id" >&2; exit 1; }
@@ -117,12 +140,13 @@ cmd_transition() {
   [ -n "$id" ] || { echo "$PROG: transition needs a bead id" >&2; exit 1; }
   local TO="" EXPECT="" ROUTE="" ROUTE_SET=0 ASSIGNEE="" ASSIGNEE_SET=0
   local CLOSE=0 NOTES="" NOTES_SET=0 JSON=0
-  local SETS=() UNSETS=()
+  local SETS=() UNSETS=() DATED=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --to)           TO="${2:-}"; shift 2 ;;
       --expect)       EXPECT="${2:-}"; shift 2 ;;
       --set)          SETS+=("${2:-}"); shift 2 ;;
+      --set-dated)    DATED+=("${2:-}"); shift 2 ;;
       --unset)        UNSETS+=("${2:-}"); shift 2 ;;
       --assignee)     ASSIGNEE="${2-}"; ASSIGNEE_SET=1; shift 2 ;;
       --route)        ROUTE="${2:-}"; ROUTE_SET=1; shift 2 ;;
@@ -155,10 +179,26 @@ cmd_transition() {
     fi
   fi
   local kv
-  for kv in ${SETS[@]+"${SETS[@]}"}; do
+  for kv in ${SETS[@]+"${SETS[@]}"} ${DATED[@]+"${DATED[@]}"}; do
     case "${kv%%=*}" in
       merge_result) echo "$PROG: merge_result is written by --to, never by --set" >&2; exit 1 ;;
       gc.routed_to) echo "$PROG: route via --route, never by --set" >&2; exit 1 ;;
+    esac
+  done
+  # A dated key's ARGUMENT carries the two components its writer decided; this
+  # script owns the third. Refusing a malformed one here is what keeps the
+  # preserve rule decidable: it compares on value and oid, and cannot find them
+  # in a value that does not have exactly those two parts.
+  for kv in ${DATED[@]+"${DATED[@]}"}; do
+    case "$kv" in
+      *=*) : ;;
+      *) echo "$PROG: --set-dated '$kv' is not k=<value>@<oid>" >&2; exit 1 ;;
+    esac
+    local dv="${kv#*=}"
+    case "$dv" in
+      *@*@*|*@) echo "$PROG: --set-dated '$kv' must carry exactly <value>@<oid>; lifecycle.sh appends the @<since>" >&2; exit 1 ;;
+      *@*) : ;;
+      *) echo "$PROG: --set-dated '$kv' must carry exactly <value>@<oid>; lifecycle.sh appends the @<since>" >&2; exit 1 ;;
     esac
   done
 
@@ -190,6 +230,16 @@ cmd_transition() {
       ROUTE=""; ROUTE_SET=1
     fi
   fi
+
+  # Resolve each dated key against the bead already in hand, appending the
+  # instant, then let it ride the ordinary --set path: one atomic write, and the
+  # post-write verification below checks the whole three-component value.
+  local dk dwant dhave
+  for kv in ${DATED[@]+"${DATED[@]}"}; do
+    dk="${kv%%=*}"; dwant="${kv#*=}"
+    dhave=$(printf '%s' "$bead" | jq -r --arg k "$dk" '(.metadata[$k] // "") | tostring')
+    SETS+=("$dk=$dwant@$(dated_since "$dhave" "$dwant")")
+  done
 
   local ARGS=()
   if [ "$TO" = "unanchored" ]; then
@@ -316,7 +366,7 @@ case "${1:-}" in
   state)      shift; cmd_state "$@" ;;
   reopen)     shift; cmd_reopen "$@" ;;
   *)
-    echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--unset k]... [--assignee <a>] [--route <pool>] [--close] [--append-notes <text>] [--json]" >&2
+    echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>] [--close] [--append-notes <text>] [--json]" >&2
     echo "       lifecycle.sh state <bead-id>" >&2
     echo "       lifecycle.sh reopen <bead-id>   # repair a bead closed on a non-closed merge_result" >&2
     exit 1 ;;

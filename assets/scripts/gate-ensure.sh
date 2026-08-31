@@ -61,6 +61,7 @@ esac
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
 ESCALATOR="$SCRIPTS_DIR/escalate.sh"
+LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 WEDGE_KEY="review-wedge"
 RUNAWAY_KEY="dispatch-runaway"
 # Ceiling on review DISPATCHES per anchor. The legitimate spend is one dispatch
@@ -365,6 +366,11 @@ STRAY
 
   head=""
   head_read=0
+  # The machine axis this pass reaches for the anchor as a whole. The gate loop
+  # already classifies every marker into settled or needs-raising; these two
+  # flags keep that answer instead of discarding it at the end of the iteration.
+  mach_wedge=0
+  mach_progress=0
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue
@@ -390,12 +396,24 @@ STRAY
         fi ;;
       exception@*)
         oid="${marker#exception@}"
-        if [ -z "$head" ] || [ "$oid" = "$head" ]; then continue; fi
+        # Bound to the live head this is the convergence cap's terminal verdict:
+        # present, current, trusted, and ungreenable by any automated actor. It
+        # is settled by construction, which is why no pass raises it and why it
+        # is the wedge rather than a cell of the stale-marker grid.
+        if [ -n "$head" ] && [ "$oid" = "$head" ]; then mach_wedge=1; continue; fi
+        if [ -z "$head" ]; then continue; fi
         why="check.$g is exception@$oid but branch '$branch' has advanced to $head" ;;
       "") why="check.$g is absent (never reviewed, or cleared by a REQUEST_CHANGES signoff)" ;;
       fixable@*) why="check.$g is '$marker' (remediation was in flight); re-dispatching unless one still is" ;;
       *) why="check.$g is '$marker', which names no verdict verb the contract knows; a fresh signoff rewrites it" ;;
     esac
+
+    # A marker not bound to the live head is the condition this pass dispatches
+    # on, and that condition is what machine `progressing` names — not the
+    # outcome of this particular attempt. A dispatch the operator hold defers,
+    # or one held for a retry, is still an anchor an automated actor is due to
+    # act on, and the axis says so.
+    mach_progress=1
 
     # Operator hold gates a re-dispatch (pipeline work toward landing); the
     # armed gate already holds the merge, so held-and-gated is safe.
@@ -641,6 +659,31 @@ The merge stays held until a human acts. Once the cause is understood:
   done <<GATES
 $gates
 GATES
+
+  # --- record the pass's own verdict on the anchor ------------------------------
+  # The classification above is reached once per pass and was previously spent on
+  # a log line. Recording it is what lets a reader — the helm board — say whether
+  # an anchor is moving without re-implementing this loop, and it costs no extra
+  # read: lifecycle.sh compares against the bead it must fetch anyway.
+  #
+  # Only with a readable head. The value is head-pinned so a stale verdict can
+  # never read as current, and a verdict pinned to nothing is not evidence.
+  #
+  # A wedged gate outranks a progressing one. The two can co-occur only on a
+  # multi-gate check_set, and there the anchor still cannot land: nothing will
+  # raise the exception, so no amount of progress on the other gates moves it,
+  # and the operator's move is the same one either way.
+  if [ -n "$head" ]; then
+    if [ "$mach_wedge" = 1 ]; then mach="wedged-exception"
+    elif [ "$mach_progress" = 1 ]; then mach="progressing"
+    else mach="settled"
+    fi
+    state=$(meta_of "$row" merge_result)
+    if [ -n "$state" ] && ! "$LIFECYCLE" transition "$id" --to "$state" --expect "$state" \
+         --set-dated "pr.machine=$mach@$head" >/dev/null; then
+      echo "$PROG: WARN $id machine axis '$mach@$head' did not record; the board reads it as unknown until the next pass" >&2
+    fi
+  fi
 done <<ROWS_EOF
 $ROWS
 ROWS_EOF

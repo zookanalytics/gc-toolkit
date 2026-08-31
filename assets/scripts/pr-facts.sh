@@ -21,7 +21,7 @@
 # empty merged_sha — an unreadable mergeCommit records
 # merged_sha=unverified:PR#<n>, loudly.
 # Every OPEN non-draft anchor also gets its POSTURE recorded before any dispatch
-# arm runs (lifecycle/lifecycle.toml [posture]): pr_posture and pr_merge_state
+# arm runs (lifecycle/lifecycle.toml [posture]): pr_posture (dated) and pr_merge_state
 # pinned to the live head, written only when the value changes, so merge.sh can
 # answer "is a human waiting on this?" off the bead instead of re-deriving it.
 # --posture-only exits non-zero when any anchor is left without a current
@@ -285,10 +285,17 @@ while IFS= read -r row; do
   if [ -n "$posture" ]; then
     want_p="$posture@$head_oid"; want_m="${merge_state:-UNKNOWN}@$head_oid"
     have_m=$(printf '%s' "$row" | jq -r '(.metadata.pr_merge_state // "") | tostring')
-    if [ "$have_p" = "$want_p" ] && [ "$have_m" = "$want_m" ]; then
+    # pr_posture is a dated key: its review_required value starts an owed clock,
+    # so the recorded value carries the instant as a third component and
+    # lifecycle.sh preserves it while the posture and the head both hold. Only a
+    # value already in that shape can be current — one still carrying the bare
+    # <value>@<oid> has no instant, and one pass writing it is how it gains one.
+    have_pv=""
+    case "$have_p" in *@*@*) have_pv="${have_p%@*}" ;; esac
+    if [ "$have_pv" = "$want_p" ] && [ "$have_m" = "$want_m" ]; then
       pinned=1
     elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           --set "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
+           --set-dated "pr_posture=$want_p" --set "pr_merge_state=$want_m" >/dev/null; then
       pinned=1
       postured=$((postured + 1))
       echo "$PROG: $id — PR#$num posture $want_p, merge state $want_m"

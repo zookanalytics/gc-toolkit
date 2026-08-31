@@ -6,7 +6,8 @@
 # states clearing the route, both in the same call; the empty-route refusal that
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
 # close/terminal pairing guards (--close only into a closed state, closed states
-# must --close); the reopen repair verb; and the drift assertion between
+# must --close); --set-dated's compare-and-preserve rule for the @<since>
+# component; the reopen repair verb; and the drift assertion between
 # lifecycle/lifecycle.toml and the embedded lifecycle-state-table block.
 set -uo pipefail
 
@@ -77,6 +78,84 @@ eq "$updates" "1" "exactly ONE gc bd update carried the whole transition"
 has "$(grep '^bd update' "$STUB_GC_LOG")" "--status=closed" "the close rides in the same update"
 has "$out" '"ok":true' "--json reports the transition"
 has "$out" '"from":"pull_request"' "--json names the from state"
+
+# --- --set-dated: the @<since> compare-and-preserve rule ------------------------
+# The operator's queue is ordered by how long a row has been owed, so the instant
+# a turn began has to survive every pass that re-reaches the same verdict at the
+# same head. Getting this wrong is not a visible failure: the row keeps rendering,
+# it just reports a three-day wait as new and sorts the most neglected row last.
+echo "# --set-dated"
+OID="1111111111111111111111111111111111111111"
+OID2="2222222222222222222222222222222222222222"
+
+store '[{"id":"d-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition d-1 --to pull_request --set-dated "pr.machine=wedged-exception@$OID" 2>&1)"; rc=$?
+eq "$rc" 0 "a first dated write exits 0"
+got="$(meta d-1 pr.machine)"
+eq "${got%@*}" "wedged-exception@$OID" "the value and oid are written as given"
+case "$got" in
+  *@*@20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z) ok "…and lifecycle.sh appended an RFC 3339 UTC instant" ;;
+  *) bad "no instant appended: '$got'" ;;
+esac
+
+# Preserve: the reconcile cadence re-reaches the same verdict at the same head
+# every few minutes, which is the case a naive clock restarts.
+store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"wedged-exception@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-2 --to pull_request --set-dated "pr.machine=wedged-exception@$OID" >/dev/null 2>&1
+eq "$(meta d-2 pr.machine)" "wedged-exception@$OID@2026-08-28T04:05:06Z"   "an unchanged value at an unchanged head keeps its instant"
+
+# Restamp on a changed VALUE: a new verdict is a new turn.
+store '[{"id":"d-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"progressing@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-3 --to pull_request --set-dated "pr.machine=wedged-exception@$OID" >/dev/null 2>&1
+got="$(meta d-3 pr.machine)"
+eq "${got%@*}" "wedged-exception@$OID" "a changed value is written"
+case "$got" in
+  *@2026-08-28T04:05:06Z) bad "a changed value kept the old instant: '$got'" ;;
+  *) ok "…and starts a fresh clock" ;;
+esac
+
+# Restamp on a moved HEAD: a wedge is released by a head move, so the old
+# instant dates a state that no longer holds.
+store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"wedged-exception@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-4 --to pull_request --set-dated "pr.machine=wedged-exception@$OID2" >/dev/null 2>&1
+got="$(meta d-4 pr.machine)"
+eq "${got%@*}" "wedged-exception@$OID2" "a moved head is written"
+case "$got" in
+  *@2026-08-28T04:05:06Z) bad "a moved head kept the old instant: '$got'" ;;
+  *) ok "…and starts a fresh clock" ;;
+esac
+
+# A value still in the bare <value>@<oid> shape has no instant to keep.
+store '[{"id":"d-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"settled@'"$OID"'"}}]'
+"$SUT" transition d-5 --to pull_request --set-dated "pr.machine=settled@$OID" >/dev/null 2>&1
+got="$(meta d-5 pr.machine)"
+case "$got" in
+  "settled@$OID@"?*) ok "an undated legacy value gains an instant" ;;
+  *) bad "the legacy value was left undated: '$got'" ;;
+esac
+
+# One atomic write, exactly as an ordinary --set: the dated key rides the same
+# update rather than adding a second one.
+store '[{"id":"d-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+"$SUT" transition d-6 --to pull_request --set-dated "pr.machine=settled@$OID" --set check_set=codex >/dev/null 2>&1
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "a dated key rides the ONE atomic update"
+
+# Shape refusals: the writer supplies value and oid, this script supplies the
+# instant, and a malformed argument makes the preserve comparison undecidable.
+store '[{"id":"d-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition d-7 --to pull_request --set-dated "pr.machine=settled" 2>&1)"; rc=$?
+eq "$rc" 1 "--set-dated with no oid is refused"
+has "$out" "<value>@<oid>" "the refusal names the shape"
+out="$("$SUT" transition d-7 --to pull_request --set-dated "pr.machine=settled@$OID@2026-01-01T00:00:00Z" 2>&1)"; rc=$?
+eq "$rc" 1 "--set-dated carrying its own instant is refused"
+out="$("$SUT" transition d-7 --to pull_request --set-dated "pr.machine" 2>&1)"; rc=$?
+eq "$rc" 1 "--set-dated with no '=' is refused"
+out="$("$SUT" transition d-7 --to pull_request --set-dated "merge_result=x@$OID" 2>&1)"; rc=$?
+eq "$rc" 1 "--set-dated merge_result is refused (owned by --to)"
+out="$("$SUT" transition d-7 --to pull_request --set-dated "gc.routed_to=x@$OID" 2>&1)"; rc=$?
+eq "$rc" 1 "--set-dated gc.routed_to is refused (owned by --route)"
+eq "$(meta d-7 pr.machine)" "<absent>" "no refusal wrote anything"
 
 # --- illegal edge / --expect mismatch / refusal ---------------------------------
 echo "# refusals"

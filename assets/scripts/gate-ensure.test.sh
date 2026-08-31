@@ -35,7 +35,7 @@ harness_init
 
 # Private scripts dir: the SUT plus a body-emitter stub (interface unchanged).
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/gate-ensure.sh"
+mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh"
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 chmod +x "$SD/review-dispatch-body.sh"
 # escalate.sh stub: records subject/key/message so the wedge arm's one-visit
@@ -787,6 +787,51 @@ out=$(run); out="$out$(run)"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "an agent still holding the bead is finishing the round, not wedged"
 eq "$(meta rev-w9 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 hasnt "$out" "WEDGED" "…and it is never called wedged"
+
+# --- the machine axis (lifecycle/lifecycle.toml [machine_axis]) ------------------
+# This loop already classifies every marker into settled or needs-raising once
+# per pass, and used to spend the answer on a log line. Recording it is what
+# lets the helm board say whether an anchor is moving without re-implementing
+# these predicates, and the value is head-pinned so a stale verdict can never
+# read as current.
+machine() { printf '%s' "$(meta "$1" pr.machine)"; }
+pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
+
+echo "# machine axis: the wedge, the settled gate, and the one being raised"
+store "[$(anchor X1 pull_request codex "exception@$(oid x1)" polecat/x1 ',"dispatch_count":"3","gc.routed_to":"human"'),
+        $(anchor X2 pull_request codex "green@$(oid x2)" polecat/x2),
+        $(anchor X3 pull_request codex "green@$(oid stale)" polecat/x3),
+        $(anchor X4 pre_open_gate codex "exception@$(oid x4)" polecat/x4 ',"gc.routed_to":"human"')]"
+oid x1 > "$GH_DIR/head_polecat_x1"
+oid x2 > "$GH_DIR/head_polecat_x2"
+oid x3 > "$GH_DIR/head_polecat_x3"
+oid x4 > "$GH_DIR/head_polecat_x4"
+out=$(run); rc=$?
+eq "$rc" 0 "the recording pass exits 0"
+# The live shape of six of the seven wedged anchors: the convergence cap stamped
+# the exception at the head the branch still carries, and routed the anchor to a
+# person. Nothing raises it, and nothing said so until now.
+eq "$(pinned X1)" "wedged-exception@$(oid x1)" "exception@<live head> records the wedge, with its shape named"
+eq "$(pinned X2)" "settled@$(oid x2)" "every gate green at the live head records settled"
+eq "$(pinned X3)" "progressing@$(oid x3)" "a marker the head has moved past records progressing"
+# Most wedged anchors have no PR at all, so a key written only for open PRs
+# would miss the majority of the condition.
+eq "$(pinned X4)" "wedged-exception@$(oid x4)" "a pre_open_gate anchor is recorded the same way"
+case "$(machine X1)" in
+  *@*@20[0-9][0-9]-*Z) ok "the recorded verdict dates its own turn" ;;
+  *) bad "no @<since> component: '$(machine X1)'" ;;
+esac
+
+echo "# …and the clock holds across a second pass at an unchanged head"
+was="$(machine X1)"
+run >/dev/null
+eq "$(machine X1)" "$was" "a re-derived verdict at the same head keeps its instant (the reconcile cadence runs every few minutes)"
+
+echo "# an unreadable head is not evidence, so nothing is recorded"
+store "[$(anchor X5 pull_request codex "green@$(oid x5)" polecat/x5)]"
+out=$(run); rc=$?
+eq "$rc" 0 "the no-head pass exits 0"
+eq "$(machine X5)" "<absent>" "a verdict pinned to no head is never written"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

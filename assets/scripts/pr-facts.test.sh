@@ -35,6 +35,14 @@ trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 
+# The value@oid half of a dated key. pr_posture carries a third @<since>
+# component, stamped by lifecycle.sh under compare-and-preserve: an unmet
+# approval requirement is one of the causes that start the owed clock the helm
+# board ranks its queue by, so the recorded posture has to date its own turn.
+# Assertions about WHAT was recorded and at which head read through this; the
+# instant has its own coverage at the end of the posture section.
+meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
+
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
@@ -348,7 +356,7 @@ printf '%s' "$(prview 50 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "RE
 echo '[]' > "$GH_DIR/reviews_50.json"; echo '[]' > "$GH_DIR/comments_50.json"
 out=$(run)
 has "$out" "posture review_required@sha-50" "the pass names what it recorded"
-eq "$(meta S1 pr_posture)" "review_required@sha-50" "the anchor carries the posture, pinned to the head"
+eq "$(meta_pinned S1 pr_posture)" "review_required@sha-50" "the anchor carries the posture, pinned to the head"
 eq "$(meta S1 pr_merge_state)" "BLOCKED@sha-50" "…and GitHub's mergeStateStatus verbatim beside it"
 eq "$(meta S1 merge_result)" "pull_request" "recording a posture is not a state change"
 
@@ -362,7 +370,7 @@ echo "# …a moved head re-pins it"
 printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
   | jq -c '.reviewDecision = "APPROVED" | .headRefOid = "sha-NEW"' > "$GH_DIR/pr_view_50.json"
 out=$(run)
-eq "$(meta S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
+eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
 eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
 
 echo "# COMMENTED is representable, and it routes to work"
@@ -375,7 +383,7 @@ printf '[{"id":5001,"user":{"login":"human1"},"body":"this path never runs","pat
   > "$GH_DIR/comments_40.json"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(meta P1 pr_posture)" "commented@sha-40" "COMMENTED is a recorded posture, not an unrepresentable one"
+eq "$(meta_pinned P1 pr_posture)" "commented@sha-40" "COMMENTED is a recorded posture, not an unrepresentable one"
 has "$out" "routed to rework:new-2" "the comment routed to something"
 eq "$(meta P1 pr_comment_disposition)" "rework:new-2" "…and the choice is recorded on the anchor"
 eq "$(meta P1 pr_comment_watermark)" "5001" "the watermark advanced to the routed comment"
@@ -393,7 +401,7 @@ echo "# …a comment below the watermark is answered; the batch never re-fires"
 : > "$STUB_SESSION_LOG"
 out=$(run)
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "no twin child"
-eq "$(meta P1 pr_posture)" "review_required@sha-40" "the answered comment falls back to the standing posture"
+eq "$(meta_pinned P1 pr_posture)" "review_required@sha-40" "the answered comment falls back to the standing posture"
 hasnt "$out" "routed to rework" "…and nothing re-routes"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…nor re-wakes the pool"
 
@@ -401,7 +409,7 @@ echo "# …a comment ABOVE the watermark is new, and gets its own batch"
 printf '[{"id":5001,"user":{"login":"human1"},"body":"a"},{"id":5009,"user":{"login":"human1"},"body":"and another"}]' \
   > "$GH_DIR/comments_40.json"
 out=$(run)
-eq "$(meta P1 pr_posture)" "commented@sha-40" "a comment above the mark is outstanding by construction"
+eq "$(meta_pinned P1 pr_posture)" "commented@sha-40" "a comment above the mark is outstanding by construction"
 eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
 eq "$(meta P1 pr_comment_disposition)" "rework:new-3" "the new batch got its own child"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
@@ -513,7 +521,7 @@ printf '[{"id":9500,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 : > "$STUB_SESSION_LOG"
 out=$(run_posture); rc=$?
 eq "$rc" 0 "a posture-only pass exits 0"
-eq "$(meta PO1 pr_posture)" "commented@sha-60" "the posture is recorded"
+eq "$(meta_pinned PO1 pr_posture)" "commented@sha-60" "the posture is recorded"
 eq "$(meta PO1 pr_merge_state)" "BLOCKED@sha-60" "…and the merge state beside it"
 has "$out" "posture-only" "the summary names the mode"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "NOTHING was dispatched"
@@ -531,7 +539,7 @@ printf '%s' "$(prview 61 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_61.json"
 echo '[]' > "$GH_DIR/reviews_61.json"
 echo '[]' > "$GH_DIR/comments_61.json"
 out=$(run_posture)
-eq "$(meta PO2 pr_posture)" "none@sha-61" "the posture is still recorded"
+eq "$(meta_pinned PO2 pr_posture)" "none@sha-61" "the posture is still recorded"
 hasnt "$out" "filed rebase-mode rework" "…but no rework child is filed"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…none at all"
 
@@ -621,7 +629,7 @@ printf '[{"id":8300,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(STUB_DROP_KEYS="new-2:pr_number" run)
 has "$out" "did not record pr_number=53; NOT watermarking" "an unheld visit fails closed"
 eq "$(meta H4 pr_comment_watermark)" "<absent>" "…the mark never moved past an unheld comment"
-eq "$(meta H4 pr_posture)" "commented@sha-53" "…and the posture still holds the merge"
+eq "$(meta_pinned H4 pr_posture)" "commented@sha-53" "…and the posture still holds the merge"
 
 echo "# …so does an anchor already routed to a human, and one with no fix pool"
 store "[$(anchor H2 47 ',"gc.routed_to":"human"')]"
@@ -756,7 +764,7 @@ printf '[{"id":7001,"user":{"login":"human1"},"state":"COMMENTED","body":"why th
   > "$GH_DIR/reviews_42.json"
 echo '[]' > "$GH_DIR/comments_42.json"
 out=$(run)
-eq "$(meta P3 pr_posture)" "commented@sha-42" "a review body with no inline comment still counts"
+eq "$(meta_pinned P3 pr_posture)" "commented@sha-42" "a review body with no inline comment still counts"
 eq "$(meta P3 pr_review_watermark)" "7001" "the review id space carries it"
 eq "$(meta P3 pr_comment_watermark)" "0" "…and the comment id space stays at zero"
 
@@ -766,7 +774,7 @@ printf '%s' "$(prview 43 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_43.json"
 printf '[{"id":7002,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"sha-43"}]' > "$GH_DIR/reviews_43.json"
 echo '[]' > "$GH_DIR/comments_43.json"
 out=$(run)
-eq "$(meta P4 pr_posture)" "none@sha-43" "its inline comments are what the comment read already sees"
+eq "$(meta_pinned P4 pr_posture)" "none@sha-43" "its inline comments are what the comment read already sees"
 
 echo "# the city's own comment is not a human waiting"
 store "[$(anchor P2 41)]"
@@ -774,7 +782,7 @@ printf '%s' "$(prview 41 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPR
 printf '[{"id":6002,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"replayed verdict"}]' > "$GH_DIR/reviews_41.json"
 printf '[{"id":6001,"user":{"login":"gc-city-bot"},"body":"replayed verdict"}]' > "$GH_DIR/comments_41.json"
 out=$(run)
-eq "$(meta P2 pr_posture)" "approved@sha-41" "our own replayed verdict is not an outstanding comment"
+eq "$(meta_pinned P2 pr_posture)" "approved@sha-41" "our own replayed verdict is not an outstanding comment"
 eq "$(meta P2 pr_comment_watermark)" "<absent>" "…and nothing was watermarked"
 
 echo "# an unanswered comment outranks an approval"
@@ -783,7 +791,7 @@ printf '%s' "$(prview 49 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPR
 echo '[]' > "$GH_DIR/reviews_49.json"
 printf '[{"id":9500,"user":{"login":"human2"},"body":"but what about this?"}]' > "$GH_DIR/comments_49.json"
 out=$(run)
-eq "$(meta P5 pr_posture)" "commented@sha-49" "one reviewer's approval does not answer another's question"
+eq "$(meta_pinned P5 pr_posture)" "commented@sha-49" "one reviewer's approval does not answer another's question"
 
 echo "# a standing CHANGES_REQUESTED outranks everything and watermarks nothing"
 store "[$(anchor P6 51)]"
@@ -793,7 +801,7 @@ printf '[{"id":9600,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","commi
 printf '[{"id":9601,"user":{"login":"human1"},"body":"fix this"}]' > "$GH_DIR/comments_51.json"
 : > "$STUB_GH_LOG"
 out=$(run)
-eq "$(meta P6 pr_posture)" "changes_requested@sha-51" "the veto is the posture"
+eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "the veto is the posture"
 eq "$(meta P6 pr_comment_watermark)" "<absent>" "its comments belong to signoff's rework loop, not this arm"
 hasnt "$(cat "$STUB_GH_LOG")" "pulls/51/comments" "…and the comment read is not even made"
 
