@@ -15,7 +15,8 @@
 #     asserts an invariant the codebase either holds or does not, so it reads
 #     the whole tree: scoping to a diff cannot make the codebase satisfy a
 #     rule, it only decides who gets told. Paths that are not regular files
-#     drop out. An empty list is a clean pass, not an error.
+#     drop out. An empty list is a clean pass, not an error, but an
+#     enumeration that FAILS exits 2 — it must never read as that empty list.
 #   • DISPATCH — the runner passes the whole file list to each detector on
 #     argv. Detectors get no stdin and no env contract beyond the argv list.
 #   • DETECTOR EXIT CODES — 0 = clean; 1 = findings, printed on stdout as
@@ -57,9 +58,21 @@ else
     # Enumerate from the top level so findings carry repo-relative paths
     # whatever directory the caller invoked from.
     cd "$repo_root" || exit 2
+    # The listing goes through a checked temp file because a failed
+    # enumeration has to reach the exit code. Read straight into the loop, a
+    # failing `git ls-files` yields zero iterations and an empty list, which
+    # is byte-identical to a clean tree, so the gate reads green exactly when
+    # it can see nothing.
+    listing="$(mktemp)" || exit 2
+    if ! git ls-files >"$listing"; then
+        echo "lint-learned: cannot enumerate tracked files under $repo_root" >&2
+        rm -f "$listing"
+        exit 2
+    fi
     while IFS= read -r f; do
         [ -n "$f" ] && [ -f "$f" ] && files+=("$f")
-    done < <(git ls-files)
+    done < "$listing"
+    rm -f "$listing"
 fi
 
 if [ "${#files[@]}" -eq 0 ]; then
