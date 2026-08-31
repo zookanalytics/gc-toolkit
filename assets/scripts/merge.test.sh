@@ -341,6 +341,84 @@ has "$out" "merge_hold was set after validation; merge held" "the terminal re-re
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 51" "…and the merge was withheld"
 eq "$(bstatus T2)" "open" "the anchor was not closed"
 
+echo "# generated-artifact freshness at the merge result"
+# The arm exists because generated/seed-audit is rendered from the whole source
+# tree and committed per branch: a PR carrying a render made at an older base
+# overwrites inputs it never saw, and every other gate here is head-keyed, so
+# nothing else notices the base moving underneath.
+RENDER_LOG="$TMP/render.log"; : > "$RENDER_LOG"
+cat > "$SD/render-seed-audit.sh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$RENDER_LOG"
+printf '%s\n' "\${STUB_RENDER_OUT:-seed audit is current}"
+exit "\${STUB_RENDER_RC:-0}"
+STUB
+chmod +x "$SD/render-seed-audit.sh"
+export STUB_RENDER_RC=0 STUB_RENDER_OUT=""
+mkdir -p "$TMP/repo/generated/seed-audit"; printf 'name = "t"\n' > "$TMP/repo/pack.toml"
+export STUB_TOPLEVEL="$TMP/repo" STUB_FETCHED_HEAD="sha-80"
+
+store "[$(anchor S0 80)]"
+printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
+echo '[]' > "$GH_DIR/reviews_80.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded S0" "a repository carrying no rendered audit merges"
+eq "$(wc -c < "$RENDER_LOG" | tr -d ' ')" "0" "…and the freshness probe never ran"
+
+: > "$TMP/repo/generated/seed-audit/INDEX.md"
+store "[$(anchor S1 81)]"
+printf '%s' "$(prview 81 OPEN CLEAN)" > "$GH_DIR/pr_view_81.json"
+echo '[]' > "$GH_DIR/reviews_81.json"
+export STUB_FETCHED_HEAD="sha-81"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded S1" "a current merge result merges"
+has "$(cat "$RENDER_LOG")" "--check-merge refs/gc-toolkit/merge-gate/base refs/gc-toolkit/merge-gate/head" \
+  "…and the question was asked of the merge, in the probe's own ref namespace"
+
+store "[$(anchor S2 82)]"
+printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
+echo '[]' > "$GH_DIR/reviews_82.json"
+export STUB_FETCHED_HEAD="sha-82" STUB_RENDER_RC=1 STUB_RENDER_OUT="seed audit would be STALE at the merge"
+: > "$STUB_GH_LOG"; : > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "would land a stale generated/seed-audit; merge held" "a stale merge result holds"
+has "$out" "seed audit would be STALE at the merge" "…quoting what the renderer found"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+has "$(cat "$STUB_ESC_LOG")" "--key seed-audit-merge-gate.82" "…and one visit carries the situation to a human"
+has "$(cat "$STUB_ESC_LOG")" "PR#82 would land a stale generated/seed-audit; the merge is held." \
+  "…whose first line is a headline, since escalate.sh titles the visit from it"
+has "$(cat "$STUB_ESC_LOG")" "seed audit would be STALE at the merge" "…carrying the renderer's own diagnosis"
+eq "$(bstatus S2)" "open" "the anchor stays open"
+
+store "[$(anchor S3 83)]"
+printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
+echo '[]' > "$GH_DIR/reviews_83.json"
+export STUB_FETCHED_HEAD="sha-83" STUB_RENDER_RC=2 STUB_RENDER_OUT="cannot tell"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "freshness could not be determined; merge held" "an unanswerable probe holds rather than passing"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+store "[$(anchor S4 84)]"
+printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
+echo '[]' > "$GH_DIR/reviews_84.json"
+export STUB_RENDER_RC=0 STUB_FETCH_RC=1
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "could not fetch 'main' and 'polecat/x84'" "an unreachable remote holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+
+store "[$(anchor S5 85)]"
+printf '%s' "$(prview 85 OPEN CLEAN)" > "$GH_DIR/pr_view_85.json"
+echo '[]' > "$GH_DIR/reviews_85.json"
+export STUB_FETCH_RC="" STUB_FETCHED_HEAD="sha-moved"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "head moved during the freshness probe (fetched 'sha-moved', validated 'sha-85')" \
+  "a head that moved under the probe holds rather than answering about the wrong tree"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
+export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

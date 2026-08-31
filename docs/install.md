@@ -191,6 +191,13 @@ assets/scripts/render-seed-audit.sh --install-hook
 
 Until then `check-seed-audit-current` warns rather than errors.
 
+The hook keeps a branch current against its own base, which is not the same as
+keeping the landing branch current: the artifact is rendered from the whole
+source tree, so a PR whose render predates a prompt input the base has since
+gained lands over that input. `merge.sh` refuses such a merge, using
+`render-seed-audit.sh --check-merge` over the tree `git merge-tree` writes, so
+merges on this rig need git 2.38 or newer.
+
 ### Smoke test
 
 ```bash

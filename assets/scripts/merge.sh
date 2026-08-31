@@ -13,7 +13,10 @@
 # by a latest APPROVED from another account at the live head; a standing
 # CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
 # child (metadata keys naming this PR AND dependency edges; unreadable holds);
-# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only). The FULL
+# mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
+# generated/seed-audit current at the MERGE RESULT (a digest over the tree
+# `git merge-tree` writes, so a render clobbered by a base that moved holds and
+# escalates rather than landing). The FULL
 # anchor-local authorization set is re-read immediately before the merge; any
 # mismatch holds. `gh pr merge --squash --match-head-commit`, then ONE
 # lifecycle.sh transition --to merged --close. A failed record exits non-zero
@@ -31,6 +34,13 @@ scrub() { tr -d '\000-\011\013-\037'; }
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
+# The repository this pass merges into, resolved through git so a run with no
+# checkout under it simply has no committed artifact to keep current.
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+# Where the freshness probe parks the two commits it needs. Its own namespace,
+# so nothing here can move a branch or a remote-tracking ref.
+GATE_REF="refs/gc-toolkit/merge-gate"
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -377,6 +387,58 @@ while IFS= read -r row; do
   if [ -z "$head_oid" ]; then
     echo "$PROG: PR#$num live head unresolved; cannot head-match the merge; merge held (anchor $id)"
     held=$((held + 1)); continue
+  fi
+
+  # --- generated-artifact freshness AT THE MERGE RESULT --------------------------
+  # generated/seed-audit is a function of the whole source tree but is committed
+  # per branch, so two PRs that touch no common file still clobber it: one moves a
+  # prompt input without re-rendering, the other lands a render made at a base
+  # without that input, and both merge cleanly. assets/hooks/pre-commit is
+  # branch-local and exits quietly where `gc` is absent, a rebase replays commits
+  # without running it at all, `-diff` in .gitattributes keeps the clobber out of
+  # the PR diff, and doctor/check-seed-audit-current reports it only once the
+  # landing branch is already wrong. This is the one place that sees the merge
+  # before it happens, and it asks for a digest rather than a render, so the cost
+  # is hashes. The probe asks the repository, not the working tree: a host holding
+  # no checkout, and a repository carrying no rendered audit, have nothing to
+  # protect, while the trees compared come from the refs fetched below, so a
+  # checkout lagging its own main decides nothing. Base movement is not
+  # anchor-local, so the terminal re-read cannot carry this; the window it leaves
+  # is one pass of the base moving under a validated PR, which the next pass sees.
+  if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/pack.toml" ] \
+     && [ -f "$REPO_ROOT/generated/seed-audit/INDEX.md" ] && [ -f "$RENDERER" ]; then
+    if ! git fetch --quiet --no-tags origin \
+         "+refs/heads/$base:$GATE_REF/base" "+refs/heads/$head_ref:$GATE_REF/head" 2>/dev/null; then
+      echo "$PROG: PR#$num could not fetch '$base' and '$head_ref' to check what the merge would land; merge held (anchor $id)"
+      held=$((held + 1)); continue
+    fi
+    fetched_head=$(git rev-parse --verify --quiet "$GATE_REF/head" 2>/dev/null)
+    if [ "$fetched_head" != "$head_oid" ]; then
+      echo "$PROG: PR#$num head moved during the freshness probe (fetched '${fetched_head:-none}', validated '$head_oid'); merge held (anchor $id)"
+      held=$((held + 1)); continue
+    fi
+    sa_out=$(bash "$RENDERER" --root "$REPO_ROOT" --check-merge "$GATE_REF/base" "$GATE_REF/head" 2>&1); sa_rc=$?
+    if [ "$sa_rc" -ne 0 ]; then
+      if [ "$sa_rc" -eq 1 ]; then
+        sa_why="would land a stale generated/seed-audit"
+      else
+        sa_why="generated-artifact freshness could not be determined"
+      fi
+      echo "$PROG: PR#$num $sa_why; merge held (anchor $id)"
+      printf '%s\n' "$sa_out" | head -6 | sed 's/^/  /'
+      # Held, not routed: rework dispatch belongs to pr-facts.sh, so the door out
+      # of this hold is a visit a human claims. First line is the visit headline.
+      [ -x "$ESCALATE" ] && "$ESCALATE" --subject "$id" --key "seed-audit-merge-gate.$num" \
+        --message "PR#$num $sa_why; the merge is held.
+
+generated/seed-audit is rendered from the whole source tree and committed per
+branch, so a branch carrying a render made at an older base lands over prompt
+inputs it never saw. Bring the head branch current with '$base', run
+assets/scripts/render-seed-audit.sh, commit generated/seed-audit, and push.
+
+$sa_out" >/dev/null 2>&1 || true
+      held=$((held + 1)); continue
+    fi
   fi
 
   # --- terminal re-read: the FULL anchor-local authorization set ----------------

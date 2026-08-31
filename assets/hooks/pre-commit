@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Keep generated/seed-audit/ in step with the fragments it renders: a commit
-# touching a seed input regenerates the audit and stages it, so the golden
-# file is simply never out of date (doctor/check-seed-audit-current only
-# fires on a commit that bypassed hooks). A commit touching no input pays one
-# `git diff --cached --name-only`; one that does pays the render (~15-25s).
+# touching a seed input regenerates the audit and stages it. A commit touching
+# no input pays one `git diff --cached --name-only`; one that does pays the
+# render (~15-25s).
+# This is branch-local upkeep, not a guarantee. The artifact is a function of
+# the whole source tree, so a branch stays current only against its own base:
+# a commit that bypasses hooks, a host with no `gc` (which exits 0 below), and
+# a rebase that replays commits without running hooks all leave a render that
+# a later merge lands over inputs it never saw. `merge.sh` is what refuses that
+# merge; doctor/check-seed-audit-current reports it in a checkout.
 # Install once: assets/scripts/render-seed-audit.sh --install-hook
 # (sets core.hooksPath = assets/hooks; relative, so worktrees resolve too).
 # Sharp edge: the render reads the WORKING TREE, not the index — under a
