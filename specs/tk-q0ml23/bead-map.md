@@ -13,7 +13,7 @@ each of them, and to the ones adjacent.
 
 **tk-jus6e4** — PR review posture is read and discarded every pass. Not
 superseded as a bead. It owns the writer and the watermarks, and the
-conversation axis is unbuildable without it. Two of its clauses change.
+conversation axis is unbuildable without it. Three of its clauses change.
 
 The first is the **value set** in its direction, item 2: that `COMMENTED`
 becomes one of the recorded values. `COMMENTED` is GitHub's vocabulary for what
@@ -48,11 +48,19 @@ the other two and never merged with them. Whether an outstanding
 issue comment also holds the merge, the way a recorded `commented` posture does,
 stays tk-jus6e4's call.
 
-Every other clause stands unchanged, including the `<value>@<oid>` shape, the
-monotonicity requirement on each watermark, the routing requirement on an
-outstanding comment, and both constraints — no ruleset change, no new scheduled
-scanner. The third space adds one endpoint to a pass `pr-facts.sh` already
-makes for every open anchor.
+The third is the **shape of the posture value**. `state-model.md` orders the
+operator's queue by how long a row has been owed, and an unmet approval
+requirement is one of the five causes that start that clock. So `pr_posture`
+records a third component, `<value>@<head-oid>@<since>`, under the
+compare-and-preserve rule in that document: keep the existing instant while the
+value and the head oid both hold, stamp a new one when either changes. The
+watermarks keep the `<value>@<oid>` shape. They are inputs to the conversation
+axis rather than causes of an owed row, and nothing orders a queue by them.
+
+Every other clause stands unchanged, including the monotonicity requirement on
+each watermark, the routing requirement on an outstanding comment, and both
+constraints — no ruleset change, no new scheduled scanner. The third space adds
+one endpoint to a pass `pr-facts.sh` already makes for every open anchor.
 
 Whoever implements tk-jus6e4 should read `state-model.md` first and write the
 position beside the posture. GitHub's `reviewDecision` stays both an input to

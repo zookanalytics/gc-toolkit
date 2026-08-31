@@ -96,18 +96,70 @@ are the writers; `pr_machine` is present on a `pre_open_gate` anchor that has
 no PR number yet.
 
 `pr_approval` is the owed rule's approval clause on the wire, read from the
-recorded posture: `review_required` is `required`, `approved` is `met`, and an
-absent posture is `unknown`. It is a separate field rather than a fourth
-machine-axis value because a PR can need an approval while the cadence is still
-`progressing`, and folding the two would make the axis pick again.
+recorded posture. The mapping is total over the posture's value set, because a
+partial one leaves the implementer to invent the rest:
+
+| `pr_posture` | `pr_approval` |
+|---|---|
+| `review_required` | `required` |
+| `changes_requested` | `required` |
+| `approved` | `met` |
+| `commented` | `not_required` |
+| `none` | `not_required` |
+| absent, or pinned to a head that is no longer live | `unknown` |
+
+`not_required` has to be reachable from an ordinary row. Most pull requests
+carry no protection rule and no review, so if `none` fell through to `unknown`
+the field would report a gap that is not there and the coverage sentence would
+never clear. `commented` joins it because a comment-only review does not gate
+the merge. That comment is the conversation axis's business, and this field
+answers one question only, which is whether GitHub is withholding the merge for
+an approval.
+
+`changes_requested` maps to `required` because the requirement stands and is
+unmet, and a blocked pull request must never render as one GitHub will let
+through. It does not follow that the row is owed by the operator, and the owed
+rule in `state-model.md` excludes it: a requested change is the city's move to
+answer. When the city pushes, the head moves, the posture is re-derived at the
+new head, and GitHub re-arms `review_required`, which is owed. This is not a
+hypothetical corner. A human's rejecting review leaves the city's own gate
+markers green, so `settled` and `changes_requested` is a pair a row can hold.
+
+It is a separate field rather than a fourth machine-axis value because a PR can
+need an approval while the cadence is still `progressing`, and folding the two
+would make the axis pick again.
 
 `pr_owed_since` is the one derived value, and it is what orders the queue.
-tk-lb3u4m ranks the owed partition by how long a row has been owed, and for a
-PR row that clock starts at the human utterance, the demand bead's creation,
-the moment the wedge was stamped, or the moment a `settled` row's approval came
-due, whichever began the current turn. It is not `updated_at`: a wedged anchor
-is touched by every reconcile pass, and ordering by that would sort the most
-neglected rows last.
+tk-lb3u4m ranks the owed partition by how long a row has been owed, so the
+clock has to start when the operator's turn began and hold still across every
+reconcile pass in between. It is not `updated_at`: a wedged anchor is touched
+by every pass, and ordering by that would sort the most neglected rows last.
+
+The board does not decide the moment either. It takes the earliest timestamp
+among the causes currently making the row owed, and `state-model.md` dates
+every one of the five:
+
+| Cause | Dated by | Phase |
+|---|---|---|
+| machine `wedged` | `pr.machine`'s `since` | 1 |
+| approval `required` | `pr_posture`'s `since` | 1 |
+| conversation `asking` | the demand bead's `created_at` | 1 |
+| conversation `outstanding` | the oldest unacknowledged utterance's `created_at` | 2 |
+| conversation `answered` | `pr.conversation`'s `since` | 2 |
+
+Earliest rather than latest. A row wedged three days ago and commented on an
+hour ago has been owed for three days, and the queue ranks it there. A row no
+cause makes owed carries the zero timestamp, and so does a row whose only
+candidate cause reads `unknown`: an unreadable input belongs in the coverage
+sentence, not in a clock reporting the wait as new.
+
+Splitting the moment across the causes is what makes it recordable at all. No
+single stage of the cadence evaluates the whole owed rule, so no single writer
+could keep one owed-since key honest, and each cause is instead dated by the
+writer that already decides it. `state-model.md` carries the recorded half: the
+`since` component, which of the five causes take it and which carry their own
+instant, and the write rule that keeps a reconcile pass from restarting the
+clock.
 
 Both axes carry `unknown`, and it is a rendered value rather than a fallback to
 the quiet end. This is the same choice `Anchor.WaitingUnknown` already makes for
@@ -120,9 +172,10 @@ Six things, in one line, and nothing more:
 
 - the PR number, linked, or the branch name when the PR is not open yet;
 - the two axis values, which already name the wedge shape;
-- `pr_approval` when it reads `required`. A `settled` and `quiet` row is in the
-  owed partition for that reason alone, and without the word the operator sees
-  a green pull request in their queue with nothing attached saying why;
+- `pr_approval` when it reads `required`, whether or not the row is owed. A
+  `settled` and `quiet` row is in the owed partition for that reason alone, and
+  without the word the operator sees a green pull request in their queue with
+  nothing attached saying why;
 - how long the current turn has been running;
 - the demand, when there is one. For `asking` that is the demand bead's title,
   which is tk-s4fg87's authored headline;
@@ -206,11 +259,18 @@ itself when the partition it renders into lands. Its shape:
   already reach the verdict. No new pass, no new GitHub read.
   `pr.conversation` and `pr_issue_watermark` are registered by phase 2,
   alongside the writer that fills them.
-- Record the review-required posture from `pr-facts.sh`, on the read it
-  already makes, and feed the owed rule's approval clause from it. If
-  tk-jus6e4 has landed, this is its `pr_posture` key and there is nothing to
-  add; if it has not, phase 1 registers the key and tk-jus6e4 extends the
-  value set rather than introducing it.
+- Implement compare-and-preserve for the `since` component in `lifecycle.sh`,
+  once, for every key that carries it. `lifecycle.sh` already reads the anchor
+  before it writes and reads it back after, so the comparison costs no extra
+  round trip, and putting it in one place is what keeps two writers from
+  disagreeing about when a turn began.
+- Record the posture from `pr-facts.sh`, on the read it already makes, and
+  feed the owed rule's approval clause from it through the wire mapping above.
+  If tk-jus6e4 has landed, this is its `pr_posture` key and phase 1 adds the
+  `since` component; if it has not, phase 1 registers the key and tk-jus6e4
+  extends the value set rather than introducing it.
+- Derive `pr_owed_since` in the board's source layer as the earliest timestamp
+  among the row's live causes, and leave it zero when there are none.
 - Add the six `Tile` fields, the source gather that fills them from the
   anchor, and the `Owed` contribution. `pr_conversation` ships in phase 1 as a
   field that always reads `unknown`, so the wire contract does not change
@@ -223,9 +283,14 @@ itself when the partition it renders into lands. Its shape:
   which reads `progressing`; and an anchor whose only open blocker is a demand
   bead, which does not. The rework child is the shape a derivation keyed on
   `anchor_bead` gets wrong, and it is one of the two normal in-flight shapes.
-- Cover the approval clause with a `settled` anchor at
-  `pr_posture=review_required@<live head>`, which is owed, and one at
-  `approved@<live head>`, which is not.
+- Cover the approval clause with a `settled` anchor at each posture value:
+  `review_required` and `changes_requested` both render `required`, and only
+  the first is owed; `approved` renders `met`; `commented` and `none` render
+  `not_required`; an absent key and one pinned to a dead head render `unknown`.
+- Cover the owed clock with a wedged anchor carried across two reconcile
+  passes at an unchanged head, which must report the same `pr_owed_since` both
+  times, and across a head move, which must restart it. Cover the earliest-wins
+  rule with a row owed by a wedge and a demand bead at once.
 
 It depends on tk-lb3u4m, which builds the partition it renders into, and on
 tk-s4fg87's phase 1 for the demand edge that `asking` reads. It does not depend

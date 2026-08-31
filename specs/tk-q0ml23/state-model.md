@@ -176,7 +176,10 @@ existing partition needs. A row is **owed by the operator** when any of:
 - conversation is `asking`, `outstanding` with nothing covering it, or
   `answered`;
 - machine is `settled` and an approving review is required at the live head
-  and absent.
+  and absent, unless the recorded posture is `changes_requested`. A rejecting
+  review is an unmet requirement, and `surface.md` renders it as one, but
+  answering it is the city's move. It returns to the operator as
+  `review_required` once the fix moves the head.
 
 The approval clause reads GitHub's requirement, not the city's gate set.
 `check_set` declares which `check.<g>` gates the city runs, and a repository
@@ -270,14 +273,14 @@ and close as one atomic write.
 Three keys, registered in `lifecycle/lifecycle.toml` like every other key the
 pack writes:
 
-- `pr.machine = <progressing|settled|wedged-exception|wedged-veto>@<head-oid>`
+- `pr.machine = <progressing|settled|wedged-exception|wedged-veto>@<head-oid>@<since>`
   — written by whichever of `gate-ensure.sh` or `merge.sh` reached the verdict
   this pass. The wedge shape is part of the value, so a reader never has to
   re-derive which of the two it is. Head-pinned for the same reason the gate
   markers are: a head move invalidates it, so a stale value can never read as
   current. It is stamped from `pre_open_gate` onward, before a PR number
   exists, because a pre-open anchor wedges the same way.
-- `pr.conversation = <quiet|outstanding|covered|asking|answered>@<head-oid>` —
+- `pr.conversation = <quiet|outstanding|covered|asking|answered>@<head-oid>@<since>` —
   written by `pr-facts.sh`, which is already the stage that reads the PR
   conversation.
 - The acknowledgement watermarks, one per id space, never merged. tk-jus6e4
@@ -294,17 +297,78 @@ pack writes:
 `asking` needs no key of its own. It is the presence of the edge, and the
 derivation reads the graph.
 
+### The `since` component
+
+`surface.md` orders the operator's queue by how long a row has been owed, so
+the start of the current turn has to be durable. The owed rule has five causes,
+and each is dated by asking one question of it: does a head move end this
+cause?
+
+For three of them it does, and those three are dated by the key that records
+them, which is already pinned to the head for the same reason.
+
+| Cause | Dated by | Because |
+|---|---|---|
+| machine `wedged` | `pr.machine`'s `since` | a head move is what releases a wedge |
+| approval `required` | `pr_posture`'s `since` | a new commit is a new thing to approve |
+| conversation `answered` | `pr.conversation`'s `since` | the turn began when the city's answer moved the head |
+
+For the other two it does not, and a head-pinned instant would be wrong for
+them. A demand bead still holds its question after the branch advances, and a
+comment is not answered by a push that ignores it. Both already carry a durable
+instant of their own, the bead's `created_at` and the utterance's, and both are
+read where they lie rather than copied.
+
+| Cause | Dated by |
+|---|---|
+| conversation `asking` | the demand bead's `created_at` |
+| conversation `outstanding` | the oldest unacknowledged utterance's `created_at` |
+
+`since` is an RFC 3339 instant in UTC, and one rule governs every write of it:
+
+> The writer preserves the existing `since` when the value and the head oid are
+> both unchanged, and stamps the current instant when either differs.
+
+That rule is the whole of it. Setting, preserving and clearing all fall out:
+
+- **Set.** The pair changes, because a wedge was stamped, or an approval
+  requirement was read at this head for the first time, or a push carried the
+  city's answer. The writer stamps the instant it reached that verdict.
+- **Preserved.** The reconcile cadence re-derives the same value at the same
+  head every few minutes, which is the case that breaks a naive clock. The pair
+  is unchanged, so the write leaves the instant alone and a three-day wedge
+  keeps reading three days old.
+- **Cleared.** The value moves to one that owes nothing, or the head moves.
+  Either way the new value arrives with its own fresh `since`, which no owed
+  row reads. There is no separate reset step and nothing left behind to
+  garbage-collect.
+
+Keeping the instant inside the value is what makes the rule enforceable. A
+timestamp in a key beside the value can be written when the value is not, and
+then it dates a state that no longer holds, with nothing in either key saying
+so. Sharing one field means a reader that trusts the value has already trusted
+the instant.
+
+`lifecycle.sh` writes all three keys, and it reads the anchor before it writes
+and reads it back after, so the comparison adds no round trip to a pass. Only
+`pr.machine` and `pr_posture` need the component in phase 1; `pr.conversation`
+gains it with the rest of the key, in phase 2.
+
 One key this design does not add, and requires to survive. tk-jus6e4 records
 `pr_posture=<changes_requested|commented|approved|review_required|none>@<head-oid>`,
 derived from GitHub's review decision, and `review_required` is the whole input
-to the owed rule's approval clause. `bead-map.md` amends that bead to record
-the conversation position as well. The position is an addition beside the
-posture and never a replacement for it, because the position says whose turn it
-is in the conversation while the posture says whether GitHub will let the merge
-through, and a green pull request nobody has approved is the case where those
-two answers differ. Only the posture's `commented` value depends on the
-watermarks, so the review-required half is readable as soon as `pr-facts.sh`
-records the decision it already fetches.
+to the owed rule's approval clause. `surface.md` maps all five of its values
+onto the wire field, so no recorded posture reaches the board undecided.
+
+`bead-map.md` amends that bead twice over this key. It records the conversation
+position beside the posture, and it adds the `since` component, because an
+unmet approval requirement is one of the five causes that start the owed clock.
+The position is an addition and never a replacement, because the position says
+whose turn it is in the conversation while the posture says whether GitHub will
+let the merge through, and a green pull request nobody has approved is the case
+where those two answers differ. Only the posture's `commented` value depends
+on the watermarks, so the review-required half is readable as soon as
+`pr-facts.sh` records the decision it already fetches.
 
 Two constraints carried from tk-jus6e4, which owns the recording half and
 should be read before any of this is built: do not loosen the repository
