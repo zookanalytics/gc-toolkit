@@ -318,9 +318,10 @@ if [ "$MODE" = "install-hook" ]; then
     exit 0
 fi
 
-# Everything past this point renders. --print-digest and --install-hook return
-# above it precisely so they still work where gc does not exist: the doctor
-# check recomputes the digest, and a pack linted outside a city has no binary.
+# Everything past this point renders. --print-sources, --check-merge and
+# --install-hook return above it precisely so they still work where gc does not
+# exist: the doctor check recomputes the input manifest, the merge gate hashes
+# the merged tree, and a pack linted outside a city has no binary.
 command -v gc >/dev/null 2>&1 || die "gc is not on PATH — the render needs the gc binary"
 
 # ------------------------------------------------------------ synthetic city
