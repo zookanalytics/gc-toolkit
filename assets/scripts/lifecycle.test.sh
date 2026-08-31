@@ -45,6 +45,16 @@ TOML_EDGES=$(awk '
 SH_EDGES=$(printf '%s\n' "$LIFECYCLE_TRANSITIONS" | sed '/^$/d' | sort)
 eq "$SH_EDGES" "$TOML_EDGES" "transition edges match lifecycle.toml"
 
+# The machine axis is declared here and spent by the helm board, which mirrors
+# it as Go constants. One meaning, two lists: a value added on one side only
+# renders as `unknown` on every row carrying it, which is the answer that tells
+# the operator to stop looking.
+TOML_MACHINES=$(sed -n 's/^machines = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
+[ -n "$TOML_MACHINES" ] && ok "machine axis declared in lifecycle.toml" || bad "machines = [...] missing from lifecycle.toml"
+GO_MACHINES=$(sed -n 's/^[[:space:]]*Machine[A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "$ROOT/services/helm/internal/board/derive.go" | tr '\n' ' ' | sed 's/ *$//')
+eq "$GO_MACHINES" "$TOML_MACHINES" "machine axis values match lifecycle.toml"
+
 # --- state verb ----------------------------------------------------------------
 echo "# state"
 store '[{"id":"b-1","status":"open","assignee":"","notes":"","metadata":{}},

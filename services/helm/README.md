@@ -433,11 +433,10 @@ field would be lying on a normal day.
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
-machine axis once per pass and used to print it to a log:
-`assets/scripts/gate-ensure.sh` classifies each gate marker, and
-`assets/scripts/merge.sh` decides it again at each of its holds. Both now record
-it through `lifecycle.sh`, in the head-pinned `<value>@<oid>@<since>` shape the
-gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
+marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
+record it through `lifecycle.sh`, in the head-pinned `<value>@<oid>@<since>`
+shape the gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
 
 **No per-PR GitHub call.** Reading the conversation for the fourteen pull
 requests open when this was designed cost about twenty seconds against a

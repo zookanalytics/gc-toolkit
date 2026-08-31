@@ -552,10 +552,18 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	// human-routed phrase below, which is not a competing fact but a less
 	// specific version of the same one: a wedged anchor is routed to a person
 	// precisely because no agent will take it, and the operator still has to
-	// know WHICH pull request that is. The identity is the PR number where one
-	// exists and the branch otherwise, because most wedged anchors have no
-	// pull request open at all.
-	case isMergeAnchor(a):
+	// know WHICH pull request that is.
+	//
+	// Only while the anchor names one. An anchor at a human state can carry
+	// merge_result with no branch and no number, and there the naming is not
+	// more specific than the phrase below but emptier than it.
+	//
+	// And only over a phrase that says WHO holds the row. The identity is the
+	// specific version of "routed to a person"; it is not a version of
+	// "a blocker landed", which is news the identity does not carry, so the
+	// disposition phrase further down keeps its row. NEEDS already orders the
+	// two that way, ahead of everything.
+	case isMergeAnchor(a) && !dispDue && prIdentity(a) != "":
 		return prFrontier(a, owedSince, now)
 	// The marker, not the kind, for the reason [severity] gives: a bead's
 	// `human` and `parked` rows are one bead and must not describe it two ways.
@@ -610,7 +618,7 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool,
-	machine, approval string, ask *Blocker) string {
+	machine, approval string, ask *Blocker, prIsOwed bool) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; what it wants now is to
 	// stop being on the board, and only a human can decide that. The takeaway
@@ -653,11 +661,19 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "unowned — assign an owning bead"
 	case a.Source == "decision":
 		return "operator decision"
-	// A merge anchor answers with its POSITION, and outranks the human-routed
-	// phrase below. A wedged anchor is routed to a person precisely because
-	// nothing else will move it, so "no question recorded" would deny the one
-	// question the row is carrying.
-	case isMergeAnchor(a):
+	// A merge anchor whose POSITION is what puts it in the queue answers with
+	// that position, and outranks the human-routed phrase below: a wedged or
+	// asked-about anchor is routed to a person precisely because nothing else
+	// will move it, so "no question recorded" would deny the one question the
+	// row is carrying.
+	//
+	// Only then. A person also routes an anchor the cadence is happily working
+	// — for a reason the machine axis knows nothing about — and there the
+	// position is not the ask but a denial of it: a row in the operator's own
+	// queue reading "in the merge cadence" says an agent has it. The empty
+	// takeaway under a hand-set route is the finding on those rows, and the
+	// phrase below is the one that names it.
+	case isMergeAnchor(a) && prIsOwed:
 		return prNeeds(machine, approval, ask)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
@@ -667,6 +683,13 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "routed to you — no question recorded"
 	case a.Source == "parked" && r.mTotal == 0:
 		return "parked for you — no question recorded"
+	// Nobody is owed this one, so it reports where the cadence has it. Ahead of
+	// the roll-up phrases below because a merge anchor does not decompose: its
+	// children are the rework and review beads the cadence files, and
+	// "no children — decompose or assign" would ask for work that is not the
+	// row's to do.
+	case isMergeAnchor(a):
+		return prNeeds(machine, approval, ask)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -1052,17 +1075,26 @@ func prConversation(a Anchor) string {
 // and not "owed for no time" — it is the absence of a cause, and inventing a
 // duration for it would report a wait that is not happening.
 func prFrontier(a Anchor, owedSince, now time.Time) string {
-	id := "no branch recorded"
-	switch {
-	case prNumber(a) > 0:
-		id = fmt.Sprintf("PR #%d", prNumber(a))
-	case a.Metadata[mdBranch] != "":
-		id = a.Metadata[mdBranch]
-	}
+	id := prIdentity(a)
 	if owedSince.IsZero() {
 		return id
 	}
 	return id + " · owed " + humanSince(owedSince, now)
+}
+
+// prIdentity names the pull request: its number once one is open, the branch
+// before that, and the EMPTY string when the anchor records neither. The branch
+// is an ordinary case rather than a fallback, because most wedged anchors have
+// no pull request open at all.
+//
+// The empty string is what keeps [frontier] honest. An anchor at a human state
+// carries merge_result and can carry nothing else, and a row's one summary line
+// is worth more spent on who holds it than on naming an absence.
+func prIdentity(a Anchor) string {
+	if n := prNumber(a); n > 0 {
+		return fmt.Sprintf("PR #%d", n)
+	}
+	return a.Metadata[mdBranch]
 }
 
 // humanSince is a coarse age for a queue ordered by it. Days once there is a
@@ -1213,7 +1245,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),

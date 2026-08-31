@@ -2095,6 +2095,88 @@ func TestProgressingIsNotOwed(t *testing.T) {
 // TestAskingIsOwedAndCarriesTheDemand: the city formed a question and is waiting
 // on the answer. That is tk-s4fg87's hold primitive with nothing added — an open
 // `blocks` edge to a demand bead — and closing the bead is what ends it.
+// TestPositionYieldsToTheHandSetRoute: the PR position outranks the
+// human-routed phrase only when the position is what puts the row in the queue.
+//
+// A person also routes a merge anchor the cadence is happily working, for a
+// reason the machine axis knows nothing about. Letting the position speak there
+// puts "in the merge cadence" — an agent has it — on a row sitting in the
+// operator's own queue, and drops the finding that a hand-set route with no
+// takeaway actually carries. Measured on the live board: two anchors at
+// `pull_request` + `gc.routed_to=human` read exactly that way.
+func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
+	anchors := []Anchor{
+		// Routed to a person, and the cadence is busy. Both are true; only one
+		// of them is why the row is in the queue.
+		mergeAnchor("tk-busy", map[string]string{
+			"pr.machine":   dated(MachineProgressing, headLive, fixtureNow),
+			"gc.routed_to": "human",
+			"pr_number":    "509",
+		}),
+		// A human state carries merge_result and nothing else to name itself by.
+		mergeAnchor("tk-bare", map[string]string{
+			"merge_result": "held",
+			"branch":       "",
+			"gc.routed_to": "human",
+		}),
+		// Nobody is owed this one, and no person routed it: the position is the
+		// best thing the row can say.
+		mergeAnchor("tk-run", map[string]string{
+			"pr.machine": dated(MachineProgressing, headLive, fixtureNow),
+		}),
+		// A parked merge anchor whose every blocker has closed.
+		func() Anchor {
+			a := mergeAnchor("tk-disp", map[string]string{
+				"gc.takeaway": "waiting on the upstream fix",
+			})
+			a.Kind, a.Source = "parked", "parked"
+			a.WaitingOn = []string{"tk-gone"}
+			a.WaitingOnClosed = []string{"tk-gone"}
+			return a
+		}(),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	busy := mustTile(t, b, "tk-busy")
+	if busy.Needs != "routed to you — no question recorded" {
+		t.Errorf("a hand-routed row keeps its own finding, got %q", busy.Needs)
+	}
+	if !busy.Owed {
+		t.Error("still owed: a person routed it")
+	}
+	// The identity is an addition, not a displacement — it is the one thing the
+	// human phrase could never say.
+	if busy.Frontier != "PR #509" {
+		t.Errorf("frontier names the pull request, got %q", busy.Frontier)
+	}
+
+	bare := mustTile(t, b, "tk-bare")
+	if bare.Frontier != "routed to the operator — no agent will take it" {
+		t.Errorf("with no number and no branch the row says who holds it, got %q", bare.Frontier)
+	}
+	if bare.Needs != "routed to you — no question recorded" {
+		t.Errorf("needs = %q", bare.Needs)
+	}
+
+	// The disposition phrase is news the identity does not carry, so it keeps
+	// its row: a branch name in place of "a blocker landed" is a downgrade.
+	disp := mustTile(t, b, "tk-disp")
+	if disp.Frontier != "parked · blocker landed" {
+		t.Errorf("frontier = %q, want the disposition phrase", disp.Frontier)
+	}
+	if disp.Needs != "blocker landed — dispose or resume" {
+		t.Errorf("needs = %q", disp.Needs)
+	}
+
+	run := mustTile(t, b, "tk-run")
+	if run.Owed {
+		t.Error("an anchor the cadence is working is not the operator's move")
+	}
+	if run.Needs != "in the merge cadence" {
+		t.Errorf("a merge row nobody is owed reports its position, got %q", run.Needs)
+	}
+}
+
 func TestAskingIsOwedAndCarriesTheDemand(t *testing.T) {
 	askedAt := fixtureNow.Add(-30 * time.Hour)
 	anchors := []Anchor{
