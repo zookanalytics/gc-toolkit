@@ -18,9 +18,18 @@ conversation axis is unbuildable without it. Two of its clauses change.
 The first is the **value set** in its direction, item 2: that `COMMENTED`
 becomes one of the recorded values. `COMMENTED` is GitHub's vocabulary for what
 a reviewer did, and it does not answer whose turn it is. Two `COMMENTED`
-reviews on one pull request, one answered and one not, are the same value.
-Record the conversation position from `state-model.md` instead: `quiet`,
+reviews on one pull request, one answered and one not, are the same value. So
+record the conversation position from `state-model.md` as well: `quiet`,
 `outstanding`, `covered`, `asking`, `answered`.
+
+Beside it, not in place of it. The posture answers a second question the
+position cannot, which is whether GitHub will let the merge through, and its
+`review_required` value is the only signal the city has for a repository that
+requires a human review the local `check_set` never declared. Dropping the
+posture for the position would leave a green pull request nobody has approved
+reading as settled and quiet and nobody's move, which is the owed rule's
+approval clause in `state-model.md` and the failure that clause exists to
+prevent. Keep both keys, written by the same pass.
 
 The second is the **set of id spaces**. tk-jus6e4 watermarks the two review
 spaces, the inline comments on `pulls/N/comments` and the bodies of `COMMENTED`
@@ -46,8 +55,8 @@ scanner. The third space adds one endpoint to a pass `pr-facts.sh` already
 makes for every open anchor.
 
 Whoever implements tk-jus6e4 should read `state-model.md` first and write the
-position, not the posture. GitHub's `reviewDecision` remains an input to that
-derivation; it stops being the thing stored.
+position beside the posture. GitHub's `reviewDecision` stays both an input to
+the position and the source of the recorded `review_required`.
 
 Nothing else in the initiative is amended.
 

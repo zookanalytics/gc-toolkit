@@ -86,20 +86,28 @@ in `model.go`. The TypeScript mirror in `contract.ts` follows.
 | `pr_url` | string | the anchor's `pr_url`; the operator's way into GitHub |
 | `pr_machine` | string | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, or `unknown` |
 | `pr_conversation` | string | `quiet`, `outstanding`, `covered`, `asking`, `answered`, or `unknown` |
+| `pr_approval` | string | `required`, `met`, `not_required`, or `unknown` |
 | `pr_owed_since` | timestamp, zero when not owed | when the operator's turn began |
 
-Five fields, and four of them are a value read off the bead. The board computes
+Six fields, and five of them are a value read off the bead. The board computes
 nothing about a merge anchor that the cadence has not already decided. The
 `pr.` prefix is the metadata key's, kept because `pr-facts.sh` and `merge.sh`
 are the writers; `pr_machine` is present on a `pre_open_gate` anchor that has
 no PR number yet.
 
+`pr_approval` is the owed rule's approval clause on the wire, read from the
+recorded posture: `review_required` is `required`, `approved` is `met`, and an
+absent posture is `unknown`. It is a separate field rather than a fourth
+machine-axis value because a PR can need an approval while the cadence is still
+`progressing`, and folding the two would make the axis pick again.
+
 `pr_owed_since` is the one derived value, and it is what orders the queue.
 tk-lb3u4m ranks the owed partition by how long a row has been owed, and for a
-PR row that clock starts at the human utterance, the demand bead's creation, or
-the moment the wedge was stamped, whichever began the current turn. It is not
-`updated_at`: a wedged anchor is touched by every reconcile pass, and ordering
-by that would sort the most neglected rows last.
+PR row that clock starts at the human utterance, the demand bead's creation,
+the moment the wedge was stamped, or the moment a `settled` row's approval came
+due, whichever began the current turn. It is not `updated_at`: a wedged anchor
+is touched by every reconcile pass, and ordering by that would sort the most
+neglected rows last.
 
 Both axes carry `unknown`, and it is a rendered value rather than a fallback to
 the quiet end. This is the same choice `Anchor.WaitingUnknown` already makes for
@@ -108,10 +116,13 @@ a clear one are not interchangeable, and only the gather can tell them apart.
 
 ## What a row says
 
-Five things, in one line, and nothing more:
+Six things, in one line, and nothing more:
 
 - the PR number, linked, or the branch name when the PR is not open yet;
 - the two axis values, which already name the wedge shape;
+- `pr_approval` when it reads `required`. A `settled` and `quiet` row is in the
+  owed partition for that reason alone, and without the word the operator sees
+  a green pull request in their queue with nothing attached saying why;
 - how long the current turn has been running;
 - the demand, when there is one. For `asking` that is the demand bead's title,
   which is tk-s4fg87's authored headline;
@@ -136,7 +147,10 @@ beads alone did not have.
   key means the cadence has not written one yet, which is a fact about the city,
   not an all-clear.
 - The sentence "nothing is owed by you" is never printed while any PR row's
-  conversation axis reads `unknown`.
+  conversation axis reads `unknown`, or while any `settled` row's approval
+  clause is unanswered. `Tile.Owed` is a boolean and cannot carry the third
+  value the axes do, so an unread input has to surface as coverage rather than
+  as a false negative on the row.
 
 ## Sequencing
 
@@ -149,6 +163,14 @@ reads as `WaitingOn`, and the machine axis needs `pr.machine` recorded by
 `gate-ensure.sh` and `merge.sh` at the point each already reaches the verdict.
 The conversation axis renders `unknown` throughout, and the coverage line says
 why. This alone answers two of the operator's three questions.
+
+The owed rule's approval clause is phase 1 as well, and it does not wait for
+the conversation axis. It reads `pr_posture=review_required@<live head>`, which
+is one field off the review decision `pr-facts.sh` already fetches for every
+open anchor, and it needs none of the watermarks that block phase 2. Until it
+is recorded, a `settled` row cannot say whether GitHub is holding the merge for
+a human, and the coverage sentence counts it rather than the row reading
+not-owed.
 
 It is also what makes a wedge legible. The board already gathers
 `gc.routed_to=human` beads, so the seven wedged anchors do reach it as
@@ -184,14 +206,26 @@ itself when the partition it renders into lands. Its shape:
   already reach the verdict. No new pass, no new GitHub read.
   `pr.conversation` and `pr_issue_watermark` are registered by phase 2,
   alongside the writer that fills them.
-- Add the five `Tile` fields, the source gather that fills them from the
+- Record the review-required posture from `pr-facts.sh`, on the read it
+  already makes, and feed the owed rule's approval clause from it. If
+  tk-jus6e4 has landed, this is its `pr_posture` key and there is nothing to
+  add; if it has not, phase 1 registers the key and tk-jus6e4 extends the
+  value set rather than introducing it.
+- Add the six `Tile` fields, the source gather that fills them from the
   anchor, and the `Owed` contribution. `pr_conversation` ships in phase 1 as a
   field that always reads `unknown`, so the wire contract does not change
   shape when phase 2 lands.
 - Render the row and its link in the owed partition, and extend the coverage
   sentence.
-- Cover the wedge derivation with a test built from the live shapes in
-  `state-model.md`: `exception@<live head>`, and a standing veto at the cap.
+- Cover the machine derivation with tests built from the live shapes in
+  `state-model.md`: both wedges, `exception@<live head>` and a standing veto at
+  the cap; an anchor whose only open blocker is a pool-routed rework child,
+  which reads `progressing`; and an anchor whose only open blocker is a demand
+  bead, which does not. The rework child is the shape a derivation keyed on
+  `anchor_bead` gets wrong, and it is one of the two normal in-flight shapes.
+- Cover the approval clause with a `settled` anchor at
+  `pr_posture=review_required@<live head>`, which is owed, and one at
+  `approved@<live head>`, which is not.
 
 It depends on tk-lb3u4m, which builds the partition it renders into, and on
 tk-s4fg87's phase 1 for the demand edge that `asking` reads. It does not depend

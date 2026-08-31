@@ -81,13 +81,29 @@ choose.
 What the merge cadence can do with this anchor on its next pass. Three values.
 
 **`progressing`** — some automated actor will act. Derived from either of: an
-open bead carrying `anchor_bead=<this anchor>`, which is a review or rework
-child in flight; or a `check.<g>` marker not bound to the branch's live head,
-which is the condition `gate-ensure.sh` dispatches on.
+open bead that blocks this anchor and carries a `gc.routed_to` naming a pool;
+or a `check.<g>` marker not bound to the branch's live head, which is the
+condition `gate-ensure.sh` dispatches on.
 
-**`settled`** — every declared gate reads `green@<live head>` and no child is
-open. The cadence is done; the PR is waiting on approval, on the merge pass, or
-on nothing.
+The blocker test is the route, and both halves of that matter. Keying on
+`anchor_bead` is too narrow, because only review children carry it. The rework
+children that hold an anchor between rounds do not: `signoff.sh` files one
+stamped `branch`, `target`, `rejection_reason` and `source_review_bead`, and
+`pr-facts.sh` files its stale-base rework stamped `branch`, `target`,
+`rejection_reason` and `prepare_mode`. Each attaches with a `blocks` edge onto
+the anchor, and an anchor with an open rework child is as busy as one with an
+open review. Reading every live blocker is too wide in the other direction. An
+anchor also blocks on ordinary prerequisites, and on the demand bead that makes
+it `asking`, and neither has an automated actor behind it. The route separates
+the two: `signoff.sh` and `pr-facts.sh` both stamp `gc.routed_to=<pool>` on the
+child and read it back before reporting it dispatched, and both leave an
+unrouted child alone, because no pool can claim one.
+
+**`settled`** — every declared gate reads `green@<live head>` and no
+pool-routed blocker is open. The cadence is done, and the PR is waiting on
+approval, on the merge pass, or on nothing. Whether it is the first of those
+three is the approval clause of the owed rule below, and it is the difference
+between a row the operator has to touch and one they can leave alone.
 
 **`wedged`** — no automated actor can move it, and none will try. Two shapes,
 both measured live:
@@ -159,8 +175,21 @@ existing partition needs. A row is **owed by the operator** when any of:
 - machine is `wedged`;
 - conversation is `asking`, `outstanding` with nothing covering it, or
   `answered`;
-- machine is `settled`, the gate set includes `approval`, and no approving
-  review stands at the live head.
+- machine is `settled` and an approving review is required at the live head
+  and absent.
+
+The approval clause reads GitHub's requirement, not the city's gate set.
+`check_set` declares which `check.<g>` gates the city runs, and a repository
+can require a human review without it. `merge.sh` arms its local approval
+requirement from `check_set` containing `approval`, from `signoff_dismissed`,
+or from one of the city's own dismissed reviews, and none of those three fires
+for a branch protection rule the city never wrote down. GitHub states the
+requirement directly, as `reviewDecision=REVIEW_REQUIRED` alongside
+`mergeStateStatus=BLOCKED`, and `merge.sh:135` and `pr-facts.sh:117` each fetch
+both fields on every pass. Keyed on the gate set instead, a pull request with a
+green codex marker, no human utterance and a standing approval requirement
+reads `settled`, `quiet` and nobody's move. That is the same PR sitting in
+silence that the initiative was filed over, reached by a different route.
 
 Everything else is the city's move, including `covered`: the operator
 commented, the city filed work for it, and the next thing that happens is the
@@ -184,25 +213,30 @@ copies.
 
 | Value | Derived from | Today |
 |---|---|---|
-| machine `progressing` | open `anchor_bead` children; marker versus live head | inferred |
-| machine `settled` | every gate `green@<live head>`, no open child | inferred |
+| machine `progressing` | open pool-routed blocker; marker versus live head | inferred |
+| machine `settled` | every gate `green@<live head>`, no pool-routed blocker | inferred |
 | machine `wedged` | `exception@<live head>`, or standing veto at cap | inferred, by re-implementing two scripts |
 | conversation `quiet` | no human utterance in any space | inferred, from complete bounded lists |
 | conversation `outstanding` | utterance id above its space's watermark | **not derivable** — no watermark exists |
 | conversation `covered` | utterance linked to an open bead | **not derivable** — no link is recorded |
 | conversation `asking` | open `blocks` edge to a demand bead | **asserted** |
 | conversation `answered` | every watermark at high water, head moved since | **not derivable** |
+| approval required and absent | GitHub's review decision at the live head | **not derivable** — the decision is fetched and discarded |
 
-One of the eight is asserted today, and it is the one tk-s4fg87 already
-specifies. Three cannot be derived at all: they depend on the watermarks and a
-comment-to-bead link that do not exist yet, which are tk-jus6e4's and
-tk-01n5cc's deliverables.
+One of the nine is asserted today, and it is the one tk-s4fg87 already
+specifies. Four cannot be derived at all: they depend on the watermarks, on a
+comment-to-bead link, and on a recorded review decision, none of which exist
+yet, and all of which are tk-jus6e4's and tk-01n5cc's deliverables.
 
-That is the sequencing answer this document owes. The machine axis can be
-rendered honestly now. The conversation axis cannot be rendered at all until
-the watermarks land, and a surface that guesses it will be wrong in the
-direction that matters: it will report `quiet` for a PR the operator commented
-on, because silence is what every failed derivation looks like.
+That is the sequencing answer this document owes, and the four undeliverables
+do not all cost the same. The machine axis can be rendered honestly now. So can
+the approval clause, which needs the review decision written down once per pass
+and none of the watermarks, which is why it belongs in the same phase as the
+machine axis rather than behind the conversation axis. The conversation axis
+cannot be rendered at all until the watermarks land, and a surface that guesses
+it will be wrong in the direction that matters: it will report `quiet` for a PR
+the operator commented on, because silence is what every failed derivation
+looks like.
 
 So the rule, which the board's own model already applies to dependency edges as
 `WaitingUnknown`:
@@ -259,6 +293,18 @@ pack writes:
 
 `asking` needs no key of its own. It is the presence of the edge, and the
 derivation reads the graph.
+
+One key this design does not add, and requires to survive. tk-jus6e4 records
+`pr_posture=<changes_requested|commented|approved|review_required|none>@<head-oid>`,
+derived from GitHub's review decision, and `review_required` is the whole input
+to the owed rule's approval clause. `bead-map.md` amends that bead to record
+the conversation position as well. The position is an addition beside the
+posture and never a replacement for it, because the position says whose turn it
+is in the conversation while the posture says whether GitHub will let the merge
+through, and a green pull request nobody has approved is the case where those
+two answers differ. Only the posture's `commented` value depends on the
+watermarks, so the review-required half is readable as soon as `pr-facts.sh`
+records the decision it already fetches.
 
 Two constraints carried from tk-jus6e4, which owns the recording half and
 should be read before any of this is built: do not loosen the repository
