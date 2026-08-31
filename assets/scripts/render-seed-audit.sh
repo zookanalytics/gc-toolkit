@@ -51,6 +51,8 @@
 # USAGE
 #   render-seed-audit.sh                  regenerate generated/seed-audit/
 #   render-seed-audit.sh --check          fail if the committed tree is stale
+#   render-seed-audit.sh --check-merge <base> <head>
+#                                         fail if that merge lands a stale tree
 #   render-seed-audit.sh --print-digest   print the source digest and exit
 #   render-seed-audit.sh --install-hook   point core.hooksPath at assets/hooks
 #   render-seed-audit.sh --out DIR        write somewhere else
@@ -64,12 +66,15 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 OUT=""
 JOBS=""
 MODE="render"
+MERGE_BASE=""
+MERGE_HEAD=""
 
 die() { printf 'render-seed-audit: %s\n' "$*" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --check)        MODE="check" ;;
+        --check-merge)  MODE="check-merge"; shift; MERGE_BASE="${1:-}"; shift; MERGE_HEAD="${1:-}" ;;
         --print-digest) MODE="digest" ;;
         --install-hook) MODE="install-hook" ;;
         --out)          shift; OUT="${1:-}" ;;
@@ -151,6 +156,92 @@ source_digest() {
 if [ "$MODE" = "digest" ]; then
     source_digest "$ROOT"
     exit 0
+fi
+
+# --------------------------------------------------------- merge-result check
+#
+# `--check` asks whether the artifact is current in ONE working tree, which is
+# what assets/hooks/pre-commit already answers on every branch. What neither can
+# see is that the artifact is a function of the whole source tree while it is
+# committed per branch. A branch that moves a prompt input and a branch that
+# re-renders from a base without that input touch no common file, so both merge
+# cleanly and the second one's render lands on top of the first one's input.
+# Rebase opens the same hole from the other side: a replayed commit runs no hook.
+#
+# This mode asks the question of the MERGE RESULT instead. `git merge-tree`
+# writes the merged tree to the object store without touching any working tree,
+# and the digest of that tree's inputs is compared against the digest its own
+# INDEX.md records. Digest only, no render: the merge cadence runs every minute
+# per rig, a render costs half a minute and a `gc` binary, and "an input moved
+# without the artifact moving" is the whole of the clobber. An artifact edited
+# by hand together with its digest line stays `--check`'s question.
+#
+# The digest comes from the renderer IN THE MERGED TREE when there is one,
+# because the input set is whatever digest_inputs names there: a change that
+# widens it records its INDEX.md under the wider set, and this checkout's older
+# copy would call that stale for a reason that is not the clobber. What runs is
+# only its --print-digest, which returns before any render and needs no `gc`,
+# under a timeout. Running it at all is the trust the merge is a second from
+# extending anyway, and this arm sits after the review and approval gates.
+if [ "$MODE" = "check-merge" ]; then
+    [ -n "$MERGE_BASE" ] && [ -n "$MERGE_HEAD" ] || die "--check-merge needs <base-rev> <head-rev>"
+    git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "--check-merge: not a git repository: $ROOT"
+    for rev in "$MERGE_BASE" "$MERGE_HEAD"; do
+        git -C "$ROOT" rev-parse --verify --quiet "$rev^{commit}" >/dev/null 2>&1 \
+            || die "--check-merge: '$rev' names no commit in $ROOT; fetch it first"
+    done
+
+    mt_out="$(git -C "$ROOT" merge-tree --write-tree "$MERGE_BASE" "$MERGE_HEAD" 2>/dev/null)"; mt_rc=$?
+    merged_tree="${mt_out%%$'\n'*}"
+    if [ "$mt_rc" -ne 0 ] || [ -z "$merged_tree" ]; then
+        die "--check-merge: '$MERGE_HEAD' does not merge into '$MERGE_BASE' in memory — a conflict, or a git without 'merge-tree --write-tree' (2.38)"
+    fi
+
+    WORK="$(mktemp -d)"
+    trap 'rm -rf "$WORK"' EXIT
+    git -C "$ROOT" archive --format=tar "$merged_tree" | tar -x -C "$WORK" \
+        || die "--check-merge: could not materialize merged tree $merged_tree"
+
+    merged_index="$WORK/generated/seed-audit/INDEX.md"
+    if [ ! -f "$merged_index" ]; then
+        printf 'merging %s into %s carries no seed audit — nothing to keep current\n' \
+            "$MERGE_HEAD" "$MERGE_BASE"
+        exit 0
+    fi
+    recorded="$(sed -n 's/^- source digest: `\(.*\)`$/\1/p' "$merged_index" | head -1)"
+    [ -n "$recorded" ] || die "--check-merge: the merged INDEX.md records no source digest, so staleness is unverifiable"
+
+    run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout 60 "$@" </dev/null; else "$@" </dev/null; fi; }
+    merged_renderer="$WORK/assets/scripts/render-seed-audit.sh"
+    if [ -f "$merged_renderer" ]; then
+        actual="$(run_bounded bash "$merged_renderer" --root "$WORK" --print-digest 2>/dev/null | head -1)"
+    else
+        actual="$(source_digest "$WORK")"
+    fi
+    [ -n "$actual" ] || die "--check-merge: could not compute the digest of the merged tree"
+
+    if [ "$recorded" = "$actual" ]; then
+        printf 'seed audit is current at the merge of %s into %s (digest %s)\n' \
+            "$MERGE_HEAD" "$MERGE_BASE" "${actual:0:12}"
+        exit 0
+    fi
+
+    printf 'seed audit would be STALE at the merge of %s into %s:\n' "$MERGE_HEAD" "$MERGE_BASE" >&2
+    printf '  digest recorded by the merged INDEX.md: %s\n' "$recorded" >&2
+    printf '  digest of the merged inputs:            %s\n' "$actual" >&2
+    # The inputs the merge takes from the base side are the ones the head's
+    # render never saw, which names the clobber rather than only asserting it.
+    culprits="$(git -C "$ROOT" diff-tree -r --name-only "$MERGE_HEAD" "$merged_tree" 2>/dev/null \
+        | grep -Fxf <(digest_inputs "$WORK" | sed "s|^$WORK/||") | head -10)"
+    if [ -n "$culprits" ]; then
+        printf 'inputs this merge takes from %s that the committed render never saw:\n' "$MERGE_BASE" >&2
+        while IFS= read -r f; do printf '  %s\n' "$f" >&2; done <<< "$culprits"
+    fi
+    printf 'Neither branch is wrong on its own: the artifact is a function of the whole source\n' >&2
+    printf 'tree, so a branch that moves an input and a branch that re-renders clobber each\n' >&2
+    printf 'other on landing. Bring the head branch current with %s, then:\n' "$MERGE_BASE" >&2
+    printf '  assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n' >&2
+    exit 1
 fi
 
 # ------------------------------------------------------------------ hook install
