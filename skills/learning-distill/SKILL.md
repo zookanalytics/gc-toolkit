@@ -54,9 +54,9 @@ threshold** — not three, not any number. Weigh:
   several observations; those are several findings, not several
   occurrences of one;
 - **source diversity** — operator plus reviewer-agent outweighs one
-  voice repeating, and a single source (all-self, or `distinct_sources=1`)
-  is a hard block on always-injected promotion (Gate 1), not merely a weak
-  input;
+  voice repeating, and a cluster with no external check — entirely
+  self-reported, or a lone unendorsed observation — is a hard block on
+  always-injected promotion (Gate 1), not merely a weak input;
 - **shared cause** — do the instances genuinely fail the same way, or
   merely rhyme?
 
@@ -118,26 +118,39 @@ surfaces it to the operator; gate 2 files an engineering bead). The gates
 do not apply to `learning-rubric` proposals against this skill, to
 retirements, or to hardens — those remove weight, not add it.
 
-### Gate 1 — source diversity: one voice does not bind everyone
+### Gate 1 — external check: one voice does not bind everyone
 
-A cluster that is **entirely `obs.source=self`**, or whose
-**`distinct_sources=1`**, has no independent corroboration and **cannot
-auto-promote into always-injected content** unless it carries
-`obs.endorsed=operator`. Self-report → self-promote → self-inject is a
-loop with no external check; what clears the gate is the operator's
-endorsement or a second independent source (`distinct_sources ≥ 2`, not
-all-self). Read the rollup's *number*, not the narrative:
-`distinct_sources` counts distinct `obs.source` values, not sessions —
-"four independent sessions" with `distinct_sources=1` is one voice
-repeating. It counts over distinct events too, so one correction captured
-by both self-report and the miner is one voice, not two. A blocked pattern
-is **surfaced, not adopted**: hold it on its pattern bead with the block
-stated and do **not** file the
-`prompt-update` bead. It promotes later on corroboration or endorsement.
+A cluster promotes into always-injected content only when something outside
+the promoting agent has corroborated it. Two things clear the gate: it
+carries `obs.endorsed=operator`, or its evidence comes from more than one
+source and is not entirely self-reported.
 
-*Worked example.* `distinct_sources=1`, all observations `obs.source=self`,
-no endorsement → **blocked**. Self-sourced clusters have been promoted and
-operator-vetoed before; gate 1 is what stops the re-promote.
+A cluster that is **entirely `obs.source=self`** is the loop this gate
+exists to break — self-report, self-promote, self-inject, with no external
+check. It is blocked unless endorsed, whatever its recurrence.
+
+An **all-operator cluster is corroborated once it spans two or more distinct
+`obs.provenance` events**, and promotes without endorsement. An operator's
+correction is the external check the gate asks for, and the endorsement flag
+is set only by the "learn this:" fast path, which an operator correcting an
+agent mid-conversation does not use. A single unendorsed operator
+observation still holds: one correction is a data point, not a pattern.
+
+Know which case you are in before you read the rollup's number.
+`distinct_sources` counts distinct `obs.source` values, so it reports 1 for
+the blocked all-self cluster and for the promotable all-operator one alike,
+and cannot tell them apart on its own. It counts over distinct events too,
+so one correction captured by both self-report and the miner is one voice,
+not two. A blocked pattern is **surfaced, not adopted**: hold it on its
+pattern bead with the block stated and do not file the `prompt-update` bead.
+It promotes later on corroboration or endorsement.
+
+*Worked example.* Every observation `obs.source=self`, no endorsement →
+**blocked**, however many events it spans. Self-sourced clusters have been
+promoted and operator-vetoed before; that block is what stops the
+re-promote. A cluster of operator corrections over several separate events
+is the opposite case and promotes, because the corrections are the external
+check.
 
 ### Gate 2 — remedy class: exhortations and structural fixes are not bullets
 
