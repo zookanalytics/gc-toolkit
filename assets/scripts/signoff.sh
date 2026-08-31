@@ -9,6 +9,9 @@
 # dismiss the city's own superseded CHANGES_REQUESTED review. request-changes:
 # clear the marker and file ONE routed rework child — or, at the round cap,
 # stamp check.<name>=exception@<head> and route the anchor to a human instead.
+# The cap counts rework rounds since the last operator feedback, not since the
+# branch was cut: pr-facts.sh records each batch of feedback on the anchor, and
+# the rounds spent before it become a floor this script subtracts.
 # The city never approves its own PRs: nothing here ever passes --approve.
 # Every oid stamped into a marker is a full 40 lowercase hex; a shorter one is
 # refused, since merge.sh can only read the marker by comparing it to a head.
@@ -42,7 +45,8 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  has left the branch is refused, not bound.
 
 env: GC_MAX_REVIEW_ROUNDS  rework rounds before the gate records
-                           exception@<head> and routes to a human (default 3)
+                           exception@<head> and routes to a human (default 3).
+                           Counted since the last operator feedback on the PR.
 U
 }
 
@@ -241,8 +245,10 @@ post_artifact() {
   fi
 }
 
-stamp_anchor() { # <key> <value>: write, read back, exit 2 when it did not stick
-  gc bd update "$ANCHOR" --set-metadata "$1=$2" >/dev/null 2>&1 || true
+stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did not stick
+  local args=(--set-metadata "$1=$2")
+  [ $# -lt 3 ] || args+=(--append-notes "$3")
+  gc bd update "$ANCHOR" "${args[@]}" >/dev/null 2>&1 || true
   local got; got=$(row_meta "$(bd_json show "$ANCHOR")" "$1")
   if [ "$got" != "$2" ]; then
     warn "$1 did not read back on anchor $ANCHOR (got '${got:-}', want '$2'); review bead left OPEN so the gate stays owed"
@@ -296,12 +302,13 @@ dismiss_superseded() {
   done
 }
 
-# Rework rounds already spent on this anchor: one routed child per round, each
-# stamped source_review_bead by the signoff that filed it. The cap bounds
+# Every rework child ever filed against this anchor: one per round, each stamped
+# source_review_bead by the signoff that filed it. The cap bounds
 # non-convergence, which only an attempted rework can demonstrate, so review
 # dispatches are not rounds however many read the same commit. An unreadable
-# ledger reads 0 — capping on a guess parks live work.
-count_rounds() {
+# ledger reads 0 — capping on a guess parks live work. What counts against the
+# cap is this total minus the floor the reset below records.
+rework_children() {
   local kids n
   kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
   n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
@@ -318,21 +325,55 @@ if [ "$VERDICT" = "approve" ]; then
   exit 0
 fi
 
-ROUNDS=$(count_rounds)
+TOTAL=$(rework_children)
 CAP="${GC_MAX_REVIEW_ROUNDS:-3}"
 case "$CAP" in ''|*[!0-9]*) CAP=3 ;; esac
+
+# Operator feedback is not a failed round. It is input the branch has never
+# been reviewed against, and the cap measures something else: the city failing
+# to converge against its own reviewer. So the rounds spent before that input
+# stop counting. pr-facts.sh records the batch that carried it in
+# signoff_rounds_reset, keyed on GitHub author identity — every id in a batch
+# was written by a login other than the city's own — so a codex verdict (posted
+# under that login), a re-review and a rework hand-back (which post nothing) all
+# leave the counter where it is. The floor is WRITTEN at the first verdict after
+# a batch rather than re-derived each time: this verdict files a child of its
+# own, and a floor recomputed next pass would swallow that one too, leaving a
+# cap that never trips.
+RESET_BATCH=$(row_meta "$ANCHOR_ROW" signoff_rounds_reset)
+FLOOR_RAW=$(row_meta "$ANCHOR_ROW" signoff_round_floor)
+case "$FLOOR_RAW" in
+  *@*) FLOOR="${FLOOR_RAW%%@*}"; FLOOR_BATCH="${FLOOR_RAW#*@}" ;;
+  *)   FLOOR=""; FLOOR_BATCH="" ;;
+esac
+case "$FLOOR" in ''|*[!0-9]*) FLOOR=0; FLOOR_BATCH="" ;; esac
+if [ -n "$RESET_BATCH" ] && [ "$RESET_BATCH" != "$FLOOR_BATCH" ]; then
+  stamp_anchor signoff_round_floor "$TOTAL@$RESET_BATCH" \
+    "signoff: round counter reset to 0 of $CAP by operator feedback batch $RESET_BATCH (review.comment ids, recorded by pr-facts.sh when it routed them). The $TOTAL rework round(s) filed before that feedback were spent converging on a review it had not yet given, so they no longer count; the cap now measures the rounds that answer it."
+  FLOOR="$TOTAL"
+fi
+ROUNDS=$((TOTAL - FLOOR))
+[ "$ROUNDS" -ge 0 ] || ROUNDS=0
 post_artifact
 
 if [ "$ROUNDS" -ge "$CAP" ]; then
   # Terminal verdict: ONE write under check.<name> (the exception), never a
   # clear beside it — an absent marker re-arms the dispatch this cap refuses.
   stamp_anchor "check.$CHECK_NAME" "exception@$REVIEWED_OID"
+  # signoff_cap names the exception this park belongs to. Operator feedback
+  # retires the park with the cap, and only this stamp tells the cap's own
+  # gc.routed_to=human from a person's, so an anchor a human parked by hand
+  # stays parked. It is written and verified with them: a park nothing proves
+  # is the cap's can be lifted only by a person.
   gc bd update "$ANCHOR" \
     --set-metadata gc.routed_to=human \
+    --set-metadata "signoff_cap=$CHECK_NAME@$REVIEWED_OID" \
     --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor" \
     >/dev/null 2>&1 || true
-  if [ "$(row_meta "$(bd_json show "$ANCHOR")" gc.routed_to)" != "human" ]; then
-    warn "gc.routed_to=human did not read back on $ANCHOR; review left open for a retry"
+  CAP_ROW=$(bd_json show "$ANCHOR")
+  if [ "$(row_meta "$CAP_ROW" gc.routed_to)" != "human" ] \
+     || [ "$(row_meta "$CAP_ROW" signoff_cap)" != "$CHECK_NAME@$REVIEWED_OID" ]; then
+    warn "the cap park did not read back on $ANCHOR (gc.routed_to='$(row_meta "$CAP_ROW" gc.routed_to)', signoff_cap='$(row_meta "$CAP_ROW" signoff_cap)'); review left open for a retry"
     exit 2
   fi
   close_review

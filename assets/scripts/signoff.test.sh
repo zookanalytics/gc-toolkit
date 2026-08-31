@@ -5,7 +5,8 @@
 # suites: the cap writes exception EXACTLY ONCE and never also unsets the
 # marker; the posted artifact carries the anchor link; --approve is NEVER used.
 # It also pins what a round IS — an attempted rework child, never a review
-# dispatch.
+# dispatch — and what it is counted from: the floor pr-facts.sh's record of
+# operator feedback sets, written once per batch and never re-derived.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -516,6 +517,7 @@ eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "the cap records exception
 eq "$(grep -c -- 'check.codex=exception@' "$STUB_GC_LOG")" "1" "exception is written EXACTLY once"
 hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata check.codex" "the cap never ALSO unsets the marker"
 eq "$(meta tk-anc gc.routed_to)" "human" "the anchor is routed to a human"
+eq "$(meta tk-anc signoff_cap)" "codex@$OID_HEAD" "…and signoff_cap names the exception that park belongs to"
 has "$(meta tk-anc blocked_reason)" "did not converge" "blocked_reason says why it is held"
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no rework child is filed past the cap"
 eq "$(status rv-1)" "closed" "the review bead still closes (verdict recorded)"
@@ -546,6 +548,75 @@ echo "# an unreadable dep list never caps"
 reset "$ANCHOR_PR"
 STUB_DEP_GARBAGE=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "garbage dep list reads as 0 rounds (child filed, no cap)"
+
+# --- operator feedback resets the count ------------------------------------------
+# The cap measures the city failing to converge against its own reviewer. A
+# review the branch has never been answered against is not one of those rounds,
+# so pr-facts.sh records the batch that carried it and the rounds spent before
+# it become a floor this script subtracts.
+spent() { # <n> — n closed rework children, edged to the anchor
+  local i extra=""
+  for i in $(seq 1 "$1"); do extra="$extra$(kid "$i" closed "\"source_review_bead\":\"r$i\"")"; done
+  reset "$ANCHOR_PR" "$extra"
+  for i in $(seq 1 "$1"); do printf 'tk-anc|c%s|blocks\n' "$i" >> "$STUB_DEPS"; done
+}
+anchor_meta() { # <k=v>... — stamp the anchor before the run
+  local kv
+  for kv in "$@"; do
+    jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" \
+      'map(if .id == "tk-anc" then .metadata[$k] = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n"
+    mv "$STUB_STORE.n" "$STUB_STORE"
+  done
+}
+
+echo "# a recorded floor is subtracted: the rounds before the feedback do not cap"
+spent 3
+anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3@0.5001
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "three spent rounds under a recorded floor exit 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…the gate is cleared for a rework, not capped"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and a rework child is filed"
+has "$(meta fix-1 rejection_reason)" "round 1" "…numbered from the feedback, not from the branch"
+
+echo "# a batch with no floor yet re-baselines, and records what the counter was"
+spent 3
+anchor_meta signoff_rounds_reset=0.5001
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the cap does not fire at the batch that reset it"
+eq "$(meta tk-anc signoff_round_floor)" "3@0.5001" "the floor is written, pinned to the batch it answers"
+has "$(notes tk-anc)" "reset to 0 of 3 by operator feedback batch 0.5001" "the reset names its cause"
+has "$(notes tk-anc)" "The 3 rework round(s) filed before" "…and what the counter was"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and the released round is spent on a rework child"
+
+echo "# …and the floor stands next verdict: re-deriving it would swallow every new round"
+spent 4
+anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3@0.5001
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc signoff_round_floor)" "3@0.5001" "the floor is unchanged at the same batch"
+has "$(meta fix-1 rejection_reason)" "round 2" "…so the round after the reset counts as the second"
+
+echo "# …and the cap trips again once the feedback's own rounds are spent"
+spent 6
+anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3@0.5001
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "a reset buys one more budget, not an exemption"
+has "$(meta tk-anc blocked_reason)" "after 3 rework rounds" "…and the reason counts from the reset"
+
+echo "# a floor that names no batch is ignored rather than trusted"
+spent 3
+anchor_meta signoff_rounds_reset=0.5001 signoff_round_floor=3
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc signoff_round_floor)" "3@0.5001" "the malformed floor is replaced by one bound to the batch"
+eq "$(meta tk-anc check.codex)" "<absent>" "…and it did not cap on a value it could not read"
+
+echo "# a floor whose write does not land refuses the verdict rather than mis-count"
+spent 3
+anchor_meta signoff_rounds_reset=0.5001
+printf 'tk-anc\n' > "$STUB_UPD_FAIL"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "an unrecorded floor exits 2"
+has "$out" "signoff_round_floor did not read back" "…naming the write that did not stick"
+eq "$(status rv-1)" "in_progress" "…and the review bead stays open, the gate still owed"
 
 # --- supersede-dismiss -----------------------------------------------------------
 echo "# supersede: dismiss own stale CHANGES_REQUESTED only"

@@ -161,7 +161,7 @@ Each gate's verdict is a head-bound marker:
 |---|---|---|
 | `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head; re-gated once the head moves past it |
 | `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
-| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>` |
+| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>`, or when new operator feedback resets the cap |
 
 `approval` takes no marker of its own. `merge.sh` satisfies it from an
 external APPROVED review at the live head, never from the city's own account
@@ -190,7 +190,48 @@ head. No cadence pass will start that review, because gate-ensure and
 `pr-facts.sh` both read an exception bound to the live head as settled. The
 human the anchor is routed to has three moves: dispatch a review by hand,
 change the anchor's `check_set`, or move the head and take the one re-gate the
-table above describes.
+table above describes. Reviewing the PR is a fourth: new review comments
+release the cap, and the exception with it.
+
+### The round cap counts from the last operator feedback
+
+`GC_MAX_REVIEW_ROUNDS` (default 3) bounds one thing — the city failing to
+converge against its own reviewer — and a round is an attempted rework child,
+never a review dispatch. Feedback from a person is not that loop. It is review
+the branch has never been answered against, so counting it against the budget
+lets an operator's own review exhaust the allowance for reviewing the response
+to it.
+
+`pr-facts.sh` records each batch it routes as `signoff_rounds_reset=<highest
+review id>.<highest comment id>`, which is one stamp per distinct piece of
+feedback: a reconcile pass every two minutes sees the same comments until they
+are answered, and a policy resetting on their mere presence would be no cap at
+all. What makes a batch operator feedback is the author: the posture derivation
+counts only ids written by a login other than the city's own, so `signoff.sh`'s
+verdicts (posted under that login), re-reviews, and rework hand-backs (which
+post nothing) leave the counter alone.
+
+`signoff.sh` subtracts a floor rather than resetting a counter, since the
+rework children stay on the anchor: at the first verdict after a new batch it
+writes `signoff_round_floor=<children then>@<batch>`, and counts what follows.
+The floor is written, not re-derived, because that verdict files a child of its
+own, and a floor recomputed each pass would swallow every new round and the cap
+would never trip.
+
+A cap that resets while its own park stands has not reset, so the same write
+retires that park: the `exception@` marker, `blocked_reason`, and the human
+route. `signoff.sh` stamps `signoff_cap=<gate>@<oid>` alongside them, and the
+reset acts only while that stamp and the standing marker still agree — an
+anchor a person parked by hand, or one whose exception they already retired, is
+theirs and stays. A live `gc.takeaway` outranks the reset the same way. The
+dispatch tally (`dispatch_count` and any `dispatch_backstop.<g>`) goes with the
+park, since rounds nobody may dispatch are no release.
+
+A standing `CHANGES_REQUESTED` review resets nothing. It is the strongest
+posture there is, `merge.sh` vetoes on the review itself, and the arm that
+records it deliberately keeps no watermark over its comments, so there is
+nothing there to tell a new remark from one already answered. Such an anchor is
+held by the reviewer directly rather than by the cap.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins

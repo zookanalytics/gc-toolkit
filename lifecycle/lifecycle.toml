@@ -222,7 +222,15 @@ keys = [
 keys = [
   "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
   "review_branch", "review_base", "reviewed_oid", "review_pool",
-  "source_review_bead", "task_kind", "dispatch_count", "fix_target_pool",
+  "source_review_bead", "task_kind", "dispatch_count", "dispatch_backstop.<g>",
+  "fix_target_pool",
+  # The review-round cap. signoff_cap = <gate>@<oid> names the exception the
+  # cap's human park belongs to, so operator feedback can tell that park from
+  # one a person made. pr-facts.sh records each batch of such feedback in
+  # signoff_rounds_reset = <review id>.<comment id>; signoff.sh answers it with
+  # signoff_round_floor = <rework children then>@<batch>, the rounds that no
+  # longer count (docs/state-machine.md).
+  "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
 ]
 
 [metadata.pr_posture]
