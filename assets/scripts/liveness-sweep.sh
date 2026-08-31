@@ -9,8 +9,11 @@
 # Replaces formulas/mol-liveness-sweep.toml + mol-triage-recurrence.toml.
 # Caller: orders/liveness-sweep.toml (exec), after liveness-sweep-precheck.sh
 # proves the delta non-empty; safe to run by hand.
-# State: $GC_PACK_STATE_DIR/liveness-sweep/<rig>/reported — the delta
-# baseline (comma-joined ids), same keying as the precheck's cooldown stamp.
+# State: $GC_PACK_STATE_DIR/liveness-sweep/<rig>/ — `reported`, the delta
+# baseline (comma-joined ids), beside `last-pass`, the cadence window. Both
+# are keyed per rig the same way the precheck keys them. A pass that starts
+# closes the window, and the precheck closes it too once it has proved there
+# is no pass to start.
 # Bias everywhere: an unreadable probe excludes nothing (re-report, never
 # hide). Exit: 0 pass completed (filed or nothing to file), 1 aborted on an
 # unreadable listing, 2 usage.
@@ -52,6 +55,29 @@ else RIG_KEY=_unscoped; fi
 STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/liveness-sweep}"
 STATE_DIR="$STATE_BASE/$RIG_KEY"
 BASELINE_FILE="$STATE_DIR/reported"
+STAMP="$STATE_DIR/last-pass"
+
+# Close the cadence window. liveness-sweep-precheck.sh, the order's `check`,
+# never spends it on a RUN verdict: a check is evaluated by callers that never
+# dispatch, so a RUN has to survive until the pass it dispatches starts.
+# Stamped before the reads, so a pass that aborts costs one window instead of
+# re-offering itself on every tick. The replace is atomic and matches the
+# check's, whose guard probes $STATE_DIR: rename(2) consults the directory's
+# mode and never the stamp's own, so a last-pass left read-only still takes
+# the window rather than leaving the cadence with no floor.
+spend_window() { # spend_window <epoch-seconds>
+    local tmp="$STAMP.$$.tmp"
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    if printf '%s\n' "$1" > "$tmp" 2>/dev/null && mv -f "$tmp" "$STAMP" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$tmp" 2>/dev/null
+    return 1
+}
+if [ "$DRY_RUN" -eq 0 ]; then
+    spend_window "$(date -u +%s)" \
+        || echo "$PROG: WARN: cannot stamp the cadence window at $STAMP" >&2
+fi
 
 # gc bd resolves its ledger from the invoking rig; pin to GC_RIG_ROOT when set.
 DB="${LIVENESS_SWEEP_DB-${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}}"

@@ -358,6 +358,49 @@ grep -q 'bd update subj-ideas' "$GC_CALLS" \
     && bad "…and stamps NOTHING on that path" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
     || ok "…and stamps NOTHING on that path (the set was never shown)"
 
+echo "── the pass owns the cadence window and spends it before it reads ──"
+# liveness-sweep-precheck.sh, the order's `check`, never spends this stamp on
+# a RUN verdict. A check is evaluated by callers that never dispatch — the
+# controller tick, the API order evaluator, `gc order check` — so a check that
+# stamped its own RUN hands the pass to whichever caller asks first.
+STAMP_FILE="$TMP/state/testrig/last-pass"
+run_sweep ABSENT
+STAMPED="$(cat "$STAMP_FILE" 2>/dev/null)"
+case "${STAMPED:-x}" in
+    ''|*[!0-9]*) bad "a completed pass stamps the window" "got '${STAMPED:-<none>}', want epoch seconds" ;;
+    *) ok "a completed pass stamps the window" ;;
+esac
+# BEFORE the reads: an aborting pass must still have spent the window, or the
+# check keeps saying RUN and a degraded store dispatches a pass every tick.
+GC_READY_FAIL=1 run_sweep "old-baseline"
+[ -s "$STAMP_FILE" ] && ok "a pass that aborts on an unreadable listing still spent the window" \
+    || bad "a pass that aborts still spent the window" "no stamp; every tick would dispatch"
+# A dry run is not a pass.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+bash "$SCRIPT" --dry-run >/dev/null 2>&1
+[ -f "$STAMP_FILE" ] && bad "--dry-run does not spend the window" "it wrote $STAMP_FILE" \
+    || ok "--dry-run does not spend the window"
+# liveness-sweep-precheck.sh's writability guard probes the state DIRECTORY;
+# the write it stands for is this one. A last-pass whose own mode is read-only
+# must still take the new window, or the guard passes, the pass runs, the
+# window never closes, and the order dispatches another pass on every tick.
+if [ "$(id -u)" -eq 0 ]; then
+    ok "a read-only last-pass still takes the window (skipped: running as root)"
+else
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+    STALE="$(( $(date -u +%s) - 99999 ))"
+    printf '%s\n' "$STALE" > "$STAMP_FILE"
+    chmod 400 "$STAMP_FILE"
+    bash "$SCRIPT" >/dev/null 2>"$TMP/err"
+    chmod 600 "$STAMP_FILE" 2>/dev/null || true
+    [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$STALE" ] \
+        && ok "a read-only last-pass still takes the window" \
+        || bad "a read-only last-pass still takes the window" "still reads $STALE — the cadence has no floor"
+    grep -q "cannot stamp the cadence window" "$TMP/err" \
+        && bad "and never reached the warn arm" "$(cat "$TMP/err")" \
+        || ok "and never reached the warn arm"
+fi
+
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

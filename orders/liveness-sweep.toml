@@ -5,7 +5,11 @@
 # mechanical precheck so an empty board costs ~3s and no agent ever spawns;
 # the precheck's exclusions are a strict SUBSET of the sweep's, so a skip is
 # provably safe. No `interval` key: a condition trigger ignores it — the
-# cadence window lives in the precheck script, stamped per rig (GC_RIG-keyed).
+# cadence window is per rig (GC_RIG-keyed), and whichever side ends the pass's
+# chance to run closes it: the exec when a pass starts, the check when it has
+# proved the board quiet. A RUN verdict never closes it, because more callers
+# evaluate a check than dispatch from it and the window would be spent on a
+# caller that runs nothing.
 # check_timeout must exceed the precheck's own worst case (3 bounded reads).
 [order]
 description = "liveness sweep: classify open beads; batch unnamed waits into one triage visit (P3). Precheck-gated; fully exec."
