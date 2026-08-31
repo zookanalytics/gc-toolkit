@@ -120,20 +120,19 @@ gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # Read the group stamp back and repair it from the subject if it landed
 # empty: it can land present-but-empty while every sibling stamp in the
 # same update lands, and an empty group disables converse's group-scoped
-# re-claim fence (tk-ax6y4, tk-msfmu) — and here also this script's own
-# dedup listing for a durable subject. Repair and warn, never exit — this
-# block files the one visit for its scope, and on a persistent miss the
-# tracks edge still carries the subject for guards that read the union
-# (tk-d6ddn).
+# re-claim fence — and here also this script's own dedup listing for a
+# durable subject. Repair and warn, never exit — this block files the one
+# visit for its scope, and on a persistent miss the tracks edge still
+# carries the subject for guards that read the union.
 GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
 if [ "$GROUP_GOT" != "$SUBJECT" ]; then
-  echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$SUBJECT' — repairing (tk-ax6y4)" >&2
+  echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '$SUBJECT' — repairing" >&2
   gc bd update "$VISIT" --set-metadata "gc.continuation_group=$SUBJECT" || true
   GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
   if [ "$GROUP_GOT" = "$SUBJECT" ]; then
     echo "gate-visit: the repair landed on $VISIT" >&2
   else
-    echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union (tk-d6ddn)" >&2
+    echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union" >&2
   fi
 fi
 # <<< gate-visit
