@@ -2379,3 +2379,49 @@ func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 		t.Error("a container nobody is owed anything on is not in the operator's queue")
 	}
 }
+
+// TestWedgedAnchorGathersTwiceAndCollapsesToOneRow.
+//
+// A wedged anchor carries `gc.routed_to=human` AND `merge_result`, so the
+// gather admits it under both kinds and hands BuildBoard two anchors with one
+// id. Both rows read the same metadata, so they band the same and tie on
+// rank_score — which means the stable sort, not the band, decides which
+// survives, and the gather's ordering is load-bearing rather than incidental.
+//
+// The row that survives has to keep both halves: the `human` kind every
+// human-gate rule keys on, and the PR axes, which are what this surface adds.
+// Losing either is silent — the operator just sees one fewer fact.
+func TestWedgedAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
+	wedgedAt := fixtureNow.Add(-72 * time.Hour)
+	md := map[string]string{
+		"merge_result": "pre_open_gate",
+		"branch":       "polecat/tk-w",
+		"gc.routed_to": "human",
+		"pr.machine":   dated(MachineWedgedException, headLive, wedgedAt),
+	}
+	humanRow := mergeAnchor("tk-w", md)
+	humanRow.Kind, humanRow.Source = "human", "human"
+	mergeRow := mergeAnchor("tk-w", md)
+
+	b := BuildBoard([]Anchor{humanRow, mergeRow}, fixtureNow, false, nil, Facts{})
+
+	if len(b.Tiles) != 1 || b.Total != 1 {
+		t.Fatalf("one bead is one row: got %d tiles (total %d)", len(b.Tiles), b.Total)
+	}
+	tile := b.Tiles[0]
+	if tile.Kind != "human" {
+		t.Errorf("kind = %q, want human — the gather orders it first so the kind cannot flip between passes", tile.Kind)
+	}
+	if tile.PRMachine != MachineWedgedException || !tile.PROwedSince.Equal(wedgedAt) {
+		t.Errorf("the surviving row lost its axes: machine=%q since=%v", tile.PRMachine, tile.PROwedSince)
+	}
+	if !tile.Owed {
+		t.Error("and it is still owed")
+	}
+	// Both derivations agree it is owed, so neither ordering could drop it from
+	// the queue — but they must also agree on the phrase, or the row a reader
+	// sees depends on which copy won.
+	if !strings.Contains(tile.Needs, "wedged") {
+		t.Errorf("needs = %q, want the wedge named", tile.Needs)
+	}
+}
