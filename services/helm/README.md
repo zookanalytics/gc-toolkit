@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 39 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 40 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -65,11 +65,13 @@ in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
 stranded empty complete progress_mismatch
 stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
-takeaway takeaway_at takeaway_by updated_at frontier needs rank_score
+takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 ```
 
-`updated_at` is `omitzero`: it is the one field a tile may omit, and a source
-that cannot read it (the supervisor backend) omits it on every row.
+`updated_at` and `closed_at` are `omitzero`, and they are the only two fields a
+tile may omit. A source that cannot read `updated_at` (the supervisor backend)
+omits it on every row; `closed_at` is present on a `DONE` row and absent from
+every live one.
 
 Tiles are deduplicated by id and **partitioned**: every `owed` row first,
 longest-waiting first, then everything else by `rank_score` descending.
