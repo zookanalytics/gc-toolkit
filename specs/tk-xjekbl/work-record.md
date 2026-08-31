@@ -81,6 +81,39 @@ must name `gc.continuation_group` and end in `repairing`. Deleting the warning
 text from a copy still fails the assertion, which was confirmed by mutating one
 copy and observing the single expected failure.
 
+## The boundary the fix does not cross
+
+The same three bead ids are cited in the prose of four files that are not
+gate-visit copies: `converse-claim.sh`, `converse-signoff.test.sh`,
+`gc-helm-open.test.sh` and `liveness-sweep-precheck.test.sh`. They are left
+alone. The bead's "Done when" names `agents/**` and `template-fragments/**`,
+and nothing about those four forces them into this commit the way the mirrored
+block forces its five siblings: each states its own constraint in its own
+words, and editing one does not desync a convention or turn a suite red.
+
+The wider sweep is its own job, and a costly one to specify. A pattern over
+short hyphenated tokens cannot find its targets here, because the pack's
+scripts are full of synthetic fixture ids of exactly that shape — `tk-work`,
+`tk-foreign`, `tk-abc12`, `lx-codex` — which outnumber the real citations by
+more than an order of magnitude. Separating a citation from a fixture is a
+reading task, not a matching one.
+
+Filed as `tk-n231a4`.
+
+## A pre-existing hole the test rewrite did not close
+
+The assertion that each copy repairs a lost stamp is a conjunction, and its
+first half greps the whole block for `--set-metadata "gc.continuation_group=`.
+Every block already contains that string in its INITIAL stamp, so the conjunct
+is satisfied whether or not the read-back arm repairs anything. Deleting the
+repair line outright leaves the suite green.
+
+This is not a regression from the citation rewrite. The same mutation passes
+against pristine `origin/main` with the old `repairing (tk-ax6y4)` assertion in
+place, so the new assertion catches exactly what the old one caught and misses
+exactly what it missed. Filed as `tk-fyapf0` rather than fixed here, to keep
+this diff to the rewrite it is reviewed as.
+
 ## What a detector would have caught
 
 The rule this bead enforces is not mechanically checkable by a pattern over
