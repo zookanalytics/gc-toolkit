@@ -650,7 +650,7 @@ TALLY
         [ "$unparked" = 1 ] && routed=""
         echo "$PROG: $id — PR#$num operator feedback resets the signoff round cap${undo:+, retiring $undo}"
       else
-        echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below (retry next pass)" >&2
+        echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below. The watermark that routing writes retires this batch, so nothing re-reads it: the anchor stays capped until the rework moves its head past the exception." >&2
       fi
     fi
 
