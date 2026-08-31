@@ -196,14 +196,14 @@ is an anchor on one backend and absent from the other is the shape of bug that
 cost the board its human-routed rows.
 
 **The library backend gathers every kind twice**: once at status open, and once
-at status closed over `GC_HELM_DONE_WINDOW` (default 7d, `0` disables). A closed
-anchor bands `DONE`, which sorts below every live band, and stays there until
-`gc-helm dismiss <id>` stamps `gc.dismissed_at`. Before that second pass a
-closing anchor left the board on the next gather, so a row disappeared at the
-moment it was answered and an operator could not tell that from a row that was
-never there (`tk-ghlg1e`). The window is a bound on what ENTERS the band; the
-dismiss is the only thing that removes a row the operator can see. Design and
-the tradeoff the window accepts: `specs/tk-ghlg1e/layout-stability.md`.
+at status closed over `GC_HELM_DONE_WINDOW` (default 7d, `0` disables). The open
+queries stop returning an anchor the moment it is answered, so the second pass
+is the only thing that gives a closed one a row. It bands `DONE`, which sorts
+below every live band, and stays there until `gc-helm dismiss <id>` stamps
+`gc.dismissed_at`. The two bounds are different in kind: the window bounds what
+ENTERS the band, and the dismiss is the only thing that removes a row the
+operator can already see. Design and the tradeoff the window accepts:
+`specs/tk-ghlg1e/layout-stability.md`.
 
 The HTTP backend scans `status=open` only, so its board carries no `DONE` band
 — narrower, not wrong, and the same shape of gap the source seam already

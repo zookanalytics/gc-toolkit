@@ -380,50 +380,40 @@ stays quiet and correct; the sweep is what pushes.
 bead named only in the takeaway prose — is invisible to both. So is an
 agent-origin park, by the ruling's own scope. Both wait for an eye.
 
-## How a held sitting ends (source-verified 2026-08-11; attachment rung reconciled 2026-08-12; idle reap switched off 2026-08-26)
+## How a held sitting ends
 
-**The configuration changed on 2026-08-26 and the mechanism below did not.**
-`agents/converse/agent.toml` now sets `idle_timeout = "0"`, which takes this
-role off the idle ladder entirely: a template whose idle timeout is <= 0 is
-never registered with the idle tracker (`buildIdleTracker`,
-`cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity
-at all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached.
-So a held converse sitting now ends only when its VISIT closes — the agent's
-sign-off, or the operator's `gc-helm dismiss <subject>` — under the layout
-rule that nothing leaves the operator's view without an explicit human act
-(`tk-ghlg1e`, runbook step 9 item 6).
+`agents/converse/agent.toml` sets `idle_timeout = "0"`, which takes this role
+off the idle ladder entirely: a template whose idle timeout is at or below zero
+is never registered with the idle tracker (`buildIdleTracker`,
+`cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
+all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
+converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
+the operator's `gc-helm dismiss <subject>`.
 
-Read the rest of this section as what the runtime still does, not as what
-converse still experiences. It governs every other role that sets an idle
-timeout, it is what the switch-off was aimed at, and it is what comes back the
-moment someone puts a number in that field again.
-
-Two things the switch-off does NOT buy, and both still bite converse:
+Two endings the idle setting does not own, and both still reach converse:
 
 - **A sitting that has ENDED is still collected in about a minute** by the
-  `no-wake-reason` drain — a different clock on a different path, unaffected by
+  `no-wake-reason` drain, a different clock on a different path, unaffected by
   any idle setting. See *How a pane dies when no sitting is live*, below.
 - **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
   health restart can still take a held sitting out from under a reader. The
-  trace-before-you-wait discipline is unchanged for exactly this reason.
+  trace-before-you-wait discipline holds for exactly this reason.
 
-The cost is real: a held visit nobody answers now holds its slot against
-`max_active_sessions = 6` indefinitely, where the 8h clock used to recycle it.
-`gc-helm dismiss` is the release valve, and it is why that verb was built in
-the same change rather than left for later.
+The cost is real: a held visit nobody answers holds its slot against
+`max_active_sessions = 6` indefinitely, where an idle clock would recycle it.
+`gc-helm dismiss` is the release valve.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
-stop path, so any stop still takes the thread whole. Filed upstream as
-`gc-f5cz9` (retire the session rather than destroy it), evaluated in
+stop path, so any stop takes the thread whole. Retiring the session rather than
+destroying it is upstream work, evaluated in
 `specs/tk-ghlg1e/layout-stability.md`.
 
----
-
-A hold has no timeout *in the pack's doctrine* — and, since 2026-08-26, none in
-its config either. What follows is the runtime it is now opted out of. Verified
-against the gascity source (rig checkout `7cff88fdc`, 2026-08-11) after an
-operator lost two threads mid-attention (`tk-bzm86`):
+Read what follows as what the runtime does, not as what converse experiences. A
+hold has no timeout *in the pack's doctrine* and none in converse's config, but
+the runtime under it does end sittings, and it governs every role that still sets
+a timeout. It is also what converse gets back the moment someone puts a number in
+that field:
 
 - **`wisp_ttl` is not this, and never was.** `[daemon] wisp_ttl` is how
   long a **closed** wisp — an ephemeral v1 formula-run bead — survives
@@ -472,14 +462,13 @@ of what the sitting was waiting for — and every deliberate close of a
 **held** sitting ends with a sign-off block naming the outcome and the
 subject to look at next.
 
-*Longevity was deliberately not the remedy, and then it was the ruling
-(2026-08-26).* The reasoning here was that raising `idle_timeout` only widens
-the window in which a dead thread looks alive — true, and it is why the fix
-that shipped in 2026-08 was durability rather than a bigger number. The
-operator's later rule is not a bigger number: it removes the clock, on the
-ground that a thread they are reading must not end without them, and accepts
-the widened window as the price. Both halves still hold. The trace is still
-written in advance, because the endings the clock never owned are still there.
+*Longevity is not the remedy, and taking the clock off is not longevity.*
+Raising `idle_timeout` only widens the window in which a dead thread looks
+alive, which is why the trace is written in advance rather than bought with a
+bigger number. Taking the clock off rests on different ground: a thread the
+operator is reading must not end without them, and the widened window is the
+price of that. Neither move retires the trace, because the endings the clock
+never owned are still there.
 
 *The size of that trace (2026-08-22, `tk-9tbbk.1`):* the takeaway is the
 board's NEEDS cell — one line in a terminal table — and it is capped at
