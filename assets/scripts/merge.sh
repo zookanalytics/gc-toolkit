@@ -14,9 +14,9 @@
 # CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
 # child (metadata keys naming this PR AND dependency edges; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
-# generated/seed-audit current at the MERGE RESULT (a digest over the tree
-# `git merge-tree` writes, so a render clobbered by a base that moved holds and
-# escalates rather than landing). The FULL
+# generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
+# tree `git merge-tree` writes, so a render clobbered by a base that moved holds
+# and escalates rather than landing). The FULL
 # anchor-local authorization set is re-read immediately before the merge; any
 # mismatch holds. `gh pr merge --squash --match-head-commit`, then ONE
 # lifecycle.sh transition --to merged --close. A failed record exits non-zero
@@ -398,8 +398,8 @@ while IFS= read -r row; do
   # without running it at all, `-diff` in .gitattributes keeps the clobber out of
   # the PR diff, and doctor/check-seed-audit-current reports it only once the
   # landing branch is already wrong. This is the one place that sees the merge
-  # before it happens, and it asks for a digest rather than a render, so the cost
-  # is hashes. The probe asks the repository, not the working tree: a host holding
+  # before it happens, and it re-hashes the inputs rather than rendering, so the
+  # cost is hashes. The probe asks the repository, not the working tree: a host holding
   # no checkout, and a repository carrying no rendered audit, have nothing to
   # protect, while the trees compared come from the refs fetched below, so a
   # checkout lagging its own main decides nothing. Base movement is not

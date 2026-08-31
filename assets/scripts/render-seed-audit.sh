@@ -53,7 +53,7 @@
 #   render-seed-audit.sh --check          fail if the committed tree is stale
 #   render-seed-audit.sh --check-merge <base> <head>
 #                                         fail if that merge lands a stale tree
-#   render-seed-audit.sh --print-digest   print the source digest and exit
+#   render-seed-audit.sh --print-sources  print the input manifest and exit
 #   render-seed-audit.sh --install-hook   point core.hooksPath at assets/hooks
 #   render-seed-audit.sh --out DIR        write somewhere else
 #   render-seed-audit.sh --root DIR       audit a different pack checkout
@@ -75,7 +75,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --check)        MODE="check" ;;
         --check-merge)  MODE="check-merge"; shift; MERGE_BASE="${1:-}"; shift; MERGE_HEAD="${1:-}" ;;
-        --print-digest) MODE="digest" ;;
+        --print-sources) MODE="sources" ;;
         --install-hook) MODE="install-hook" ;;
         --out)          shift; OUT="${1:-}" ;;
         --root)         shift; ROOT="$(cd "${1:-}" 2>/dev/null && pwd)" || die "--root: no such directory" ;;
@@ -106,7 +106,7 @@ PH_PACK="[[PACK-ROOT]]"
 PH_CITY="[[CITY-ROOT]]"
 PH_HOME="[[HOME]]"
 
-# --------------------------------------------------------------- source digest
+# ------------------------------------------------------------- source manifest
 #
 # The inputs a render is a function of. Over-inclusive on purpose: an extra
 # input can only trigger a re-render nobody needed, while a missing one lets a
@@ -133,8 +133,27 @@ PH_HOME="[[HOME]]"
 # the binary, so an upgrade really can move every byte of the artifact — but with
 # no commit in this repo to explain it. INDEX.md records the version on its own
 # line instead, which lets doctor/check-seed-audit-current call a content
-# mismatch an error and a version-only mismatch a warning, and lets the digest be
-# recomputed on a host with no `gc` at all.
+# mismatch an error and a version-only mismatch a warning, and lets the manifest
+# be recomputed on a host with no `gc` at all.
+#
+# The manifest is committed as generated/seed-audit/SOURCES.txt, one record per
+# input, sorted by path. Per-input records rather than one digest over all of
+# them is what keeps the artifact out of the merge queue's way: a repo-global
+# value in a per-branch committed file moves on EVERY seed-input edit, so two
+# pull requests touching two different agents collide on it unconditionally and
+# each landing forces a rebase of everything still open. Per-input records move
+# only where the input moved, so those two merge the way their sources do. The
+# same reasoning keeps the per-agent byte rows in INDEX.md and leaves their
+# totals out: a total is a repo-global line derived from rows already committed
+# beside it.
+#
+# A record is two lines, path then hash, and the split is load-bearing rather
+# than cosmetic. Git needs one unchanged line between two changes to merge them;
+# a flat `<hash>  <path>` list leaves none, so the neighbouring entries of two
+# different inputs still collide — measured on agents/deacon/prompt.template.md
+# against agents/dog/agent.toml, adjacent in sort order, which conflicted. With
+# the path on its own line only the hash moves, and the next record's path line
+# is the separation.
 digest_inputs() {
     local root="$1"
     find "$root/agents" "$root/template-fragments" "$root/formulas" "$root/packs" \
@@ -143,18 +162,34 @@ digest_inputs() {
     printf '%s\n' "$root/assets/scripts/render-seed-audit.sh"
 }
 
-source_digest() {
-    local root="$1"
+MANIFEST_HEADER='# Every input generated/seed-audit is rendered from: one record per input,
+# path then sha256, sorted by path. Written and read by
+# assets/scripts/render-seed-audit.sh; the path line between two hashes is what
+# lets two branches that moved different inputs merge.'
+
+source_manifest() {
+    local root="$1" f
+    printf '%s\n' "$MANIFEST_HEADER"
     {
         while IFS= read -r f; do
             [ -f "$f" ] || continue
             printf '%s\t%s\n' "${f#"$root"/}" "$(sha256sum "$f" | cut -d' ' -f1)"
         done < <(digest_inputs "$root")
-    } | sha256sum | cut -d' ' -f1
+    } | LC_ALL=C sort | tr '\t' '\n'
 }
 
-if [ "$MODE" = "digest" ]; then
-    source_digest "$ROOT"
+# path<TAB>hash, one input per line — the manifest folded back into the shape a
+# set comparison can be taken over.
+manifest_pairs() { grep -v '^#' "$1" | paste - -; }
+
+# Reported by the render summary so a run has a one-line identity. Nothing
+# commits it: a stored copy is the churning line this artifact was cured of.
+source_digest() {
+    source_manifest "$1" | sha256sum | cut -d' ' -f1
+}
+
+if [ "$MODE" = "sources" ]; then
+    source_manifest "$ROOT"
     exit 0
 fi
 
@@ -170,19 +205,19 @@ fi
 #
 # This mode asks the question of the MERGE RESULT instead. `git merge-tree`
 # writes the merged tree to the object store without touching any working tree,
-# and the digest of that tree's inputs is compared against the digest its own
-# INDEX.md records. Digest only, no render: the merge cadence runs every minute
-# per rig, a render costs half a minute and a `gc` binary, and "an input moved
-# without the artifact moving" is the whole of the clobber. An artifact edited
-# by hand together with its digest line stays `--check`'s question.
+# and the inputs of that tree are hashed and compared against the manifest the
+# tree itself commits. Hashes only, no render: the merge cadence runs every
+# minute per rig, a render costs half a minute and a `gc` binary, and "an input
+# moved without the artifact moving" is the whole of the clobber. An artifact
+# edited by hand together with its manifest stays `--check`'s question.
 #
-# The digest comes from the renderer IN THE MERGED TREE when there is one,
+# The manifest comes from the renderer IN THE MERGED TREE when there is one,
 # because the input set is whatever digest_inputs names there: a change that
-# widens it records its INDEX.md under the wider set, and this checkout's older
-# copy would call that stale for a reason that is not the clobber. What runs is
-# only its --print-digest, which returns before any render and needs no `gc`,
-# under a timeout. Running it at all is the trust the merge is a second from
-# extending anyway, and this arm sits after the review and approval gates.
+# widens it records SOURCES.txt under the wider set, and this checkout's
+# older copy would call that stale for a reason that is not the clobber. What
+# runs is only its --print-sources, which returns before any render and needs no
+# `gc`, under a timeout. Running it at all is the trust the merge is a second
+# from extending anyway, and this arm sits after the review and approval gates.
 if [ "$MODE" = "check-merge" ]; then
     [ -n "$MERGE_BASE" ] && [ -n "$MERGE_HEAD" ] || die "--check-merge needs <base-rev> <head-rev>"
     git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "--check-merge: not a git repository: $ROOT"
@@ -197,46 +232,50 @@ if [ "$MODE" = "check-merge" ]; then
         die "--check-merge: '$MERGE_HEAD' does not merge into '$MERGE_BASE' in memory — a conflict, or a git without 'merge-tree --write-tree' (2.38)"
     fi
 
-    WORK="$(mktemp -d)" || die "mktemp failed"
-    trap 'rm -rf "$WORK"' EXIT
+    SCRATCH="$(mktemp -d)" || die "mktemp failed"
+    trap 'rm -rf "$SCRATCH"' EXIT
+    # The merged tree materializes into its own subdirectory so the manifest
+    # computed beside it is never mistaken for part of the tree under test.
+    WORK="$SCRATCH/tree"
+    mkdir -p "$WORK"
     git -C "$ROOT" archive --format=tar "$merged_tree" | tar -x -C "$WORK" \
         || die "--check-merge: could not materialize merged tree $merged_tree"
 
-    merged_index="$WORK/generated/seed-audit/INDEX.md"
-    if [ ! -f "$merged_index" ]; then
+    merged_audit="$WORK/generated/seed-audit"
+    merged_sources="$merged_audit/SOURCES.txt"
+    if [ ! -d "$merged_audit" ]; then
         printf 'merging %s into %s carries no seed audit — nothing to keep current\n' \
             "$MERGE_HEAD" "$MERGE_BASE"
         exit 0
     fi
-    recorded="$(sed -n 's/^- source digest: `\(.*\)`$/\1/p' "$merged_index" | head -1)"
-    [ -n "$recorded" ] || die "--check-merge: the merged INDEX.md records no source digest, so staleness is unverifiable"
+    [ -f "$merged_sources" ] || die "--check-merge: the merged seed audit commits no SOURCES.txt, so staleness is unverifiable"
 
     run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout 60 "$@" </dev/null; else "$@" </dev/null; fi; }
+    actual_sources="$SCRATCH/actual.txt"
     merged_renderer="$WORK/assets/scripts/render-seed-audit.sh"
     if [ -f "$merged_renderer" ]; then
-        actual="$(run_bounded bash "$merged_renderer" --root "$WORK" --print-digest 2>/dev/null | head -1)"
+        run_bounded bash "$merged_renderer" --root "$WORK" --print-sources >"$actual_sources" 2>/dev/null
     else
-        actual="$(source_digest "$WORK")"
+        source_manifest "$WORK" >"$actual_sources"
     fi
-    [ -n "$actual" ] || die "--check-merge: could not compute the digest of the merged tree"
+    [ -s "$actual_sources" ] || die "--check-merge: could not compute the input manifest of the merged tree"
 
-    if [ "$recorded" = "$actual" ]; then
-        printf 'seed audit is current at the merge of %s into %s (digest %s)\n' \
-            "$MERGE_HEAD" "$MERGE_BASE" "${actual:0:12}"
+    if cmp -s "$merged_sources" "$actual_sources"; then
+        printf 'seed audit is current at the merge of %s into %s (%s inputs)\n' \
+            "$MERGE_HEAD" "$MERGE_BASE" "$(manifest_pairs "$actual_sources" | wc -l | tr -d ' ')"
         exit 0
     fi
 
+    # One record per input means the mismatch names the drifting files outright,
+    # rather than reporting that two opaque digests differ. A changed input
+    # contributes its recorded pair and its actual one, so the paths are
+    # deduplicated; an added or removed input contributes one.
+    drifted="$(LC_ALL=C comm -3 <(manifest_pairs "$merged_sources" | LC_ALL=C sort) \
+                              <(manifest_pairs "$actual_sources" | LC_ALL=C sort) \
+        | sed 's/^\t//' | cut -f1 | LC_ALL=C sort -u | head -10)"
     printf 'seed audit would be STALE at the merge of %s into %s:\n' "$MERGE_HEAD" "$MERGE_BASE" >&2
-    printf '  digest recorded by the merged INDEX.md: %s\n' "$recorded" >&2
-    printf '  digest of the merged inputs:            %s\n' "$actual" >&2
-    # The inputs the merge takes from the base side are the ones the head's
-    # render never saw, which names the clobber rather than only asserting it.
-    culprits="$(git -C "$ROOT" diff-tree -r --name-only "$MERGE_HEAD" "$merged_tree" 2>/dev/null \
-        | grep -Fxf <(digest_inputs "$WORK" | sed "s|^$WORK/||") | head -10)"
-    if [ -n "$culprits" ]; then
-        printf 'inputs this merge takes from %s that the committed render never saw:\n' "$MERGE_BASE" >&2
-        while IFS= read -r f; do printf '  %s\n' "$f" >&2; done <<< "$culprits"
-    fi
+    printf 'inputs whose content does not match the manifest the merged tree commits:\n' >&2
+    while IFS= read -r f; do [ -n "$f" ] && printf '  %s\n' "$f" >&2; done <<< "$drifted"
     printf 'Neither branch is wrong on its own: the artifact is a function of the whole source\n' >&2
     printf 'tree, so a branch that moves an input and a branch that re-renders clobber each\n' >&2
     printf 'other on landing. Bring the head branch current with %s, then:\n' "$MERGE_BASE" >&2
@@ -583,6 +622,16 @@ fi
 est_tokens() { printf '%s\n' "$(( $1 / 4 ))"; }
 commas() { printf "%s\n" "$1" | sed -e :a -e 's/\(.*[0-9]\)\([0-9]\{3\}\)/\1,\2/;ta'; }
 
+# Said on stdout, not committed. The number is worth knowing on a render; a copy
+# of it in a per-branch file is a repo-global line that every seed-input edit
+# rewrites, which is what collides two otherwise unrelated pull requests.
+report_totals() {
+    printf '  agents %s B / ~%s tok · formulas %s B / ~%s tok · total %s B / ~%s tok\n' \
+        "$(commas "$total_a")" "$(commas "$(est_tokens "$total_a")")" \
+        "$(commas "$total_f")" "$(commas "$(est_tokens "$total_f")")" \
+        "$(commas "$((total_a + total_f))")" "$(commas "$(est_tokens "$((total_a + total_f))")")"
+}
+
 DIGEST="$(source_digest "$ROOT")"
 GCVER="$(gc version 2>/dev/null | head -1)"
 
@@ -655,8 +704,8 @@ at spawn. Every file under \`formulas/\` is one compiled formula recipe. Togethe
 they are the part of the seed this repo controls.
 
 - \`gc\` version: \`$GCVER\`
-- source digest: \`$DIGEST\`
 - agents: ${#AGENTS[@]} · formulas: ${#FORMULAS[@]}
+- input manifest: \`SOURCES.txt\`
 
 ## Scope
 
@@ -686,7 +735,6 @@ EOF
         total_a=$((total_a + b))
         printf '| [`%s`](agents/%s.md) | %s | %s |\n' "$a" "$a" "$(commas "$b")" "$(commas "$(est_tokens "$b")")"
     done
-    printf '| **total** | **%s** | **%s** |\n' "$(commas "$total_a")" "$(commas "$(est_tokens "$total_a")")"
 
     cat <<'EOF'
 
@@ -711,10 +759,6 @@ EOF
         printf '| [`%s`](formulas/%s.md) | `%s` | %s | %s |\n' \
             "$f" "$f" "$sc" "$(commas "$b")" "$(commas "$(est_tokens "$b")")"
     done
-    printf '| **total** | | **%s** | **%s** |\n' "$(commas "$total_f")" "$(commas "$(est_tokens "$total_f")")"
-
-    grand=$((total_a + total_f))
-    printf '\n**Grand total: %s bytes / ~%s tokens.**\n' "$(commas "$grand")" "$(commas "$(est_tokens "$grand")")"
 
     cat <<'EOF'
 
@@ -750,8 +794,12 @@ checkout:
 EOF
 } > "$STAGE/INDEX.md"
 
-# The per-formula scope sidecars were scratch for the manifest above; the emitted
-# tree holds rendered text and INDEX.md only.
+# What the freshness checks compare against, and the only machine-read file in
+# the tree. It is written last so it describes the sources this render read.
+source_manifest "$ROOT" > "$STAGE/SOURCES.txt"
+
+# The per-formula scope sidecars were scratch for the tables above; the emitted
+# tree holds rendered text, INDEX.md and the manifest.
 find "$STAGE" -name '*.scope' -delete
 
 # ---------------------------------------------------------------------- emit
@@ -766,6 +814,7 @@ if [ "$MODE" = "check" ]; then
     if diff -r -q "$OUT" "$STAGE" >"$TMPROOT/diff.txt" 2>&1; then
         printf 'seed audit is current (%s agents, %s formulas, digest %s)\n' \
             "${#AGENTS[@]}" "${#FORMULAS[@]}" "${DIGEST:0:12}"
+        report_totals
         exit 0
     fi
     printf 'seed audit is STALE — the committed tree does not match a fresh render:\n' >&2
@@ -779,3 +828,4 @@ mkdir -p "$(dirname "$OUT")"
 cp -r "$STAGE" "$OUT"
 printf 'wrote %s (%s agents, %s formulas, digest %s)\n' \
     "${OUT#"$ROOT"/}" "${#AGENTS[@]}" "${#FORMULAS[@]}" "${DIGEST:0:12}"
+report_totals
