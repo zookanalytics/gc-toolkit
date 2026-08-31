@@ -72,18 +72,24 @@ gc bd list --status=open --json --limit=0
 # on stdout — apply it to the combined in_progress + open listing before the
 # per-bead liveness loop.
 #
-# A bead names its owner in one of three places and only the first is an
+# A bead names its owner in up to three places and only one of them is an
 # assignee. A workflow STEP bead has no assignee at all: gc bd list --json omits
 # the key when it is empty, and the step names its owner in
 # metadata.gc.session_id, which is what gc.session_affinity=require pins it to.
-# A workflow ROOT bead names only metadata.gc.session_name. The most specific
-# present signal wins, because a session id belongs to one session forever while
-# a pool slot name passes to each new occupant: a bead pinned to a dead id must
-# resolve against that id, not against the live session now holding its slot.
+# A workflow ROOT bead names only metadata.gc.session_name.
+#
+# Precedence runs session id, then assignee, then session name. Only the id
+# names a session that will never come back. It is re-stamped on every claim, so
+# it always names the session actually holding the bead. The other two are labels
+# a successor inherits: pool work is assigned to the slot, and the slot stays
+# live under whoever holds it next. A crashed pool session leaves a bead whose
+# assignee and session name both name that still-live slot, so resolving it on
+# either label reports the successor's life as the dead owner's, and the bead
+# stays in_progress under an owner that never returns.
 jq -c '[ .[]
   | . as $bead
   | (.metadata // {}) as $m
-  | ([ (.assignee // ""), ($m["gc.session_id"] // ""), ($m["gc.session_name"] // "") ]
+  | ([ ($m["gc.session_id"] // ""), (.assignee // ""), ($m["gc.session_name"] // "") ]
      | map(select(. != "")) | first) as $owner
   | select($owner != null)
   | $bead + {owner: $owner} ]'

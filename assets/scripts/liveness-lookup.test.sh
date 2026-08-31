@@ -199,19 +199,31 @@ eq "$(bead_state "$MAP_STEP" '{"id":"st2","metadata":{"gc.session_id":"lx-3rk8v"
 # (R) A dead id whose pool SLOT is live still reads dead. The slot name belongs
 #     to whoever holds the slot now; the id belongs to the session that will
 #     never return, and gc.session_affinity=require pins the bead to the id. This
-#     is why the owner precedence puts the id ahead of the name.
+#     is why the owner precedence puts the id ahead of BOTH labels.
 eq "$(bead_state "$MAP_STEP" '{"id":"st3","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "absent" \
    "(R) dead session id outranks a live pool slot name -> still orphaned"
+# (R) The same, one level in: this is the shape a pool session leaves when it
+#     crashes mid-claim, before anything clears the bead. `assignee` is the SLOT,
+#     which the next occupant makes live again, so an assignee-first precedence
+#     reads the successor's life as the dead owner's and the bead is stranded
+#     in_progress forever — the very repeat-recovery engine this step exists to
+#     stop. Only the id remembers who died.
+eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "absent" \
+   "(R) dead session id outranks a LIVE slot assignee -> orphaned, not stranded"
 # (S) A workflow root has only a session name. A per-instance name dies with its
 #     session; a slot name outlives it, and recovery must not yank the live one.
 eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "active" \
    "(S) workflow root on a live session name -> active"
 eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-lx-7xcse"}}')" "absent" \
    "(S) workflow root on a dead per-instance session name -> absent"
-# (T) An assignee still decides it when the bead has one, so nothing about the
-#     established assignee path changes.
-eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"active","lx-7xcse":"closed"}' '{"id":"b1","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_id":"lx-7xcse"}}')" "active" \
-   "(T) assignee outranks session metadata"
+# (T) With no session id to be more specific than it, the assignee decides —
+#     the established assignee path is untouched for every bead that has one.
+eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"active"}' '{"id":"b1","assignee":"gc-toolkit/gc-toolkit.furiosa"}')" "active" \
+   "(T) assignee alone still decides a bead carrying no session id"
+# (T) A live session id keeps its bead when the assignee is the one that died,
+#     so the reordering cannot manufacture an orphan either.
+eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"closed","lx-3rk8v":"active"}' '{"id":"b3","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_id":"lx-3rk8v"}}')" "active" \
+   "(T) live session id outranks a dead assignee -> not orphaned"
 # (U) The normalizing retry applies to a session-derived owner like any other.
 eq "$(bead_state '{"gascity/gc-toolkit.gc-z0vi2":"active"}' '{"id":"b2","metadata":{"gc.session_name":"gc-toolkit.gc-z0vi2"}}')" "active" \
    "(U) a session-name owner gets the same last-segment retry"

@@ -18,9 +18,14 @@
 # gc.session_affinity=require pins it to, and a workflow ROOT names only
 # metadata.gc.session_name. A filter reading `assignee` alone therefore cannot
 # see graph.v2 machinery at all, and orphan recovery cannot reach the beads it
-# exists to recover. Precedence runs most specific first, because a session id
-# belongs to one session forever while a pool slot name passes to each new
-# occupant.
+# exists to recover.
+#
+# Precedence runs session id, then assignee, then session name. A session id is
+# re-stamped on every claim and names the session actually holding the bead; the
+# other two are labels a successor inherits, because pool work is assigned to the
+# SLOT and the slot stays live under its next occupant. The order is what decides
+# a crashed pool session's step bead, which keeps a live slot assignee beside its
+# dead id.
 #
 # This test EXECUTES the real filter extracted verbatim from the formula (between
 # the `host-bead-skip` markers), so it cannot drift from the shipped instruction.
@@ -123,17 +128,20 @@ eq "$(ids "$FIX3")" "s1,s2" \
 eq "$(owners "$FIX3")" "s1=lx-7xcse,s2=gc-toolkit--gc-toolkit__polecat-1-pool" \
    "stamps .owner from whichever signal the bead carries"
 
-# Precedence, most specific first: assignee, then gc.session_id, then
-# gc.session_name. The id/name order is load-bearing: a pool slot name is handed
-# to each new occupant, so a bead pinned to a dead id must resolve against that
-# id and not against the live session now holding its slot.
+# Precedence, most specific first: gc.session_id, then assignee, then
+# gc.session_name. The whole order is load-bearing. Both labels are handed on to
+# a slot's next occupant, so a bead pinned to a dead id must resolve against that
+# id and not against the live session now holding the slot. a1 is the shape a
+# crashed pool session leaves behind: assignee and session name both name the
+# still-live slot, and only the id remembers who actually died.
 FIX4='[
-  {"id":"a1","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1"}},
+  {"id":"a1","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}},
   {"id":"a2","assignee":"","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1"}},
-  {"id":"a3","assignee":"","metadata":{"gc.session_name":"slot-1"}}
+  {"id":"a3","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_name":"slot-1"}},
+  {"id":"a4","assignee":"","metadata":{"gc.session_name":"slot-1"}}
 ]'
-eq "$(owners "$FIX4")" "a1=gc-toolkit/gc-toolkit.furiosa,a2=lx-dead,a3=slot-1" \
-   "owner precedence: assignee, then gc.session_id, then gc.session_name"
+eq "$(owners "$FIX4")" "a1=lx-dead,a2=lx-dead,a3=gc-toolkit/gc-toolkit.furiosa,a4=slot-1" \
+   "owner precedence: gc.session_id, then assignee, then gc.session_name"
 
 # Degenerate metadata must neither error nor invent an owner. A bead with every
 # signal empty is as unowned as one with no metadata key.
