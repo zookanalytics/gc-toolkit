@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- source digest: `c9d170a8d16c690a9d5d403f0bad0cf4f160505e37af15d14dd2f1d7302a6876`
+- source digest: `db9a0615876a39e2a1f39096dfcc57ec1ecea3b95bfc37f8818511c1cf299583`
 - agents: 14 · formulas: 22
 
 ## Scope
@@ -40,12 +40,12 @@ covers that dimension.
 | [`gemini`](agents/gemini.md) | 4,457 | 1,114 |
 | [`keeper`](agents/keeper.md) | 20,622 | 5,155 |
 | [`mechanik`](agents/mechanik.md) | 20,130 | 5,032 |
-| [`polecat`](agents/polecat.md) | 14,404 | 3,601 |
-| [`polecat-codex`](agents/polecat-codex.md) | 14,434 | 3,608 |
+| [`polecat`](agents/polecat.md) | 15,350 | 3,837 |
+| [`polecat-codex`](agents/polecat-codex.md) | 15,380 | 3,845 |
 | [`proactive`](agents/proactive.md) | 8,690 | 2,172 |
 | [`refinery`](agents/refinery.md) | 9,467 | 2,366 |
 | [`witness`](agents/witness.md) | 9,420 | 2,355 |
-| **total** | **165,342** | **41,335** |
+| **total** | **167,234** | **41,808** |
 
 ## Formula recipes
 
@@ -81,7 +81,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,092 | 523 |
 | **total** | | **66,782** | **16,695** |
 
-**Grand total: 232,124 bytes / ~58,031 tokens.**
+**Grand total: 234,016 bytes / ~58,504 tokens.**
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
