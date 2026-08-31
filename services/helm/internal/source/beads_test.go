@@ -1717,6 +1717,49 @@ func TestDoneWindowOptOut(t *testing.T) {
 	}
 }
 
+// A gather that reads the clock again per rig measures each rig's DONE window
+// from a different instant, so a row at the boundary is kept or dropped by how
+// long the gather took to reach its rig rather than by the board's own clock.
+// The pinned-clock fixtures cannot see that — their clock never moves — so this
+// one advances on every read.
+func TestDoneWindowUsesOneClockAcrossRigs(t *testing.T) {
+	t.Setenv("GC_HELM_DONE_WINDOW", "24h")
+	// Closed 23h before the pass clock: inside a 24h window measured at the
+	// captured instant, outside one measured from any later read.
+	boundary := func(prefix string) *fakeStore {
+		return &fakeStore{issues: map[string][]*beads.Issue{
+			"epic": {closedIssue(prefix+"-edge", "closed just inside the window", "epic", 2,
+				testNow.Add(-23*time.Hour), testNow.Add(-23*time.Hour), "")},
+		}}
+	}
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{
+		"gc-toolkit":  boundary("tk"),
+		"signal-loom": boundary("sl"),
+	}, withClock(advancingClock(testNow, 2*time.Hour)))
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, id := range []string{"tk-edge", "sl-edge"} {
+		if _, ok := findAnchor(res, id); !ok {
+			t.Errorf("%s closed inside the window at the pass clock and must be gathered; a per-rig clock read ages it out", id)
+		}
+	}
+}
+
+// advancingClock moves on every read, so a second read is always a later
+// instant than the one the gather captured.
+func advancingClock(start time.Time, step time.Duration) func() time.Time {
+	var reads int
+	return func() time.Time {
+		t := start.Add(time.Duration(reads) * step)
+		reads++
+		return t
+	}
+}
+
 func TestDoneSince(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	cases := []struct {

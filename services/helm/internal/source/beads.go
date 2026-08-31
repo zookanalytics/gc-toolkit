@@ -343,9 +343,10 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	g := &gatherState{rigByPrefix: map[string]string{}}
 	convoys := s.convoyIndex(ctx, g)
 
-	// One clock for the whole pass, so the closed-sitting window and the
-	// takeaway spans it feeds are measured against the same instant on every
-	// rig rather than drifting across a slow gather.
+	// One clock for the whole pass, so every window measured against it — the
+	// closed-sitting window, the DONE window, the takeaway spans it feeds —
+	// lands on the same instant on every rig rather than drifting across a
+	// slow gather.
 	now := s.now().UTC()
 
 	var sittings []board.Sitting
@@ -356,7 +357,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 			g.note(true, []string{"rig " + r.name + ": " + err.Error()})
 			continue
 		}
-		s.gatherRig(ctx, g, st, r, convoys)
+		s.gatherRig(ctx, g, st, r, convoys, now)
 		sittings = append(sittings, s.rigSittings(ctx, st, r, g, now)...)
 		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
 	}
@@ -460,12 +461,14 @@ var metadataAnchors = []metadataAnchor{
 // queries stop returning it the instant it is answered. It derives into the
 // terminal DONE band, below every live row. `gc-helm dismiss` retires it on the
 // operator's word; doneSince ages it out on a clock once it has been closed
-// longer than the window.
-func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow) {
+// longer than the window. That clock is the caller's captured `now`, so every
+// rig is bounded at the same cutoff and a row at the boundary does not turn on
+// which rig the gather reached last.
+func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, now time.Time) {
 	// Children are read at ALL statuses in both passes, so n_closed is a real
 	// count rather than a count of the still-open ones.
 	s.gatherAnchors(ctx, g, st, r, convoys, beads.StatusOpen, nil)
-	if since, ok := doneSince(s.now().UTC()); ok {
+	if since, ok := doneSince(now); ok {
 		s.gatherAnchors(ctx, g, st, r, convoys, beads.StatusClosed, &since)
 	}
 }
