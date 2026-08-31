@@ -23,14 +23,15 @@ const defaultSupervisorPort = 8372
 // SupervisorSource reads bead state from the supervisor loopback HTTP
 // API. It satisfies [Source].
 //
-// It gathers the three TYPE-keyed anchor kinds only. The two metadata-keyed
-// kinds ([metadataAnchors]: `human` and `parked`) are unreachable from here,
-// and not for want of trying: `GET /beads` takes status/type/label/assignee/rig
-// and no metadata predicate, and its payloads omit metadata entirely, so there
-// is nothing to filter on server-side and nothing to filter on client-side
-// either — recovering it would mean one `/bead/{id}` round trip per open bead
-// in the city. A board served from this backend is therefore NARROWER, in the
-// same way its stale_days is pinned to 0; see the backend table in README.md.
+// It gathers the three TYPE-keyed anchor kinds and the two metadata-keyed ones
+// ([metadataAnchors]: `human` and `parked`). `GET /beads` takes no metadata
+// predicate, so that filter runs client-side over one paged scan of the city's
+// open beads.
+//
+// A board served from this backend is NARROWER: no `updated_at` (so stale_days
+// is 0), no visits and so no sittings, no in-flight map, and no resolved
+// waiting edges — see [SupervisorSource.metadataAnchorFor]. See the backend
+// table in README.md.
 type SupervisorSource struct {
 	baseURL string // e.g. http://127.0.0.1:8372
 	city    string // registered city name, e.g. "loomington"
@@ -152,13 +153,33 @@ func discoverCity() string {
 // --- wire types (mirror the supervisor Huma API) ---
 
 // apiBead mirrors the supervisor's bead JSON. Only the fields the gather needs
-// are decoded; notably the API omits updated_at/assignee (see README "Deferred").
+// are decoded; the API omits updated_at everywhere (see README "Deferred"), so
+// this backend cannot compute stale_days.
+//
+// Metadata stays RAW: the values are not all strings (`bd --set-metadata
+// key=true` stores a JSON boolean), and a strict decode into map[string]string
+// fails the whole object, which inside a list envelope drops the entire PAGE.
+// [decodeMetadata] coerces instead.
 type apiBead struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Priority *int   `json:"priority"`
-	Parent   string `json:"parent"` // convoy parent==null floating filter
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	Status      string          `json:"status"`
+	IssueType   string          `json:"issue_type"`
+	Priority    *int            `json:"priority"`
+	Parent      string          `json:"parent"` // convoy parent==null floating filter
+	Assignee    string          `json:"assignee"`
+	Description string          `json:"description"`
+	Ephemeral   bool            `json:"ephemeral"`
+	Metadata    json.RawMessage `json:"metadata"`
+	Deps        []apiBeadDep    `json:"dependencies"`
+}
+
+// apiBeadDep is one edge as the bead payloads carry it, pointing FROM the bead
+// the payload describes: a child's parent-child edge names its parent.
+type apiBeadDep struct {
+	IssueID     string `json:"issue_id"`
+	DependsOnID string `json:"depends_on_id"`
+	Type        string `json:"type"`
 }
 
 type listEnvelope struct {
@@ -277,6 +298,7 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 	s.gatherEpics(ctx, g)
 	s.gatherDecisions(ctx, g)
 	s.gatherConvoys(ctx, g)
+	s.gatherMetadataAnchors(ctx, g)
 
 	// Every fetch failed — the supervisor is unreachable, not merely degraded.
 	// Error so the server returns 502 instead of a misleading empty board.
@@ -285,12 +307,17 @@ func (s *SupervisorSource) Gather(ctx context.Context) (*Result, error) {
 	}
 
 	// Session liveness, so a claimed child with a live owner reads as moving.
-	// This backend supplies no VISITS and no in-flight map — both need bead
-	// metadata the list endpoints omit — so on it a held anchor reads as
-	// unheld and a slung bead reads as stranded. That is the same shape of gap
-	// this backend already documents for updated_at: a narrower board, not a
-	// wrong one. What it must not do is invert the liveness test, which is
-	// what leaving OwnerState empty would do.
+	//
+	// The other two joins stay unbuilt. Both count in_progress as live
+	// ([liveStatuses]) — a HELD visit is a claimed one, and a live graph.v2
+	// root is claimed by definition — while GET /beads takes a single status
+	// per request and the scan behind the metadata kinds asks for `open`.
+	// Lifting either join onto that scan would drop exactly the rows that make
+	// it true. So on this backend a held anchor reads as unheld and a slung
+	// bead reads as stranded: the same shape of gap it already documents for
+	// updated_at, a narrower board rather than a wrong one. What it must not do
+	// is invert the liveness test, which is what leaving OwnerState empty would
+	// do.
 	owners := sessionStates(ctx, s.gc, g)
 
 	facts := board.Facts{OwnerState: owners}
@@ -350,11 +377,22 @@ func (s *SupervisorSource) epicChildren(ctx context.Context, g *gatherState, epi
 	for _, d := range graph.Deps {
 		if d.From == epicID && d.Kind == "parent-child" {
 			if b, ok := byID[d.To]; ok {
-				children = append(children, board.Child{ID: b.ID, Status: b.Status})
+				children = append(children, childOf(b))
 			}
 		}
 	}
 	return children
+}
+
+// childOf projects one payload bead onto a board child. Assignee and metadata
+// travel: the derivation needs both to classify a child.
+func childOf(b apiBead) board.Child {
+	return board.Child{
+		ID:       b.ID,
+		Status:   b.Status,
+		Assignee: b.Assignee,
+		Metadata: decodeMetadata(b.Metadata),
+	}
 }
 
 func (s *SupervisorSource) gatherDecisions(ctx context.Context, g *gatherState) {
@@ -427,7 +465,154 @@ func (s *SupervisorSource) convoyChildren(ctx context.Context, g *gatherState, c
 	}
 	children := make([]board.Child, 0, len(detail.Children))
 	for _, c := range detail.Children {
-		children = append(children, board.Child{ID: c.ID, Status: c.Status})
+		children = append(children, childOf(c))
 	}
 	return children
+}
+
+// beadPageSize is the supervisor's own maximum for `GET /beads?limit=`; asking
+// for more is silently clamped, so paging is the only way to read the whole set.
+const beadPageSize = 100
+
+// maxBeadPages bounds the open-bead scan at 20k beads: a cursor loop with no
+// ceiling is a hang rather than a slow gather. Hitting it is reported as
+// partial.
+const maxBeadPages = 200
+
+// infraTypes are the bookkeeping bead types no board anchor is ever built from:
+// session records, event rows, agent mail, and molecule roots. The beads backend
+// excludes them with the library's SkipWisps; this backend has to name them,
+// because the supervisor's list merges the wisp side in and flags only part of
+// it `ephemeral` (message and molecule carry the flag, session and event do
+// not).
+var infraTypes = map[string]bool{
+	"session":  true,
+	"event":    true,
+	"message":  true,
+	"molecule": true,
+}
+
+// openBeads pages the whole city's open beads.
+//
+// EVERY WAY THIS SCAN COMES BACK SHORT REPORTS ITSELF: both truncations — a
+// page that fails after earlier ones succeeded, and the page cap — return the
+// rows already read together with a `warn` the caller records as a partial
+// error. A board missing rows must not report itself complete.
+func (s *SupervisorSource) openBeads(ctx context.Context) (out []apiBead, warn []string, err error) {
+	cursor := ""
+	for page := 1; page <= maxBeadPages; page++ {
+		path := fmt.Sprintf("/beads?status=open&limit=%d", beadPageSize)
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		var env listEnvelope
+		if e := s.getJSON(ctx, path, &env); e != nil {
+			if len(out) > 0 {
+				return out, append(warn, fmt.Sprintf("open-bead scan stopped after %d page(s): %v", page-1, e)), nil
+			}
+			return nil, nil, e
+		}
+		// The supervisor's own cross-rig degradation: a page can be short
+		// because one rig did not answer, and only the envelope says so.
+		if env.Partial {
+			warn = append(warn, env.PartialErrors...)
+		}
+		out = append(out, env.Items...)
+		if env.NextCursor == "" {
+			return out, warn, nil
+		}
+		cursor = env.NextCursor
+	}
+	return out, append(warn, fmt.Sprintf("open-bead scan stopped at the %d-page cap; rows may be missing", maxBeadPages)), nil
+}
+
+// gatherMetadataAnchors admits the two METADATA-keyed kinds from one paged scan
+// of the city's open beads.
+//
+// The selector is [metadataAnchor.matches], shared with the beads backend so
+// the two cannot drift on which beads are anchors. A bead carrying BOTH markers
+// is admitted TWICE, once per kind, as the beads backend's two queries also do;
+// BuildBoard's id-dedup keeps the higher band.
+func (s *SupervisorSource) gatherMetadataAnchors(ctx context.Context, g *gatherState) {
+	all, warn, err := s.openBeads(ctx)
+	if err != nil {
+		g.note(true, []string{"metadata-keyed kinds: " + err.Error()})
+		return
+	}
+	g.ok()
+	for _, w := range warn {
+		g.note(true, []string{"metadata-keyed kinds: " + w})
+	}
+
+	// Children come from inverting the scan's own parent-child edges. The
+	// per-anchor alternative, /beads/graph/{id}, walks the whole connected
+	// component and does not fit inside the board cache window.
+	openChildren := map[string][]board.Child{}
+	for _, b := range all {
+		for _, d := range b.Deps {
+			if d.Type == "parent-child" && d.DependsOnID != "" {
+				openChildren[d.DependsOnID] = append(openChildren[d.DependsOnID], childOf(b))
+			}
+		}
+	}
+
+	for _, b := range all {
+		if !anchorCandidate(b) {
+			continue
+		}
+		md := decodeMetadata(b.Metadata)
+		for _, ma := range metadataAnchors {
+			if ma.matches(md) {
+				g.anchors = append(g.anchors, s.metadataAnchorFor(g, b, md, ma.kind, openChildren[b.ID]))
+			}
+		}
+	}
+}
+
+// anchorCandidate reports whether a bead may be admitted under a METADATA-keyed
+// kind. It is this backend's form of the beads gather's ExcludeTypes+SkipWisps
+// filter: a bead already admitted as an epic, decision or convoy must not be
+// re-admitted under a second kind, and infrastructure beads are not work.
+func anchorCandidate(b apiBead) bool {
+	if b.Ephemeral || infraTypes[b.IssueType] {
+		return false
+	}
+	for _, kind := range typedAnchorKinds {
+		if b.IssueType == kind {
+			return false
+		}
+	}
+	return true
+}
+
+// metadataAnchorFor projects one scanned bead onto an anchor of the given kind.
+//
+// WaitingUnknown is set because this backend cannot resolve the blockers'
+// STATUSES. The `blocks` edges ride on the scan, but discharging one needs a
+// positive `closed`, and the scan reads open beads only — absence from it is
+// equally consistent with closed, with a store the scan did not cover, and with
+// an id that resolves to nothing. Neither answer is safe to invent: `open` puts
+// a false waiting_on_open on the wire, and `landed` lets [board.ruled] stand a
+// human-gated row DOWN on evidence nobody read.
+//
+// Children are the OPEN ones only, so n_closed reads 0 and `complete` never
+// fires from this backend.
+func (s *SupervisorSource) metadataAnchorFor(g *gatherState, b apiBead, md map[string]string, kind string, children []board.Child) board.Anchor {
+	rig, prefix := g.rigOf(b.ID)
+	return board.Anchor{
+		ID:             b.ID,
+		Title:          b.Title,
+		Kind:           kind,
+		Source:         kind,
+		Rig:            rig,
+		Prefix:         prefix,
+		Priority:       b.Priority,
+		Description:    b.Description,
+		Metadata:       md,
+		Children:       children,
+		Takeaway:       md["gc.takeaway"],
+		TakeawayAt:     md["gc.takeaway_at"],
+		TakeawayBy:     md["gc.takeaway_by"],
+		WaitingUnknown: true,
+	}
 }

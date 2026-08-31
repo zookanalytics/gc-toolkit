@@ -120,8 +120,13 @@ type rollup struct {
 	// inFlightHeads is the part of liveHeads attributable to a workflow.
 	inFlightHeads []string
 	// openHeads is unclaimed/unowned open children MINUS anything a live
-	// workflow already carries — those are not idle, they are in flight.
+	// workflow already carries — those are not idle, they are in flight — and
+	// MINUS parkedHeads, which are not idle either.
 	openHeads []string
+	// parkedHeads is the part of that set that carries its OWN board row under
+	// a human-gated or parked kind. A child waiting on the operator is not work
+	// nobody has picked up, so it must not be counted as idle.
+	parkedHeads []string
 }
 
 // rollUp derives every child-derived quantity for one anchor.
@@ -132,6 +137,7 @@ func rollUp(children []Child, f Facts) rollup {
 		deadOwnerHeads: []string{},
 		inFlightHeads:  []string{},
 		openHeads:      []string{},
+		parkedHeads:    []string{},
 	}
 
 	live := make(map[string]bool, len(children))
@@ -163,12 +169,18 @@ func rollUp(children []Child, f Facts) rollup {
 	}
 
 	// Second pass: openHeads subtracts liveHeads, which is only complete once
-	// every child has been classified.
+	// every child has been classified. The parked split is taken from what
+	// remains after that subtraction — a child that is moving is neither idle
+	// nor parked, whatever markers it carries.
 	for _, c := range children {
 		if c.Status == "closed" {
 			continue
 		}
 		if (c.Assignee == "" || c.Status != "in_progress") && !live[c.ID] {
+			if hasOwnRow(c.Metadata) {
+				r.parkedHeads = append(r.parkedHeads, c.ID)
+				continue
+			}
 			r.openHeads = append(r.openHeads, c.ID)
 		}
 	}
@@ -184,8 +196,15 @@ func rollUp(children []Child, f Facts) rollup {
 	sort.Strings(r.deadOwnerHeads)
 	sort.Strings(r.inFlightHeads)
 	sort.Strings(r.openHeads)
+	sort.Strings(r.parkedHeads)
 	return r
 }
+
+// idle is the open-child count with the ones parked for the operator taken out.
+// It is what "stranded" and the frontier's count phrases mean by open; the wire
+// keeps the honest total in [Tile.Open] and names the difference in
+// [Tile.ParkedHeads]. With nothing parked it equals r.open.
+func (r rollup) idle() int { return r.open - len(r.parkedHeads) }
 
 // beadRef matches a bead id with one of the given prefixes: `<prefix>-<suffix>`
 // where the suffix is 3-8 lowercase alphanumerics. Mirrors gc-helm.sh's
@@ -299,7 +318,35 @@ func waitingSplit(a Anchor) (all, open []string) {
 // human-gated bead — which is what reading the marker off the anchor does.
 func humanGated(a Anchor) bool {
 	return a.Source == "decision" || a.Source == "human" ||
-		a.Metadata["gc.routed_to"] == "human"
+		a.Metadata[mdRoutedTo] == routedHuman
+}
+
+// The two metadata markers that make an ordinary bead an anchor in its own
+// right — the gather selects the `human` and `parked` kinds by exactly these
+// (source.metadataAnchors). The board restates them because the gather imports
+// the board and not the reverse; a marker added on one side has to be added on
+// the other, or the two disagree about which beads have a row.
+const (
+	mdRoutedTo  = "gc.routed_to"
+	mdTakeaway  = "gc.takeaway"
+	routedHuman = "human"
+)
+
+// hasOwnRow reports whether a bead carrying this metadata is an anchor in its
+// own right, and therefore carries its ask on a row of its own rather than as
+// idle work under its parent.
+//
+// Presence, not truthiness, for the takeaway — the same reading
+// source.metadataAnchor.matches uses, so a blanked takeaway still counts.
+func hasOwnRow(md map[string]string) bool {
+	if md == nil {
+		return false
+	}
+	if md[mdRoutedTo] == routedHuman {
+		return true
+	}
+	_, ok := md[mdTakeaway]
+	return ok
 }
 
 // ruled is the STAND-DOWN state: a human-gated row that has already been
@@ -369,11 +416,18 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 //   - `unowned` is HIGH: under the everything-is-owned law an unowned
 //     non-machine convoy is exactly the orphan the observer exists to catch.
 //   - `human` is ELEVATED for the same reason a decision is: gc.routed_to=human
-//     means no agent will take it. Both stand DOWN once [ruled] — the row was
-//     answered, and a recorded ruling that keeps asking is the loudest kind of
-//     noise. A ruled row that DECOMPOSED is banded by its roll-up instead,
-//     exactly as a decomposed `parked` subject is: "answered" is a claim about
-//     the bead, and open work hanging under it falsifies the claim (tk-a9k0l).
+//     means no agent will take it. Read off the MARKER ([humanGated]), not the
+//     kind, so the `parked` TWIN of a human-routed bead bands with its sibling
+//     — the two rows are one bead, and a dedup between rows that disagree
+//     arbitrates by rank rather than by which row is truer. Open children under
+//     a human-routed bead do not falsify what it says about itself: it never
+//     claimed to want nothing, it claimed to want the operator, and nobody can
+//     pick that work up until the operator answers.
+//     Both stand DOWN once [ruled] — the row was answered,
+//     and a recorded ruling that keeps asking is the loudest kind of noise. A
+//     ruled row that DECOMPOSED is banded by its roll-up instead, exactly as a
+//     decomposed `parked` subject is: "answered" is a claim about the bead, and
+//     open work hanging under it falsifies the claim (tk-a9k0l).
 //   - `parked` is LOW for the opposite reason — the conversation reached a
 //     takeaway and wants nothing, it only has to stay FINDABLE, so the band
 //     floor keeps it out of the contest whatever its priority or age. UNLESS
@@ -389,11 +443,14 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 //     tk-2cyxo). A roll-up whose children have all closed lands back on LOW
 //     through the r.open == 0 branch below.
 //
-// STRANDED (HIGH) is open work with nothing LIVE in it and no open visit. Two
+// STRANDED (HIGH) is open work with nothing LIVE in it and no open visit. Three
 // things make that different from the naive "0 in progress": inProgressLive
-// counts a slung bead whose movement lives on its workflow, and `held` means a
+// counts a slung bead whose movement lives on its workflow, `held` means a
 // conversation is holding the anchor — attention is already on it, so silence
-// in the child beads is not abandonment.
+// in the child beads is not abandonment — and a child parked for the operator
+// is a question already asked on its own row, so [rollup.idle] excludes it. An
+// anchor whose every open child is parked that way falls through to NORMAL:
+// the asks are all live, none of them are its own.
 func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) Severity {
 	var sev0 Severity
 	inProgressLive := len(r.liveHeads)
@@ -402,7 +459,7 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) S
 		sev0 = SevHigh
 	case isRuled && r.mTotal == 0:
 		sev0 = SevLow
-	case !isRuled && (a.Source == "decision" || a.Source == "human"):
+	case !isRuled && humanGated(a):
 		sev0 = SevElevated
 	case dispDue:
 		sev0 = SevElevated
@@ -412,7 +469,7 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) S
 		sev0 = SevLow
 	case r.open == 0:
 		sev0 = SevLow
-	case r.open > 0 && inProgressLive == 0 && !held:
+	case r.idle() > 0 && inProgressLive == 0 && !held:
 		sev0 = SevHigh
 	case len(r.deadOwnerHeads) > 0:
 		sev0 = SevElevated
@@ -443,12 +500,20 @@ func rankScore(sev Severity, w, stale int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRuled bool) string {
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
+	parked := len(r.parkedHeads)
 	deadSfx := ""
 	if dead > 0 {
 		deadSfx = fmt.Sprintf(" · %d stuck (dead owner)", dead)
+	}
+	// An undifferentiated "N open" cannot separate unassigned beads from ones
+	// finished and waiting on a ruling, so the phrases below count the IDLE
+	// remainder and name the parked ones apart from it.
+	parkedSfx := ""
+	if parked > 0 {
+		parkedSfx = fmt.Sprintf(" · %d parked for the operator", parked)
 	}
 
 	switch {
@@ -461,7 +526,9 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRu
 		return "ruled — takeaway recorded"
 	case !isRuled && a.Source == "decision":
 		return "human-gated decision"
-	case !isRuled && a.Source == "human":
+	// The marker, not the kind, for the reason [severity] gives: a bead's
+	// `human` and `parked` rows are one bead and must not describe it two ways.
+	case !isRuled && humanGated(a):
 		return "routed to the operator — no agent will take it"
 	case dispDue:
 		return "parked · blocker landed"
@@ -472,19 +539,27 @@ func frontier(a Anchor, r rollup, held bool, waitingOpen []string, dispDue, isRu
 	// reports its frontier through the same count phrases as every other
 	// roll-up anchor, so the phrase explains the band those counts just gave it.
 	case a.Source == "parked" && r.mTotal == 0:
+		// The phrase is a CLAIM about what the sitting left behind, so it may
+		// not be made on a row that left nothing — NEEDS says the same thing
+		// one column over, and the two must not contradict each other.
+		if takeaway == "" {
+			return "conversation parked — no takeaway recorded"
+		}
 		return "conversation parked — takeaway recorded"
 	case r.mTotal == 0:
 		return "empty — no children"
 	case r.open == 0:
 		return fmt.Sprintf("all %d closed · 0 open", r.mTotal)
+	case r.idle() == 0 && parked > 0 && inProgressLive == 0 && dead == 0:
+		return fmt.Sprintf("%d parked for the operator · nothing idle", parked)
 	case inProgressLive == 0 && dead > 0 && !held:
-		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.open, dead)
+		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.idle(), dead) + parkedSfx
 	case inProgressLive == 0 && held:
-		return fmt.Sprintf("%d open · in conversation", r.open) + deadSfx
+		return fmt.Sprintf("%d open · in conversation", r.idle()) + deadSfx + parkedSfx
 	case inProgressLive == 0:
-		return fmt.Sprintf("%d open · 0 in flight (stranded)", r.open)
+		return fmt.Sprintf("%d open · 0 in flight (stranded)", r.idle()) + parkedSfx
 	default:
-		return fmt.Sprintf("%d open · %d in flight", r.open, inProgressLive) + deadSfx
+		return fmt.Sprintf("%d open · %d in flight", r.idle(), inProgressLive) + deadSfx + parkedSfx
 	}
 }
 
@@ -539,10 +614,14 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "unowned — assign an owning bead"
 	case a.Source == "decision":
 		return "operator decision"
-	case a.Source == "human":
-		return "operator action"
+	// The two kinds a PERSON put here. On these the empty takeaway is itself
+	// the finding — whoever routed or parked the row never recorded what is
+	// owed — so the phrase names that rather than reading like a valid ask a
+	// silent row cannot support.
+	case humanGated(a):
+		return "routed to you — no question recorded"
 	case a.Source == "parked" && r.mTotal == 0:
-		return "resume: prefix+a, then the bead id"
+		return "parked for you — no question recorded"
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -550,6 +629,10 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 			return fmt.Sprintf("all %d closed — graduate", r.mTotal)
 		}
 		return fmt.Sprintf("all %d closed — close or extend", r.mTotal)
+	// Ahead of the dead-owner and idle phrases: this row has no ask of its own
+	// left, so "assign or visit" would name the wrong bead.
+	case r.idle() == 0 && len(r.parkedHeads) > 0 && inProgressLive == 0 && dead == 0:
+		return fmt.Sprintf("%d parked for the operator — rule on those rows", len(r.parkedHeads))
 	case inProgressLive == 0 && dead > 0 && !held:
 		return "dead owner — recover or reassign"
 	case inProgressLive == 0 && held:
@@ -603,6 +686,13 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		Title:    a.Title,
 		Severity: sev,
 
+		// The two states in which a PERSON, not an agent, holds the next move.
+		// Read from the same predicates severity uses, not from the band it
+		// produces: `unowned` is checked first there and would swallow a
+		// human-routed convoy, and the stale bump can lift an ordinary row into
+		// the same band without any person owing anything.
+		Owed: (humanGated(a) && !isRuled) || dispDue,
+
 		Weight: w,
 		Held:   held,
 
@@ -621,7 +711,13 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		Owned: a.Owned,
 
-		Stranded: r.mTotal > 0 && r.open > 0 && len(r.liveHeads) == 0 && !held,
+		// An UNANSWERED human gate is excluded for the same reason `held` is:
+		// stranded means open work nobody's attention is on, and a row routed
+		// to the operator has the operator's. Once [ruled] the gate is
+		// discharged and open children under it are ordinary idle work again,
+		// so the exemption ends exactly where the band's does.
+		Stranded: r.mTotal > 0 && r.idle() > 0 && len(r.liveHeads) == 0 && !held &&
+			!(humanGated(a) && !isRuled),
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
 			a.Source != "human" && a.Source != "parked",
 		Complete:         r.mTotal > 0 && r.open == 0,
@@ -632,6 +728,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		CrossRigRefs:   xrefs,
 		OpenHeads:      r.openHeads,
 		DeadOwnerHeads: r.deadOwnerHeads,
+		ParkedHeads:    r.parkedHeads,
 
 		WaitingOn:      waiting,
 		WaitingOnOpen:  waitingOpen,
@@ -642,17 +739,18 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		TakeawayBy: nilIfEmpty(a.TakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
-		Frontier:  frontier(a, r, held, waitingOpen, dispDue, isRuled),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled),
 		RankScore: rankScore(sev, w, stale),
 	}
 }
 
-// BuildBoard derives every tile, ranks by rank_score descending, and
-// deduplicates by id keeping the highest-ranked occurrence (so a bead matched
-// by two gathers appears once, in its higher band). Ties break by id ascending
-// for deterministic output. now stamps GeneratedAt. partial/partialErrors
-// propagate cross-rig degradation.
+// BuildBoard derives every tile, ranks by rank_score descending, deduplicates
+// by id keeping the highest-ranked occurrence (so a bead matched by two gathers
+// appears once, in its higher band), and then PARTITIONS: the operator's queue
+// ahead of the city overview, per [owedFirst]. Ties break by id ascending for
+// deterministic output. now stamps GeneratedAt. partial/partialErrors propagate
+// cross-rig degradation.
 //
 // facts carries the three cross-anchor joins (visits, in-flight workflows,
 // session liveness); a zero value is legal and yields a board with no held or
@@ -663,12 +761,7 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		tiles = append(tiles, computeTile(a, now, facts))
 	}
 
-	sort.SliceStable(tiles, func(i, j int) bool {
-		if tiles[i].RankScore != tiles[j].RankScore {
-			return tiles[i].RankScore > tiles[j].RankScore
-		}
-		return tiles[i].ID < tiles[j].ID
-	})
+	sort.SliceStable(tiles, func(i, j int) bool { return rankFirst(tiles[i], tiles[j]) })
 
 	seen := make(map[string]struct{}, len(tiles))
 	deduped := make([]Tile, 0, len(tiles))
@@ -679,6 +772,8 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		seen[t.ID] = struct{}{}
 		deduped = append(deduped, t)
 	}
+
+	sort.SliceStable(deduped, func(i, j int) bool { return owedFirst(deduped[i], deduped[j]) })
 
 	return Board{
 		GeneratedAt:   now.UTC(),
@@ -765,6 +860,95 @@ func CapSittings(in []Sitting, maxClosed int) (kept []Sitting, dropped int) {
 	return kept, dropped
 }
 
+// owedFirst orders the board: the operator's queue ahead of everything else,
+// oldest-owed first inside it, and the established rank order everywhere else.
+//
+// PARTITION BEFORE RANK, because rank cannot express this. rank_score is
+// severity, then subtree size, then staleness; severity is coarse and shared
+// between stranded, unowned and human-gated rows, so the term that actually
+// orders the board is SIZE — and a demand owed by a person has a subtree near 1
+// where a container has hundreds. One global sort therefore files the
+// operator's own queue underneath the city's, every time, whatever the bands
+// say.
+//
+// Inside the queue, size is not the question either. It is a list of decisions,
+// so age is the order. A row nothing on the wire can date sorts LAST: an
+// unknown age is not evidence of a long wait, and the supervisor backend reads
+// no updated_at at all, so treating unknown as oldest would put every row from
+// that backend ahead of every dated one.
+//
+// Apply it STABLY and after the dedup. A bead admitted under two kinds carries
+// the same id in both rows and ties every test below, so only the rank order
+// the dedup already resolved can decide which of the two survives.
+// rankFirst is the board's severity-then-size-then-staleness order, ties broken
+// by id ascending. [BuildBoard] ranks with it, the dedup resolves duplicates by
+// it, and [CityOverview] restores it — one definition, so the overview cannot
+// drift from the order the dedup already spent.
+func rankFirst(a, b Tile) bool {
+	if a.RankScore != b.RankScore {
+		return a.RankScore > b.RankScore
+	}
+	return a.ID < b.ID
+}
+
+func owedFirst(a, b Tile) bool {
+	if a.Owed != b.Owed {
+		return a.Owed
+	}
+	if !a.Owed {
+		return false
+	}
+	sa, sb := owedSince(a), owedSince(b)
+	if sa.IsZero() != sb.IsZero() {
+		return !sa.IsZero()
+	}
+	if !sa.Equal(sb) {
+		return sa.Before(sb)
+	}
+	return a.ID < b.ID
+}
+
+// owedSince is when the row started asking. gc.takeaway_at is the moment a
+// sitting authored what is owed, which is the true start of the wait;
+// updated_at only bounds it from below, and neither may be readable.
+func owedSince(t Tile) time.Time {
+	if t.TakeawayAt != nil {
+		if ts, err := time.Parse(time.RFC3339, *t.TakeawayAt); err == nil {
+			return ts
+		}
+	}
+	return t.UpdatedAt
+}
+
+// OperatorQueue is the partition the board answers with by DEFAULT — the rows
+// [Tile.Owed] marks, in [owedFirst] order. The city overview stays available
+// behind an explicit `--all`.
+func OperatorQueue(tiles []Tile) []Tile {
+	out := make([]Tile, 0, len(tiles))
+	for _, t := range tiles {
+		if t.Owed {
+			out = append(out, t)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return owedFirst(out[i], out[j]) })
+	return out
+}
+
+// CityOverview is the partition behind `--all`: every tile, in [rankFirst]
+// order.
+//
+// Board.Tiles leaves [BuildBoard] partitioned owed-first, which is the default
+// view's order and the opposite of the question the overview answers. Feeding
+// that slice to [CapRows] costs twice: the overview leads with the operator's
+// queue instead of the city's highest-ranked row, and the cap then drops
+// whatever the hoisted queue pushed past the limit.
+func CityOverview(tiles []Tile) []Tile {
+	out := make([]Tile, len(tiles))
+	copy(out, tiles)
+	sort.SliceStable(out, func(i, j int) bool { return rankFirst(out[i], out[j]) })
+	return out
+}
+
 // DefaultMaxRows and DefaultMaxParked mirror gc-helm.sh's GC_HELM_MAX_ROWS=50
 // and GC_HELM_MAX_PARKED=15.
 const (
@@ -809,4 +993,19 @@ func CapRows(tiles []Tile, limit, maxParked int) []Tile {
 	// tiles arrives ranked and the filter above preserves that order, so the
 	// re-merge gc-helm.sh does with an explicit sort is already done.
 	return out
+}
+
+// CapQueue bounds the operator's queue. limit<=0 means uncapped.
+//
+// Deliberately not [CapRows]. That split exists because `parked` rows are
+// band-floored to LOW and would otherwise be pushed off the end of a
+// rank-ordered board, so it rations them against a small separate budget. In
+// this partition a parked row is not a straggler — it is a conversation waiting
+// on the operator, and it earned its place by age — so that budget would cut
+// the queue precisely where it carries the most.
+func CapQueue(tiles []Tile, limit int) []Tile {
+	if limit <= 0 || len(tiles) <= limit {
+		return tiles
+	}
+	return tiles[:limit]
 }

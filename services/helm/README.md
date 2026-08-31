@@ -6,21 +6,19 @@ Attention Canvas operator dashboard (epic `tk-eemvf`) and the Go port of the
 board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces —
 the bash dies).
 
-> **The bash has not died, and it is still what `prefix+b` runs.**
-> `tmux-pick-helm.sh:52` invokes `gc-helm.sh --json`, not this binary. But the
-> two are no longer two IMPLEMENTATIONS: since `tk-134d7` this repo also builds
-> `helm-svc board`, a terminal renderer over *this* gather and *this*
-> derivation, and `internal/board` carries the whole of the bash board's
-> `--json` field set rather than a subset of it. The remaining bash-only
-> surface is its verbs (`open`, `react`, `takeaway`), which have no Go
-> equivalent — so `gc-helm.sh` stays in place and working, and retiring it is a
-> separate decision recorded under "Two helm boards, and they diverge" in
+> **The bash board is gone; the bash WRITE VERBS are what is left.**
+> `tmux-pick-helm.sh:60` invokes `"$HELM_SVC" board --json --limit=36`, this
+> binary. `gc-helm.sh` no longer renders a board at all: it carries `open`,
+> `react` and `takeaway`, and `gc-helm.sh --json` exits 2 with `unknown verb`.
+> Its own usage text points at `helm-svc board`. Retiring the remaining verbs is
+> a separate decision recorded under "Two helm boards, and they diverge" in
 > `docs/gascity-human-engagement.md`.
 >
-> **A change to this board's gather, ranking, or anchor kinds is still a
-> standing question against `gc-helm.sh`** — `cmd/helm-svc/contract_parity_test.go`
-> fails when the two field sets drift, but nothing compares their VALUES
-> automatically. Say in the PR whether the sibling needs the same change.
+> There is therefore no bash field set left to drift against, and
+> `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
+> out of `gc-helm.sh` and compared key sets — was deleted with the board it
+> guarded (9a6b86a). The mirror that still needs guarding is the TypeScript one,
+> and `web/contract_parity_test.go` guards it.
 
 The spine came from the `tk-sy3vj` spike; `tk-x89rn` then widened the source seam
 so the board can read `updated_at` and bead metadata, which is what makes
@@ -35,7 +33,8 @@ Two entry points over ONE board. They share `internal/source` (the gather) and
 ```
 helm-svc                 serve  — the sidecar (below). Bare invocation, which is
                                   how the supervisor spawns it.
-helm-svc board [--json]  render — the terminal board (tk-134d7). See *CLI view*.
+helm-svc board [--json]  render — what is owed by you (tk-134d7). See *CLI view*.
+helm-svc board --all     render — the city overview instead.
 helm-svc probe           check  — can THIS binary read the city's bead stores?
                                   See *Readability check*.
 ```
@@ -54,35 +53,87 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries the full `gc-helm.sh --json` field set — 34 fields, declared in
-the bash object literal's order in `internal/board/model.go` and mirrored in
-`web/src/contract.ts`:
+A `Tile` carries 39 fields, declared in `internal/board/model.go` and mirrored
+in `web/src/contract.ts`. The order started as the bash board's object literal
+so the two `--json` outputs could be diffed line for line; that literal is gone
+and the order is now simply the wire's:
 
 ```
-id rig kind title severity weight held
+id rig kind title severity owed weight held
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
 stranded empty complete progress_mismatch
-stale_days priority cross_rig_refs open_heads dead_owner_heads
+stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
+waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at frontier needs rank_score
 ```
 
-Tiles are ranked `rank_score` descending and deduplicated by id.
+`updated_at` is `omitzero`: it is the one field a tile may omit, and a source
+that cannot read it (the supervisor backend) omits it on every row.
+
+Tiles are deduplicated by id and **partitioned**: every `owed` row first,
+longest-waiting first, then everything else by `rank_score` descending.
+
+### The two questions, and why they are two surfaces
+
+`owed` marks a row whose next move is a PERSON'S — an unanswered human gate, or
+a parked conversation whose recorded waits have all landed. That partition is
+the board's default answer; the city overview is one flag or one keystroke away.
+
+Ranking cannot express the split. `rank_score` is severity, then subtree size,
+then staleness; severity is coarse and shared between stranded, unowned and
+human-gated rows, so the term that actually orders a board is SIZE — and a
+demand owed by a person has a subtree near 1 where an epic has up to 999. On one
+globally ranked list the operator's own queue therefore sorts under the city's
+containers by construction, whatever the bands say. Inside the queue, size is
+not the question either: it is a list of decisions, so it is ordered by how long
+each has been owed (`gc.takeaway_at`, falling back to `updated_at`; a row
+neither can date sorts last).
+
+| surface | default | the overview |
+|---|---|---|
+| `helm-svc board` | the queue, oldest first | `--all` |
+| tmux | `prefix+b` | `prefix+B` |
+| dashboard | the *owed by you* section, at the top of the page | the ranked table under it |
+
+The wire arrives partitioned, so the overview sorts itself back to `rank_score`
+before it is capped (`board.CityOverview`). Reading the partitioned slice as if
+it were ranked costs twice: the overview leads with the queue it is meant to
+sit behind, and the cap then drops whatever the hoisted rows pushed past the
+limit.
+
+In the queue the row's HEADLINE is the demand — the `needs` sentence — and the
+bead title is secondary; `prefix+b` and the *owed by you* table both read it
+that way. The overview asks what the city's shape is, so it leads with the
+object and its frontier.
+
+**The empty queue is a CLAIM, and it is the most consequential sentence any of
+these print.** So it never renders blank: the CLI prints its coverage
+(`N rigs checked, all reachable`), and an empty queue out of a PARTIAL gather is
+not an answer at all — it exits `3`, because the rows that would have
+contradicted it are exactly the ones the unread store was holding. The picker
+reads that exit code rather than substituting an empty menu. `--all` keeps its
+own contract: an empty overview is an empty overview.
 
 ### CLI view (`helm-svc board`)
 
 ```
-helm-svc board                     # the ranked table a human glances at
-helm-svc board --json              # the ranked JSON ARRAY (the gc-helm.sh contract)
-helm-svc board --json --limit=0    # uncapped, for tooling
+helm-svc board                     # what is owed by you, oldest first
+helm-svc board --all               # the city overview: every anchor, ranked
+helm-svc board --json              # the same rows as a JSON ARRAY (the gc-helm.sh contract)
+helm-svc board --all --json --limit=0   # uncapped, for tooling
 ```
 
 `--json` emits a bare **array**, not the service's envelope, because that array
-is what `gc-helm.sh --json` emits and what `assets/scripts/tmux-pick-helm.sh`
-consumes. Rows are capped at 50 by default with a separate budget of 15 for
-`parked` rows (`--limit=0` opts out of both), matching the bash board's split
-cap. Exit codes match too: `0` rendered, `2` usage, `3` gather failed — a failed
-gather is never rendered as an empty "nothing needs you".
+is what `assets/scripts/tmux-pick-helm.sh` consumes — it runs `jq 'length'` and
+`.[]` over this output, and the `{generated_at,total,tiles}` envelope would make
+every row invisible while still parsing cleanly. Overview rows are capped at 50
+by default with a separate budget of 15 for `parked` rows (`--limit=0` opts out
+of both); the queue takes the same 50 with no parked sub-budget, because there a
+parked row is a conversation waiting on the operator rather than a straggler.
+Exit codes: `0` rendered, `2` usage, `3` gather failed or an empty queue could
+not be stood behind — a failed gather is never rendered as an empty "nothing
+needs you".
 
 It runs the gather **in-process and uncached**: no daemon, no dependency on the
 sidecar being up, which is most of the point of having a CLI. Measured on the
@@ -132,6 +183,13 @@ Five kinds are gathered. The first three are selected by the bead's issue
 | `human` | `gc.routed_to=human` | ELEVATED, LOW once *ruled* | the operator owns it; no agent will take it |
 | `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
 
+All five are gathered by **both** backends. The library backend filters the two
+metadata kinds in the store query; the HTTP backend filters them client-side
+over one paged `/beads?status=open` scan (`tk-lb3u4m`). The two selectors live
+in `source.metadataAnchor` — one field set, read two ways — because a bead that
+is an anchor on one backend and absent from the other is the shape of bug that
+cost the board its human-routed rows.
+
 **Why metadata is an anchor key at all.** The type question cannot see an
 operator-owned item. `gc.routed_to=human` and `gc.takeaway` are stamped on
 ordinary task/bug/chore beads, so a board keyed on type excluded them by
@@ -144,10 +202,16 @@ already an anchor (an epic carrying a takeaway, say) is not gathered twice. A
 bead carrying both markers is, and `BuildBoard`'s dedup keeps the higher band —
 `human` over `parked`.
 
-That dedup is why the two takeaway rules below key on *human-gatedness* rather
-than on the kind alone. Two rows for one bead, each banded on its own, means the
-LOUDER derivation always wins, so a rule that quiets the `human` row would be
-undone by its `parked` twin on every row it was written for.
+That dedup is why every human-gate rule keys on *human-gatedness*
+(`board.humanGated`, which reads `gc.routed_to` off the anchor) rather than on
+the kind alone. Two rows for one bead, each banded on its own, means the LOUDER
+derivation always wins — in both directions. A rule that quiets the `human` row
+is undone by its `parked` twin on every row it was written for; and a `parked`
+twin banded by its roll-up hands the bead a HIGH *stranded* row, which is what
+the board said about `gc-sc8a8`, a bead held for a named operator ruling
+(`tk-lb3u4m`). The band, the frontier and the `stranded` flag all read the
+marker, so the two rows describe the bead the same way and the dedup has nothing
+left to arbitrate.
 
 Both gathers read the anchor's `parent-child` children, exactly as the `epic`
 gather does. The relation belongs to the bead, not to the kind, and it is
@@ -201,7 +265,7 @@ prose — and the board re-derives, per render, whether it has been discharged:
 
 | `waiting_on` | `waiting_on_open` | row |
 |---|---|---|
-| empty | — | LOW, "conversation parked — takeaway recorded" (a childless row; with children the roll-up answers instead) |
+| empty | — | LOW, "conversation parked — takeaway recorded", or "— no takeaway recorded" when the sitting left none (a childless row; with children the roll-up answers instead) |
 | non-empty | non-empty | LOW, "parked · waiting on N" — a live hold, still quiet |
 | non-empty | empty | `disposition_due`: ELEVATED, "parked · blocker landed", and NEEDS becomes "blocker landed — dispose or resume" |
 
@@ -249,7 +313,7 @@ A row is **ruled** when all three hold:
 
 | shape | row |
 |---|---|
-| no takeaway | unchanged: ELEVATED, "human-gated decision" / "operator action" |
+| no takeaway | unchanged: ELEVATED, frontier "human-gated decision"; NEEDS names the silence (below) |
 | takeaway, waits unreadable | unchanged — an unread graph proves nothing |
 | takeaway, a wait still open | unchanged — answering is not finishing |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
@@ -292,6 +356,35 @@ ruling — but NEEDS answers "what does this row want from me", and what a ruled
 row wants is a close or a re-open, not a re-read. The ruling stays on the wire
 in `takeaway`, where nothing truncates it; in the terminal table it was the
 longest cell in that column and the least actionable.
+
+### A parent stops counting its parked children as idle (`tk-lb3u4m`)
+
+An anchor's roll-up reports how many children are open and how many are moving.
+The gap between those two numbers is what makes a row HIGH — *stranded*, with
+`decomposed, idle — assign or visit` next to it. That reading is wrong for one
+class of child: a bead routed to the operator, or holding a takeaway, is not
+work nobody has picked up. It has a row of its own, with its own ask on it, and
+nobody is going to assign it because it is already assigned to the operator.
+
+So `open_heads` splits. `parked_heads` names the open children that carry their
+own row — `board.hasOwnRow`, the same two markers the gather selects the `human`
+and `parked` kinds by — and the band, the `stranded` flag and the frontier's
+count phrases all read the IDLE remainder. `open` on the wire is unchanged: it
+is still every non-closed child, because the total was never the thing that was
+wrong.
+
+Three shapes come out of it:
+
+| the anchor's open children | band | frontier |
+|---|---|---|
+| some idle, some parked | unchanged — the idle ones still strand it | `5 open · 0 in flight (stranded) · 2 parked for the operator` |
+| all parked | NORMAL — no ask of its own | `2 parked for the operator · nothing idle` |
+| none parked | unchanged, byte for byte | `2 open · 0 in flight (stranded)` |
+
+Measured on the live board the day this landed: `sl-kg9z6.1` had been reporting
+`7 open, 0 in flight (stranded)` while three of those seven were waiting on a
+named operator ruling, and `tk-eemvf` and `tk-9tbbk` were reading `decomposed,
+idle — assign or visit` with nothing under them but a parked child.
 
 ## Converse sittings (`tk-ghlg1e.1`)
 
@@ -351,11 +444,13 @@ not wrong — and marks the gather partial.
 
 ### Where it shows up
 
-`helm-svc board` prints the section under the ranked table, `●` for a running
-sitting, AGE measured from the start of a running one and from the end of a
-closed one. `--json` is **untouched**: it emits the bare ranked array that
-`gc-helm.sh --json` emits and `tmux-pick-helm.sh` consumes, and growing a second
-shape there would break that contract.
+Both terminal views print the section under their rows, the queue and `--all`
+alike: the record belongs to the board rather than to one of its views, and a
+conversation nobody ended is owed in the same sense the queue's rows are. `●`
+marks a running sitting; AGE is measured from the start of a running one and
+from the end of a closed one. `--json` is **untouched**: it emits the bare
+ranked array that `gc-helm.sh --json` emits and `tmux-pick-helm.sh` consumes,
+and growing a second shape there would break that contract.
 
 The web app renders the same order — running first, longest-running first, then
 most recently closed — and drills in on a sitting's SUBJECT, since that is the
@@ -398,7 +493,10 @@ restart.
 
 **`SupervisorSource` — the loopback HTTP API (fallback).** Endpoints consumed
 (all under `/v0/city/<city>/`): `/rigs`, `/beads?type=epic`, `/beads/graph/{id}`
-(all-status child roll-up), `/beads?type=decision`, `/convoys` + `/convoy/{id}`.
+(all-status child roll-up), `/beads?type=decision`, `/convoys` + `/convoy/{id}`,
+and `/beads?status=open` paged to the end — one scan the `human` and `parked`
+kinds are filtered out of client-side, and whose parent-child edges are inverted
+into those anchors' child roll-ups so they cost no request of their own.
 
 **The `gc` CLI (`internal/source/gccli.go`) — for two facts no bead carries.**
 `gc session list --state all --json` for session liveness, and `gc convoy list`
@@ -417,7 +515,7 @@ from `/helm` rather than an empty board that reads as "nothing needs attention".
 
 ### Why there are two backends
 
-`SupervisorSource` cannot see two facts the model needs, and this is a property
+`SupervisorSource` cannot see one fact the model needs, and this is a property
 of the API, not of the client:
 
 - **`updated_at` reaches no endpoint at all** — not `/beads`, `/beads/graph/{id}`,
@@ -425,23 +523,29 @@ of the API, not of the client:
   field, but it serializes `omitzero`, arrives zero everywhere, and there is no
   `fields`/`full` parameter to widen the projection. Without it `stale_days` is
   pinned to 0 and **no tile can ever age**.
-- **metadata reaches only the single-bead reads** (`/bead/{id}`, `/convoy/{id}`),
-  so a gather would pay one extra round trip per anchor to see it.
-- **the metadata-keyed anchor kinds are therefore unreachable over HTTP at all.**
-  `GET /beads` filters on status/type/label/assignee/rig and nothing else, and
-  its payloads carry no metadata, so `human` and `parked` can be selected
-  neither server-side nor client-side — finding them would mean one
-  `/bead/{id}` round trip per open bead in the city. The **sittings** record is
-  out of reach for the same two reasons: it selects on `task_kind=visit` and it
-  reads `gc.outcome` off each hit. Under `GC_HELM_SOURCE=supervisor` the
-  envelope's `sittings` is simply `null` and neither view renders the section —
-  the same shape of gap, and the same trade.
 
-`BeadsSource` reads both directly. Choosing it over a new supervisor endpoint —
+`BeadsSource` reads it directly. Choosing it over a new supervisor endpoint —
 the other sanctioned path — is recorded, with the measurements, in
 `specs/tk-x89rn/source-backend-decision.md`; the short version is that the
 supervisor is the `gc` binary in the **gascity** rig and cannot be changed from
 this repository.
+
+**Two further reasons stood here until tk-lb3u4m measured them and found them
+false:** that metadata reaches only the single-bead reads, and that the
+metadata-keyed kinds are therefore unreachable over HTTP. `GET /beads` really
+does take no metadata predicate, but its payloads carry `metadata`,
+`description`, `priority`, `assignee` and `dependencies`, so the filter runs
+client-side over one paged scan — nine requests and ~750 ms for the whole city's
+900 open beads, against a gather already dominated by the per-epic
+`/beads/graph/{id}` calls. What that belief cost was not a narrower board: it was
+a board on which the four beads provably waiting on the operator had no row at
+all, and the epic above one of them read `decomposed, idle — assign or visit`.
+Measured on the live city, the same gather went from 28 tiles to 81.
+
+The **sittings** record is absent on this backend, and not for either of those
+reasons: it is derived from the visit read, which `SupervisorSource` does not do
+at all. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null`
+and neither view renders the section.
 
 **Costs of the library backend, paid at build time, not per request:** the
 module went from zero dependencies to ~170 (the Dolt / go-mysql-server stack),
@@ -469,7 +573,7 @@ healthy.
 |---|---|
 | unset (default) | beads library if this binary can actually OPEN a rig store; otherwise the HTTP API, with a log line naming the consequence |
 | `beads` | force the library; **fatal** if no store can be opened, rather than a quiet downgrade |
-| `supervisor` | force the HTTP API (accepting `stale_days = 0` and no `human`/`parked` kinds) |
+| `supervisor` | force the HTTP API (accepting `stale_days = 0`, no visits or sittings, no in-flight join, and unresolved waiting edges) |
 
 **The test is an OPEN, not a path check** (tk-4cqtv). Resolving
 `<city>/rigs/*/.beads` is not enough to know this backend can serve: a binary
@@ -1067,8 +1171,9 @@ JSON the mount already served. Structure only — see *Web UI*.
 gathers `human` (`gc.routed_to=human`) and `parked` (`gc.takeaway` present)
 beads, so an item the operator owns is no longer invisible for the sole reason
 that its issue type is `task`. See *Anchor kinds*. This is the first consumer to
-spend the metadata tk-x89rn widened the seam to carry — it spends it in the
-GATHER; no derivation in `internal/board` reads metadata yet.
+spend the metadata tk-x89rn widened the seam to carry. `internal/board` reads it
+too: `humanGated` keys the human-gate rules off `gc.routed_to`, and `hasOwnRow`
+keys the parked-child split off both markers.
 
 **Delivered since** (tk-eemvf.4, the U9 terminal embed): an xterm.js terminal
 attached to the city's existing ttyd, peek at rest and live on focus, with the
@@ -1090,6 +1195,13 @@ same-origin reachability confirmed and detach-not-kill verified — see
   stored before that gate existed. `--json` always carries the whole string, in
   `needs` and in `takeaway`. It is a bound on PROSE only: NEEDS never holds an
   identifier, because the mechanical heads are `--json`-only (`tk-9tbbk.1`).
+- **A demand with no takeaway says so.** A `human` row with no `gc.takeaway`
+  reads "routed to you — no question recorded", and a childless `parked` row
+  "parked for you — no question recorded". Both absent and blank count as
+  silent: `collapseWS` flattens whitespace-only prose to empty. The phrase is
+  the actionable one, because a silent demand means whoever routed or parked
+  the row never finished the handoff; a generic "operator action" reads like a
+  valid ask and leaves the operator nothing to act on.
 - **`stranded`/`empty`/`complete`/`progress_mismatch`** booleans, and `held`.
 - **The in-flight / dead-owner join.** A child counts as moving only when its
   owning session is demonstrably live, or a live graph.v2 workflow stands over

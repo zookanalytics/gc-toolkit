@@ -1,13 +1,20 @@
 #!/bin/sh
 # tmux-pick-helm.sh — Gas City Helm picker (pick-a-row → land).
 #
-# Usage: tmux-pick-helm.sh [--city-path <path>]
+# Usage: tmux-pick-helm.sh [--city-path <path>] [--all]
 #
-# Renders the ranked board from `helm-svc board --json` (the Go board,
-# services/helm) as a tmux display-menu; picking a row runs
-# `gc-helm.sh open <bead>`, which files a VISIT on that bead so a converse
-# session holds it. Bound as the sibling of the live-session picker
-# (prefix+S = "what's running"; this = "what needs me").
+# Renders `helm-svc board --json` (the Go board, services/helm) as a tmux
+# display-menu; picking a row runs `gc-helm.sh open <bead>`, which files a VISIT
+# on that bead so a converse session holds it. Bound as the sibling of the
+# live-session picker (prefix+S = "what's running"; this = "what needs me").
+#
+# TWO MENUS, ONE SCRIPT. Bare, this renders the operator's QUEUE — what is owed
+# by a person, oldest first, each row headlined by the demand itself. --all
+# renders the city overview, headlined by the object, and is bound one keystroke
+# away (prefix+B). They are the same rows, ranked and labelled to answer
+# different questions, and the queue is the one a keystroke should reach first:
+# the overview sorts by severity then subtree size, where a demand owed by a
+# person has a subtree of one.
 #
 # The helm-svc binary is resolved at the path the launcher/builder deploy
 # to (<state-root>/bin/helm-svc — see gc-helm-svc.sh / gc-helm-build.sh),
@@ -19,9 +26,12 @@
 set -e
 
 CITY_PATH=""
+ALL=""
+MENU_TITLE=" Helm — what needs you "
 while [ $# -gt 0 ]; do
     case "$1" in
         --city-path) CITY_PATH="${2:-}"; shift 2 ;;
+        --all) ALL="--all"; MENU_TITLE=" Helm — city overview "; shift ;;
         --) shift; break ;;
         *) break ;;
     esac
@@ -65,7 +75,7 @@ fi
 BOARD_ERR="$(mktemp "${TMPDIR:-/tmp}/gc-helm-pick.XXXXXX" 2>/dev/null || printf '')"
 if [ -n "$BOARD_ERR" ]; then trap 'rm -f "$BOARD_ERR"' EXIT; fi
 BOARD_RC=0
-BOARD=$("$HELM_SVC" board --json --limit=36 2>"${BOARD_ERR:-/dev/null}") || BOARD_RC=$?
+BOARD=$("$HELM_SVC" board --json --limit=36 ${ALL:+--all} 2>"${BOARD_ERR:-/dev/null}") || BOARD_RC=$?
 
 if [ "$BOARD_RC" -ne 0 ]; then
     WHY=""
@@ -86,7 +96,11 @@ COUNT=$(printf '%s' "$BOARD" | jq 'length' 2>/dev/null || echo 0)
 case "$COUNT" in ''|*[!0-9]*) COUNT=0 ;; esac
 
 if [ "$COUNT" -eq 0 ]; then
-    gcmux display-message -d 4000 "Helm: nothing needs you. (Nothing floats.)"
+    if [ -n "$ALL" ]; then
+        gcmux display-message -d 4000 "Helm: no open anchors need attention. (Nothing floats.)"
+    else
+        gcmux display-message -d 5000 "Helm: nothing needs you. prefix+B for the city overview."
+    fi
     exit 0
 fi
 
@@ -95,17 +109,31 @@ CMD_PREFIX=""
 [ -n "$CITY_PATH" ] && CMD_PREFIX="cd $(sq "$CITY_PATH") && "
 SQ_ATTN=$(sq "$ATTN")
 
-# One TSV row per anchor: held, severity, id, rig, title, frontier.
+# One TSV row per anchor: held, severity, id, rig, title, frontier, needs.
+#
+# Every cell carries a placeholder when it is empty. IFS=TAB is IFS WHITESPACE,
+# so an empty field collapses against its neighbour and every later column
+# shifts left — a row with no title would render its frontier as its title.
 ROWS=$(printf '%s' "$BOARD" | jq -r '
-    .[] | [(if .held then "●" else "·" end), (.severity//"?"), .id, (.rig//"?"),
-           ((.title//"")[0:38]), ((.frontier//"")[0:34])] | @tsv')
+    def nz(v; d): (v // "") | if . == "" then d else . end;
+    .[] | [(if .held then "●" else "·" end), nz(.severity; "?"), .id, nz(.rig; "?"),
+           (nz(.title; "—")[0:38]), (nz(.frontier; "—")[0:34]),
+           (nz(.needs; "—")[0:48])] | @tsv')
 
 HOTKEYS="abcdefghijklmnopqrstuvwxyz0123456789"
 set --
 i=1
-while IFS="$TAB" read -r glyph sev id rig title frontier; do
+while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     [ -n "$id" ] || continue
-    label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
+    # The queue's headline is the DEMAND — helm-svc puts the authored
+    # gc.takeaway in `needs`, and what the operator owes is the whole reason the
+    # row is on this menu. The bead's own title names the object and follows it.
+    # The overview asks the other question, so it leads with the object.
+    if [ -n "$ALL" ]; then
+        label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$title" "$frontier")
+    else
+        label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$needs" "$title")
+    fi
 
     # Background the open: a cold visit-file plus converse spawn takes
     # seconds and must never freeze the tmux server.
@@ -122,4 +150,4 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-gcmux display-menu -T " Helm — what needs you " -x C -y C -- "$@"
+gcmux display-menu -T "$MENU_TITLE" -x C -y C -- "$@"

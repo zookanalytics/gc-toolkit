@@ -41,7 +41,7 @@ fixture() { # -> ROOT STATE STUBS TMUXLOG; BOARD_RC/BOARD_OUT/BOARD_ERR drive th
     CASE=$((CASE + 1))
     local base="$TMP/case$CASE"
     ROOT="$base/scripts"; STATE="$base/state"; STUBS="$base/stubs"
-    TMUXLOG="$base/tmux-calls"
+    TMUXLOG="$base/tmux-calls"; ARGVLOG="$base/helm-svc-argv"
     mkdir -p "$ROOT" "$STATE/bin" "$STUBS"
     cp "$PICK" "$ROOT/tmux-pick-helm.sh"
     # The picker refuses to run at all without its sibling opener.
@@ -59,6 +59,7 @@ STUB
     # Stub helm-svc: exit code, stdout and stderr all come from the case.
     cat > "$STATE/bin/helm-svc" <<'STUB'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_BOARD_ARGV"
 [ -n "${STUB_BOARD_OUT:-}" ] && printf '%s' "$STUB_BOARD_OUT"
 [ -n "${STUB_BOARD_ERR:-}" ] && printf '%s' "$STUB_BOARD_ERR" >&2
 exit "${STUB_BOARD_RC:-0}"
@@ -66,17 +67,18 @@ STUB
     chmod +x "$STATE/bin/helm-svc"
 }
 
-run_pick() { # -> RC, with the tmux calls in $(cat "$TMUXLOG")
+run_pick() { # [script args] -> RC, tmux calls in $CALLS, helm-svc argv in $ARGV
     set +e
-    STUB_TMUX_LOG="$TMUXLOG" \
+    STUB_TMUX_LOG="$TMUXLOG" STUB_BOARD_ARGV="$ARGVLOG" \
     STUB_BOARD_RC="${BOARD_RC:-0}" STUB_BOARD_OUT="${BOARD_OUT:-}" \
     STUB_BOARD_ERR="${BOARD_ERR:-}" \
     GC_SERVICE_STATE_ROOT="${STATE_OVERRIDE-$STATE}" \
     PATH="$STUBS:/usr/bin:/bin" \
-        sh "$ROOT/tmux-pick-helm.sh" >"$TMP/case$CASE/stdout" 2>"$TMP/case$CASE/stderr"
+        sh "$ROOT/tmux-pick-helm.sh" "$@" >"$TMP/case$CASE/stdout" 2>"$TMP/case$CASE/stderr"
     RC=$?
     set -e
     CALLS="$(cat "$TMUXLOG" 2>/dev/null || true)"
+    ARGV="$(cat "$ARGVLOG" 2>/dev/null || true)"
 }
 
 # ==============================================================================
@@ -157,6 +159,94 @@ unset STATE_OVERRIDE
 eq "$RC" 0 "(NOBIN) exits 0"
 has "$CALLS" "helm-svc binary not found" "(NOBIN) absent still reports absent"
 hasnt "$CALLS" "BOARD UNREADABLE" "(NOBIN) which is a different state from a failing binary"
+
+# ==============================================================================
+# TWO MENUS, ONE SCRIPT — prefix+b is the queue, prefix+B the overview
+# ==============================================================================
+# The board's own split lives in helm-svc; the picker's whole share of it is the
+# flag it forwards and the surface it names. Every case below runs both
+# invocations, because an assertion made against one menu says nothing about the
+# other and both are bound to a key.
+
+# --- case: the flag is forwarded, and only when asked for ---------------------
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"HIGH","title":"an owed demand","frontier":"1 open","held":false}]'
+run_pick
+hasnt "$ARGV" "--all" "(QUEUE) bare, the picker asks for the queue"
+has "$ARGV" "board --json --limit=36" "(QUEUE) with the capped board invocation"
+
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"HIGH","title":"an epic","frontier":"7 open","held":false}]'
+run_pick --all
+has "$ARGV" "--all" "(ALL) --all reaches helm-svc"
+has "$ARGV" "board --json --limit=36" "(ALL) alongside the same capped invocation"
+
+# --- case: each menu names the question it answers ----------------------------
+has "$CALLS" "city overview" "(ALL) the menu is titled the overview"
+hasnt "$CALLS" "what needs you" "(ALL) not the queue's title"
+
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"HIGH","title":"an owed demand","frontier":"1 open","held":false}]'
+run_pick
+has "$CALLS" "what needs you" "(QUEUE) the menu is titled the queue"
+hasnt "$CALLS" "city overview" "(QUEUE) not the overview's title"
+
+# --- case: an empty queue is not an empty city --------------------------------
+# The queue can be clear while the overview is not, so the two say different
+# things and the queue names the key that widens it.
+fixture
+BOARD_RC=0 BOARD_OUT='[]' BOARD_ERR=""
+run_pick
+has "$CALLS" "nothing needs you" "(QUEUE-EMPTY) the all-clear"
+has "$CALLS" "prefix+B" "(QUEUE-EMPTY) naming the key that shows the rest"
+
+fixture
+BOARD_RC=0 BOARD_OUT='[]' BOARD_ERR=""
+run_pick --all
+has "$CALLS" "no open anchors" "(ALL-EMPTY) the city, not the queue, is clear"
+hasnt "$CALLS" "prefix+B" "(ALL-EMPTY) which is the key already pressed"
+
+# --- case: the failure arm holds on BOTH menus --------------------------------
+# The flag is read before the board is asked for, so a new argument path is a
+# second way to reach the arm that must never print the all-clear.
+fixture
+BOARD_RC=3 BOARD_OUT="" BOARD_ERR='helm-svc board: gather failed: rig gascity: schema version mismatch'
+run_pick --all
+eq "$RC" 0 "(ALL-SKEW) exits cleanly"
+has "$CALLS" "BOARD UNREADABLE" "(ALL-SKEW) the overview reports unreadable too"
+has "$CALLS" "schema version mismatch" "(ALL-SKEW) carrying helm-svc's reason"
+hasnt "$CALLS" "no open anchors" "(ALL-SKEW) never the overview's all-clear"
+hasnt "$CALLS" "display-menu" "(ALL-SKEW) no board is rendered"
+
+# --- case: the queue's headline is the demand, not the object -----------------
+# helm-svc already authored the sentence — the takeaway, in `needs`. A menu that
+# spends the row on `.title` renders the OBJECT and drops the question, which is
+# the whole thing the operator opened this menu to read. All three fields are
+# distinct so no assertion can pass on the wrong one.
+DISTINCT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"ELEVATED","title":"OBJECT-TITLE","frontier":"FRONTIER-SHAPE","needs":"DEMAND-SENTENCE","held":false}]'
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$DISTINCT"
+run_pick
+has "$CALLS" "DEMAND-SENTENCE" "(NEEDS) the queue row carries the demand"
+has "$CALLS" "OBJECT-TITLE" "(NEEDS) and keeps the bead title as context"
+has "${CALLS#*DEMAND-SENTENCE}" "OBJECT-TITLE" "(NEEDS) the demand LEADS and the title follows"
+hasnt "$CALLS" "FRONTIER-SHAPE" "(NEEDS) the frontier is not the queue's question"
+
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$DISTINCT"
+run_pick --all
+has "${CALLS#*OBJECT-TITLE}" "FRONTIER-SHAPE" "(ALL-NEEDS) the overview leads with the object and its shape"
+hasnt "$CALLS" "DEMAND-SENTENCE" "(ALL-NEEDS) which is the other menu's headline"
+
+# --- case: an empty cell does not shift the row's later columns ---------------
+# IFS=TAB is IFS *whitespace*, so an empty field collapses against its neighbour
+# and every column after it reads one to the left — a row with no title would
+# render its demand as its title and nothing as its demand.
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT='[{"id":"tk-abc12","rig":"gc-toolkit","severity":"ELEVATED","title":"","frontier":"","needs":"DEMAND-SENTENCE","held":false}]'
+run_pick
+has "$CALLS" "display-menu" "(SHIFT) the row still renders"
+has "$CALLS" "DEMAND-SENTENCE" "(SHIFT) with the demand intact, not shifted out of the label"
 
 # ==============================================================================
 # STATIC GUARD — the shape of the original defect must not come back

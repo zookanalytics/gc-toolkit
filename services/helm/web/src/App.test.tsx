@@ -3,15 +3,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { Board, Sitting, Tile } from './contract';
 
-// A board carrying all five shapes the split has to tell apart: an ordinary
-// ranked anchor, an operator-owned bead that IS attention, a parked
-// conversation that is not, a parked conversation whose routed work has
-// landed — which stopped being "wants nothing" and has to leave the quiet
+// A board carrying all five shapes the sections have to tell apart: an
+// ordinary ranked anchor, an operator-owned bead that is the DEFAULT answer, a
+// parked conversation that is neither, a parked conversation whose routed work
+// has landed — which stopped being "wants nothing" and has to leave the quiet
 // section (tk-2plde) — and a parked conversation whose routed work is still
 // OPEN, which never was "wants nothing" (tk-a9k0l).
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     rig: 'gc-toolkit',
+    owed: false,
     weight: 0,
     held: false,
     n_closed: 0,
@@ -34,6 +35,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     cross_rig_refs: [],
     open_heads: [],
     dead_owner_heads: [],
+    parked_heads: [],
     waiting_on: [],
     waiting_on_open: [],
     disposition_due: false,
@@ -80,6 +82,18 @@ const BOARD: Board = {
   total: 5,
   sittings: SITTINGS,
   tiles: [
+    // Owed rows lead the wire (contract.ts), so the fixture is in wire order.
+    tile({
+      id: 'tk-jgq6s',
+      kind: 'human',
+      title: 'Disposition: 1 anchorless open PR remains (#88)',
+      severity: 'ELEVATED',
+      owed: true,
+      takeaway_at: '2026-07-04T09:00:00Z',
+      frontier: 'routed to the operator — no agent will take it',
+      needs: 'routed to you — no question recorded',
+      rank_score: 2_003_011,
+    }),
     tile({
       id: 'tk-epic',
       kind: 'epic',
@@ -92,21 +106,12 @@ const BOARD: Board = {
       rank_score: 3_005_003,
     }),
     tile({
-      id: 'tk-jgq6s',
-      kind: 'human',
-      title: 'Disposition: 1 anchorless open PR remains (#88)',
-      severity: 'ELEVATED',
-      frontier: 'routed to the operator — no agent will take it',
-      needs: 'operator action',
-      rank_score: 2_003_011,
-    }),
-    tile({
       id: 'tk-yps55',
       kind: 'parked',
       title: "gc-toolkit's helm returns the raw script path",
       severity: 'LOW',
-      frontier: 'conversation parked — takeaway recorded',
-      needs: 'resume: prefix+a, then the bead id',
+      frontier: 'conversation parked — no takeaway recorded',
+      needs: 'parked for you — no question recorded',
       rank_score: 2_001,
     }),
     // Parked by kind, but the work it was waiting on has closed. The service
@@ -168,9 +173,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The main ranked table is the first one on the page; the parked one follows. */
-function attentionTable(): HTMLElement {
-  return screen.getAllByRole('table')[0];
+// Address the tables through their sections, not by position: the queue leads
+// the page, so an index would silently re-point at it.
+function owedSection(): HTMLElement {
+  return screen.getByRole('region', { name: /owed by you/i });
 }
 
 function parkedSection(): HTMLElement {
@@ -181,17 +187,65 @@ function sittingsSection(): HTMLElement {
   return screen.getByRole('region', { name: /converse sittings/i });
 }
 
-// The bug in one assertion: a bead the operator owns reaches the board at all.
-// Before tk-2v08m the gather was keyed on issue type, so `gc.routed_to=human`
-// on an ordinary task made it invisible however plainly it was marked.
-it('ranks an operator-owned bead with the rest of the attention', async () => {
+/** The city overview — the one table outside both sections. */
+function attentionTable(): HTMLElement {
+  const tables = screen.getAllByRole('table');
+  const sectioned = [
+    owedSection(),
+    screen.queryByRole('region', { name: /parked conversations/i }),
+    screen.queryByRole('region', { name: /converse sittings/i }),
+  ];
+  const found = tables.find((t) => !sectioned.some((s) => s?.contains(t)));
+  if (!found) throw new Error('no overview table on the page');
+  return found;
+}
+
+// Two bugs in one assertion. A bead the operator owns has to reach the board at
+// all — before tk-2v08m the gather was keyed on issue type, so
+// `gc.routed_to=human` on an ordinary task was invisible however plainly it was
+// marked. And it has to be the board's DEFAULT answer rather than one row in a
+// ranked list, because rank sorts a one-bead demand under every container.
+it('answers with the operator-owned bead, not with the ranked overview', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/anchorless open PR/)).toBeTruthy());
 
-  const row = within(attentionTable()).getByText(/anchorless open PR/).closest('tr');
+  const row = within(owedSection()).getByText(/anchorless open PR/).closest('tr');
   expect(row).not.toBeNull();
-  expect(within(row as HTMLElement).getByText('ELEVATED')).toBeTruthy();
-  expect(within(row as HTMLElement).getByText('operator action')).toBeTruthy();
+  expect(within(row as HTMLElement).getByText('routed to you — no question recorded')).toBeTruthy();
+  expect(within(row as HTMLElement).getByText('2026-07-04')).toBeTruthy();
+
+  // It is in the queue INSTEAD of the overview, not as well as.
+  expect(within(attentionTable()).queryByText(/anchorless open PR/)).toBeNull();
+  // …and the HIGH row it outranks nowhere still leads that overview.
+  expect(within(attentionTable()).getByText('Attention Canvas')).toBeTruthy();
+});
+
+// The never-blank contract. "Nothing is owed by you" is this page's most
+// consequential sentence and the default output of every failure path, so the
+// section states its coverage or states the error — it is never empty.
+it('states its coverage when nothing is owed', async () => {
+  const nothingOwed: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]] };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(nothingOwed), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(within(owedSection()).getByText(/Every store answered/)).toBeTruthy();
+});
+
+it('refuses to call a partial gather an all-clear', async () => {
+  const partial: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]], partial: true };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(partial), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(within(owedSection()).getByText(/not an all-clear/)).toBeTruthy();
+  expect(within(owedSection()).queryByText(/Every store answered/)).toBeNull();
 });
 
 // The other half of the bead: a parked conversation must be FINDABLE without
@@ -204,16 +258,17 @@ it('lists a parked conversation in its own section, not in the ranked table', as
   const parked = within(parkedSection()).getByText(/helm returns the raw script path/);
   expect(within(attentionTable()).queryByText(/helm returns the raw script path/)).toBeNull();
 
-  // The resume gesture rides on the row itself — the thread was always
-  // resumable, only never findable.
+  // The row carries its own ask. This fixture is the shape a sitting left
+  // without recording one, and the section says so rather than filing it as an
+  // ordinary quiet row.
   const row = parked.closest('tr');
   expect(row).not.toBeNull();
-  expect(within(row as HTMLElement).getByText(/prefix\+a/)).toBeTruthy();
+  expect(within(row as HTMLElement).getByText('parked for you — no question recorded')).toBeTruthy();
 });
 
-it('counts the two sections separately in the header', async () => {
+it('counts the three sections separately in the header', async () => {
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/4 anchors · 1 parked/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/1 owed · 3 anchors · 1 parked/)).toBeTruthy());
 });
 
 // The defect this split exists to prevent (tk-2plde): a subject that routed
@@ -265,7 +320,7 @@ it('drills into a parked row like any other tile', async () => {
 // A board with nothing parked must not grow an empty section or a "· 0 parked"
 // suffix that reads as a category the operator has to check.
 it('shows no parked section when nothing is parked', async () => {
-  const attentionOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]], sittings: null };
+  const attentionOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]], sittings: null };
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response(JSON.stringify(attentionOnly), { status: 200 })),
@@ -346,4 +401,50 @@ it('ages a sitting against the board it came from, not the clock', async () => {
 
   const live = within(sittingsSection()).getByText('tk-vst01').closest('tr') as HTMLElement;
   expect(within(live).getByText('2h')).toBeTruthy();
+});
+
+// "No anchors need attention" is a claim about the WHOLE board, and the section
+// directly above it has just listed anchors that need one. On an owed-only board
+// the unqualified sentence contradicts the queue it sits under; the same board
+// with nothing on it at all is the only one it is true of.
+it('does not tell an owed-only board that nothing needs attention', async () => {
+  const owedOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]] };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(owedOnly), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/anchorless open PR/)).toBeTruthy());
+  expect(screen.getByText('No other anchors need attention.')).toBeTruthy();
+  expect(screen.queryByText('No anchors need attention.')).toBeNull();
+});
+
+it('tells a board with no rows at all that nothing needs attention', async () => {
+  const nothing: Board = { ...BOARD, total: 0, tiles: [], sittings: null };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(nothing), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/Nothing is owed by you/)).toBeTruthy());
+  expect(screen.getByText('No anchors need attention.')).toBeTruthy();
+});
+
+// attentionTable() addresses the overview by exclusion, so every other table on
+// the page has to be excluded by name. A board whose only row is owed renders
+// no overview table at all while the sittings section still renders one — the
+// arm where a missed exclusion hands a test the wrong table instead of failing.
+it('does not mistake the sittings table for the overview', async () => {
+  const owedOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]] };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(owedOnly), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+  expect(within(sittingsSection()).getByRole('table')).toBeTruthy();
+  expect(() => attentionTable()).toThrow(/no overview table/);
 });

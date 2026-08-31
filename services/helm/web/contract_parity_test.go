@@ -496,13 +496,16 @@ func fixtureBoard() board.Board {
 				CrossRigRefs:   []string{"sl-9k2mq"},
 				OpenHeads:      []string{"tk-eemvf.5", "tk-eemvf.6"},
 				DeadOwnerHeads: []string{"tk-eemvf.4"},
+				// The populated case: one of the eight open children is parked,
+				// so the frontier below reports seven idle and names the eighth.
+				ParkedHeads: []string{"tk-eemvf.7"},
 
 				Takeaway:   &takeaway,
 				TakeawayAt: &takeawayAt,
 				TakeawayBy: &takeawayBy,
 
 				UpdatedAt: time.Date(2026, 8, 7, 9, 30, 0, 0, time.UTC),
-				Frontier:  "8 open · 1 in flight · 1 stuck (dead owner)",
+				Frontier:  "7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
 				Needs:     takeaway,
 				RankScore: 3014004,
 			},
@@ -544,6 +547,7 @@ func fixtureBoard() board.Board {
 				CrossRigRefs:   []string{},
 				OpenHeads:      []string{},
 				DeadOwnerHeads: []string{},
+				ParkedHeads:    []string{},
 
 				// The absent case for the takeaway triple: null, never omitted.
 				Takeaway:   nil,

@@ -62,10 +62,15 @@ func TestFourAnchorBoard(t *testing.T) {
 	if got := len(b.Tiles); got != 4 {
 		t.Fatalf("all four anchors admitted: want 4, got %d", got)
 	}
-	if got := b.Tiles[0].Severity; got != SevHigh {
-		t.Errorf("top row is a stranded epic: want HIGH, got %s", got)
+	// The board leads with the operator's queue, and the decision is the only
+	// row here whose next move is a person's. The overview begins under it.
+	if got := b.Tiles[0].ID; got != "sl-dec" {
+		t.Errorf("the owed decision leads the board: got %s", got)
 	}
-	// the stranded epic floats above the decision.
+	if got := b.Tiles[1].Severity; got != SevHigh {
+		t.Errorf("the overview still opens on a stranded epic: want HIGH, got %s", got)
+	}
+	// the stranded epic still outranks the decision on rank_score.
 	epic, _ := tileByID(b, "tk-epic")
 	dec, _ := tileByID(b, "sl-dec")
 	if !(epic.RankScore > dec.RankScore) {
@@ -115,7 +120,7 @@ func TestMetadataKindDerivation(t *testing.T) {
 	if !strings.Contains(human.Frontier, "routed to the operator") {
 		t.Errorf("frontier must say who owns it: %q", human.Frontier)
 	}
-	if human.Needs != "operator action" {
+	if human.Needs != "routed to you — no question recorded" {
 		t.Errorf("needs: %q", human.Needs)
 	}
 
@@ -132,10 +137,13 @@ func TestMetadataKindDerivation(t *testing.T) {
 	if !strings.Contains(parked.Frontier, "parked") {
 		t.Errorf("frontier: %q", parked.Frontier)
 	}
-	// The resume GESTURE, not a sentence derived from the takeaway — that is
-	// tk-x55wt's bead.
-	if !strings.Contains(parked.Needs, "prefix+a") {
-		t.Errorf("needs must name the resume gesture: %q", parked.Needs)
+	// This fixture recorded no takeaway, so both columns say so rather than
+	// dressing an unfinished handoff as a conversation that concluded.
+	if parked.Frontier != "conversation parked — no takeaway recorded" {
+		t.Errorf("frontier: %q", parked.Frontier)
+	}
+	if parked.Needs != "parked for you — no question recorded" {
+		t.Errorf("needs: %q", parked.Needs)
 	}
 }
 
@@ -233,11 +241,11 @@ func TestParkedWithChildren(t *testing.T) {
 	if bare.Severity != SevLow || bare.MTotal != 0 {
 		t.Errorf("a childless parked row is untouched: %s %d children", bare.Severity, bare.MTotal)
 	}
-	if bare.Frontier != "conversation parked — takeaway recorded" {
-		t.Errorf("…and renders exactly as before: %q", bare.Frontier)
+	if bare.Frontier != "conversation parked — no takeaway recorded" {
+		t.Errorf("…and reports what this one actually left: %q", bare.Frontier)
 	}
-	if !strings.Contains(bare.Needs, "prefix+a") {
-		t.Errorf("…including the resume gesture: %q", bare.Needs)
+	if bare.Needs != "parked for you — no question recorded" {
+		t.Errorf("…in both columns: %q", bare.Needs)
 	}
 
 	human, _ := tileByID(b, "tk-human")
@@ -409,7 +417,7 @@ func TestDispositionDueIsParkedOnly(t *testing.T) {
 	if tile.DispositionDue {
 		t.Error("disposition_due is a parked-row distinction")
 	}
-	if tile.Needs != "operator action" {
+	if tile.Needs != "routed to you — no question recorded" {
 		t.Errorf("the human row keeps its own phrase: %q", tile.Needs)
 	}
 }
@@ -730,7 +738,7 @@ func TestTakeawayWinsNeeds(t *testing.T) {
 	if plain.Takeaway != nil {
 		t.Errorf("absent takeaway is null: got %v", plain.Takeaway)
 	}
-	if plain.Needs != "resume: prefix+a, then the bead id" {
+	if plain.Needs != "parked for you — no question recorded" {
 		t.Errorf("fallback NEEDS: got %q", plain.Needs)
 	}
 }
@@ -1012,7 +1020,7 @@ func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {
 	if dec.Severity != SevElevated || dec.Frontier != "human-gated decision" || dec.Needs != "operator decision" {
 		t.Errorf("unanswered decision: %s / %q / %q", dec.Severity, dec.Frontier, dec.Needs)
 	}
-	if hum.Severity != SevElevated || hum.Needs != "operator action" {
+	if hum.Severity != SevElevated || hum.Needs != "routed to you — no question recorded" {
 		t.Errorf("unanswered human row: %s / %q", hum.Severity, hum.Needs)
 	}
 }
@@ -1225,4 +1233,552 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 	if got := BuildBoard(nil, time.Now(), false, nil, Facts{}).Sittings; got != nil {
 		t.Errorf("Sittings = %v, want nil", got)
 	}
+}
+
+// TestParkedChildIsNotIdleWork: an epic whose child is finished and waiting on
+// a ruling must not report that child as idle work. "Assign or visit" names the
+// wrong bead — the child is already assigned, to the operator.
+func TestParkedChildIsNotIdleWork(t *testing.T) {
+	kids := []Child{
+		{ID: "sl-kg9z6.1.9", Status: "open", Metadata: map[string]string{
+			"gc.routed_to": "human",
+			"gc.takeaway":  "holding for your ruling",
+		}},
+		{ID: "sl-kg9z6.1.2", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
+	}
+	for i := 1; i <= 5; i++ {
+		kids = append(kids, Child{ID: "sl-idle" + string(rune('0'+i)), Status: "open"})
+	}
+	anchors := []Anchor{{
+		ID: "sl-kg9z6.1", Title: "the parent epic", Kind: "epic", Source: "epic",
+		Rig: "signal-loom", Prefix: "sl", Priority: ptr(1), Children: kids,
+	}}
+
+	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "sl-kg9z6.1")
+	if !ok {
+		t.Fatal("epic tile missing")
+	}
+
+	// The wire keeps the honest total and names the split.
+	if tile.Open != 7 {
+		t.Errorf("open = %d, want 7 — the total is not what changed", tile.Open)
+	}
+	if len(tile.ParkedHeads) != 2 {
+		t.Errorf("parked_heads = %v, want the two human-routed children", tile.ParkedHeads)
+	}
+	for _, id := range tile.OpenHeads {
+		if id == "sl-kg9z6.1.9" || id == "sl-kg9z6.1.2" {
+			t.Errorf("open_heads still carries a parked child: %v", tile.OpenHeads)
+		}
+	}
+	if len(tile.OpenHeads) != 5 {
+		t.Errorf("open_heads = %v, want the five genuinely idle children", tile.OpenHeads)
+	}
+
+	// Five children really are idle, so the epic is still stranded: the split
+	// differentiates the count, it does not silence it.
+	if tile.Severity != SevHigh || !tile.Stranded {
+		t.Errorf("five idle children are still stranded: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+	}
+	if !strings.Contains(tile.Frontier, "5 open") || !strings.Contains(tile.Frontier, "2 parked for the operator") {
+		t.Errorf("frontier must decompose the count, got %q", tile.Frontier)
+	}
+}
+
+// TestAllChildrenParkedIsNotStranded: when the ONLY open children are waiting
+// on the operator, the parent has no ask of its own — the asks are on the
+// children's own rows.
+func TestAllChildrenParkedIsNotStranded(t *testing.T) {
+	anchors := []Anchor{{
+		ID: "tk-epic", Title: "everything is with the operator", Kind: "epic", Source: "epic",
+		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
+			{ID: "tk-a", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
+			{ID: "tk-b", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruling owed"}},
+			{ID: "tk-c", Status: "closed"},
+		},
+	}}
+
+	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-epic")
+	if !ok {
+		t.Fatal("epic tile missing")
+	}
+	if tile.Severity == SevHigh || tile.Stranded {
+		t.Errorf("an epic whose every open child is parked is not stranded: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+	}
+	if strings.Contains(tile.Needs, "idle") || strings.Contains(tile.Needs, "assign") {
+		t.Errorf("needs must not send the operator to assign work that is already theirs: %q", tile.Needs)
+	}
+	if !strings.Contains(tile.Needs, "2 parked") {
+		t.Errorf("needs must say what is actually owed, got %q", tile.Needs)
+	}
+	if !strings.Contains(tile.Frontier, "2 parked for the operator") || !strings.Contains(tile.Frontier, "nothing idle") {
+		t.Errorf("frontier = %q", tile.Frontier)
+	}
+	if len(tile.OpenHeads) != 0 {
+		t.Errorf("open_heads = %v, want empty", tile.OpenHeads)
+	}
+}
+
+// TestParkedSplitLeavesUnparkedAnchorsUnchanged pins the no-op case: an anchor
+// with no parked children must band and read exactly as it does without the
+// split.
+func TestParkedSplitLeavesUnparkedAnchorsUnchanged(t *testing.T) {
+	cases := []struct {
+		name     string
+		anchor   Anchor
+		facts    Facts
+		wantSev  Severity
+		frontier string
+		needs    string
+	}{
+		{
+			name: "stranded",
+			anchor: Anchor{ID: "tk-s", Kind: "epic", Source: "epic", Children: []Child{
+				{ID: "tk-s1", Status: "open"}, {ID: "tk-s2", Status: "open"},
+			}},
+			wantSev: SevHigh, frontier: "2 open · 0 in flight (stranded)", needs: "decomposed, idle — assign or visit",
+		},
+		{
+			name: "in flight",
+			anchor: Anchor{ID: "tk-f", Kind: "epic", Source: "epic", Children: []Child{
+				{ID: "tk-f1", Status: "in_progress", Assignee: "polecat-live"},
+			}},
+			facts:   liveOwners("polecat-live"),
+			wantSev: SevNormal, frontier: "1 open · 1 in flight", needs: "in flight",
+		},
+		{
+			name: "dead owner",
+			anchor: Anchor{ID: "tk-d", Kind: "epic", Source: "epic", Children: []Child{
+				{ID: "tk-d1", Status: "in_progress", Assignee: "polecat-gone"},
+			}},
+			wantSev: SevHigh, frontier: "1 open · 1 stuck (dead owner)", needs: "dead owner — recover or reassign",
+		},
+		{
+			name: "all closed",
+			anchor: Anchor{ID: "tk-c", Kind: "epic", Source: "epic", Children: []Child{
+				{ID: "tk-c1", Status: "closed"},
+			}},
+			wantSev: SevLow, frontier: "all 1 closed · 0 open", needs: "all 1 closed — close or extend",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tile, ok := tileByID(BuildBoard([]Anchor{tc.anchor}, fixtureNow, false, nil, tc.facts), tc.anchor.ID)
+			if !ok {
+				t.Fatal("tile missing")
+			}
+			if tile.Severity != tc.wantSev {
+				t.Errorf("severity = %s, want %s", tile.Severity, tc.wantSev)
+			}
+			if tile.Frontier != tc.frontier {
+				t.Errorf("frontier = %q, want %q", tile.Frontier, tc.frontier)
+			}
+			if tile.Needs != tc.needs {
+				t.Errorf("needs = %q, want %q", tile.Needs, tc.needs)
+			}
+			if len(tile.ParkedHeads) != 0 {
+				t.Errorf("parked_heads = %v, want empty", tile.ParkedHeads)
+			}
+		})
+	}
+}
+
+// TestParkedSplitIgnoresAMovingChild: a child that is moving is neither idle nor
+// parked, whatever markers it carries. A rework bead can carry a stale takeaway
+// from the sitting that dispatched it while a polecat works it now.
+func TestParkedSplitIgnoresAMovingChild(t *testing.T) {
+	anchors := []Anchor{{
+		ID: "tk-epic", Kind: "epic", Source: "epic", Children: []Child{
+			{ID: "tk-live", Status: "in_progress", Assignee: "polecat-live",
+				Metadata: map[string]string{"gc.takeaway": "dispatched, work routed"}},
+		},
+	}}
+	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live")), "tk-epic")
+	if !ok {
+		t.Fatal("tile missing")
+	}
+	if len(tile.ParkedHeads) != 0 {
+		t.Errorf("a moving child is not parked: %v", tile.ParkedHeads)
+	}
+	if tile.InProgressLive != 1 || tile.Severity != SevNormal {
+		t.Errorf("live child still reads as in flight: live=%d sev=%s", tile.InProgressLive, tile.Severity)
+	}
+}
+
+// TestHasOwnRowReadsPresenceNotTruthiness: bd round-trips an empty metadata
+// value and the decode keeps the key, so a blanked takeaway still gives the bead
+// a row. This reading must match the gather's selector, or a child is an anchor
+// on the board and idle work under its parent at the same time.
+func TestHasOwnRowReadsPresenceNotTruthiness(t *testing.T) {
+	cases := []struct {
+		name string
+		md   map[string]string
+		want bool
+	}{
+		{"nil", nil, false},
+		{"empty", map[string]string{}, false},
+		{"routed to the operator", map[string]string{"gc.routed_to": "human"}, true},
+		{"routed to an agent", map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}, false},
+		{"takeaway present", map[string]string{"gc.takeaway": "held"}, true},
+		{"takeaway blanked", map[string]string{"gc.takeaway": ""}, true},
+		{"only a neighbouring key", map[string]string{"gc.takeaway_at": "2026-08-26T00:00:00Z"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasOwnRow(tc.md); got != tc.want {
+				t.Errorf("hasOwnRow(%v) = %v, want %v", tc.md, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHumanRoutedTwinBandsWithItsSibling: a bead carrying BOTH markers is
+// gathered twice. The two rows are one bead, so they must band by the same rule
+// — otherwise the dedup arbitrates by rank rather than by which row is truer.
+func TestHumanRoutedTwinBandsWithItsSibling(t *testing.T) {
+	md := map[string]string{
+		"gc.routed_to": "human",
+		"gc.takeaway":  "cut-short — no ruling yet; cap needs clearing",
+	}
+	kid := []Child{{ID: "gc-yblin", Status: "open"}}
+	// Waits are UNKNOWN, as the supervisor backend reports them, so the row
+	// cannot stand down and the case is about the band it keeps.
+	anchors := []Anchor{
+		{ID: "gc-sc8a8", Title: "held for a ruling", Kind: "human", Source: "human", Rig: "gascity", Prefix: "gc",
+			Priority: ptr(1), Metadata: md, Takeaway: md["gc.takeaway"], Children: kid, WaitingUnknown: true},
+		{ID: "gc-sc8a8", Title: "held for a ruling", Kind: "parked", Source: "parked", Rig: "gascity", Prefix: "gc",
+			Priority: ptr(1), Metadata: md, Takeaway: md["gc.takeaway"], Children: kid, WaitingUnknown: true},
+	}
+
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	tile, ok := tileByID(b, "gc-sc8a8")
+	if !ok {
+		t.Fatal("tile missing")
+	}
+	if len(b.Tiles) != 1 {
+		t.Errorf("the two rows are one bead: %d tiles", len(b.Tiles))
+	}
+	if tile.Severity != SevElevated {
+		t.Errorf("severity = %s, want ELEVATED — the operator is the blocker, not a missing assignment", tile.Severity)
+	}
+	if tile.Stranded || strings.Contains(tile.Frontier, "stranded") {
+		t.Errorf("a bead held for an operator ruling is not stranded: stranded=%v frontier=%q", tile.Stranded, tile.Frontier)
+	}
+	if tile.Frontier != "routed to the operator — no agent will take it" {
+		t.Errorf("frontier = %q", tile.Frontier)
+	}
+	if tile.Needs != md["gc.takeaway"] {
+		t.Errorf("needs must spend the takeaway: %q", tile.Needs)
+	}
+	// The child is re-attributed, not suppressed: still on the wire.
+	if tile.Open != 1 || len(tile.OpenHeads) != 1 {
+		t.Errorf("the open child must still be reported: open=%d heads=%v", tile.Open, tile.OpenHeads)
+	}
+}
+
+// TestParkedWithoutTheHumanMarkerKeepsItsRollUp: a parked subject that
+// decomposed is still banded by its children, because "the conversation wants
+// nothing" is a claim about the bead and open work under it falsifies it. Only
+// the human marker earns the exemption, because a human-routed bead never made
+// that claim.
+func TestParkedWithoutTheHumanMarkerKeepsItsRollUp(t *testing.T) {
+	anchors := []Anchor{{
+		ID: "tk-gpqyyn", Title: "a sitting that routed work", Kind: "parked", Source: "parked",
+		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1),
+		Metadata: map[string]string{"gc.takeaway": "routed; nothing further needed here"},
+		Takeaway: "routed; nothing further needed here",
+		Children: []Child{{ID: "tk-kid", Status: "open"}},
+	}}
+	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-gpqyyn")
+	if !ok {
+		t.Fatal("tile missing")
+	}
+	if tile.Severity != SevHigh || !tile.Stranded {
+		t.Errorf("a decomposed parked subject is banded by its children: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+	}
+	if tile.Frontier != "1 open · 0 in flight (stranded)" {
+		t.Errorf("frontier = %q", tile.Frontier)
+	}
+}
+
+// TestOperatorRowBeatsAHigherSeverityRow is the case the whole partition exists
+// for, and it fails on a globally ranked board by construction.
+//
+// tk-owed is one bead routed to the operator, carrying a takeaway, subtree 1.
+// tk-container is a stranded epic with 300 open children. The epic bands HIGH,
+// the demand bands ELEVATED, so severity alone already files the demand second
+// — and even at equal severity the epic's subtree would win the rank tiebreak
+// 300 to 1.
+func TestOperatorRowBeatsAHigherSeverityRow(t *testing.T) {
+	kids := make([]Child, 0, 300)
+	for i := 0; i < 300; i++ {
+		kids = append(kids, Child{ID: fmt.Sprintf("tk-c%d", i), Status: "open"})
+	}
+	owedAt := "2026-06-01T00:00:00Z"
+	anchors := []Anchor{
+		{ID: "tk-container", Title: "big stranded epic", Kind: "epic", Source: "epic",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: fixtureNow, Children: kids},
+		// WaitingUnknown is the shape the supervisor backend produces: a
+		// takeaway whose blocker statuses are unreadable is NOT [ruled], so the
+		// row is still asking.
+		{ID: "tk-owed", Title: "one bead waiting on a person", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
+			Metadata:       map[string]string{mdRoutedTo: routedHuman, mdTakeaway: "approve the cutover or say no"},
+			Takeaway:       "approve the cutover or say no",
+			TakeawayAt:     owedAt,
+			WaitingUnknown: true},
+	}
+
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	container, _ := tileByID(b, "tk-container")
+	owed, _ := tileByID(b, "tk-owed")
+	if container.Severity != SevHigh || owed.Severity != SevElevated {
+		t.Fatalf("fixture no longer sets up the contest: container=%s owed=%s", container.Severity, owed.Severity)
+	}
+	if container.RankScore <= owed.RankScore {
+		t.Fatalf("fixture no longer sets up the contest: the container must outrank the demand (%d vs %d)",
+			container.RankScore, owed.RankScore)
+	}
+
+	if !owed.Owed {
+		t.Error("a bead routed to the operator is owed")
+	}
+	if container.Owed {
+		t.Error("a stranded container is not owed by anyone in particular")
+	}
+	if b.Tiles[0].ID != "tk-owed" {
+		t.Errorf("the owed row leads the board despite ranking below the container: got %s", b.Tiles[0].ID)
+	}
+
+	// And the DEFAULT surface does not merely reorder — it REPLACES. The
+	// container is not in it at all.
+	q := OperatorQueue(b.Tiles)
+	if len(q) != 1 || q[0].ID != "tk-owed" {
+		t.Fatalf("the default surface is the queue alone: got %v", ids(q))
+	}
+}
+
+// TestOperatorQueueIsOrderedByAge: the queue is a list of decisions, so it is
+// ordered by how long each has been owed. Rank would order it by subtree size,
+// which is what the partition is escaping.
+func TestOperatorQueueIsOrderedByAge(t *testing.T) {
+	human := func(id, takeawayAt string, kids int) Anchor {
+		a := Anchor{ID: id, Title: id, Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdRoutedTo: routedHuman, mdTakeaway: "answer me"},
+			Takeaway: "answer me", UpdatedAt: fixtureNow, WaitingUnknown: true}
+		if takeawayAt != "" {
+			a.TakeawayAt = takeawayAt
+		}
+		for i := 0; i < kids; i++ {
+			a.Children = append(a.Children, Child{ID: fmt.Sprintf("%s-c%d", id, i), Status: "in_progress", Assignee: "live"})
+		}
+		return a
+	}
+	// The ids run OPPOSITE to the ages on purpose: the final tiebreak in
+	// [owedFirst] is id-ascending, and ids that happened to agree with the
+	// ages would pass this test with the age comparison deleted.
+	anchors := []Anchor{
+		human("tk-a-recent", "2026-06-29T00:00:00Z", 200),
+		human("tk-c-ancient", "2026-01-02T00:00:00Z", 0),
+		human("tk-b-middle", "2026-05-01T00:00:00Z", 50),
+	}
+
+	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("live"))
+	q := OperatorQueue(b.Tiles)
+
+	want := []string{"tk-c-ancient", "tk-b-middle", "tk-a-recent"}
+	if got := ids(q); !equalIDs(got, want) {
+		t.Errorf("queue order = %v, want oldest first %v", got, want)
+	}
+	// The rank order is the reverse, which is what makes this test mean
+	// something: the newest row carries 200 children and outranks both.
+	recent, _ := tileByID(b, "tk-a-recent")
+	ancient, _ := tileByID(b, "tk-c-ancient")
+	if recent.RankScore <= ancient.RankScore {
+		t.Fatalf("fixture no longer inverts rank against age: recent=%d ancient=%d",
+			recent.RankScore, ancient.RankScore)
+	}
+}
+
+// TestUndatedOwedRowSortsLast: an unknown age is not evidence of a long wait.
+// The supervisor backend reads no updated_at at all, so reading "undated" as
+// "oldest" would file every row from that backend ahead of every dated one.
+func TestUndatedOwedRowSortsLast(t *testing.T) {
+	// Ids opposite to the intended order, so the id tiebreak cannot pass this.
+	anchors := []Anchor{
+		{ID: "tk-a-undated", Title: "no date anywhere", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdRoutedTo: routedHuman}},
+		{ID: "tk-z-dated", Title: "asked yesterday", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdRoutedTo: routedHuman}, UpdatedAt: daysAgo(1)},
+	}
+	q := OperatorQueue(BuildBoard(anchors, fixtureNow, false, nil, Facts{}).Tiles)
+	if got := ids(q); !equalIDs(got, []string{"tk-z-dated", "tk-a-undated"}) {
+		t.Errorf("queue order = %v, want the dated row first", got)
+	}
+}
+
+// TestRuledRowLeavesTheQueue: [ruled] is the stand-down state — the operator
+// already answered and the routed work has landed. Those rows are banded LOW
+// precisely so they stop asking, and the queue has to agree with the band or
+// the stand-down does nothing.
+func TestRuledRowLeavesTheQueue(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-answered", Title: "already ruled", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdRoutedTo: routedHuman, mdTakeaway: "ruled: ship it"},
+			Takeaway: "ruled: ship it", UpdatedAt: fixtureNow},
+		{ID: "tk-asking", Title: "still asking", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdRoutedTo: routedHuman}, UpdatedAt: fixtureNow},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	answered, _ := tileByID(b, "tk-answered")
+	if answered.Severity != SevLow {
+		t.Fatalf("fixture: the answered row must be ruled/LOW, got %s", answered.Severity)
+	}
+	if answered.Owed {
+		t.Error("a ruled row is not owed — it was answered")
+	}
+	if got := ids(OperatorQueue(b.Tiles)); !equalIDs(got, []string{"tk-asking"}) {
+		t.Errorf("queue = %v, want only the unanswered row", got)
+	}
+}
+
+// TestCapQueueDoesNotRationParkedRows: CapRows gives `parked` a small separate
+// budget because those rows are floored to LOW and would fall off the end of a
+// ranked board. Inside the queue a parked row is a conversation waiting on the
+// operator and earned its place by age, so that budget would cut the queue
+// exactly where it carries the most.
+func TestCapQueueDoesNotRationParkedRows(t *testing.T) {
+	var tiles []Tile
+	for i := 0; i < DefaultMaxParked+5; i++ {
+		tiles = append(tiles, Tile{ID: fmt.Sprintf("tk-p%02d", i), Kind: "parked", Owed: true})
+	}
+	if got := len(CapQueue(tiles, DefaultMaxRows)); got != len(tiles) {
+		t.Errorf("CapQueue kept %d of %d parked rows", got, len(tiles))
+	}
+	if got := len(CapRows(tiles, DefaultMaxRows, DefaultMaxParked)); got != DefaultMaxParked {
+		t.Fatalf("fixture: CapRows must ration these to %d, got %d", DefaultMaxParked, got)
+	}
+	if got := len(CapQueue(tiles, 3)); got != 3 {
+		t.Errorf("CapQueue still honors its own limit: got %d", got)
+	}
+	if got := len(CapQueue(tiles, 0)); got != len(tiles) {
+		t.Errorf("limit 0 is uncapped: got %d", got)
+	}
+}
+
+// TestCityOverviewIsRankedNotPartitioned: Board.Tiles leaves BuildBoard
+// partitioned owed-first, so the `--all` view has to sort it back. The
+// partition is what the queue is for; reading it as a ranked list files the
+// city's highest-ranked row behind a one-bead demand.
+func TestCityOverviewIsRankedNotPartitioned(t *testing.T) {
+	kids := make([]Child, 0, 300)
+	for i := 0; i < 300; i++ {
+		kids = append(kids, Child{ID: fmt.Sprintf("tk-c%d", i), Status: "open"})
+	}
+	anchors := []Anchor{
+		{ID: "tk-container", Title: "big stranded epic", Kind: "epic", Source: "epic",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: fixtureNow, Children: kids},
+		{ID: "tk-owed", Title: "one bead waiting on a person", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
+			Metadata:       map[string]string{mdRoutedTo: routedHuman, mdTakeaway: "approve the cutover or say no"},
+			Takeaway:       "approve the cutover or say no",
+			TakeawayAt:     "2026-06-01T00:00:00Z",
+			WaitingUnknown: true},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	if got := ids(b.Tiles); !equalIDs(got, []string{"tk-owed", "tk-container"}) {
+		t.Fatalf("fixture: the board is partitioned owed-first, got %v", got)
+	}
+
+	overview := CityOverview(b.Tiles)
+	if got := ids(overview); !equalIDs(got, []string{"tk-container", "tk-owed"}) {
+		t.Errorf("the overview is ranked, highest first: got %v", got)
+	}
+	// The board is shared with every other view of the same render, so the
+	// re-sort may not reach back into it.
+	if got := ids(b.Tiles); !equalIDs(got, []string{"tk-owed", "tk-container"}) {
+		t.Errorf("CityOverview must not reorder the board it was given: got %v", got)
+	}
+}
+
+// TestSilentDemandNamesItsSilence: the takeaway is the whole reason a row owed
+// by a person carries a sentence, so its ABSENCE is the finding — whoever
+// routed or parked the row never recorded what is owed. A generic phrase reads
+// like a valid ask and leaves the operator nothing to act on. Blank counts as
+// absent: collapseWS flattens whitespace-only prose to empty.
+func TestSilentDemandNamesItsSilence(t *testing.T) {
+	for _, tc := range []struct{ name, takeaway string }{
+		{"absent", ""},
+		{"blank", " \t\n "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchors := []Anchor{
+				{ID: "tk-human", Title: "Disposition: one PR needs the operator", Kind: "human", Source: "human",
+					Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(4),
+					Metadata: map[string]string{mdRoutedTo: routedHuman, mdTakeaway: tc.takeaway},
+					Takeaway: tc.takeaway},
+				{ID: "tk-parked", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
+					Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+					Metadata: map[string]string{mdTakeaway: tc.takeaway},
+					Takeaway: tc.takeaway},
+				// The control. Same kind, same shape, one recorded sentence —
+				// so a phrase that came from anywhere but the takeaway fails
+				// here instead of passing everywhere.
+				{ID: "tk-spoken", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
+					Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+					Metadata: map[string]string{mdTakeaway: "ship it or say why not"},
+					Takeaway: "ship it or say why not"},
+			}
+			b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+			human, ok := tileByID(b, "tk-human")
+			if !ok {
+				t.Fatal("the human-routed tile is missing")
+			}
+			if human.Takeaway != nil {
+				t.Errorf("a silent takeaway is null on the wire, not %q", *human.Takeaway)
+			}
+			if !human.Owed {
+				t.Error("a silent demand is still owed — it is the operator's move either way")
+			}
+			if human.Needs != "routed to you — no question recorded" {
+				t.Errorf("the human row names its silence: %q", human.Needs)
+			}
+
+			parked, ok := tileByID(b, "tk-parked")
+			if !ok {
+				t.Fatal("the parked tile is missing")
+			}
+			if parked.Needs != "parked for you — no question recorded" {
+				t.Errorf("the parked row names its silence: %q", parked.Needs)
+			}
+			// The frontier is a claim about what the sitting left behind, so it
+			// may not say "takeaway recorded" one column from NEEDS saying none
+			// was.
+			if parked.Frontier != "conversation parked — no takeaway recorded" {
+				t.Errorf("the frontier agrees with it: %q", parked.Frontier)
+			}
+
+			spoken, ok := tileByID(b, "tk-spoken")
+			if !ok {
+				t.Fatal("the control tile is missing")
+			}
+			if spoken.Needs != "ship it or say why not" {
+				t.Errorf("a recorded takeaway is still the NEEDS answer: %q", spoken.Needs)
+			}
+			if spoken.Frontier != "conversation parked — takeaway recorded" {
+				t.Errorf("…and the frontier still says one was left: %q", spoken.Frontier)
+			}
+		})
+	}
+}
+
+// ids is a test helper.
+func ids(tiles []Tile) []string {
+	out := make([]string, 0, len(tiles))
+	for _, t := range tiles {
+		out = append(out, t.ID)
+	}
+	return out
 }

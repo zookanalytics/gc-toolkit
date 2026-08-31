@@ -53,6 +53,14 @@ export interface Tile {
   kind: string;
   title: string;
   severity: Severity;
+  /**
+   * The next move on this row is a PERSON'S: an unanswered human gate, or a
+   * parked conversation whose recorded waits have all landed. Not derivable
+   * from `severity`, which is coarse and shared — a one-bead demand bands
+   * ELEVATED while a stranded container bands HIGH, so rank alone always sorts
+   * the operator's own queue underneath the city's.
+   */
+  owed: boolean;
   /** Rank proxy: subtree size + priority weight + capped cross-rig refs. */
   weight: number;
   /** An open visit bead names this anchor — a conversation is holding it. */
@@ -76,7 +84,12 @@ export interface Tile {
   in_flight_heads: string[] | null;
   /** Convoys only: `false` marks the unowned-convoy orphan exception. `null` for every other kind. */
   owned: boolean | null;
-  /** Open work with nothing live in it and no open visit. */
+  /**
+   * Open work with nothing live in it, no open visit, and no UNANSWERED human
+   * gate — the three ways a row's silence is already accounted for. A bead
+   * routed to the operator is not stranded; once the ruling is recorded the
+   * gate is discharged and open children under it are ordinary idle work again.
+   */
   stranded: boolean;
   empty: boolean;
   complete: boolean;
@@ -92,9 +105,16 @@ export interface Tile {
   priority: number | null;
   /** Bead ids belonging to OTHER rigs, scanned out of the anchor's prose. */
   cross_rig_refs: string[] | null;
-  /** Idle open children — unclaimed, and not carried by a live workflow. */
+  /** Idle open children — unclaimed, not carried by a live workflow, and not parked. */
   open_heads: string[] | null;
   dead_owner_heads: string[] | null;
+  /**
+   * Open children that carry a board row of their own — routed to the operator,
+   * or holding a takeaway. Split out of `open_heads` so a parent cannot report
+   * a child that is waiting on a ruling as work nobody has picked up. `open`
+   * still counts them.
+   */
+  parked_heads: string[] | null;
   /**
    * Beads this row depends on by a `blocks` edge, and the subset still open.
    * On a parked conversation these are the work a sitting routed out of it:
@@ -153,9 +173,15 @@ export interface Sitting {
 }
 
 /**
- * Board is the envelope returned at `<mount>/helm`. Tiles arrive sorted by
- * `rank_score` descending and deduplicated by `id`; `total` is the count before
- * any row cap.
+ * Board is the envelope returned at `<mount>/helm`. Tiles arrive deduplicated
+ * by `id` and PARTITIONED: every `owed` row first, oldest-owed first, then
+ * everything else by `rank_score` descending. `total` is the count before any
+ * row cap.
+ *
+ * The partition is on the wire rather than left to each renderer because
+ * `rank_score` cannot express it — severity is coarse and shared, so the term
+ * that really orders the list is subtree size, and a demand owed by a person
+ * has a subtree of one. Filter on `owed` to take just the queue.
  */
 export interface Board {
   /** RFC 3339. */

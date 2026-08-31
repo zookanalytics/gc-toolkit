@@ -20,18 +20,12 @@ import (
 // (github.com/steveyegge/beads), opening each rig's own `.beads` store the way
 // the `bd` CLI does. It satisfies [Source].
 //
-// WHY THIS EXISTS (tk-x89rn). [SupervisorSource] cannot carry two facts the
-// board model needs, and no HTTP endpoint supplies them:
-//
-//   - updated_at is absent from EVERY supervisor bead payload — /beads,
-//     /beads/graph/{id}, /beads/ready, /bead/{id} and /convoy/{id} alike. The
-//     Bead schema declares the field, but it serializes `omitzero` and arrives
-//     zero, and there is no `fields`/`full` parameter to widen the projection.
-//     Without it stale_days is pinned to 0 and the NORMAL→ELEVATED stale bump
-//     can never fire.
-//   - metadata reaches only the single-bead reads (/bead/{id}, /convoy/{id});
-//     the list and graph endpoints omit it, so the gather cannot see it without
-//     one extra round trip per anchor.
+// WHY THIS EXISTS (tk-x89rn). updated_at is absent from EVERY supervisor bead
+// payload — /beads, /beads/graph/{id}, /beads/ready, /bead/{id} and
+// /convoy/{id} alike. The Bead schema declares the field, but it serializes
+// `omitzero` and arrives zero, and there is no `fields`/`full` parameter to
+// widen the projection. Without it stale_days is pinned to 0 and the
+// NORMAL→ELEVATED stale bump can never fire.
 //
 // Of the two paths the data-access contract sanctions — the in-process library,
 // or a new/extended supervisor endpoint — only this one is buildable from this
@@ -39,14 +33,11 @@ import (
 // rig. This is also what the bash PoC always did (`bd list --db <rig>/.beads`),
 // so it is the proven shape rather than a new one.
 //
-// It is also the only backend that can gather the METADATA-keyed anchor kinds
-// (tk-2v08m): selecting beads by `gc.routed_to=human` or by the presence of
-// `gc.takeaway` is a filter the library applies in the query, while the
-// supervisor's list endpoints omit metadata entirely and would need one extra
-// round trip per candidate bead to rediscover it. Under GC_HELM_SOURCE=
-// supervisor those two kinds are simply absent from the board — a narrower
-// board, not a wrong one, and the same shape of gap the source seam already
-// documents for `updated_at`.
+// It gathers the METADATA-keyed anchor kinds (tk-2v08m) in the QUERY rather
+// than after the fetch: `gc.routed_to=human` and the presence of `gc.takeaway`
+// are filters the library applies in the store. [SupervisorSource] reads the
+// same two kinds client-side, so the selector is shared — see
+// [metadataAnchor.matches], which must keep the two readings identical.
 //
 // DATA-ACCESS CONTRACT. This still honours the package contract: reads go
 // through the sanctioned beads library, never raw Dolt. There is no
@@ -429,6 +420,22 @@ type metadataAnchor struct {
 	// label prefixes this kind's entry in partial_errors, so a degraded gather
 	// names the kind an operator would recognise rather than a metadata key.
 	label string
+}
+
+// matches is the CLIENT-SIDE form of the same selector the fields above build
+// into a store query, for a backend with no metadata predicate. The two
+// readings must agree, or a bead is an anchor on one backend and absent from
+// the other.
+//
+// Presence, not truthiness, is the test for a key-only kind: `bd` round-trips
+// an empty metadata value and decodeMetadata keeps the KEY for one, so a
+// takeaway that was set and then blanked still marks the bead as parked.
+func (ma metadataAnchor) matches(md map[string]string) bool {
+	v, ok := md[ma.key]
+	if !ok {
+		return false
+	}
+	return ma.value == "" || v == ma.value
 }
 
 var metadataAnchors = []metadataAnchor{

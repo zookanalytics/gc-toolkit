@@ -162,19 +162,23 @@ type Progress struct {
 // Tile is one rendered row of the board — the additive contract mirrored by the
 // frontend and emitted verbatim by `helm-svc board --json`.
 //
-// FIELD ORDER IS THE BASH OBJECT LITERAL'S ORDER, deliberately.
-// encoding/json emits struct fields in declaration order, so keeping this
-// sequence aligned with gc-helm.sh's `{ id:…, rig:…, … }` means the two boards
-// serialize the same keys in the same sequence and a human can diff the two
-// outputs line for line. Renaming or removing a field breaks both the
-// TypeScript mirror and the CLI contract; adding one is safe if it is added to
-// the bash literal in the same position.
+// FIELD ORDER IS PART OF THE CONTRACT. encoding/json emits struct fields in
+// declaration order, so the sequence below is what every consumer sees.
+// Renaming or removing a field breaks the TypeScript mirror and the CLI
+// contract; adding one at the end is safe.
 type Tile struct {
 	ID       string   `json:"id"`
 	Rig      string   `json:"rig"`
 	Kind     string   `json:"kind"`
 	Title    string   `json:"title"`
 	Severity Severity `json:"severity"`
+
+	// Owed marks a row whose next move is a PERSON'S: an unanswered human gate,
+	// or a parked conversation whose recorded waits have all landed. It is not
+	// derivable from the band — severity is coarse and shared, so a one-bead
+	// demand (ELEVATED) sorts below a stranded container (HIGH) and rank alone
+	// can never put the operator's queue first. [OperatorQueue] is the partition.
+	Owed bool `json:"owed"`
 
 	// Weight is the rank PROXY: subtree size + priority weight + a capped
 	// cross-rig-ref count. It is the middle lane of rank_score.
@@ -221,6 +225,13 @@ type Tile struct {
 	CrossRigRefs   []string `json:"cross_rig_refs"`
 	OpenHeads      []string `json:"open_heads"`
 	DeadOwnerHeads []string `json:"dead_owner_heads"`
+
+	// ParkedHeads is the open children that carry a board row of their OWN —
+	// routed to the operator, or holding a takeaway. They are split out of
+	// OpenHeads so a parent cannot report a child that is waiting on a ruling
+	// as work nobody has picked up. Open still counts them; this names which
+	// ones they are.
+	ParkedHeads []string `json:"parked_heads"`
 
 	// WaitingOn is every bead this row depends on by a `blocks` edge;
 	// WaitingOnOpen is the subset that has NOT closed. DispositionDue is the
@@ -333,8 +344,11 @@ type Facts struct {
 	RigNames []string
 }
 
-// Board is the envelope returned by the service. Tiles are sorted by rank_score
-// descending and deduplicated by id; Total is the count before any row cap.
+// Board is the envelope returned by the service. Tiles are deduplicated by id
+// and ordered by [owedFirst] — the operator's queue, oldest-owed first, then
+// everything else by rank_score descending. Total is the count before any row
+// cap. Tile.Owed is where the two partitions meet, so a consumer that wants
+// only one of them does not have to re-derive the boundary.
 type Board struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	Total       int       `json:"total"`

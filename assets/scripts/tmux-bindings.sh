@@ -30,10 +30,16 @@ CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --city-path $(sq "$CITY_PATH")"
 
 # Helm — the sibling of prefix+S. prefix+S answers "what's running";
-# prefix+b answers "what needs me": the ranked cross-rig board rendered from
-# `helm-svc board --json`. Pick a row and it files a VISIT on that bead,
-# which a converse session holds for you. See tmux-pick-helm.sh.
+# prefix+b answers "what needs me": the operator's own queue, oldest first,
+# rendered from `helm-svc board --json`. Pick a row and it files a VISIT on that
+# bead, which a converse session holds for you. See tmux-pick-helm.sh.
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
+
+# prefix+B is the city overview — every anchor ranked together. It is a separate
+# key rather than the same one because the two answer different questions, and
+# only the queue answers the one a person presses a key to ask. Same script,
+# same pick-a-row behavior, `--all` selects the wider set.
+gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH") --all"
 
 # Operator-origin visit intake — type a message, get a durable, routed
 # conversation on it. Input handling (a `gum write` popup) lives in the
