@@ -11,11 +11,12 @@
 #   - the rescue property doctor/check-state-space depends on: a raw TAB
 #     inside a JSON string must not cost the whole payload;
 #   - no in-script inline scrub outside the fence;
-#   - the diff-time enforcement (tools/lint-learned.d/inline-ctrl-scrub.sh)
+#   - the lint enforcement (tools/lint-learned.d/inline-ctrl-scrub.sh)
 #     still fires on each shape it exists to catch.
 #
-# The detector is what runs in the refinery gate on every change set; this
-# suite is the pack-wide sweep the detector's per-diff scope cannot do.
+# The detector is a shape check, run by tools/lint-learned.sh over every
+# tracked file; this suite proves what a shape check cannot — that the block
+# behaves on every byte, and that all its copies are one block.
 # Hermetic: reads the repo only; no gc, no city, no network.
 
 set -u
