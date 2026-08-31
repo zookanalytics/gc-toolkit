@@ -83,6 +83,15 @@ out=$(check_merge base base); rc=$?
 eq "$rc" 0 "no artifact in the merge result exits 0"
 has "$out" "carries no seed audit" "…as a stated fact, not a silent pass"
 
+echo "# the stub tree a pack carries before its first render is MISSING, not stale"
+on base; git -C "$R" checkout -q -b stub
+mkdir -p "$R/generated/seed-audit"
+printf 'rendered on first install\n' > "$R/generated/seed-audit/README.md"
+commit "the pre-render stub"
+out=$(check_merge base stub); rc=$?
+eq "$rc" 0 "a stub carrying neither INDEX.md nor SOURCES.txt exits 0"
+has "$out" "carries no seed audit" "…for the stated reason, not by falling through a file test"
+
 echo "# the input set is the MERGED TREE's to define, not this checkout's"
 # A head that widens digest_inputs records SOURCES.txt under the wider set. Read
 # with this checkout's older definition it would look stale for a reason that is

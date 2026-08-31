@@ -67,8 +67,15 @@ if [ "$actual_sources" != "$(cat "$sources")" ]; then
     pairs() { grep -v '^#' | paste - - | LC_ALL=C sort; }
     drifted=$(comm -3 <(pairs < "$sources") <(printf '%s\n' "$actual_sources" | pairs) \
         | sed 's/^\t//' | cut -f1 | LC_ALL=C sort -u | head -10)
-    detail "inputs that moved since generated/seed-audit/ was generated:"
-    while IFS= read -r f; do [ -n "$f" ] && detail "  $f"; done <<< "$drifted"
+    if [ -n "$drifted" ]; then
+        detail "inputs that moved since generated/seed-audit/ was generated:"
+        while IFS= read -r f; do detail "  $f"; done <<< "$drifted"
+    else
+        # Reachable only by editing the manifest outside its records, since a
+        # renderer that writes them differently is itself a hashed input and
+        # would appear in the list above. Saying so beats an empty heading.
+        detail "No input accounts for it: SOURCES.txt differs from a fresh manifest outside its per-input records, so it was hand-edited or written by another tool."
+    fi
     detail "The committed audit describes a seed no agent receives — and every file in it still reads as a valid prompt, which is why this is a check and not a review."
     detail "Fix: assets/scripts/render-seed-audit.sh && git add generated/seed-audit"
     exit 2

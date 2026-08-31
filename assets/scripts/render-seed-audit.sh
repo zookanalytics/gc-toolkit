@@ -73,15 +73,15 @@ die() { printf 'render-seed-audit: %s\n' "$*" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --check)        MODE="check" ;;
-        --check-merge)  MODE="check-merge"; shift; MERGE_BASE="${1:-}"; shift; MERGE_HEAD="${1:-}" ;;
+        --check)         MODE="check" ;;
+        --check-merge)   MODE="check-merge"; shift; MERGE_BASE="${1:-}"; shift; MERGE_HEAD="${1:-}" ;;
         --print-sources) MODE="sources" ;;
-        --install-hook) MODE="install-hook" ;;
-        --out)          shift; OUT="${1:-}" ;;
-        --root)         shift; ROOT="$(cd "${1:-}" 2>/dev/null && pwd)" || die "--root: no such directory" ;;
-        --jobs)         shift; JOBS="${1:-}" ;;
-        -h|--help)      sed -n '/^# USAGE/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *)              die "unknown argument: $1" ;;
+        --install-hook)  MODE="install-hook" ;;
+        --out)           shift; OUT="${1:-}" ;;
+        --root)          shift; ROOT="$(cd "${1:-}" 2>/dev/null && pwd)" || die "--root: no such directory" ;;
+        --jobs)          shift; JOBS="${1:-}" ;;
+        -h|--help)       sed -n '/^# USAGE/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)               die "unknown argument: $1" ;;
     esac
     shift
 done
@@ -162,10 +162,11 @@ digest_inputs() {
     printf '%s\n' "$root/assets/scripts/render-seed-audit.sh"
 }
 
-MANIFEST_HEADER='# Every input generated/seed-audit is rendered from: one record per input,
-# path then sha256, sorted by path. Written and read by
-# assets/scripts/render-seed-audit.sh; the path line between two hashes is what
-# lets two branches that moved different inputs merge.'
+MANIFEST_HEADER='# Every input generated/seed-audit is rendered from, sorted by path: one
+# record per input, path then sha256. Written by assets/scripts/render-seed-audit.sh
+# and compared against a fresh hashing of the same files by its --check-merge and
+# by doctor/check-seed-audit-current. The path line between two hashes is the
+# unchanged line git needs to merge two branches that moved different inputs.'
 
 source_manifest() {
     local root="$1" f
@@ -243,7 +244,11 @@ if [ "$MODE" = "check-merge" ]; then
 
     merged_audit="$WORK/generated/seed-audit"
     merged_sources="$merged_audit/SOURCES.txt"
-    if [ ! -d "$merged_audit" ]; then
+    # An absent artifact — or the stub tree a pack carries before its first
+    # render — is MISSING, not stale. A rendered INDEX.md without the manifest
+    # beside it is neither: it was hand-edited or written by an older renderer,
+    # and calling that current would pass the case the mode exists to catch.
+    if [ ! -f "$merged_audit/INDEX.md" ] && [ ! -f "$merged_sources" ]; then
         printf 'merging %s into %s carries no seed audit — nothing to keep current\n' \
             "$MERGE_HEAD" "$MERGE_BASE"
         exit 0
@@ -274,8 +279,16 @@ if [ "$MODE" = "check-merge" ]; then
                               <(manifest_pairs "$actual_sources" | LC_ALL=C sort) \
         | sed 's/^\t//' | cut -f1 | LC_ALL=C sort -u | head -10)"
     printf 'seed audit would be STALE at the merge of %s into %s:\n' "$MERGE_HEAD" "$MERGE_BASE" >&2
-    printf 'inputs whose content does not match the manifest the merged tree commits:\n' >&2
-    while IFS= read -r f; do [ -n "$f" ] && printf '  %s\n' "$f" >&2; done <<< "$drifted"
+    if [ -n "$drifted" ]; then
+        printf 'inputs whose content does not match the manifest the merged tree commits:\n' >&2
+        while IFS= read -r f; do printf '  %s\n' "$f" >&2; done <<< "$drifted"
+    else
+        # Reachable only by editing the manifest outside its records, since a
+        # renderer that writes them differently is itself a hashed input and
+        # would appear in the list above. Saying so beats an empty heading.
+        printf 'no input accounts for it: the manifest differs from a fresh one outside its\n' >&2
+        printf 'per-input records, so it was hand-edited or written by another tool.\n' >&2
+    fi
     printf 'Neither branch is wrong on its own: the artifact is a function of the whole source\n' >&2
     printf 'tree, so a branch that moves an input and a branch that re-renders clobber each\n' >&2
     printf 'other on landing. Bring the head branch current with %s, then:\n' "$MERGE_BASE" >&2
