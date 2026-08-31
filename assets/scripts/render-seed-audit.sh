@@ -197,7 +197,7 @@ if [ "$MODE" = "check-merge" ]; then
         die "--check-merge: '$MERGE_HEAD' does not merge into '$MERGE_BASE' in memory — a conflict, or a git without 'merge-tree --write-tree' (2.38)"
     fi
 
-    WORK="$(mktemp -d)"
+    WORK="$(mktemp -d)" || die "mktemp failed"
     trap 'rm -rf "$WORK"' EXIT
     git -C "$ROOT" archive --format=tar "$merged_tree" | tar -x -C "$WORK" \
         || die "--check-merge: could not materialize merged tree $merged_tree"

@@ -140,6 +140,12 @@ has "$out" "does not merge into" "…rather than reporting on a tree that cannot
 out=$(bash "$SUT" --root "$R" --check-merge 2>&1); rc=$?
 eq "$rc" 2 "--check-merge without its two revs exits 2"
 
+# Both arms fail closed here; what the guard buys is the diagnosis, so the
+# assertion is on the message rather than the exit.
+out=$(TMPDIR=/nonexistent-under-test bash "$SUT" --root "$R" --check-merge base fresh 2>&1); rc=$?
+eq "$rc" 2 "a scratch dir that cannot be made exits 2"
+has "$out" "mktemp failed" "…naming the cause, not the tar failure downstream of it"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
