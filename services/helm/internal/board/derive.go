@@ -799,6 +799,19 @@ func poolRouted(b Blocker) bool {
 // only the operator can give is a `decision`, and anything else a person holds
 // carries the route that says so. Either way no automated actor will close it,
 // which is what makes the anchor `asking` rather than busy.
+//
+// The route clause is deliberately wider than the proposal's three authored
+// shapes, and it is the COMPATIBILITY PATH the design asks for. tk-s4fg87's
+// phase 3 converts a capped anchor into a decision bead plus an edge, after
+// which `wedged` and `asking` are one primitive read two ways. Until that
+// conversion reaches them, a capped anchor is the unconverted form of exactly
+// that bead — so an anchor blocked on one is waiting on a person today, and
+// narrowing this to `decision` alone would hide the wait until a migration
+// nobody has run yet. The row names what it is waiting on, so a reader can see
+// that two rows in the queue share one cause.
+//
+// A visit never reaches here: escalate.sh attaches one with a `tracks` edge, so
+// it is not a blocker at all.
 func demand(b Blocker) bool {
 	return b.Status != "closed" &&
 		(b.IssueType == "decision" || b.RoutedTo == routedHuman)

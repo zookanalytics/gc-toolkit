@@ -2425,3 +2425,50 @@ func TestWedgedAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 		t.Errorf("needs = %q, want the wedge named", tile.Needs)
 	}
 }
+
+// TestCappedAnchorBlockerIsADemandToday is the live shape this rule was
+// measured against, and it is the one case where the demand test is wider than
+// tk-s4fg87's three authored shapes.
+//
+// On live gc-toolkit, tk-j81t84 blocks on tk-dchq5: a `bug` at pre_open_gate,
+// routed to a person by the convergence cap, open for thirteen days. It is not
+// a `decision` and not a visit, so a narrow reading calls it an ordinary
+// prerequisite and the waiting row stays out of the queue — which is where it
+// had been sitting, banded LOW, with a takeaway saying the work was finished and
+// only an operator could open its PR.
+//
+// tk-s4fg87's phase 3 converts capped anchors into exactly the decision bead a
+// narrow reading would want. Until it runs, this IS that bead.
+func TestCappedAnchorBlockerIsADemandToday(t *testing.T) {
+	cappedAt := fixtureNow.Add(-13 * 24 * time.Hour)
+	a := mergeAnchor("tk-waiter", map[string]string{"pr_number": "473"},
+		Blocker{
+			ID: "tk-capped", Title: "the fix its PR cannot open", Status: "open",
+			// The shape signoff.sh's cap arm leaves behind: routed to a person,
+			// no pool route, an ordinary work type.
+			RoutedTo: "human", IssueType: "bug", CreatedAt: cappedAt,
+		})
+	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-waiter")
+
+	if !tile.Owed {
+		t.Error("an anchor whose only blocker no automated actor will close is waiting on a person")
+	}
+	if !tile.PROwedSince.Equal(cappedAt) {
+		t.Errorf("pr_owed_since = %v, want the blocker's own created_at %v", tile.PROwedSince, cappedAt)
+	}
+	// Two rows in the queue can share one cause, so the waiting row has to name
+	// the bead it is waiting on rather than just asserting that it waits.
+	if !strings.Contains(tile.Needs, "the fix its PR cannot open") {
+		t.Errorf("needs must name what it is waiting on, got %q", tile.Needs)
+	}
+
+	// A pool-routed blocker of the same shape is the control: something will
+	// claim it, so nothing is owed.
+	b := mergeAnchor("tk-busy", nil, Blocker{
+		ID: "tk-rework", Title: "rework in flight", Status: "open",
+		RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "bug", CreatedAt: cappedAt,
+	})
+	if mustTile(t, BuildBoard([]Anchor{b}, fixtureNow, false, nil, Facts{}), "tk-busy").Owed {
+		t.Error("a pool-routed blocker of the same shape is the city's move, not the operator's")
+	}
+}
