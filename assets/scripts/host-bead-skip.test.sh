@@ -5,9 +5,8 @@
 # only beads that name an OWNER, and stamps that owner as `.owner` for the
 # liveness loop. A bead naming no owner is already in the pool's court and
 # needs no recovery. Owned-but-dead beads are exactly the witness's recovery
-# domain: no class of owned bead is exempt from
-# orphan recovery. Visits and their
-# converse sessions need no carve-out either — a visit whose session died
+# domain: no class of owned bead is exempt from orphan recovery. Visits and
+# their converse sessions need no carve-out either — a visit whose session died
 # mid-hold SHOULD return to the pool (respawn-and-reconstitute-from-the-record
 # is the cold continuity path; specs/2026-08-fresh-start/spine-port.md, D4).
 #
