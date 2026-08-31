@@ -6,7 +6,20 @@ scope = "rig"
 provider = "codex"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
-nudge = "Run gc hook --claim --json; it checks assigned work first, then routed pool work."
+# A pool slot's first turn carries this nudge and nothing else: there is no
+# behavioral prime in the launch, so whatever the nudge omits is absent. It
+# opens with gc prime because a codex session reaches this point with none of
+# its rendered doctrine loaded, and it states the task rather than a command
+# because a command is all a session without doctrine will do.
+nudge = """
+Run gc prime to load your doctrine before you act. Then claim and complete one \
+work item: gc hook --claim --json returns assigned work first and routed pool \
+work second, and the bead it names is yours to carry through its formula to \
+the terminal step. Claiming is not completing. A reason of \
+existing_assignment means you already hold the work, so execute it instead of \
+reporting it. If you cannot proceed, record why on the bead and clear your \
+assignee so the work is re-offered.\
+"""
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0

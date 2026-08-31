@@ -5,7 +5,20 @@ provider = "claude"
 wake_mode = "fresh"
 # Per-agent home; per-bead worktrees are created under it by workspace-setup.
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
-nudge = "Run gc hook --claim --json; it checks assigned work first, then routed pool work."
+# A pool slot's first turn carries this nudge and nothing else: there is no
+# behavioral prime in the launch, so whatever the nudge omits is absent. It
+# states the task rather than a command, because a session that reads it as a
+# command runs the claim and stops, holding work nothing will re-offer. Unlike
+# polecat-codex it does not open with gc prime: a claude session arrives with
+# its rendered doctrine already in context.
+nudge = """
+Claim and complete one work item: gc hook --claim --json returns assigned work \
+first and routed pool work second, and the bead it names is yours to carry \
+through its formula to the terminal step. Claiming is not completing. A reason \
+of existing_assignment means you already hold the work, so execute it instead \
+of reporting it. If you cannot proceed, record why on the bead and clear your \
+assignee so the work is re-offered.\
+"""
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0
