@@ -1,10 +1,16 @@
-# gc-toolkit — primary pack for a Gas City city. Native roster, no imports.
+# gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, converse, mechanik, polecat-codex, proactive). There is no
-# gastown import and there are no cross-pack prompt patches: each agent's
+# witness, deacon, converse, mechanik, polecat-codex, proactive, dog). There is
+# no gastown import and there are no cross-pack prompt patches: each agent's
 # prompt.template.md is purpose-written and injects shared doctrine from
 # template-fragments/ directly.
+#
+# "No imports" scopes to PACK imports: this file declares no [imports.*] and
+# no [rigs.imports.*]. Formula inheritance is a separate mechanism and is
+# deliberate: formulas/mol-polecat-work.toml declares
+# extends = ["mol-polecat-base"], which resolves through the formula search
+# path to the core pack (specs/2026-08-rewrite/plan.md:62).
 #
 # OVERLAY WIRING. Claude-hook overlays (overlays/cycle-recycle,
 # overlays/work-context) are staged into an agent's work dir via

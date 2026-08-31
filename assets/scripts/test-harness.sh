@@ -27,7 +27,8 @@ harness_init() {
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
   export STUB_UPDATE_FAIL="" STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
-  export STUB_SLING_FAIL=""
+  export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
+  export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
@@ -228,6 +229,7 @@ case "$verb" in
     # dependency rows; up = rows depending on the id) and -t/--type.
     case "${1:-}" in
       list)
+        [ -n "${STUB_DEP_GARBAGE:-}" ] && { echo "not-json"; exit 0; }
         id="${2:-}"; shift 2 || true
         dir=""; dtyp=""
         while [ $# -gt 0 ]; do
@@ -298,6 +300,13 @@ case "$sub" in
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment) exit 0 ;;
       create)
+        # The composed body reaches the log only as a temp path, so keep a copy
+        # of what the reviewer would read.
+        : > "$G/pr_create_body.txt"
+        while [ $# -gt 0 ]; do
+          case "$1" in --body-file) shift; [ -f "${1:-}" ] && cat "$1" > "$G/pr_create_body.txt" ;; esac
+          shift || true
+        done
         [ -n "${STUB_PR_CREATE_URL:-}" ] && echo "$STUB_PR_CREATE_URL"
         exit "${STUB_PR_CREATE_RC:-0}" ;;
       *) echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
@@ -321,10 +330,21 @@ case "$sub" in
       */commits/*)
         br="${path##*/commits/}"
         f="$G/head_$(san "$br")"
-        [ -s "$f" ] || { echo "gh: no head" >&2; exit 1; }
+        # No fixture = the ref does not exist (a branch a merge deleted). Real
+        # gh writes the error body to STDOUT, ignores --jq, and exits non-zero.
+        if [ ! -s "$f" ]; then
+          printf '{"message":"No commit found for SHA: %s","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"422"}' "$br"
+          exit 1
+        fi
         sha=$(cat "$f")
         repo="${path#repos/}"; repo="${repo%%/commits/*}"
-        out="{\"sha\":\"$sha\",\"html_url\":\"https://github.com/$repo/commit/$sha\"}" ;;
+        out="{\"sha\":\"$sha\",\"html_url\":\"https://github.com/$repo/commit/$sha\"}"
+        # STUB_GH_COMMIT_RC: a well-formed body delivered with a non-zero exit
+        # — the one failure shape no check on the output can refuse.
+        if [ -n "${STUB_GH_COMMIT_RC:-}" ]; then
+          if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+          exit "$STUB_GH_COMMIT_RC"
+        fi ;;
       */pulls/*/reviews/*/dismissals)
         printf 'DISMISS %s\n' "$path" >> "${STUB_GH_LOG:?}"
         exit "${STUB_DISMISS_RC:-0}" ;;
@@ -355,6 +375,17 @@ set -u
 case "$*" in
   *"remote get-url origin"*) echo "${STUB_ORIGIN_URL:-}" ;;
   *"symbolic-ref"*) echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
+  *"ls-remote"*)
+    # STUB_LS_REMOTE names a file of branch names, one per line, served in
+    # ls-remote's own "<sha>\trefs/heads/<name>" shape. STUB_LS_REMOTE_RC
+    # models the unreachable remote: real git prints nothing and exits
+    # non-zero, which no check on the output alone can tell from "no refs".
+    [ -n "${STUB_LS_REMOTE_RC:-}" ] && exit "$STUB_LS_REMOTE_RC"
+    while IFS= read -r b; do
+      [ -n "$b" ] || continue
+      printf '%s\trefs/heads/%s\n' "$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)" "$b"
+    done < "${STUB_LS_REMOTE:-/dev/null}"
+    exit 0 ;;
   *) exit 0 ;;
 esac
 STUB

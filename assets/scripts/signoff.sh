@@ -10,10 +10,22 @@
 # clear the marker and file ONE routed rework child — or, at the round cap,
 # stamp check.<name>=exception@<head> and route the anchor to a human instead.
 # The city never approves its own PRs: nothing here ever passes --approve.
+# Every oid stamped into a marker is a full 40 lowercase hex; a shorter one is
+# refused, since merge.sh can only read the marker by comparing it to a head.
+# Both verdicts are refused when the reviewed commit has left the branch.
+# Both are refused on an already-closed review bead: signoff closes the bead
+# itself, last, so a closed one was recorded or retired before it was judged.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
-# Exit: 0 recorded · 1 refused, nothing written · 2 a write did not read back
+# Exit: 0 recorded · 1 refused, no verdict written · 2 a write did not read back
 #       (the review bead is left open so the gate stays owed).
 set -uo pipefail
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 usage() {
   cat >&2 <<'U'
@@ -26,7 +38,8 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
   --notes-file   the verdict body; default: the review bead's notes
   --reviewed-oid the commit the review pinned; default: the review bead's own
                  reviewed_oid (stamped at dispatch), else the live head of the
-                 anchor's branch (git ls-remote origin <branch>)
+                 anchor's branch (git ls-remote origin <branch>). A pin that
+                 has left the branch is refused, not bound.
 
 env: GC_MAX_REVIEW_ROUNDS  rework rounds before the gate records
                            exception@<head> and routes to a human (default 3)
@@ -56,13 +69,21 @@ if [ -n "$NOTES_FILE" ] && [ ! -r "$NOTES_FILE" ]; then
 fi
 
 # bd JSON with the C0 set stripped: a raw control byte in notes breaks jq.
-bd_json()   { gc bd "$@" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037'; }
+bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
 is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; nothing written"; exit 1; }
+
+# A verdict answering a closed bead may not clear a marker or spend a round:
+# the dispatch it answers was already recorded, or retired unjudged.
+REVIEW_STATUS=$(printf '%s' "$REVIEW_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
+if [ "$REVIEW_STATUS" = "closed" ]; then
+  warn "review bead $REVIEW_BEAD is already closed (gc.outcome='$(row_meta "$REVIEW_ROW" gc.outcome)'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the gate if it is still owed."
+  exit 1
+fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 [ -n "$CHECK_NAME" ] || CHECK_NAME=codex
 
@@ -109,13 +130,87 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 # then correctly fails the merge's green@<live head> condition and re-gates).
 REVIEWED_OID="$OID_OVERRIDE"
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
+
+# The live head of the anchor's branch: the PR's own head post-open (what the
+# merge condition compares against), the remote ref pre-open. Empty is
+# "unanswerable", never "no head".
+live_head() {
+  if [ -n "$POST_OPEN" ]; then
+    gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null
+  elif [ -n "$BRANCH" ]; then
+    git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}'
+  fi
+}
+
 if [ -z "$REVIEWED_OID" ]; then
   [ -n "$BRANCH" ] || { warn "anchor $ANCHOR names no branch and no --reviewed-oid was given; nothing to bind the verdict to"; exit 1; }
   REVIEWED_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}')
 fi
+# The verdict is stamped into check.<g>, whose grammar is <verb>@<40-hex oid>.
+# An abbreviated sha passes a hex-only test yet equals no live head merge.sh
+# could read it against, so the marker holds the anchor instead of gating it.
+REVIEWED_OID=$(printf '%s' "$REVIEWED_OID" | tr '[:upper:]' '[:lower:]')
 case "$REVIEWED_OID" in
-  ''|*[!0-9a-fA-F]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
+  ''|*[!0-9a-f]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
 esac
+if [ "${#REVIEWED_OID}" -ne 40 ]; then
+  warn "reviewed oid '$REVIEWED_OID' is ${#REVIEWED_OID} hex character(s); check.$CHECK_NAME requires the full 40 — pass the unabbreviated commit; nothing written"
+  exit 1
+fi
+
+# Answers on | gone | unknown for whether <oid> is still in the branch's
+# history. Commits added on top keep it 'on' — the reviewed diff is still
+# there and green@<pin> fails the merge's live-head condition on its own. Only
+# a rewrite makes it 'gone'. Unknown proceeds: a probe that cannot reach the
+# remote must not discard a review round that happened.
+oid_on_branch() { # <oid> <live-head>
+  local oid="$1" live="${2:-}" base rc
+  [ -n "$live" ] || { printf 'unknown'; return 0; }
+  [ "$oid" != "$live" ] || { printf 'on'; return 0; }
+  if [ -n "$PR_REPO" ]; then
+    base=$(gh api --hostname "$PR_HOST" "repos/$PR_REPO/compare/$oid...$live" \
+      --jq '.merge_base_commit.sha // empty' 2>/dev/null)
+    if [ "$base" = "$oid" ]; then printf 'on'; return 0
+    elif [ -n "$base" ]; then printf 'gone'; return 0
+    fi
+  fi
+  [ -n "$BRANCH" ] && git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+  git merge-base --is-ancestor "$oid" "$live" >/dev/null 2>&1; rc=$?
+  case "$rc" in
+    0) printf 'on' ;;
+    1) printf 'gone' ;;
+    *) printf 'unknown' ;;   # git could not resolve one of the commits
+  esac
+}
+
+LIVE_HEAD=$(live_head)
+if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
+  # mol-review re-reads the dispatch pin on the next claim, so a dead one left
+  # in place re-reviews the same departed commit. Clear only the bead's own pin:
+  # a caller who overrode a live one has not staled the dispatch. Best-effort —
+  # the refusal stands either way.
+  if [ "$(row_meta "$REVIEW_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
+    gc bd update "$REVIEW_BEAD" --unset-metadata reviewed_oid >/dev/null 2>&1 || true
+    # A denied or raced delete does not always fail the call, and the note and
+    # warning below both state the pin as cleared. Read it back. row_meta
+    # answers '' for a key that is gone and for a row it could not read, so
+    # absence is proof only from a row that resolved.
+    AFTER_ROW=$(bd_json show "$REVIEW_BEAD")
+    if ! is_rows "$AFTER_ROW"; then
+      warn "head moved to ${LIVE_HEAD:-unknown}, but $REVIEW_BEAD would not resolve on the read-back after clearing the dead dispatch pin, so whether reviewed_oid=$REVIEWED_OID is gone is unproven. Nothing was written and no round was spent. If the pin survived, the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Check it by hand: gc bd show $REVIEW_BEAD --json, then gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
+      exit 2
+    fi
+    if [ "$(row_meta "$AFTER_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
+      warn "head moved to ${LIVE_HEAD:-unknown}, but clearing the dead dispatch pin did not read back on $REVIEW_BEAD: reviewed_oid is still $REVIEWED_OID. Nothing was written and no round was spent. The pin stands, so the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Clear it by hand: gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
+      exit 2
+    fi
+  fi
+  gc bd update "$REVIEW_BEAD" --append-notes \
+    "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No marker written, no rework filed; the dispatch pin is cleared for a re-review at the live head." \
+    >/dev/null 2>&1 || true
+  warn "head moved: reviewed oid $REVIEWED_OID has left branch '${BRANCH:-?}', now at $LIVE_HEAD. No verdict written — re-pin at $LIVE_HEAD, review that commit, and submit the verdict it earns."
+  exit 1
+fi
 
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.
@@ -179,7 +274,7 @@ dismiss_superseded() {
   local handle live raw rc stale rid paired
   handle=$(gh api --hostname "$PR_HOST" user -q .login 2>/dev/null)
   [ -n "$handle" ] || return 0
-  live=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null)
+  live=$(live_head)
   [ "$live" = "$REVIEWED_OID" ] || return 0
   raw=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json autoMergeRequest 2>/dev/null) || return 0
   printf '%s' "$raw" | jq -e 'type == "object" and has("autoMergeRequest") and .autoMergeRequest == null' >/dev/null 2>&1 || return 0
@@ -202,17 +297,15 @@ dismiss_superseded() {
 }
 
 # Rework rounds already spent on this anchor: one routed child per round, each
-# stamped source_review_bead by the signoff that filed it (the primary count).
-# The backup is dispatch_count on the ANCHOR — that is where gate-ensure
-# writes it. An unreadable ledger reads 0 — capping on a guess parks live work.
+# stamped source_review_bead by the signoff that filed it. The cap bounds
+# non-convergence, which only an attempted rework can demonstrate, so review
+# dispatches are not rounds however many read the same commit. An unreadable
+# ledger reads 0 — capping on a guess parks live work.
 count_rounds() {
-  local kids n dc
+  local kids n
   kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
   n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
   case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  dc=$(row_meta "$ANCHOR_ROW" dispatch_count)
-  case "$dc" in ''|*[!0-9]*) dc=0 ;; esac
-  [ "$dc" -gt "$n" ] && n="$dc"
   printf '%s' "$n"
 }
 

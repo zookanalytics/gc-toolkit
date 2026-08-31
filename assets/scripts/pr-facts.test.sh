@@ -4,8 +4,9 @@
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
 # cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds veto, unstamped orphans adopted), classified rebase or
-# merge by the head branch and stamped prepare_mode, routed only once that stamp
-# reads back; stale-gate -> one
+# merge by the head branch and stamped prepare_mode, counted as dispatched only
+# once that stamp AND the route read back, with a child stranded by a lost route
+# stamp re-routed rather than buried by the dedup; stale-gate -> one
 # re-review child per head, carrying mol-review via gc sling --on (dedup,
 # pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
@@ -146,6 +147,54 @@ eq "$(meta new-2 prepare_mode)" "<absent>" "the stamp really was dropped"
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "an unstamped child is inert, never routable AND rewriting"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 
+echo "# …a route stamp that does not persist leaves the rework UNDISPATCHED"
+store "[$(anchor RT 32)]"
+printf '%s' "$(prview 32 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_32.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "the route stamp really was dropped"
+has "$out" "did not record gc.routed_to=$FIX; left unrouted" "the lost route stamp is caught by a read-back"
+hasnt "$out" "filed rebase-mode rework new-2 routed to" "an unreachable rework is never reported as dispatched"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+
+echo "# …and the NEXT pass re-routes it, past the branch dedup that would bury it"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the stranded child is adopted, not suppressed as a dup"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and the route lands on the retry"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…with no twin minted"
+has "$out" "filed rebase-mode rework new-2 routed to $FIX" "…and only now is the dispatch reported"
+
+echo "# …once routed, the child dedups normally again"
+out=$(run)
+has "$out" "already covers branch" "a routed child suppresses a twin as before"
+
+echo "# …a stranded rework a polecat has since claimed is never re-stamped under them"
+held='{"id":"held-rw","status":"in_progress","assignee":"rig/gc-toolkit.polecat-2","notes":"",'
+held="$held"'"title":"Rebase PR#33 onto main: base rewritten, PR conflicts",'
+held="$held"'"metadata":{"branch":"polecat/x33","rejection_reason":"stale base at head sha-33: x"}}'
+store "[$(anchor RT2 33), $held]"
+printf '%s' "$(prview 33 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_33.json"
+out=$(run)
+has "$out" "already covers branch" "a claimed child still suppresses the arm"
+eq "$(meta held-rw 'gc.routed_to')" "<absent>" "…and nothing is written under the holder"
+
+echo "# …a strand never overrides a LIVE sibling's claim on the force-push"
+strand='{"id":"strand-rw","status":"open","assignee":"","notes":"",'
+strand="$strand"'"title":"Rebase PR#34 onto main: base rewritten, PR conflicts",'
+strand="$strand"'"metadata":{"branch":"polecat/x34","rejection_reason":"stale base at head sha-34: x"}}'
+livesib='{"id":"live-rw","status":"in_progress","assignee":"rig/gc-toolkit.polecat-3","notes":"",'
+livesib="$livesib"'"title":"Rebase PR#34 onto main: base rewritten, PR conflicts",'
+livesib="$livesib"'"metadata":{"branch":"polecat/x34","rejection_reason":"stale base at head sha-old: x"}}'
+# The strand is listed FIRST: it is open, so it matches the dedup's live arm and
+# would be the one picked as the dup — the veto must not depend on that order.
+store "[$strand, $livesib, $(anchor RT3 34)]"
+printf '%s' "$(prview 34 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_34.json"
+out=$(run)
+has "$out" "rework live-rw already covers branch" "the live sibling still vetoes, strand or no strand"
+has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable strand is named, not silently left"
+eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
 printf '%s' "$(prview 24 MERGED CLEAN MERGEABLE)" | jq -c 'del(.mergeCommit)' > "$GH_DIR/pr_view_24.json"
@@ -174,6 +223,34 @@ grep -qxF "new-2|blocks|F9" "$STUB_DEPS" && ok "re-review blocks the anchor" || 
 echo "# …dedup on second pass"
 out=$(run)
 hasnt "$out" "filed re-review" "a live review naming the anchor suppresses a twin"
+
+# The stale-gate scan addresses each declared gate by its own name; whitespace
+# around a separator must not join two gates into one.
+echo "# a multi-gate check_set is scanned per gate, never as one joined name"
+store "[$(anchor F9m 19 ',"check_set":"codex, triage","check.triage":"green@sha-OLD"')]"
+printf '%s' "$(prview 19 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_19.json"
+: > "$STUB_GC_LOG"
+out=$(run)
+hasnt "$out" "codextriage" "the comma list is not collapsed into one gate name"
+has "$out" "check.triage green@sha-OLD is stale" "the stale second gate is found under its own name"
+eq "$(meta new-2 check_name)" "triage" "the re-review names the real gate"
+
+echo "# an exception at a stale head rides the same re-review path as a stale green"
+store "[$(anchor F9b 21 ',"check.codex":"exception@sha-OLD"')]"
+printf '%s' "$(prview 21 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_21.json"
+out=$(run)
+has "$out" "check.codex exception@sha-OLD is stale (live head sha-21)" \
+  "a head that moved past an exception is re-reviewed, not left terminal"
+eq "$(meta new-2 anchor_bead)" "F9b" "the re-review links the anchor"
+eq "$(meta new-2 reviewed_oid)" "sha-21" "…and pins the live head"
+d=$(jq -r '.[] | select(.id == "new-2") | .description' "$STUB_STORE")
+has "$d" "check.codex was exception@sha-OLD" "the dispatch note names the verb that staled, not a hardcoded green@"
+
+echo "# …and an exception AT the live head is still terminal"
+store "[$(anchor F9c 22 ',"check.codex":"exception@sha-22"')]"
+printf '%s' "$(prview 22 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_22.json"
+out=$(run)
+hasnt "$out" "filed re-review" "a verdict bound to the live head dispatches nothing"
 
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"

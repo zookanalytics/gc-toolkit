@@ -12,7 +12,19 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
 P="$TMP/pack"
-mkdir -p "$P/assets/scripts" "$P/generated/seed-audit/agents" "$P/generated/seed-audit/formulas"
+mkdir -p "$P/assets/scripts" "$P/generated/seed-audit/agents" "$P/generated/seed-audit/formulas" "$TMP/bin"
+# Stub gc: run.sh reads `gc version` off PATH and compares it to the version
+# the artifact records, so an unstubbed fixture is green only where gc is absent.
+cat > "$TMP/bin/gc" <<'GC'
+#!/usr/bin/env bash
+[ "${1:-}" = "version" ] && { printf '%s\n' "${GCVER:-gc v1}"; exit 0; }
+exit 0
+GC
+chmod +x "$TMP/bin/gc"
+# The upkeep arm sits behind a rev-parse guard: without a real repo it is
+# skipped, and "hook wired" then reports a read that never happened.
+git init -q -b main "$P"
+git -C "$P" config core.hooksPath assets/hooks
 # Stub renderer: --print-digest answers from $DIGEST so tests steer it.
 cat > "$P/assets/scripts/render-seed-audit.sh" <<'R'
 #!/usr/bin/env bash
@@ -26,13 +38,17 @@ index() { # <digest>
 }
 printf 'p\n' > "$P/generated/seed-audit/agents/worker.md"
 printf 'f\n' > "$P/generated/seed-audit/formulas/mol-x.md"
-run_check() { DIGEST="${DIGEST:-}" GC_PACK_DIR="$P" bash "$CHECK" 2>&1; }
+# core.hooksPath resolves local-then-global, so an operator with a global one
+# set would answer case 9's unset read; /dev/null pins the fixture to local.
+run_check() { DIGEST="${DIGEST:-}" GCVER="${GCVER:-gc v1}" GC_PACK_DIR="$P" PATH="$TMP/bin:$PATH" \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$CHECK" 2>&1; }
 
 # --- 1. current digest passes -------------------------------------------------
 index d1
 OUT=$(DIGEST=d1 run_check); RC=$?
 eq "$RC" "0" "a matching digest is OK"
 has "$OUT" "1 agent prompt(s), 1 formula recipe(s)" "the summary counts the artifact"
+has "$OUT" "hook wired" "the green line reports an upkeep read it actually made"
 
 # --- 2. stale digest is an ERROR ------------------------------------------------
 OUT=$(DIGEST=d2 run_check); RC=$?
@@ -72,7 +88,29 @@ OUT=$(DIGEST=d2 run_check); RC=$?
 eq "$RC" "2" "staleness is still detected through bash despite the mode bit"
 chmod +x "$P/assets/scripts/render-seed-audit.sh"
 
-# --- 7. no renderer shipped = nothing to keep current -------------------------------------
+# --- 7. a gc newer than the artifact records warns, never errors ------------------
+OUT=$(DIGEST=d1 GCVER='gc v9' run_check); RC=$?
+eq "$RC" "1" "a host gc newer than the rendered artifact warns"
+has "$OUT" "gc version drift" "the drift is named"
+has "$OUT" 'rendered with "gc v1", host runs "gc v9"' "both versions are shown"
+has "$OUT" "upkeep is not fully wired" "content is current, only upkeep is flagged"
+
+# --- 8. a hook wired somewhere else warns -----------------------------------------
+git -C "$P" config core.hooksPath .githooks
+OUT=$(DIGEST=d1 run_check); RC=$?
+eq "$RC" "1" "a hooksPath pointing somewhere else warns"
+has "$OUT" 'core.hooksPath is ".githooks", not assets/hooks' "the configured path is named once"
+has "$OUT" "upkeep is not fully wired" "the summary separates upkeep from content"
+git -C "$P" config core.hooksPath assets/hooks
+
+# --- 9. no hook wired at all warns ------------------------------------------------
+git -C "$P" config --unset core.hooksPath
+OUT=$(DIGEST=d1 run_check); RC=$?
+eq "$RC" "1" "an unset hooksPath warns"
+has "$OUT" "core.hooksPath is unset, not assets/hooks" "the unset case reads as one value"
+git -C "$P" config core.hooksPath assets/hooks
+
+# --- 10. no renderer shipped = nothing to keep current -------------------------------------
 rm "$P/assets/scripts/render-seed-audit.sh"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a pack shipping no renderer has nothing to keep current"

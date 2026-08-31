@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
 // fakeStore is a beadStore over in-memory fixtures. It stands in for a real
@@ -33,31 +34,88 @@ type fakeStore struct {
 // returned its fixtures regardless would let the gather ask a wrong question
 // and still pass.
 func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.IssueFilter) ([]*beads.Issue, error) {
-	// Every gather query must scope its statuses; a fake that ignored the filter
-	// would let a regression through silently. Exactly two shapes are legal:
+	// An id-keyed read is the one shape with no status scope, and that is the
+	// point of it: the sitting gather resolves a subject bead whether or not it
+	// has since closed. It is matched first so the scope rule below stays a
+	// rule about the SEARCHES.
+	if len(filter.IDs) > 0 {
+		return f.searchByIDs(filter)
+	}
+
+	// Every other gather query must scope its statuses; a fake that ignored the
+	// filter would let a regression through silently. Three shapes are legal:
 	//
 	//   Status=open              the ANCHOR queries — an anchor is an open bead.
 	//   Statuses=[open,inprog]   the JOIN queries (visits, workflow roots and
 	//                            steps) — a CLAIMED visit is a held conversation,
 	//                            not a finished one, and a claimed step is the
 	//                            normal state of a live molecule.
+	//   Status=closed            the recently-closed sitting pass, which MUST
+	//                            carry a window: closed beads accumulate without
+	//                            limit, so an unbounded one is a bug the fake
+	//                            refuses rather than serves.
 	//
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
 	switch {
 	case filter.Status != nil && *filter.Status == beads.StatusOpen && len(filter.Statuses) == 0:
+	case filter.Status != nil && *filter.Status == beads.StatusClosed && len(filter.Statuses) == 0:
+		if filter.ClosedAfter == nil {
+			return nil, errors.New("a closed-bead query must bound its window with ClosedAfter")
+		}
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
 	default:
-		return nil, errors.New("expected status=open (anchors) or statuses=[open,in_progress] (joins)")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins) or status=closed+ClosedAfter (sittings)")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
 		if err, bad := f.failType[kind]; bad {
 			return nil, err
 		}
-		return f.issues[kind], nil
+		return f.matching(f.issues[kind], filter), nil
 	}
 	return f.searchByMetadata(filter)
+}
+
+// searchByIDs models `id IN (...)`, which is what the shared SQL builder emits
+// for IssueFilter.IDs.
+func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error) {
+	if err, bad := f.failMeta["__ids__"]; bad {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, id := range filter.IDs {
+		want[id] = true
+	}
+	var out []*beads.Issue
+	for _, kind := range slices.Sorted(maps.Keys(f.issues)) { // deterministic order
+		for _, iss := range f.issues[kind] {
+			if want[iss.ID] {
+				out = append(out, iss)
+			}
+		}
+	}
+	return out, nil
+}
+
+// matching applies the status and closed-window predicates the library applies
+// in SQL. Without it the fake would hand an open-visit query the closed visits
+// too, and the two sitting passes could not be told apart.
+func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
+	var out []*beads.Issue
+	for _, iss := range in {
+		if filter.Status != nil && iss.Status != *filter.Status {
+			continue
+		}
+		if len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, iss.Status) {
+			continue
+		}
+		if filter.ClosedAfter != nil && (iss.ClosedAt == nil || !iss.ClosedAt.After(*filter.ClosedAfter)) {
+			continue
+		}
+		out = append(out, iss)
+	}
+	return out
 }
 
 // searchByMetadata models the library's metadata predicates over the fixtures:
@@ -86,11 +144,12 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 	// here is what makes the dedup in BuildBoard a safety net rather than the
 	// only thing standing between the operator and a duplicated row.
 	//
-	// The rule is scoped to the anchor gathers. A JOIN query (statuses=[open,
-	// in_progress]) is not gathering anchors at all — it is reading visit beads
-	// and molecule steps, which are ordinary tasks — so demanding the exclusion
-	// there would be asserting a rule that does not apply.
-	if len(filter.Statuses) == 0 {
+	// The rule is scoped to the anchor gathers, which are the status=open ones.
+	// A JOIN query (statuses=[open,in_progress]) and the closed-sitting pass are
+	// not gathering anchors at all — they read visit beads and molecule steps,
+	// which are ordinary tasks — so demanding the exclusion there would be
+	// asserting a rule that does not apply.
+	if filter.Status != nil && *filter.Status == beads.StatusOpen {
 		for _, want := range []string{"epic", "decision", "convoy"} {
 			if !excluded[want] {
 				return nil, errors.New("a metadata-keyed gather must exclude the typed anchor kinds; missing " + want)
@@ -115,7 +174,7 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 			out = append(out, iss)
 		}
 	}
-	return out, nil
+	return f.matching(out, filter), nil
 }
 
 func (f *fakeStore) GetDependenciesWithMetadata(_ context.Context, id string) ([]*beads.IssueWithDependencyMetadata, error) {
@@ -313,6 +372,10 @@ func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore,
 	base := []BeadsOption{
 		WithCityPath(root),
 		withGCClient(&fakeGC{}),
+		// A pinned clock, so a fixture's close stamp sits a fixed distance
+		// inside or outside the sitting window instead of drifting with the
+		// wall clock. A caller that needs another one appends its own.
+		withClock(func() time.Time { return testNow }),
 		withStoreOpener(func(_ context.Context, beadsDir string) (beadStore, error) {
 			rig := filepath.Base(filepath.Dir(beadsDir))
 			st, ok := stores[rig]
@@ -1308,5 +1371,201 @@ func TestBeadsProbeHandleIsReusedByGather(t *testing.T) {
 	}
 	if opens != 1 {
 		t.Errorf("probe + gather opened the store %d times, want 1 — a startup probe must not cost an extra connection", opens)
+	}
+}
+
+// --- sittings --------------------------------------------------------------
+
+// visitBead builds an OPEN visit bead: a sitting a converse session is holding.
+func visitBead(id, title, meta string, created time.Time) *beads.Issue {
+	i := issue(id, title, "task", 2, created, meta)
+	i.CreatedAt = created
+	return i
+}
+
+// closedVisitBead builds a FINISHED sitting. The close stamp is what the
+// window filters on, so it is set explicitly rather than derived.
+func closedVisitBead(id, title, meta string, created, closed time.Time) *beads.Issue {
+	i := visitBead(id, title, meta, created)
+	i.Status = beads.StatusClosed
+	i.UpdatedAt = closed
+	i.ClosedAt = &closed
+	return i
+}
+
+// sittingStore is one subject visited three times, plus a fourth sitting whose
+// close fell outside the window.
+//
+// The subject carries ONE takeaway, stamped at 09:55 — inside the middle
+// sitting's span and outside the other two. That is the whole attribution
+// question in fixture form: the takeaway on a bead belongs to the sitting that
+// wrote it, and a subject visited more than once has sittings that did not.
+func sittingStore() *fakeStore {
+	at := func(h, m int) time.Time { return time.Date(2026, 8, 1, h, m, 0, 0, time.UTC) }
+	return &fakeStore{failMeta: map[string]error{}, issues: map[string][]*beads.Issue{
+		"task": {
+			issue("tk-parked", "the subject three sittings talked about", "task", 2, at(9, 55),
+				`{"gc.takeaway":"routed to the polecat pool","gc.takeaway_at":"2026-08-01T09:55:00Z","gc.takeaway_by":"converse"}`),
+			issue("tk-quiet", "a subject nobody reached a takeaway on", "task", 2, at(7, 0), `{}`),
+			issue("tk-settled", "a subject whose only sitting ended inside the window", "task", 2, at(9, 30), `{}`),
+
+			visitBead("tk-sit-open", "visit: tk-parked — still talking",
+				`{"task_kind":"visit","gc.continuation_group":"tk-parked","gc.claimed_at":"2026-08-01T11:00:00Z","gc.session_name":"gc-toolkit__converse-1"}`,
+				at(10, 45)),
+			closedVisitBead("tk-sit-recent", "visit: tk-parked — routed the work",
+				`{"task_kind":"visit","gc.continuation_group":"tk-parked","gc.outcome":"diagnosed","gc.claimed_at":"2026-08-01T09:00:00Z","gc.session_name":"gc-toolkit__converse-2"}`,
+				at(8, 55), at(10, 0)),
+			closedVisitBead("tk-sit-earlier", "visit: tk-parked — nothing to do yet",
+				`{"task_kind":"visit","gc.continuation_group":"tk-parked","gc.outcome":"folded","gc.claimed_at":"2026-08-01T06:00:00Z"}`,
+				at(5, 55), at(7, 0)),
+			// The Held control: one sitting, closed, inside the window. Nothing
+			// holds tk-settled, and only a closed-sitting leak into the visit
+			// join could say otherwise.
+			closedVisitBead("tk-sit-settled", "visit: tk-settled — done and closed",
+				`{"task_kind":"visit","gc.continuation_group":"tk-settled","gc.outcome":"benign","gc.claimed_at":"2026-08-01T09:30:00Z"}`,
+				at(9, 25), at(9, 45)),
+			// Closed 4 days before the pinned clock: inside the store, outside
+			// any default window.
+			closedVisitBead("tk-sit-old", "visit: tk-quiet — long since done",
+				`{"task_kind":"visit","gc.continuation_group":"tk-quiet","gc.outcome":"moot"}`,
+				time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC), time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC)),
+		},
+	}}
+}
+
+func sittingsByID(res *Result) map[string]board.Sitting {
+	out := map[string]board.Sitting{}
+	for _, s := range res.Facts.Sittings {
+		out[s.ID] = s
+	}
+	return out
+}
+
+func gatherSittings(t *testing.T, opts ...BeadsOption) *Result {
+	t.Helper()
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": sittingStore()}, opts...)
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	return res
+}
+
+// TestGatherRecordsSittings: the record carries running sittings and those
+// closed inside the window, and nothing older.
+func TestGatherRecordsSittings(t *testing.T) {
+	got := sittingsByID(gatherSittings(t))
+
+	for _, want := range []string{"tk-sit-open", "tk-sit-recent", "tk-sit-earlier"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("%s missing from the sitting record: got %v", want, slices.Sorted(maps.Keys(got)))
+		}
+	}
+	if _, ok := got["tk-sit-old"]; ok {
+		t.Error("a sitting closed outside the window must not be gathered — the window is what bounds an unbounded read")
+	}
+
+	open := got["tk-sit-open"]
+	if open.Status != "open" || !open.ClosedAt.IsZero() {
+		t.Errorf("a running sitting has no close stamp: status=%q closed=%v", open.Status, open.ClosedAt)
+	}
+	if want := time.Date(2026, 8, 1, 11, 0, 0, 0, time.UTC); !open.OpenedAt.Equal(want) {
+		t.Errorf("OpenedAt = %v, want the gc.claimed_at stamp %v", open.OpenedAt, want)
+	}
+	if open.Session != "gc-toolkit__converse-1" || open.Subject != "tk-parked" || open.Rig != "gc-toolkit" {
+		t.Errorf("sitting identity: %+v", open)
+	}
+
+	done := got["tk-sit-recent"]
+	if done.Status != "closed" || done.Outcome != "diagnosed" {
+		t.Errorf("a closed sitting carries the justification it closed on: status=%q outcome=%q", done.Status, done.Outcome)
+	}
+	if want := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC); !done.ClosedAt.Equal(want) {
+		t.Errorf("ClosedAt = %v, want %v", done.ClosedAt, want)
+	}
+
+	// A visit that never got a claim stamp still has to say when it started.
+	if fallback := got["tk-sit-old"]; fallback.ID != "" {
+		t.Fatal("guarded above")
+	}
+}
+
+// TestSittingTakeawayIsAttributedBySpan is the reason the takeaway is not simply
+// copied off the subject: three sittings share one subject, and only the one
+// that was running when the takeaway was stamped may claim it.
+func TestSittingTakeawayIsAttributedBySpan(t *testing.T) {
+	got := sittingsByID(gatherSittings(t))
+
+	if want := "routed to the polecat pool"; got["tk-sit-recent"].Takeaway != want {
+		t.Errorf("the sitting whose span contains gc.takeaway_at gets it: %q, want %q", got["tk-sit-recent"].Takeaway, want)
+	}
+	if s := got["tk-sit-earlier"]; s.Takeaway != "" {
+		t.Errorf("a sitting that closed BEFORE the takeaway was stamped must not claim it: %q", s.Takeaway)
+	}
+	if s := got["tk-sit-open"]; s.Takeaway != "" {
+		t.Errorf("a sitting that started AFTER the takeaway was stamped must not claim it: %q", s.Takeaway)
+	}
+}
+
+// TestSittingWindowIsConfigurable: the knob widens the closed half, and zero
+// turns it off without touching the running half.
+func TestSittingWindowIsConfigurable(t *testing.T) {
+	t.Setenv("GC_HELM_SITTINGS_WINDOW", "120h")
+	if _, ok := sittingsByID(gatherSittings(t))["tk-sit-old"]; !ok {
+		t.Error("a wider window reaches further back")
+	}
+
+	t.Setenv("GC_HELM_SITTINGS_WINDOW", "0s")
+	got := sittingsByID(gatherSittings(t))
+	if _, ok := got["tk-sit-recent"]; ok {
+		t.Error("a zero window gathers no closed sittings")
+	}
+	if _, ok := got["tk-sit-open"]; !ok {
+		t.Error("a zero window must not cost the board its RUNNING sittings")
+	}
+
+	t.Setenv("GC_HELM_SITTINGS_WINDOW", "not-a-duration")
+	if _, ok := sittingsByID(gatherSittings(t))["tk-sit-recent"]; !ok {
+		t.Error("an unparseable window falls back to the default rather than emptying the section")
+	}
+}
+
+// TestOnlyRunningSittingsHoldTheirAnchor: Tile.Held is a claim about a LIVE
+// conversation, so the closed half of the record must not feed it.
+func TestOnlyRunningSittingsHoldTheirAnchor(t *testing.T) {
+	res := gatherSittings(t)
+	if !res.Facts.Visits["tk-parked"] {
+		t.Error("a subject with a running sitting is held")
+	}
+	if res.Facts.Visits["tk-settled"] {
+		t.Error("a subject whose only sitting has CLOSED is not held — the conversation ended")
+	}
+	if res.Facts.Visits["tk-quiet"] {
+		t.Error("a subject whose sitting fell outside the window is not held either")
+	}
+}
+
+// TestSittingPassesDegradeIndependently: neither half of the record may take
+// the other down, and Tile.Held must survive losing the closed pass.
+func TestSittingPassesDegradeIndependently(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := sittingStore()
+	st.failMeta["__ids__"] = errors.New("subject read failed")
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	got := sittingsByID(res)
+	if len(got) != 4 {
+		t.Errorf("an unreadable subject narrows the rows, it does not drop them: got %d", len(got))
+	}
+	if s := got["tk-sit-recent"]; s.Takeaway != "" || s.Outcome != "diagnosed" {
+		t.Errorf("the sitting keeps what it owns and loses only the joined headline: %+v", s)
+	}
+	if !res.Partial {
+		t.Error("a failed subject read is reported as partial")
 	}
 }

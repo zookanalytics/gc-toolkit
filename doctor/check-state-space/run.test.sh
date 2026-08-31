@@ -25,6 +25,8 @@ states = [
   "abandoned",
 ]
 closed_states = ["merged"]
+detached_states = ["pre_open_gate"]
+park_route = "parked-with-a-person"
 EOF
 
 cat > "$TMP/bin/gc" <<'GC'
@@ -116,6 +118,47 @@ store '[{"id":"a-11","status":"open","metadata":{"merge_result":"bogus"}}]'
 OUT=$(RIGS_JSON="$TMP/rigs-susp.json" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a suspended rig is skipped rather than probed"
 has "$OUT" "suspended" "the skip is noted, not silent"
+
+# --- 10. a detached state is neither routed nor held ----------------------
+store '[{"id":"a-12","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"alpha/gc-toolkit.polecat"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a route on a detached state is an ERROR"
+has "$OUT" "a-12" "it names the bead"
+has "$OUT" "alpha/gc-toolkit.polecat" "it quotes the route that made it pool demand"
+has "$OUT" "detached_states" "it names the declaration the bead violates"
+
+store '[{"id":"a-13","status":"open","assignee":"alpha/gc-toolkit.polecat-1","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an assignee on a detached state is an ERROR"
+has "$OUT" "alpha/gc-toolkit.polecat-1" "it quotes the holder"
+
+store '[{"id":"a-14","status":"open","assignee":"alpha/holder","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"alpha/pool"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "both fields set is an ERROR"
+eq "$(printf '%s' "$OUT" | grep -c 'a-14')" "2" "each violated field is reported separately"
+
+store '[{"id":"a-15","status":"open","assignee":"","metadata":{"merge_result":"abandoned","gc.routed_to":"human"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a route on a NON-detached state is the declared routing, not a finding"
+
+# The park sentinel is a rest, not an offer: signoff.sh routes a round-capped
+# anchor there and it stays parked across the flip to pull_request.
+store '[{"id":"a-17","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"parked-with-a-person"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the declared park_route on a detached state is not a finding"
+store '[{"id":"a-18","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a value that is NOT the declared park_route still is (the sentinel is read, not assumed)"
+
+# --- 11. the detached set is read from lifecycle.toml ---------------------
+# The fixture declares pre_open_gate alone; the builtin fallback also carries
+# pull_request. One bead separates a read declaration from the fallback.
+store '[{"id":"a-16","status":"open","assignee":"","metadata":{"merge_result":"pull_request","gc.routed_to":"alpha/pool"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a state lifecycle.toml does NOT declare detached is not held to the rule"
+OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "2" "the same bead IS a finding under the builtin detached set"
+has "$OUT" "a-16" "the fallback arm names the bead"
 
 echo
 echo "check-state-space: $PASS passed, $FAIL failed"

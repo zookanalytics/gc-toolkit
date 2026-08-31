@@ -7,8 +7,11 @@
 # transition: validate the edge against the declared machine, perform ONE atomic
 # `gc bd update` carrying every field, re-read and verify each written field.
 # --close only into a closed state, and a closed state requires --close (status
-# and merge_result move together). Human states also stamp gc.routed_to=human
-# in the same call unless --route is given.
+# and merge_result move together). A state's declared routing rides in the same
+# call unless --route is given: human states stamp gc.routed_to=human, and
+# detached states clear it unless the bead already rests on the park route. A
+# human state also refuses an EMPTY --route: a bead waiting on a person has to
+# name one.
 # reopen: repair a bead closed while merge_result is a NON-closed state — set
 # status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
 # Callers: pr-open.sh, merge.sh, pr-facts.sh, mol-refinery-patrol.
@@ -21,14 +24,19 @@ set -u
 
 PROG="lifecycle"
 
-# The one scrubber the pack standardizes on: strips control chars that break
-# `--json` parsing while keeping TAB/LF/CR.
-scrub() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 # >>> lifecycle-state-table
 # Mirrors lifecycle/lifecycle.toml exactly; lifecycle.test.sh fails on drift.
-LIFECYCLE_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
-LIFECYCLE_HUMAN_STATES="abandoned retargeted blocked refused_false_completion"
+LIFECYCLE_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion held"
+LIFECYCLE_HUMAN_STATES="abandoned retargeted blocked refused_false_completion held"
+LIFECYCLE_DETACHED_STATES="pre_open_gate pull_request"
+LIFECYCLE_PARK_ROUTE="human"
 LIFECYCLE_CLOSED_STATES="merged"
 LIFECYCLE_TRANSITIONS="
 unanchored>pre_open_gate
@@ -36,6 +44,7 @@ unanchored>pull_request
 unanchored>merged
 unanchored>blocked
 unanchored>refused_false_completion
+unanchored>held
 pre_open_gate>pull_request
 pre_open_gate>unanchored
 pull_request>merged
@@ -47,6 +56,7 @@ retargeted>pull_request
 retargeted>unanchored
 blocked>unanchored
 refused_false_completion>unanchored
+held>unanchored
 "
 # <<< lifecycle-state-table
 
@@ -56,6 +66,10 @@ is_state() { # <name>
 
 is_human_state() { # <name>
   case " $LIFECYCLE_HUMAN_STATES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+is_detached_state() { # <name>
+  case " $LIFECYCLE_DETACHED_STATES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
 is_closed_state() { # <name>
@@ -130,6 +144,16 @@ cmd_transition() {
     echo "$PROG: --to $TO requires --close — a closed state must close in the same atomic write, or the bead is left open+$TO" >&2
     exit 1
   fi
+  # A human state is a bead waiting on a person, so it must name one. An
+  # omitted --route takes the default; an EMPTY one is the write that leaves a
+  # bead waiting on nobody — no queue holds it and no invariant can name it.
+  if is_human_state "$TO"; then
+    [ "$ROUTE_SET" = 1 ] || { ROUTE="human"; ROUTE_SET=1; }
+    if [ -z "$ROUTE" ]; then
+      echo "$PROG: --to $TO requires a route — '$TO' is a human state (human_states: $LIFECYCLE_HUMAN_STATES) and an empty gc.routed_to leaves the bead waiting on nobody" >&2
+      exit 1
+    fi
+  fi
   local kv
   for kv in ${SETS[@]+"${SETS[@]}"}; do
     case "${kv%%=*}" in
@@ -153,9 +177,18 @@ cmd_transition() {
     echo "$PROG: illegal edge $cur -> $TO for $id (declared machine: lifecycle/lifecycle.toml)" >&2
     exit 1
   fi
-  # Human states route to a human as part of the same transition.
-  if [ "$ROUTE_SET" = 0 ] && is_human_state "$TO"; then
-    ROUTE="human"; ROUTE_SET=1
+  # A bead already resting on the park route keeps it. No pool claims that
+  # value, and clearing it would retract a bead a person still owns. Setting
+  # ROUTE_SET also puts gc.routed_to under the post-write verification below,
+  # so a route that fails to clear surfaces as an unverified transition rather
+  # than as a silent pool offer. A human state never reaches here: the guard
+  # above set ROUTE_SET on arguments alone.
+  local cur_route=""
+  if [ "$ROUTE_SET" = 0 ] && is_detached_state "$TO"; then
+    cur_route=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
+    if [ "$cur_route" != "$LIFECYCLE_PARK_ROUTE" ]; then
+      ROUTE=""; ROUTE_SET=1
+    fi
   fi
 
   local ARGS=()

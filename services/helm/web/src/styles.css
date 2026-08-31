@@ -92,6 +92,26 @@ th {
 }
 
 /*
+ * Converse sittings. A third section for the same reason parked is a second
+ * one: this is the conversation record, not an attention list, and the ranked
+ * table is where things that want doing live.
+ */
+
+.sittings {
+  margin-top: 2rem;
+}
+
+.sittings h2 {
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+/* A running sitting is the row an operator can still join. */
+.sitting-running td {
+  font-weight: 600;
+}
+
+/*
  * Terminal tile. Same brief as the rest of this file: enough shape to show the
  * two states (peek at rest, live on focus) and no further. The spatial
  * placement this tile eventually gets belongs to U6.

@@ -18,6 +18,13 @@
 # Callers: the refinery close arm (--no-run probe), the deacon patrol (publish).
 set -uo pipefail
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+
 usage() {
   cat >&2 <<'USAGE'
 usage: doctor-finding-gate.sh probe <bead-id> [--json <file>] [--cache <file>]
@@ -101,7 +108,7 @@ cmd_probe() {
 
   # Control bytes stripped: an unparseable bead must not read as "no bead".
   local row
-  row=$(gc bd show "$bead" --json 2>/dev/null | tr -d '\000-\010\013\014\016-\037')
+  row=$(gc bd show "$bead" --json 2>/dev/null | scrub)
   [ -n "$row" ] || return 2
   jq -e 'type == "array" and length > 0' <<<"$row" >/dev/null 2>&1 || return 2
 
@@ -203,7 +210,7 @@ cmd_successor() {
   local existing raw
   raw=$(gc bd list --status=open,in_progress,blocked \
           --metadata-field "doctor_check=$check" --limit=20 --json 2>/dev/null \
-        | tr -d '\000-\010\013\014\016-\037')
+        | scrub)
   # An unreadable ledger is NOT an empty one.
   if [ -n "$raw" ]; then
     jq -e 'type == "array"' <<<"$raw" >/dev/null 2>&1 || return 2

@@ -89,11 +89,28 @@ case "$GATE$RESOLVE$CONSUME$CLOSE$HALT$HALT_CLOSE" in
   *)    ok  "snippets are backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
 
+# The declared default is what a source-read reconstruction renders, and it is
+# reached only when the poured step was bypassed. Empty renders `<rig>/refinery`,
+# an address no agent holds, and the refinery's exact-match find-work then never
+# reads the bead. Every substitution below pins `gc-toolkit.` explicitly, so none
+# of them can see the default.
+BP_DEFAULT="$(awk '
+  /^\[vars\.binding_prefix\]$/ {f=1; next}
+  f && /^\[/                    {exit}
+  f && /^default[ \t]*=/         {sub(/^default[ \t]*=[ \t]*"/, ""); sub(/"$/, ""); print; exit}
+' "$TOML")"
+[ -n "$BP_DEFAULT" ] \
+  && ok "binding_prefix declares a non-empty default ($BP_DEFAULT)" \
+  || bad "binding_prefix default is EMPTY — a source-read renders <rig>/refinery, which names no agent"
+
 # --- Fakes. -------------------------------------------------------------------
 # git   : only `git branch --show-current` is used; it answers $FAKE_BRANCH.
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
+#         `gc agent list --json` answers $FAKE_AGENTS; the value UNREADABLE
+#         makes the call fail, which reaches the guard as a different cause
+#         than an empty roster but must take the same arm.
 mkdir -p "$TMP/bin"
 
 cat > "$TMP/bin/git" <<'GIT'
@@ -111,6 +128,8 @@ case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
+  "agent list")        [ "${FAKE_AGENTS-}" = "UNREADABLE" ] && exit 1
+                       printf '{"agents":%s}\n' "${FAKE_AGENTS:-[]}"; exit 0 ;;
 esac
 exit 0
 GC
@@ -252,11 +271,20 @@ eq "$(run_resolve polecat/tk-work main '{"target":""}')" \
 # the bead between writes, and --notes can never erase the dispatch note.
 # {{binding_prefix}} is substituted the way the materializer does; GC_RIG is
 # controlled per case.
-run_consume() { # <landing-target> [gc-rig]
+# ROSTER_OK is the shape `gc agent list --json` returns: every agent carries a
+# rig-qualified name, and the guard also accepts the binding-qualified tail so a
+# session outside a rig still resolves. Neither form ever yields bare
+# `refinery`, which is what makes the empty-prefix address detectable at all.
+ROSTER_OK='[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},{"qualified_name":"myrig/gc-toolkit.refinery"},{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]'
+
+# $3 is set-but-empty on purpose in the empty-prefix case, so `${3-...}` and not
+# `${3:-...}` is the expansion that renders it.
+run_consume() { # <landing-target> [gc-rig] [binding-prefix] [agents-json|UNREADABLE]
   : > "$TMP/log"
-  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|${3-gc-toolkit.}|g" > "$TMP/consume.sh"
   local rc=0
-  LANDING_TARGET="$1" GC_RIG="${2-}" FAKE_LOG="$TMP/log" bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  LANDING_TARGET="$1" GC_RIG="${2-}" FAKE_AGENTS="${4-$ROSTER_OK}" FAKE_LOG="$TMP/log" \
+    bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
 
@@ -284,6 +312,141 @@ eq "$(run_consume '')" \
    "1|DRAIN;" \
    "unset LANDING_TARGET: halts instead of writing an empty target"
 
+# An empty {{binding_prefix}} is what the formula's declared default renders
+# whenever this command is rebuilt from the .toml instead of read out of the
+# poured step. The address becomes `gc-toolkit/refinery`. The refinery's
+# find-work is exact-match on assignee, so a bead written there is never read
+# and no error is raised anywhere. The halt must come BEFORE the write, so the
+# log carries DRAIN and no UPDATE at all.
+eq "$(run_consume main gc-toolkit '')" \
+   "1|DRAIN;" \
+   "empty binding prefix: halts on an address no agent holds, writing nothing"
+
+# The check is roster membership, not merely a non-empty prefix — a wrong prefix
+# strands exactly as thoroughly as an absent one.
+eq "$(run_consume main gc-toolkit typo.)" \
+   "1|DRAIN;" \
+   "unbound binding prefix: halts on an address no agent holds, writing nothing"
+
+# The permissive arm. A roster the guard could not read proves nothing about the
+# address, and failing closed there would stall handoffs that are almost always
+# correct. A call that fails and a roster that is genuinely empty arrive by
+# different routes and must both write.
+eq "$(run_consume main myrig gc-toolkit. UNREADABLE)" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "unreadable roster: hands off rather than stalling on what it cannot check"
+
+eq "$(run_consume main myrig gc-toolkit. '[]')" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "empty roster: hands off rather than stalling on what it cannot check"
+
+# --- 3b. The PR summary the handoff carries. ----------------------------------
+# pr-open.sh publishes metadata.pr_summary as the PR's ## Summary and falls back
+# to the anchor's description, which is dispatch text. Only the polecat has read
+# the diff, so the summary rides the SAME atomic write as the rest of the
+# transition; a second write is a second thing a crash can lose.
+#
+# run_consume_file <summary-file-path> [strict]
+#   -> prints "<rc>|<log>" with PR_SUMMARY_FILE pointed at the given path. The
+#      path is passed unconditionally, so an absent file is tested as the
+#      polecat's shell actually presents it: the variable set, the file gone.
+run_consume_file() {
+  : > "$TMP/log"
+  : > "$TMP/summary-consume.sh"
+  if [ "${2:-}" = "strict" ]; then printf 'set -euo pipefail\n' > "$TMP/summary-consume.sh"; fi
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/summary-consume.sh"
+  local rc=0
+  LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+    PR_SUMMARY_FILE="$1" bash "$TMP/summary-consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+printf 'Compares heads instead of names.' > "$TMP/summary.txt"
+eq "$(run_consume_file "$TMP/summary.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "a carried summary rides the one atomic write as pr_summary"
+
+# A real summary is prose, not a line. The fake logs argv verbatim, so an
+# embedded newline shows up as a second logged line — which is the proof that
+# the value reaches gc unmangled rather than truncated at the first line.
+printf 'Line one.\nLine two.' > "$TMP/summary-multiline.txt"
+eq "$(run_consume_file "$TMP/summary-multiline.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Line one.;Line two. --append-notes Implemented: <brief summary>;" \
+   "a multi-line summary reaches the write whole"
+
+# Both no-summary shapes fall back to the unsummarized handoff
+# BYTE-IDENTICALLY. An empty metadata value round-trips as set-but-empty rather
+# than absent, so writing one asserts a summary that was never composed;
+# pr-open.sh's whitespace guard is a second line of defence, not a licence to
+# write the key.
+: > "$TMP/summary-empty.txt"
+eq "$(run_consume_file "$TMP/summary-empty.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "an empty summary file writes no pr_summary key at all"
+
+eq "$(run_consume_file "$TMP/summary-absent.txt")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "a PR_SUMMARY_FILE naming no file hands off unsummarized rather than halting"
+
+# The step's own blocks run before this one under one shell, and a polecat that
+# skipped 4b leaves PR_SUMMARY_FILE unset. Under `set -u` an unguarded read
+# would kill the handoff after the push — the branch pushed, the bead never
+# handed off.
+: > "$TMP/log"
+printf 'set -euo pipefail\n' > "$TMP/nosummary.sh"
+printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/nosummary.sh"
+NOSUM_RC=0
+LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+  bash "$TMP/nosummary.sh" > "$TMP/out" 2>&1 || NOSUM_RC=$?
+eq "$NOSUM_RC|$(tr '\n' ';' < "$TMP/log")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "strict shell, PR_SUMMARY_FILE never set: hands off unsummarized, no set -u crash"
+
+eq "$(run_consume_file "$TMP/summary.txt" strict)" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "strict shell: a carried summary still writes"
+
+# The polecat pastes this block into a live shell, and `bash "$TMP/consume.sh"`
+# above does not model one that runs strict. Both of the guard's reads are
+# pipefail traps: `... | grep -q` returns 141 when grep matches and exits before
+# the writer finishes, and the roster pipeline returns non-zero whenever `gc`
+# fails, which is the case the permissive arm exists to serve. Either one turns
+# a correct handoff into a halt under `set -euo pipefail`, so run the real
+# snippet under it.
+run_strict_consume() { # <landing-target> <gc-rig> <agents-json|UNREADABLE>
+  : > "$TMP/log"
+  printf 'set -euo pipefail\n' > "$TMP/strict.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/strict.sh"
+  local rc=0
+  LANDING_TARGET="$1" GC_RIG="$2" FAKE_AGENTS="$3" FAKE_LOG="$TMP/log" \
+    bash "$TMP/strict.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+# The SIGPIPE half needs a roster larger than the 64K pipe buffer, with the match
+# up front: `grep -q` exits on the first hit while the writer is still blocked,
+# the writer takes SIGPIPE, and pipefail reports 141 for a pipeline that found
+# what it was looking for. A small roster fits in the buffer and never triggers
+# it. The fixture is therefore sized to straddle two limits — the roster it
+# renders must clear the 64K pipe buffer, while the JSON carrying it reaches the
+# fake through the environment and must stay under MAX_ARG_STRLEN (128K), which
+# execve enforces per variable. 1200 entries gives ~97K of roster from ~83K of
+# JSON; overshooting the cap surfaces as a bare rc=126, not as a useful failure.
+ROSTER_BIG="$(jq -cn '[{qualified_name:"gc-toolkit/gc-toolkit.refinery"}]
+  + [range(1200) | {qualified_name:("filler-rig-\(.)/gc-toolkit.polecat-padding-entry")}]')"
+
+eq "$(run_strict_consume main gc-toolkit "$ROSTER_BIG")" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "strict shell: a matching address in an oversized roster still writes (the pipe form takes SIGPIPE here)"
+
+eq "$(run_strict_consume main gc-toolkit UNREADABLE)" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "strict shell: a failed roster call still reaches the permissive arm rather than killing the step"
+
+eq "$(run_strict_consume main gc-toolkit '[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]')" \
+   "1|DRAIN;" \
+   "strict shell: a roster without the address still halts, and the diagnostic does not die on an empty grep"
+
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
 # the gate, and the handoff reads $LANDING_TARGET from the resolver. Run all
@@ -295,7 +458,7 @@ printf '%s\n' "$RESOLVE" | sed "s|{{base_branch}}|polecat/su-uzy9.5|g" >> "$TMP/
 printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/both.sh"
 BOTH_RC=0
 FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":"main"}' \
-  GC_RIG="" FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
+  GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" bash "$TMP/both.sh" > "$TMP/out" 2>&1 || BOTH_RC=$?
 eq "$BOTH_RC" "0" "composed run exits 0 on the rework shape"
 eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
    "composed run resolves the landing target to main, not to the pushed branch"

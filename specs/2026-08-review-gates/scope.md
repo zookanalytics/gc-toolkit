@@ -80,6 +80,30 @@ merge.sh: unchanged — merges when every declared gate is green@live head
   `exception@<head>` and files a visit framing the choice (G2), instead of
   ping-ponging rework children (the reviewer-fatigue anti-pattern
   foundation.md forbids).
+- **`codex` is not waivable before the PR exists.** `pr-open.sh` requires
+  `check.codex=green@<live head>` by literal name and never reads `check_set`,
+  so a set that drops `codex` while the anchor is still at `pre_open_gate`
+  strands it with nothing able to raise the marker pr-open waits on. The flow
+  above runs triage at exactly that state, so codex staying always-on is what
+  makes it safe there, not a preference about how much review is enough.
+
+## Until triage lands
+
+`check_set` is still calibrated by hand on the anchors that need it, and that
+act is granted and bounded in
+[docs/authority-map.md](../../docs/authority-map.md): a human, on a named
+anchor, reason recorded in the anchor's notes, narrowing only once the PR is
+open. That describes the interim only. Triage inherits the power when it
+lands, and from that point the rules above are the contract: triage is the sole
+narrower, its waiver reaches only the gates the charter marks waivable, and
+`none` stays the human-only opt-out.
+
+Two cases could look like a standing human narrowing path after that, and
+neither is one. A missing charter leaves triage unable to widen the set, and a
+human may still widen it by hand, because the rules reserve only narrowing to
+triage. A narrowing the charter does not mark waivable is available to nobody.
+The one move left to a human there is `none`, which the authority-map row
+already grants.
 
 ## Implementation inventory (follow-up work)
 

@@ -50,8 +50,12 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; exit 1; }
 
-# Strip control chars (they break jq), sparing TAB and NEWLINE.
-strip_ctrl() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 # Split on commas/whitespace, drop empties, keep first-seen order.
 split_ids() {
@@ -71,7 +75,7 @@ if [ -n "$VISIT" ] && [ -n "$IDS_ARG" ]; then
 fi
 
 if [ -n "$VISIT" ]; then
-    VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | strip_ctrl)
+    VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | scrub)
     if ! printf '%s' "$VISIT_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
         echo "liveness-recheck: cannot read visit $VISIT — nothing re-checked" >&2
         exit 1
@@ -118,7 +122,7 @@ CARRIED_JSON=$(to_json_array "$CARRIED_IDS")
 # argv would meet ARG_MAX as a truncation rather than an error.
 BEADFILE=$(mktemp)
 trap 'rm -f "$BEADFILE"' EXIT
-gc bd list --id "$ID_CSV" --all --brief --json --limit=0 2>/dev/null | strip_ctrl > "$BEADFILE"
+gc bd list --id "$ID_CSV" --all --brief --json --limit=0 2>/dev/null | scrub > "$BEADFILE"
 if ! jq -e 'type == "array"' "$BEADFILE" >/dev/null 2>&1; then
     echo "liveness-recheck: the batched bead read FAILED — no census printed." >&2
     echo "  (gc bd list --id … --all --brief --json --limit=0 returned no JSON array; a bd" >&2
@@ -130,7 +134,7 @@ fi
 
 # --- read 2: the ready set (best-effort, never load-bearing) ------------------
 READY_STATE=verified
-READY_RAW=$(gc bd ready --unassigned --limit=0 --json 2>/dev/null | strip_ctrl)
+READY_RAW=$(gc bd ready --unassigned --limit=0 --json 2>/dev/null | scrub)
 if printf '%s' "$READY_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
     READY_JSON=$(printf '%s' "$READY_RAW" | jq -c '[.[].id]')
 else

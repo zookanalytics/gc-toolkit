@@ -152,12 +152,12 @@ rendering is `helm-svc board --json`. See
 gc doctor
 ```
 
-The pack's nine checks, and what a failure means:
+The pack's checks, and what a failure means:
 
 | Check | Asserts (invariant) | First-failure cause |
 |---|---|---|
-| `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml` (I2) | a writer minted an undeclared state |
-| `check-routed-work-claimable` | every route and assignee names a live target; rig-scoped orders bound (I3) | a pool renamed, or an order missing its rig registration |
+| `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml`, and a detached state rests unheld and offered to no pool (I2) | a writer minted an undeclared state, or something routed a parked anchor back into pool demand |
+| `check-routed-work-claimable` | every route and assignee names a live target; routed work is in `bd ready` or in `bd blocked`; rig-scoped orders bound (I3) | a pool renamed, an order missing its rig registration, or routed work stranded outside both queues |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare `check_set`; markers are well-formed `verb@oid` (I6+I7) | a hand-written or truncated marker |
@@ -165,6 +165,7 @@ The pack's nine checks, and what a failure means:
 | `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
+| `check-recycle-capable` | cycle-recycle can fire: the city name resolves, the supervisor endpoint carries a numeric `input_tokens` per awake patrol agent, and no refinery defer guard is latched | the token field left the API schema, or an uncommitted tracked file has latched the refinery's git-op guard |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.

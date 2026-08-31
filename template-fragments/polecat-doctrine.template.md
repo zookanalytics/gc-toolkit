@@ -24,6 +24,14 @@ gc bd show <id> --json | jq '.[0].metadata'
 #    you or the hook returns no work.
 ```
 
+Every `action: "work"` result is a claim you hold, whatever its `reason`.
+`claimed` is work the hook just took from the pool; `ready_assignment` and
+`existing_assignment` are claims already in your name, which is what a
+fresh-woken pool session sees when it was given work before it woke. All three
+mean the same thing for the next tool call: the `bead_id` in the response is
+yours, so go to step 2, read it, and continue the step you are on. None of them
+is a terminal answer, and only `action: "drain"` ends the turn.
+
 ## The governing rule: follow the formula the bead carries
 
 The poured formula's step descriptions are the plan. What the claim is —
@@ -80,6 +88,7 @@ read "landed in the refinery" as "main moved".
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
+| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text |
 | `prepare_mode` | refinery | `rebase` (disposable branch) or `merge` (shared) — honor it on resume |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
@@ -96,7 +105,7 @@ carries the exact block.
 | Bead | Closed by |
 |---|---|
 | the work bead | the refinery, after a verified merge — **NEVER you** |
-| a review bead | `signoff.sh`, after the verdict — **NEVER you** |
+| a review bead | `signoff.sh` after the verdict, or the cadence's `review-sweep.sh` when there is none to give — **NEVER you** |
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 

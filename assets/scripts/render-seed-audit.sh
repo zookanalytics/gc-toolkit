@@ -383,6 +383,11 @@ for i in range(0, len(argv), 2):
         pairs.append((needle, argv[i + 1]))
 for needle, token in sorted(pairs, key=lambda p: len(p[0]), reverse=True):
     src = src.replace(needle, token)
+# Every rendered file ends with exactly one newline, whatever the source prompt
+# ends with: a trailing blank line is a whitespace defect in a committed file,
+# and the sources are the wrong place to fix it — the next prompt edit would
+# restore it.
+src = src.rstrip("\n") + "\n"
 sys.stdout.buffer.write(src.encode("utf-8", "surrogateescape"))
 PYEOF
 

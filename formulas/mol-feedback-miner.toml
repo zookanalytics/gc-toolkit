@@ -34,7 +34,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.miner_window_days]
-description = "Sweep window in days: PRs merged or closed within the last N days are read. Windows overlap across runs by design — dedup on obs.provenance makes re-reading a comment idempotent, and the overlap is what makes a capped or interrupted run naturally resumable."
+description = "Sweep window in days: PRs merged or closed within the last N days are read. Windows overlap across runs by design — dedup on (obs.provenance, obs.category) makes re-reading a comment idempotent, and the overlap is what makes a capped or interrupted run naturally resumable."
 required = false
 default = "3"
 
@@ -182,18 +182,24 @@ For each candidate, derive at capture time:
   when unsure, guess `diff`.
 - **`obs.category`** — a free slug (e.g. `redundant-comments`,
   `commit-message-style`); the distiller owns the vocabulary and merges
-  near-duplicates, so a rough guess is fine.
+  near-duplicates, so a rough guess is fine. When one comment yields two
+  candidates, give them different slugs: the §4 dedup key is the pair
+  (provenance, category), and the provenance half is identical for both.
 - **`obs.scope`** — guess narrow (D4): default `repo:<rig>`; use
   `agent:<role>` only when the feedback explicitly names a role's standing
   behavior. Never guess `global` at capture time.
 
-## 4. Dedup on `obs.provenance` — before filing anything
+## 4. Dedup on (`obs.provenance`, `obs.category`) — before filing anything
 
-The provenance key for a comment is `pr:<owner/repo>#<n>:comment:<id>`. A
-candidate whose key is already carried by ANY existing observation bead in
-this rig's store is skipped — this is where self-report double-counts die:
-the same event captured in-conversation and by this miner must stay one
-occurrence.
+The provenance key for a comment is `pr:<owner/repo>#<n>:comment:<id>`, and
+it names the comment, not the finding: one comment can carry two distinct
+corrections. A candidate whose provenance AND category are both already
+carried by an existing observation bead in this rig's store is skipped —
+this is where self-report double-counts die: the same finding captured
+in-conversation and by this miner must stay one occurrence. Keying on
+provenance alone lets the first capture of a comment shadow every other
+finding in it, permanently, because nothing re-reads a comment this sweep
+has already covered.
 
 ```bash
 # The dedup surface. Observations are closed at creation, so closed is the
@@ -201,11 +207,12 @@ occurrence.
 # malformed capture. --limit=0 is deliberate: an unbounded all-time closed
 # listing — dedup correctness beats page-size truncation; the surface grows
 # with observation history.
-SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | .metadata["obs.provenance"] // empty')
+SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | [(.metadata["obs.provenance"] // ""), (.metadata["obs.category"] // "")] | @tsv')
 
-# Per candidate:
+# Per candidate; $CATEGORY is the slug derived in §3.
 KEY="pr:$REPO_SLUG#$N:comment:$CID"
-echo "$SEEN" | grep -Fxq "$KEY" && { echo "dedup: $KEY already recorded — skipping"; continue; }
+PAIR=$(printf '%s\\t%s' "$KEY" "$CATEGORY")
+printf '%s\\n' "$SEEN" | grep -Fxq "$PAIR" && { echo "dedup: $KEY + $CATEGORY already recorded — skipping"; continue; }
 ```
 
 ## 5. File at most {{max_obs_per_run}} observation beads — the §1 contract, exactly
@@ -242,7 +249,7 @@ echo "filed observation $BEAD ($KEY)"
 ```
 
 If candidates remain past the cap, drop them and note the count — they are
-not lost: the window re-covers those PRs next run and the provenance dedup
+not lost: the window re-covers those PRs next run and the §4 pair-key dedup
 keeps everything already filed from double-counting, so a capped run is
 naturally resumable.
 
@@ -266,6 +273,6 @@ The miner records, full stop.
 
 **Exit criteria:** Every window PR's review + issue comments read as data;
 each corrective-of-a-generalizable-kind comment either filed as one closed
-observation bead (§1 contract, `obs.source=miner`), skipped by provenance
+observation bead (§1 contract, `obs.source=miner`), skipped by §4 pair-key
 dedup, or dropped for the cap with a logged count; the session drained.
 """

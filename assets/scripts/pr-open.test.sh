@@ -3,9 +3,9 @@
 # Covers: adopting an existing OPEN or MERGED PR (flip only, one lifecycle
 # transition, never a twin); refusing fork/foreign/uncertifiable rows; the
 # closed-unmerged headstone (fresh PR + supersede note; same-head close is a
-# human decision left alone); holds gating the create path; the codex
-# green@live-head gate; the moved-head refusal on the created PR; and the
-# comment-not-approval verdict replay.
+# human decision left alone); holds gating the create path; the check_set
+# green@live-head gate over every gate the anchor declares; the moved-head
+# refusal on the created PR; and the comment-not-approval verdict replay.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,9 +19,10 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh"
 SUT="$SD/pr-open.sh"
 
-pre() { # id branch extra-json
-  printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"%s","merged_target":"main"%s}}' \
-    "$1" "$1" "$1" "$2" "${3:-}"
+pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
+  local cs="${4-codex}"
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"%s","merged_target":"main"%s%s}}' \
+    "$1" "$1" "$1" "$2" "${cs:+,\"check_set\":\"$cs\"}" "${3:-}"
 }
 prrow() { # num state branch head base [mergedAt] [headrepo]
   printf '{"number":%s,"url":"https://github.com/zook/gc-toolkit/pull/%s","state":"%s","mergedAt":%s,"baseRefName":"%s","headRefName":"%s","headRefOid":"%s","headRepository":{"name":"%s"},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":false}' \
@@ -63,12 +64,50 @@ out=$("$SUT" 2>&1)
 has "$out" "held (merge_hold" "merge_hold holds the create"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR published past the hold"
 
-echo "# codex not green at the live head holds"
+echo "# a declared gate not green at the live head holds"
 store "[$(pre B2 polecat/b2 ',"check.codex":"green@stale-oid"')]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
 out=$("$SUT" 2>&1)
-has "$out" "codex not green at live head" "a stale marker holds the open"
+has "$out" "check 'codex' not green at live head" "a stale marker holds the open"
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
+
+# The gate is the anchor's whole declared set: a set naming a second reviewer
+# publishes only once that reviewer has answered, and a set naming no
+# marker-bearing gate publishes rather than waiting on a marker no arm writes.
+echo "# a second declared gate with no marker holds the publish"
+store "[$(pre B3 polecat/b3 ',"check.codex":"green@sha-b3"' 'codex,triage')]"
+echo "sha-b3" > "$GH_DIR/head_polecat_b3"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "check 'triage' not green at live head (have 'none'" "the unmarked second gate holds"
+eq "$(meta B3 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered gate"
+
+echo "# an empty check_set is never the gateless opt-out"
+store "[$(pre B4 polecat/b4 '' '')]"
+echo "sha-b4" > "$GH_DIR/head_polecat_b4"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "no normalized check_set" "an unnormalized anchor is held, not published"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and nothing is opened under it"
+
+echo "# check_set=none publishes: gateless BY CHOICE is not a missing marker"
+store "[$(pre B5 polecat/b5 '' 'none')]"
+echo "sha-b5" > "$GH_DIR/head_polecat_b5"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/61"
+printf '%s' "$(prrow 61 OPEN polecat/b5 sha-b5 main)" > "$GH_DIR/pr_view_61.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#61" "the none sentinel opens instead of stranding at pre_open_gate"
+eq "$(meta B5 merge_result)" "pull_request" "anchor flipped"
+
+echo "# check_set=approval publishes: approval carries no marker and needs the PR"
+store "[$(pre B6 polecat/b6 '' 'approval')]"
+echo "sha-b6" > "$GH_DIR/head_polecat_b6"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/62"
+printf '%s' "$(prrow 62 OPEN polecat/b6 sha-b6 main)" > "$GH_DIR/pr_view_62.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#62" "an approval-only set opens; merge.sh holds for the human review"
+eq "$(meta B6 merge_result)" "pull_request" "anchor flipped"
 
 echo "# create the PR at the reviewed head"
 store "[$(pre C1 polecat/c1 ',"check.codex":"green@sha-c1"'),
@@ -88,6 +127,47 @@ hasnt "$ghlog" "--draft" "the PR is non-draft"
 has "$ghlog" "pr view 77 --repo github.com/zook/gc-toolkit" "read back BY NUMBER, pinned"
 has "$ghlog" "pr comment 77" "the verdict was replayed as a comment"
 hasnt "$ghlog" "pr review" "never an approval"
+
+echo "# the body summarizes the diff, and demotes the dispatch text"
+# A reviewer who was not in the originating conversation opens this body. The
+# anchor's description is dispatch text — what the work was asked to do — so
+# the polecat's pr_summary is the ## Summary and the description survives one
+# level down.
+store "[$(pre E1 polecat/e1 ',"check.codex":"green@sha-e1","pr_summary":"Compares heads instead of branch names, so a moved head is refused."')]"
+echo "sha-e1" > "$GH_DIR/head_polecat_e1"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/81"
+printf '%s' "$(prrow 81 OPEN polecat/e1 sha-e1 main)" > "$GH_DIR/pr_view_81.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#81" "the PR was opened"
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"Compares heads instead of branch names, so a moved head is refused." \
+    "pr_summary is the summary a reviewer reads first"
+has "$body" "<summary>Dispatch — what this work was asked to do</summary>" "the dispatch text is demoted, not dropped"
+has "$body" "d E1" "…and it is still in the body"
+has "$body" "## Refinery handoff" "the handoff block is unchanged"
+
+echo "# no carried summary keeps today's body"
+# The current text is a poor summary, not an empty one: an anchor whose handoff
+# carried nothing must still open with a body.
+store "[$(pre E2 polecat/e2 ',"check.codex":"green@sha-e2"')]"
+echo "sha-e2" > "$GH_DIR/head_polecat_e2"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/82"
+printf '%s' "$(prrow 82 OPEN polecat/e2 sha-e2 main)" > "$GH_DIR/pr_view_82.json"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#82" "the PR was opened"
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"d E2" "the description is the summary when nothing was carried"
+hasnt "$body" "<details>" "no empty demotion section when there is nothing to demote"
+
+echo "# a whitespace-only summary is the absent case"
+store "[$(pre E3 polecat/e3 ',"check.codex":"green@sha-e3","pr_summary":"   \n  "')]"
+echo "sha-e3" > "$GH_DIR/head_polecat_e3"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/83"
+printf '%s' "$(prrow 83 OPEN polecat/e3 sha-e3 main)" > "$GH_DIR/pr_view_83.json"
+out=$("$SUT" 2>&1)
+body=$(cat "$GH_DIR/pr_create_body.txt")
+has "$body" "## Summary"$'\n'$'\n'"d E3" "blank prose falls back rather than publishing an empty summary"
+hasnt "$body" "<details>" "…and demotes nothing"
 
 echo "# a head that moved between gate and create refuses the stamp"
 store "[$(pre C2 polecat/c2 ',"check.codex":"green@sha-c2"')]"

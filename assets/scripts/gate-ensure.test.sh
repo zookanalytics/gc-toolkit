@@ -2,13 +2,24 @@
 # Hermetic test for assets/scripts/gate-ensure.sh — arm 1 of the merge cadence.
 # Covers: default check_set stamping (and the rc=3 hold when the stamp does not
 # persist or the enumeration is unreadable); the `none` opt-out; marker
-# classification (green@live head, stale green, exception, fixable, absent,
-# unmappable); in-flight dedup (routed, poured, claimed) + stranded repair
+# classification (green@ and exception@ the live head, stale green, stale
+# exception, fixable, absent, unmappable, and a malformed green that an
+# unreadable head must not settle); the live-head read (a deleted ref, a body
+# without .sha, and a failed read are all unanswerable, never "advanced"); the
+# stray-marker sweep (undeclared + malformed is cleared; well-formed,
+# exception@ and declared markers are not; an unpersisted clear is reported);
+# a multi-gate check_set split per gate rather than joined into one name;
+# in-flight dedup (routed, poured, claimed) + stranded repair
 # (convoy probe: re-sling only a review with no LIVE tracking convoy, and
 # converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
-# gc.execution_routed_to read-back, never retried in-pass); merge_hold; the
-# dispatch_count cap; and the review-wedge escalation (exec-stamp-only reach
+# gc.execution_routed_to read-back, never retried in-pass); merge_hold;
+# dispatch_count as a tally the round cap never reads; the refusal to
+# re-review a head a closed request-changes verdict already judged while its
+# rework child is still open; the dispatch backstop (a ceiling on DISPATCHES
+# that refuses loudly -- one deduped visit plus a stamp and a note on the
+# anchor -- restates itself when the head moves, and never preempts the
+# precise refusal); and the review-wedge escalation (exec-stamp-only reach
 # whose poured workflow is spent -> one deduped visit, held one pass first).
 set -uo pipefail
 
@@ -17,6 +28,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# A hermetic suite must not read the caller's city: an ambient GC_RIG changes
+# the gc sling argv these assertions match on.
+unset GC_RIG 2>/dev/null || true
 harness_init
 
 # Private scripts dir: the SUT plus a body-emitter stub (interface unchanged).
@@ -36,6 +50,9 @@ exit 0
 ESC
 chmod +x "$SD/escalate.sh"
 SUT="$SD/gate-ensure.sh"
+# The SUT forwards GC_RIG into every sling and reads GC_MAX_REVIEW_DISPATCHES as
+# the ceiling; an ambient value would rewrite the assertions below.
+unset GC_RIG GC_MAX_REVIEW_DISPATCHES 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
 run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
@@ -48,9 +65,16 @@ anchor() { # id mr checkset marker branch extra-json
     "${6:-}"
 }
 
+# sha1sum is exactly 40 lowercase hex, so a labelled fixture oid satisfies the
+# marker grammar. A shorter string is a MALFORMED marker — a different arm.
+# live_head_for holds the head it reads to that same grammar, so fixture HEADS
+# go through here too; a mnemonic like "sha-b4" now reads as no head at all.
+oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
+SHORT="8d7f0cf3c"   # the abbreviated-sha shape that wedged gc-na313
+
 echo "# stamping the default"
 store "[$(anchor A1 pre_open_gate "" "" polecat/a1)]"
-echo "sha-a1" > "$GH_DIR/head_polecat_a1"
+oid a1 > "$GH_DIR/head_polecat_a1"
 out=$(run); rc=$?
 eq "$rc" 0 "a stamped-and-dispatched pass exits 0"
 eq "$(meta A1 check_set)" "codex" "empty check_set is stamped with the default"
@@ -61,7 +85,7 @@ eq "$(meta "$rid" check_name)" "codex" "review bead names the gate"
 eq "$(meta "$rid" anchor_bead)" "A1" "review bead links the anchor"
 eq "$(meta "$rid" review_branch)" "polecat/a1" "review bead carries review_branch"
 eq "$(meta "$rid" review_base)" "main" "review bead carries review_base"
-eq "$(meta "$rid" reviewed_oid)" "sha-a1" "dispatch pins reviewed_oid at the live head (signoff binds the verdict to it)"
+eq "$(meta "$rid" reviewed_oid)" "$(oid a1)" "dispatch pins reviewed_oid at the live head (signoff binds the verdict to it)"
 eq "$(meta "$rid" fix_target_pool)" "$FIXP" "dispatch stamps the derived fix pool for the rework path"
 eq "$(meta "$rid" 'gc.execution_routed_to')" "$POOL" "the pour stamped gc.execution_routed_to (the dispatch read-back)"
 eq "$(meta "$rid" 'gc.routed_to')" "<absent>" "the pour retired gc.routed_to (never restored beside a live workflow)"
@@ -84,58 +108,160 @@ eq "$rc" 3 "an unreadable gating enumeration exits rc=3"
 
 echo "# opt-out and settled markers"
 store "[$(anchor B1 pre_open_gate none "" polecat/b1),
-        $(anchor B2 pre_open_gate codex "green@sha-b2" polecat/b2),
-        $(anchor B3 pull_request codex "exception@sha-b3" polecat/b3)]"
-echo "sha-b2" > "$GH_DIR/head_polecat_b2"
-echo "sha-b3x" > "$GH_DIR/head_polecat_b3"
+        $(anchor B2 pre_open_gate codex "green@$(oid b2)" polecat/b2),
+        $(anchor B3 pull_request codex "exception@$(oid b3)" polecat/b3)]"
+oid b2 > "$GH_DIR/head_polecat_b2"
+oid b3 > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "opt-out/settled pass exits 0"
 eq "$(meta B1 check_set)" "none" "the none sentinel is left alone"
-has "$out" "0 reviews dispatched" "green@live-head, exception@ and none dispatch nothing"
+has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none, dispatch nothing"
+
+# check_set is a comma list and each gate is addressed by its own name, so the
+# split has to survive whitespace around the separators.
+echo "# a multi-gate check_set is raised per gate, never as one joined name"
+store "[$(anchor M1 pull_request "codex, triage" "green@$(oid m1)" polecat/m1)]"
+oid m1 > "$GH_DIR/head_polecat_m1"
+: > "$STUB_GC_LOG"
+out=$(run)
+hasnt "$out" "codextriage" "the comma list is not collapsed into one gate name"
+has "$out" "gate 'triage'" "the second declared gate is raised under its own name"
+mrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$mrid" check_name)" "triage" "the dispatched review names the real gate"
+eq "$(meta M1 dispatch_count)" "1" "the gate already green at the live head bought no dispatch"
+
+echo "# an exception the head has moved PAST is re-armed, cap or no cap"
+store "[$(anchor B4 pull_request codex "exception@$(oid old)" polecat/b4),
+        $(anchor B5 pull_request codex "exception@$(oid old)" polecat/b5 ',"dispatch_count":"3","gc.routed_to":"human"')]"
+oid b4 > "$GH_DIR/head_polecat_b4"
+oid b5 > "$GH_DIR/head_polecat_b5"
+out=$(run); rc=$?
+eq "$rc" 0 "re-gate pass exits 0"
+has "$out" "2 reviews dispatched" "a branch fixed under an exception gets one look"
+has "$out" "advanced to $(oid b4)" "the dispatch names the head that staled the exception"
+has "$out" "advanced to $(oid b5)" \
+  "…including the anchor whose cap is spent and whose gc.routed_to is human"
+hasnt "$out" "B5 gate 'codex' has spent" \
+  "B5 carries the live shape signoff's cap arm writes, and nothing refuses it"
+eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
+eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
 
 echo "# stale green / fixable / absent / unmappable all dispatch"
 store "[$(anchor C1 pre_open_gate codex "green@old-oid" polecat/c1),
         $(anchor C2 pull_request codex "fixable@old-oid" polecat/c2),
         $(anchor C3 pull_request codex "" polecat/c3),
         $(anchor C4 pull_request codex "red" polecat/c4)]"
-echo "sha-c1" > "$GH_DIR/head_polecat_c1"
-echo "sha-c2" > "$GH_DIR/head_polecat_c2"
-echo "sha-c3" > "$GH_DIR/head_polecat_c3"
-echo "sha-c4" > "$GH_DIR/head_polecat_c4"
+oid c1 > "$GH_DIR/head_polecat_c1"
+oid c2 > "$GH_DIR/head_polecat_c2"
+oid c3 > "$GH_DIR/head_polecat_c3"
+oid c4 > "$GH_DIR/head_polecat_c4"
 out=$(run); rc=$?
 eq "$rc" 0 "dispatch pass exits 0"
 has "$out" "4 reviews dispatched" "stale green, fixable, absent and unmappable each dispatched one review"
 
-echo "# unreadable live head fails soft: a present green marker stays satisfiable"
-store "[$(anchor C5 pre_open_gate codex "green@somewhere" polecat/c5)]"
+echo "# unreadable live head fails soft: a WELL-FORMED green marker stays satisfiable"
+# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit — the
+# shape a merge landing mid-pass presents to the anchor it just settled.
+store "[$(anchor C5 pre_open_gate codex "green@$(oid c5)" polecat/c5),
+        $(anchor C5b pull_request codex "exception@$(oid c5b)" polecat/c5b)]"
+: > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "no-head pass exits 0"
-has "$out" "0 reviews dispatched" "green with an unreadable head is not re-gated"
+has "$out" "0 reviews dispatched" "green@ and exception@ a 40-hex oid with an unreadable head are not re-gated"
+hasnt "$out" "has advanced to" "a head that could not be read is never called a move"
+hasnt "$out" "No commit found" "the gh error body never becomes a dispatch reason"
+
+echo "# …but a MALFORMED green is not evidence, so the soft pass must not settle it"
+store "[$(anchor C6 pre_open_gate codex "green@$SHORT" polecat/c6)]"
+out=$(run); rc=$?
+eq "$rc" 0 "malformed-green pass exits 0"
+has "$out" "no 40-hex oid" "the un-satisfiable marker is named"
+has "$out" "1 reviews dispatched" "…and a signoff is dispatched to rewrite it"
+
+echo "# a head that is not a SHA is not a head"
+# gh exits 0 and prints 'null' when the body carries no .sha: the exit code
+# alone does not separate a head from a miss.
+store "[$(anchor C7 pre_open_gate codex "green@$(oid c7)" polecat/c7)]"
+echo "null" > "$GH_DIR/head_polecat_c7"
+: > "$STUB_GC_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "malformed-head pass exits 0"
+has "$out" "0 reviews dispatched" "a non-SHA answer at rc=0 is unanswerable, not a move"
+hasnt "$out" "advanced to null" "'null' is never reported as the live head"
+
+echo "# a SHA-shaped answer that arrives with a failure is still unanswerable"
+store "[$(anchor C8 pre_open_gate codex "green@$(oid c8old)" polecat/c8)]"
+oid c8 > "$GH_DIR/head_polecat_c8"
+: > "$STUB_GC_LOG"
+out=$(STUB_GH_COMMIT_RC=1 run); rc=$?
+eq "$rc" 0 "failed-read pass exits 0"
+has "$out" "0 reviews dispatched" "a non-zero gh exit means no head, whatever it printed"
+
+echo "# stray markers: a check.<g> outside check_set that no arm could rewrite"
+store "[$(anchor N1 pull_request codex "green@$(oid n1)" polecat/n1 ',"check.refinery":"green@'"$SHORT"'"')]"
+oid n1 > "$GH_DIR/head_polecat_n1"
+out=$(run); rc=$?
+eq "$rc" 0 "the sweep pass exits 0"
+eq "$(meta N1 check.refinery)" "<absent>" "the undeclared malformed marker is cleared"
+eq "$(meta N1 check.codex)" "green@$(oid n1)" "…and the declared, well-formed marker is untouched"
+has "$out" "cleared undeclared malformed gate marker check.refinery" "the clear is reported"
+has "$out" "1 stray markers cleared" "…and counted"
+has "$out" "0 reviews dispatched" "…and a marker that governs nothing dispatches nothing"
+has "$(jq -r '.[] | select(.id == "N1") | .notes' "$STUB_STORE")" "does not declare that gate" "the anchor records why it was cleared"
+
+echo "# …a WELL-FORMED undeclared marker is history, not damage"
+store "[$(anchor N2 pull_request codex "green@$(oid n2)" polecat/n2 ',"check.refinery":"green@'"$(oid n2r)"'"')]"
+oid n2 > "$GH_DIR/head_polecat_n2"
+out=$(run)
+eq "$(meta N2 check.refinery)" "green@$(oid n2r)" "a narrowed check_set keeps its well-formed history"
+has "$out" "0 stray markers cleared" "…and nothing was swept"
+
+echo "# …exception@ is the operator's verdict — never swept, malformed or not"
+store "[$(anchor N3 pull_request codex "green@$(oid n3)" polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"')]"
+oid n3 > "$GH_DIR/head_polecat_n3"
+out=$(run)
+eq "$(meta N3 check.refinery)" "exception@$SHORT" "an exception verdict survives the sweep"
+has "$out" "0 stray markers cleared" "…and nothing was swept"
+
+echo "# …the none opt-out does not exempt an anchor from the sweep"
+store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
+out=$(run)
+eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
+has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
+
+echo "# …a clear that does not persist is reported, not counted"
+store "[$(anchor N5 pull_request codex "green@$(oid n5)" polecat/n5 ',"check.refinery":"green@'"$SHORT"'"')]"
+oid n5 > "$GH_DIR/head_polecat_n5"
+out=$(STUB_DROP_KEYS="N5:check.refinery" run 2>&1); rc=$?
+eq "$rc" 0 "an unpersisted clear does not hold the merge (the marker gates nothing)"
+eq "$(meta N5 check.refinery)" "green@$SHORT" "the marker is still there"
+has "$out" "still reads" "the failed clear is reported"
+has "$out" "0 stray markers cleared" "…and not counted"
 
 echo "# in-flight dedup"
 store "[$(anchor D1 pull_request codex "" polecat/d1),
         {\"id\":\"rev-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D1\",\"gc.routed_to\":\"$POOL\"}}]"
-echo "sha-d1" > "$GH_DIR/head_polecat_d1"
+oid d1 > "$GH_DIR/head_polecat_d1"
 out=$(run)
 has "$out" "0 reviews dispatched" "a live routed review (legacy stamp shape) suppresses the dispatch"
 
 store "[$(anchor D1b pull_request codex "" polecat/d1b),
         {\"id\":\"rev-1b\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D1b\",\"gc.execution_routed_to\":\"$POOL\"}}]"
-echo "sha-d1b" > "$GH_DIR/head_polecat_d1b"
+oid d1b > "$GH_DIR/head_polecat_d1b"
 out=$(run)
 has "$out" "0 reviews dispatched" "a poured review (gc.execution_routed_to) suppresses the dispatch"
 
 store "[$(anchor D2 pull_request codex "" polecat/d2),
         {\"id\":\"rev-2\",\"status\":\"in_progress\",\"assignee\":\"rig/codex-1\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D2\"}}]"
-echo "sha-d2" > "$GH_DIR/head_polecat_d2"
+oid d2 > "$GH_DIR/head_polecat_d2"
 out=$(run)
 has "$out" "0 reviews dispatched" "a claimed review (route consumed) suppresses the dispatch"
 
 echo "# stranded review (never poured) is re-slung, not counted in flight forever"
 store "[$(anchor D3 pull_request codex "" polecat/d3),
         {\"id\":\"rev-3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D3\"}}]"
-echo "sha-d3" > "$GH_DIR/head_polecat_d3"
+oid d3 > "$GH_DIR/head_polecat_d3"
 : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "STRANDED review rev-3" "the stranded shape is named"
@@ -148,7 +274,7 @@ store "[$(anchor D4 pull_request codex "" polecat/d4),
         {\"id\":\"rev-4\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D4\"}},
         {\"id\":\"conv-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
 printf 'conv-1|tracks|rev-4\n' >> "$STUB_DEPS"
-echo "sha-d4" > "$GH_DIR/head_polecat_d4"
+oid d4 > "$GH_DIR/head_polecat_d4"
 : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "convoy-tracked" "the convoy-tracked review is recognized as a live pour"
@@ -161,7 +287,7 @@ store "[$(anchor D5 pull_request codex "" polecat/d5),
         {\"id\":\"rev-5\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D5\"}},
         {\"id\":\"conv-2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
 printf 'conv-2|tracks|rev-5\n' >> "$STUB_DEPS"
-echo "sha-d5" > "$GH_DIR/head_polecat_d5"
+oid d5 > "$GH_DIR/head_polecat_d5"
 : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "STRANDED review rev-5" "a closed convoy no longer counts as a live pour"
@@ -170,21 +296,274 @@ eq "$(meta rev-5 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 
 echo "# merge_hold gates the re-dispatch"
 store "[$(anchor E1 pull_request codex "" polecat/e1 ',"merge_hold":"true"')]"
-echo "sha-e1" > "$GH_DIR/head_polecat_e1"
+oid e1 > "$GH_DIR/head_polecat_e1"
 out=$(run)
 has "$out" "merge_hold is set (operator gate); no dispatch" "an operator hold suppresses the dispatch"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
 
-echo "# dispatch_count cap"
-store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"3"')]"
-echo "sha-f1" > "$GH_DIR/head_polecat_f1"
+# --- rework rounds: the ledger the cap is counted from --------------------------
+# A review of a commit no rework has touched returns the findings that filed
+# the child already waiting, and spends a dispatch round doing it.
+judged_review() { # <id> <anchor> <oid>
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"%s","reviewed_oid":"%s"}}' \
+    "$1" "$2" "$3"
+}
+rework_kid() { # <id> <source-review> <status>
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"source_review_bead":"%s"}}' "$1" "$3" "$2"
+}
+
+echo "# dispatch_count is a tally, not a cap: cap-many spent rounds still dispatch"
+store "[$(anchor F1 pull_request codex "" polecat/f1 ',"dispatch_count":"3"'),
+        $(judged_review rev-f1 F1 old-f1),
+        $(rework_kid fix-f1a rev-f1 closed),
+        $(rework_kid fix-f1b rev-f1 closed),
+        $(rework_kid fix-f1c rev-f1 closed)]"
+printf 'fix-f1a|blocks|F1\nfix-f1b|blocks|F1\nfix-f1c|blocks|F1\n' >> "$STUB_DEPS"
+oid f1 > "$GH_DIR/head_polecat_f1"
 out=$(run)
-has "$out" "cap of 3" "the round cap declines further dispatches"
+has "$out" "1 reviews dispatched" "the third rework's result still gets the review that settles the gate"
+hasnt "$out" "cap of" "…no dispatch-side cap preempts signoff.sh's terminal verdict"
+eq "$(meta F1 dispatch_count)" "4" "…and the tally advances past the cap it is not"
+
+echo "# a head already judged, with its rework still open, is never re-reviewed"
+store "[$(anchor R1 pull_request codex "" polecat/r1),
+        $(judged_review rev-r1 R1 "$(oid r1)"),
+        $(rework_kid fix-r1 rev-r1 open)]"
+printf 'fix-r1|blocks|R1\n' >> "$STUB_DEPS"
+oid r1 > "$GH_DIR/head_polecat_r1"
+out=$(run); rc=$?
+eq "$rc" 0 "the refusal exits 0 (gate stays armed, merge held)"
+has "$out" "already judged $(oid r1)" "the refusal names the commit already judged"
+has "$out" "rework fix-r1 is still open" "…and the rework that has to move first"
 has "$out" "0 reviews dispatched" "…and nothing was dispatched"
+eq "$(meta R1 dispatch_count)" "<absent>" "…and no round was consumed on a question already answered"
+
+echo "# …but a head that MOVED past the verdict re-gates"
+store "[$(anchor R2 pull_request codex "" polecat/r2),
+        $(judged_review rev-r2 R2 old-oid),
+        $(rework_kid fix-r2 rev-r2 open)]"
+printf 'fix-r2|blocks|R2\n' >> "$STUB_DEPS"
+oid r2 > "$GH_DIR/head_polecat_r2"
+out=$(run)
+has "$out" "1 reviews dispatched" "a commit no verdict has read is reviewed"
+
+echo "# …and a CLOSED rework is an attempt made: the next round dispatches"
+store "[$(anchor R3 pull_request codex "" polecat/r3),
+        $(judged_review rev-r3 R3 "$(oid r3)"),
+        $(rework_kid fix-r3 rev-r3 closed)]"
+printf 'fix-r3|blocks|R3\n' >> "$STUB_DEPS"
+oid r3 > "$GH_DIR/head_polecat_r3"
+out=$(run)
+has "$out" "1 reviews dispatched" "a spent rework re-opens the gate even at an unmoved head"
+
+echo "# a closed review that filed no rework bars nothing"
+store "[$(anchor R4 pull_request codex "" polecat/r4),
+        $(judged_review rev-r4 R4 "$(oid r4)")]"
+oid r4 > "$GH_DIR/head_polecat_r4"
+out=$(run)
+has "$out" "1 reviews dispatched" "only a request-changes verdict (which files a child) bars a re-review"
+
+echo "# a verdict on ANOTHER gate bars nothing"
+store "[$(anchor R6 pull_request codex "" polecat/r6),
+        {\"id\":\"rev-r6\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"other\",\"anchor_bead\":\"R6\",\"reviewed_oid\":\"$(oid r6)\"}},
+        $(rework_kid fix-r6 rev-r6 open)]"
+printf 'fix-r6|blocks|R6\n' >> "$STUB_DEPS"
+oid r6 > "$GH_DIR/head_polecat_r6"
+out=$(run)
+has "$out" "1 reviews dispatched" "the guard is per-gate: another gate's verdict does not answer this one"
+
+echo "# the bar is THIS verdict's own rework, not any open child on the anchor"
+store "[$(anchor R7 pull_request codex "" polecat/r7),
+        $(judged_review rev-r7 R7 "$(oid r7)"),
+        $(rework_kid fix-r7 rev-r7 closed),
+        $(rework_kid fix-r7b rev-old open)]"
+printf 'fix-r7|blocks|R7\nfix-r7b|blocks|R7\n' >> "$STUB_DEPS"
+oid r7 > "$GH_DIR/head_polecat_r7"
+out=$(run)
+has "$out" "1 reviews dispatched" "an open child from another round does not answer this verdict"
+
+echo "# an unreadable child ledger holds the dispatch"
+store "[$(anchor R5 pull_request codex "" polecat/r5),
+        $(judged_review rev-r5 R5 "$(oid r5)"),
+        $(rework_kid fix-r5 rev-r5 open)]"
+printf 'fix-r5|blocks|R5\n' >> "$STUB_DEPS"
+oid r5 > "$GH_DIR/head_polecat_r5"
+out=$(STUB_DEP_GARBAGE=1 run)
+has "$out" "prior-verdict probe unreadable" "an unanswerable probe is reported"
+has "$out" "0 reviews dispatched" "…and dispatches nothing (merge stays held, retry next pass)"
+
+echo "# …but an anchor with no prior verdict never reads that ledger at all"
+store "[$(anchor R8 pull_request codex "" polecat/r8)]"
+oid r8 > "$GH_DIR/head_polecat_r8"
+out=$(STUB_DEP_GARBAGE=1 run)
+has "$out" "1 reviews dispatched" "a first dispatch is not held by a child-ledger read it does not need"
+
+echo "# the stranded-review repair asks the same question, and is refused too"
+store "[$(anchor R9 pull_request codex "" polecat/r9),
+        $(judged_review rev-r9 R9 "$(oid r9)"),
+        $(rework_kid fix-r9 rev-r9 open),
+        {\"id\":\"rev-stray\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R9\",\"reviewed_oid\":\"$(oid r9)\"}}]"
+printf 'fix-r9|blocks|R9\n' >> "$STUB_DEPS"
+oid r9 > "$GH_DIR/head_polecat_r9"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "already judged $(oid r9)" "the stranded repair path reaches the same refusal"
+has "$out" "no re-sling of rev-stray" "…and names the review it declines to re-sling"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…so the stranded review is not sent back to the pool"
+has "$out" "0 reviews dispatched" "…and the pass dispatches nothing"
+
+echo "# …but a stranded review whose head MOVED past the verdict is still repaired"
+store "[$(anchor R10 pull_request codex "" polecat/r10),
+        $(judged_review rev-r10 R10 old-oid),
+        $(rework_kid fix-r10 rev-r10 open),
+        {\"id\":\"rev-stray2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R10\",\"reviewed_oid\":\"old-oid\"}}]"
+printf 'fix-r10|blocks|R10\n' >> "$STUB_DEPS"
+oid r10 > "$GH_DIR/head_polecat_r10"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "STRANDED review rev-stray2" "a commit no verdict has read still earns the repair"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-stray2 --on mol-review" "…and it is re-slung"
+
+echo "# an unreadable head names no commit, so no verdict can be tested against it"
+# No head_polecat_r11: live_head_for reads nothing. The closed review carries no
+# reviewed_oid either, so an unguarded probe would match "" against "" and bar a
+# dispatch on a verdict that never named a commit.
+store "[$(anchor R11 pull_request codex "" polecat/r11),
+        {\"id\":\"rev-r11\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R11\"}},
+        $(rework_kid fix-r11 rev-r11 open)]"
+printf 'fix-r11|blocks|R11\n' >> "$STUB_DEPS"
+out=$(run)
+has "$out" "1 reviews dispatched" "an unreadable head bars nothing, however the ledger reads"
+hasnt "$out" "already judged" "…and no verdict is claimed over a commit nobody named"
+
+# --- dispatch backstop -------------------------------------------------------
+# The ceiling bounds DISPATCHES. already_answered above sees only the rework a
+# verdict actually filed, so a review that ends writing no marker and leaving
+# no visible child returns the anchor to the state that triggered the dispatch
+# and the next pass repeats it. These fixtures pin where the refusal starts,
+# that it is never silent, and that it defers to the precise refusal.
+echo "# under the ceiling nothing is refused"
+store "[$(anchor S1 pull_request codex "" polecat/s1 ',"dispatch_count":"4"')]"
+oid s1 > "$GH_DIR/head_polecat_s1"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "1 reviews dispatched" "the last dispatch under the ceiling is made"
+eq "$(meta S1 dispatch_count)" "5" "...and counted"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and nothing is escalated below the ceiling"
+eq "$(meta S1 'dispatch_backstop.codex')" "<absent>" "...and the anchor carries no hold"
+
+echo "# at the ceiling the dispatch is refused, and said out loud"
+store "[$(anchor S2 pull_request codex "" polecat/s2 ',"dispatch_count":"5"')]"
+oid s2 > "$GH_DIR/head_polecat_s2"
+: > "$STUB_ESCALATE_LOG"; : > "$STUB_GC_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "the refusal exits 0 (gate stays armed, merge held)"
+has "$out" "0 reviews dispatched" "nothing is dispatched at the ceiling"
+has "$out" "1 at the dispatch backstop" "...and the pass reports the hold"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "...no review is poured"
+esc=$(cat "$STUB_ESCALATE_LOG")
+has "$esc" "--subject S2" "the visit is filed on the anchor"
+has "$esc" "--key dispatch-runaway" "...under its own situation key, so repeats dedup"
+has "$esc" "GC_MAX_REVIEW_DISPATCHES" "...and names the ceiling's own env var"
+has "$esc" "NOT the convergence cap" "...and says which number it is not"
+eq "$(meta S2 'dispatch_backstop.codex')" "5@$(oid s2)" "the hold is stamped, keyed to the head it holds"
+has "$(notes S2)" "merge stays HELD" "...and the anchor's notes carry the reason, readable from the anchor alone"
+eq "$(meta S2 dispatch_count)" "5" "a refused dispatch consumes no count"
+
+echo "# ...once per situation: a repeat pass re-reports without re-filing"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "already escalated [dispatch-runaway]" "a second pass names the standing hold"
+has "$out" "1 at the dispatch backstop" "...and keeps counting it, so the hold stays visible every pass"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and files nothing new"
+eq "$(notes S2 | awk '/merge stays HELD/{n++} END{print n+0}')" "1" "...and appends the anchor note exactly once"
+
+echo "# ...and a moved head restates the situation, which says it again"
+oid s2b > "$GH_DIR/head_polecat_s2"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "5@$(oid s2b)" "the hold names the head it now holds"
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject S2" "...and the visit is re-filed against it"
+eq "$(meta S2 'dispatch_backstop.codex')" "5@$(oid s2b)" "...and the stamp follows the head"
+eq "$(meta S2 dispatch_count)" "5" "...but a moved head buys no dispatch past the ceiling"
+
+echo "# an escalation that does not file leaves the anchor unstamped, and retries"
+store "[$(anchor S3 pull_request codex "" polecat/s3 ',"dispatch_count":"6"')]"
+oid s3 > "$GH_DIR/head_polecat_s3"
+out=$(STUB_ESCALATE_FAIL=1 run)
+has "$out" "escalation did not file" "a failed visit is reported"
+has "$out" "0 reviews dispatched" "...and the dispatch is still refused"
+eq "$(meta S3 'dispatch_backstop.codex')" "<absent>" "...and the anchor is not stamped"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject S3" "the next pass files it"
+eq "$(meta S3 'dispatch_backstop.codex')" "6@$(oid s3)" "...and stamps the anchor"
+
+echo "# a hold stamp that does not persist is reported, and appends no note"
+store "[$(anchor S10 pull_request codex "" polecat/s10 ',"dispatch_count":"5"')]"
+oid s10 > "$GH_DIR/head_polecat_s10"
+: > "$STUB_ESCALATE_LOG"
+out=$(STUB_DROP_KEYS="S10:dispatch_backstop.codex" run)
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject S10" "the visit is filed even when the anchor cannot be stamped"
+has "$out" "hold stamp did not persist" "...and the unstamped anchor is reported"
+eq "$(notes S10)" "" "...and no note is appended, so repeat passes cannot flood the anchor"
+
+echo "# with no escalator the hold is still stamped on the anchor"
+store "[$(anchor S9 pull_request codex "" polecat/s9 ',"dispatch_count":"5"')]"
+oid s9 > "$GH_DIR/head_polecat_s9"
+chmod -x "$SD/escalate.sh"
+out=$(run)
+chmod +x "$SD/escalate.sh"
+has "$out" "is missing" "a missing escalator is reported"
+has "$out" "0 reviews dispatched" "...and the dispatch is still refused"
+eq "$(meta S9 'dispatch_backstop.codex')" "5@$(oid s9)" "...and the anchor still carries the hold"
+has "$(notes S9)" "NOT escalated" "...whose note says plainly that no visit was filed"
+
+echo "# the round cap does not reach the dispatch path"
+store "[$(anchor S4 pull_request codex "" polecat/s4 ',"dispatch_count":"3"')]"
+oid s4 > "$GH_DIR/head_polecat_s4"
+: > "$STUB_ESCALATE_LOG"
+out=$(GC_MAX_REVIEW_ROUNDS=1 run)
+has "$out" "1 reviews dispatched" "GC_MAX_REVIEW_ROUNDS bounds signoff.sh's rework rounds, never this dispatch"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and escalates nothing"
+
+echo "# the ceiling is configurable, and a garbage value falls back to the default"
+store "[$(anchor S5 pull_request codex "" polecat/s5 ',"dispatch_count":"2"')]"
+oid s5 > "$GH_DIR/head_polecat_s5"
+: > "$STUB_ESCALATE_LOG"
+out=$(GC_MAX_REVIEW_DISPATCHES=2 run)
+has "$out" "at the dispatch backstop" "GC_MAX_REVIEW_DISPATCHES moves the ceiling"
+has "$(cat "$STUB_ESCALATE_LOG")" "--key dispatch-runaway" "...and a lowered ceiling escalates like the default"
+store "[$(anchor S6 pull_request codex "" polecat/s6 ',"dispatch_count":"2"')]"
+oid s6 > "$GH_DIR/head_polecat_s6"
+out=$(GC_MAX_REVIEW_DISPATCHES=abc run)
+has "$out" "1 reviews dispatched" "a non-numeric ceiling still dispatches"
+hasnt "$out" "integer expression" "...because it fell back to the default, not because the comparison errored"
+
+echo "# a head already answered is not a runaway: the precise refusal wins"
+store "[$(anchor S7 pull_request codex "" polecat/s7 ',"dispatch_count":"9"'),
+        $(judged_review rev-s7 S7 "$(oid s7)"),
+        $(rework_kid fix-s7 rev-s7 open)]"
+printf 'fix-s7|blocks|S7\n' >> "$STUB_DEPS"
+oid s7 > "$GH_DIR/head_polecat_s7"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "already judged $(oid s7)" "an anchor waiting on the rework it filed is refused for that reason"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and is never paged as a runaway, however high the tally"
+eq "$(meta S7 'dispatch_backstop.codex')" "<absent>" "...and carries no backstop hold"
+
+echo "# a pour that does not read back burns no count, so the ceiling stays where it is"
+store "[$(anchor S8 pull_request codex "" polecat/s8 ',"dispatch_count":"4"')]"
+oid s8 > "$GH_DIR/head_polecat_s8"
+: > "$STUB_ESCALATE_LOG"
+out=$(STUB_DROP_KEYS="new-2:gc.execution_routed_to" run)
+has "$out" "dispatch NOT counted" "the unread-back pour is not counted"
+eq "$(meta S8 dispatch_count)" "4" "...so the tally does not advance"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and a failed pour never pushes an anchor to the ceiling"
 
 echo "# a created-but-unstamped orphan is ADOPTED, never twinned"
 store "[$(anchor H1 pull_request codex "" polecat/h1)]"
-echo "sha-h1" > "$GH_DIR/head_polecat_h1"
+oid h1 > "$GH_DIR/head_polecat_h1"
 out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
 has "$out" "did not record anchor_bead=H1" "the failed stamp is reported (orphan left behind)"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "the orphan exists"
@@ -196,7 +575,7 @@ eq "$(meta new-2 'gc.execution_routed_to')" "$POOL" "…and poured"
 
 echo "# a pour whose exec stamp does not read back is not counted"
 store "[$(anchor G1 pull_request codex "" polecat/g1)]"
-echo "sha-g1" > "$GH_DIR/head_polecat_g1"
+oid g1 > "$GH_DIR/head_polecat_g1"
 out=$(STUB_DROP_KEYS="new-2:gc.execution_routed_to" run); rc=$?
 eq "$rc" 0 "a failed pour read-back leaves rc=0 (gate armed, merge held)"
 has "$out" "pour did not read back" "the unverified pour is reported"
@@ -215,7 +594,7 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1"
 
 echo "# a hard sling failure (rc!=0, nothing written) is not counted…"
 store "[$(anchor K1 pull_request codex "" polecat/k1)]"
-echo "sha-k1" > "$GH_DIR/head_polecat_k1"
+oid k1 > "$GH_DIR/head_polecat_k1"
 out=$(STUB_SLING_FAIL=1 run); rc=$?
 eq "$rc" 0 "a hard sling failure leaves rc=0 (gate armed, merge held)"
 has "$out" "pour did not read back" "the hard-failed pour is reported"
@@ -274,7 +653,7 @@ store "[$(anchor W1 pull_request codex "" polecat/w1),
         $(root_row root-w1 conv-w1),
         $(spent_steps root-w1 sw1)]"
 printf 'conv-w1|tracks|rev-w1\n' >> "$STUB_DEPS"
-echo "sha-w1" > "$GH_DIR/head_polecat_w1"
+oid w1 > "$GH_DIR/head_polecat_w1"
 : > "$STUB_ESCALATE_LOG"
 out=$(run)
 has "$out" "looks WEDGED" "the first sighting names the wedge"
@@ -302,7 +681,7 @@ store "[$(anchor W2 pull_request codex "" polecat/w2),
         $(root_row root-w2 conv-w2),
         $(live_steps root-w2 sw2)]"
 printf 'conv-w2|tracks|rev-w2\n' >> "$STUB_DEPS"
-echo "sha-w2" > "$GH_DIR/head_polecat_w2"
+oid w2 > "$GH_DIR/head_polecat_w2"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out="$out$(run)"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "a live step chain escalates nothing, however many passes run"
@@ -319,7 +698,7 @@ store "[$(anchor W3 pull_request codex "" polecat/w3),
         $(step_row sw3-c root-w3 verdict-and-drain closed),
         $(step_row sw3-d root-w3 workflow-finalize in_progress)]"
 printf 'conv-w3|tracks|rev-w3\n' >> "$STUB_DEPS"
-echo "sha-w3" > "$GH_DIR/head_polecat_w3"
+oid w3 > "$GH_DIR/head_polecat_w3"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out=$(run)
 has "$(cat "$STUB_ESCALATE_LOG")" "--subject rev-w3" "a chain whose only live step is workflow-finalize is spent"
@@ -334,7 +713,7 @@ store "[$(anchor W4 pull_request codex "" polecat/w4),
         $(spent_steps root-w4 sw4),
         $(live_steps root-w4b sw4b)]"
 printf 'conv-w4|tracks|rev-w4\nconv-w4b|tracks|rev-w4\n' >> "$STUB_DEPS"
-echo "sha-w4" > "$GH_DIR/head_polecat_w4"
+oid w4 > "$GH_DIR/head_polecat_w4"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out="$out$(run)"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "a second live workflow keeps the review in flight"
@@ -343,7 +722,7 @@ eq "$(meta rev-w4 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 echo "# an unreadable pour linkage escalates nothing"
 store "[$(anchor W5 pull_request codex "" polecat/w5),
         $(review_row rev-w5 W5)]"
-echo "sha-w5" > "$GH_DIR/head_polecat_w5"
+oid w5 > "$GH_DIR/head_polecat_w5"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "a review with no traceable workflow is reported, not judged"
@@ -356,7 +735,7 @@ store "[$(anchor W6 pull_request codex "" polecat/w6),
         $(convoy_row conv-w6),
         $(root_row root-w6 conv-w6)]"
 printf 'conv-w6|tracks|rev-w6\n' >> "$STUB_DEPS"
-echo "sha-w6" > "$GH_DIR/head_polecat_w6"
+oid w6 > "$GH_DIR/head_polecat_w6"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "an empty step enumeration proves nothing about the pour"
@@ -369,7 +748,7 @@ store "[$(anchor W7 pull_request codex "" polecat/w7),
         $(root_row root-w7 conv-w7),
         $(spent_steps root-w7 sw7)]"
 printf 'conv-w7|tracks|rev-w7\n' >> "$STUB_DEPS"
-echo "sha-w7" > "$GH_DIR/head_polecat_w7"
+oid w7 > "$GH_DIR/head_polecat_w7"
 : > "$STUB_ESCALATE_LOG"
 out=$(run)
 out=$(STUB_ESCALATE_FAIL=1 run); rc=$?
@@ -388,7 +767,7 @@ store "[$(anchor W8 pull_request codex "" polecat/w8),
         $(root_row root-w8 conv-w8),
         $(spent_steps root-w8 sw8)]"
 printf 'conv-w8|tracks|rev-w8\n' >> "$STUB_DEPS"
-echo "sha-w8" > "$GH_DIR/head_polecat_w8"
+oid w8 > "$GH_DIR/head_polecat_w8"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out="$out$(run)"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "a restored route means the pool can re-claim it — spent chain or not"
@@ -402,7 +781,7 @@ store "[$(anchor W9 pull_request codex "" polecat/w9),
         $(root_row root-w9 conv-w9),
         $(spent_steps root-w9 sw9)]"
 printf 'conv-w9|tracks|rev-w9\n' >> "$STUB_DEPS"
-echo "sha-w9" > "$GH_DIR/head_polecat_w9"
+oid w9 > "$GH_DIR/head_polecat_w9"
 : > "$STUB_ESCALATE_LOG"
 out=$(run); out="$out$(run)"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "an agent still holding the bead is finishing the round, not wedged"

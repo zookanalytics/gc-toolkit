@@ -122,8 +122,10 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    9. I1 DOCTOR CHECK (carried from PR #469, whose diff targets the old
       doctor): check-wait-is-an-edge — assert every wait is a graph edge,
       not a metadata string (component-model I1). Rebuild in the new doctor
-      layout (`doctor/check-state-space` is the model); I1 and I9 are the
-      only component-model invariants without a check in this tree.
+      layout (`doctor/check-state-space` is the model); I1 is the only
+      component-model invariant without a check in this tree. I9 now has
+      `doctor/check-pour-text-current`, and component-model.md §3 already
+      cites it. I1 is marked PARTIAL, with the remainder tracked on tk-wz4igt.
    10. ONE SCRUBBER (carried from PR #461): the tree still carries ~22
        inline `tr -d` control-character scrub definitions across
        assets/scripts and tools; consolidate to one shared helper with one
@@ -140,7 +142,15 @@ says OPERATOR is their decision, not yours. Work the steps in order.
        ride the code merge gate with a code-calibrated round cap. The
        mechanism exists (per-anchor check_set `none`/`approval`,
        GC_MAX_REVIEW_ROUNDS); write the doctrine/default that applies it to
-       non-code beads.
+       non-code beads. Answered by tk-rbeq4f (2026-08-26), which also
+       rejects this item's framing: no default belongs in a document, and
+       `codex` is a gate label rather than a policy. The power to depart
+       from the configured default is granted and bounded in
+       docs/authority-map.md, the machinery it acts on is corrected in
+       docs/state-machine.md §Gates, and specs/tk-rbeq4f/ carries the
+       reasoning. The cap itself is not the lever and stays where it is;
+       the remaining code-shaped surface is the review rubric, carved out
+       as tk-wigtu9.
 
    Superseded open PRs: when the operator confirms this branch has landed,
    close the open zook-bot PRs it obsoletes, each with a one-line comment
@@ -152,8 +162,18 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    incident is likewise carried: the close decision left the agent surface
    in the rewrite, and this branch adds the lifecycle.sh close/terminal
    pairing guard, the sanctioned `lifecycle.sh reopen` repair, and the I4
-   anchor-shape filter — the reopened gc-na313 needs no further repair
-   beyond landing this.
+   anchor-shape filter.
+
+   That covers the anchor-close half only. gc-na313 also carries
+   `check.refinery="green@8d7f0cf3c"`, a 9-hex oid where the marker grammar
+   requires 40, which keeps `check-gate-integrity` red on its own — and
+   because `verify` fails on any non-ok check, that one marker holds the
+   cutover's verify gate red by itself. The sweep does not touch it: it
+   strips healer keys and repairs closed-bead state, while `check.*` is a
+   gate verdict. The repair ships in tk-43chr6, which teaches gate-ensure to
+   clear a marker that both fails the grammar and names a gate `check_set`
+   does not declare; the marker goes on the next merge-cadence pass over the
+   gascity store.
 
 ## Failure handling
 

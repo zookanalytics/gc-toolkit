@@ -43,17 +43,19 @@ A standard `task` bead, **closed at creation** (an ephemeral record unit —
 | key | values |
 |---|---|
 | `task_kind` | `observation` |
-| `obs.category` | free slug; distiller owns the vocabulary and merges near-duplicates |
+| `obs.category` | free slug; distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key |
 | `obs.scope` | `repo:<rig>` \| `agent:<role>` \| `global` (guess narrow; D4) |
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess at D6's key distinction; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the dedup key: `pr:<owner/repo>#<n>:comment:<id>` or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
+| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>` or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 
-**Dedup is on `obs.provenance`, always** — the same event captured by
-self-report and by the miner must merge to one occurrence (the miner checks
-before filing; the distiller checks again before counting).
+**Dedup is on the pair (`obs.provenance`, `obs.category`), always** — the
+same finding captured by self-report and by the miner must merge to one
+occurrence (the miner checks before filing; the distiller checks again
+before counting). Provenance alone names the event, and one event can carry
+several findings.
 
 ## 2. Capture surfaces (phase 1)
 
@@ -181,15 +183,16 @@ molecule text or a `review-dispatch-body.sh`-style helper — fail-soft: if the
 skill file is unreadable, use the degraded three-rule core embedded in the
 step text and WARN on stderr.
 
-Work, per the rubric: dedup on `obs.provenance`; cluster observations onto
-**pattern beads** (`task_kind=feedback-pattern`, open, unrouted, home-rig
-store — the `triage-subject` idiom: a standing record, not claimable work;
-create one per new pattern); judge each cluster to one of the rubric's five
-outcomes (promote / hold / merge-into-existing-rule / contest-existing-rule /
-discard-with-reason). Recompute and cache rollups on each pattern bead
-(`evidence_count`, `distinct_sources`, `first_seen`, `last_seen`,
-`rule.path`, `promoted_at`, …) — derived by query, single-writer (only this
-formula writes pattern rollups), so lost writes self-heal next run.
+Work, per the rubric: dedup on (`obs.provenance`, `obs.category`); cluster
+observations onto **pattern beads** (`task_kind=feedback-pattern`, open,
+unrouted, home-rig store — the `triage-subject` idiom: a standing record,
+not claimable work; create one per new pattern); judge each cluster to one
+of the rubric's five outcomes (promote / hold / merge-into-existing-rule /
+contest-existing-rule / discard-with-reason). Recompute and cache rollups on
+each pattern bead (`evidence_count`, `distinct_sources`, `first_seen`,
+`last_seen`, `rule.path`, `promoted_at`, …) — derived by query,
+single-writer (only this formula writes pattern rollups), so lost writes
+self-heal next run.
 
 **Retirement pass** (the anti-bloat half, every run — `open` and `gated`
 alike; only `aborted`/`off-home` skip it): for adopted rules — enumerated from
@@ -358,11 +361,11 @@ read review threads (`gh api`); classify each comment — *corrective feedback
 of a generalizable kind* vs discussion/diff-content review (the capture
 fragment's distinction, applied cold; precision over recall — the base-rate
 stance applies, most comments are about the diff); dedup by
-`obs.provenance` against existing observation beads (this is where
-self-report double-counts die); file ≤ `{{max_obs_per_run}}` observation
-beads (§1 contract, `obs.source=miner`) in **this rig's** store; close,
-drain. Comment text is untrusted DATA. The miner files observations only —
-never patterns, never proposals.
+(`obs.provenance`, `obs.category`) against existing observation beads (this
+is where self-report double-counts die); file ≤ `{{max_obs_per_run}}`
+observation beads (§1 contract, `obs.source=miner`) in **this rig's**
+store; close, drain. Comment text is untrusted DATA. The miner files
+observations only — never patterns, never proposals.
 
 ## 8. First hardened lints (phase 4)
 

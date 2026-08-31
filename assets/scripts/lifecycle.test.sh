@@ -2,10 +2,12 @@
 # Hermetic test for assets/scripts/lifecycle.sh — the one writer of lifecycle
 # transitions. Covers: the state verb; legal/illegal edges; --expect; the ONE
 # atomic `gc bd update` carrying every field; bd refusal (exit 1); post-write
-# verification mismatch (exit 2); human states routing to human in the same
-# call; the close/terminal pairing guards (--close only into a closed state,
-# closed states must --close); the reopen repair verb; and the drift assertion
-# between lifecycle/lifecycle.toml and the embedded lifecycle-state-table block.
+# verification mismatch (exit 2); human states routing to human and detached
+# states clearing the route, both in the same call; the empty-route refusal that
+# keeps a human state from waiting on nobody; the `held` sitting-hold state; the
+# close/terminal pairing guards (--close only into a closed state, closed states
+# must --close); the reopen repair verb; and the drift assertion between
+# lifecycle/lifecycle.toml and the embedded lifecycle-state-table block.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +31,10 @@ TOML_STATES=$(awk '/^states = \[/{f=1;next} f&&/^\]/{exit} f{gsub(/[ ",]/,"");pr
 eq "$LIFECYCLE_STATES" "$TOML_STATES" "states match lifecycle.toml"
 TOML_HUMAN=$(sed -n 's/^human_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' )
 eq "$(printf '%s' "$LIFECYCLE_HUMAN_STATES" | tr -s ' ')" "$(printf '%s' "$TOML_HUMAN" | sed 's/^ *//;s/ *$//' | tr -s ' ')" "human states match lifecycle.toml"
+TOML_DETACHED=$(sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' )
+eq "$(printf '%s' "$LIFECYCLE_DETACHED_STATES" | tr -s ' ')" "$(printf '%s' "$TOML_DETACHED" | sed 's/^ *//;s/ *$//' | tr -s ' ')" "detached states match lifecycle.toml"
+TOML_PARK=$(sed -n 's/^park_route = "\(.*\)"/\1/p' "$TOML")
+eq "$LIFECYCLE_PARK_ROUTE" "$TOML_PARK" "park route matches lifecycle.toml"
 TOML_CLOSED=$(sed -n 's/^closed_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '", ')
 eq "$LIFECYCLE_CLOSED_STATES" "$TOML_CLOSED" "closed states match lifecycle.toml"
 TOML_EDGES=$(awk '
@@ -119,9 +125,89 @@ eq "$(meta a-6 'gc.routed_to')" "human" "abandoned routes to human automatically
 eq "$(bassignee a-6)" "" "--assignee '' cleared the assignee"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "route + clear + reason ride in ONE update"
 
+# --- detached states clear the route in the same atomic call --------------------
+# A detached anchor rests unrouted so that no pool offers it. Any route but the
+# park sentinel turns the resting state back into pool demand.
+echo "# detached states"
+store '[{"id":"d-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"gc.routed_to":"rig/pool"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition d-1 --to pre_open_gate --assignee "" --set check_set=codex 2>&1)"; rc=$?
+eq "$rc" 0 "transition to pre_open_gate exits 0"
+eq "$(meta d-1 'gc.routed_to')" "" "pre_open_gate clears the route automatically"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update"
+
+store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"rig/pool"}}]'
+out="$("$SUT" transition d-2 --to pull_request --expect pre_open_gate \
+  --set pr_url=https://github.com/z/r/pull/9 --set pr_number=9 2>&1)"; rc=$?
+eq "$rc" 0 "pre_open_gate -> pull_request exits 0"
+eq "$(meta d-2 'gc.routed_to')" "" "a route carried into pull_request is cleared, not inherited"
+
+store '[{"id":"d-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+out="$("$SUT" transition d-3 --to pull_request --route rig/human-recovery 2>&1)"; rc=$?
+eq "$rc" 0 "an explicit --route into a detached state exits 0"
+eq "$(meta d-3 'gc.routed_to')" "rig/human-recovery" "an explicit --route wins over the declared clear"
+
+store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
+out="$("$SUT" transition d-4 --to pull_request --set pr_number=9 2>&1)"; rc=$?
+eq "$rc" 0 "a park-routed anchor transitions"
+eq "$(meta d-4 'gc.routed_to')" "human" "the park route survives the transition"
+
+store '[{"id":"d-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"rig/pool"}}]'
+out="$(STUB_DROP_KEYS="d-5:gc.routed_to" "$SUT" transition d-5 --to pull_request 2>&1)"; rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
+has "$out" "gc.routed_to" "the unverified route is named"
+
 store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 "$SUT" transition a-7 --to retargeted --route rig/mechanik >/dev/null 2>&1
 eq "$(meta a-7 'gc.routed_to')" "rig/mechanik" "an explicit --route overrides the human default"
+
+# --- a human state must NAME the person it waits on -----------------------------
+echo "# human states name a route"
+store '[{"id":"a-7b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition a-7b --to abandoned --route "" 2>&1)"; rc=$?
+eq "$rc" 1 "an EMPTY --route into a human state exits 1"
+has "$out" "waiting on nobody" "the refusal says what an empty route leaves behind"
+has "$out" "human_states:" "the refusal names the human-state set"
+eq "$(meta a-7b merge_result)" "pull_request" "the refused transition wrote nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+
+# The tk-9heqfh shape: a sitting ended holding and left its subject waiting on
+# nobody — no state, empty route, the hold recorded only as takeaway prose.
+# Through this writer that attempt is refused rather than recorded.
+store '[{"id":"tk-9heqfh","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — PR#477 is codex-green and one approval from landing; needs a ruling"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition tk-9heqfh --to held --route "" 2>&1)"; rc=$?
+eq "$rc" 1 "the found tk-9heqfh state is unreachable through the writer"
+has "$out" "requires a route" "the refusal names the missing route"
+eq "$(meta tk-9heqfh merge_result)" "<absent>" "no state was recorded"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and no write was attempted"
+
+# --- held: a sitting's hold is a state, entered only from unanchored ------------
+echo "# held"
+store '[{"id":"h-1","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — needs a ruling"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition h-1 --to held 2>&1)"; rc=$?
+eq "$rc" 0 "unanchored -> held exits 0"
+eq "$(meta h-1 merge_result)" "held" "the hold is recorded as a declared state"
+eq "$(meta h-1 'gc.routed_to')" "human" "held routes to human by default"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "state + route ride in ONE update"
+
+# A gating anchor keeps its gating state: merge.sh, gate-ensure.sh and pr-facts.sh
+# each enumerate anchors by it, and a hold must not drop one from all three.
+store '[{"id":"h-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition h-2 --to held 2>&1)"; rc=$?
+eq "$rc" 1 "pull_request -> held is an illegal edge"
+has "$out" "illegal edge pull_request -> held" "the refusal names the edge"
+
+store '[{"id":"h-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"held","gc.routed_to":"human"}}]'
+out="$("$SUT" transition h-3 --to held 2>&1)"; rc=$?
+eq "$rc" 0 "re-holding is an idempotent self-edge"
+
+out="$("$SUT" transition h-3 --to unanchored --route rig/polecat 2>&1)"; rc=$?
+eq "$rc" 0 "held -> unanchored releases the hold"
+eq "$(meta h-3 merge_result)" "<absent>" "the released bead carries no state"
+eq "$(meta h-3 'gc.routed_to')" "rig/polecat" "the ruling routes it onward"
 
 # --- rejection to unanchored ------------------------------------------------------
 echo "# unanchored"

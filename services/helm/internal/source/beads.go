@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/steveyegge/beads"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
@@ -71,6 +72,12 @@ type BeadsSource struct {
 	// openStore is. See gccli.go for why this is a third sanctioned backend
 	// rather than a contract violation.
 	gc gcClient
+
+	// now is the gather's clock. The closed-sitting window is measured from it,
+	// so it is injectable for the same reason the stores are: a test that had to
+	// place its fixtures relative to wall-clock time would be asserting against
+	// a moving target.
+	now func() time.Time
 }
 
 // beadStore is the slice of [beads.Storage] this source uses. Narrowing it to
@@ -99,6 +106,11 @@ func withGCClient(c gcClient) BeadsOption {
 	return func(s *BeadsSource) { s.gc = c }
 }
 
+// withClock pins the gather's clock (used by tests).
+func withClock(now func() time.Time) BeadsOption {
+	return func(s *BeadsSource) { s.now = now }
+}
+
 // NewBeadsSource builds a source over the city's per-rig bead stores. The city
 // root comes from GC_HELM_CITY_PATH, else GC_CITY_PATH, else GC_CITY.
 func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
@@ -106,12 +118,16 @@ func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 		cityPath:  DiscoverCityPath(),
 		stores:    map[string]beadStore{},
 		openStore: openLibraryStore,
+		now:       time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
 	if s.gc == nil {
 		s.gc = newGCExec(s.cityPath)
+	}
+	if s.now == nil {
+		s.now = time.Now
 	}
 	return s
 }
@@ -335,7 +351,12 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	g := &gatherState{rigByPrefix: map[string]string{}}
 	convoys := s.convoyIndex(ctx, g)
 
-	var visits []string
+	// One clock for the whole pass, so the closed-sitting window and the
+	// takeaway spans it feeds are measured against the same instant on every
+	// rig rather than drifting across a slow gather.
+	now := s.now().UTC()
+
+	var sittings []board.Sitting
 	var roots []workflowRoot
 	for _, r := range rigs {
 		st, err := s.store(ctx, r)
@@ -344,7 +365,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 			continue
 		}
 		s.gatherRig(ctx, g, st, r, convoys)
-		visits = append(visits, s.visitSubjects(ctx, st, r, g)...)
+		sittings = append(sittings, s.rigSittings(ctx, st, r, g, now)...)
 		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
 	}
 
@@ -357,7 +378,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 
 	return &Result{
 		Anchors:       g.anchors,
-		Facts:         buildFacts(visits, inflight, owners, rigs),
+		Facts:         buildFacts(sittings, inflight, owners, rigs),
 		Partial:       g.partial,
 		PartialErrors: g.partialErrs,
 	}, nil

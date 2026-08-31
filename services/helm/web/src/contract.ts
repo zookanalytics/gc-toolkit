@@ -116,6 +116,43 @@ export interface Tile {
 }
 
 /**
+ * Sitting is one converse sitting — the visit bead a conversation runs inside.
+ *
+ * Sittings are not tiles and are not ranked against them: a tile is an anchor
+ * that wants something, a sitting is an event in the conversation record. The
+ * board carries every running sitting plus those closed inside the service's
+ * recent window (`GC_HELM_SITTINGS_WINDOW`, a day by default).
+ */
+export interface Sitting {
+  id: string;
+  rig: string;
+  /** The anchor the conversation is about — the same id `held` keys on. */
+  subject: string;
+  title: string;
+  /** The visit bead's status. `'closed'` is finished; anything else is running. */
+  status: string;
+  /**
+   * The one-word justification a sitting closed on (`gc.outcome`: folded,
+   * moot, benign, diagnosed, cut-short, or the word a held sitting signs off
+   * with). Empty while it is still running.
+   */
+  outcome: string;
+  /** The converse session that ran it — what an operator attaches to. */
+  session: string;
+  /** RFC 3339. Omitted when the source could not read the stamp. */
+  opened_at?: string;
+  /** RFC 3339. Omitted while the sitting is still running. */
+  closed_at?: string;
+  /**
+   * The headline THIS sitting left on its subject, or `''`. A takeaway lives on
+   * the subject and each sitting overwrites the last one's, so the service
+   * hands it only to the sitting that was running when it was stamped — a
+   * subject visited three times has two sittings that did not write it.
+   */
+  takeaway: string;
+}
+
+/**
  * Board is the envelope returned at `<mount>/helm`. Tiles arrive sorted by
  * `rank_score` descending and deduplicated by `id`; `total` is the count before
  * any row cap.
@@ -130,6 +167,12 @@ export interface Board {
    * Narrow it (`board.tiles ?? []`) before iterating.
    */
   tiles: Tile[] | null;
+  /**
+   * The conversation record: running sittings first (longest-running first),
+   * then the recently closed (most recent first). `null` rather than `[]` when
+   * empty, exactly like `tiles` — narrow before iterating.
+   */
+  sittings: Sitting[] | null;
   /** True when one or more rigs did not answer; the board is incomplete. */
   partial?: boolean;
   partial_errors?: string[];

@@ -7,23 +7,30 @@
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING -> classify the head branch
 # (allowlist: only polecat/* may be rewritten, and never a graduation) and file
-# ONE rework child per head to the fix pool, stamped prepare_mode and routed only
-# once that stamp reads back (dedup: a rework child naming this branch whose
-# rejection_reason names this head; an unstamped orphan is adopted by title,
-# never twinned); gate green at a STALE head -> file one re-review child per
-# head to the review pool, carrying mol-review via gc sling --on (dedup: a
-# live review naming the anchor, or one with review_branch=branch and
-# reviewed_oid=<live head>; same orphan adoption), stamped with fix_target_pool
-# for the rework path; dismissal of our OWN superseded CHANGES_REQUESTED
-# (never a human's; signoff_dismissed read back FIRST; skipped under native
-# auto-merge). A merged record never carries an empty merged_sha — an
-# unreadable mergeCommit records merged_sha=unverified:PR#<n>, loudly.
+# ONE rework child per head to the fix pool, stamped prepare_mode and counted as
+# dispatched only once that stamp AND the route itself read back (dedup: a rework
+# child naming this branch whose rejection_reason names this head; an unstamped
+# orphan is adopted by title and an unrouted one re-routed, never twinned); a
+# gate green@ or exception@ a STALE head -> file one
+# re-review child per head to the review pool, carrying mol-review via gc
+# sling --on (dedup: a live review naming the anchor, or one with
+# review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
+# stamped with fix_target_pool for the rework path; dismissal of our OWN
+# superseded CHANGES_REQUESTED (never a human's; signoff_dismissed read back
+# FIRST; skipped under native auto-merge). A merged record never carries an
+# empty merged_sha — an unreadable mergeCommit records
+# merged_sha=unverified:PR#<n>, loudly.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
 
 PROG="pr-facts"
-scrub() { tr -d '\000-\010\013\014\016-\037'; }
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
@@ -77,7 +84,7 @@ bd_list() { # guarded array read; non-zero = "could not tell"
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   printf '%s' "$raw"
 }
-escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups per subject+key
+escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
 }
@@ -184,7 +191,7 @@ while IFS= read -r row; do
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
          --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
@@ -248,9 +255,27 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but the rework probe failed; no rework dispatched (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     }
-    dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+    # A child of a prior pass whose route stamp exited 0 without writing. The
+    # route is what makes it reachable — neither `bd ready` nor a pool claim can
+    # see it without one — and the dedup below matches it, so nothing retries it.
+    # Narrow to open/unassigned/unrouted at THIS head: a metadata write ignores
+    # bd's claim guard, so re-stamping a child someone holds stomps live work.
+    stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
+      [ .[] | select(.id != $id)
+        | select(((.status // "open") | ascii_downcase) == "open")
+        | select(((.assignee // "") | tostring) == "")
+        | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+        | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
+        | select(((.metadata.merge_result // "") | tostring) == "")
+        | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
+        | .id ] | .[0] // empty' 2>/dev/null)
+    # A strand is open, so it matches the live arm below and would veto its own
+    # rescue; it is excluded from its own dedup and from nothing else. Any OTHER
+    # match still vetoes — a second routed child would race the force-push the
+    # first one already owns.
+    dup=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg s "$stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
       ($live | split(",")) as $ls
-      | [ .[] | select(.id != $id)
+      | [ .[] | select(.id != $id) | select(.id != $s)
           | select(((.metadata.merge_result // "") | tostring) == "")
           | ((.status // "open") | ascii_downcase) as $st
           | ((.metadata.rejection_reason // "") | tostring) as $rr
@@ -258,7 +283,7 @@ GATES
                    or (($ls | index($st)) != null))
           | .id ] | .[0] // empty' 2>/dev/null)
     if [ -n "$dup" ]; then
-      echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child"
+      echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
       skipped=$((skipped + 1)); continue
     fi
     # Any rebase_hold on a bead naming this branch is an operator freeze.
@@ -269,23 +294,28 @@ GATES
       echo "$PROG: $id — PR#$num conflicts but $frozen holds branch '$fix_branch' with rebase_hold (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # Orphan adoption BEFORE create: a child this arm created whose stamp then
-    # failed carries the deterministic title but no branch metadata — invisible
-    # to the branch dedup above, so re-creating would mint a twin every pass. The
-    # title is the classifier's, and stays deterministic for a given head: the
-    # mode is a pure function of the branch name and the graduation marker.
-    # An unreadable probe dispatches nothing (retry next pass).
-    if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
-      echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    FIX=$(printf '%s' "$forphans" | jq -r '
-      [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$FIX" ]; then
-      echo "$PROG: $id adopting unstamped rework orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
+    if [ -n "$stranded" ]; then
+      FIX="$stranded"
+      echo "$PROG: $id re-routing stranded rework $FIX for PR#$num (a prior pass's route stamp did not land)"
     else
-      FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
-        | jq -r '.id // empty' 2>/dev/null)
+      # Orphan adoption BEFORE create: a child this arm created whose stamp then
+      # failed carries the deterministic title but no branch metadata — invisible
+      # to the branch dedup above, so re-creating would mint a twin every pass.
+      # The title is the classifier's, and stays deterministic for a given head:
+      # the mode is a pure function of the branch name and the graduation marker.
+      # An unreadable probe dispatches nothing (retry next pass).
+      if ! forphans=$(bd_list --status=open --title-contains "$FIX_TITLE"); then
+        echo "$PROG: $id — PR#$num conflicts but the orphan probe failed; no rework dispatched (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      FIX=$(printf '%s' "$forphans" | jq -r '
+        [ .[] | select(((.metadata.branch // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+      if [ -n "$FIX" ]; then
+        echo "$PROG: $id adopting unstamped rework orphan $FIX for PR#$num (created by a prior pass whose stamp failed)"
+      else
+        FIX=$(gc bd create "$FIX_TITLE base rewritten, PR conflicts" -t task --json 2>/dev/null \
+          | jq -r '.id // empty' 2>/dev/null)
+      fi
     fi
     if [ -z "$FIX" ]; then
       echo "$PROG: $id could not file the rework child for PR#$num; retry next pass" >&2
@@ -312,28 +342,39 @@ GATES
       echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 \
-      || echo "$PROG: WARN rework $FIX not routed to $FIX_POOL; route it by hand" >&2
+    # `gc bd update` returns 0 without having written (the claim guard is one
+    # such path), so the exit code does not establish the route, and an unrouted
+    # child reported as dispatched is a rework nothing can reach.
+    gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+    rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+    if [ "$rgot" != "$FIX_POOL" ]; then
+      echo "$PROG: WARN rework $FIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
     reworked=$((reworked + 1))
     echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
     continue
   fi
 
-  # --- gate green at a STALE head: one re-review child per head ------------------
-  stale_gate=""; stale_oid=""
+  # --- a head-bound verdict at a STALE head: one re-review child per head -------
+  # exception@ rides the same path as green@: both bind a verdict to a commit,
+  # and a branch that has moved past either one has had no look at its head.
+  stale_gate=""; stale_oid=""; stale_verb=""
   if [ -n "$head_oid" ]; then
     while IFS= read -r g; do
       [ -n "$g" ] || continue
       case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
       m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
       case "$m" in
-        green@*)
-          o="${m#green@}"
-          if [ -n "$o" ] && [ "$o" != "$head_oid" ]; then stale_gate="$g"; stale_oid="$o"; break; fi ;;
+        green@*|exception@*)
+          o="${m#*@}"
+          if [ -n "$o" ] && [ "$o" != "$head_oid" ]; then
+            stale_gate="$g"; stale_oid="$o"; stale_verb="${m%%@*}"; break
+          fi ;;
       esac
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
   fi
   if [ -n "$stale_gate" ]; then
@@ -359,7 +400,7 @@ GATES
     if [ -n "$live_rev" ] || [ -n "$head_rev" ]; then
       skipped=$((skipped + 1)); continue
     fi
-    NOTE="Stale-gate re-review: check.$stale_gate was green@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
+    NOTE="Stale-gate re-review: check.$stale_gate was $stale_verb@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
     # Orphan adoption BEFORE create (same shape as the rebase arm): an
     # unstamped re-review carries the deterministic title but no anchor_bead.
     REV_TITLE="Review PR#$num: re-review at live head"
@@ -413,7 +454,7 @@ GATES
     fi
     gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
     regated=$((regated + 1))
-    echo "$PROG: $id — PR#$num check.$stale_gate green@$stale_oid is stale (live head $head_oid); filed re-review $RID routed to $REVIEW_POOL"
+    echo "$PROG: $id — PR#$num check.$stale_gate $stale_verb@$stale_oid is stale (live head $head_oid); filed re-review $RID routed to $REVIEW_POOL"
     continue
   fi
 
@@ -428,7 +469,7 @@ GATES
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
     [ "$m" = "green@$head_oid" ] || all_green=0
   done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | tr -d '[:space:]' | sed '/^$/d')
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
   rd=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
   if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \

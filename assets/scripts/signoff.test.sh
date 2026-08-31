@@ -4,6 +4,8 @@
 # assertions of the retired signoff-round-cap and first-round-review-body
 # suites: the cap writes exception EXACTLY ONCE and never also unsets the
 # marker; the posted artifact carries the anchor link; --approve is NEVER used.
+# It also pins what a round IS — an attempted rework child, never a review
+# dispatch.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +33,17 @@ shift
 bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id)]' "$STORE"; }
 case "${1:-}" in
   show)
+    # A read that stops working only AFTER the delete: keyed on the unset so the
+    # SUT's first read of the bead still resolves. Both modes answer the same ''
+    # through row_meta that a genuinely cleared key does.
+    mode=$(awk -v i="$2" '$1 == i {print $2}' "${STUB_SHOW_DEAD:-/dev/null}" 2>/dev/null)
+    if [ -n "$mode" ] && grep -qx "$2" "${STUB_UNSET_LOG:-/dev/null}" 2>/dev/null; then
+      case "$mode" in
+        garbage) printf 'not-json\n' ;;
+        *)       echo '{"error":"no issues found"}' ;;
+      esac
+      exit 0
+    fi
     out=$(bead_json "$2")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       echo '{"error":"no issues found"}'
@@ -47,8 +60,14 @@ case "${1:-}" in
           jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
             'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
         --unset-metadata) shift
-          jq -c --arg id "$id" --arg k "$1" \
-            'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+          printf '%s\n' "$id" >> "${STUB_UNSET_LOG:-/dev/null}"
+          # A concurrent writer re-stamping the key loses the delete without
+          # failing the call: rc 0, key untouched. Denial is STUB_UPD_FAIL.
+          if [ -n "${STUB_UNSET_NOOP:-}" ] && grep -qx "$id" "$STUB_UNSET_NOOP" 2>/dev/null; then :
+          else
+            jq -c --arg id "$id" --arg k "$1" \
+              'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+          fi ;;
         --append-notes) shift
           jq -c --arg id "$id" --arg n "$1" \
             'map(if .id == $id then .notes = ((.notes // "") + "\n" + $n) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
@@ -141,6 +160,9 @@ case "${1:-}" in
     case "$*" in
       *" user "*) printf '%s\n' "${STUB_LOGIN:-city-bot}" ;;
       *"/reviews?"*) [ -n "${STUB_REVIEWS:-}" ] && printf '%s\n' "$STUB_REVIEWS" ;;
+      # The SUT asks with --jq '.merge_base_commit.sha'; serve the extracted
+      # value, as the headRefOid arm above does. Empty = the compare 404'd.
+      *"/compare/"*) [ -n "${STUB_COMPARE_MB:-}" ] && printf '%s\n' "$STUB_COMPARE_MB" ;;
     esac ;;
 esac
 exit 0
@@ -152,6 +174,8 @@ if [ "${1:-}" = "ls-remote" ]; then
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
   exit 0
 fi
+# merge-base --is-ancestor: 0 ancestor, 1 not, 128 a commit git cannot resolve.
+[ "${1:-}" = "merge-base" ] && exit "${STUB_MERGEBASE_RC:-0}"
 exit 0
 STUB
 chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
@@ -159,7 +183,20 @@ export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
 export STUB_GH_LOG="$TMP/gh.log" STUB_GH_BODY="$TMP/gh.body" STUB_CREATED="$TMP/created"
 export STUB_SEQ="$TMP/seq" STUB_UPD_FAIL="$TMP/updfail" STUB_GH_ALL="$TMP/gh.all"
-export STUB_LSREMOTE="aaa111" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
+export STUB_UNSET_NOOP="$TMP/unsetnoop" STUB_UNSET_LOG="$TMP/unsetlog"
+# "<id> norows|garbage": gc bd show stops resolving that id once the id
+# has been unset, standing in for a read-back the store cannot answer.
+export STUB_SHOW_DEAD="$TMP/showdead"
+# Fixture oids are 40 lowercase hex — the grammar signoff.sh enforces before it
+# stamps a marker; sha1sum mints a labelled one.
+oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
+OID_HEAD=$(oid head); OID_OVR1=$(oid ovr1); OID_PIN=$(oid pin)
+OID_OVR2=$(oid ovr2); OID_MOVED=$(oid moved); OID_NEWHEAD=$(oid newhead)
+OID_OLD=$(oid old)
+OID_DEAD=$(oid dead); OID_LIVE=$(oid live); OID_BASE=$(oid base)
+OID_PRELIVE=$(oid prelive); OID_LIVEPIN=$(oid livepin)
+OID_SHORT=$(printf '%s' "$OID_DEAD" | cut -c1-9)
+export STUB_LSREMOTE="$OID_HEAD" STUB_AUTOMERGE_JSON='{"autoMergeRequest":null}'
 : > "$STUB_GH_ALL"
 unset GC_RIG GC_MAX_REVIEW_ROUNDS 2>/dev/null || true
 
@@ -170,7 +207,8 @@ REVIEW='{"id":"rv-1","status":"in_progress","assignee":"pool/x","metadata":{"che
 reset() { # $1 = anchor json, extra beads appended via $2
   printf '[%s,%s%s]' "$1" "$REVIEW" "${2:-}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_GH_BODY"
-  : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; printf '0' > "$STUB_SEQ"
+  : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; : > "$STUB_UNSET_NOOP"; printf '0' > "$STUB_SEQ"
+  : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 status() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
@@ -184,7 +222,7 @@ eq "$rc" 0 "approve exits 0"
 has "$(cat "$STUB_GH_LOG")" "pr review 42 --repo github.com/o/r --comment" "artifact posted as a pinned COMMENT"
 has "$(cat "$STUB_GH_BODY")" "tk-anc" "the posted body carries the anchor link"
 has "$(cat "$STUB_GH_BODY")" "VERDICT body: findings here" "the posted body carries the verdict notes"
-eq "$(meta tk-anc check.codex)" "green@aaa111" "check.codex stamped green at the live head"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "check.codex stamped green at the live head"
 eq "$(status rv-1)" "closed" "review bead closed"
 eq "$(meta rv-1 gc.outcome)" "recorded" "review bead closed with gc.outcome=recorded"
 
@@ -193,34 +231,200 @@ reset "$ANCHOR_PRE"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "pre-open approve exits 0"
 hasnt "$(cat "$STUB_GH_LOG")" "pr review" "pre-open posts no gh pr review (no PR yet)"
-eq "$(meta rv-1 reviewed_oid)" "aaa111" "pre-open records reviewed_oid on the review bead"
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "pre-open records reviewed_oid on the review bead"
 has "$(notes rv-1)" "tk-anc" "pre-open verdict notes carry the anchor link"
-eq "$(meta tk-anc check.codex)" "green@aaa111" "pre-open still stamps the marker"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "pre-open still stamps the marker"
 eq "$(status rv-1)" "closed" "pre-open closes the review bead"
 
 echo "# --reviewed-oid override"
 reset "$ANCHOR_PR"
-"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid beef01 >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "green@beef01" "the override pins the stamped oid"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR1 >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "green@$OID_OVR1" "the override pins the stamped oid"
 
 echo "# a dispatch-pinned reviewed_oid wins over a moved live head"
 reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.reviewed_oid = "ccc111" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-STUB_LSREMOTE="moved222" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+jq -c --arg o "$OID_PIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_LSREMOTE="$OID_MOVED" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "pinned-oid approve exits 0"
-eq "$(meta tk-anc check.codex)" "green@ccc111" "green is stamped at the PINNED oid, not the moved live head (merge then holds on head mismatch)"
+eq "$(meta tk-anc check.codex)" "green@$OID_PIN" "green is stamped at the PINNED oid, not the moved live head (merge then holds on head mismatch)"
 
 echo "# …and the explicit --reviewed-oid flag still outranks the bead pin"
 reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.reviewed_oid = "ccc111" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid beef02 >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "green@beef02" "the flag outranks the dispatch pin"
+jq -c --arg o "$OID_PIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR2 >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "green@$OID_OVR2" "the flag outranks the dispatch pin"
+
+echo "# the marker grammar is enforced at the writer"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve --reviewed-oid 8d7f0cf3c 2>&1); rc=$?
+eq "$rc" 1 "an abbreviated sha refuses — it would mint a marker no live head can match"
+eq "$(meta tk-anc check.codex)" "<absent>" "…and nothing was stamped"
+has "$out" "requires the full 40" "…and the refusal names the grammar"
+
+reset "$ANCHOR_PR"
+UPPER=$(printf '%s' "$OID_HEAD" | tr 'a-f' 'A-F')
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$UPPER" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "an uppercase oid is accepted"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "…and normalized to the lowercase grammar"
 
 echo "# notes-file body"
 reset "$ANCHOR_PR"
 printf 'P2: nit at foo.sh:3\n' > "$TMP/notes"
 "$SUT" --review-bead rv-1 --verdict approve --notes-file "$TMP/notes" >/dev/null 2>&1
 has "$(cat "$STUB_GH_BODY")" "P2: nit at foo.sh:3" "--notes-file body reaches the artifact"
+
+# --- the pin must still be on the branch ---------------------------------------
+seed_marker() { # <value>: give the anchor a marker the refusal must not touch
+  jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata["check.codex"] = $v else . end)' \
+    "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+}
+
+echo "# a pin the branch no longer carries is refused (post-open)"
+reset "$ANCHOR_PR"; seed_marker "green@old000"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict request-changes --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "a pin rebased off the branch refuses"
+has "$out" "head moved" "the refusal is the phrase mol-review's failure arm keys on"
+has "$out" "$OID_LIVE" "…and names the live head to re-pin at"
+eq "$(meta tk-anc check.codex)" "green@old000" "the marker is untouched — no clear, no stamp"
+hasnt "$(cat "$STUB_GC_LOG")" "update tk-anc" "the anchor is never written"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "no verdict posted to the PR"
+eq "$(cat "$STUB_CREATED")" "" "no rework child minted from a dead pin"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for the re-pin"
+has "$(notes rv-1)" "signoff refused a verdict at $OID_DEAD" "the refusal is recorded on the review bead"
+
+echo "# …and the dead dispatch pin is cleared so a re-claim cannot loop on it"
+reset "$ANCHOR_PR"
+jq -c --arg o "$OID_DEAD" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "the bead-pinned dead oid refuses too"
+eq "$(meta rv-1 reviewed_oid)" "<absent>" "the dead pin is cleared; mol-review re-resolves the live head"
+
+echo "# …but a caller's dead --reviewed-oid never clears a live dispatch pin"
+reset "$ANCHOR_PR"
+jq -c --arg o "$OID_LIVEPIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD >/dev/null 2>&1
+eq "$(meta rv-1 reviewed_oid)" "$OID_LIVEPIN" "the dispatch pin the caller overrode is left alone"
+
+echo "# approve is refused on the same terms"
+reset "$ANCHOR_PR"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "approve at a pin off the branch refuses"
+eq "$(meta tk-anc check.codex)" "<absent>" "no green stamped for a commit the branch lost"
+
+echo "# a branch that only GREW still binds at the reviewed commit"
+reset "$ANCHOR_PR"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_DEAD" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 0 "an ancestor pin is still evidence"
+eq "$(meta tk-anc check.codex)" "green@$OID_DEAD" "green lands on the reviewed commit; merge.sh holds on the head mismatch"
+
+echo "# an unanswerable probe never discards a round that happened"
+reset "$ANCHOR_PR"
+out=$(STUB_PR_HEAD="" STUB_COMPARE_MB="" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 0 "no readable live head proceeds"
+eq "$(meta tk-anc check.codex)" "green@$OID_DEAD" "…binding the pin it was handed"
+
+echo "# pre-open falls back to git ancestry"
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE="$OID_PRELIVE" STUB_MERGEBASE_RC=1 \
+  "$SUT" --review-bead rv-1 --verdict request-changes --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "pre-open refuses a pin git says is no ancestor"
+eq "$(cat "$STUB_CREATED")" "" "…and mints no rework child"
+eq "$(status rv-1)" "in_progress" "…and leaves the review open"
+
+echo "# …and an unresolvable commit is unknown, not gone"
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE="$OID_PRELIVE" STUB_MERGEBASE_RC=128 \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 0 "git rc=128 proceeds"
+eq "$(meta tk-anc check.codex)" "green@$OID_DEAD" "…and the verdict binds"
+
+echo "# an abbreviated pin that has ALSO left the branch is refused on the grammar"
+reset "$ANCHOR_PR"
+jq -c --arg o "$OID_SHORT" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "the grammar refusal wins when both guards would fire"
+has "$out" "requires the full 40" "…and names the grammar, not the head move"
+hasnt "$out" "head moved" "…because the branch probe is never reached"
+eq "$(meta rv-1 reviewed_oid)" "$OID_SHORT" "a malformed pin is left for its writer, not cleared as a dead one"
+
+# --- clearing the dead pin is the refusal's whole recovery path ------------------
+# mol-review re-reads the pin on the next claim, so one that survives the clear
+# sends every later claim back to the same departed commit. Both arms below leave
+# it in place — one by failing the call, one by returning success and changing
+# nothing — and only a read-back tells either from a clear that worked.
+pin() { jq -c --arg o "$1" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+
+echo "# a dead pin the clear could not remove is a read-back failure, not a plain refusal"
+reset "$ANCHOR_PR"; seed_marker "green@keepme"; pin "$OID_DEAD"
+printf 'rv-1\n' > "$STUB_UPD_FAIL"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a dispatch pin that survives the clear exits 2, not the head-moved 1"
+eq "$(meta rv-1 reviewed_oid)" "$OID_DEAD" "the dead pin is still on the bead"
+has "$out" "did not read back" "the refusal reports the failed clear, not a moved head"
+has "$out" "--unset-metadata reviewed_oid" "…and names the manual repair"
+hasnt "$(notes rv-1)" "the dispatch pin is cleared" "…and never records that the pin was cleared"
+eq "$(meta tk-anc check.codex)" "green@keepme" "the gate marker is still untouched"
+eq "$(cat "$STUB_CREATED")" "" "no rework child is filed"
+eq "$(status rv-1)" "in_progress" "the review bead stays open so the gate stays owed"
+
+echo "# …including when the clear reports success and the pin does not move"
+reset "$ANCHOR_PR"; seed_marker "green@keepme"; pin "$OID_DEAD"
+printf 'rv-1\n' > "$STUB_UNSET_NOOP"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a silently-lost clear is caught by the read-back, not by the write's exit status"
+eq "$(meta rv-1 reviewed_oid)" "$OID_DEAD" "the dead pin is still on the bead"
+hasnt "$(notes rv-1)" "the dispatch pin is cleared" "the bead is never told the pin was cleared"
+has "$out" "did not read back" "the operator is told the clear failed"
+
+# A read-back that cannot answer reads exactly like a key that is gone: both
+# give row_meta ''. Absence only proves the clear from a row that resolved.
+echo "# …and a read-back that resolves no row is unproven, not a clear"
+reset "$ANCHOR_PR"; seed_marker "green@keepme"; pin "$OID_DEAD"
+printf 'rv-1 norows\n' > "$STUB_SHOW_DEAD"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a read-back the store cannot answer exits 2, not the head-moved 1"
+has "$out" "would not resolve" "the refusal names the unreadable bead, not a surviving pin"
+has "$out" "--unset-metadata reviewed_oid" "…and still names the manual repair"
+hasnt "$(notes rv-1)" "the dispatch pin is cleared" "…and never records that the pin was cleared"
+eq "$(meta tk-anc check.codex)" "green@keepme" "the gate marker is untouched"
+eq "$(cat "$STUB_CREATED")" "" "no rework child is filed"
+eq "$(status rv-1)" "in_progress" "the review bead stays open so the gate stays owed"
+
+echo "# …and unparseable read-back output is unproven on the same terms"
+reset "$ANCHOR_PR"; seed_marker "green@keepme"; pin "$OID_DEAD"
+printf 'rv-1 garbage\n' > "$STUB_SHOW_DEAD"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "unparseable read-back output exits 2"
+has "$out" "would not resolve" "…on the same unproven-clear refusal"
+hasnt "$(notes rv-1)" "the dispatch pin is cleared" "the bead is never told the pin was cleared"
+eq "$(meta tk-anc check.codex)" "green@keepme" "the gate marker is untouched"
+eq "$(status rv-1)" "in_progress" "the review bead stays open so the gate stays owed"
+
+# --- a retired dispatch records no verdict ---------------------------------------
+close_rv() { jq -c 'map(if .id == "rv-1" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+
+echo "# a closed review bead is refused"
+reset "$ANCHOR_PR"; seed_marker "green@keepme"; close_rv
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 1 "request-changes on a closed review bead is refused"
+eq "$(cat "$STUB_CREATED")" "" "a retired dispatch files no rework child"
+eq "$(meta tk-anc check.codex)" "green@keepme" "a retired dispatch clears no marker"
+has "$out" "already closed" "the refusal says why"
+
+echo "# …and approve on a closed review bead writes no marker either"
+reset "$ANCHOR_PRE"; close_rv
+"$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "approve on a closed review bead is refused"
+eq "$(meta tk-anc check.codex)" "<absent>" "no green is stamped for a retired dispatch"
 
 # --- fail-closed refusals ------------------------------------------------------
 echo "# refusals"
@@ -245,7 +449,7 @@ jq -c 'map(if .id == "rv-1" then (.metadata |= del(.anchor_bead)) else . end)' "
 printf 'tk-anc|rv-1|blocks\n' > "$STUB_DEPS"
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "edge-resolved anchor accepted"
-eq "$(meta tk-anc check.codex)" "green@aaa111" "marker landed on the edge-resolved anchor"
+eq "$(meta tk-anc check.codex)" "green@$OID_HEAD" "marker landed on the edge-resolved anchor"
 
 echo "# marker read-back failure"
 reset "$ANCHOR_PR"
@@ -308,7 +512,7 @@ reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"
 seed_cap_deps c1 c2 c3
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "the cap path exits 0"
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "the cap records exception@<head>"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "the cap records exception@<head>"
 eq "$(grep -c -- 'check.codex=exception@' "$STUB_GC_LOG")" "1" "exception is written EXACTLY once"
 hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata check.codex" "the cap never ALSO unsets the marker"
 eq "$(meta tk-anc gc.routed_to)" "human" "the anchor is routed to a human"
@@ -326,17 +530,17 @@ echo "# cap is tunable via GC_MAX_REVIEW_ROUNDS"
 reset "$ANCHOR_PR" "$(kid 1 open '"source_review_bead":"r1"')"
 seed_cap_deps c1
 GC_MAX_REVIEW_ROUNDS=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "GC_MAX_REVIEW_ROUNDS=1 trips at 1"
 
-echo "# dispatch_count on the ANCHOR (gate-ensure's writer) also counts"
+echo "# dispatch_count is not a round count: reviews of one commit never cap"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(meta tk-anc check.codex)" "exception@aaa111" "anchor dispatch_count past the cap trips it with no children"
-reset "$ANCHOR_PR"
-jq -c 'map(if .id == "rv-1" then .metadata.dispatch_count = "4" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
-eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "a stray dispatch_count on the REVIEW bead does not cap (wrong writer)"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "a dispatch_count past the cap with no rework children exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…does not trip the cap"
+eq "$(meta tk-anc gc.routed_to)" "<absent>" "…does not route the anchor to a human"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…and the first rework round is filed"
+has "$(meta fix-1 rejection_reason)" "round 1" "…numbered by attempts, not by dispatches"
 
 echo "# an unreadable dep list never caps"
 reset "$ANCHOR_PR"
@@ -346,19 +550,19 @@ eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "garbage dep list reads as 0 rou
 # --- supersede-dismiss -----------------------------------------------------------
 echo "# supersede: dismiss own stale CHANGES_REQUESTED only"
 reset "$ANCHOR_PR"
-export STUB_PR_HEAD="aaa111"
-export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"old000"}
-{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"old000"}
-{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"aaa111"}'
+export STUB_PR_HEAD="$OID_HEAD"
+export STUB_REVIEWS='{"id":111,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":222,"user":{"login":"a-human"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'"}
+{"id":333,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_HEAD"'"}'
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 has "$(cat "$STUB_GH_LOG")" "reviews/111/dismissals" "own stale CHANGES_REQUESTED is dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/222/dismissals" "a human's block is NEVER dismissed"
 hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed commit stands"
-eq "$(meta tk-anc signoff_dismissed)" "111@aaa111" "signoff_dismissed pairs the retraction"
+eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
 echo "# supersede holds on a moved head"
 reset "$ANCHOR_PR"
-STUB_PR_HEAD="bbb222" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+STUB_PR_HEAD="$OID_NEWHEAD" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "a moved head keeps the block"
 
 echo "# supersede holds while auto-merge is armed"

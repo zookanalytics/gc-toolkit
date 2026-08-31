@@ -3,7 +3,7 @@ import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase, resolveTerminalSession } from './terminal/endpoint';
-import type { Board, Tile } from './contract';
+import type { Board, Sitting, Tile } from './contract';
 
 // The board shape lives in ./contract.ts — the hand-written mirror of the Go
 // structs in internal/board, guarded by the parity check in
@@ -42,6 +42,26 @@ const PARKED_KIND = 'parked';
 const isParked = (tile: Tile): boolean =>
   tile.kind === PARKED_KIND && !tile.disposition_due && tile.open === 0;
 
+// A sitting is finished when its visit bead closed; anything else is a
+// conversation someone is still in. Reading the status rather than the presence
+// of closed_at keeps a sitting whose stamp could not be read on the running
+// side, which is the side that shows a row rather than hides one.
+const isRunning = (s: Sitting): boolean => s.status !== 'closed';
+
+// How long ago a stamp was, in the coarsest unit that still says something. An
+// absent stamp is unknown, never "just now": the sitting whose timestamp the
+// source could not read must not read as the freshest one.
+function shortAge(stamp: string | undefined, now: number): string {
+  if (!stamp) return '?';
+  const ms = Date.parse(stamp);
+  if (Number.isNaN(ms)) return '?';
+  const mins = Math.max(0, Math.floor((now - ms) / 60_000));
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 // Document-relative on purpose. The app is served under a runtime-city-named
 // prefix (/v0/city/<city>/svc/helm/), so an absolute '/helm' would address the
 // supervisor root and 404. Relative to the document, this is <mount>/helm.
@@ -65,6 +85,63 @@ function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void })
     <button type="button" className="drill-open" onClick={() => onOpen(id)}>
       {id}
     </button>
+  );
+}
+
+// The conversation record: what is being talked about right now, and what the
+// sittings that just ended concluded.
+//
+// A section rather than rows in the ranked table, for the reason parked
+// conversations are one: a sitting is an event, not a demand, and ranking it
+// against a stranded epic would be answering a question nobody asked. The
+// ranked table says what needs doing; this says what is being said.
+function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number; onOpen: (id: string) => void }) {
+  if (sittings.length === 0) return null;
+  const running = sittings.filter(isRunning).length;
+
+  return (
+    <section className="sittings" aria-labelledby="sittings-heading">
+      <h2 id="sittings-heading">converse sittings</h2>
+      <p className="sub">
+        {running} running · {sittings.length - running} closed recently. A running sitting is a
+        conversation someone is still in; a closed one shows the outcome it closed on and, when
+        that sitting is the one that wrote it, the takeaway it left.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>state</th>
+            <th>sitting</th>
+            <th>rig</th>
+            <th>subject</th>
+            <th>age</th>
+            <th>outcome</th>
+            <th>headline</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sittings.map((s) => {
+            const live = isRunning(s);
+            return (
+              <tr key={s.id} className={live ? 'sitting-running' : undefined}>
+                <td>{live ? 'running' : 'closed'}</td>
+                <td>{s.id}</td>
+                <td>{s.rig}</td>
+                <td>
+                  {/* The subject is an anchor, so it drills in like any tile id. */}
+                  <DrillOpen id={s.subject} onOpen={onOpen} />
+                </td>
+                <td>{shortAge(live ? s.opened_at : s.closed_at, now)}</td>
+                {/* A running sitting has not concluded; the em dash is the
+                    absence of an outcome, not an empty one. */}
+                <td>{s.outcome || '—'}</td>
+                <td>{s.takeaway || s.title}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
@@ -108,6 +185,13 @@ export function App() {
   }, [refresh]);
 
   const tiles = board?.tiles ?? [];
+  // Sitting ages are measured from the board's OWN generated_at, so a tab left
+  // open does not age every row past what the gather actually saw. A board
+  // without a readable stamp falls back to the wall clock.
+  const renderedAt = useMemo(() => {
+    const t = board ? Date.parse(board.generated_at) : NaN;
+    return Number.isNaN(t) ? Date.now() : t;
+  }, [board]);
   const attention = tiles.filter((tile) => !isParked(tile));
   const parked = tiles.filter(isParked);
 
@@ -228,6 +312,8 @@ export function App() {
           </table>
         </section>
       )}
+
+      <Sittings sittings={board?.sittings ?? []} now={renderedAt} onOpen={setDrillTarget} />
 
       {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
           not a wiring limit. The city still runs a single ttyd, but its attach

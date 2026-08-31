@@ -1,7 +1,8 @@
-// Command helm-svc has TWO entry points over ONE board:
+// Command helm-svc has TWO entry points over ONE board, plus a check on itself:
 //
 //	helm-svc            the Attention Canvas backend sidecar (default; `serve`)
 //	helm-svc board      the terminal board — the CLI VIEW of the same data
+//	helm-svc probe      can THIS binary read the city's bead stores? (see probe.go)
 //
 // They share the gather (internal/source) and the ranking (internal/board)
 // rather than reimplementing either, which is the whole point: a fix to the
@@ -72,6 +73,9 @@ func main() {
 		case "board":
 			boardMain(os.Args[2:])
 			return
+		case "probe":
+			probeMain(os.Args[2:])
+			return
 		case "serve":
 			os.Args = append(os.Args[:1], os.Args[2:]...)
 		case "-h", "--help", "help":
@@ -89,9 +93,10 @@ func main() {
 const topUsage = `Usage:
   helm-svc [serve]        run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
   helm-svc board [flags]  render the cross-rig attention board in the terminal
+  helm-svc probe [flags]  report whether this binary can read the city's bead stores
 
 Both views share one gather and one ranking. Run "helm-svc board --help" for
-the board's flags.
+the board's flags, or "helm-svc probe --help" for the readability check.
 `
 
 func serve() {

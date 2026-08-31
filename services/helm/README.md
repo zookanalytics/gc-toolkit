@@ -36,12 +36,15 @@ Two entry points over ONE board. They share `internal/source` (the gather) and
 helm-svc                 serve  — the sidecar (below). Bare invocation, which is
                                   how the supervisor spawns it.
 helm-svc board [--json]  render — the terminal board (tk-134d7). See *CLI view*.
+helm-svc probe           check  — can THIS binary read the city's bead stores?
+                                  See *Readability check*.
 ```
 
 As the sidecar:
 
 ```
-GET /helm   -> { generated_at, total, tiles:[ Tile, ... ], partial?, partial_errors? }
+GET /helm   -> { generated_at, total, tiles:[ Tile, ... ], sittings:[ Sitting, ... ],
+                 partial?, partial_errors? }
 GET /healthz     -> { "status":"ok" }   (liveness probe; no gather)
 GET /            -> the board JSON, or the embedded web app for a browser
                     (Accept: text/html) — see *Web UI*
@@ -93,6 +96,28 @@ loomington city (5 stores, 55 anchors):
 Same binary as the sidecar on purpose: a separately-built CLI would be a second
 artifact that can go stale on its own, which is the failure that motivated the
 epic (`tk-5nm0p`). Full rationale in `cmd/helm-svc/board.go`.
+
+### Readability check (`helm-svc probe`)
+
+```
+helm-svc probe                     # 0 readable · 3 no store could be opened · 2 usage
+helm-svc probe --timeout=30        # bound the open (default GC_HELM_PROBE_TIMEOUT, else 10s)
+```
+
+One question, cheaply: can the binary running it open a bead store? It opens
+one and gathers nothing — ~0.2s against the loomington city, against 2.7s for
+the board — and one readable store is enough, matching what `Gather` needs to
+return a board at all.
+
+It exists because a binary's ability to read a store is fixed by the beads
+library it embedded at build time, while the store's schema moves under it
+whenever `bd` is upgraded. That drift is invisible to every other signal: the
+sources are older than the binary, `/healthz` answers without gathering, and
+the sidecar itself keeps serving because `selectSource` falls back to the
+supervisor HTTP API. In August 2026 all three read green for three days while
+`helm-svc board` exited 3 on every rig (`tk-00o34c`). `probe` is the one
+question whose answer moves with the store, and the build gate below spends it
+on every tick.
 
 ### Anchor kinds
 
@@ -268,6 +293,81 @@ row wants is a close or a re-open, not a re-read. The ruling stays on the wire
 in `takeaway`, where nothing truncates it; in the terminal table it was the
 longest cell in that column and the least actionable.
 
+## Converse sittings (`tk-ghlg1e.1`)
+
+Beside the ranked list the envelope carries the **conversation record**: every
+converse sitting that is running, plus those that closed inside a recent window.
+A sitting is a `task_kind=visit` bead — the bead a converse session claims and
+holds a conversation inside — and it is the same read that produces `held`.
+
+Sittings are **not tiles and are not ranked against them**. A tile is an anchor
+that wants something; a sitting is an event. The web app gives them a section of
+their own below the parked one, and `helm-svc board` prints them under the
+table, for the same reason parked conversations get a section: putting an event
+in a queue of demands answers a question nobody asked.
+
+| | gathered | shown |
+|---|---|---|
+| running | `status` open or in_progress | always — a live conversation is never elided |
+| closed | `closed_at` inside `GC_HELM_SITTINGS_WINDOW` (default `24h`) | most recent first, capped at 12 in a rendered view |
+
+`GC_HELM_SITTINGS_WINDOW` takes a Go duration (`6h`, `90m`). `0` gathers no
+closed sittings and leaves the running ones untouched; anything unparseable
+falls back to the default, because a malformed knob must not cost the board a
+section. The bound lives on the QUERY (`ClosedAfter`), not in the renderer:
+closed visits accumulate forever, and reading them all to throw most away would
+grow without limit against a store the whole city shares.
+
+The two passes fail independently. Losing the closed pass costs the recent
+history and nothing else — `held` is derived from the running half of the same
+record, so the glyph and the section can never disagree about what is held.
+
+### The justification a sitting closed on
+
+`gc.outcome` is stamped on the VISIT before it closes (`folded`, `moot`,
+`benign`, `diagnosed`, `cut-short`, or the word a held sitting signs off with).
+It is per-sitting and never rewritten, so it is attributable with no inference
+at all. A running sitting has none, and renders as `—` rather than as blank.
+
+`gc.takeaway` is the harder half, and it is why `Sitting.takeaway` is not a
+copy. **The takeaway lives on the SUBJECT, and each sitting overwrites the last
+one's.** A subject visited three times has one takeaway and two sittings that
+did not write it, so hanging it on all three rows would credit two of them with
+a conclusion they never reached. The service carries it only for the sitting
+whose own span — `gc.claimed_at` (falling back to the bead's creation) to
+`closed_at`, or to now while it runs — contains `gc.takeaway_at`.
+
+Measured on the live city, 2026-08-26: `tk-7linih` was visited twice, by
+`tk-5063jn` (closed 20:52, `diagnosed`) and `tk-eb5cot` (20:58–21:21,
+`unblocked`). Its single takeaway is stamped 21:20:48, inside the second span
+and after the first had ended. The span test is what stops the earlier sitting
+from displaying a headline written half an hour after it closed.
+
+Two sittings that genuinely overlap on one subject could both contain the stamp.
+The visit claim serializes them in practice, and the failure there is a
+duplicated headline rather than a misattributed one. A subject that cannot be
+read at all leaves its sittings showing an outcome and no headline — narrower,
+not wrong — and marks the gather partial.
+
+### Where it shows up
+
+`helm-svc board` prints the section under the ranked table, `●` for a running
+sitting, AGE measured from the start of a running one and from the end of a
+closed one. `--json` is **untouched**: it emits the bare ranked array that
+`gc-helm.sh --json` emits and `tmux-pick-helm.sh` consumes, and growing a second
+shape there would break that contract.
+
+The web app renders the same order — running first, longest-running first, then
+most recently closed — and drills in on a sitting's SUBJECT, since that is the
+anchor the drill plane knows how to open. Because `POST /helm/open` already
+invalidates the cached board, a visit filed from the drill panel appears in this
+section on the next read rather than after the TTL.
+
+**`gc-helm.sh` needs no counterpart.** This adds no field to `Tile` and no
+anchor kind, so the bash board's `--json` contract and the parity test are
+untouched; the bash board simply has no sittings section. Adding one there is a
+separate decision, in the same class as the other bash-only verbs.
+
 ## Architecture
 
 Three packages, a clean dependency line `board <- source <- server <- cmd`:
@@ -331,7 +431,11 @@ of the API, not of the client:
   `GET /beads` filters on status/type/label/assignee/rig and nothing else, and
   its payloads carry no metadata, so `human` and `parked` can be selected
   neither server-side nor client-side — finding them would mean one
-  `/bead/{id}` round trip per open bead in the city.
+  `/bead/{id}` round trip per open bead in the city. The **sittings** record is
+  out of reach for the same two reasons: it selects on `task_kind=visit` and it
+  reads `gc.outcome` off each hit. Under `GC_HELM_SOURCE=supervisor` the
+  envelope's `sittings` is simply `null` and neither view renders the section —
+  the same shape of gap, and the same trade.
 
 `BeadsSource` reads both directly. Choosing it over a new supervisor endpoint —
 the other sanctioned path — is recorded, with the measurements, in
@@ -444,7 +548,7 @@ So the two jobs are separate:
 | build | `assets/scripts/gc-helm-build.sh` | the `helm-build` order, every 5m |
 | start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
 
-`gc-helm-build.sh` rebuilds only when a source is newer than the binary — an
+`gc-helm-build.sh` rebuilds when a source is newer than the binary — an
 ordinary `find -newer` dependency, the same question `make` asks — publishes by
 atomic rename so a failed link can never truncate a serving binary, and in
 `--deploy` mode restarts the service onto what it published. Build and restart
@@ -452,6 +556,41 @@ are one step on purpose: a new binary that nothing restarts onto is the other
 half of the defect. On 2026-08-22 the helm process had been up 14h55m on a
 binary built at 02:40 while three commits touching `services/helm` had landed
 after it, all three inert in the served board.
+
+**Source mtime is not the only way to go stale.** A binary can be newer than
+every source file and still fail every gather, because what it can read is
+fixed by the beads library it embedded and the store's schema moves
+independently. `find -newer` is structurally blind to that: deleting a file
+makes nothing newer, and a dependency that drifts under an unchanged `go.mod`
+never touches a source at all. So the gate also asks `helm-svc probe`, and
+`build-status` records the answer rather than the build:
+
+| `build-status` | meaning |
+|---|---|
+| `ok <ts>` | built or current, **and** the binary can read the stores |
+| `unreadable <ts> <why>` | it cannot; the board will not render |
+| `unprobed <ts>` | no city in the environment to probe against (a hand run) |
+| `failed <ts>` | the build itself failed; the previous binary is untouched |
+
+`ok` is written only behind a passing probe, so nothing downstream can read
+this file as a healthy board while the gather it reports on cannot run. An
+unreadable binary exits the gate non-zero, which is what turns the order red.
+
+Nothing is ever restarted onto a binary the probe has condemned. In `--deploy`
+mode the readability answer comes before the restart, on both paths: a build
+whose artifact fails the probe reports and stops without marking
+`restart-pending`, and an up-to-date binary that fails it is not restarted onto
+even when a previous run left that marker behind. The service keeps running the
+binary it already has.
+
+**A rebuild is the remedy only while it can produce a different binary.** When
+the stale thing is the `go.mod` pin rather than the sources, rebuilding embeds
+the same library and changes nothing, so repeating it every five minutes buys
+a rebuild loop and buries the real fix. The gate records the beads version of
+the binary whose probe failed in `<state_root>/probe-failed`; a later tick that
+would embed that same version reports and stops instead of rebuilding, naming
+the dependency to bump. Moving the pin re-arms it, and a passing probe clears
+the record.
 
 **A publish that was never restarted onto is remembered.** Publishing marks
 `<state_root>/restart-pending`, and only a restart that returns success clears
@@ -692,8 +831,8 @@ fixture from decaying into a check that passes because it exercises nothing.
 Two shapes deserve care when mirroring, and the mapping derives both from the
 struct tag rather than leaving them to judgement: `omitempty`/`omitzero` becomes
 a TypeScript `?`, and a slice *without* `omitempty` becomes `T[] | null` because
-`encoding/json` writes `null` for a nil slice. `tiles` really is nullable —
-narrow it (`board.tiles ?? []`) before iterating.
+`encoding/json` writes `null` for a nil slice. `tiles` and `sittings` really are
+nullable — narrow them (`board.tiles ?? []`) before iterating.
 
 Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
 fixture): `specs/tk-eemvf.2/decisions.md`.
@@ -889,6 +1028,9 @@ Discovery env:
   and `GC_HELM_CITY` (else parsed from `GC_SERVICE_URL_PREFIX`, else the
   `GC_CITY_PATH` basename) — the HTTP backend's target.
 - `GC_HELM_CACHE_TTL` — seconds or a Go duration; default 45s.
+- `GC_HELM_SITTINGS_WINDOW` — a Go duration; default 24h. How far back a CLOSED
+  converse sitting stays on the board; `0` leaves only the running ones. See
+  *Converse sittings* above.
 - `GC_HELM_PROBE_TIMEOUT` — seconds or a Go duration; default 10s. Bounds the
   startup open described under *Picking a backend*. The socket is not created
   until the backend is chosen, so an unbounded probe would turn a wedged Dolt

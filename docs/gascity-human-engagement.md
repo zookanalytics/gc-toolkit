@@ -735,6 +735,18 @@ operator's *own* unsent words have no such protection, and until
   `tk-2v08m` did say so, in as many words, which is the only reason
   `tk-fkeft` was findable.
 
+  **Declared divergence: converse sittings, Go board only (2026-08-26,
+  `tk-ghlg1e.1`).** The Go board now carries a conversation record beside
+  the ranked list — running sittings plus those closed inside
+  `GC_HELM_SITTINGS_WINDOW`, each with the `gc.outcome` it closed on — and
+  renders it in both `helm-svc board` and the dashboard
+  (`services/helm/README.md`, *Converse sittings*). `gc-helm.sh` has no
+  counterpart and needs none to stay in parity: the record rides the
+  envelope beside `tiles`, so no `Tile` field and no anchor kind changed
+  and the field-set test is untouched. What an operator on `prefix+b` does
+  not get is the section itself. Building it in bash is a separate
+  decision, in the same class as the bash-only verbs above.
+
 ## What upstream does not ship (the pack's actual seam)
 
 Revised 2026-08-08 after the build-factory trial and operator probing —
