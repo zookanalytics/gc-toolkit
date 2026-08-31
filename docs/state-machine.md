@@ -104,8 +104,8 @@ both enumerate from there. `doctor/check-state-space` reports the violation.
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` is `green@<live head>` |
-| pull_request → merged | `merge.sh` (cadence arm 3) | full authorization set validated; close + record in one call |
-| pull_request → merged | `pr-facts.sh` (cadence arm 4) | GitHub merged the PR out-of-band; record only |
+| pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
+| pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
@@ -120,7 +120,7 @@ anchor stays `pull_request` (or `pre_open_gate`) and the cleared marker holds
 the merge until the child lands and the gate re-evaluates.
 
 Convoy graduation is a separate transition on the convoy bead:
-`convoy-graduate.sh` (cadence arm 5) moves a convoy to refinery-assigned with
+`convoy-graduate.sh` (cadence arm 6) moves a convoy to refinery-assigned with
 `branch=integration/<id>` when all members are closed, at least one merge is
 recorded onto the integration branch, and no hold or branch vetoes.
 
@@ -166,13 +166,14 @@ Each gate's verdict is a head-bound marker:
 `approval` takes no marker of its own. `merge.sh` satisfies it from an
 external APPROVED review at the live head, never from the city's own account
 and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
-that rule. **`signoff.sh` is the single writer of gate verdicts**
-(component-model I7). It refuses any oid that is not 40 lowercase hex: the
-marker earns its authority from `merge.sh` comparing it to the live head, and
-an abbreviated sha compares equal to nothing. A head move stales every verb at
-once, so a fixed branch re-evaluates fresh with no manual reset — gate-ensure
-re-arms the gate by dispatching a fresh review, whose verdict overwrites the
-stale marker.
+that rule. What the *reviewer* did short of a verdict is posture, not a gate:
+see [Posture](#posture) below. **`signoff.sh` is the single writer of gate
+verdicts** (component-model I7). It refuses any oid that is not 40 lowercase
+hex: the marker earns its authority from `merge.sh` comparing it to the live
+head, and an abbreviated sha compares equal to nothing. A head move stales
+every verb at once, so a fixed branch re-evaluates fresh with no manual reset
+— gate-ensure re-arms the gate by dispatching a fresh review, whose verdict
+overwrites the stale marker.
 
 One shape cannot be re-armed that way. `merge.sh` and gate-ensure both read
 only the gates named in `check_set`, so a `check.<g>` outside it is dispatched
@@ -221,6 +222,75 @@ pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
 fails closed. One anchor per PR is asserted structurally by
 `doctor/check-one-anchor-per-pr`; `merge.sh` still refuses a second anchor on
 sight as fail-closed defense.
+
+## Posture
+
+Gates record what the machine decided. **Posture** records what the pull request
+is doing, in the same `<value>@<oid>` shape, written by `pr-facts.sh` on every
+open non-draft anchor and read off the bead by everything downstream. Declared
+in `lifecycle/lifecycle.toml` `[posture]`.
+
+| Key | Value | Meaning |
+|---|---|---|
+| `pr_posture` | `<posture>@<oid>` | the review posture at `<oid>` |
+| `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
+| `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
+| `pr_review_watermark` | `<id>` | highest routed COMMENTED `pulls/N/reviews` id |
+| `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
+
+The postures, in the precedence the derivation applies:
+
+| Posture | When | Merge effect |
+|---|---|---|
+| `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
+| `commented` | a review comment sits above its watermark | holds |
+| `approved` | GitHub reports `APPROVED` | none |
+| `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
+| `none` | no `reviewDecision` applies | none |
+
+A comment outranks an approval on purpose: one reviewer's approval does not
+answer another reviewer's question. `merge.sh` holds on a recorded `commented`
+whatever head it is pinned to, because a comment survives a head move. An
+**absent** posture never holds there, since that is a fact not yet recorded
+rather than a fact recorded as bad. What refuses the absence is the cadence:
+`pr-facts.sh --posture-only` runs immediately before the merge arm and exits
+non-zero when it could not make an anchor's posture current, which holds the
+merge arm for that pass. Only the arm that did the reading can tell "no comment"
+from "could not read", so the hold lives there rather than in the reader. A
+posture recorded a pass earlier could not see a comment that arrived since, and
+no consumer asks GitHub to find out, merge.sh's own terminal re-read included. A
+read that fails records nothing rather than something weaker, so a standing
+`commented` keeps holding through an unreadable pass, and an anchor already held
+that way is not one the arm holds the pass over.
+
+**The watermarks** separate a comment already routed from a new one. Each is the
+highest id routed in its own id space, and each advances only after the routing
+reads back, so a comment nothing answered cannot fall below the mark. For a
+rework child that is two stamps: the `prepare_mode` it must resume in, and the
+route that makes it claimable. The two spaces are never merged: a reply can land
+on an old review, so review ids cannot stand in for comment ids. They rest on
+one assumption — that ids rise with visibility.
+
+Both spaces are review spaces: the inline comments on `pulls/N/comments`, and the
+bodies of COMMENTED reviews on `pulls/N/reviews`. A plain conversation comment on
+the PR is an issue comment, carries no review, and raises no posture.
+
+Under `changes_requested` the comment ids are neither read nor watermarked,
+because `signoff.sh`'s rework loop owns the comments underneath a veto. Once the
+veto clears, a batch that loop already answered can therefore be routed a second
+time. Marking those ids answered here would be worse: a comment added after the
+review would fall below the mark, and silence is the one outcome this section
+rules out.
+
+**An outstanding comment routes to something.** It becomes a fix-pool rework
+child, or, when a human already holds the anchor (`merge_hold`, `rebase_hold`,
+`gc.routed_to=human`, or a recorded `gc.takeaway`) or there is nowhere to route
+work, one `escalate.sh` visit per batch. Either way the filed bead holds the
+merge until it closes — the rework child through a `blocks` edge, the visit
+through the `pr_number` stamp that `merge.sh`'s in-flight-holder probe reads. A
+visit takes no `blocks` edge: `escalate.sh` files it *depending on* its subject,
+so an edge back would be a cycle. `pr_comment_disposition` records which was
+chosen. Silence is not one of the options.
 
 ## The handoff
 
@@ -286,7 +356,7 @@ sequenceDiagram
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` at a stale head gets one re-review
   child per head. Idempotent per head — re-runs never duplicate children.
-- **Disposal** (`review-sweep.sh`, cadence arm 6): a review outlives its own
+- **Disposal** (`review-sweep.sh`, cadence arm 7): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes
   the review with `gc.outcome=moot` and records the reason on it, and writes

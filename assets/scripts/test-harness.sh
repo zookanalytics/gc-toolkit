@@ -352,6 +352,10 @@ case "$sub" in
         n="${path##*/pulls/}"; n="${n%%/*}"
         f="$G/reviews_$n.json"
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
+      */pulls/*/comments*)
+        n="${path##*/pulls/}"; n="${n%%/*}"
+        f="$G/comments_$n.json"
+        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */rules/branches/*)
         b="${path##*/rules/branches/}"
         f="$G/rules_$(san "$b").json"

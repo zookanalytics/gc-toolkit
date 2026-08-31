@@ -84,11 +84,20 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   power from writing one: a clear withdraws evidence where a verdict asserts
   it, so no clearer can make a gate pass. Three components hold that power,
   each under one condition stated in [authority-map.md](authority-map.md).
+- **One posture writer** — `pr-facts.sh`, which records what the PR is doing
+  (`pr_posture`, `pr_merge_state`, the comment watermarks) so every consumer
+  reads it off the anchor instead of re-deriving it from GitHub. It runs twice
+  per cadence pass, `--posture-only` before the merge arm and in full after it,
+  because a reader that never asks GitHub needs the record to be no older than
+  the decision it feeds. The pre-merge run's exit code carries the other half of
+  that: an anchor it could not make current holds the merge arm for the pass, so
+  the reader is never handed a stale fact in place of a fresh one. Both runs are
+  the same writer, and the write is idempotent.
 - **One merge writer** — `merge.sh`, which re-reads the full authorization set
   immediately before merging. `--match-head-commit` pins the merge to a
   commit, but the anchor-local authorization set — `check.*`, `merge_hold`,
-  `merged_target` — does not move the head; the pre-merge re-read is what
-  catches a mid-pass write to any of them.
+  `pr_posture`, `merged_target` — does not move the head; the pre-merge
+  re-read is what catches a mid-pass write to any of them.
 
 ---
 

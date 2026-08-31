@@ -4,8 +4,9 @@
 # controller supplies the loop, cwd = the rig root, and the env (GC_RIG,
 # GC_PACK_STATE_DIR, gh token).
 # Arms, in load-bearing order: gate-ensure (rc=3 = designed HOLD of merge.sh
-# for this pass, not a fault), pr-open, merge (BEADS_ACTOR projected to the
-# refinery: it closes anchors assigned to it), pr-facts (same projection),
+# for this pass, not a fault), pr-open, pr-facts --posture-only (the posture
+# merge reads must be written in the same pass), merge (BEADS_ACTOR projected to
+# the refinery: it closes anchors assigned to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
 # review-sweep (cleanup over closed anchors; no projection, no merge authority).
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
@@ -170,12 +171,14 @@ run_pass() { # <label> <script> [args...]
 # pass — an approval-gated queue must not raise order.failed every 60s over it.
 GATE_UNSAFE_RC=3
 MERGE_HELD=0
+MERGE_HELD_WHY=""
 gate_rc=0
 run_pass "(1) gate-ensure" gate-ensure.sh \
   --default "$CHECK_SET_DEFAULT" --review-pool "$REVIEW_POOL" \
   --fix-pool "$FIX_POOL" || gate_rc=$?
 if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
   MERGE_HELD=1
+  MERGE_HELD_WHY="${MERGE_HELD_WHY:+$MERGE_HELD_WHY, }gate-ensure unsafe"
   note "gate-ensure UNSAFE (rc=$gate_rc) — merge.sh HELD this pass"
 elif [ "$gate_rc" != 0 ]; then
   FAILED="${FAILED}gate-ensure rc=$gate_rc; "
@@ -184,10 +187,26 @@ fi
 # (2) pr-open: pre_open_gate -> pull_request.
 run_pass "(2) pr-open" pr-open.sh || FAILED="${FAILED}pr-open rc=$?; "
 
+# (2b) posture: merge.sh answers "is a human waiting on this?" off the bead and
+# never asks GitHub, so the posture it reads has to be written in THIS pass. The
+# full pr-facts arm runs after merge, which leaves a comment that arrived since
+# the last pass invisible to the merge it should have held. Its rc is the same
+# guarantee read the other way: an arm that could not record a posture leaves
+# merge.sh validating one from an earlier tick, so it holds merge for the pass.
+posture_rc=0
+( export BEADS_ACTOR="$AGENT"
+  run_pass "(2b) pr-posture" pr-facts.sh --posture-only ) || posture_rc=$?
+if [ "$posture_rc" != 0 ]; then
+  MERGE_HELD=1
+  MERGE_HELD_WHY="${MERGE_HELD_WHY:+$MERGE_HELD_WHY, }posture not current"
+  FAILED="${FAILED}pr-posture rc=$posture_rc; "
+  note "pr-posture rc=$posture_rc — merge.sh HELD this pass"
+fi
+
 # (3) merge: BEADS_ACTOR projected in a subshell — the anchors it closes are
 # assigned to the refinery, and bd refuses a close by a different principal.
 if [ "$MERGE_HELD" = 1 ]; then
-  log "-- (3) merge: HELD this pass (gate-ensure unsafe)"
+  log "-- (3) merge: HELD this pass ($MERGE_HELD_WHY)"
 else
   ( export BEADS_ACTOR="$AGENT"
     run_pass "(3) merge" merge.sh ) || FAILED="${FAILED}merge rc=$?; "
