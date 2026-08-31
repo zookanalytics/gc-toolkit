@@ -11,14 +11,15 @@
 # proves "zero new really". Anything else — any unreadable probe, a missing
 # subject, its own abort — RUNS the pass: a probe that cannot be read
 # excludes nothing. It also sets the 6h cadence (a condition trigger has no
-# interval): the per-rig window is READ here and advanced by liveness-sweep.sh
-# when a pass starts, because more callers evaluate a check than dispatch from
-# it — the controller tick, the API order evaluator, `gc order check` — and a
-# check that closed its own window would hand the RUN verdict to whichever
-# caller asked first. Never writes a bead, never advances the window, and
-# never advances the sweep's baseline.
+# interval). The per-rig window is spent by whichever side ends the pass's
+# chance to run: liveness-sweep.sh when a pass starts, or this check when it
+# has proved the board quiet, since then no pass will. A RUN verdict never
+# spends it, because more callers evaluate a check than dispatch from it (the
+# controller tick, the API order evaluator, `gc order check`) and a check that
+# closed its own window on RUN would hand the pass to whichever caller asked
+# first. Never writes a bead and never advances the sweep's baseline.
 # Usage: liveness-sweep-precheck.sh [--force]
-#   --force    classify even inside the cooldown window
+#   --force    classify inside the window, and leave the window where it is
 # Exit: 0 = RUN the agent pass · 1 = do not (nothing new / window) · 2 usage.
 # NOT set -e: every failure is handled and routed to the run-the-pass side.
 set -uo pipefail
@@ -113,9 +114,9 @@ command -v jq >/dev/null 2>&1 || {
     DECIDED=1; exit 0
 }
 
-# The cooldown, read-only: liveness-sweep.sh stamps $STAMP when a pass starts.
-# A verdict this script hands out must be the same one the next caller gets,
-# because the caller that acts on it is not necessarily the caller that asked.
+# The cooldown. A RUN verdict this script hands out must be the same one the
+# next caller gets, because the caller that acts on it is not necessarily the
+# caller that asked; liveness-sweep.sh stamps $STAMP once the pass starts.
 # Repeating RUN cannot storm: the controller gates on an open order-tracking
 # bead before it evaluates a check at all, so the pass in flight is the one
 # that closes the window.
@@ -130,9 +131,9 @@ if [ "$FORCE" -eq 0 ] && [ -f "$STAMP" ]; then
         exit 1
     fi
 fi
-# The pass closes the window by writing $STAMP. If it could not, the cadence
-# has no floor and every dispatch tick would run a pass, so probe the write
-# here and refuse rather than storm.
+# The window is closed by a write to $STAMP, the pass's or this check's. If
+# that write is impossible the cadence has no floor and every dispatch tick
+# would run a pass, so probe it here and refuse rather than storm.
 if ! ( mkdir -p "$STATE_DIR" 2>/dev/null && : > "$STAMP.probe" 2>/dev/null ); then
     say "liveness-sweep precheck: CANNOT WRITE the cooldown stamp at $STAMP."
     say "  Refusing to run the pass: with no cadence this check would dispatch a pass"
@@ -303,6 +304,19 @@ fi
 
 if [ "$DECISION" = "skip" ]; then
     say "SKIP: $REASON — no agent session this pass."
+    # A proven-quiet board spends the window here, because nothing else will:
+    # the exec is the only other writer and a SKIP never starts it. Left
+    # unspent, the whole classification re-runs on every evaluation of a board
+    # that has nothing to say, which is the poll this cadence exists to bound.
+    # Spending a SKIP is safe in a way spending a RUN is not, because every
+    # caller inside the window gets the same "do not run" either way. --force
+    # is diagnostic and leaves the window where it found it. The two earlier
+    # skips never reach here: one is already inside a window, the other could
+    # not write.
+    if [ "$FORCE" -eq 0 ]; then
+        mkdir -p "$STATE_DIR" 2>/dev/null && printf '%s\n' "$NOW" > "$STAMP" 2>/dev/null \
+            || say "  WARN: cannot stamp the cadence window at $STAMP — the next tick reclassifies."
+    fi
     exit 1
 fi
 say "RUN: $REASON."

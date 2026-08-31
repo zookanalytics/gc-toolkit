@@ -25,15 +25,18 @@
 #      non-array answer, missing subject and mid-flight abort is exercised, and
 #      each must RUN — never skip.
 #
-#   4. THE COOLDOWN IS ENFORCED, READ-ONLY HERE, AND PER RIG. A condition
-#      trigger has no interval, so the 6h cadence lives in these two scripts:
-#      the check reads the window, the exec stamps it. A check is evaluated by
-#      callers that never dispatch — the controller tick, the API order
-#      evaluator, `gc order check` — so a check that stamped its own window
-#      would spend the RUN verdict on whichever caller asked first and report a
-#      cooldown to the dispatcher, leaving the sweep dark while its check
-#      logged RUN. Repeated evaluation is pinned to keep answering RUN until a
-#      pass actually runs, and the two scripts are pinned to one stamp path.
+#   4. THE COOLDOWN IS ENFORCED, PER RIG, AND SPENT BY WHOEVER ENDS THE PASS.
+#      A condition trigger has no interval, so the 6h cadence lives in these
+#      two scripts: the exec stamps the window when a pass starts, the check
+#      stamps it when it has proved there is no pass to start, and a RUN
+#      verdict never spends it. A check is evaluated by callers that never
+#      dispatch — the controller tick, the API order evaluator, `gc order
+#      check` — so a check that stamped its own RUN would spend it on whichever
+#      caller asked first and report a cooldown to the dispatcher, leaving the
+#      sweep dark while its check logged RUN. Repeated evaluation is pinned to
+#      keep answering RUN until a pass actually runs, a quiet board is pinned to
+#      answer from the window rather than reclassify on every tick, and the two
+#      scripts are pinned to one stamp path.
 #      The state directory is city+pack scoped while the order is rig-scoped,
 #      so a window without a rig component would let the first rig through the
 #      check silence every other rig for six hours — section 4b runs two rigs
@@ -383,8 +386,8 @@ rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "first evaluation in a fresh window classifies and runs"
 [ -f "$STATE/last-pass" ] \
-    && bad "evaluating the check does not spend the window" "the check wrote $STATE/last-pass" \
-    || ok "evaluating the check does not spend the window"
+    && bad "a RUN verdict does not spend the window" "the check wrote $STATE/last-pass" \
+    || ok "a RUN verdict does not spend the window"
 # Three evaluators call this check — the controller tick, the API order
 # evaluator, `gc order check` — and only one of them dispatches. A verdict
 # spent on an evaluator that dispatches nothing is a window the pass never
@@ -394,8 +397,8 @@ eq "$RC" "0" "first evaluation in a fresh window classifies and runs"
 "$SCRIPT" >/dev/null 2>&1; RC3=$?
 eq "$RC2/$RC3" "0/0" "repeated evaluation still reports RUN — the check is not a one-shot latch"
 [ -f "$STATE/last-pass" ] \
-    && bad "and none of them spent the window" "the check wrote $STATE/last-pass" \
-    || ok "and none of them spent the window"
+    && bad "and none of them spent the RUN" "the check wrote $STATE/last-pass" \
+    || ok "and none of them spent the RUN"
 # The pass is what closes it, by writing the stamp liveness-sweep.sh writes.
 printf '%s\n' "$(date -u +%s)" > "$STATE/last-pass"
 OUT="$("$SCRIPT" 2>&1)"; RC=$?
@@ -420,9 +423,8 @@ grep -q 'STAMP="\$STATE_DIR/last-pass"' "$SCRIPT" && grep -q 'STAMP="\$STATE_DIR
 grep -qE '> *"\$STAMP"' "$SWEEP" \
     && ok "the exec redirects into the stamp" \
     || bad "the exec redirects into the stamp" "no write to \$STAMP in $SWEEP"
-grep -qE '> *"\$STAMP"' "$SCRIPT" \
-    && bad "the check never redirects into the stamp" "found a write to \$STAMP in $SCRIPT" \
-    || ok "the check never redirects into the stamp"
+eq "$(grep -cE '> *"\$STAMP"' "$SCRIPT")" "1" \
+   "the check writes the stamp in exactly one place"
 # A degraded store must still reach a RUN verdict — the storm guard is the
 # exec's stamp now, not a verdict the check withholds.
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
@@ -447,6 +449,38 @@ else
     has "$OUT" "CANNOT WRITE the cooldown stamp" "and says exactly what is broken"
     has "$OUT" "the sweep is OFF" "and that the sweep is off until it is fixed"
 fi
+
+# The other end of the window. A SKIP dispatches nothing, so the exec never
+# runs and nothing else can advance the stamp; an unspent window leaves the
+# full classification to re-run on every evaluation of a board that has
+# nothing to say, which is the poll the cadence exists to bound.
+echo "── a proven-quiet SKIP spends the window itself ──"
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
+rm -rf "$LIVENESS_SWEEP_STATE_DIR"
+: > "$FIX/reads"
+OUT="$("$SCRIPT" 2>&1)"; RC=$?
+eq "$RC" "1" "the quiet board skips"
+has "$OUT" "SKIP:" "and got there by classifying, not from a window"
+[ -s "$STATE/last-pass" ] && ok "a proven-quiet SKIP spends the window" \
+    || bad "a proven-quiet SKIP spends the window" "no $STATE/last-pass — every tick would reclassify"
+# The second evaluation is the regression: it must answer from the window.
+: > "$FIX/reads"
+OUT2="$("$SCRIPT" 2>&1)"; RC2=$?
+eq "$RC2" "1" "the next evaluation still skips"
+eq "$OUT2" "" "and says nothing — it never reached a verdict of its own"
+eq "$(wc -c < "$FIX/reads" | tr -d ' ')" "0" \
+   "and read no beads at all — the window bounds the poll on a quiet board"
+eq "$(grep -c '^=== ' "$STATE/pass.log")" "1" "one classification, one log entry"
+# --force classifies inside that window without moving it. Backdated first, or
+# a stamp rewritten within the same second would look untouched.
+printf '%s\n' "$(( $(date -u +%s) - 100 ))" > "$STATE/last-pass"
+STAMPED_AT="$(cat "$STATE/last-pass")"
+OUT3="$("$SCRIPT" --force 2>&1)"; RC3=$?
+eq "$RC3" "1" "--force reclassifies the quiet board"
+has "$OUT3" "SKIP:" "and reaches the same verdict"
+eq "$(cat "$STATE/last-pass")" "$STAMPED_AT" "--force leaves the window where it found it"
+cp "$TMP/ready.bak" "$FIX/ready.json"
 
 echo "── the report survives the controller discarding stdout ──"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"

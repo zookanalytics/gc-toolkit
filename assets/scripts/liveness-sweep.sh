@@ -11,9 +11,9 @@
 # proves the delta non-empty; safe to run by hand.
 # State: $GC_PACK_STATE_DIR/liveness-sweep/<rig>/ — `reported`, the delta
 # baseline (comma-joined ids), beside `last-pass`, the cadence window. Both
-# are keyed per rig the same way the precheck keys them; the precheck only
-# READS last-pass, so a pass that starts is the only thing that closes a
-# window.
+# are keyed per rig the same way the precheck keys them. A pass that starts
+# closes the window, and the precheck closes it too once it has proved there
+# is no pass to start.
 # Bias everywhere: an unreadable probe excludes nothing (re-report, never
 # hide). Exit: 0 pass completed (filed or nothing to file), 1 aborted on an
 # unreadable listing, 2 usage.
@@ -58,8 +58,8 @@ BASELINE_FILE="$STATE_DIR/reported"
 STAMP="$STATE_DIR/last-pass"
 
 # Close the cadence window. liveness-sweep-precheck.sh, the order's `check`,
-# reads this stamp and never writes it: a check is evaluated by callers that
-# never dispatch, so only a pass that actually started may spend the window.
+# never spends it on a RUN verdict: a check is evaluated by callers that never
+# dispatch, so a RUN has to survive until the pass it dispatches starts.
 # Stamped before the reads, so a pass that aborts costs one window instead of
 # re-offering itself on every tick.
 if [ "$DRY_RUN" -eq 0 ]; then
