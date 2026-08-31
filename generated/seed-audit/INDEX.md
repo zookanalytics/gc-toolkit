@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- source digest: `d3d0b559b91a0d900cfba29c5f0a456ec43861426b98ec9baac107a654d2813f`
+- source digest: `1cd105fa8dc3280bc7374c1a5492fea827e965b5417615f3b9699aec2cf914e0`
 - agents: 14 · formulas: 22
 
 ## Scope
@@ -59,7 +59,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 |---|---|---:|---:|
 | [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 1,826 | 456 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
-| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 2,946 | 736 |
+| [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
 | [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 3,622 | 905 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,548 | 637 |
@@ -79,9 +79,9 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,092 | 523 |
-| **total** | | **66,782** | **16,695** |
+| **total** | | **67,048** | **16,762** |
 
-**Grand total: 234,430 bytes / ~58,607 tokens.**
+**Grand total: 234,696 bytes / ~58,674 tokens.**
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
