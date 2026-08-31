@@ -789,11 +789,10 @@ eq "$(meta rev-w9 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 hasnt "$out" "WEDGED" "…and it is never called wedged"
 
 # --- the machine axis (lifecycle/lifecycle.toml [machine_axis]) ------------------
-# This loop already classifies every marker into settled or needs-raising once
-# per pass, and used to spend the answer on a log line. Recording it is what
-# lets the helm board say whether an anchor is moving without re-implementing
-# these predicates, and the value is head-pinned so a stale verdict can never
-# read as current.
+# This loop classifies every marker into settled or needs-raising once per pass.
+# Recording that answer is what lets the helm board say whether an anchor is
+# moving without re-implementing these predicates, and the value is head-pinned
+# so a stale verdict can never read as current.
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 

@@ -451,6 +451,23 @@ var metadataAnchors = []metadataAnchor{
 	// These are deliberately NOT attention items (see the LOW band in
 	// derive.go); they are items the operator has to be able to find again.
 	{kind: "parked", key: "gc.takeaway", label: "parked-visits"},
+	// A merge anchor: a branch, a gate set, and a pull request the city is
+	// trying to land. `doctor/check-one-anchor-per-pr` asserts one open gating
+	// anchor per pull request, so the anchor already IS the PR's row and the PR
+	// facts attach to the tile it produces — there is no second object and no
+	// second queue.
+	//
+	// Keyed on `merge_result` PRESENCE, never on `pr_number`. An anchor at
+	// `pre_open_gate` has a machine axis and no PR number yet, and six of the
+	// seven wedged anchors measured on 2026-08-28 were in exactly that state,
+	// so a query keyed on the number would omit the majority of the condition
+	// this row exists to show.
+	//
+	// LAST in this list on purpose. A wedged anchor carries `gc.routed_to=human`
+	// too and is therefore gathered twice; [board.BuildBoard]'s id-dedup keeps
+	// the first at equal rank, so it stays a `human` row and reports the same PR
+	// axes either way, rather than flipping kind between passes.
+	{kind: "merge", key: "merge_result", label: "merge-anchors"},
 }
 
 // gatherRig collects every anchor kind from one rig's store, twice: once at
@@ -541,7 +558,7 @@ func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st bead
 				// the stand-down test (board.ruled), and without them the
 				// "and the work landed" clause would be vacuous for exactly
 				// the kind an operator files a `--waiting-on` edge on.
-				a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
+				a.Blockers, a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
 			}
 			g.anchors = append(g.anchors, a)
 		}
@@ -609,7 +626,7 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 			}
 			a := newAnchor(iss, ma.kind, r)
 			a.Children = s.parentChildren(ctx, g, st, iss.ID)
-			a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
+			a.Blockers, a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown = s.waitingEdges(ctx, g, st, iss.ID)
 			g.anchors = append(g.anchors, a)
 		}
 	}
@@ -619,11 +636,13 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 // them have closed.
 //
 // WHO SPENDS IT. The edge answers one question — "is the work this row was
-// waiting on done?" — and three kinds spend the answer: `parked` through
-// board.dispositionDue, and `decision` / `human` through board.ruled. It is
-// read for those three and not for `epic` or `convoy`, whose bands come from a
-// child roll-up that already says whether their work is moving. gc-helm.sh
-// gathers the same three, so the two boards stay field-for-field identical.
+// waiting on done?" — and four kinds spend the answer: `parked` through
+// board.dispositionDue, `decision` / `human` through board.ruled, and `merge`
+// through the PR round-trip's two axes, which read the blockers rather than
+// their ids. It is read for those four and not for `epic` or `convoy`, whose
+// bands come from a child roll-up that already says whether their work is
+// moving. gc-helm.sh gathers the first three, so the two boards stay
+// field-for-field identical on every field it has.
 //
 // FAILURE REPORTS ITSELF. The two failure shapes are not the same, and only
 // one of them used to be safe. A blocker that IS read but is not closed is
@@ -643,11 +662,11 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 // drops the anchor entirely and cannot leave one standing with its edges
 // silently missing. The separate per-anchor query here is what creates the
 // third case.
-func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadStore, id string) (all, closed []string, unknown bool) {
+func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadStore, id string) (blockers []board.Blocker, all, closed []string, unknown bool) {
 	deps, err := st.GetDependenciesWithMetadata(ctx, id)
 	if err != nil {
 		g.note(true, []string{"waiting@" + id + ": " + err.Error()})
-		return nil, nil, true
+		return nil, nil, nil, true
 	}
 	for _, d := range deps {
 		if d == nil || string(d.DependencyType) != "blocks" {
@@ -657,8 +676,21 @@ func (s *BeadsSource) waitingEdges(ctx context.Context, g *gatherState, st beadS
 		if d.Issue.Status == beads.StatusClosed {
 			closed = append(closed, d.Issue.ID)
 		}
+		// The same edge, typed. The PR round-trip asks the blockers three
+		// questions the id alone cannot answer — who is due to act on it, what
+		// it is asking for, and when it started asking — and answering them
+		// from this read is what keeps the render path off a second query.
+		md := decodeMetadata(d.Issue.Metadata)
+		blockers = append(blockers, board.Blocker{
+			ID:        d.Issue.ID,
+			Title:     d.Issue.Title,
+			Status:    strings.ToLower(string(d.Issue.Status)),
+			RoutedTo:  md["gc.routed_to"],
+			IssueType: strings.ToLower(string(d.Issue.IssueType)),
+			CreatedAt: d.Issue.CreatedAt,
+		})
 	}
-	return all, closed, false
+	return blockers, all, closed, false
 }
 
 // newAnchor projects one bead onto a board anchor under the given kind. Kind

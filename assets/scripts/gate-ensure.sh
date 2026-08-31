@@ -661,10 +661,10 @@ $gates
 GATES
 
   # --- record the pass's own verdict on the anchor ------------------------------
-  # The classification above is reached once per pass and was previously spent on
-  # a log line. Recording it is what lets a reader — the helm board — say whether
-  # an anchor is moving without re-implementing this loop, and it costs no extra
-  # read: lifecycle.sh compares against the bead it must fetch anyway.
+  # The classification above is reached once per pass. Recording it is what lets
+  # a reader — the helm board — say whether an anchor is moving without
+  # re-implementing this loop, and it costs no extra read: lifecycle.sh compares
+  # against the bead it must fetch anyway.
   #
   # Only with a readable head. The value is head-pinned so a stale verdict can
   # never read as current, and a verdict pinned to nothing is not evidence.

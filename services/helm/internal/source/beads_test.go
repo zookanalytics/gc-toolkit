@@ -1792,3 +1792,130 @@ func TestDoneSince(t *testing.T) {
 		})
 	}
 }
+
+// TestMergeAnchorsAreGathered is the PR round-trip's gather (specs/tk-q0ml23).
+//
+// `doctor/check-one-anchor-per-pr` asserts one open gating anchor per pull
+// request, so the anchor already IS the PR's row — but a merge anchor is an
+// ordinary task or bug, and until now only the ones a person had been routed
+// were gathered at all. That left every `progressing` and `settled` row off the
+// board, and left the wedged ones reading as bare "routed to a person".
+//
+// Keyed on merge_result PRESENCE, never on pr_number: six of the seven wedged
+// anchors measured on 2026-08-28 sat at pre_open_gate with no pull request
+// open, so a number-keyed query would omit the majority of the condition.
+func mergeStore() *fakeStore {
+	return &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"task": {
+				issue("tk-pre", "wedged before the PR opened", "task", 1, testNow.Add(-3*24*time.Hour),
+					`{"merge_result":"pre_open_gate","branch":"polecat/tk-pre","gc.routed_to":"human","pr.machine":"wedged-exception@aaaa@2026-08-28T04:05:06Z"}`),
+				issue("tk-open", "an ordinary open PR", "task", 2, testNow,
+					`{"merge_result":"pull_request","pr_number":"512","branch":"polecat/tk-open"}`),
+				issue("tk-quiet", "no merge_result at all", "task", 2, testNow, `{"branch":"polecat/tk-quiet"}`),
+			},
+		},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-open": {
+				withDepType(child("tk-rev", "open", testNow,
+					`{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","anchor_bead":"tk-open"}`), "blocks"),
+				withDepType(child("tk-dem", "open", testNow, `{"gc.routed_to":"human"}`), "blocks"),
+				// Not a `blocks` edge: it holds nothing and must not be read as
+				// an actor or as a demand.
+				withDepType(child("tk-rel", "open", testNow, `{"gc.routed_to":"gc-toolkit/x"}`), "related"),
+			},
+		},
+	}
+}
+
+func TestMergeAnchorsAreGathered(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": mergeStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	kinds := map[string][]string{}
+	for _, a := range res.Anchors {
+		kinds[a.ID] = append(kinds[a.ID], a.Kind)
+	}
+	// A wedged anchor carries BOTH markers and gathers twice, exactly as a
+	// human+parked bead does. `human` comes FIRST so BuildBoard's id-dedup —
+	// which keeps the first at equal rank — leaves it a human row rather than
+	// letting the kind flip between passes.
+	if got := kinds["tk-pre"]; len(got) != 2 || got[0] != "human" || got[1] != "merge" {
+		t.Errorf("tk-pre kinds = %v, want [human merge] in that order", got)
+	}
+	if got := kinds["tk-open"]; len(got) != 1 || got[0] != "merge" {
+		t.Errorf("tk-open kinds = %v, want [merge] — a detached anchor has no route to gather it", got)
+	}
+	if got := kinds["tk-quiet"]; got != nil {
+		t.Errorf("a bead with no merge_result is not a merge anchor: %v", got)
+	}
+
+	i, ok := findAnchor(res, "tk-open")
+	if !ok {
+		t.Fatal("merge anchor missing")
+	}
+	open := res.Anchors[i]
+	if got := open.Metadata["pr_number"]; got != "512" {
+		t.Errorf("the PR identity rides on the anchor: %v", open.Metadata)
+	}
+
+	// The blockers carry what the two axes discriminate on. The ROUTE is what
+	// separates a review or rework child, which a pool will claim, from the
+	// demand bead that makes the anchor `asking` — and the ids alone, which is
+	// all WaitingOn carries, cannot answer either question.
+	if len(open.Blockers) != 2 {
+		t.Fatalf("blockers = %+v, want the two `blocks` edges only", open.Blockers)
+	}
+	byID := map[string]board.Blocker{}
+	for _, b := range open.Blockers {
+		byID[b.ID] = b
+	}
+	if got := byID["tk-rev"].RoutedTo; got != "gc-toolkit/gc-toolkit.polecat-codex" {
+		t.Errorf("the pool route must ride on the blocker: %q", got)
+	}
+	if got := byID["tk-dem"].RoutedTo; got != "human" {
+		t.Errorf("the demand's route must ride on it too: %q", got)
+	}
+	if byID["tk-rev"].Status != "open" || byID["tk-dem"].Status != "open" {
+		t.Errorf("blocker statuses: %+v", open.Blockers)
+	}
+	// Same read, not a second one: the id slices still come out of it.
+	if len(open.WaitingOn) != 2 || open.WaitingUnknown {
+		t.Errorf("waiting_on = %v (unknown=%v) — the blockers and the ids are one query",
+			open.WaitingOn, open.WaitingUnknown)
+	}
+}
+
+// TestMergeAnchorUnreadableEdgesStayUnknown. An edge set that could not be read
+// is not an anchor with no blockers: it looks identical, and the PR axes would
+// silently report "nothing is holding this" for a row whose demand bead the
+// store simply failed to return.
+func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
+	st := mergeStore()
+	st.failDeps = map[string]error{"tk-open": errors.New("dolt timeout")}
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok := findAnchor(res, "tk-open")
+	if !ok {
+		t.Fatal("merge anchor missing")
+	}
+	if !res.Anchors[i].WaitingUnknown {
+		t.Error("an unreadable edge set must say so rather than read as no blockers")
+	}
+	if len(res.Anchors[i].Blockers) != 0 {
+		t.Errorf("nothing was read, so nothing is reported: %+v", res.Anchors[i].Blockers)
+	}
+	if !res.Partial {
+		t.Error("the gather is degraded and the board has to say so out loud")
+	}
+}

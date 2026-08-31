@@ -46,8 +46,37 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     frontier: '',
     needs: '',
     rank_score: 0,
+    // A row that is not a merge anchor: EMPTY axes, not 'unknown'. "Not a pull
+    // request" and "a pull request whose position could not be read" are
+    // different answers, and only the second is a gap in coverage.
+    pr_number: 0,
+    pr_url: '',
+    pr_machine: '',
+    pr_conversation: '',
+    pr_approval: '',
     ...over,
   };
+}
+
+/**
+ * A merge anchor row, as the board derives one. The default is the shape that
+ * put this surface in the backlog: wedged at the convergence cap's exception,
+ * with no pull request open, which is where six of the seven wedged anchors sat
+ * when the design measured them.
+ */
+function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
+  return tile({
+    kind: 'human',
+    title: 'a merge anchor',
+    severity: 'ELEVATED',
+    owed: true,
+    pr_machine: 'wedged-exception',
+    pr_conversation: 'unknown',
+    pr_approval: 'unknown',
+    pr_owed_since: '2026-08-08T11:02:00Z',
+    needs: 'wedged: the review cap\'s exception stands at the live head — only a new commit clears it',
+    ...over,
+  });
 }
 
 // The two halves of the conversation record: one sitting still running, one
@@ -504,4 +533,126 @@ it('does not mistake the sittings table for the overview', async () => {
   await waitFor(() => expect(sittingsSection()).toBeTruthy());
   expect(within(sittingsSection()).getByRole('table')).toBeTruthy();
   expect(() => attentionTable()).toThrow(/no overview table/);
+});
+
+// --- the PR round-trip (specs/tk-q0ml23) --------------------------------------
+
+/** Serve a board made of exactly these tiles. */
+function serve(tiles: Tile[]) {
+  const board: Board = { ...BOARD, total: tiles.length, tiles, sittings: [] };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(board), { status: 200 })),
+  );
+}
+
+// A wedged anchor reached the board before this change — it is routed to a
+// person, so the gather found it — and said nothing about WHY nothing was
+// moving. "Routed to a person" reads identically for an anchor awaiting a
+// ruling and for one frozen at exception@<live head>, where the only release is
+// a head move nobody is going to make.
+it('names the wedge and links the pull request', async () => {
+  serve([
+    prTile({
+      id: 'tk-veto',
+      title: 'a pull request a human rejected',
+      pr_machine: 'wedged-veto',
+      pr_number: 513,
+      pr_url: 'https://github.com/zook/gc-toolkit/pull/513',
+      needs: 'wedged: a standing CHANGES_REQUESTED with the rework rounds spent',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/a pull request a human rejected/)).toBeTruthy());
+
+  const row = within(owedSection()).getByText(/a pull request a human rejected/).closest('tr');
+  expect(row).not.toBeNull();
+  expect(within(row as HTMLElement).getByText(/wedged: a standing CHANGES_REQUESTED/)).toBeTruthy();
+
+  // One click to the conversation. The board never reproduces a comment thread;
+  // line-level commenting stays in GitHub and this is the way there.
+  const link = within(row as HTMLElement).getByRole('link', { name: 'PR #513' });
+  expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/pull/513');
+});
+
+// The row is a MERGE ANCHOR's, not a pull request's. Most wedged anchors have
+// no pull request at all, so a surface that could only identify a row by its
+// number would have nothing to show for the majority of them.
+it('identifies a pre-open row without inventing a link', async () => {
+  serve([prTile({ id: 'tk-pre', title: 'wedged before the PR opened' })]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/wedged before the PR opened/)).toBeTruthy());
+
+  const row = within(owedSection()).getByText(/wedged before the PR opened/).closest('tr');
+  expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
+  expect(within(row as HTMLElement).getByText('not open yet')).toBeTruthy();
+});
+
+// The queue is ordered by how long a row has been owed, and pr_owed_since is
+// the only stamp on a merge anchor that dates the TURN. updated_at is touched by
+// every reconcile pass, so falling back to it reports the most neglected row as
+// the freshest one.
+it('dates an owed PR row by its turn, not by the last pass that touched it', async () => {
+  serve([
+    prTile({
+      id: 'tk-old',
+      title: 'wedged for three days',
+      pr_owed_since: '2026-08-08T11:02:00Z',
+      updated_at: '2026-08-11T14:55:00Z',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/wedged for three days/)).toBeTruthy());
+
+  const row = within(owedSection()).getByText(/wedged for three days/).closest('tr');
+  expect(within(row as HTMLElement).getByText('2026-08-08')).toBeTruthy();
+  expect(within(row as HTMLElement).queryByText('2026-08-11')).toBeNull();
+});
+
+// The empty-state contract, extended. A board that says "nothing is owed" while
+// a pull request's position is unread has told the operator to stop looking on
+// the strength of a question it never asked. `owed` is a boolean and cannot
+// carry the third value the axes do, so the gap has to surface as coverage.
+it('withholds the all-clear while a PR position is unread', async () => {
+  serve([
+    prTile({
+      id: 'tk-silent',
+      title: 'a pull request the cadence has not judged',
+      owed: false,
+      pr_machine: 'unknown',
+      pr_owed_since: undefined,
+      needs: 'position unknown — the merge cadence has recorded none',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/NOT an all-clear/)).toBeTruthy());
+
+  const sub = within(owedSection()).getByRole('status');
+  expect(sub.textContent).toMatch(/1 of 1 have no position recorded/);
+  // The conversation axis is unread on every row in this phase, and the sentence
+  // says why rather than letting the silence pass for an answer.
+  expect(sub.textContent).toMatch(/acknowledgement watermarks are not built yet/);
+  expect(sub.textContent).not.toMatch(/^Nothing is owed by you\./);
+});
+
+// …and it is a real all-clear when every position was readable. A coverage
+// sentence that can never clear is one an operator learns to ignore.
+it('gives the all-clear when every PR position was readable', async () => {
+  serve([
+    prTile({
+      id: 'tk-green',
+      title: 'a pull request waiting on the merge pass',
+      owed: false,
+      pr_machine: 'settled',
+      pr_conversation: 'quiet',
+      pr_approval: 'not_required',
+      pr_owed_since: undefined,
+      needs: 'green — waiting on the merge pass',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/Nothing is owed by you/)).toBeTruthy());
+
+  const sub = within(owedSection()).getByRole('status');
+  expect(sub.textContent).toMatch(/1 pull requests read, all with a position/);
 });

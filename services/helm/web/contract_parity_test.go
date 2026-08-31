@@ -558,6 +558,71 @@ func fixtureBoard() board.Board {
 				Needs:     "all 2 closed — graduate",
 				RankScore: 3000,
 			},
+			// A merge anchor: the PR round-trip's row. Wedged at the convergence
+			// cap's exception, which is the live shape six of the seven wedged
+			// anchors carried when the surface was designed — and with no PR
+			// number, because that is the state most of them were in. It pins
+			// the whole axis field set, including the zero `pr_number` a
+			// pre-open row carries and the `pr_owed_since` the queue is ranked
+			// by, so the TypeScript side sees every one of them.
+			{
+				ID:       "tk-01n5cc",
+				Rig:      "gc-toolkit",
+				Kind:     "human",
+				Title:    "Write the city's own review posture back to GitHub",
+				Severity: board.SevElevated,
+
+				Owed:   true,
+				Weight: 3,
+				Held:   false,
+
+				NClosed:    0,
+				MTotal:     0,
+				Open:       0,
+				InProgress: 0,
+				Assigned:   0,
+
+				InProgressLive: 0,
+				InProgressDead: 0,
+				DeadOwner:      false,
+
+				InFlight:      0,
+				InFlightHeads: []string{},
+
+				Owned: nil,
+
+				Stranded:         false,
+				Empty:            false,
+				Complete:         false,
+				ProgressMismatch: false,
+
+				StaleDays:      3,
+				Priority:       &p1,
+				CrossRigRefs:   []string{},
+				OpenHeads:      []string{},
+				DeadOwnerHeads: []string{},
+				ParkedHeads:    []string{},
+
+				Takeaway:   nil,
+				TakeawayAt: nil,
+				TakeawayBy: nil,
+
+				UpdatedAt: time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
+				Frontier:  "polecat/tk-01n5cc · owed 3d",
+				Needs:     "wedged: the review cap's exception stands at the live head — only a new commit clears it",
+				RankScore: 2003003,
+
+				// No PR number: the branch is pushed and gated, and nothing has
+				// opened a pull request for it.
+				PRNumber:       0,
+				PRURL:          "",
+				PRMachine:      board.MachineWedgedException,
+				PRConversation: board.ConversationUnknown,
+				PRApproval:     board.AxisUnknown,
+				// Three days before the board was generated, and held there by
+				// every reconcile pass in between.
+				PROwedSince: time.Date(2026, 8, 8, 11, 2, 0, 0, time.UTC),
+			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into
 			// the TypeScript check, which cannot see a field no tile populates.

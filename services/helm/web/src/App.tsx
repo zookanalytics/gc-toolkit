@@ -93,8 +93,65 @@ async function fetchBoard(signal: AbortSignal): Promise<Board> {
 // neither. Display only — the ORDER is the service's, and re-deriving it here
 // is how the two would drift.
 function owedSince(tile: Tile): string {
-  const stamp = tile.takeaway_at ?? tile.updated_at;
+  // pr_owed_since first: on a merge anchor it is the only stamp that dates the
+  // TURN. A wedged anchor is touched by every reconcile pass, so updated_at
+  // reports the most neglected row as the freshest one.
+  const stamp = tile.pr_owed_since ?? tile.takeaway_at ?? tile.updated_at;
   return stamp ? stamp.slice(0, 10) : 'unknown';
+}
+
+/** A merge anchor: the row the PR round-trip renders onto. */
+function isPRRow(tile: Tile): boolean {
+  return tile.pr_machine !== '';
+}
+
+/**
+ * The pull request this row is about, as a link when one is open.
+ *
+ * Before the PR opens there is no link to give and the branch is the identity —
+ * which is the common case among wedged rows, not an edge one. The conversation
+ * lives in GitHub and this is the one click to it; the board never reproduces a
+ * comment thread.
+ */
+function PRLink({ tile }: { tile: Tile }) {
+  if (!isPRRow(tile)) return null;
+  if (tile.pr_number > 0 && tile.pr_url) {
+    return (
+      <a href={tile.pr_url} target="_blank" rel="noreferrer">
+        PR #{tile.pr_number}
+      </a>
+    );
+  }
+  return <span className="sub">not open yet</span>;
+}
+
+/**
+ * What the board could not read about the pull requests it holds.
+ *
+ * The owed section's empty state is a contract: it states its coverage or it
+ * states the error, never a blank. PR rows add a way for that to go quietly
+ * wrong, because an axis nothing has recorded looks exactly like an axis with
+ * nothing to say — so the all-clear is withheld while any position is unread.
+ * `owed` is a boolean and cannot carry the third value the axes do.
+ */
+function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
+  const rows = tiles.filter(isPRRow);
+  const gaps: string[] = [];
+  const noPosition = rows.filter((t) => t.pr_machine === 'unknown').length;
+  const noConversation = rows.filter((t) => t.pr_conversation === 'unknown').length;
+  const noApproval = rows.filter((t) => t.pr_machine === 'settled' && t.pr_approval === 'unknown').length;
+  if (noPosition > 0) {
+    gaps.push(`${noPosition} of ${rows.length} have no position recorded by the merge cadence`);
+  }
+  if (noConversation > 0) {
+    gaps.push(
+      `${noConversation} cannot say where the conversation stands (the acknowledgement watermarks are not built yet)`,
+    );
+  }
+  if (noApproval > 0) {
+    gaps.push(`${noApproval} are green with no readable answer on whether GitHub wants a review`);
+  }
+  return { rows: rows.length, gaps };
 }
 
 // The drill-in entry point, shared by both tables. A button rather than a
@@ -215,6 +272,7 @@ export function App() {
   // (contract.ts). The sections re-read the flag rather than slicing by
   // position, so a section can never disagree with the order that produced it.
   const owed = tiles.filter((tile) => tile.owed);
+  const coverage = prCoverage(tiles);
   const rest = tiles.filter((tile) => !tile.owed);
   const done = rest.filter(isDone);
   const attention = rest.filter((tile) => !isDone(tile) && !isParked(tile));
@@ -271,7 +329,11 @@ export function App() {
           <p className="sub" role="status">
             {board.partial
               ? 'Nothing is owed by you — but some rigs did not answer, so this is not an all-clear.'
-              : 'Nothing is owed by you. Every store answered.'}
+              : coverage.gaps.length > 0
+                ? `Nothing readable is owed by you — but this is NOT an all-clear. Every store answered; of ${coverage.rows} pull requests, ${coverage.gaps.join('; ')}.`
+                : coverage.rows > 0
+                  ? `Nothing is owed by you. Every store answered; ${coverage.rows} pull requests read, all with a position.`
+                  : 'Nothing is owed by you. Every store answered.'}
           </p>
         ) : (
           <>
@@ -284,6 +346,7 @@ export function App() {
                 <tr>
                   <th>id</th>
                   <th>rig</th>
+                  <th>pr</th>
                   <th>needs</th>
                   <th>title</th>
                   <th>owed since</th>
@@ -296,6 +359,9 @@ export function App() {
                       <DrillOpen id={tile.id} onOpen={setDrillTarget} />
                     </td>
                     <td>{tile.rig}</td>
+                    <td>
+                      <PRLink tile={tile} />
+                    </td>
                     <td>{tile.needs}</td>
                     <td>{tile.title}</td>
                     <td>{owedSince(tile)}</td>

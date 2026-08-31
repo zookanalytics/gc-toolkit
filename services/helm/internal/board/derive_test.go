@@ -1950,3 +1950,432 @@ func TestCapRowsBudgetsAreSeparate(t *testing.T) {
 		t.Errorf("limit<=0 stays uncapped for every band: got %d of %d", got, len(tiles))
 	}
 }
+
+// --- the PR round-trip (specs/tk-q0ml23) --------------------------------------
+//
+// Every case below is built from a shape the design measured on live gc-toolkit
+// on 2026-08-28, because the failure this surface exists to prevent is a board
+// that reports a wedged pull request as nobody's problem, and only the real
+// shapes prove it does not.
+
+const (
+	// A 40-hex oid, the grammar the gate markers and the dated keys share.
+	headLive = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	headOld  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
+// dated builds the <value>@<oid>@<since> shape lifecycle.sh writes.
+func dated(value, oid string, at time.Time) string {
+	return value + "@" + oid + "@" + at.Format(time.RFC3339)
+}
+
+// mergeAnchor is an open merge anchor as the gather produces one: the `merge`
+// kind, whatever metadata the case is about, and its `blocks` blockers.
+func mergeAnchor(id string, md map[string]string, blockers ...Blocker) Anchor {
+	full := map[string]string{"merge_result": "pull_request", "branch": "polecat/" + id}
+	for k, v := range md {
+		full[k] = v
+	}
+	return Anchor{
+		ID: id, Title: "t " + id, Kind: "merge", Source: "merge",
+		Rig: "gc-toolkit", Prefix: "tk", Metadata: full, Blockers: blockers,
+		UpdatedAt: fixtureNow, // touched by this very reconcile pass
+	}
+}
+
+func mustTile(t *testing.T, b Board, id string) Tile {
+	t.Helper()
+	tile, ok := tileByID(b, id)
+	if !ok {
+		t.Fatalf("no tile for %s", id)
+	}
+	return tile
+}
+
+// TestWedgedAnchorIsOwedAndNamed covers both wedge shapes.
+//
+// The exception wedge is the state six of the seven wedged anchors were in, and
+// five of those six had no pull request open, which is why the row is keyed on
+// the anchor and carries the branch instead. The veto wedge is the seventh.
+// Neither was visible as anything but "routed to a person", which reads the
+// same for an anchor awaiting a ruling and for one nothing will ever move.
+func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
+	wedgedAt := fixtureNow.Add(-72 * time.Hour)
+	anchors := []Anchor{
+		mergeAnchor("tk-exc", map[string]string{
+			"merge_result":   "pre_open_gate",
+			"pr.machine":     dated(MachineWedgedException, headLive, wedgedAt),
+			"gc.routed_to":   "human",
+			"check.codex":    "exception@" + headLive,
+			"blocked_reason": "signoff did not converge after 3 rework rounds (cap 3)",
+		}),
+		mergeAnchor("tk-veto", map[string]string{
+			"pr.machine": dated(MachineWedgedVeto, headLive, wedgedAt),
+			"pr_number":  "513",
+			"pr_url":     "https://github.com/zook/gc-toolkit/pull/513",
+			"pr_posture": dated(postureChangesRequested, headLive, wedgedAt),
+		}),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	exc := mustTile(t, b, "tk-exc")
+	if exc.PRMachine != MachineWedgedException {
+		t.Errorf("pr_machine = %q, want %q", exc.PRMachine, MachineWedgedException)
+	}
+	if !exc.Owed {
+		t.Error("a wedged anchor is owed by the operator: nothing else will move it")
+	}
+	if !strings.Contains(exc.Needs, "wedged") || !strings.Contains(exc.Needs, "exception") {
+		t.Errorf("needs must name the wedge and its shape, got %q", exc.Needs)
+	}
+	if !exc.PROwedSince.Equal(wedgedAt) {
+		t.Errorf("pr_owed_since = %v, want the wedge stamp %v", exc.PROwedSince, wedgedAt)
+	}
+	// No PR number: the identity is the branch, which is the majority case.
+	if exc.PRNumber != 0 || !strings.Contains(exc.Frontier, "polecat/tk-exc") {
+		t.Errorf("a pre-open row identifies itself by branch, got number=%d frontier=%q",
+			exc.PRNumber, exc.Frontier)
+	}
+	if !strings.Contains(exc.Frontier, "owed 3d") {
+		t.Errorf("the row carries the age the queue is sorted by, got %q", exc.Frontier)
+	}
+
+	veto := mustTile(t, b, "tk-veto")
+	if veto.PRMachine != MachineWedgedVeto {
+		t.Errorf("pr_machine = %q, want %q", veto.PRMachine, MachineWedgedVeto)
+	}
+	if !veto.Owed {
+		t.Error("a veto past the rework cap is owed: signoff will file nothing further")
+	}
+	if !strings.Contains(veto.Needs, "CHANGES_REQUESTED") {
+		t.Errorf("needs must name the veto, got %q", veto.Needs)
+	}
+	if veto.PRNumber != 513 || veto.PRURL == "" {
+		t.Errorf("an open PR carries its number and link, got %d / %q", veto.PRNumber, veto.PRURL)
+	}
+}
+
+// TestProgressingIsNotOwed: an anchor an automated actor is working is the
+// city's move, not the operator's.
+//
+// The rework child is the shape a derivation keyed on `anchor_bead` gets wrong.
+// Only review children carry that key; the rework children that hold an anchor
+// between rounds carry `source_review_bead` or nothing, and an anchor with an
+// open rework child is as busy as one with an open review.
+func TestProgressingIsNotOwed(t *testing.T) {
+	anchors := []Anchor{
+		mergeAnchor("tk-rev", map[string]string{
+			"pr.machine": dated(MachineProgressing, headLive, fixtureNow),
+		}, Blocker{ID: "tk-rev1", Title: "codex review", Status: "open",
+			RoutedTo: "gc-toolkit/gc-toolkit.polecat-codex", IssueType: "task"}),
+		// The recorded verdict is stale — the last gate pass saw a green gate —
+		// but a pool-routed child is open right now, and that is live graph
+		// truth the gather reads for free.
+		mergeAnchor("tk-rew", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+		}, Blocker{ID: "tk-rew1", Title: "rework: address the findings", Status: "open",
+			RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "task"}),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	for _, id := range []string{"tk-rev", "tk-rew"} {
+		tile := mustTile(t, b, id)
+		if tile.PRMachine != MachineProgressing {
+			t.Errorf("%s: pr_machine = %q, want %q", id, tile.PRMachine, MachineProgressing)
+		}
+		if tile.Owed {
+			t.Errorf("%s: an anchor a pool is working is not owed by the operator", id)
+		}
+		if !tile.PROwedSince.IsZero() {
+			t.Errorf("%s: a row nothing is owed on carries no clock, got %v", id, tile.PROwedSince)
+		}
+	}
+}
+
+// TestAskingIsOwedAndCarriesTheDemand: the city formed a question and is waiting
+// on the answer. That is tk-s4fg87's hold primitive with nothing added — an open
+// `blocks` edge to a demand bead — and closing the bead is what ends it.
+func TestAskingIsOwedAndCarriesTheDemand(t *testing.T) {
+	askedAt := fixtureNow.Add(-30 * time.Hour)
+	anchors := []Anchor{
+		mergeAnchor("tk-ask", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": dated(postureNone, headLive, fixtureNow),
+		}, Blocker{ID: "tk-dem", Title: "Which base should this land on?", Status: "open",
+			RoutedTo: "human", IssueType: "task", CreatedAt: askedAt}),
+		// A `decision` is a demand by construction, the way the board's own
+		// decision kind is, and needs no route to say so.
+		mergeAnchor("tk-ask2", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": dated(postureNone, headLive, fixtureNow),
+		}, Blocker{ID: "tk-dec", Title: "Ruling on the retarget", Status: "open",
+			IssueType: "decision", CreatedAt: askedAt}),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	ask := mustTile(t, b, "tk-ask")
+	if !ask.Owed {
+		t.Error("an anchor waiting on an answer is owed by the operator")
+	}
+	if !strings.Contains(ask.Needs, "Which base should this land on?") {
+		t.Errorf("the row carries the demand's authored headline, got %q", ask.Needs)
+	}
+	// A demand outlives a head move, so it is dated at the bead's own instant
+	// rather than at a head-pinned key.
+	if !ask.PROwedSince.Equal(askedAt) {
+		t.Errorf("pr_owed_since = %v, want the demand's created_at %v", ask.PROwedSince, askedAt)
+	}
+	if !mustTile(t, b, "tk-ask2").Owed {
+		t.Error("a decision blocker is a demand too")
+	}
+}
+
+// TestDemandBlockerIsNotProgressing is the other half of the route
+// discriminator. Reading every open blocker would call an anchor busy because a
+// person has not answered it yet, which inverts the one answer the row exists
+// to give.
+func TestDemandBlockerIsNotProgressing(t *testing.T) {
+	anchors := []Anchor{
+		mergeAnchor("tk-q", nil,
+			Blocker{ID: "tk-dem", Title: "a question", Status: "open", RoutedTo: "human"},
+			// An ordinary prerequisite: no route, no actor.
+			Blocker{ID: "tk-pre", Title: "land the other thing first", Status: "open"},
+			// A CLOSED pool-routed child proves nothing about now.
+			Blocker{ID: "tk-old", Title: "an old review", Status: "closed",
+				RoutedTo: "gc-toolkit/gc-toolkit.polecat-codex"},
+		),
+	}
+	tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-q")
+	if tile.PRMachine == MachineProgressing {
+		t.Error("neither a demand, a bare prerequisite nor a closed child has an actor behind it")
+	}
+	if tile.PRMachine != AxisUnknown {
+		t.Errorf("with nothing recorded the axis reads unknown, got %q", tile.PRMachine)
+	}
+}
+
+// TestApprovalClauseIsTotalOverThePosture. The mapping has to cover every value
+// pr-facts.sh can record: a partial one leaves the rest to be invented, and
+// `not_required` in particular has to be reachable from an ordinary row, or the
+// coverage sentence never clears for a repository with no protection rule.
+func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
+	at := fixtureNow.Add(-5 * time.Hour)
+	cases := []struct {
+		posture  string
+		approval string
+		owed     bool
+		why      string
+	}{
+		{postureReviewRequired, ApprovalRequired, true,
+			"GitHub is holding the merge for a review nobody has given"},
+		{postureChangesRequested, ApprovalRequired, false,
+			"the requirement is unmet, but answering a rejecting review is the city's move"},
+		{postureApproved, ApprovalMet, false, "approved"},
+		{postureCommented, ApprovalNotRequired, false, "a comment-only review does not gate the merge"},
+		{postureNone, ApprovalNotRequired, false, "no protection rule and no review"},
+	}
+	for _, c := range cases {
+		t.Run(c.posture, func(t *testing.T) {
+			a := mergeAnchor("tk-"+c.posture, map[string]string{
+				"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+				"pr_posture": dated(c.posture, headLive, at),
+			})
+			tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), a.ID)
+			if tile.PRApproval != c.approval {
+				t.Errorf("pr_approval = %q, want %q", tile.PRApproval, c.approval)
+			}
+			if tile.Owed != c.owed {
+				t.Errorf("owed = %v, want %v — %s", tile.Owed, c.owed, c.why)
+			}
+			if c.owed && !tile.PROwedSince.Equal(at) {
+				t.Errorf("pr_owed_since = %v, want the posture stamp %v", tile.PROwedSince, at)
+			}
+		})
+	}
+}
+
+// TestApprovalUnknownWhenThePostureIsStaleOrAbsent. A posture read before the
+// cadence moved on says nothing about the current head, and pr.machine's own
+// head is how the board learns which head that is without asking GitHub.
+func TestApprovalUnknownWhenThePostureIsStaleOrAbsent(t *testing.T) {
+	anchors := []Anchor{
+		mergeAnchor("tk-stale", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": dated(postureApproved, headOld, fixtureNow),
+		}),
+		mergeAnchor("tk-nopost", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+		}),
+		// The pre-migration shape: a posture with no instant is not in the
+		// dated shape and cannot be trusted to date anything.
+		mergeAnchor("tk-undated", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": postureReviewRequired + "@" + headLive,
+		}),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	for _, id := range []string{"tk-stale", "tk-nopost", "tk-undated"} {
+		tile := mustTile(t, b, id)
+		if tile.PRApproval != AxisUnknown {
+			t.Errorf("%s: pr_approval = %q, want unknown", id, tile.PRApproval)
+		}
+		if tile.Owed {
+			t.Errorf("%s: an unreadable approval belongs in the coverage sentence, not on the row", id)
+		}
+		if !tile.PROwedSince.IsZero() {
+			t.Errorf("%s: an unknown cause contributes no clock, got %v", id, tile.PROwedSince)
+		}
+	}
+}
+
+// TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove. The reconcile cadence
+// re-derives the same verdict at the same head every few minutes; a clock that
+// restarts there reports a three-day wedge as new and sorts the most neglected
+// row last.
+func TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove(t *testing.T) {
+	wedgedAt := fixtureNow.Add(-72 * time.Hour)
+	held := dated(MachineWedgedException, headLive, wedgedAt)
+
+	first := mustTile(t, BuildBoard([]Anchor{
+		mergeAnchor("tk-w", map[string]string{"pr.machine": held}),
+	}, fixtureNow, false, nil, Facts{}), "tk-w")
+
+	// A second pass, later, with the value lifecycle.sh's preserve rule leaves
+	// untouched — and an updated_at the pass moved, which is exactly what makes
+	// updated_at the wrong field to rank by.
+	later := fixtureNow.Add(2 * time.Hour)
+	a := mergeAnchor("tk-w", map[string]string{"pr.machine": held})
+	a.UpdatedAt = later
+	second := mustTile(t, BuildBoard([]Anchor{a}, later, false, nil, Facts{}), "tk-w")
+
+	if !first.PROwedSince.Equal(second.PROwedSince) {
+		t.Errorf("the clock moved across two passes at an unchanged head: %v then %v",
+			first.PROwedSince, second.PROwedSince)
+	}
+
+	// A head move releases a wedge, so a wedge at the NEW head is a new turn.
+	moved := mustTile(t, BuildBoard([]Anchor{
+		mergeAnchor("tk-w", map[string]string{
+			"pr.machine": dated(MachineWedgedException, headOld, later),
+		}),
+	}, later, false, nil, Facts{}), "tk-w")
+	if !moved.PROwedSince.Equal(later) {
+		t.Errorf("a wedge at a new head starts a fresh clock: got %v, want %v",
+			moved.PROwedSince, later)
+	}
+}
+
+// TestOwedSinceTakesTheEarliestCause. A row wedged three days ago and asked
+// about an hour ago has been owed for three days, and the queue ranks it there.
+func TestOwedSinceTakesTheEarliestCause(t *testing.T) {
+	wedgedAt := fixtureNow.Add(-72 * time.Hour)
+	askedAt := fixtureNow.Add(-1 * time.Hour)
+	a := mergeAnchor("tk-both", map[string]string{
+		"pr.machine": dated(MachineWedgedException, headLive, wedgedAt),
+	}, Blocker{ID: "tk-d", Title: "and a question", Status: "open",
+		RoutedTo: "human", CreatedAt: askedAt})
+
+	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-both")
+	if !tile.PROwedSince.Equal(wedgedAt) {
+		t.Errorf("pr_owed_since = %v, want the EARLIEST cause %v", tile.PROwedSince, wedgedAt)
+	}
+}
+
+// TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage. A missing key means
+// the cadence has not written one yet, which is a fact about the city rather
+// than an all-clear — and the all-clear is exactly what a quiet default would
+// produce.
+func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-silent", nil),
+		{ID: "tk-epic", Title: "an ordinary epic", Kind: "epic", Source: "epic",
+			Rig: "gc-toolkit", Prefix: "tk", Children: []Child{{ID: "c1", Status: "open"}}},
+	}, fixtureNow, false, nil, Facts{})
+
+	silent := mustTile(t, b, "tk-silent")
+	if silent.PRMachine != AxisUnknown {
+		t.Errorf("pr_machine = %q, want unknown", silent.PRMachine)
+	}
+	if !strings.Contains(silent.Needs, "unknown") {
+		t.Errorf("the row says its position is unread, got %q", silent.Needs)
+	}
+
+	// A row that is not a merge anchor carries EMPTY axes, not `unknown`: "not
+	// a pull request" and "a pull request nobody can read" are different
+	// answers, and only the second is a gap.
+	epic := mustTile(t, b, "tk-epic")
+	if epic.PRMachine != "" || epic.PRConversation != "" || epic.PRApproval != "" {
+		t.Errorf("a non-merge row carries no axes, got %q/%q/%q",
+			epic.PRMachine, epic.PRConversation, epic.PRApproval)
+	}
+
+	c := Coverage(b.Tiles)
+	if c.Rows != 1 {
+		t.Errorf("coverage counts merge anchors only: got %d, want 1", c.Rows)
+	}
+	if c.MachineUnknown != 1 {
+		t.Errorf("the unrecorded position counts against coverage: got %d", c.MachineUnknown)
+	}
+	if c.Complete() {
+		t.Error("coverage cannot be complete while a position is unread — that is the all-clear nobody earned")
+	}
+}
+
+// TestConversationAxisIsHonestlyUnknown. Its other values all resolve to
+// acknowledgement watermarks nothing records yet. Shipping a guess would render
+// `quiet` for a pull request the operator commented on, which is the one
+// mistake this axis exists to prevent, so the field ships as `unknown` and the
+// coverage sentence carries the reason.
+func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-c", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": dated(postureNone, headLive, fixtureNow),
+		}),
+	}, fixtureNow, false, nil, Facts{})
+
+	tile := mustTile(t, b, "tk-c")
+	if tile.PRConversation != ConversationUnknown {
+		t.Errorf("pr_conversation = %q, want unknown in this phase", tile.PRConversation)
+	}
+	// This row is settled, approved-not-required and owed by nobody. It is
+	// still not an all-clear, because where the conversation stands is unread.
+	if tile.Owed {
+		t.Error("nothing here makes the row owed")
+	}
+	if c := Coverage(b.Tiles); c.Complete() || c.ConversationUnknown != 1 {
+		t.Errorf("the unread conversation has to reach the coverage sentence: %+v", c)
+	}
+}
+
+// TestOwedPRRowLeadsTheQueue. The partition and its ordering are tk-lb3u4m's;
+// this asserts a PR row participates in them rather than needing a surface of
+// its own.
+func TestOwedPRRowLeadsTheQueue(t *testing.T) {
+	old := fixtureNow.Add(-96 * time.Hour)
+	recent := fixtureNow.Add(-2 * time.Hour)
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineWedgedVeto, headLive, recent)}),
+		{ID: "tk-big", Title: "a container that outranks everything", Kind: "epic", Source: "epic",
+			Rig: "gc-toolkit", Prefix: "tk", Children: func() []Child {
+				out := make([]Child, 40)
+				for i := range out {
+					out[i] = Child{ID: fmt.Sprintf("k%d", i), Status: "open"}
+				}
+				return out
+			}()},
+		mergeAnchor("tk-old", map[string]string{"pr.machine": dated(MachineWedgedException, headLive, old)}),
+	}, fixtureNow, false, nil, Facts{})
+
+	q := OperatorQueue(b.Tiles)
+	got := []string{}
+	for _, t := range q {
+		got = append(got, t.ID)
+	}
+	if !slices.Equal(got, []string{"tk-old", "tk-new"}) {
+		t.Errorf("the queue is the wedged rows, oldest-owed first: got %v", got)
+	}
+	if _, ok := tileByID(Board{Tiles: q}, "tk-big"); ok {
+		t.Error("a container nobody is owed anything on is not in the operator's queue")
+	}
+}
