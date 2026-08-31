@@ -52,7 +52,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    `blocked_reason` naming the cap in the same act that wrote the marker. No
    visit is filed for it, so the anchor is parked rather than queued. A head
    move past a recorded `exception@` undoes that. The gate is no longer
-   settled and one dispatch is re-armed.
+   settled and one dispatch is re-armed. So does new operator feedback, which
+   arm 5 records: the cap counts non-convergence, and a review the branch has
+   never answered is not that
+   ([state-machine.md](state-machine.md#the-round-cap-counts-from-the-last-operator-feedback)).
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
@@ -115,7 +118,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes an unanswered review comment to a rework
    child or a visit. The posture write is idempotent, so re-running it here
    after arm 3 costs nothing when nothing changed. Routing lives only in this
-   arm: arm 3 records, this one decides what answers the comment.
+   arm: arm 3 records, this one decides what answers the comment. Each batch it
+   routes also resets `signoff.sh`'s round cap, once per batch, retiring the
+   cap's own park with it when `signoff_cap` still claims that park.
 6. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

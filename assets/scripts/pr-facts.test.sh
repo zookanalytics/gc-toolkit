@@ -22,6 +22,10 @@
 # read back, a comment above the mark re-firing while one below it stays
 # answered, and the reads that record nothing rather than clear a standing
 # `commented`.
+# Also covers the review-round cap reset such a batch performs: once per batch,
+# retiring the dispatch tally and the cap's own park with it, while a park no
+# `signoff_cap` claims, a live takeaway, a verdict the city posted itself, and a
+# rework hand-back each leave the cap standing.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -636,6 +640,114 @@ printf '[{"id":8200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
+
+# --- operator feedback resets signoff's round cap --------------------------------
+# The cap bounds the city failing to converge against its own reviewer. A review
+# the branch has never been answered against is new input, not one of those
+# rounds, so it goes back to the loop instead of spending the allowance on the
+# operator's own words.
+CAP_STATE=',"check.codex":"exception@sha-55","signoff_cap":"codex@sha-55"'
+CAP_STATE="$CAP_STATE"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
+CAP_STATE="$CAP_STATE"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-55"'
+
+echo "# new operator feedback on a capped anchor resets it, park and all"
+store "[$(anchor R1 55 "$CAP_STATE")]"
+printf '%s' "$(prview 55 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_55.json"
+echo '[]' > "$GH_DIR/reviews_55.json"
+printf '[{"id":8500,"user":{"login":"human1"},"body":"this is not what I asked for"}]' > "$GH_DIR/comments_55.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
+out=$(run)
+eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the batch that reset the cap is recorded by its own id coordinates"
+eq "$(meta R1 'check.codex')" "<absent>" "the exception is retired — a cap that resets under its own marker has not reset"
+eq "$(meta R1 signoff_cap)" "<absent>" "…and the stamp that proved the park was the cap's"
+eq "$(meta R1 blocked_reason)" "<absent>" "…and the reason that named it"
+eq "$(meta R1 'gc.routed_to')" "" "…and the human park, so the anchor is back in the cadence"
+eq "$(meta R1 dispatch_count)" "<absent>" "the dispatch tally goes too: released rounds nobody may dispatch are no release"
+eq "$(meta R1 'dispatch_backstop.codex')" "<absent>" "…with the backstop stamp that dedups its escalation"
+has "$(notes R1)" "operator feedback on PR#55 (review 0, comment 8500" "the reset names the feedback that caused it"
+eq "$(meta R1 pr_comment_disposition)" "rework:new-2" "the comments route to work, not to the visit the park would have forced"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+
+echo "# …and the same feedback on a later pass resets nothing"
+BEFORE_NOTES=$(notes R1)
+out=$(run)
+eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the recorded batch is unchanged"
+eq "$(notes R1)" "$BEFORE_NOTES" "…and nothing was appended: one reset per distinct piece of feedback"
+hasnt "$out" "resets the signoff round cap" "…and the pass says nothing about a reset"
+
+echo "# …nor does a batch already recorded whose watermark write dropped"
+# The watermark and the reset stamp are separate writes. A pass that routed the
+# comments but lost the mark sees the same batch again; what stops the second
+# reset is the recorded batch, not the mark.
+store "[$(anchor R2 56 ',"check.codex":"exception@sha-56","signoff_cap":"codex@sha-56","gc.routed_to":"human","signoff_rounds_reset":"0.8600"')]"
+printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_56.json"
+echo '[]' > "$GH_DIR/reviews_56.json"
+printf '[{"id":8600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_56.json"
+out=$(run)
+hasnt "$out" "resets the signoff round cap" "a batch already recorded resets nothing"
+eq "$(meta R2 'check.codex')" "exception@sha-56" "…the cap's exception still stands"
+eq "$(meta R2 'gc.routed_to')" "human" "…and its park"
+eq "$(meta R2 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
+
+echo "# a verdict the city posted itself is not feedback, and resets nothing"
+# Identity, not shape: signoff.sh posts its verdicts under the city's own login
+# and a rework hand-back posts nothing at all, so neither can reach the reset.
+store "[$(anchor R3 57 ',"check.codex":"exception@sha-57","signoff_cap":"codex@sha-57","gc.routed_to":"human"')]"
+printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_57.json"
+printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: request-changes","commit_id":"sha-57"}]' \
+  > "$GH_DIR/reviews_57.json"
+printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3"}]' > "$GH_DIR/comments_57.json"
+out=$(run)
+eq "$(meta R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
+eq "$(meta R3 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
+eq "$(meta R3 'check.codex')" "exception@sha-57" "…the cap's exception stands"
+eq "$(meta R3 'gc.routed_to')" "human" "…and the anchor stays parked for the person it was given to"
+
+echo "# …and a rework hand-back, which posts nothing at all, is not feedback either"
+KID52='{"id":"kid-52","status":"open","assignee":"","title":"Rework PR#52","notes":"","metadata":{"anchor_bead":"R7","source_review_bead":"rv-52"}}'
+store "[$(anchor R7 52 ',"check.codex":"exception@sha-52","signoff_cap":"codex@sha-52","gc.routed_to":"human"'),$KID52]"
+printf '%s' "$(prview 52 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_52.json"
+echo '[]' > "$GH_DIR/reviews_52.json"
+echo '[]' > "$GH_DIR/comments_52.json"
+out=$(run)
+eq "$(meta R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
+eq "$(meta R7 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
+eq "$(meta R7 'check.codex')" "exception@sha-52" "…and the cap's exception stands"
+eq "$(meta R7 'gc.routed_to')" "human" "…with the park it belongs to"
+
+echo "# a park no signoff_cap claims is a person's, and survives the reset"
+store "[$(anchor R4 58 ',"check.codex":"exception@sha-58","gc.routed_to":"human"')]"
+printf '%s' "$(prview 58 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_58.json"
+echo '[]' > "$GH_DIR/reviews_58.json"
+printf '[{"id":8800,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_58.json"
+out=$(run)
+eq "$(meta R4 signoff_rounds_reset)" "0.8800" "the counter still resets — the rounds are the cap's, wherever the park came from"
+eq "$(meta R4 'check.codex')" "exception@sha-58" "…but an exception no signoff_cap claims is not the cap's to retire"
+eq "$(meta R4 'gc.routed_to')" "human" "…and the park stands"
+eq "$(meta R4 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
+
+echo "# …and a live takeaway outranks the reset even with the cap's own stamp"
+store "[$(anchor R5 59 ',"check.codex":"exception@sha-59","signoff_cap":"codex@sha-59","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"')]"
+printf '%s' "$(prview 59 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_59.json"
+echo '[]' > "$GH_DIR/reviews_59.json"
+printf '[{"id":8900,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_59.json"
+out=$(run)
+eq "$(meta R5 'check.codex')" "exception@sha-59" "a sitting's decision is not undone by a comment"
+eq "$(meta R5 'gc.routed_to')" "human" "…and the anchor stays parked for it"
+eq "$(meta R5 pr_comment_disposition)" "visit:new-2" "…which is who the comments go to"
+
+echo "# a reset the store refuses leaves the cap standing, and says so"
+# One transition carries the whole reset, so a refusal retires nothing: the
+# batch stays unrecorded and the next pass reads the same comments and retries.
+store "[$(anchor R6 51 "$(printf '%s' "$CAP_STATE" | sed 's/sha-55/sha-51/g')")]"
+printf '%s' "$(prview 51 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_51.json"
+echo '[]' > "$GH_DIR/reviews_51.json"
+printf '[{"id":8510,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_51.json"
+out=$(STUB_UPDATE_FAIL="R6" run)
+has "$out" "cap reset did not record" "the refusal is reported, not swallowed"
+eq "$(meta R6 signoff_rounds_reset)" "<absent>" "…no batch is recorded, so the next pass retries"
+eq "$(meta R6 'check.codex')" "exception@sha-51" "…the exception is left standing"
+eq "$(meta R6 'gc.routed_to')" "human" "…and so is the park"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"

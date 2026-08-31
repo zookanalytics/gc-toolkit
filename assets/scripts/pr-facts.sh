@@ -30,6 +30,11 @@
 # An unanswered review comment is posture `commented`, and it routes to
 # something — a fix-pool rework child, or a visit when a human already holds the
 # anchor — with the watermarks advancing only once that routing reads back.
+# Such a batch also resets signoff.sh's review-round cap, once per batch: it is
+# review the branch has never been answered against, not a round of the loop the
+# cap measures. The reset retires the dispatch tally with it, and the cap's own
+# park (its exception@, blocked_reason and human route) when signoff_cap and the
+# standing marker still agree it was the cap that wrote them.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
@@ -595,6 +600,60 @@ GATES
     fix_branch="${head_ref:-$branch}"
     routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     takeaway=$(printf '%s' "$row" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
+
+    # --- operator feedback resets the review-round cap ---------------------------
+    # signoff.sh's cap bounds the city failing to converge against its own
+    # reviewer. This batch is not that loop: the posture above counted only ids
+    # authored by a login other than $SELF_LOGIN, so a codex verdict (posted
+    # under that login) and a rework hand-back (which posts nothing) can never
+    # reach here. It is review the branch has never been answered against, so
+    # the rounds spent before it stop counting — signoff.sh re-baselines its
+    # floor at the next verdict, keyed on the batch stamped here. The batch
+    # coordinates are the dedup: a reconcile every two minutes sees the same
+    # comments until they are answered, and a reset per pass would be no cap.
+    reset_key="$max_r.$max_c"
+    if [ "$(printf '%s' "$row" | jq -r '(.metadata.signoff_rounds_reset // "") | tostring')" != "$reset_key" ]; then
+      RSET=(--set "signoff_rounds_reset=$reset_key")
+      undo=""; unparked=0
+      # The dispatch tally bounds a runaway: reviews that dispatch and leave no
+      # verdict. New operator feedback is the evidence this anchor is not that,
+      # and the released rounds cannot be dispatched at all while the tally
+      # stands at gate-ensure's ceiling. Its backstop stamp goes with it, since
+      # it dedups the escalation for a ceiling that no longer stands.
+      while IFS= read -r k; do
+        [ -n "${k:-}" ] || continue
+        RSET+=(--unset "$k"); undo="${undo:+$undo, }$k"
+      done <<TALLY
+$(printf '%s' "$row" | jq -r '(.metadata // {}) | keys[]?
+  | select(. == "dispatch_count" or startswith("dispatch_backstop."))' 2>/dev/null)
+TALLY
+      # Retire the cap's own park with it. An exception still bound to the head
+      # re-settles the gate, and a human route sends this very batch to a visit,
+      # so a reset leaving either standing would not be one. signoff_cap names
+      # the exception the park belongs to, and the two must still agree: a park
+      # a person put there, or one whose exception was already retired by hand,
+      # is theirs and stays. A live takeaway is a sitting's decision on this
+      # anchor and outranks the reset the same way.
+      cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
+      case "$cap" in
+        ?*@?*)
+          cap_gate="${cap%%@*}"; cap_oid="${cap#*@}"
+          if [ -z "$takeaway" ] && [ "$(printf '%s' "$row" | jq -r --arg k "check.$cap_gate" \
+               '(.metadata[$k] // "") | tostring')" = "exception@$cap_oid" ]; then
+            RSET+=(--unset "check.$cap_gate" --unset blocked_reason --unset signoff_cap --route "")
+            undo="${undo:+$undo, }check.$cap_gate=exception@$cap_oid, blocked_reason and the human route"
+            unparked=1
+          fi ;;
+      esac
+      if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence." >/dev/null; then
+        [ "$unparked" = 1 ] && routed=""
+        echo "$PROG: $id — PR#$num operator feedback resets the signoff round cap${undo:+, retiring $undo}"
+      else
+        echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below (retry next pass)" >&2
+      fi
+    fi
+
     # A human already holding this anchor gets the comments; filing work under a
     # live human decision fights it, and a child told to answer comments may have
     # to bring the branch current, which rebase_hold forbids. Absent any of that,
