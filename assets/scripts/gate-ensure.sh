@@ -678,8 +678,13 @@ GATES
     elif [ "$mach_progress" = 1 ]; then mach="progressing"
     else mach="settled"
     fi
+    #
+    # --route carries the anchor's OWN route back. Recording a verdict is an
+    # observation, not a routing decision, and an omitted --route would let a
+    # detached state's default clear a route this pass never looked at.
     state=$(meta_of "$row" merge_result)
     if [ -n "$state" ] && ! "$LIFECYCLE" transition "$id" --to "$state" --expect "$state" \
+         --route "$(meta_of "$row" "gc.routed_to")" \
          --set-dated "pr.machine=$mach@$head" >/dev/null; then
       echo "$PROG: WARN $id machine axis '$mach@$head' did not record; the board reads it as unknown until the next pass" >&2
     fi

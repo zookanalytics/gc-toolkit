@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -364,9 +365,20 @@ type fakeGC struct {
 	members  map[string]string // convoy id -> single tracked member
 	err      error             // when set, every call fails with it
 	memberN  int               // ConvoyMember call count
+	// sessionsN and convoysN complete the tally. Together with memberN they are
+	// every external command a gather runs, which is what lets a test assert
+	// the cost of the board rather than only its contents.
+	sessionsN int
+	convoysN  int
 }
 
+// externalCalls is every subprocess this gather made. The gather's whole
+// external surface is this interface: the rest is the bead store, opened
+// in-process.
+func (f *fakeGC) externalCalls() int { return f.sessionsN + f.convoysN + f.memberN }
+
 func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
+	f.sessionsN++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -374,6 +386,7 @@ func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 }
 
 func (f *fakeGC) Convoys(context.Context) ([]convoyRow, error) {
+	f.convoysN++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -1917,5 +1930,55 @@ func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
 	}
 	if !res.Partial {
 		t.Error("the gather is degraded and the board has to say so out loud")
+	}
+}
+
+// TestPRRowsCostNoCallPerPullRequest pins surface.md's cost argument, which is
+// an acceptance criterion rather than an aspiration.
+//
+// Reading the conversation from GitHub for the fourteen pull requests open when
+// the surface was designed took about twenty seconds against a 45-second cache
+// TTL, so a cold render would spend half a cache generation inside `gh`. Worse,
+// a single `gh pr list` reported mergeStateStatus=UNKNOWN for nine of those
+// fourteen, because GitHub computes mergeability lazily — a surface deriving its
+// state from that field would render two thirds of its rows unknown on a cold
+// read and change its answer on the next one with nothing having happened.
+//
+// So the rows render from the bead, and the number of subprocesses a gather runs
+// cannot grow with the number of pull requests. The gather's whole external
+// surface is the gcClient; everything else is the store, opened in-process.
+func TestPRRowsCostNoCallPerPullRequest(t *testing.T) {
+	storeWith := func(n int) *fakeStore {
+		anchors := make([]*beads.Issue, 0, n)
+		for i := range n {
+			id := fmt.Sprintf("tk-pr%02d", i)
+			anchors = append(anchors, issue(id, "an open PR", "task", 2, testNow,
+				fmt.Sprintf(`{"merge_result":"pull_request","pr_number":"%d","branch":"polecat/%s"}`, 500+i, id)))
+		}
+		return &fakeStore{issues: map[string][]*beads.Issue{"task": anchors}}
+	}
+
+	gather := func(n int) (anchors, calls int) {
+		t.Helper()
+		gc := &fakeGC{}
+		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": storeWith(n)},
+			withGCClient(gc))
+		res, err := src.Gather(context.Background())
+		if err != nil {
+			t.Fatalf("Gather(%d): %v", n, err)
+		}
+		return len(res.Anchors), gc.externalCalls()
+	}
+
+	oneAnchors, oneCalls := gather(1)
+	manyAnchors, manyCalls := gather(25)
+
+	if oneAnchors != 1 || manyAnchors != 25 {
+		t.Fatalf("fixture no longer scales the rows: got %d and %d", oneAnchors, manyAnchors)
+	}
+	if manyCalls != oneCalls {
+		t.Errorf("the gather spent %d external calls on 25 pull requests and %d on one — "+
+			"a per-PR call is exactly what the bead is read to avoid", manyCalls, oneCalls)
 	}
 }

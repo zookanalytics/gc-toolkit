@@ -826,6 +826,17 @@ was="$(machine X1)"
 run >/dev/null
 eq "$(machine X1)" "$was" "a re-derived verdict at the same head keeps its instant (the reconcile cadence runs every few minutes)"
 
+echo "# recording a verdict moves no route"
+# The stamp rides a lifecycle self-transition, and a detached state's default is
+# to clear the route. An observation must not retract a routing decision it
+# never looked at, so the anchor's own route rides back with it.
+eq "$(meta X1 'gc.routed_to')" "human" "a parked anchor keeps the route the cap gave it"
+store "[$(anchor X6 pull_request codex "green@$(oid x6)" polecat/x6 ',"gc.routed_to":"rig/gc-toolkit.polecat"')]"
+oid x6 > "$GH_DIR/head_polecat_x6"
+run >/dev/null
+eq "$(pinned X6)" "settled@$(oid x6)" "the verdict is recorded"
+eq "$(meta X6 'gc.routed_to')" "rig/gc-toolkit.polecat" "…and the route is left exactly as it was found"
+
 echo "# an unreadable head is not evidence, so nothing is recorded"
 store "[$(anchor X5 pull_request codex "green@$(oid x5)" polecat/x5)]"
 out=$(run); rc=$?

@@ -476,6 +476,15 @@ out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
+echo "# recording a verdict moves no route"
+store "[$(anchor V8 87 ',"check.codex":"exception@sha-87","gc.routed_to":"human"')]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
+echo '[]' > "$GH_DIR/reviews_87.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned V8)" "wedged-exception@sha-87" "the verdict is recorded"
+eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the park route the cap gave it"
+
 echo "# an open blocker is progressing only when a POOL is behind it"
 store "[$(anchor V6 85),
         {\"id\":\"rw-v6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\"}},

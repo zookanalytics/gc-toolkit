@@ -90,10 +90,14 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 # it, so a reader learns whether an anchor is moving without re-implementing
 # these predicates. lifecycle.sh owns the @<since> component and preserves it
 # across a pass that reaches the same verdict at the same head.
-record_machine() { # <anchor-id> <value> <head-oid>
+#
+# --route carries the anchor's own route back: recording a verdict is an
+# observation, not a routing decision, and an omitted --route would let a
+# detached state's default clear a route this pass never looked at.
+record_machine() { # <anchor-id> <value> <head-oid> <current-route>
   [ -n "${3:-}" ] || return 0
   "$LIFECYCLE" transition "$1" --to pull_request --expect pull_request \
-    --set-dated "pr.machine=$2@$3" >/dev/null 2>&1 && return 0
+    --route "${4:-}" --set-dated "pr.machine=$2@$3" >/dev/null 2>&1 && return 0
   echo "$PROG: WARN $1 machine axis '$2@$3' did not record; the board reads it as unknown until the next pass" >&2
 }
 
@@ -216,6 +220,7 @@ while IFS= read -r row; do
   dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
+  aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
   if [ -n "$prurl" ] && [ "$(canon_pr_url "$prurl")" != "$live_url" ]; then
     echo "$PROG: anchor $id records pr_url '$prurl' but PR#$num is '$live_url'; merge held — operator must repair"
     held=$((held + 1)); continue
@@ -282,9 +287,9 @@ while IFS= read -r row; do
     # dispatches nothing, and the release is a head move nobody is going to
     # make. Every other shape here is a gate a review is due to raise.
     if [ "$have" = "exception@$head_oid" ]; then
-      record_machine "$id" "wedged-exception" "$head_oid"
+      record_machine "$id" "wedged-exception" "$head_oid" "$aroute"
     else
-      record_machine "$id" "progressing" "$head_oid"
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
     fi
     echo "$PROG: PR#$num check '$hg' not green at live head (have '$have', want 'green@$head_oid'); merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -330,7 +335,7 @@ while IFS= read -r row; do
           | ((.metadata["gc.routed_to"] // "") | tostring) as $r
           | select($r != "" and $r != "human")
           | .id ] | .[0] // empty' 2>/dev/null)
-    [ -n "$pool_holder" ] && record_machine "$id" "progressing" "$head_oid"
+    [ -n "$pool_holder" ] && record_machine "$id" "progressing" "$head_oid" "$aroute"
     echo "$PROG: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
@@ -369,9 +374,9 @@ while IFS= read -r row; do
         | select(((.metadata.source_review_bead // "") | tostring) != "") ] | length' 2>/dev/null)
     case "$rounds" in ''|*[!0-9]*) rounds=0 ;; esac
     if [ "$rounds" -ge "$MAX_REVIEW_ROUNDS" ]; then
-      record_machine "$id" "wedged-veto" "$head_oid"
+      record_machine "$id" "wedged-veto" "$head_oid" "$aroute"
     else
-      record_machine "$id" "progressing" "$head_oid"
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
     fi
     echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED; merge held (anchor $id, rework rounds $rounds/$MAX_REVIEW_ROUNDS)"
     held=$((held + 1)); continue
@@ -394,7 +399,7 @@ while IFS= read -r row; do
       # is open: the cadence is done and the pull request is waiting on a person.
       # That is `settled`, and the approval clause of the owed rule is what makes
       # the row the operator's rather than nobody's.
-      record_machine "$id" "settled" "$head_oid"
+      record_machine "$id" "settled" "$head_oid" "$aroute"
       echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor $id)"
       held=$((held + 1)); continue
     fi
@@ -438,7 +443,7 @@ while IFS= read -r row; do
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
     *)
       # The cadence has nothing left to do; GitHub is not ready. Still `settled`.
-      record_machine "$id" "settled" "$head_oid"
+      record_machine "$id" "settled" "$head_oid" "$aroute"
       echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'); merge held (anchor $id)"
       held=$((held + 1)); continue ;;
   esac
