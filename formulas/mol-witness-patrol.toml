@@ -60,22 +60,40 @@ the pool. Canonical chain: worktree -> (push) -> branch -> (merge) ->
 target; recovery ensures work reaches the branch, then the bead is
 schedulable again.
 
-**1. Candidates.** List this rig's beads and keep only ASSIGNED ones:
+**1. Candidates.** List this rig's beads and keep only OWNED ones:
 ```bash
 gc bd list --status=in_progress --json --limit=0
 gc bd list --status=open --json --limit=0
 ```
 ```bash
 # >>> host-bead-skip
-# Keep only beads that are ASSIGNED. Reads the bead-list array on stdin,
-# writes the surviving array on stdout — apply it to the combined
-# in_progress + open listing before the per-bead liveness loop.
-jq -c '[ .[] | select((.assignee // "") != "") ]'
+# Keep only beads that name an OWNER, and stamp that owner as `.owner` for the
+# liveness loop. Reads the bead-list array on stdin, writes the surviving array
+# on stdout — apply it to the combined in_progress + open listing before the
+# per-bead liveness loop.
+#
+# A bead names its owner in one of three places and only the first is an
+# assignee. A workflow STEP bead has no assignee at all: gc bd list --json omits
+# the key when it is empty, and the step names its owner in
+# metadata.gc.session_id, which is what gc.session_affinity=require pins it to.
+# A workflow ROOT bead names only metadata.gc.session_name. The most specific
+# present signal wins, because a session id belongs to one session forever while
+# a pool slot name passes to each new occupant: a bead pinned to a dead id must
+# resolve against that id, not against the live session now holding its slot.
+jq -c '[ .[]
+  | . as $bead
+  | (.metadata // {}) as $m
+  | ([ (.assignee // ""), ($m["gc.session_id"] // ""), ($m["gc.session_name"] // "") ]
+     | map(select(. != "")) | first) as $owner
+  | select($owner != null)
+  | $bead + {owner: $owner} ]'
 # <<< host-bead-skip
 ```
-There is no assigned-bead class orphan recovery must skip on kind alone: a
-visit whose session died SHOULD return to the pool (cold continuity is
-respawn-and-reconstitute). Two exclusions are structural, not kind-based:
+A bead naming no owner in any of the three places is already in the pool's
+court, and it is the only thing this filter drops. There is no owned-bead class
+orphan recovery must skip on kind alone: a visit whose session died SHOULD
+return to the pool (cold continuity is respawn-and-reconstitute). Two
+exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
   configured named sessions) — the controller owns their lifecycle.
 - **Dispatcher-routed control beads** (`gc.routed_to=control-dispatcher`,
@@ -84,7 +102,7 @@ respawn-and-reconstitute). Two exclusions are structural, not kind-based:
 
 **2. Liveness — session-ID liveness, never template matching.** Pool
 instances get NEW ids on restart, so pattern-matching an assignee against a
-template false-negatives forever. Build the assignee->state map ONCE per
+template false-negatives forever. Build the identity->state map ONCE per
 cycle from `gc session list --state=all --json` (an OBJECT — iterate
 `.sessions[]`; fields are lowercase snake_case) plus the session beads
 (`gc bd list --type=session --label=gc:session --include-infra --all
@@ -98,20 +116,22 @@ recovery this cycle and escalate
 (`escalate.sh --subject <this wisp> --key witness-empty-liveness-map ...`),
 then continue to check-refinery.
 
-Resolve each bead's assignee exact-first, with exactly ONE narrow fallback
-— the last `/`-segment, resolved toward LIFE (a collision with any
-non-closed session reads as alive; the retry can un-orphan, never
-manufacture an orphan):
+Resolve the `.owner` the filter stamped on each bead — the loop's `OWNER` —
+exact-first, with exactly ONE narrow fallback: the last `/`-segment, resolved
+toward LIFE (a collision with any non-closed session reads as alive; the retry
+can un-orphan, never manufacture an orphan). A session id is a map key like any
+other, so the same two passes answer for an assignee, a session name, and a
+session id:
 ```bash
 # >>> liveness-lookup
-# Exact lookup first: authoritative whenever the assignee is a literal map key.
-STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '.[$a] // "absent"')
+# Exact lookup first: authoritative whenever the owner is a literal map key.
+STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$OWNER" '.[$a] // "absent"')
 # Identity-normalizing fallback. Stripping the prefix can make two sessions in
 # different cities collide on one bare identity, so resolve a collision toward
 # LIFE: any matching session that is not closed/archived wins. Only when EVERY
 # candidate owner is dead does the fallback report a dead state.
 if [ "$STATE" = "absent" ]; then
-  STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$ASSIGNEE" '
+  STATE=$(printf '%s' "$LIVENESS_MAP" | jq -r --arg a "$OWNER" '
     def bare: sub("^.*/"; "");
     [ to_entries[] | select((.key | bare) == ($a | bare)) | .value ] as $matches
     | if ($matches | length) == 0 then "absent"

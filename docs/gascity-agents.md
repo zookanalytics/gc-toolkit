@@ -1321,7 +1321,14 @@ orphaned for pool/ephemeral identities, and the skip rule exempts only
 identity falls through to source-delete + reopen —
 yanking a bead out from under a live owner mid-work.
 
-**Rule: an `absent` assignee is a lead, not a verdict.** Before
+A bead's owner is not always an assignee. A workflow step carries none at
+all and names its session in `metadata.gc.session_id`, which is what
+`gc.session_affinity=require` pins it to; a workflow root names only
+`metadata.gc.session_name`. The map is keyed on ids and names alike, so the
+rule below governs whichever of the three a bead carries, and the scan
+resolves the most specific one present.
+
+**Rule: an `absent` owner is a lead, not a verdict.** Before
 classifying one as orphaned, resolve it the way the shipped witness
 recipe does — *exact first, then last segment, live wins*:
 
@@ -1329,7 +1336,7 @@ recipe does — *exact first, then last segment, live wins*:
    stands even when a normalized retry would answer differently. That
    is how a genuinely dead session still gets recovered.
 2. **On a miss, retry once on the last `/`-separated segment of *both*
-   sides** — `${ASSIGNEE##*/}` as shell shorthand (`##`, not `#`: the
+   sides** — `${OWNER##*/}` as shell shorthand (`##`, not `#`: the
    part to drop runs to the **last** slash, not the first), compared as
    a whole segment and never as a suffix, so `toolkit.furiosa` does not
    alias onto `gc-toolkit.furiosa`. Both sides, because both directions

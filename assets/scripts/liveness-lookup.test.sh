@@ -63,16 +63,43 @@ bash -n "$TMP/lookup.sh" \
   && ok "extracted lookup is syntactically valid bash" \
   || bad "extracted lookup failed bash -n"
 
-# state <liveness-map-json> <assignee> -> prints the resolved STATE.
-# The snippet is sourced exactly as the witness runs it: LIVENESS_MAP and
-# ASSIGNEE preset by the per-bead loop, no set -e.
+# state <liveness-map-json> <owner> -> prints the resolved STATE.
+# The snippet is sourced exactly as the witness runs it: LIVENESS_MAP and OWNER
+# preset by the per-bead loop, no set -e. OWNER is whichever identity the
+# host-bead-skip filter stamped on the bead — an assignee, a session name, or a
+# session id; the map is keyed on all three, so one lookup answers for any of
+# them.
 state() {
-  LIVENESS_MAP="$1" ASSIGNEE="$2" bash -c '
+  LIVENESS_MAP="$1" OWNER="$2" bash -c '
     LIVENESS_MAP="$LIVENESS_MAP"
-    ASSIGNEE="$ASSIGNEE"
+    OWNER="$OWNER"
     source "$0"
     printf "%s" "$STATE"
   ' "$TMP/lookup.sh" 2>/dev/null
+}
+
+# --- Compose the owner derivation with the lookup. ---------------------------
+# The loop never sees a raw assignee: it resolves the `.owner` that the
+# host-bead-skip filter stamped. Extract that filter too and run the two blocks
+# in series, so a case can start from a whole bead rather than a bare identity.
+FILTER="$(awk '
+  /# >>> host-bead-skip/ {f=1; next}
+  /# <<< host-bead-skip/ {f=0}
+  f' "$TOML")"
+
+[ -n "$FILTER" ] \
+  && ok "owner filter extracted between host-bead-skip markers" \
+  || bad "owner filter extraction EMPTY — markers missing from $TOML"
+
+printf '%s\n' "$FILTER" > "$TMP/filter.sh"
+
+# bead_state <liveness-map-json> <bead-json> -> the resolved STATE, or the empty
+# string when the filter drops the bead as naming no owner.
+bead_state() {
+  local owner
+  owner=$(printf '[%s]' "$2" | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner // empty')
+  [ -n "$owner" ] || return 0
+  state "$1" "$owner"
 }
 
 # The exact-only lookup as it shipped BEFORE the fix, for the premise assertions.
@@ -154,6 +181,44 @@ eq "$(state '{}' "gascity/gc-toolkit.gc-z0vi2")" "absent" \
 #     form; keys are non-empty so this stays absent rather than aliasing.
 eq "$(state "$MAP_CITYWISP" "gascity/")" "absent" \
    "(L) trailing-slash assignee -> absent (no empty-segment wildcard)"
+
+# --- Whole-bead classification: owners that are not assignees. ----------------
+# A workflow STEP bead carries no assignee at all — `gc bd list --json` omits the
+# key when it is empty — and names its owner in gc.session_id, which is what
+# gc.session_affinity=require pins it to. A workflow ROOT names only
+# gc.session_name. Resolving those is what lets orphan recovery see graph.v2
+# machinery; resolving them WRONG either strands the chain or yanks a live one.
+MAP_STEP='{"lx-3rk8v":"active","gc-toolkit--gc-toolkit__polecat-1-pool":"active"}'
+
+# (Q) The recovery case: the pinned session is gone from the map entirely.
+eq "$(bead_state "$MAP_STEP" '{"id":"st1","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit__polecat-lx-7xcse","gc.session_affinity":"require"}}')" "absent" \
+   "(Q) step bead, no assignee, DEAD gc.session_id -> absent (orphaned)"
+# (Q) The same shape on a live session must be left alone.
+eq "$(bead_state "$MAP_STEP" '{"id":"st2","metadata":{"gc.session_id":"lx-3rk8v","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "active" \
+   "(Q) step bead, no assignee, LIVE gc.session_id -> active (not orphaned)"
+# (R) A dead id whose pool SLOT is live still reads dead. The slot name belongs
+#     to whoever holds the slot now; the id belongs to the session that will
+#     never return, and gc.session_affinity=require pins the bead to the id. This
+#     is why the owner precedence puts the id ahead of the name.
+eq "$(bead_state "$MAP_STEP" '{"id":"st3","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "absent" \
+   "(R) dead session id outranks a live pool slot name -> still orphaned"
+# (S) A workflow root has only a session name. A per-instance name dies with its
+#     session; a slot name outlives it, and recovery must not yank the live one.
+eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "active" \
+   "(S) workflow root on a live session name -> active"
+eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-lx-7xcse"}}')" "absent" \
+   "(S) workflow root on a dead per-instance session name -> absent"
+# (T) An assignee still decides it when the bead has one, so nothing about the
+#     established assignee path changes.
+eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"active","lx-7xcse":"closed"}' '{"id":"b1","assignee":"gc-toolkit/gc-toolkit.furiosa","metadata":{"gc.session_id":"lx-7xcse"}}')" "active" \
+   "(T) assignee outranks session metadata"
+# (U) The normalizing retry applies to a session-derived owner like any other.
+eq "$(bead_state '{"gascity/gc-toolkit.gc-z0vi2":"active"}' '{"id":"b2","metadata":{"gc.session_name":"gc-toolkit.gc-z0vi2"}}')" "active" \
+   "(U) a session-name owner gets the same last-segment retry"
+# (V) A bead naming no owner never reaches the lookup — recovery has nothing to
+#     resolve, and inventing an owner for it would be the false-orphan path.
+eq "$(bead_state "$MAP_STEP" '{"id":"n1","metadata":{"gc.kind":"workflow","gc.root_bead_id":"tk-root"}}')" "" \
+   "(V) ownerless bead is dropped by the filter, never classified"
 
 # --- Static wiring: no un-normalized lookup may survive elsewhere. ------------
 # The fix only holds if the marked snippet is the ONLY place an assignee is
