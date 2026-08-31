@@ -10,11 +10,14 @@
 # set is a SUPERSET of the sweep's true candidates and "zero new locally"
 # proves "zero new really". Anything else — any unreadable probe, a missing
 # subject, its own abort — RUNS the pass: a probe that cannot be read
-# excludes nothing. It also owns the 6h cadence (a condition trigger has no
-# interval): stamp per rig, BEFORE classifying, so a crash cannot storm.
-# Never writes a bead and never advances the sweep's baseline.
-# Usage: liveness-sweep-precheck.sh [--dry-run] [--force]
-#   --dry-run  classify and report, but never stamp the cooldown
+# excludes nothing. It also sets the 6h cadence (a condition trigger has no
+# interval): the per-rig window is READ here and advanced by liveness-sweep.sh
+# when a pass starts, because more callers evaluate a check than dispatch from
+# it — the controller tick, the API order evaluator, `gc order check` — and a
+# check that closed its own window would hand the RUN verdict to whichever
+# caller asked first. Never writes a bead, never advances the window, and
+# never advances the sweep's baseline.
+# Usage: liveness-sweep-precheck.sh [--force]
 #   --force    classify even inside the cooldown window
 # Exit: 0 = RUN the agent pass · 1 = do not (nothing new / window) · 2 usage.
 # NOT set -e: every failure is handled and routed to the run-the-pass side.
@@ -24,11 +27,9 @@ INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE onl
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
 
-DRY_RUN=0
 FORCE=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dry-run) DRY_RUN=1 ;;
         --force)   FORCE=1 ;;
         -h|--help) sed -n '/^# Usage:/,/^# NOT set -e/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "liveness-sweep-precheck: unexpected argument: $1" >&2; exit 2 ;;
@@ -112,8 +113,12 @@ command -v jq >/dev/null 2>&1 || {
     DECIDED=1; exit 0
 }
 
-# The cooldown: due-check, then STAMP, then classify — a stamp written after
-# the verdict would let a crash re-offer the pass every tick.
+# The cooldown, read-only: liveness-sweep.sh stamps $STAMP when a pass starts.
+# A verdict this script hands out must be the same one the next caller gets,
+# because the caller that acts on it is not necessarily the caller that asked.
+# Repeating RUN cannot storm: the controller gates on an open order-tracking
+# bead before it evaluates a check at all, so the pass in flight is the one
+# that closes the window.
 NOW="$(date -u +%s)"
 if [ "$FORCE" -eq 0 ] && [ -f "$STAMP" ]; then
     LAST="$(cat "$STAMP" 2>/dev/null)"
@@ -125,16 +130,18 @@ if [ "$FORCE" -eq 0 ] && [ -f "$STAMP" ]; then
         exit 1
     fi
 fi
-if [ "$DRY_RUN" -eq 0 ]; then
-    if ! ( mkdir -p "$STATE_DIR" 2>/dev/null && printf '%s\n' "$NOW" > "$STAMP" 2>/dev/null ); then
-        say "liveness-sweep precheck: CANNOT WRITE the cooldown stamp at $STAMP."
-        say "  Refusing to run the pass: with no cadence this check would dispatch a pass"
-        say "  on every dispatch tick. Fix the state directory — the sweep is OFF"
-        say "  for this rig until it is writable."
-        DECISION=skip; REASON="cooldown stamp unwritable"; DECIDED=1
-        exit 1
-    fi
+# The pass closes the window by writing $STAMP. If it could not, the cadence
+# has no floor and every dispatch tick would run a pass, so probe the write
+# here and refuse rather than storm.
+if ! ( mkdir -p "$STATE_DIR" 2>/dev/null && : > "$STAMP.probe" 2>/dev/null ); then
+    say "liveness-sweep precheck: CANNOT WRITE the cooldown stamp at $STAMP."
+    say "  Refusing to run the pass: with no cadence this check would dispatch a pass"
+    say "  on every dispatch tick. Fix the state directory — the sweep is OFF"
+    say "  for this rig until it is writable."
+    DECISION=skip; REASON="cooldown stamp unwritable"; DECIDED=1
+    exit 1
 fi
+rm -f "$STAMP.probe" 2>/dev/null || true
 
 TMP="$(mktemp -d)"
 

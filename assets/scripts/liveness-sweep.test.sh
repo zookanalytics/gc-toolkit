@@ -358,6 +358,29 @@ grep -q 'bd update subj-ideas' "$GC_CALLS" \
     && bad "…and stamps NOTHING on that path" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
     || ok "…and stamps NOTHING on that path (the set was never shown)"
 
+echo "── the pass owns the cadence window and spends it before it reads ──"
+# liveness-sweep-precheck.sh, the order's `check`, only READS this stamp. A
+# check is evaluated by callers that never dispatch — the controller tick, the
+# API order evaluator, `gc order check` — so a check that stamped its own
+# window hands the RUN verdict to whichever caller asks first (bead tk-q3h04r).
+STAMP_FILE="$TMP/state/testrig/last-pass"
+run_sweep ABSENT
+STAMPED="$(cat "$STAMP_FILE" 2>/dev/null)"
+case "${STAMPED:-x}" in
+    ''|*[!0-9]*) bad "a completed pass stamps the window" "got '${STAMPED:-<none>}', want epoch seconds" ;;
+    *) ok "a completed pass stamps the window" ;;
+esac
+# BEFORE the reads: an aborting pass must still have spent the window, or the
+# check keeps saying RUN and a degraded store dispatches a pass every tick.
+GC_READY_FAIL=1 run_sweep "old-baseline"
+[ -s "$STAMP_FILE" ] && ok "a pass that aborts on an unreadable listing still spent the window" \
+    || bad "a pass that aborts still spent the window" "no stamp; every tick would dispatch"
+# A dry run is not a pass.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+bash "$SCRIPT" --dry-run >/dev/null 2>&1
+[ -f "$STAMP_FILE" ] && bad "--dry-run does not spend the window" "it wrote $STAMP_FILE" \
+    || ok "--dry-run does not spend the window"
+
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

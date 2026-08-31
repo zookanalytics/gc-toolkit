@@ -25,15 +25,20 @@
 #      non-array answer, missing subject and mid-flight abort is exercised, and
 #      each must RUN — never skip.
 #
-#   4. THE COOLDOWN IS ENFORCED, STAMPED BEFORE THE WORK, AND PER RIG. A
-#      condition trigger has no interval, so the 6h cadence lives in the script.
-#      Stamping after the verdict would let a crash re-offer the pass on the
-#      next tick and let a degraded store dispatch a session every tick, so the
-#      ordering is itself under test. And the state directory it stamps into is
-#      city+pack scoped while the order is rig-scoped, so a window without a rig
-#      component would let the first rig through the check silence every other
-#      rig for six hours — section 4b runs two rigs against one shared state
-#      directory, which is the only way to see that.
+#   4. THE COOLDOWN IS ENFORCED, READ-ONLY HERE, AND PER RIG. A condition
+#      trigger has no interval, so the 6h cadence lives in these two scripts:
+#      the check reads the window, the exec stamps it. A check is evaluated by
+#      callers that never dispatch — the controller tick, the API order
+#      evaluator, `gc order check` — so a check that stamped its own window
+#      would spend the RUN verdict on whichever caller asked first and report a
+#      cooldown to the dispatcher; that is how the sweep went dark for 3.6 days
+#      while its check logged RUN daily. Repeated evaluation is pinned to keep
+#      answering RUN until a pass actually runs, and the two scripts are pinned
+#      to one stamp path. The state directory is city+pack scoped while the
+#      order is rig-scoped, so a window without a rig component would let the
+#      first rig through the check silence every other rig for six hours —
+#      section 4b runs two rigs against one shared state directory, which is
+#      the only way to see that.
 #
 #   5. THE SUBSET PROPERTY, which is the soundness argument itself. The precheck
 #      is only safe because its exclusions are a strict subset of the sweep's
@@ -208,7 +213,7 @@ eq "$(sort -u "$FIX/reads" | tr '\n' '|')" "list $TMP/rigroot/.beads|ready $TMP/
    "every bead read is pinned to the rig store"
 
 echo "── the local classification: which beads survive to the delta ──"
-run_precheck --dry-run
+run_precheck
 SURV="$(survivors_of "$OUT")"
 has ",$SURV," ",f-plain," "an ordinary idle bead survives — the defect the sweep exists for"
 has ",$SURV," ",f-takeaway-empty," "an EMPTY gc.takeaway is a cleared hold, not a hold"
@@ -245,7 +250,7 @@ echo "── 'still alive' means NOT CLOSED, never 'present in the open listing'
 cp "$FIX/live.json" "$TMP/live.bak"
 cp "$FIX/ready.json" "$TMP/ready.bak"
 jq 'map(select(.id != "f-child"))' "$TMP/live.bak" > "$FIX/live.json"
-run_precheck --dry-run
+run_precheck
 SURV2="$(survivors_of "$OUT")"
 hasnt ",$SURV2," ",f-epic-open," "a parent whose only live child is BLOCKED is still gated (tk-dhue)"
 cp "$TMP/live.bak" "$FIX/live.json"
@@ -309,18 +314,17 @@ cp "$TMP/live.bak" "$FIX/live.json"
 run_precheck
 eq "$RC" "1" "control: this board really does skip when every read is good"
 
-# `--force --dry-run`: classify regardless of the window the control run above
-# just stamped, and do not move it. Without --force these all hit the cooldown
-# and exit silently, which looks exactly like the skip they are meant to rule
-# out — the empty $OUT is the tell.
+# `--force`: classify regardless of any window a pass left behind. Inside the
+# cooldown these all exit silently, which looks exactly like the skip they are
+# meant to rule out — the empty $OUT is the tell.
 for probe in ready live widen; do
-    OUT="$(bash -c "export FAIL_${probe}=1; exec \"\$0\" --force --dry-run" "$SCRIPT" 2>&1)"; RC=$?
+    OUT="$(bash -c "export FAIL_${probe}=1; exec \"\$0\" --force" "$SCRIPT" 2>&1)"; RC=$?
     eq "$RC" "0" "a FAILED $probe read RUNS the pass — it is not an empty board"
     hasnt "$OUT" "SKIP:" "a FAILED $probe read does not skip"
     has "$OUT" "UNREADABLE" "a failed $probe read says the probe was unreadable"
     has "$OUT" "$probe" "the diagnostic names the $probe read"
 
-    OUT="$(bash -c "export GARBAGE_${probe}=1; exec \"\$0\" --force --dry-run" "$SCRIPT" 2>&1)"; RC=$?
+    OUT="$(bash -c "export GARBAGE_${probe}=1; exec \"\$0\" --force" "$SCRIPT" 2>&1)"; RC=$?
     eq "$RC" "0" "a NON-ARRAY $probe answer RUNS the pass"
     has "$OUT" "UNREADABLE" "a non-array $probe answer is unreadable, not empty"
 done
@@ -336,7 +340,7 @@ done
 # The board is still the emptied one the control above proved really does SKIP,
 # so a RUN here can be the non-zero status and nothing else.
 for probe in ready live widen; do
-    OUT="$(bash -c "export NONZERO_${probe}=1; exec \"\$0\" --force --dry-run" "$SCRIPT" 2>&1)"; RC=$?
+    OUT="$(bash -c "export NONZERO_${probe}=1; exec \"\$0\" --force" "$SCRIPT" 2>&1)"; RC=$?
     eq "$RC" "0" "a $probe read that exits NON-ZERO with a valid array RUNS the pass"
     hasnt "$OUT" "SKIP:" "an array-shaped answer from a FAILED $probe call does not skip"
     has "$OUT" "UNREADABLE" "a failed $probe call is unreadable however good its stdout looks"
@@ -372,16 +376,32 @@ has "$OUT" "ABORTED before deciding" "it says it aborted"
 has "$OUT" "NOT an empty board" "and refuses to be read as an empty board"
 
 # --- 4. the cooldown ---------------------------------------------------------
-# A condition trigger has no interval and its check runs on every dispatch tick,
-# so the 6h cadence is this script's own.
-echo "── the cadence is enforced here, and stamped BEFORE the work ──"
+# A condition trigger has no interval, so the 6h length is this script's own.
+# The window it measures belongs to the pass: this check runs on every dispatch
+# tick, and on evaluations that dispatch nothing at all.
+echo "── the cadence window is READ here and spent only by a pass ──"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 "$SCRIPT" >/dev/null 2>&1; RC=$?
-eq "$RC" "0" "first run in a fresh window classifies and runs"
-[ -f "$STATE/last-pass" ] && ok "it stamped the window" \
-    || bad "it stamped the window" "no $STATE/last-pass"
+eq "$RC" "0" "first evaluation in a fresh window classifies and runs"
+[ -f "$STATE/last-pass" ] \
+    && bad "evaluating the check does not spend the window" "the check wrote $STATE/last-pass" \
+    || ok "evaluating the check does not spend the window"
+# THE REGRESSION (bead tk-q3h04r). Three evaluators call this check — the
+# controller tick, the API order evaluator, `gc order check` — and only one of
+# them dispatches. When the check owned the window, whichever asked first got
+# the single RUN and the dispatcher got a cooldown for the next 24h; the sweep
+# logged RUN daily and never ran for 3.6 days. Every evaluation must return the
+# same verdict until a pass actually runs.
+"$SCRIPT" >/dev/null 2>&1; RC2=$?
+"$SCRIPT" >/dev/null 2>&1; RC3=$?
+eq "$RC2/$RC3" "0/0" "repeated evaluation still reports RUN — the check is not a one-shot latch"
+[ -f "$STATE/last-pass" ] \
+    && bad "and none of them spent the window" "the check wrote $STATE/last-pass" \
+    || ok "and none of them spent the window"
+# The pass is what closes it, by writing the stamp liveness-sweep.sh writes.
+printf '%s\n' "$(date -u +%s)" > "$STATE/last-pass"
 OUT="$("$SCRIPT" 2>&1)"; RC=$?
-eq "$RC" "1" "a second tick inside the window does NOT run the pass"
+eq "$RC" "1" "a tick inside a window a pass has stamped does NOT run the pass"
 eq "$OUT" "" "and says nothing — this is the answer on almost every tick"
 OUT="$("$SCRIPT" --force 2>&1)"; RC=$?
 eq "$RC" "0" "--force classifies anyway"
@@ -393,21 +413,30 @@ eq "$RC" "0" "once the window has elapsed the pass runs again"
 printf '%s\n' "$(( $(date -u +%s) - 100 ))" > "$STATE/last-pass"
 LIVENESS_SWEEP_INTERVAL=60 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "LIVENESS_SWEEP_INTERVAL is the single source of the cadence"
-# STAMP-BEFORE-WORK: a run whose reads all fail must still have stamped, or a
-# degraded store dispatches an agent session on every dispatch tick.
+# Both scripts must key the same file, or the check reads a window nothing
+# stamps and the sweep runs on every tick.
+rm -rf "$LIVENESS_SWEEP_STATE_DIR"
+grep -q 'STAMP="\$STATE_DIR/last-pass"' "$SCRIPT" && grep -q 'STAMP="\$STATE_DIR/last-pass"' "$SWEEP" \
+    && ok "check and exec name the same stamp path" \
+    || bad "check and exec name the same stamp path" "one of them keys the window elsewhere"
+grep -qE '> *"\$STAMP"' "$SWEEP" \
+    && ok "the exec redirects into the stamp" \
+    || bad "the exec redirects into the stamp" "no write to \$STAMP in $SWEEP"
+grep -qE '> *"\$STAMP"' "$SCRIPT" \
+    && bad "the check never redirects into the stamp" "found a write to \$STAMP in $SCRIPT" \
+    || ok "the check never redirects into the stamp"
+# A degraded store must still reach a RUN verdict — the storm guard is the
+# exec's stamp now, not a verdict the check withholds.
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 FAIL_ready=1 "$SCRIPT" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "a degraded store runs the pass"
-[ -f "$STATE/last-pass" ] && ok "and STILL stamped — a degraded store cannot storm" \
-    || bad "and STILL stamped — a degraded store cannot storm" "no stamp; every tick would dispatch"
-# --dry-run must never move the window.
+# The writability probe leaves nothing behind.
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
-"$SCRIPT" --dry-run >/dev/null 2>&1
-[ -f "$STATE/last-pass" ] \
-    && bad "--dry-run does not stamp" "it wrote the window stamp" \
-    || ok "--dry-run does not stamp"
-# An unwritable state dir is the one condition that refuses to run: with no
-# cadence the check would dispatch a session every tick.
+"$SCRIPT" >/dev/null 2>&1
+eq "$(find "$STATE" -name 'last-pass*' 2>/dev/null | wc -l | tr -d ' ')" "0" \
+   "the writability probe leaves no file behind"
+# An unwritable state dir is the one condition that refuses to run: the pass
+# could not stamp there, so with no cadence floor every tick would dispatch.
 if [ "$(id -u)" -eq 0 ]; then
     # root ignores directory modes, so the unwritable case cannot be staged.
     ok "an unwritable state dir refuses to run rather than storm (skipped: running as root)"
@@ -444,28 +473,30 @@ eq "$(awk 'END { print NR }' "$STATE/pass.log")" "3" \
 echo "── two rigs sharing one GC_PACK_STATE_DIR keep separate windows ──"
 SHARED="$TMP/packstate"
 rm -rf "$SHARED"
-# Rig A: a normal first pass. Classifies, runs, and stamps its own window.
+# Rig A: a normal first evaluation, then its pass stamps rig A's window (what
+# liveness-sweep.sh does at the start of a run).
 : > "$FIXDIR/reads"
 OUT_A="$(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$SHARED" GC_RIG=rigA "$SCRIPT" 2>&1)"; RC_A=$?
 eq "$RC_A" "0" "rig A runs its pass"
 has "$OUT_A" "RUN:" "and reached a real verdict"
-[ -f "$SHARED/liveness-sweep/rigA/last-pass" ] && ok "rig A stamped its OWN window" \
-    || bad "rig A stamped its OWN window" "no $SHARED/liveness-sweep/rigA/last-pass"
-# Rig A again, inside the window: still silent, so the cadence was not simply
+mkdir -p "$SHARED/liveness-sweep/rigA"
+printf '%s\n' "$(date -u +%s)" > "$SHARED/liveness-sweep/rigA/last-pass"
+# Rig A again, inside the window: silent, so the cadence was not simply
 # disabled to separate the rigs.
 OUT_A2="$(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$SHARED" GC_RIG=rigA "$SCRIPT" 2>&1)"; RC_A2=$?
-eq "$RC_A2" "1" "rig A's own second tick is still held by the cooldown"
+eq "$RC_A2" "1" "rig A's next tick is held by the window its own pass stamped"
 eq "$OUT_A2" "" "and still says nothing"
 # Rig B, same state directory, immediately after: this is the regression. It
 # must classify its own store rather than inherit rig A's window.
 : > "$FIXDIR/reads"
 OUT_B="$(unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$SHARED" GC_RIG=rigB "$SCRIPT" 2>&1)"; RC_B=$?
-eq "$RC_B" "0" "rig B still runs after rig A stamped — the window is not shared"
+eq "$RC_B" "0" "rig B still runs after rig A's pass stamped — the window is not shared"
 has "$OUT_B" "RUN:" "and rig B reached a real verdict"
 [ -s "$FIXDIR/reads" ] && ok "rig B actually read its store" \
     || bad "rig B actually read its store" "no reads — it exited from the cooldown branch"
-[ -f "$SHARED/liveness-sweep/rigB/last-pass" ] && ok "rig B stamped a window of its own" \
-    || bad "rig B stamped a window of its own" "no $SHARED/liveness-sweep/rigB/last-pass"
+[ -f "$SHARED/liveness-sweep/rigB/last-pass" ] \
+    && bad "rig B's window is untouched until its own pass runs" "the check stamped rig B" \
+    || ok "rig B's window is untouched until its own pass runs"
 # Two rigs, two logs: a quiet rig's history stays its own.
 [ -s "$SHARED/liveness-sweep/rigA/pass.log" ] && [ -s "$SHARED/liveness-sweep/rigB/pass.log" ] \
     && ok "each rig keeps its own pass.log" \
@@ -488,8 +519,8 @@ eq "$(find "$KEYS/liveness-sweep" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | 
 # stamping over whichever rig happened to be first.
 rm -rf "$KEYS"
 (unset LIVENESS_SWEEP_STATE_DIR; GC_PACK_STATE_DIR="$KEYS" GC_RIG='' GC_RIG_ROOT='' "$SCRIPT" >/dev/null 2>&1)
-[ -f "$KEYS/liveness-sweep/_unscoped/last-pass" ] && ok "an unscoped hand run stamps its own bucket" \
-    || bad "an unscoped hand run stamps its own bucket" "no _unscoped window"
+[ -d "$KEYS/liveness-sweep/_unscoped" ] && ok "an unscoped hand run keys its own bucket" \
+    || bad "an unscoped hand run keys its own bucket" "no _unscoped state dir"
 # A rig root with no rig name still keys per root, and two roots sharing a last
 # component stay distinct — the basename reads well, the full path is the identity.
 rm -rf "$KEYS"
@@ -555,7 +586,7 @@ export OPEN_PRS WORKED HUSK_STEPS
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
-BASELINE_CSV="" run_precheck --dry-run
+BASELINE_CSV="" run_precheck
 PRE_IDS="$(survivors_of "$OUT")"
 
 # Positive control FIRST: a containment assertion over two empty sets passes
