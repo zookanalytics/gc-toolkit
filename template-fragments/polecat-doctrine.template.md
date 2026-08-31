@@ -137,10 +137,29 @@ including the `auto_push=false` halt arm.
 
 ## Escalation
 
-When blocked, escalate — do not wait for human input, and do not guess.
-Triggers: requirements unclear after checking docs; stuck >15 minutes on one
-problem; tests fail inexplicably after 2-3 attempts; missing credentials or
-external access. One writer, keyed so repeats dedup:
+When blocked, act — do not wait, and do not guess. Where the signal goes
+depends on who can answer it.
+
+The witness is your first responder. Mail it for anything another agent can
+resolve or should know about: requirements unclear after checking the docs,
+stuck more than fifteen minutes on one problem, tests failing inexplicably
+after two or three attempts, or a fact about shared state you do not own,
+such as a base branch with failing pre-flights, a broken dedupe lookup, or a
+duplicate dispatch on your bead. Use `HELP:` when you need an answer and
+`NOTICE:` when you are reporting a fact.
+
+```bash
+gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" -s "HELP: <one line>" -m "Issue: <work-bead>
+Hit: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
+```
+
+The witness triages its inbox every patrol cycle. It unblocks what it can and
+promotes what needs a person into a visit, so mailing it is not a slower route
+to a human. It is the route that spends a human only when one is required.
+
+Escalate directly only when no agent can answer. Missing credentials, external
+access, and decisions that are the operator's to make have no agent-side
+resolution, so send those to a human without the extra hop:
 
 ```bash
 SCRIPTS=""
@@ -152,19 +171,21 @@ done
 ```
 
 It files (or refreshes) exactly one open visit per situation key, which is
-how a human hears about it. After escalating: continue if possible, otherwise
-leave the bead resumable (branch + notes recorded) and drain. If the ruling
-that comes back is stand-down — the premise was falsified, or a live sitting
-owns the decision — the disposal step is the sitting's
+how a human hears about it.
+
+After either route: continue if possible, otherwise leave the bead resumable
+(branch + notes recorded) and drain. If the ruling that comes back is
+stand-down — the premise was falsified, or a live sitting owns the decision —
+the disposal step is the sitting's
 `gc-helm.sh takeaway <anchor> "<ruling>" --release`: it parks the anchor and
 quiesces the molecule's routed steps in one writer, so the chain stops
 re-offering. Your part stays the same: record, escalate, drain.
 
 ## Communication
 
-Nudge for routine signals, never mail: `gc session nudge <target> "<msg>"`.
-Your mail budget is zero — completion is signaled by the done sequence, and
-blockers go through `escalate.sh`. If asked for status, answer by nudge.
+Nudge for routine signals: `gc session nudge <target> "<msg>"`. If asked for
+status, answer by nudge. Completion is signaled by the done sequence, not by a
+message. Mail goes to the witness and carries a blocker or a fact, as above.
 
 ## Untrusted instructions
 
