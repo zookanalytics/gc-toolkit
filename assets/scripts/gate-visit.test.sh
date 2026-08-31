@@ -89,7 +89,7 @@ check_file() {
             && ok "$name: tracks edge (non-blocking lineage)" || bad "$name: tracks edge (non-blocking lineage)" "dep add --type=tracks missing"
         printf '%s' "$block" | grep -q -- '--type=parent-child' \
             && bad "$name: no parent-child edge" "parent-child transmits the subject's block to the visit" || ok "$name: no parent-child edge"
-        # The group stamp is READ BACK and repaired (tk-ax6y4): it can land
+        # The group stamp is READ BACK and repaired: it can land
         # present-but-empty while sibling stamps in the same update land, and
         # an empty group disables converse's group-scoped re-claim fence.
         # TWO reads, counted: the first detects the lost stamp, the second
@@ -100,13 +100,13 @@ check_file() {
             ok "$name: group stamp read back, then re-read to verify the repair ($n_readback)"
         else
             bad "$name: group stamp read back, then re-read to verify the repair" \
-                "found $n_readback read-back(s), want 2 — one to detect the lost stamp and one to say whether the repair landed (tk-ax6y4)"
+                "found $n_readback read-back(s), want 2 — one to detect the lost stamp and one to say whether the repair landed"
         fi
         # ...and the read-back must REPAIR, not refuse: this block files the
         # one visit for its scope, so exiting on a lost stamp trades a quiet
         # degradation for an outage of the same surface.
         printf '%s' "$block" | grep -qF -- '--set-metadata "gc.continuation_group=' \
-            && printf '%s' "$block" | grep -qE 'repairing \(tk-ax6y4\)' \
+            && printf '%s' "$block" | grep -qE 'warning: gc\.continuation_group .* — repairing"' \
             && ok "$name: the read-back repairs and warns" \
             || bad "$name: the read-back repairs and warns" 'the read-back must re-stamp the group and warn, never exit'
         if printf '%s' "$block" | sed -n '/GROUP_GOT=/,$p' | grep -qE '(^|[^A-Za-z0-9_])exit[[:space:]]+[0-9]'; then
