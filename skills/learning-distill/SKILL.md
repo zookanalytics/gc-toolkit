@@ -122,8 +122,8 @@ retirements, or to hardens — those remove weight, not add it.
 
 A cluster promotes into always-injected content only when something outside
 the promoting agent has corroborated it. Two things clear the gate: it
-carries `obs.endorsed=operator`, or its evidence comes from more than one
-source and is not entirely self-reported.
+carries `obs.endorsed=operator`, or its evidence is not entirely
+self-reported and spans two or more distinct `obs.provenance` events.
 
 A cluster that is **entirely `obs.source=self`** is the loop this gate
 exists to break — self-report, self-promote, self-inject, with no external
