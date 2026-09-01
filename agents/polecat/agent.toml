@@ -5,12 +5,11 @@ provider = "claude"
 wake_mode = "fresh"
 # Per-agent home; per-bead worktrees are created under it by workspace-setup.
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
-# A claude pool slot arrives with its rendered doctrine already in context, so
-# this nudge supplements that doctrine and does not open with gc prime the way
-# polecat-codex does. It still names the task rather than the command to run.
-# A nudge naming only a command is the nearer instruction and wins over the
-# doctrine, so the session runs the claim and stops, holding a claim on work
-# that nothing will re-offer.
+# The nudge is the whole instruction a woken pool slot acts on, so it names the
+# task and not just the command that starts it. A nudge naming only a command is
+# obeyed literally: the session runs the claim, reports the JSON, and stops, and
+# nothing re-offers a held claim. The two pools differ only in provider, so both
+# carry this same nudge text.
 nudge = """
 Claim and complete one work item: gc hook --claim --json returns assigned work \
 first and routed pool work second, and the bead it names is yours to carry \

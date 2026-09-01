@@ -6,18 +6,17 @@ scope = "rig"
 provider = "codex"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
-# The nudge is the whole instruction a pool slot acts on when it wakes, so it
-# names the task and not just the command to run. A session that reads it as a
-# command runs the claim and stops, holding a claim on work that nothing will
-# re-offer. It opens with gc prime because a codex session arrives with none of
-# its rendered doctrine loaded, leaving the nudge as the only thing in context.
+# The nudge is the whole instruction a woken pool slot acts on, so it names the
+# task and not just the command that starts it. A nudge naming only a command is
+# obeyed literally: the session runs the claim, reports the JSON, and stops, and
+# nothing re-offers a held claim. The two pools differ only in provider, so both
+# carry this same nudge text.
 nudge = """
-Run gc prime to load your doctrine before you act. Then claim and complete one \
-work item: gc hook --claim --json returns assigned work first and routed pool \
-work second, and the bead it names is yours to carry through its formula to \
-the terminal step. Claiming is not completing. A reason of \
-existing_assignment means you already hold the work, so execute it instead of \
-reporting it. If you cannot proceed, record why on the bead and clear your \
+Claim and complete one work item: gc hook --claim --json returns assigned work \
+first and routed pool work second, and the bead it names is yours to carry \
+through its formula to the terminal step. Claiming is not completing. A reason \
+of existing_assignment means you already hold the work, so execute it instead \
+of reporting it. If you cannot proceed, record why on the bead and clear your \
 assignee so the work is re-offered.\
 """
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
