@@ -329,6 +329,7 @@ func humanGated(a Anchor) bool {
 const (
 	mdRoutedTo  = "gc.routed_to"
 	mdTakeaway  = "gc.takeaway"
+	mdDemandFor = "gc.demand_for"
 	routedHuman = "human"
 )
 
@@ -347,6 +348,24 @@ func hasOwnRow(md map[string]string) bool {
 	}
 	_, ok := md[mdTakeaway]
 	return ok
+}
+
+// isDemand reports whether the anchor is a DEMAND: a bead `gc-helm demand`
+// filed to carry what a person owes, naming the work it blocks in
+// `gc.demand_for`.
+//
+// A demand is stamped with a `gc.takeaway` like any other human-gated row, and
+// on this one row that headline is the QUESTION rather than an answer to it —
+// the verb puts the authored ask there so the board has a sentence to show.
+// The demand bead also carries no blocker of its own; it IS the blocker, and
+// the edge points at it from the gated work. So both halves of [ruled] are
+// satisfied the moment the demand is filed, and the row would stand down on
+// its first render, before anyone had read it.
+//
+// A demand is answered by being CLOSED, which is what makes the gated work
+// ready. Until then it is owed, whatever it recorded about itself.
+func isDemand(a Anchor) bool {
+	return a.Metadata[mdDemandFor] != ""
 }
 
 // ruled is the STAND-DOWN state: a human-gated row that has already been
@@ -379,8 +398,12 @@ func hasOwnRow(md map[string]string) bool {
 // glance, while standing one down on an unread graph invites them to close or
 // extend a question whose routed work is still open — the exact fail-open the
 // clause exists to prevent (tk-fhd705).
+//
+// The third clause guards the other direction. Both of the above read a
+// takeaway as an answer somebody already gave; on a demand row it is the
+// question itself, so [isDemand] takes that row back out.
 func ruled(a Anchor, takeaway string, waitingOpen []string) bool {
-	return humanGated(a) && takeaway != "" &&
+	return humanGated(a) && takeaway != "" && !isDemand(a) &&
 		!a.WaitingUnknown && len(waitingOpen) == 0
 }
 

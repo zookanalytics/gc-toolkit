@@ -1319,9 +1319,13 @@ have "the takeaway is read back, not just the visit's outcome stamp" \
 # The ORDER is the safety property: the stamp is written first, so an edge that
 # cannot be wired warns and the conclusion still lands. A writer that exits on a
 # failed edge would trade the data loss this fixes for the one it replaces.
-if awk '/^cmd_takeaway\(\)/ {f=1} f' "$HELM" | grep -n 'gc.takeaway=$text' | head -1 | cut -d: -f1 | {
+# takeaway_body — cmd_takeaway ALONE. An `awk … f` that never clears its flag
+# runs to end-of-file, so every verb defined after cmd_takeaway was read as part
+# of it, and these two probes would answer about a sibling's code.
+takeaway_body() { sed -n '/^cmd_takeaway()/,/^}/p' "$HELM"; }
+if takeaway_body | grep -n 'gc.takeaway=$text' | head -1 | cut -d: -f1 | {
        read -r stamp_ln || stamp_ln=0
-       edge_ln=$(awk '/^cmd_takeaway\(\)/ {f=1} f' "$HELM" | grep -n 'bd dep add' | head -1 | cut -d: -f1)
+       edge_ln=$(takeaway_body | grep -n 'bd dep add' | head -1 | cut -d: -f1)
        [ -n "$edge_ln" ] && [ "$stamp_ln" -gt 0 ] && [ "$stamp_ln" -lt "$edge_ln" ]
    }; then
     ok "the takeaway is stamped BEFORE any edge is attempted"
@@ -1329,12 +1333,164 @@ else
     bad "the takeaway is stamped BEFORE any edge is attempted" \
         "an edge wired first can fail the verb and cost the sitting its conclusion"
 fi
-if awk '/^cmd_takeaway\(\)/ {f=1} f' "$HELM" | grep -A3 'could not wire' | grep -qE 'exit [0-9]'; then
+if takeaway_body | grep -A3 'could not wire' | grep -qE 'exit [0-9]'; then
     bad "a failed edge does not abort the verb" \
         "the warning arm exits — the takeaway lands but the caller reads a failure"
 else
     ok "a failed edge does not abort the verb"
 fi
+
+echo "── a wait is a bead and an edge, never a parked subject ──"
+# The takeaway above records a wait for a HUMAN to read. This section is the
+# other half: the machine-readable one. A sitting that reaches an open question
+# files what the person owes as a bead and blocks the work on it, so the work
+# leaves `bd ready` until the demand closes and re-enters it the moment it does.
+# Every assertion is one way that reverts to a stamp nobody can act on.
+have "gc-helm exposes the demand verb" 'cmd_demand()' "$HELM"
+have "…and documents it in usage" 'gc-helm demand <gated-bead>' "$HELM"
+demand_body() { sed -n '/^cmd_demand()/,/^}/p' "$HELM"; }
+
+# THE SHAPE. beads refuses a `blocks` edge from a parent to its own descendant,
+# so a demand filed UNDER the bead it gates could never gate it — which is why
+# prose markers were reached for instead of edges. The demand takes the gated
+# bead's own parent; anything else silently rebuilds the dead end.
+if demand_body | grep -q -- '--parent "$parent"'; then
+    ok "the demand inherits the gated bead's parent (a sibling, not a child)"
+else
+    bad "the demand inherits the gated bead's parent (a sibling, not a child)" \
+        "filed under the gated bead, the demand can never carry a blocks edge to it"
+fi
+if demand_body | grep -q -- '--parent "$gated"'; then
+    bad "…and never the gated bead itself as parent" \
+        "that is the descendant shape beads refuses to let block its ancestor"
+else
+    ok "…and never the gated bead itself as parent"
+fi
+have "…reading that parent off the CHILD, where the edge is stored" \
+     '"parent-child"' "$HELM"
+
+# FAIL CLOSED, and deliberately unlike takeaway. There the prose is what the
+# sitting owes and a rejected edge only warns; here the edge IS the record, and
+# a demand without one leaves the work reading ready while a person still owes
+# an answer — the exact state this verb removes.
+if demand_body | grep -A3 'is NOT blocked by' | grep -qE 'exit [0-9]'; then
+    ok "a demand whose edge did not land fails the verb"
+else
+    bad "a demand whose edge did not land fails the verb" \
+        "reporting success on a missing edge leaves the gated work reading ready"
+fi
+# The verdict comes from the row, never from `dep add`'s exit status, and it is
+# read off EVERY bead the call was asked to gate. An --also-blocks target left
+# unwired reads ready against a demand named to gate it: the same state, one
+# bead over.
+if demand_body | grep -qF -- 'w_after=$(gc bd show "$_w"'; then
+    ok "…having read the edge back off each bead it was asked to gate"
+else
+    bad "…having read the edge back off each bead it was asked to gate" \
+        "a read-back that checks only the gated bead passes an --also-blocks target that never got its edge"
+fi
+
+# The prompt is the half that decides whether the verb is ever called.
+# Matched on the CAPTURE, not on the call: step 7 re-states a demand with the
+# same three tokens, so a looser pattern passes on a hold that files nothing.
+have "the hold files a demand, not only a stamp" 'DEMAND_OUT=$("$HELM" demand "$ITEM"' "$PROMPT"
+have "…and reads the demand id back off stdout" "awk '/^demand /{print \$2; exit}'" "$PROMPT"
+lacks "…and never authorizes a prose-only wait in its place" \
+      'the takeaway is then the only record' "$PROMPT" \
+      "that arm sends the sitting on to post framing for a hold with no demand bead behind it"
+
+# The gate, EXTRACTED AND RUN. A filter between the demand call and the capture
+# answers with its OWN status, so a verb that fails closed on a missing edge
+# reads as a filed demand and the sitting frames a hold nothing is holding.
+# Prose cannot pin that; these assertions run the block rather than describe it.
+awk '/# >>> hold-demand-gate/{inb=1; next} /# <<< hold-demand-gate/{inb=0} inb' \
+    "$PROMPT" | sed 's/^   //' > "$TMPD/hold-gate.sh"
+if [ -s "$TMPD/hold-gate.sh" ]; then ok "the demand write is a marked, extractable block"
+else bad "the demand write is a marked, extractable block" "no hold-demand-gate block in $PROMPT"; fi
+if bash -n "$TMPD/hold-gate.sh" 2>/dev/null; then ok "…and is valid bash"
+else bad "…and is valid bash" "bash -n failed"; fi
+
+# stub_helm <exit-status> <stdout> — stands in for the demand verb. Written to
+# files rather than baked into the stub so the heredoc stays quoted.
+stub_helm() {
+    printf '%s\n' "$2" >"$TMPD/helm.out"
+    printf '%s\n' "$1" >"$TMPD/helm.rc"
+    cat >"$TMPD/helm.sh" <<'STUB'
+#!/usr/bin/env bash
+D="$(dirname "$0")"
+cat "$D/helm.out"
+exit "$(cat "$D/helm.rc")"
+STUB
+    chmod +x "$TMPD/helm.sh"
+}
+GATE_OUT=""
+GATE_RC=0
+run_gate() {
+    GATE_OUT="$(HELM="$TMPD/helm.sh" ITEM=tk-gated bash "$TMPD/hold-gate.sh" 2>&1)"
+    GATE_RC=$?
+}
+
+# THE MASKED CASE, and the whole reason the status is read at all. The verb
+# fails closed AFTER it has printed, so stdout alone says the demand landed.
+stub_helm 4 'demand tk-dem blocks tk-gated (by converse, decision): who owns it'
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then ok "a non-zero demand stops the hold even when stdout names an id"
+else bad "a non-zero demand stops the hold even when stdout names an id" \
+        "the gate read awk's status, not the verb's — a hold with no edge behind it posts as normal"; fi
+has_out() { case "$GATE_OUT" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in: $GATE_OUT" ;; esac; }
+lacks_out() { case "$GATE_OUT" in *"$2"*) bad "$1" "found '$2' in: $GATE_OUT" ;; *) ok "$1" ;; esac; }
+has_out "…and says so, naming the item and the status" "NO DEMAND FILED on tk-gated (status 4)"
+has_out "…and forbids the framing rather than qualifying it" "Do NOT post the framing"
+
+# The plain fail-closed shape: the verb exits 4 having printed nothing.
+stub_helm 4 ''
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then ok "a demand that exits non-zero and prints nothing stops the hold"
+else bad "a demand that exits non-zero and prints nothing stops the hold" "the sitting continues into a prose-only wait"; fi
+
+# Exit 0 is not enough either: an id the block cannot read is a demand it
+# cannot discharge in step 7, and cannot name in the thread.
+stub_helm 0 'gc-helm: demand: refreshed something the parser does not know'
+run_gate
+if [ "$GATE_RC" -ne 0 ]; then ok "an unparsable id stops the hold even at status 0"
+else bad "an unparsable id stops the hold even at status 0" "DEMAND is empty and the sitting holds on nothing"; fi
+
+# THE HAPPY PATH, which is what makes the three above mean anything: a gate
+# wired to refuse everything passes them all and takes every hold with it.
+stub_helm 0 'demand tk-dem blocks tk-gated (by converse, decision): who owns it'
+run_gate
+if [ "$GATE_RC" -eq 0 ]; then ok "a filed demand at status 0 lets the hold proceed"
+else bad "a filed demand at status 0 lets the hold proceed" "rc=$GATE_RC, out: $GATE_OUT"; fi
+lacks_out "…and says nothing about a failure" "NO DEMAND FILED"
+have "the sitting discharges the demand when it settles the question" \
+     'gc bd close "$DEMAND"' "$PROMPT"
+have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "<what is still owed' "$PROMPT"
+have "the prompt states the sibling rule for everything a sitting files" \
+     'SIBLING of the subject, never a' "$PROMPT"
+
+# THE POINT OF ALL OF IT. A prose hold is a dispatch only a person can resume:
+# it requires someone to come back, read a sentence, and hand-clear a field.
+# No agent in this pack may write one. The readers stay, because live holds
+# predate this rule and keep working. Converting them is separate work, so
+# this pins the WRITE.
+holdwriters=""
+for f in "$PROMPT" "$REPO"/agents/*/prompt.template.md "$REPO"/formulas/*.toml \
+         "$REPO"/assets/scripts/*.sh "$REPO"/template-fragments/*.md; do
+    case "$f" in *.test.sh) continue ;; esac
+    [ -r "$f" ] || continue
+    # A WRITE is an assignment to the key. A read is a lookup, and those stay.
+    if grep -qE 'set-metadata "?triage\.hold=|triage\.hold=<' "$f"; then
+        holdwriters="$holdwriters ${f#"$REPO"/}"
+    fi
+done
+if [ -z "$holdwriters" ]; then
+    ok "no agent, formula, or script in this pack writes a triage.hold"
+else
+    bad "no agent, formula, or script in this pack writes a triage.hold" \
+        "prose hold written by:$holdwriters — a demand bead plus a blocks edge is the disposition now"
+fi
+have "the sweep's disposition menu offers demand in its place" \
+     'demand (gc-helm.sh demand' "$REPO/assets/scripts/liveness-sweep.sh"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

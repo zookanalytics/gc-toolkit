@@ -1130,6 +1130,91 @@ func TestRuledTwinDoesNotReElevate(t *testing.T) {
 	}
 }
 
+// TestOpenDemandStaysOwed is the acceptance case for the demand verb. The verb
+// files what a person owes as its own bead: `gc.demand_for` names the work it
+// gates, `gc.routed_to=human` puts it on the operator's queue, and the authored
+// headline is stamped as `gc.takeaway` so the board has a question to show. The
+// demand carries no blocker of its own — it IS the blocker — so a fresh one
+// satisfies every clause [ruled] had before [isDemand], and stood down on the
+// render that first saw it. The row the verb exists to raise dropped straight
+// out of the default queue.
+//
+// The two controls are what make the exclusion narrow rather than a hole in the
+// stand-down: an ordinary answered row beside the demand still stands down, and
+// the demand stops being owed the moment it closes, which is how it is answered.
+func TestOpenDemandStaysOwed(t *testing.T) {
+	const headline = "which of the two shapes should converse file?"
+	demandMD := map[string]string{
+		"gc.routed_to":   "human",
+		"gc.takeaway":    headline,
+		"gc.demand_for":  "tk-gated",
+		"gc.takeaway_at": "2026-06-30T10:00:00Z",
+	}
+	anchors := []Anchor{
+		// Filed --kind=decision, and gathered twice: once as a decision, once
+		// off the `gc.routed_to=human` marker. Both rows are one bead, and the
+		// dedup keeps the higher band — so both have to stay up, or the twin
+		// hands the stand-down back.
+		{ID: "tk-demand", Title: headline, Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata: demandMD, Takeaway: headline, TakeawayAt: demandMD["gc.takeaway_at"]},
+		{ID: "tk-demand", Title: headline, Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata: demandMD, Takeaway: headline, TakeawayAt: demandMD["gc.takeaway_at"]},
+		// Control: answered, no demand marker, still stands down.
+		{ID: "tk-answered", Title: "an ordinary ruling", Kind: "human", Source: "human",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — nothing further needed here"},
+			Takeaway: "routed — nothing further needed here"},
+		// Control: the same demand once answered. Closing it is what makes the
+		// gated work ready, and what takes the row off the queue.
+		{ID: "tk-discharged", Title: "an answered demand", Kind: "decision", Source: "decision",
+			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
+			ClosedAt: daysAgo(1),
+			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": headline, "gc.demand_for": "tk-gated"},
+			Takeaway: headline},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	tile, ok := tileByID(b, "tk-demand")
+	if !ok {
+		t.Fatal("tk-demand is missing from the board")
+	}
+	if !tile.Owed {
+		t.Error("an open demand is what a person owes — it must stay on the operator's queue")
+	}
+	if tile.Severity != SevElevated {
+		t.Errorf("an unanswered demand keeps the human-gated band, got %s (kind %s)", tile.Severity, tile.Kind)
+	}
+	if tile.Needs != headline {
+		t.Errorf("needs is the question itself, not a disposition: %q", tile.Needs)
+	}
+	if tile.Frontier == "ruled — takeaway recorded" {
+		t.Errorf("frontier reads the demand as answered: %q", tile.Frontier)
+	}
+	// Owed rows partition ahead of the rest, oldest ask first.
+	if b.Tiles[0].ID != "tk-demand" {
+		t.Errorf("the demand heads the queue, got %q", b.Tiles[0].ID)
+	}
+
+	answered, ok := tileByID(b, "tk-answered")
+	if !ok {
+		t.Fatal("tk-answered is missing from the board")
+	}
+	if answered.Owed || answered.Severity != SevLow || answered.Needs != "ruled — close or extend" {
+		t.Errorf("the stand-down still fires for an ordinary answered row: owed=%v %s %q",
+			answered.Owed, answered.Severity, answered.Needs)
+	}
+
+	discharged, ok := tileByID(b, "tk-discharged")
+	if !ok {
+		t.Fatal("tk-discharged is missing from the board")
+	}
+	if discharged.Owed || discharged.Severity != SevDone {
+		t.Errorf("a closed demand owes nothing: owed=%v %s", discharged.Owed, discharged.Severity)
+	}
+}
+
 // TestDispositionDueSurvivesForAPlainParkedRow: the stand-down must not become
 // a way to silence tk-2plde. A parked subject that is NOT human-gated keeps the
 // promotion — it is in the LOW floor, where the promotion is the only thing

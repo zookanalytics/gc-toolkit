@@ -10,7 +10,9 @@ technical nouns. A **subject** is the durable thing a dialogue is about —
 the bead; its id is the continuation-group identity; its notes and visit
 history are the dialogue's record, spanning its whole life (an epic may
 see hundreds of visits). A **visit** is a filed request for one bounded
-sitting of that dialogue: a child bead the converse role claims, whose
+sitting of that dialogue: a bead the converse role claims, linked to its
+subject by a `tracks` edge (never `parent-child`, which would transmit the
+subject's blocked state to the visit), whose
 outcome is recorded to the subject and which closes when it resolves —
 out loud, with a sign-off, if it was ever *held*; silently against its
 subject if its premise died or it turned out to need no human, in which
@@ -392,6 +394,103 @@ stays quiet and correct; the sweep is what pushes.
 **What is still not covered.** Work routed with *neither* recording — a sibling
 bead named only in the takeaway prose — is invisible to both. So is an
 agent-origin park, by the ruling's own scope. Both wait for an eye.
+
+That gap is what the next section closes, by making the sibling the
+canonical shape and the edge mandatory rather than optional.
+
+## How a sitting ends: a demand bead and an edge
+
+A bead is either ready, and therefore moving, or blocked on a named bead
+by an edge. There is no third state. A sitting that reaches an open
+question no longer parks its subject on a sentence and waits for someone
+to come back and read it; it files what the person owes as its own bead
+and blocks the waiting work on that bead.
+
+What a person owes is a bead like any other. A ruling is
+`issue_type=decision`; a task only a named person can perform is a bead
+assigned to them. Either way it carries `gc.routed_to=human`, so it lands
+in the operator's partition of the board, and the authored
+140-character headline is its TITLE — the same primitive `gc.takeaway`
+already enforced, now attached to the thing that is actually owed. The
+work it gates carries a `blocks` edge to it and is therefore not
+`bd ready`. Closing the demand makes that work ready and the pool claims
+it, so discharging a decision advances the pipeline rather than the
+operator's to-do list.
+
+The writer is `assets/scripts/gc-helm.sh demand`. It resolves the gated
+bead first, files the demand, wires the edge, and then reads the edge back
+off the gated bead — exiting non-zero when it did not land, because a
+demand with no edge leaves the work reading ready while a person still
+owes an answer, which is precisely the state the verb exists to remove.
+One open demand per gated bead: a resumed sitting that re-states the same
+question refreshes the existing demand rather than giving one wait two
+blockers.
+
+### The shape constraint, and why it is the hard part
+
+beads REFUSES a `blocks` edge from a parent to its own descendant. The
+guard is correct — blocked status cascades to descendants, so the
+descendant would inherit the block it exists to lift:
+
+```
+$ gc bd dep add <parent> <descendant> -t blocks
+Error: <parent> cannot be blocked by its descendant <descendant>:
+blocked status cascades to descendants, so <descendant> would inherit
+the block and never close
+```
+
+The canonical converse shape filed routed work as a CHILD of the subject,
+and a child can therefore never express its wait on its own parent as an
+edge. That is very likely why metadata markers — `triage.hold`,
+`gc.takeaway`-as-a-park — were reached for instead of edges in the first
+place. So this is not only "use edges". It requires that routed work stop
+being filed as a child of the thing it waits on.
+
+**The replacement shape is the sibling.** A demand, and any work a sitting
+routes, takes the SUBJECT'S OWN parent — or no parent at all, when the
+subject has none. `gc-helm.sh demand` does this itself, reading the parent
+off the gated bead (a `parent-child` edge is stored on the child, so the
+gated bead's own row is where its parent is legible). Converse does the
+same by hand for work it routes, and the sign-off's
+`takeaway --waiting-on <work-bead>` then takes, where against a child it
+was refused.
+
+### What happens to routed work already filed as a child
+
+Nothing. It is not re-parented and not migrated. Both readers already
+handle it, deliberately: the liveness sweep reads the union of a subject's
+`blocks` edges and its children, and the board gives a parked row the same
+child roll-up (`services/helm/internal/source/beads.go`, `gatherMetadataAnchors`)
+for exactly this reason. That union is the legacy reading and stays.
+What changes is what gets filed from here on. A child is covered by the
+sweep alone; a sibling with an edge is covered by the sweep, by the board,
+and by `bd ready` — which is the one that makes the work move without a
+person in the loop.
+
+Converting the existing backlog of parked subjects and `triage.hold` prose
+is separate work. It makes the edge the board's primary source and leaves
+the metadata as a derived view. `gc.routed_to=human` and `gc.takeaway`
+stay readable throughout; nothing here breaks a live hold.
+
+### Where prose alone is still correct
+
+`gc-helm.sh takeaway` keeps writing prose with no edge at two call sites,
+and both are right:
+
+- **A settled sitting.** The takeaway records what the sitting concluded.
+  Nothing is owed and nothing is waiting, so there is no bead to point an
+  edge at. The stamp is a record, not a gate.
+- **A stand-down (`takeaway … --release`).** The dispatch's premise is
+  falsified and the work should NOT happen. That is a disposal: the anchor
+  is parked and the molecule's routed steps are quiesced so the dead chain
+  stops re-offering. An edge would assert a wait that does not exist.
+
+Everywhere else the takeaway carries its wait as an edge —
+`--waiting-on` for work a pool owes, a demand bead for what a person owes.
+No agent in this pack writes a `triage.hold` any more; the sweep's
+disposition menu offers `demand` in its place
+(`assets/scripts/liveness-sweep.sh`). The readers of `triage.hold` remain,
+because live holds predate this and keep working.
 
 ## How a held sitting ends
 
@@ -803,8 +902,9 @@ operator's *own* unsent words have no such protection, and until
 
   **What is still open is retirement, and `prefix+b` still runs the
   bash.** `tmux-pick-helm.sh` was deliberately NOT repointed: `gc-helm.sh`
-  keeps verbs (`open`, `react`, `takeaway`) that have no Go equivalent, so
-  retiring it is a separate piece of work and still the operator's call.
+  keeps verbs (`open`, `react`, `takeaway`, `demand`) that have no Go
+  equivalent, so retiring it is a separate piece of work and still the
+  operator's call.
   Until the script is gone there are still two programs, and the tripwire
   stands — but it is now cheaper to honour, because the field sets are
   pinned against each other by
@@ -837,21 +937,22 @@ Revised 2026-08-08 after the build-factory trial and operator probing —
 this is the genuinely native ground, and it is deliberately small. A
 definition first, because everything below uses it:
 
-> **A visit** is a filed request for one bounded sitting of a subject's
-> dialogue, stored as a bead: a small child of the subject whose body
-> says what that sitting would be for ("ratify this plan", "review
-> posted — decision needed"), whose metadata routes it to the converse
-> pool and names the subject's continuation group, whose `gc.outcome`
-> records how it resolved, and which closes when it does (the subject
-> never closes this way). A visit that is *held* becomes the sitting it
-> asked for, and ends out loud, with a sign-off naming the outcome and
-> the subject to look at next, because the ending is the one part of a
+> **A visit** is a filed request for one bounded sitting of a
+> subject's dialogue, stored as a bead linked to the subject by a
+> `tracks` edge and never as its child, whose body says what that
+> sitting would be for ("ratify this plan", "review posted — decision
+> needed"), whose metadata routes it to the converse pool and names
+> the subject's continuation group, whose `gc.outcome` records how it
+> resolved, and which closes when it does (the subject never closes
+> this way). A visit that is *held* becomes the sitting it asked for,
+> and ends out loud, with a sign-off naming the outcome and the
+> subject to look at next, because the ending is the one part of a
 > sitting the operator cannot reconstruct from the record ("How a held
-> sitting ends", above). A visit that is claimed and found not to need a
-> human never becomes a sitting at all: it closes silently against its
-> subject, because a visit is a request for attention and the loop has
-> to be able to answer it with *no* (tk-mndjz). The sequence of visits
-> under a subject is the dialogue's durable spine — board-legible,
+> sitting ends", above). A visit that is claimed and found not to need
+> a human never becomes a sitting at all: it closes silently against
+> its subject, because a visit is a request for attention and the loop
+> has to be able to answer it with *no*. The sequence of visits under
+> a subject is the dialogue's durable spine — board-legible,
 > cold-reconstructable, no provider transcript required.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and

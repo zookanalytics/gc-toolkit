@@ -9,10 +9,10 @@ the bash dies).
 > **The bash board is gone; the bash WRITE VERBS are what is left.**
 > `tmux-pick-helm.sh:60` invokes `"$HELM_SVC" board --json --limit=36`, this
 > binary. `gc-helm.sh` no longer renders a board at all: it carries `open`,
-> `react` and `takeaway`, and `gc-helm.sh --json` exits 2 with `unknown verb`.
-> Its own usage text points at `helm-svc board`. Retiring the remaining verbs is
-> a separate decision recorded under "Two helm boards, and they diverge" in
-> `docs/gascity-human-engagement.md`.
+> `react`, `takeaway`, `demand` and `dismiss`, and `gc-helm.sh --json` exits 2
+> with `unknown verb`. Its own usage text points at `helm-svc board`. Retiring the
+> remaining verbs is a separate decision recorded under "Two helm boards, and
+> they diverge" in `docs/gascity-human-engagement.md`.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -252,8 +252,8 @@ anchor with children is banded by that roll-up like any other anchor: HIGH when
 its frontier is stranded, NORMAL when something is moving, and LOW again once
 every child has closed.
 
-That relation is the ONLY one that can see the canonical converse shape. A
-sitting files the work it routes as a CHILD of the subject, and beads refuses a
+That relation is the ONLY one that can see work filed as a CHILD of its
+subject. Work filed that way exists in the tree, and beads refuses a
 `blocks` edge from a parent to its own descendant —
 
     $ bd dep add tk-z9nln tk-wvrga -t blocks
@@ -266,6 +266,12 @@ board ONLY through its parent's roll-up: the row reported zero children AND its
 open children were on no board anywhere. Measured on `tk-z9nln`, 2026-08-22 —
 the row read `m_total=0 · conversation parked`, while the deliverable it was
 waiting for sat open, unassigned and unrouted, invisible.
+
+Converse files routed work, and the demand beads that record what a person
+owes, as SIBLINGS of the subject (`docs/gascity-human-engagement.md`, "How a
+sitting ends"), so the `waiting_on` edge takes and the disposition rule below
+fires for them. The child roll-up stays exactly as it is: it is what keeps the
+work already filed as a child visible, and nothing re-parents it.
 
 A roll-up whose children have ALL closed stays LOW. The row can now *say* the
 work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which is what a
@@ -325,18 +331,20 @@ since converse never closes a subject by contract, nothing in the city could
 ever have retired them. Two constants that never stand down are not
 *unmissable*; uniform is the same thing as invisible.
 
-A row is **ruled** when all three hold:
+A row is **ruled** when all four hold:
 
 1. it is human-gated — kind `decision` or `human`, or a bead carrying
    `gc.routed_to=human` (which is how the `parked` twin of one is recognised);
-2. it carries a `gc.takeaway`; and
-3. its `blocks` waits were READ, and none of them is still open.
+2. it carries a `gc.takeaway`;
+3. its `blocks` waits were READ, and none of them is still open; and
+4. it is not a demand — no `gc.demand_for`.
 
 | shape | row |
 |---|---|
 | no takeaway | unchanged: ELEVATED, frontier "human-gated decision"; NEEDS names the silence (below) |
 | takeaway, waits unreadable | unchanged — an unread graph proves nothing |
 | takeaway, a wait still open | unchanged — answering is not finishing |
+| open demand (`gc.demand_for`) | unchanged — its takeaway is the question, not an answer to it |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
 | takeaway, every wait landed, *with* children | banded by the roll-up, like a decomposed `parked` subject |
 
@@ -364,6 +372,13 @@ Three properties carry over from the disposition rule, and one is new:
 - **LOW, not NORMAL.** NORMAL is stale-bumped past fourteen days, which would
   put `tk-z130v` — thirty days old — straight back in the band it was standing
   down from.
+- **A demand is exempt.** `gc-helm demand` stamps the authored ask as the
+  demand bead's own `gc.takeaway` so the board has a sentence to show, and the
+  demand carries no blocker of its own — it *is* the blocker, and the edge
+  points at it from the gated work. Clauses 2 and 3 are therefore satisfied the
+  moment it is filed, and without clause 4 the row the verb exists to raise
+  stood down on the render that first saw it. A demand is answered by being
+  CLOSED, which is what makes the gated work ready; until then it is owed.
 - **`dispositionDue` yields to it.** That promotion exists to lift a row out of
   the parked LOW *floor*; a human-gated bead was never in that floor, and the
   stand-down answers for the same state at the volume the operator asked for.
@@ -1240,9 +1255,9 @@ Session liveness and convoy ownership come from the `gc` CLI — see
 
 **Still deferred** (and *why*):
 
-- **Retiring `gc-helm.sh`.** Its `open`, `react` and `takeaway` verbs have no Go
-  equivalent, so the script stays. Retirement is a follow-up once the board view
-  is proven at parity in daily use.
+- **Retiring `gc-helm.sh`.** Its `open`, `react`, `takeaway`, `demand` and
+  `dismiss` verbs have no Go equivalent, so the script stays. Retirement is a
+  follow-up once the board view is proven at parity in daily use.
 - **A CLI cache.** `helm-svc board` re-gathers every run (~2.7-3.3s). The bash
   board's 45s file cache makes a repeat glance ~1.8s. Caching here would buy
   about a second and re-introduce a staleness surface, which is the thing this
