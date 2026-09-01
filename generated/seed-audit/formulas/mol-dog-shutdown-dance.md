@@ -16,11 +16,14 @@ gc.routed_to={{binding_prefix}}dog, --label=warrant:
 
   gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"<reason>","warrant.requester":"<who>","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
 
-The claimed warrant bead is the dance's identity: use $GC_BEAD_ID for
-verification, evidence, and closure. Pardon-biased: one `alive` verdict ends
-the dance. EVERY stop path either closes the warrant with
-gc.outcome=pardoned|executed|refused or files escalate.sh
-(--key wedged-<session>) — never both silence and an open claim.
+The claimed warrant bead is the dance's identity, and `gc hook current
+--id-only` is what names it — it reads back the id this session claimed. A
+pool session never receives $GC_BEAD_ID, so a close written against that
+variable writes nothing and still exits 0, leaving the warrant open and
+silent. Every step that touches the warrant re-derives the id in its own
+shell. Pardon-biased: one `alive` verdict ends the dance. EVERY stop path
+either closes the warrant with gc.outcome=pardoned|executed|refused or files
+escalate.sh (--key wedged-<session>) — never both silence and an open claim.
 
 Step-close discipline, same as the sibling formulas: when this runs as a
 poured molecule each step closes its own bead via

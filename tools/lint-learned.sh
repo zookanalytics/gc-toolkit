@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # lint-learned.sh — runner for hardened learned-rule lints.
 #
-# Executes every executable in tools/lint-learned.d/ against a set of changed
-# files. Each detector encodes ONE hardened learned rule — a prose bullet from
+# Executes every executable in tools/lint-learned.d/ against the repository.
+# Each detector encodes ONE hardened learned rule — a prose bullet from
 # a learned-conventions fragment that graduated into executable form via a
 # `prompt-update: harden` PR (specs/2026-08-learning-system/implementation-design.md
 # §8). Wiring this runner into a rig's refinery `lint_command` is a PER-RIG
@@ -10,10 +10,13 @@
 # the tool, never the wiring.
 #
 # Contract:
-#   • FILE LIST — from argv when args are given; otherwise from
-#         git diff --name-only ${LINT_BASE:-origin/main}...HEAD
-#     limited to paths that still exist as regular files (deletes drop out).
-#     An empty list is a clean pass, not an error.
+#   • FILE LIST — from argv when args are given; otherwise every tracked file
+#     in the repository, from `git ls-files` at the top level. A detector
+#     asserts an invariant the codebase either holds or does not, so it reads
+#     the whole tree: scoping to a diff cannot make the codebase satisfy a
+#     rule, it only decides who gets told. Paths that are not regular files
+#     drop out. An empty list is a clean pass, not an error, but an
+#     enumeration that FAILS exits 2 — it must never read as that empty list.
 #   • DISPATCH — the runner passes the whole file list to each detector on
 #     argv. Detectors get no stdin and no env contract beyond the argv list.
 #   • DETECTOR EXIT CODES — 0 = clean; 1 = findings, printed on stdout as
@@ -26,8 +29,8 @@
 #   • Detectors must be CHEAP and DEPENDENCY-FREE (bash + POSIX userland):
 #     a rig that opts in runs this inside a gate on every bead.
 #
-# Non-executables in lint-learned.d/ (README.md, *.allow tuning files) are
-# data, not detectors, and are skipped by the executable filter.
+# Non-executables in lint-learned.d/ (README.md) are data, not detectors, and
+# are skipped by the executable filter.
 
 set -uo pipefail
 
@@ -46,20 +49,34 @@ if [ "$#" -gt 0 ]; then
         [ -f "$f" ] && files+=("$f")
     done
 else
-    base="${LINT_BASE:-origin/main}"
-    if ! diff_out="$(git diff --name-only "${base}...HEAD" 2>/dev/null)"; then
-        # Exit 2, distinct from findings-exit-1: an unresolvable base must
-        # never read as a green (or merely-findings) gate.
-        echo "lint-learned: cannot resolve base '${base}' — fetch it or set LINT_BASE" >&2
+    if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        # Exit 2, distinct from findings-exit-1: a tree the runner cannot
+        # enumerate must never read as a green (or merely-findings) gate.
+        echo "lint-learned: not inside a git repository — pass files on argv" >&2
+        exit 2
+    fi
+    # Enumerate from the top level so findings carry repo-relative paths
+    # whatever directory the caller invoked from.
+    cd "$repo_root" || exit 2
+    # The listing goes through a checked temp file because a failed
+    # enumeration has to reach the exit code. Read straight into the loop, a
+    # failing `git ls-files` yields zero iterations and an empty list, which
+    # is byte-identical to a clean tree, so the gate reads green exactly when
+    # it can see nothing.
+    listing="$(mktemp)" || exit 2
+    if ! git ls-files >"$listing"; then
+        echo "lint-learned: cannot enumerate tracked files under $repo_root" >&2
+        rm -f "$listing"
         exit 2
     fi
     while IFS= read -r f; do
         [ -n "$f" ] && [ -f "$f" ] && files+=("$f")
-    done <<< "$diff_out"
+    done < "$listing"
+    rm -f "$listing"
 fi
 
 if [ "${#files[@]}" -eq 0 ]; then
-    echo "lint-learned: no changed files to lint — clean"
+    echo "lint-learned: no files to lint — clean"
     exit 0
 fi
 
