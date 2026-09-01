@@ -242,9 +242,9 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
           or ((.title // "") | startswith("input convoy for"))
           or ((.metadata["gc.synthetic"] // "") == "true")));
   # The tracking bead of an order is a wisp: issue_type task, no metadata
-  # until it closes, and no edges, so it reaches no structural class and
-  # every order in flight reports itself. Both conjuncts are machine-minted
-  # and immutable, which keeps the exclusion locally decidable and monotone.
+  # until it closes, and no edges, so its id and its title are the only
+  # durable structural signals it carries. Both are machine-minted and
+  # immutable, which keeps the exclusion locally decidable and monotone.
   # Requiring BOTH is what keeps a human bead titled "order: ..." visible,
   # and a wisp of some other kind too.
   def order_wisp:
