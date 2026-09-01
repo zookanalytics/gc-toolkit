@@ -137,12 +137,12 @@ A
 eq "$(resolve rework-1 polecat/parent)" "anchor-pre|anchor-pre" \
    "(3) pre_open_gate anchor on same branch -> resolved as gating anchor"
 
-# (3b) THE PR #522 REGRESSION. The anchor is parked in a HUMAN state — signoff
-#      capped its rework rounds and routed it to a person — so it is not in
-#      either gating sub-state. It still carries a merge_result, still owns the
-#      PR, and doctor still counts it as an open anchor. A lookup restricted to
-#      pull_request/pre_open_gate walks straight past it and stamps the child as
-#      a second anchor, which is exactly what PR #522 ended up with.
+# (3b) The anchor is parked in a HUMAN state — signoff caps its rework rounds
+#      and routes it to a person — so it is in neither gating sub-state. It
+#      still carries a merge_result, still owns the PR, and doctor still counts
+#      it as an open anchor. A lookup restricted to pull_request/pre_open_gate
+#      walks straight past it and stamps the child as a second anchor for the
+#      same PR.
 for HUMAN_STATE in blocked held abandoned retargeted refused_false_completion; do
   printf 'anchor-h|%s|polecat/parent|2026-07-01T00:00:00Z\n' "$HUMAN_STATE" > "$FAKE_ANCHORS"
   eq "$(resolve rework-1 polecat/parent)" "anchor-h|anchor-h" \
