@@ -65,9 +65,11 @@
 # that store's candidates. A held step is a note, and the resting state it
 # names is `blocked` — the one state neither arm scans, so no pool is offered
 # it. Releasing it to `open` instead hands it to the pool its route still
-# names, which is the opposite of the hold. When the roots cannot be read the
-# steps that depend on them go unjudged: a hold that cannot be seen must not
-# be released.
+# names, which is the opposite of the hold. A root the lookup does not return
+# is a root that was not read: `bd list --id` drops an id it cannot resolve and
+# still exits 0, so the ids asked for are compared against the ids that came
+# back. Steps whose root went unread go unjudged, because a hold that cannot be
+# seen must not be released.
 #
 # last_active is derived from tmux pane changes and is hardened upstream
 # against self-inflation (gc's own nudge keystrokes do not ratchet it), so a
@@ -90,7 +92,7 @@ HELD='((($m["gc.takeaway"] // "") | tostring) != "")
 
 errors=(); warnings=(); notes=()
 unclaimed=(); occupied_list=(); occupancy_partial=0
-declare -A root_held=() held_count=() held_age=(); holds_ok=1
+declare -A root_held=() root_seen=() held_count=() held_age=(); holds_ok=1; holds_missing=0
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
@@ -104,21 +106,35 @@ scrub() { tr -d '\000-\011\013-\037'; }
 # its own marker is already answered and never arrives here; the rest are
 # resolved in ONE listing, which is why the ids arrive as a set. --all because
 # a hold outlives its root's close, and a husk step under a retired root is
-# exactly the one that must not be handed back to a pool. Sets root_held, and
-# holds_ok=0 when the lookup could not answer at all.
+# exactly the one that must not be handed back to a pool.
+#
+# Sets root_seen beside root_held, because a root the listing does not return
+# has not been judged either way: `bd list --id` drops an id it cannot resolve
+# and still exits 0, so an absent row reads identically to a root with no hold
+# unless the two id sets are compared. holds_ok=0 is the whole lookup failing;
+# holds_missing counts the roots an otherwise good lookup answered without.
 resolve_holds() {
-    local db="$1" ids="$2" raw out
-    unset -v root_held; declare -gA root_held=()
-    holds_ok=1
+    local db="$1" ids="$2" raw out r h
+    unset -v root_held root_seen; declare -gA root_held=() root_seen=()
+    holds_ok=1; holds_missing=0
     [ -n "$ids" ] || return 0
     raw=$(run_bounded bd list --db "$db" --id "$ids" --all --json --limit 0 2>/dev/null)
     if [ $? -ne 0 ] || [ -z "$raw" ]; then holds_ok=0; return 0; fi
     out=$(printf '%s' "$raw" | scrub | jq -r '.[]? | select(type == "object")
         | (.metadata // {}) as $m
-        | select('"$HELD"')
-        | ((.id // "") | tostring) | select(. != "")' 2>/dev/null)
+        | (((.id // "") | tostring) | gsub("[[:cntrl:]]"; " ")) as $rid
+        | select($rid != "")
+        | [$rid, (if '"$HELD"' then "1" else "0" end)] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then holds_ok=0; return 0; fi
-    while IFS= read -r r; do [ -n "$r" ] && root_held["$r"]=1; done <<< "$out"
+    while IFS="$SEP" read -r r h; do
+        [ -n "$r" ] || continue
+        root_seen["$r"]=1
+        [ "$h" = "1" ] && root_held["$r"]=1
+    done <<< "$out"
+    while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        [ -n "${root_seen[$r]:-}" ] || holds_missing=$((holds_missing + 1))
+    done <<< "$(printf '%s' "$ids" | tr ',' '\n' | LC_ALL=C sort -u)"
     return 0
 }
 
@@ -246,13 +262,14 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         done <<< "$rows"
         resolve_holds "$db" "${hroots%,}"
         [ "$holds_ok" = "1" ] || warnings+=("$label: the roots named by this store's stalled step(s) could not be read — a deliberate hold cannot be told from a strand there, so those steps were NOT judged")
+        [ "$holds_ok" != "1" ] || [ "$holds_missing" -eq 0 ] || warnings+=("$label: $holds_missing of the roots named by this store's stalled step(s) returned no row. An id the lookup cannot resolve is a root that went unread, not a root without a hold, so those steps were NOT judged")
         while IFS="$SEP" read -r cls bid as held ex hm root; do
             [ -n "$cls" ] || continue
             if [ "$hm" = "1" ] || { [ -n "$root" ] && [ -n "${root_held[$root]:-}" ]; }; then
                 held_note "$label" in_progress "$held"
                 continue
             fi
-            [ "$holds_ok" = "1" ] || [ -z "$root" ] || continue
+            [ -z "$root" ] || [ -n "${root_seen[$root]:-}" ] || continue
             case "$cls" in
                 unheld)   errors+=("$label step $bid: in_progress for ${held}m with NO assignee. Nothing holds it, and \`bd ready\` cannot offer it either because its status is not open, so it is reachable by neither path; release it (status=open) so a pool can re-offer it.") ;;
                 orphaned) errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — id, session_name and alias were all tried. Nothing holds this step and nothing will advance it; release it (status=open, assignee=\"\") so a pool can re-offer it.") ;;
@@ -351,13 +368,14 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
     [ -n "$orows" ] || continue
     resolve_holds "$db" "${oroots%,}"
     [ "$holds_ok" = "1" ] || warnings+=("$label: the roots named by this store's unclaimed step(s) could not be read — a deliberate hold cannot be told from a strand there, so those steps were NOT judged")
+    [ "$holds_ok" != "1" ] || [ "$holds_missing" -eq 0 ] || warnings+=("$label: $holds_missing of the roots named by this store's unclaimed step(s) returned no row. An id the lookup cannot resolve is a root that went unread, not a root without a hold, so those steps were NOT judged")
     while IFS="$SEP" read -r uid uroute uref uage uhm uroot; do
         [ -n "$uid" ] || continue
         if [ "$uhm" = "1" ] || { [ -n "$uroot" ] && [ -n "${root_held[$uroot]:-}" ]; }; then
             held_note "$label" open "$uage"
             continue
         fi
-        [ "$holds_ok" = "1" ] || [ -z "$uroot" ] || continue
+        [ -z "$uroot" ] || [ -n "${root_seen[$uroot]:-}" ] || continue
         unclaimed+=("${label}${SEP}${uid}${SEP}${uroute}${SEP}${uref}${SEP}${uage}")
     done <<< "$orows"
 done <<< "$scopes"

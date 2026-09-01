@@ -661,6 +661,43 @@ between "$AGE" 150 159 "the note reports the oldest of them"
 eq "$(printf '%s' "$OUT" | grep -c 'held on purpose')" "1" "one line for the whole cohort"
 clear_stores
 
+# --- 15f. a root that returns no row is unread, not unheld -----------------
+# `bd list --id` drops an id it cannot resolve and still exits 0, so a lookup
+# that answers about none of the roots it was asked about reads exactly like
+# one that found no hold on any of them. The step goes unjudged, and only the
+# step whose root actually came back may be judged.
+store alpha "$(unheld a-noroot 7200 '"gc.root_bead_id":"r-gone"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a step naming a root the store does not return WARNS, never errors"
+has "$OUT" "returned no row" "the warning says the root came back with no row"
+has "$OUT" "NOT judged" "the warning says the step was not judged"
+hasnt "$OUT" "status=open" "no release hint is given against a root that went unread"
+hasnt "$OUT" "held on purpose" "an unread root is not read as a hold either"
+clear_stores
+
+# Per root, not per store: one unresolvable root must not silence the strand
+# beside it, whose own root came back carrying nothing.
+store alpha "$(unheld a-noroot 7200 '"gc.root_bead_id":"r-gone"')" \
+            "$(unheld a-strand 7200 '"gc.root_bead_id":"r-1"')" \
+            "$(root r-1 open '{}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the strand whose root came back is still an ERROR"
+has "$OUT" "alpha step a-strand" "the judged strand is named"
+hasnt "$OUT" "alpha step a-noroot" "the step whose root went unread is not"
+has "$OUT" "1 of the roots" "the warning counts the unresolved root alone"
+clear_stores
+
+# Arm 2 the same way, and for the sharper reason: the advice withheld here is
+# the claim itself.
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-gone"')"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unread root leaves arm 2 a warning, not the never-claimed error"
+has "$OUT" "returned no row" "the arm 2 warning names the unresolved root"
+hasnt "$OUT" "nudge the pool" "the pool is not nudged against a root that went unread"
+clear_stores
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
