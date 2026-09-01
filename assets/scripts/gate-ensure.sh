@@ -486,8 +486,11 @@ Two repairs, either of which clears the hold:
   return it to the pool as a formula-less review, the shape mol-review
   documents for exactly this recovery —
     gc bd update $rid --set-metadata gc.routed_to=$rpool
-  or drop the abandoned round and let the next pass dispatch a fresh review —
-    gc bd close $rid" >/dev/null \
+  or drop the abandoned round and let the next pass dispatch a fresh review.
+  Close it through a write that records the disposal: a bare 'gc bd close'
+  leaves a review stating neither a verdict nor a reason, which spends this
+  round against the dispatch ceiling and tells the next reader nothing —
+    gc bd update $rid --set-metadata gc.outcome=abandoned --append-notes 'Closed unjudged: the poured workflow finished without calling signoff.sh, so no verdict is coming. No gate marker written, no rework filed.' --status=closed" >/dev/null \
                   && { wedged=$((wedged + 1)); echo "$PROG: $id gate '$g' review $rid is WEDGED (workflow $spent_root spent); escalated [$WEDGE_KEY]"; } \
                   || echo "$PROG: $id gate '$g' review $rid is WEDGED (workflow $spent_root spent) but the escalation did not file; retry next pass" >&2
               fi ;;

@@ -670,6 +670,10 @@ has "$esc" "--subject rev-w1" "the visit is filed on the wedged review bead"
 has "$esc" "--key review-wedge" "…under one situation key, so repeats dedup"
 has "$esc" "gate 'codex' on W1 is held" "…naming the anchor and gate that are stuck"
 has "$esc" "gc bd update rev-w1 --set-metadata gc.routed_to=$POOL" "…and the route-restore repair"
+# The drop repair disposes of a review, so it must leave the record every other
+# closer leaves; a bare close is what doctor/check-review-verdict-recorded flags.
+has "$esc" "gc.outcome=abandoned" "…and a drop repair that records the disposal"
+hasnt "$esc" "gc bd close rev-w1" "…never a bare close, which records nothing"
 has "$esc" "root-w1" "…and the spent workflow"
 has "$esc" "check.codex is absent" "…and the marker state, not the dispatch arm's rationale"
 has "$out" "0 reviews dispatched" "escalating still dispatches nothing"
