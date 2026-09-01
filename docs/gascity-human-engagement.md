@@ -951,10 +951,9 @@ definition first, because everything below uses it:
 > sitting ends", above). A visit that is claimed and found not to need
 > a human never becomes a sitting at all: it closes silently against
 > its subject, because a visit is a request for attention and the loop
-> has to be able to answer it with *no* (tk-mndjz). The sequence of
-> visits under a subject is the dialogue's durable spine —
-> board-legible, cold-reconstructable, no provider transcript
-> required.
+> has to be able to answer it with *no*. The sequence of visits under
+> a subject is the dialogue's durable spine — board-legible,
+> cold-reconstructable, no provider transcript required.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and
 > those are routinely a day or more apart — a queued visit holds its
