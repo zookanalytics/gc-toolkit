@@ -78,7 +78,8 @@ RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .pat
 # Split the ordered SHA list explicitly with awk: zsh — the shell this block
 # is pasted into — performs NO word-splitting on an unquoted expansion, so
 # `set -- $COMMIT_SHA` sets ONE joined parameter there.
-SHA_LIST=$(mktemp)
+SHA_LIST=$(mktemp "${TMPDIR:-/tmp}/gctk-upstream-gc-pr-prep.XXXXXX")
+trap 'rm -f "$SHA_LIST"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 printf '%s' "$COMMIT_SHA" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$SHA_LIST"
 N=$(awk 'END { print NR }' "$SHA_LIST")
 FIRST_SHA=$(awk 'NR == 1 { print; exit }' "$SHA_LIST")
@@ -157,7 +158,8 @@ SCRUB_LOG=/tmp/scrub-all-{{issue}}.txt
 # Explicit awk split + read-from-FILE: zsh does not word-split unquoted
 # expansions, and a file (not a pipe) lets the fail-safe `exit 0` below
 # leave the step rather than a subshell.
-SHA_LIST=$(mktemp)
+SHA_LIST=$(mktemp "${TMPDIR:-/tmp}/gctk-upstream-gc-pr-prep.XXXXXX")
+trap 'rm -f "$SHA_LIST"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 printf '%s' "$COMMIT_SHA" | awk '{ for (i = 1; i <= NF; i++) print $i }' > "$SHA_LIST"
 while IFS= read -r SHA; do
   if ! git cherry-pick "$SHA"; then

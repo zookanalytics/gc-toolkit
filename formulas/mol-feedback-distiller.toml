@@ -130,7 +130,13 @@ done
 # Rig set: a poured {{rig_list}} wins; else enumerate. `gc rig list --json`
 # returns an OBJECT ({"rigs":[...]}), and the HQ entry is addressable only by
 # PATH (`--rig <city>` fails) — so carry name + path per line.
-RIGSET=$(mktemp)
+RIGSET=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
+# $PENDING is deliberately absent: later blocks read it, so it outlives this
+# shell and is removed at its last use. An empty $RAW is guarded because
+# `rm -f "$RAW.pending"` would otherwise name `.pending` in the cwd.
+RAW=""
+distill_scratch_rm() { rm -f "$RIGSET"; [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"; return 0; }
+trap distill_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 POURED="{{rig_list}}"
 if [ -n "$POURED" ]; then
   printf '%s' "$POURED" | tr ' ' '\\n' | grep -v '^$' > "$RIGSET"
@@ -144,14 +150,15 @@ if [ ! -s "$RIGSET" ]; then
   exit 0
 fi
 
-PENDING=$(mktemp); echo '[]' > "$PENDING"
+PENDING=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX"); echo '[]' > "$PENDING"
 # `while read < file`, never `for R in $RIGS` (zsh does not word-split).
 # Open a store by PATH when known (`gc bd -C <path>` — also reaches HQ),
 # by NAME only for poured names.
 TAB=$(printf '\\t')
 while IFS="$TAB" read -r R RPATH; do
   [ -n "$R" ] || continue
-  RAW=$(mktemp)
+  [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"
+  RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
   if [ -n "$RPATH" ]; then
     gc bd -C "$RPATH" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
   else
@@ -529,6 +536,9 @@ if [ -n "$RECUR" ]; then
 else
   echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 fi
+# The pending set is read across every step, so step 1 cannot trap it; this
+# is its last use. Guarded because each block is its own shell.
+[ -n "${PENDING:-}" ] && rm -f "$PENDING"
 "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```

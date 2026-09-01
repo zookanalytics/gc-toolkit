@@ -160,7 +160,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/tmux-visit-prompt.sh"
 BINDINGS="$HERE/tmux-bindings.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-tmux-visit-prompt-test.XXXXXX")"
 SOCKET="gcvp-test-$$"
 PROBE_SOCKET="gcvp-probe-$$"
 cleanup() {

@@ -433,7 +433,7 @@ reviewer. You are the only actor that has read the diff, so say what changed
 and why, for a reviewer who was not in the originating conversation:
 
 ```bash
-PR_SUMMARY_FILE=$(mktemp)
+PR_SUMMARY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-polecat-work.XXXXXX")
 cat > "$PR_SUMMARY_FILE" <<'PRSUMMARY'
 <the behavior before, the behavior now, and the shape of the change — a short
 paragraph or a few bullets of markdown>
@@ -521,6 +521,10 @@ if [ -n "$PR_SUMMARY" ]; then
 fi
 gc bd update "$WORK_BEAD_ID" "${HANDOFF[@]}" --append-notes "Implemented: <brief summary>"
 # <<< submit-target-consume
+# The summary file crosses steps, so step 4b cannot trap it and the block
+# above must not consume it — it is extracted and replayed against one
+# fixture. Handed off, it has no further reader.
+rm -f "${PR_SUMMARY_FILE:-}"
 ```
 
 `${GC_RIG:+$GC_RIG/}` renders the rig prefix only inside a rig session. An

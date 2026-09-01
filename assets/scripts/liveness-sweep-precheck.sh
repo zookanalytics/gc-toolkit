@@ -171,7 +171,7 @@ if [ "$STAMP_WRITABLE" -eq 0 ]; then
     exit 1
 fi
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-precheck.XXXXXX")"
 
 if command -v timeout >/dev/null 2>&1; then
     if timeout -k 1 1 true >/dev/null 2>&1; then

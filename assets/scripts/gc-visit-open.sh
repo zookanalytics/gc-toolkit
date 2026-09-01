@@ -134,7 +134,11 @@ enumerate_rigs() {
     # >>> rig-enumeration-taxonomy
     # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences, tk-lzdty); no
     # timeout arm because this script does not bound the call.
-    _er_errf=$(mktemp 2>/dev/null || printf '')
+    # The stderr capture outlives nothing: it is read and removed a few lines
+    # down. The trap is for the signal that lands while `gc rig list` runs.
+    _er_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-rig-enum.XXXXXX" 2>/dev/null || printf '')
+    trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
+    trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
     _er_rc=0
     if [ -n "$_er_errf" ]; then
         rigs_raw=$(gc rig list --json 2>"$_er_errf") || _er_rc=$?

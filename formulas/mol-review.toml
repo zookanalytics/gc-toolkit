@@ -163,12 +163,24 @@ read in chunks, not sampled.
 
 **2. Run the tests at the pinned commit** in a throwaway detached worktree,
 so they run against exactly what you reviewed:
+Run it as ONE shell: the trap is what removes the worktree, and it fires
+when that shell exits.
 ```bash
-REVIEW_WT=$(mktemp -d "/tmp/gc-review-$REVIEW_BEAD.XXXXXX")
+REPO=$(git rev-parse --show-toplevel)
+REVIEW_WT=$(mktemp -d "${TMPDIR:-/tmp}/gc-review-$REVIEW_BEAD.XXXXXX")
+# The trap owns the teardown, so every exit reaches it — a failing suite, a
+# timeout, an interrupt. A worktree left behind keeps its registration too,
+# and a registration whose directory still exists is one `git worktree prune`
+# cannot reclaim: it needs the removal to have run.
+review_wt_rm() {
+  cd "$REPO" 2>/dev/null || true
+  git -C "$REPO" worktree remove --force "$REVIEW_WT" 2>/dev/null || rm -rf "$REVIEW_WT"
+  git -C "$REPO" worktree prune
+}
+trap review_wt_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git worktree add "$REVIEW_WT" --detach "$REVIEWED_OID"
 cd "$REVIEW_WT"
 # run the suites the diff touches; record real pass/fail counts
-cd - >/dev/null && git worktree remove --force "$REVIEW_WT"
 ```
 A failing suite is not automatically a finding: check whether it fails on the
 base too. A pre-existing failure belongs in the verdict as context, not as

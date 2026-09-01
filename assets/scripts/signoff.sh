@@ -568,7 +568,7 @@ fi
 
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.
-BODY_FILE=$(mktemp) || { warn "mktemp failed"; exit 1; }
+BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
 trap 'rm -f "$BODY_FILE"' EXIT
 if [ -n "$NOTES_FILE" ]; then
   cat "$NOTES_FILE" > "$BODY_FILE"

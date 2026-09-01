@@ -108,7 +108,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SVC="$HERE/gc-helm-svc.sh"
 BUILD="$HERE/gc-helm-build.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-svc-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------------------

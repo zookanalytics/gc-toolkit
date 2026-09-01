@@ -124,7 +124,7 @@ case "$sub" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$bead:"*) drops="${pair#*:}" ;; esac
     done
-    tmp="$(mktemp)"; cp "$S" "$tmp"
+    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"; cp "$S" "$tmp"
     jq -c --arg id "$bead" 'map(if .id == $id then (.metadata |= del(.["gc.routed_to"])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
     case ",$drops," in
       *",gc.execution_routed_to,"*) : ;;
@@ -216,7 +216,7 @@ case "$verb" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
     done
-    tmp="$(mktemp)"; cp "$S" "$tmp"
+    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"; cp "$S" "$tmp"
     for kv in ${sets[@]+"${sets[@]}"}; do
       k="${kv%%=*}"; v="${kv#*=}"
       case ",$drops," in *",$k,"*) continue ;; esac
@@ -256,7 +256,7 @@ case "$verb" in
       shift || true
     done
     n=$(jq 'length' "$S"); nid="new-$((n + 1))"
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
     jq -c --arg id "$nid" --arg t "$title" --arg b "$body" \
       '. + [{id: $id, status: "open", assignee: "", title: $t, description: $b, notes: "", issue_type: "task", metadata: {}}]' \
       "$S" > "$tmp" && mv "$tmp" "$S"
@@ -265,7 +265,7 @@ case "$verb" in
   close)
     id="${1:-}"
     case " ${STUB_CLOSE_FAIL:-} " in *" $id "*) echo "gc: simulated close refusal" >&2; exit 1 ;; esac
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)

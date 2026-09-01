@@ -177,6 +177,11 @@ ANCHORS=$(printf '%s' "$ANCHORS" | scrub)
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no pre-open anchors"; exit 0; }
 
 opened=0; flipped=0; held=0; skipped=0
+# The body file is removed after each create; the trap covers the window
+# a signal can land in, which is the whole `gh pr create` call.
+BODY=""
+trap 'rm -f "$BODY" 2>/dev/null' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -271,7 +276,7 @@ GATES
   # the absent case, as it is for check_set above.
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty')
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || summary=""
-  BODY=$(mktemp) || { echo "$PROG: cannot create a temp file for the PR body" >&2; exit 1; }
+  BODY=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open.XXXXXX") || { echo "$PROG: cannot create a temp file for the PR body" >&2; exit 1; }
   {
     echo "## Summary"; echo
     if [ -n "$summary" ]; then printf '%s\n' "$summary"

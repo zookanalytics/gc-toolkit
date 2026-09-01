@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
 TOML="$ROOT/formulas/mol-dog-shutdown-dance.toml"
 AGENT="$ROOT/agents/dog/agent.toml"
-TMP="$(mktemp -d)"; mkdir -p "$TMP/bin"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-dog-escalation-wiring-test.XXXXXX")"; mkdir -p "$TMP/bin"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }

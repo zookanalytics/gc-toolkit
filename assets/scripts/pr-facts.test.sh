@@ -40,7 +40,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -569,7 +569,7 @@ echo '[]' > "$GH_DIR/reviews_47.json"
 printf '[{"id":9200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_47.json"
 out=$(STUB_DROP_KEYS="new-2:anchor_bead" run)
 has "$out" "did not record anchor_bead=W3; left unrouted" "the dropped stamp leaves an orphan again"
-ctmp=$(mktemp); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
+ctmp=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX"); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
 out=$(run)
 hasnt "$out" "adopting unstamped comment-rework orphan" "a closed orphan is passed over"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
@@ -626,7 +626,7 @@ echo '[]' > "$GH_DIR/reviews_49.json"
 printf '[{"id":9400,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_49.json"
 out=$(STUB_DROP_KEYS="new-2:gc.routed_to" run)
 has "$out" "NOT watermarking" "the unrouted child holds the mark"
-ctmp=$(mktemp); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
+ctmp=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX"); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
 out=$(run)
 eq "$(meta W5 pr_comment_watermark)" "9400" "a closed child answers the batch even unrouted — refusing forever could not converge"
 

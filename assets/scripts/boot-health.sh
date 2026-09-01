@@ -46,6 +46,12 @@ STATE_OK=1
 mkdir -p "$STATE_DIR" 2>/dev/null || STATE_OK=0
 { [ -d "$STATE_DIR" ] && [ -w "$STATE_DIR" ]; } || STATE_OK=0
 
+# save_state removes its staging file on either failure. A signal landing
+# mid-write reaches neither branch, and nothing else prunes .bh-tmp.*.
+BH_TMP=""
+trap 'rm -f "$BH_TMP" 2>/dev/null' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+
 # Bounded, exit status PRESERVED (124 timeout / 128+n killed) — the report
 # step needs the distinction.
 gc_call_rc() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
@@ -70,6 +76,7 @@ save_state() {
     [ "$STATE_OK" = "1" ] || return 0
     local tmp
     tmp="$(mktemp "$STATE_DIR/.bh-tmp.XXXXXX" 2>/dev/null)" || return 0
+    BH_TMP="$tmp"
     # shellcheck disable=SC2015  # not if-then-else: the rm is the cleanup path
     # for EITHER failure (write or install), which is exactly what is wanted.
     {
@@ -78,6 +85,7 @@ save_state() {
         printf 'cold_since=%s\n'  "$cold_since"
         printf 'last_report=%s\n' "$last_report"
     } > "$tmp" 2>/dev/null && mv -f "$tmp" "$STATE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    BH_TMP=""
 }
 
 # Recovery closes the episode: next coldness is a NEW episode and reports again.

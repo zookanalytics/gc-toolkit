@@ -63,7 +63,7 @@ check_file() {
                      *prompt.template.md) PROMPT_CONSUMERS=$((PROMPT_CONSUMERS + 1)) ;;
                      *)                   SCRIPT_CONSUMERS=$((SCRIPT_CONSUMERS + 1)) ;; esac
         name="$(basename "$f") block $n"
-        tmp="$(mktemp)"
+        tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
         # neutralize template placeholders so bash can parse the copy
         printf '%s\n' "$block" | sed 's/{{[a-z_]*}}/X/g' > "$tmp"
         if bash -n "$tmp" 2>/dev/null; then ok "$name: valid bash"; else bad "$name: valid bash" "bash -n failed"; fi
@@ -142,7 +142,7 @@ echo "── the read-back actually repairs (executed, not grepped) ──"
 # The assertions above prove the TEXT is present; none proves the logic works,
 # and the block exists to turn a silent failure into a loud one. So the
 # canonical copy is extracted and RUN against a stub, once per outcome.
-EXTMP="$(mktemp -d)"
+EXTMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gate-visit-test.XXXXXX")"
 trap 'rm -rf "$EXTMP"' EXIT
 mkdir -p "$EXTMP/bin"
 cat > "$EXTMP/bin/gc" <<'GVSTUB'

@@ -59,7 +59,7 @@ for f in "$FORMULA_TOML" "$AGENT_TOML" "$PROMPT_MD"; do
 done
 command -v jq >/dev/null 2>&1 || { echo "fixture: jq required" >&2; exit 2; }
 
-FXDIR="$(mktemp -d)"
+FXDIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 # shellcheck disable=SC2329  # invoked indirectly via the EXIT trap
 cleanup() { rm -rf "$FXDIR"; }
 trap cleanup EXIT
@@ -210,7 +210,7 @@ extract_toml_block() {
     done < "$AGENT_TOML"
 }
 WQ="$(extract_toml_block work_query | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
-POISON="$(mktemp -d)"
+POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
 : > "$POISON/called"
@@ -238,7 +238,7 @@ has "scale_check answers in COUNT form (0 fallback)" "printf '0'"           "$SC
 absent "scale_check carries no enable gate"         "GC_PROACTIVE_ENABLED"  "$SC_RAW"
 absent "scale_check carries no city-cap clamp"      "GC_PROACTIVE_CITY_CAP" "$SC_RAW"
 has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proactive' "$SC_RAW"
-POISON="$(mktemp -d)"
+POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
 : > "$POISON/called"
@@ -442,7 +442,7 @@ has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
-UFX="$(mktemp -d)"
+UFX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$UFX/u1.show.json" <<'JSON'
 [{"id":"u1","title":"u","description":"trusted seed body","status":"open","issue_type":"task","parent":"","metadata":{"pr_number":"5"},"notes":"n","comment_count":1,"dependencies":[]}]
 JSON

@@ -96,7 +96,7 @@ fi
 # gc bd resolves its ledger from the invoking rig; pin to GC_RIG_ROOT when set.
 DB="${LIVENESS_SWEEP_DB-${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}}"
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 if command -v timeout >/dev/null 2>&1; then

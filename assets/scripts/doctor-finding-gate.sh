@@ -18,6 +18,13 @@
 # Callers: the refinery close arm (--no-run probe), the deacon patrol (publish).
 set -uo pipefail
 
+# Each command handler stages its payload in a temp file and removes it on
+# every branch it can reach. A signal reaches none of them, and only one
+# handler runs per invocation, so one registered path covers both.
+DFG_TMP=""
+trap 'rm -f "$DFG_TMP" 2>/dev/null' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
 # LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
@@ -155,7 +162,8 @@ cmd_probe() {
       # `gc doctor` exits 1 when findings exist — normal here; only the
       # payload's shape decides usability.
       local tmp
-      tmp=$(mktemp 2>/dev/null) || return 2
+      tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-doctor-finding-gate.XXXXXX" 2>/dev/null) || return 2
+      DFG_TMP="$tmp"
       timeout "$DOCTOR_TIMEOUT" gc doctor --json >"$tmp" 2>/dev/null
       if payload_ok "$tmp"; then
         payload="$tmp"; ran="$tmp"
@@ -185,6 +193,7 @@ cmd_probe() {
       | .[]' "$payload" 2>/dev/null)
 
   [ -z "$ran" ] || rm -f "$ran" 2>/dev/null
+  DFG_TMP=""
 
   [ -n "$matched" ] || return 0
   printf '%s\n' "$matched"
@@ -273,7 +282,8 @@ cmd_publish() {
 
   # Buffer first: stdin is not seekable and validation precedes the cache.
   local tmp rc=2
-  tmp=$(mktemp 2>/dev/null) || return 2
+  tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-doctor-finding-gate.XXXXXX" 2>/dev/null) || return 2
+  DFG_TMP="$tmp"
   if [ -n "$src" ] && [ "$src" != "-" ]; then
     cat -- "$src" >"$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 2; }
   else
@@ -287,6 +297,7 @@ cmd_publish() {
     rc=0
   fi
   rm -f "$tmp" 2>/dev/null
+  DFG_TMP=""
   return "$rc"
 }
 

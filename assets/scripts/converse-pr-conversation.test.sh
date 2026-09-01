@@ -30,7 +30,7 @@ command -v jq >/dev/null 2>&1 || {
     exit 1
 }
 
-TMPD="$(mktemp -d)"
+TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-pr-conversation-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; FIXDIR="$TMPD/fix"; RIGROOT="$TMPD/rig"; CITY="$TMPD/city"; BARE="$TMPD/bare"
 mkdir -p "$BIN" "$FIXDIR" "$RIGROOT/tools" "$CITY" "$BARE"
