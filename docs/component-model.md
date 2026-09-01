@@ -369,8 +369,10 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **Adding a state** — declare it in `lifecycle/lifecycle.toml`, name its
   writer in [state-machine.md](state-machine.md)'s table, or it does not
   exist.
-- **Adding a metadata key** — it is state. Register it in `lifecycle.toml`, or
-  accept that nothing downstream can be proven exhaustive over it.
+- **Adding a metadata key** — it is state. Register it in `lifecycle.toml`
+  beside the writer that sets it, and define what reads it, what its absence
+  means, and how it is cleared. Those three are invisible in a key's value and
+  are the whole of what a later reader needs.
 - **Adding an invariant** — name its check in the same PR.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
