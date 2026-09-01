@@ -29,6 +29,7 @@ harness_init() {
   export STUB_UPDATE_FAIL="" STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
+  export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
@@ -379,6 +380,11 @@ set -u
 case "$*" in
   *"remote get-url origin"*) echo "${STUB_ORIGIN_URL:-}" ;;
   *"symbolic-ref"*) echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
+  # The checkout a merge pass runs over. Empty by default, which is a host with
+  # no repository under it and therefore no committed artifact to keep current.
+  *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;
+  *"rev-parse --verify --quiet"*) printf '%s\n' "${STUB_FETCHED_HEAD:-}" ;;
+  *"fetch "*) exit "${STUB_FETCH_RC:-0}" ;;
   *"ls-remote"*)
     # STUB_LS_REMOTE names a file of branch names, one per line, served in
     # ls-remote's own "<sha>\trefs/heads/<name>" shape. STUB_LS_REMOTE_RC

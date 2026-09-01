@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # doctor/check-seed-audit-current — generated/seed-audit/ matches its inputs.
 # The audit is the rendered standing prompt of every agent and the compiled
-# recipe of every formula, committed for review; INDEX.md records a sha256
-# over every input file, and this check recomputes it from the pack tree —
+# recipe of every formula, committed for review; SOURCES.txt records a
+# sha256 per input file, and this check recomputes them from the pack tree —
 # cheap by construction (hashes, no re-render; the authoritative check is
-# `assets/scripts/render-seed-audit.sh --check`). A digest mismatch is an
+# `assets/scripts/render-seed-audit.sh --check`). A drifting input is an
 # error: the committed audit describes a seed no agent receives. An ABSENT
 # audit is a WARNING, not an error — a fresh clone before the first render
 # is expected, and it re-renders on first install (--install-hook).
@@ -16,6 +16,7 @@ set -u
 dir="${GC_PACK_DIR:-.}"
 audit="$dir/generated/seed-audit"
 index="$audit/INDEX.md"
+sources="$audit/SOURCES.txt"
 script="$dir/assets/scripts/render-seed-audit.sh"
 
 warnings=()
@@ -38,30 +39,44 @@ if [ ! -f "$index" ]; then
     exit 1
 fi
 
-recorded_digest=$(sed -n 's/^- source digest: `\(.*\)`$/\1/p' "$index" | head -1)
 recorded_gcver=$(sed -n 's/^- `gc` version: `\(.*\)`$/\1/p' "$index" | head -1)
 
-if [ -z "$recorded_digest" ]; then
-    echo "seed audit records no source digest — staleness is UNVERIFIABLE"
-    detail "generated/seed-audit/INDEX.md exists but carries no '- source digest: \`…\`' line; it was hand-edited or written by an older renderer, so the artifact cannot be checked at all."
+if [ ! -f "$sources" ]; then
+    echo "seed audit records no input manifest — staleness is UNVERIFIABLE"
+    detail "generated/seed-audit/SOURCES.txt does not exist beside INDEX.md; the tree was hand-edited or written by an older renderer, so the artifact cannot be checked at all."
     detail "Fix: assets/scripts/render-seed-audit.sh && git add generated/seed-audit"
     exit 2
 fi
 
-# --print-digest hashes files and shells out to nothing (works with no gc).
-actual_digest=$(bash "$script" --root "$dir" --print-digest 2>/dev/null)
-if [ -z "$actual_digest" ]; then
-    echo "could not recompute the seed-audit source digest — staleness UNVERIFIED"
-    detail "bash $script --print-digest produced no output; the one cheap staleness signal is dark, which is not a benign skip."
+# --print-sources hashes files and shells out to nothing (works with no gc).
+actual_sources=$(bash "$script" --root "$dir" --print-sources 2>/dev/null)
+if [ -z "$actual_sources" ]; then
+    echo "could not recompute the seed-audit input manifest — staleness UNVERIFIED"
+    detail "bash $script --print-sources produced no output; the one cheap staleness signal is dark, which is not a benign skip."
     detail ${warnings[@]+"${warnings[@]}"}
     exit 1
 fi
 
-if [ "$recorded_digest" != "$actual_digest" ]; then
+if [ "$actual_sources" != "$(cat "$sources")" ]; then
     echo "seed audit STALE — a prompt input moved without the artifact moving"
-    detail "recorded digest: $recorded_digest"
-    detail "actual digest:   $actual_digest"
-    detail "An input to the render (agents/, template-fragments/, formulas/, packs/, pack.toml, or the renderer itself) changed since generated/seed-audit/ was generated, so the committed audit describes a seed no agent receives — and every file in it still reads as a valid prompt, which is why this is a check and not a review."
+    # The manifest is two lines per input, path then hash; folding it back to
+    # path<TAB>hash is what a set comparison can be taken over. A changed input
+    # contributes its recorded pair and its actual one, so the paths are
+    # deduplicated; an added or removed input contributes one. `comm -3` indents
+    # its second column with a TAB, which is also the pair separator.
+    pairs() { grep -v '^#' | paste - - | LC_ALL=C sort; }
+    drifted=$(comm -3 <(pairs < "$sources") <(printf '%s\n' "$actual_sources" | pairs) \
+        | sed 's/^\t//' | cut -f1 | LC_ALL=C sort -u | head -10)
+    if [ -n "$drifted" ]; then
+        detail "inputs that moved since generated/seed-audit/ was generated:"
+        while IFS= read -r f; do detail "  $f"; done <<< "$drifted"
+    else
+        # Reachable only by editing the manifest outside its records, since a
+        # renderer that writes them differently is itself a hashed input and
+        # would appear in the list above. Saying so beats an empty heading.
+        detail "No input accounts for it: SOURCES.txt differs from a fresh manifest outside its per-input records, so it was hand-edited or written by another tool."
+    fi
+    detail "The committed audit describes a seed no agent receives — and every file in it still reads as a valid prompt, which is why this is a check and not a review."
     detail "Fix: assets/scripts/render-seed-audit.sh && git add generated/seed-audit"
     exit 2
 fi
@@ -92,5 +107,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail "${warnings[@]}"
     exit 1
 fi
-echo "OK: seed audit current — $n_agents agent prompt(s), $n_formulas formula recipe(s), digest $(printf %.12s "$actual_digest"), hook wired"
+n_inputs=$(printf '%s\n' "$actual_sources" | grep -v '^#' | paste - - | wc -l | tr -d ' ')
+echo "OK: seed audit current — $n_agents agent prompt(s), $n_formulas formula recipe(s), $n_inputs input(s) hashed, hook wired"
 exit 0
