@@ -55,6 +55,8 @@ reset: retire a round cap under a ruling. Advances signoff_round_floor to the
   blocked_reason, signoff_cap, the human route and the dispatch tally — in one
   write. Needs no PR and no review bead, and writes to no other bead. Refused
   when the rework ledger the floor comes from does not read, or names no round.
+  Refused while a live demand holds the anchor: a sitting is waiting on a
+  person there, and this ruling would hand the decision back to a pool.
   --reason  why the cap is retired; recorded on the anchor (required)
   --batch   the batch id the floor is pinned to (default: reset-<UTC stamp>)
 
@@ -118,6 +120,38 @@ row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") |
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
 
+# >>> takeaway-hold-discriminator
+# Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
+# say: it is one field a sitting stamps when it begins and REPLACES with its
+# outcome when it signs off, and nothing clears it, so its presence dates the
+# last sitting instead of naming a live wait. Read as a hold, it parks an
+# anchor from its first conversation onward.
+#
+# The wait itself is a bead. `gc-helm.sh demand` files what a person owes as
+# its own bead stamped gc.demand_for=<anchor>, blocking the anchor on it, and
+# the sitting closes that bead with the ruling that answers it. A live demand
+# is a live hold; none, and the takeaway records a sitting that ended.
+#
+# Only demands count. Rework children and `--waiting-on` edges are work in
+# flight, which the merge already holds on, and reading `blocks` at large would
+# restore the same permanence one indirection out. The `held` lifecycle state
+# is not read either: it is entered only from `unanchored`, and every anchor a
+# round cap parks carries pre_open_gate or pull_request.
+#
+# Fails CLOSED — a ledger that will not read answers "held", because releasing
+# an anchor a person is holding hands their decision back to a pool.
+takeaway_is_holding() { # <anchor-id>; 0 = a person still owes an answer here
+  local rows
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 0
+  rows=$(printf '%s' "$rows" | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  printf '%s' "$rows" | jq -e --arg a "${1:-}" \
+    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
+    >/dev/null 2>&1
+}
+# <<< takeaway-hold-discriminator
+
 # Both verbs write to the anchor; these two read and write it.
 stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did not stick
   local args=(--set-metadata "$1=$2")
@@ -168,12 +202,14 @@ if [ "$MODE" = reset ]; then
   ANCHOR_ROW=$(bd_json show "$ANCHOR")
   is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
 
-  # A sitting's decision outranks the ruling this verb carries, exactly as it
-  # outranks pr-facts.sh's reset: releasing an anchor a sitting is holding hands
-  # work back to the pool the sitting took it from.
-  TAKEAWAY=$(row_meta "$ANCHOR_ROW" gc.takeaway)
-  if [ -n "$TAKEAWAY" ]; then
-    warn "anchor $ANCHOR is held by a live takeaway ('$TAKEAWAY'); nothing written — release the takeaway, or rule through the sitting that set it"
+  # A sitting still waiting on a person outranks the ruling this verb carries,
+  # exactly as it outranks pr-facts.sh's reset: releasing an anchor a sitting is
+  # holding hands work back to the pool the sitting took it from. A sitting that
+  # already ended does not — and this verb is the recovery path for the anchor
+  # it left parked, so reading its takeaway as a hold would close the last way
+  # out of the park.
+  if takeaway_is_holding "$ANCHOR"; then
+    warn "anchor $ANCHOR is held by a live demand: a sitting is waiting on a person here, and this ruling would hand the decision back to a pool. Nothing written — close the demand with the answer, or rule through the sitting that filed it"
     exit 1
   fi
 

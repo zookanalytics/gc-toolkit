@@ -275,7 +275,12 @@ keys = ["merge_hold", "rebase_hold", "tracking_only"]
 
 [metadata.human_surface]
 keys = [
-  "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.continuation_group",
+  # gc.demand_for names the bead a demand gates. It is what the merge cadence
+  # reads to tell a sitting still waiting on a person from one that ended:
+  # gc.takeaway beside it is the headline, replaced at sign-off and never
+  # cleared, so only the demand's own liveness answers that question.
+  "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.demand_for",
+  "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",
   "sweep.*", "triage.*", "stall_root",
 ]

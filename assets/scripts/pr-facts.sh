@@ -89,6 +89,38 @@ canon_pr_url() {
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
+# >>> takeaway-hold-discriminator
+# Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
+# say: it is one field a sitting stamps when it begins and REPLACES with its
+# outcome when it signs off, and nothing clears it, so its presence dates the
+# last sitting instead of naming a live wait. Read as a hold, it parks an
+# anchor from its first conversation onward.
+#
+# The wait itself is a bead. `gc-helm.sh demand` files what a person owes as
+# its own bead stamped gc.demand_for=<anchor>, blocking the anchor on it, and
+# the sitting closes that bead with the ruling that answers it. A live demand
+# is a live hold; none, and the takeaway records a sitting that ended.
+#
+# Only demands count. Rework children and `--waiting-on` edges are work in
+# flight, which the merge already holds on, and reading `blocks` at large would
+# restore the same permanence one indirection out. The `held` lifecycle state
+# is not read either: it is entered only from `unanchored`, and every anchor a
+# round cap parks carries pre_open_gate or pull_request.
+#
+# Fails CLOSED — a ledger that will not read answers "held", because releasing
+# an anchor a person is holding hands their decision back to a pool.
+takeaway_is_holding() { # <anchor-id>; 0 = a person still owes an answer here
+  local rows
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 0
+  rows=$(printf '%s' "$rows" | scrub)
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  printf '%s' "$rows" | jq -e --arg a "${1:-}" \
+    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
+    >/dev/null 2>&1
+}
+# <<< takeaway-hold-discriminator
+
 # >>> pr-posture-vocabulary
 # Mirrors lifecycle/lifecycle.toml [posture]; pr-facts.test.sh fails on drift.
 # Listed in the precedence the derivation applies, strongest human signal first.
@@ -599,7 +631,9 @@ GATES
   if [ "$posture" = "commented" ]; then
     fix_branch="${head_ref:-$branch}"
     routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
-    takeaway=$(printf '%s' "$row" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
+    # Read once: both the cap retirement below and the routing choice after it
+    # turn on the same question, and each answer costs a ledger read.
+    holding=""; takeaway_is_holding "$id" && holding=1
 
     # --- operator feedback resets the review-round cap ---------------------------
     # signoff.sh's cap bounds the city failing to converge against its own
@@ -632,13 +666,13 @@ TALLY
       # so a reset leaving either standing would not be one. signoff_cap names
       # the exception the park belongs to, and the two must still agree: a park
       # a person put there, or one whose exception was already retired by hand,
-      # is theirs and stays. A live takeaway is a sitting's decision on this
-      # anchor and outranks the reset the same way.
+      # is theirs and stays. A sitting still holding this anchor for a ruling
+      # outranks the reset the same way.
       cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
       case "$cap" in
         ?*@?*)
           cap_gate="${cap%%@*}"; cap_oid="${cap#*@}"
-          if [ -z "$takeaway" ] && [ "$(printf '%s' "$row" | jq -r --arg k "check.$cap_gate" \
+          if [ -z "$holding" ] && [ "$(printf '%s' "$row" | jq -r --arg k "check.$cap_gate" \
                '(.metadata[$k] // "") | tostring')" = "exception@$cap_oid" ]; then
             RSET+=(--unset "check.$cap_gate" --unset blocked_reason --unset signoff_cap --route "")
             undo="${undo:+$undo, }check.$cap_gate=exception@$cap_oid, blocked_reason and the human route"
@@ -664,7 +698,7 @@ TALLY
     is_held "$rhold"        && why="rebase_hold freezes the branch"
     is_held "$hold"         && why="merge_hold is set"
     [ "$routed" = "human" ] && why="the anchor is already routed to a human"
-    [ -n "$takeaway" ]      && why="a sitting recorded a takeaway on it"
+    [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
     DISP=""
     if [ "$choice" = "rework" ]; then

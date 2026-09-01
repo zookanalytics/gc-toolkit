@@ -223,9 +223,14 @@ retires that park: the `exception@` marker, `blocked_reason`, and the human
 route. `signoff.sh` stamps `signoff_cap=<gate>@<oid>` alongside them, and the
 reset acts only while that stamp and the standing marker still agree — an
 anchor a person parked by hand, or one whose exception they already retired, is
-theirs and stays. A live `gc.takeaway` outranks the reset the same way. The
-dispatch tally (`dispatch_count` and any `dispatch_backstop.<g>`) goes with the
-park, since rounds nobody may dispatch are no release.
+theirs and stays. A sitting still waiting on a person outranks the reset the
+same way, and what says so is the demand bead `gc-helm.sh demand` filed
+(`gc.demand_for=<anchor>`), never `gc.takeaway`. That field is stamped when a
+sitting begins and replaced by its outcome at sign-off, so it dates the last
+sitting rather than naming a live wait; read as a hold it parks an anchor from
+its first conversation onward, whatever the PR goes on to say. The dispatch tally
+(`dispatch_count` and any `dispatch_backstop.<g>`) goes with the park, since
+rounds nobody may dispatch are no release.
 
 That release reaches only an anchor with a PR. One capped before its PR was
 opened has no conversation to be commented on, so no batch is ever recorded,
@@ -236,7 +241,7 @@ rounds as spent pre-open and names the verb that ends them. That verb is
 `signoff_round_floor=<children now>@<a minted batch>` with
 `signoff_rounds_reset` carrying the same batch, so the next verdict does not
 re-derive it — and retires the park in the same call, under the same
-`signoff_cap` agreement and takeaway guards the feedback reset uses. It reads
+`signoff_cap` agreement and live-demand guard the feedback reset uses. It reads
 no PR and touches no review bead, records the ruling on the anchor, and
 verifies every key it wrote, the retired tally keys included: `gate-ensure.sh`
 holds dispatches while `dispatch_count` stands, so an unset that was denied or
@@ -247,6 +252,12 @@ or one naming no round at all, refuses the whole verb before it writes. Reading
 such a walk as zero rounds would write a floor of 0 and let the next pass count
 the real children from it and cap again, which is the deadlock the verb exists
 to end.
+
+The verb is the only way back for an anchor whose batch was already recorded,
+too. The feedback reset fires once per batch, and its arm is reached only while
+a comment stands unanswered, so a batch that stamped itself and left the park
+standing is never re-read: the watermark written in that same pass answers those
+comments, and the posture stops being `commented`.
 
 A standing `CHANGES_REQUESTED` review resets nothing. It is the strongest
 posture there is, `merge.sh` vetoes on the review itself, and the arm that
