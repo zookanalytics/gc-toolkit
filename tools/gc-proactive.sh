@@ -2,18 +2,23 @@
 # gc-proactive.sh — the proactive-via-slung-mol engine (Bead-Universe Phase 4;
 # v1 design specs/bead-universe/design-doc.md, still governing this tool).
 # "Proactive" is NOT a resident loop: it is mol-first-reaction slung at a
-# bead (read body → write a first-reaction CARD → file a visit) so the human
-# arrives at advanced work. This tool is the trigger layer:
+# bead (read body → write a first-reaction CARD → dispose: route it to a pool,
+# hold it on an edge, or file a visit) so the human arrives at advanced work,
+# and at fewer beads. This tool is the trigger layer:
 #   demand [<pool>]      pool work_query — routed beads, board-ranked
-#   scan [--json|--sling] find movable-forward / opt-in beads; --sling reacts
+#   scan [--json|--sling] find movable-forward / opt-in beads; --sling reacts,
+#                        bounded by GC_PROACTIVE_SLING_CAP per sweep
 #   sling <bead> [--nudge] [-n]  sling a first reaction (mr path, hard-refuses
 #                        --merge direct — the security invariant)
-#   deliverable          "would a sling be picked up?" — always yes now (kept
-#                        for callers that branch on it, exit 0/1)
-# The only throttle is the pool's max_active_sessions
-# (agents/proactive/agent.toml); slung beads queue until a slot frees.
-# Tunables: GC_PROACTIVE_POOL / _MERGE / _SCAN_LIMIT / _FIXTURE (test hook:
-# canned ready/scan .json instead of gc calls).
+#   deliverable          "would a sling be picked up?" — no when the city's
+#                        agent roster says this pool cannot pick it up
+#                        (absent, suspended, or capped at zero), exit 0/1
+# The pool's only throttle is its max_active_sessions
+# (agents/proactive/agent.toml); slung beads queue until a slot frees. That
+# bounds how many reactions run at once. GC_PROACTIVE_SLING_CAP is a different
+# bound: how many one `scan --sling` sweep may hand out.
+# Tunables: GC_PROACTIVE_POOL / _MERGE / _SCAN_LIMIT / _SLING_CAP / _FIXTURE
+# (test hook: canned ready/scan/agents .json instead of gc calls).
 set -euo pipefail
 
 PROG="${0##*/}"
@@ -21,6 +26,11 @@ PROG="${0##*/}"
 POOL_BASE="${GC_PROACTIVE_POOL:-gc-toolkit.proactive}"
 MERGE="${GC_PROACTIVE_MERGE:-mr}"
 SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
+# What ONE --sling sweep may hand out. A first reaction can end in a route to
+# the polecat pool, so an uncapped sweep is a queue of implementation sessions
+# filed by one command. 5 is that pool's own max_active_sessions: a sweep
+# never hands out more than the city can start working in one cycle.
+SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
 
@@ -73,33 +83,93 @@ usage() {
 Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       proactive beads, board-ranked. Read-only.
        $PROG scan [--json] [--sling]  Find movable-forward / opt-in beads; with
-                                      --sling, sling a first reaction at each.
-                                      Read-only without --sling.
+                                      --sling, sling a first reaction at each,
+                                      at most $SLING_CAP per sweep
+                                      (GC_PROACTIVE_SLING_CAP). Read-only
+                                      without --sling.
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
                                       direct (the security invariant).
-       $PROG deliverable              Would a slung first reaction actually be
-                                      PICKED UP? Always yes (the pool is always
-                                      on; its cap only queues work). Kept for
-                                      callers that branch on the answer.
+       $PROG deliverable [<pool-target>]
+                                      Would work routed at that pool actually
+                                      be PICKED UP? No when this city's agent
+                                      roster says it cannot: absent, suspended,
+                                      or capped at zero slots. Defaults to the
+                                      proactive pool; any rig-qualified target
+                                      answers. Exit 0 yes, 1 no; callers divert
+                                      on no.
 
-Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) is the
-only throttle; routed beads queue until a slot frees.
+Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) throttles
+how many run at once; routed beads queue until a slot frees. One --sling sweep
+hands out at most $SLING_CAP reactions.
 Security: proactive output is mr-only
 (GC_PROACTIVE_MERGE=$MERGE; "direct" is refused).
 EOF
 }
 
 # ---------------------------------------------------------------------------
-# deliverable — "if I sling right now, will anything ever pick it up?"
-# Always yes: the pool is always on, and its max_active_sessions cap only
-# queues a routed bead, never drops it. Kept as a verb because callers
-# (assets/scripts/gc-visit-open.sh) branch on the exit status.
+# deliverable [<pool-target>] — "if I route work there right now, will anything
+# ever pick it up?" The default target is the proactive pool; the first
+# reaction's actionable exit asks the same question about the pool it is about
+# to hand a bead to."
+# The queue is not the question: a routed bead waits at zero cost until a slot
+# frees. What makes a sling vanish is a pool that cannot claim it at all, and
+# the city's own agent roster is where that shows: the pool is not registered
+# in this city, it is suspended, or it is capped at zero slots.
+#
+# NO is a positive finding only. A roster this cannot read answers YES, because
+# an unreadable roster is not evidence of an absent pool, and a false no
+# silently retires the framing every caller diverts from
+# (assets/scripts/gc-visit-open.sh files a bare visit on a no).
 # ---------------------------------------------------------------------------
 cmd_deliverable() {
-    printf 'yes: the proactive pool is always on — its cap (max_active_sessions, agents/proactive/agent.toml) only queues a slung reaction, never drops it\n'
-    return 0
+    local target roster verdict
+    target="$(resolve_pool_target "${1:-}" 2>/dev/null)" || {
+        printf 'no: cannot rig-qualify the proactive pool target (set GC_RIG or pass <rig>/<base>) — a bare name routes to nobody\n'
+        return 1
+    }
+
+    if [ -n "$FIXTURE" ]; then
+        roster=""
+        [ -f "$FIXTURE/agents.json" ] && roster="$(cat "$FIXTURE/agents.json")"
+    elif command -v timeout >/dev/null 2>&1; then
+        # Bounded: gc-visit-open asks this question while an operator waits at
+        # a prompt, and a hung roster read must degrade to yes, not to a hang.
+        roster="$(timeout "${GC_PROACTIVE_ROSTER_TIMEOUT:-15}" gc agent list --json 2>/dev/null || true)"
+    else
+        roster="$(gc agent list --json 2>/dev/null || true)"
+    fi
+
+    # jq answers one word: present | absent | suspended | nocap. Anything else
+    # (empty roster, malformed JSON, no jq) leaves verdict empty = unreadable.
+    verdict=""
+    if [ -n "$roster" ]; then
+        verdict="$(printf '%s' "$roster" | jq -r --arg t "$target" '
+            (.agents // []) | map(select((.qualified_name // "") == $t)) as $m
+            | if ($m | length) == 0 then "absent"
+              elif ($m[0].suspended // false) then "suspended"
+              elif ((($m[0].pool // {}).max // 1) < 1) then "nocap"
+              else "present" end' 2>/dev/null || true)"
+    fi
+
+    case "$verdict" in
+        absent)
+            printf 'no: no agent is registered at %s in this city, so a slung reaction routes to nobody\n' "$target"
+            return 1 ;;
+        suspended)
+            printf 'no: the pool at %s is suspended; a slung reaction would sit unclaimed until it resumes\n' "$target"
+            return 1 ;;
+        nocap)
+            printf 'no: the pool at %s has no session slots (max_active_sessions is 0), so nothing can claim a slung reaction\n' "$target"
+            return 1 ;;
+        present)
+            printf 'yes: %s is registered and unsuspended — its cap only queues a slung reaction, never drops it\n' "$target"
+            return 0 ;;
+        *)
+            printf 'yes: could not read this city agent roster, so the pool is assumed live — an unreadable roster is not evidence that %s is gone\n' "$target"
+            return 0 ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -190,6 +260,10 @@ cmd_scan() {
         esac
     done
 
+    case "$SLING_CAP" in
+        ''|*[!0-9]*) die "GC_PROACTIVE_SLING_CAP must be a non-negative integer (got '$SLING_CAP')" ;;
+    esac
+
     local cands
     cands="$(scan_candidates)"
 
@@ -204,18 +278,30 @@ cmd_scan() {
         return 0
     fi
 
-    # --sling: advance each candidate. The sweep is bounded by the scan's own
-    # candidate limit (GC_PROACTIVE_SCAN_LIMIT); the pool cap queues the rest.
-    local slung=0
+    # --sling: advance each candidate, highest board weight first, and stop at
+    # SLING_CAP. The cap is the throttle that matters now that a reaction can
+    # end in a route to an implementation pool: without it one sweep files as
+    # many downstream sessions as the scan found candidates. What it skips is
+    # named, not silently dropped — the next sweep sees the same beads, since
+    # a candidate only leaves the scan once a reaction has advanced it.
+    local slung=0 skipped=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
     for id in $ids; do
+        if [ "$slung" -ge "$SLING_CAP" ]; then
+            skipped=$(( skipped + 1 ))
+            continue
+        fi
         if cmd_sling "$id"; then
             slung=$(( slung + 1 ))
         fi
     done
-    log "scan --sling: slung $slung first reaction(s)"
+    if [ "$skipped" -gt 0 ]; then
+        log "scan --sling: slung $slung first reaction(s); $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
+    else
+        log "scan --sling: slung $slung first reaction(s)"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -263,6 +349,15 @@ cmd_sling() {
         return 0
     fi
 
+    if [ -n "$FIXTURE" ]; then
+        # The fixture hook stands in for every gc call in this tool, including
+        # this one: a --sling sweep under test must exercise the loop and its
+        # cap without dispatching anything into a live city.
+        log "$PROG: (fixture) would sling $FORMULA at $bead (merge=$MERGE) -> $target"
+        printf 'gc sling %s\n' "$*"
+        return 0
+    fi
+
     log "$PROG: slinging $FORMULA at $bead (merge=$MERGE) -> $target"
     gc sling "$@"
 }
@@ -279,7 +374,7 @@ main() {
         demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
         sling)  cmd_sling "$@" ;;
-        deliverable) cmd_deliverable ;;
+        deliverable) cmd_deliverable "$@" ;;
         *) die "unknown verb '$verb' (demand|scan|sling|deliverable; --help)" ;;
     esac
 }

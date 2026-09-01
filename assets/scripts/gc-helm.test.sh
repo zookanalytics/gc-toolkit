@@ -92,8 +92,12 @@ case "$1 ${2:-}" in
     # different things about the two, and the DONE row only exists for one.
     st=open; case "$id" in CLOSED-*) st=closed ;; esac
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c}}]'
-    else jq -n --arg i "$id" --arg s "$st" '[{id:$i,status:$s,metadata:{}}]'; fi ;;
+    # What gc.routed_to reads back as. FAKE_ROUTED holds it, so a test can
+    # model the route LANDING and the route landing EMPTY (the silent drop a
+    # multi-pair --set-metadata update can produce) with the same stub.
+    routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -121,11 +125,13 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
-       FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists"
+       FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
+       FAKE_ROUTED="$TMP/routed"
 mkdir -p "$TMP/signal-loom/.beads"
 export FAKE_SL_PATH="$TMP/signal-loom"
-: > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"
+: > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 unset GC_HELM_FIXTURE || true
+unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release 2>"$TMP/err" || true)"
@@ -275,6 +281,108 @@ eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(EDGENONE) no --waiting-on, n
 grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
+
+# ── takeaway --release --route: release the bead TO a pool ────────────────────
+# A first reaction that concludes "this is work" hands the bead on instead of
+# back. The route rides the release write, so the disposition lands whole or
+# not at all. Covered:
+#   (ROUTE)     the route replaces the empty clear, in the SAME single update
+#   (ROUTECLR)  no --route still clears the route (the release is unchanged)
+#   (ROUTEQUAL) a bare agent name is refused before anything is written
+#   (ROUTEREL)  --route without --release is refused (the unreadable half-state)
+#   (ROUTEOK)   a route that reads back correct is not re-written
+#   (ROUTEFIX)  a route that reads back EMPTY is repaired and reported
+#   (ROUTEDEAD) a repair that also misses is a verb failure, with its writes kept
+POOL="gc-toolkit/gc-toolkit.polecat"
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
+   --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
+RLINE="$(grep -E "^bd update A-PARKED( |$)" "$TMP/updates" | head -n1)"
+case "$RLINE" in
+  *"--set-metadata gc.routed_to=$POOL"*) ok "(ROUTE) the release routes the bead to the pool" ;;
+  *) bad "(ROUTE) no route stamp in the release write (got: ${RLINE:-<none>})" ;;
+esac
+case "$RLINE" in
+  *"--status=open"*"--assignee="*) ok "(ROUTE) …in the same write that reopens and unassigns" ;;
+  *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
+esac
+case "$RLINE" in
+  *"--set-metadata gc.takeaway=actionable — routed to the polecat pool"*) ok "(ROUTE) …and the headline still rides it" ;;
+  *) bad "(ROUTE) the headline was lost: ${RLINE:-<none>}" ;;
+esac
+
+# (ROUTECLR) the plain release is untouched: it still hands the bead back.
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release >/dev/null 2>&1 || true
+grep -q -- '--set-metadata gc.routed_to= ' "$TMP/updates" \
+  && ok "(ROUTECLR) no --route still clears the route" \
+  || bad "(ROUTECLR) the plain release changed shape: $(cat "$TMP/updates")"
+
+# (ROUTEQUAL) a bare name is matched against nothing and would sit forever.
+: > "$TMP/updates"
+QRC=0
+sh "$SCRIPT" takeaway A-PARKED "bare" --release --route "gc-toolkit.polecat" >/dev/null 2>"$TMP/rerr" || QRC=$?
+eq "$QRC" "2" "(ROUTEQUAL) a bare agent name is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEQUAL) …and nothing was written"
+grep -q 'rig-qualified' "$TMP/rerr" \
+  && ok "(ROUTEQUAL) …and the refusal names the cause" \
+  || bad "(ROUTEQUAL) the refusal does not explain itself (stderr: $(cat "$TMP/rerr"))"
+
+# (ROUTEREL) routed but still assigned to the reacting session reads as neither.
+: > "$TMP/updates"
+RRC=0
+sh "$SCRIPT" takeaway A-PARKED "no release" --route "$POOL" >/dev/null 2>"$TMP/rerr" || RRC=$?
+eq "$RRC" "2" "(ROUTEREL) --route without --release is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEREL) …and nothing was written"
+
+# (ROUTEOK) a landed route is verified once and left alone.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "landed" --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
+eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
+   "(ROUTEOK) a route that reads back correct is written once (the anchor, not its quiesced steps)"
+
+# (ROUTEFIX) the silent drop: the stamp lands empty, so the bead is visible to
+# no pool. The verb must notice and repair rather than report success.
+: > "$TMP/updates"; : > "$TMP/routed"
+FRC=0
+sh "$SCRIPT" takeaway A-PARKED "dropped" --release --route "$POOL" >"$TMP/rout" 2>"$TMP/rerr" || FRC=$?
+eq "$(grep -c -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" || true)" "2" \
+   "(ROUTEFIX) an empty read-back is re-stamped"
+grep -q 'read back as' "$TMP/rerr" \
+  && ok "(ROUTEFIX) …and the miss is reported" \
+  || bad "(ROUTEFIX) the dropped route was silent (stderr: $(cat "$TMP/rerr"))"
+grep -q 'visible to no pool' "$TMP/rerr" \
+  && ok "(ROUTEFIX) …and a repair that also misses says what it costs" \
+  || bad "(ROUTEFIX) the persistent miss does not name its consequence (stderr: $(cat "$TMP/rerr"))"
+
+# (ROUTEDEAD) --route promises the pool can see the bead. A caller that reads a
+# zero exit as "released to that pool" would drain over a bead nothing can
+# claim, so the persistent miss is a verb failure — with every write that DID
+# land kept, and named, so a hand repair finishes it.
+eq "$FRC" "4" "(ROUTEDEAD) a route that will not stamp is a verb runtime failure"
+grep -q 'takeaway set on' "$TMP/rout" \
+  && bad "(ROUTEDEAD) the verb reported success on an unrouted bead" \
+  || ok "(ROUTEDEAD) …and it does not report the takeaway as set"
+grep -q -- '--set-metadata gc.routed_to=' "$TMP/rerr" \
+  && ok "(ROUTEDEAD) …the message carries the by-hand repair" \
+  || bad "(ROUTEDEAD) no repair spelled out (stderr: $(cat "$TMP/rerr"))"
+RD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$RD" in
+  *"--status=open"*"--assignee="*) ok "(ROUTEDEAD) …the release it already wrote is kept, not rolled back" ;;
+  *) bad "(ROUTEDEAD) the release write was lost: ${RD:-<none>}" ;;
+esac
+grep -qE "^bd update s-impl( |\$)" "$TMP/updates" \
+  && ok "(ROUTEDEAD) …and the molecule steps the release quiesced stay quiesced" \
+  || bad "(ROUTEDEAD) the failure exited before quiescing the released molecule"
+
+# A route that lands is unaffected by any of that.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+GRC=0
+sh "$SCRIPT" takeaway A-PARKED "landed clean" --release --route "$POOL" >"$TMP/rout" 2>/dev/null || GRC=$?
+eq "$GRC" "0" "(ROUTEDEAD) a route that stamps still exits zero"
+grep -q "released to $POOL" "$TMP/rout" \
+  && ok "(ROUTEDEAD) …and says where the bead went" \
+  || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
@@ -563,6 +671,119 @@ ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 
 export FAKE_STEPS_JSON="$TMP/steps.json"
+
+# ── The releasing session's own step survives the release ────────────────────
+# mol-first-reaction's terminal step disposes by calling `takeaway --release` on
+# the bead its own molecule is anchored to, and then has to close its own step
+# bead. step-close.sh resolves that bead by (assignee, gc.step_ref), so a
+# quiesce that clears the live step's assignee lands the disposition and strands
+# the molecule: the step stays open and is re-offered forever. This section runs
+# the real release and then the real step-close.sh against ONE mutating store —
+# a logging-only stub cannot show the second command failing on what the first
+# wrote.
+LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
+export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
+SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
+POOL="gc-toolkit/gc-toolkit.polecat"
+
+# A-LIVE is the anchor; root-LIVE its molecule root. L-live is the terminal step
+# this session is executing the release FROM; L-peer is a sibling step left
+# pinned to a session that is gone, which is what the quiesce exists for.
+cat > "$LIVE_STORE" <<JSON
+[
+ {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.input_convoy_id":"convoy-LIVE"}},
+ {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}}
+]
+JSON
+printf 'convoy-LIVE|A-LIVE\n' > "$LIVE_CONVOYS"
+: > "$LIVE_LOG"
+
+cat > "$LIVE/bin/gc" <<'GCL'
+#!/usr/bin/env bash
+# A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
+# answers the state the earlier write left behind.
+sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE"; }
+case "$1 ${2:-}" in
+  "rig list") printf '{"rigs":[{"name":"gc-toolkit","path":"/nonexistent-rig","prefix":"tk"}]}\n' ;;
+  "bd list")
+    st=""; who=""; seen_who=0
+    for a in "$@"; do
+      case "$a" in
+        --status=*)   st="${a#--status=}" ;;
+        --assignee=*) who="${a#--assignee=}"; seen_who=1 ;;
+      esac
+    done
+    jq --arg st "$st" --arg who "$who" --argjson sw "$seen_who" '
+      [ .[] | . as $b
+        | select($st == "" or (($st | split(",")) | index($b.status // "")) != null)
+        | select($sw == 0 or (($b.assignee // "") == $who)) ]' "$LIVE_STORE" ;;
+  "bd show")
+    row=$(jq -c --arg i "$3" '[ .[] | select(.id == $i) ]' "$LIVE_STORE")
+    [ "$row" != "[]" ] && printf '%s\n' "$row" || printf '[{"id":"%s","status":"open","metadata":{}}]\n' "$3" ;;
+  "convoy status")
+    a=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$LIVE_CONVOYS")
+    [ -n "$a" ] && jq -n --arg a "$a" '{children:[{id:$a}]}' || printf '{"children":[]}\n' ;;
+  "bd update")
+    printf 'update %s\n' "$*" >> "$LIVE_LOG"
+    id="$3"; shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --db)             shift 2 ;;
+        --assignee=*)     sw --arg i "$id" --arg v "${1#--assignee=}" 'map(if .id==$i then .assignee=$v else . end)'; shift ;;
+        --assignee)       sw --arg i "$id" --arg v "${2:-}" 'map(if .id==$i then .assignee=$v else . end)'; shift 2 ;;
+        --status=*)       sw --arg i "$id" --arg v "${1#--status=}" 'map(if .id==$i then .status=$v else . end)'; shift ;;
+        --set-metadata)   sw --arg i "$id" --arg k "${2%%=*}" --arg v "${2#*=}" 'map(if .id==$i then .metadata[$k]=$v else . end)'; shift 2 ;;
+        --unset-metadata) sw --arg i "$id" --arg k "$2" 'map(if .id==$i then (.metadata |= del(.[$k])) else . end)'; shift 2 ;;
+        *)                shift ;;
+      esac
+    done ;;
+  "bd dep") printf 'dep %s\n' "$*" >> "$LIVE_LOG" ;;
+esac
+exit 0
+GCL
+chmod +x "$LIVE/bin/gc"
+
+field() { jq -r --arg i "$1" --arg k "$2" '.[] | select(.id==$i) | (if $k=="status" then .status elif $k=="assignee" then (.assignee // "") else (.metadata[$k] // "") end)' "$LIVE_STORE"; }
+
+SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
+RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+  sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
+
+eq "$(field L-live assignee)" "$SESSION" \
+   "(LIVESTEP) the step the release runs FROM keeps its assignee"
+eq "$(field L-live gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(LIVESTEP) …and its route"
+eq "$(field L-live gc.session_affinity)" "require" \
+   "(LIVESTEP) …and its session affinity"
+grep -q 'kept live step L-live' <<< "$RELOUT" \
+  && ok "(LIVESTEP) …and the run says which step it kept" \
+  || bad "(LIVESTEP) the kept step is unreported (out: $RELOUT)"
+
+# The guard is narrow: a sibling pinned to a session that is GONE is exactly the
+# husk the quiesce exists for, and it must still be cleared.
+eq "$(field L-peer assignee)" "" \
+   "(LIVESTEP) a peer session's step under the same anchor is still quiesced"
+eq "$(field L-peer gc.routed_to)" "" \
+   "(LIVESTEP) …and de-routed"
+
+# The disposition itself still lands whole.
+eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
+eq "$(field A-LIVE assignee)" ""    "(LIVESTEP) …and unassigned"
+eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
+
+# The proof the guard exists for: the terminal step is still CLOSABLE after the
+# release, by the same resolution the formula's terminal block uses.
+SCRC=0
+SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+  bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
+eq "$(field L-live status)" "closed" \
+   "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
+[ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
+PATH="$SAVED_PATH"
+
 
 echo ""
 echo "gc-helm takeaway (release quiesce, waiting-on edges, length gate) + dismiss: $PASS passed, $FAIL failed"
