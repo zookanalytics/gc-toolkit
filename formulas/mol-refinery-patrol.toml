@@ -322,14 +322,14 @@ BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 # so that test is true for the whole pre-open window. A first-pass rejection
 # lands inside it.
 PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
-if [ "$MERGE_STRATEGY" != "direct" ]; then
+if [ -z "$BRANCH" ]; then
+  echo "no metadata.branch on $WORK — no branch to delete"
+elif [ "$MERGE_STRATEGY" != "direct" ]; then
   echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
 elif [ "${PR_SHAPED:-1}" != "0" ]; then
   echo "keeping origin/$BRANCH — the bead already records a PR"
-elif [ -z "$BRANCH" ]; then
-  echo "no metadata.branch on $WORK — no branch to delete"
 else
-  git push origin --delete "$BRANCH"
+  git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
 fi
 # <<< rejection-branch-keep
 ```

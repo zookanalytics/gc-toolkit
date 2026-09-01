@@ -20,6 +20,8 @@
 #   6. Both steps that branch on the merge strategy read it through ONE
 #      spliced block, so keeping a branch and opening a PR for it cannot
 #      disagree about which mode the bead is in.
+#   7. The delete is cleanup behind a repool that already stands, so a push
+#      that cannot delete is reported and the cycle continues.
 #
 # Executes the real blocks extracted verbatim from the formula against stub
 # `gc` + `lifecycle.sh`. No live city, Dolt, network, or worktrees.
@@ -165,7 +167,9 @@ done
 cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
 case "$1 $2 $3" in
-  "push origin --delete") printf 'DELETE|%s\n' "$4" >> "$FAKE_LOG"; exit 0 ;;
+  "push origin --delete")
+    [ "${FAKE_DELETE_FAILS:-0}" = "1" ] && { printf 'DELETE-REFUSED|%s\n' "$4" >> "$FAKE_LOG"; exit 1; }
+    printf 'DELETE|%s\n' "$4" >> "$FAKE_LOG"; exit 0 ;;
 esac
 exit 1
 GIT
@@ -222,6 +226,25 @@ arm "{$BR}" >/dev/null
 grep -q 'keeping origin/polecat/tk-work' "$TMP/out" \
   && ok "(16) a kept branch is named in the cycle log, not silently skipped" \
   || bad "(16) a kept branch is named in the cycle log, not silently skipped"
+eq "$(arm '{}')" "0|" \
+   "(17) mr with no metadata.branch -> nothing to delete"
+grep -q 'no metadata.branch on tk-work' "$TMP/out" \
+  && ok "(17b) a branch-less bead is named as such, not logged as 'keeping origin/'" \
+  || bad "(17b) a branch-less bead is named as such, not logged as 'keeping origin/'"
+
+# The delete is the last thing the arm does and the repool above it has already
+# committed. A push that cannot delete leaves a branch for the later sweep,
+# which the cycle tolerates; aborting here would strand the cycle instead.
+export FAKE_DELETE_FAILS=1
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}")" "0|" \
+   "(18) a refused delete does not fail the cycle"
+grep -q 'could not delete origin/polecat/tk-work' "$TMP/out" \
+  && ok "(18b) a refused delete is reported, not swallowed" \
+  || bad "(18b) a refused delete is reported, not swallowed"
+grep -q '^DELETE-REFUSED|polecat/tk-work$' "$TMP/log" \
+  && ok "(18c) the delete was actually attempted (the case is not vacuous)" \
+  || bad "(18c) the delete was actually attempted (the case is not vacuous)"
+unset FAKE_DELETE_FAILS
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
