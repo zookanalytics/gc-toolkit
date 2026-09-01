@@ -8,7 +8,9 @@
 # dispatch — and what it is counted from: the floor pr-facts.sh's record of
 # operator feedback sets, written once per batch and never re-derived. The
 # `reset` verb is the other way that floor moves, for the anchor whose cap
-# fired before it had a PR to be commented on.
+# fired before it had a PR to be commented on, and for the one whose batch was
+# recorded while the park stood. Both retirements read the same discriminator:
+# a live demand holds the anchor, a takeaway from a sitting that ended does not.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -129,6 +131,29 @@ case "${1:-}" in
         [ "${1:-}" = "--blocks" ] && printf '%s|%s|blocks\n' "${2:-}" "$src" >> "$DEPS"
         echo "dep added" ;;
     esac ;;
+  list)
+    # Enough of `bd list` for the live-demand read: --status and repeated
+    # --metadata-field, ANDed. STUB_LIST_FAIL models a ledger that will not
+    # answer, which the discriminator must read as "held".
+    [ -n "${STUB_LIST_FAIL:-}" ] && { echo "bd: list unavailable (stub)" >&2; exit 1; }
+    shift
+    statuses=""; fields=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status=*) statuses="${1#--status=}" ;;
+        --status) shift; statuses="${1:-}" ;;
+        --metadata-field) shift; fields+=("${1:-}") ;;
+        --metadata-field=*) fields+=("${1#--metadata-field=}") ;;
+      esac
+      shift || true
+    done
+    out=$(jq -c --arg st "$statuses" '[ .[] | (.status // "open") as $b
+      | select($st == "" or (($st | split(",")) | index($b))) ]' "$STORE")
+    for f in ${fields[@]+"${fields[@]}"}; do
+      out=$(printf '%s' "$out" | jq -c --arg k "${f%%=*}" --arg v "${f#*=}" \
+        '[ .[] | select(((((.metadata // {})[$k]) // "") | tostring) == $v) ]')
+    done
+    printf '%s\n' "$out" ;;
   ready)
     # An open issue is ready when every blocker it depends on is closed.
     blocked=" "
@@ -701,13 +726,47 @@ anchor_meta "check.codex=exception@$OID_HEAD" "signoff_cap=codex@$OID_HEAD" "gc.
 eq "$rc" 0 "reset on an anchor with a PR exits 0"
 eq "$(meta tk-anc check.codex)" "<absent>" "…and retires that park too"
 
-echo "# a live takeaway outranks the ruling"
-capped_pre 3 "gc.takeaway=held for a sitting"
+# --- what a hold is: the demand bead, never the takeaway headline ---------------
+# A sitting stamps gc.takeaway when it begins and replaces it with the outcome
+# at sign-off, so the field outlives every sitting that touches an anchor. Read
+# as a hold it shuts this verb permanently, and this verb is the only way back
+# for an anchor whose feedback reset already fired.
+demand() { # <status> — a demand bead gating tk-anc, in the store
+  jq -c --arg st "$1" '. + [{"id":"dm-1","status":$st,"assignee":"",
+    "metadata":{"gc.demand_for":"tk-anc","gc.routed_to":"human"},"notes":""}]' \
+    "$STUB_STORE" > "$STUB_STORE.n"
+  mv "$STUB_STORE.n" "$STUB_STORE"
+}
+
+echo "# a live demand outranks the ruling"
+capped_pre 3 "gc.takeaway=holding — needs a ruling"
+demand open
 out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
-eq "$rc" 1 "a held anchor refuses the reset"
+eq "$rc" 1 "an anchor a person still owes an answer on refuses the reset"
 eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and nothing is written, not even the floor"
 eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…the park stands"
-has "$out" "takeaway" "…and the refusal names the hold"
+has "$out" "live demand" "…and the refusal names the hold"
+
+echo "# …but a takeaway recording a sitting that ENDED does not"
+capped_pre 3 "gc.takeaway=approved as-is on GitHub; merge still held by the gate"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-3 2>&1); rc=$?
+eq "$rc" 0 "a takeaway no demand backs is a record, not a hold"
+eq "$(meta tk-anc signoff_round_floor)" "3@ruling-3" "…the floor advances"
+eq "$(meta tk-anc check.codex)" "<absent>" "…and the park is retired"
+eq "$(meta tk-anc 'gc.takeaway')" "approved as-is on GitHub; merge still held by the gate" "…while the sitting's record is left alone"
+
+echo "# …and a demand the ruling already closed is such a sitting"
+capped_pre 3 "gc.takeaway=holding — needs a ruling"
+demand closed
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-4 2>&1); rc=$?
+eq "$rc" 0 "a closed demand holds nothing"
+eq "$(meta tk-anc check.codex)" "<absent>" "…so the park is retired"
+
+echo "# a ledger that will not answer reads as held"
+capped_pre 3
+out=$(STUB_LIST_FAIL=1 "$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "an unreadable demand ledger refuses the reset"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…the park stands rather than be released on a guess"
 
 echo "# an exception no signoff_cap claims is a person's: the counter resets, the park stays"
 spent 3 "$ANCHOR_PRE"

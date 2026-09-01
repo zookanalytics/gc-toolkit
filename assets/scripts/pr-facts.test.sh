@@ -24,8 +24,9 @@
 # `commented`.
 # Also covers the review-round cap reset such a batch performs: once per batch,
 # retiring the dispatch tally and the cap's own park with it, while a park no
-# `signoff_cap` claims, a live takeaway, a verdict the city posted itself, and a
-# rework hand-back each leave the cap standing.
+# `signoff_cap` claims, a live demand, a verdict the city posted itself, and a
+# rework hand-back each leave the cap standing — and a takeaway whose sitting
+# already ended holds nothing, which is the shape a demand tells from a hold.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,6 +81,14 @@ prview() { # num state mergeState mergeable extra [headRefName]
     "$2" "${6:-polecat/x$1}" "$1" "$3" "$4" "$1" "$1" "${5:-}"
 }
 
+# What `gc-helm.sh demand` files when a sitting holds an anchor: the bead the
+# person owes, gating the anchor. Its liveness — never the gc.takeaway headline
+# beside it — is what says a sitting is still waiting on somebody.
+demand() { # <anchor-id> [status]
+  printf '{"id":"dm-%s","status":"%s","assignee":"","title":"Rule on %s","notes":"","metadata":{"gc.demand_for":"%s","gc.routed_to":"human"}}' \
+    "$1" "${2:-open}" "$1" "$1"
+}
+
 ROOT="$(cd "$HERE/../.." && pwd)"
 
 echo "# posture vocabulary drift against lifecycle.toml"
@@ -88,6 +97,11 @@ BLOCK="$(awk '/# >>> pr-posture-vocabulary/{f=1;next} /# <<< pr-posture-vocabula
 eval "$BLOCK"
 TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
 eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
+
+echo "# the takeaway-hold discriminator is one block, shared with signoff.sh"
+xd() { awk '/^[[:space:]]*# >>> takeaway-hold-discriminator[[:space:]]*$/{inb=1; next} /^[[:space:]]*# <<< takeaway-hold-discriminator[[:space:]]*$/{inb=0} inb' "$1"; }
+[ -n "$(xd "$HERE/pr-facts.sh")" ] && ok "block present here" || bad "block missing from pr-facts.sh"
+eq "$(xd "$HERE/pr-facts.sh")" "$(xd "$HERE/signoff.sh")" "…byte-identical to signoff.sh's copy (both retirement writers read one rule)"
 
 echo "# out-of-band merge is recorded"
 store "[$(anchor F1 10)]"
@@ -586,21 +600,32 @@ out=$(STUB_SELF_LOGIN="" run); rc=$?
 eq "$rc" 0 "the full pass exits 0"
 has "$out" "not current" "…while still reporting the count"
 
-echo "# a human already holding the anchor gets the comments, not the fix pool"
-store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"')]"
+echo "# a sitting still waiting on a person gets the comments, not the fix pool"
+store "[$(anchor H1 44 ',"gc.takeaway":"holding — needs a ruling"'),$(demand H1)]"
 printf '%s' "$(prview 44 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_44.json"
 echo '[]' > "$GH_DIR/reviews_44.json"
 printf '[{"id":8001,"user":{"login":"human1"},"body":"this is wrong"}]' > "$GH_DIR/comments_44.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
 has "$(cat "$STUB_ESC_LOG")" "--key pr-comments.44.0.8001" "the visit key names the exact batch"
-has "$(cat "$STUB_ESC_LOG")" "a sitting recorded a takeaway on it" "…and why no work could be routed"
-eq "$(meta H1 pr_comment_disposition)" "visit:new-2" "the choice is recorded, and it is the visit"
+has "$(cat "$STUB_ESC_LOG")" "a sitting is holding it for an operator ruling" "…and why no work could be routed"
+eq "$(meta H1 pr_comment_disposition)" "visit:new-3" "the choice is recorded, and it is the visit"
 eq "$(meta H1 pr_comment_watermark)" "8001" "the comment IS dispositioned — it went to a named party"
-eq "$(meta new-2 task_kind)" "visit" "the visit was really filed"
-eq "$(meta new-2 pr_number)" "44" "the visit carries the PR, which is what holds the merge"
-hasnt "$(grep -F '|blocks|H1' "$STUB_DEPS" || true)" "new-2" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
+eq "$(meta new-3 task_kind)" "visit" "the visit was really filed"
+eq "$(meta new-3 pr_number)" "44" "the visit carries the PR, which is what holds the merge"
+hasnt "$(grep -F '|blocks|H1' "$STUB_DEPS" || true)" "new-3" "…and NOT a blocks edge: escalate.sh already files the visit depending on its subject"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "no work was routed under the human's decision"
+
+echo "# …while a takeaway whose sitting ENDED holds nothing: the comments become work"
+store "[$(anchor H2 45 ',"gc.takeaway":"routed — nothing further needed here"'),$(demand H2 closed)]"
+printf '%s' "$(prview 45 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_45.json"
+echo '[]' > "$GH_DIR/reviews_45.json"
+printf '[{"id":8002,"user":{"login":"human1"},"body":"this is wrong"}]' > "$GH_DIR/comments_45.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(meta H2 pr_comment_disposition)" "rework:new-3" "a closed demand is a sitting that ended, so the fix pool gets them"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and no visit is filed"
+eq "$(meta H2 'gc.takeaway')" "routed — nothing further needed here" "…while the sitting's record is left alone"
 
 echo "# …and so does rebase_hold: a child told to answer comments may rewrite the branch"
 store "[$(anchor H5 54 ',"rebase_hold":"true"')]"
@@ -726,15 +751,31 @@ eq "$(meta R4 'check.codex')" "exception@sha-58" "…but an exception no signoff
 eq "$(meta R4 'gc.routed_to')" "human" "…and the park stands"
 eq "$(meta R4 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
 
-echo "# …and a live takeaway outranks the reset even with the cap's own stamp"
-store "[$(anchor R5 59 ',"check.codex":"exception@sha-59","signoff_cap":"codex@sha-59","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"')]"
+echo "# …and a sitting still waiting on a person outranks the reset, cap stamp or not"
+store "[$(anchor R5 59 ',"check.codex":"exception@sha-59","signoff_cap":"codex@sha-59","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"'),$(demand R5)]"
 printf '%s' "$(prview 59 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_59.json"
 echo '[]' > "$GH_DIR/reviews_59.json"
 printf '[{"id":8900,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_59.json"
 out=$(run)
-eq "$(meta R5 'check.codex')" "exception@sha-59" "a sitting's decision is not undone by a comment"
+eq "$(meta R5 'check.codex')" "exception@sha-59" "a decision a person still owes is not undone by a comment"
 eq "$(meta R5 'gc.routed_to')" "human" "…and the anchor stays parked for it"
-eq "$(meta R5 pr_comment_disposition)" "visit:new-2" "…which is who the comments go to"
+eq "$(meta R5 pr_comment_disposition)" "visit:new-3" "…which is who the comments go to"
+
+echo "# …but a takeaway recording a sitting that ENDED retires the park like any other"
+# The stuck shape this discriminator exists for: every sitting replaces the
+# takeaway it found and none of them clears it, so presence alone would park an
+# anchor from its first conversation onward, whatever the PR went on to say.
+store "[$(anchor R8 61 ',"check.codex":"exception@sha-61","signoff_cap":"codex@sha-61","gc.routed_to":"human","gc.takeaway":"approved as-is on GitHub; merge still held by the gate"')]"
+printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
+echo '[]' > "$GH_DIR/reviews_61.json"
+printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_61.json"
+out=$(run)
+eq "$(meta R8 signoff_rounds_reset)" "0.9100" "the batch is recorded"
+eq "$(meta R8 'check.codex')" "<absent>" "…the cap's exception is retired"
+eq "$(meta R8 signoff_cap)" "<absent>" "…with the stamp that claimed it"
+eq "$(meta R8 'gc.routed_to')" "" "…and the human route the cap wrote"
+eq "$(meta R8 pr_comment_disposition)" "rework:new-2" "…so the comments become work"
+eq "$(meta R8 'gc.takeaway')" "approved as-is on GitHub; merge still held by the gate" "…while the sitting's record is left alone"
 
 echo "# a reset the store refuses leaves the cap standing, and says so"
 # One transition carries the whole reset, so a refusal retires nothing: the
