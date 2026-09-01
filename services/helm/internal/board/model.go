@@ -328,11 +328,9 @@ type Tile struct {
 	// number yet, and most wedged anchors are in exactly that state, so
 	// PRNumber is a field on the row and never the selector.
 	//
-	// Five of the six are read off the bead. The board computes nothing about a
-	// merge anchor that the cadence has not already decided: reading the
-	// conversation for the open pull requests costs about twenty seconds
-	// against a 45-second cache TTL, and a cold `gh pr list` reports
-	// mergeStateStatus=UNKNOWN for two thirds of them.
+	// Every value here is read off beads: the board computes nothing about a
+	// merge anchor that the cadence has not already decided, and the render path
+	// makes no GitHub call.
 
 	// PRNumber is 0 before the PR opens; PRURL is the operator's way into
 	// GitHub, which is where the conversation stays.
