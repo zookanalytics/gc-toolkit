@@ -206,10 +206,10 @@ gate_hold_verb = "exception"
 # other.
 route_key = "gc.routed_to"
 # How doctor/check-wait-is-an-edge reports a marker with no live blocker.
-# "warn" while the standing backlog of marker-only holds is still being
-# converted (phase 3 of specs/tk-s4fg87/proposal.md); "error" once it is. The
-# posture is declared here rather than compiled into the check, so ending the
-# migration is this line, and so it is readable beside the markers it governs.
+# "warn" while a backlog of marker-only holds is still being converted to
+# edges; "error" once none are left. The posture is declared here rather than
+# compiled into the check, so ending the conversion is this line, and so it is
+# readable beside the markers it governs.
 hold_severity = "warn"
 
 [posture]
