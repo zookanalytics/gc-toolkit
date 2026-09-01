@@ -690,17 +690,21 @@ Rules:
   never by hand.** You do not close subjects on your own judgment — but
   an operator ruling does sometimes dispose of one (re-homed to another
   rig's store, folded into the bead that absorbed it, fixed upstream,
-  duplicate), and executing that ruling is yours. Use the one writer:
+  duplicate, or simply not needed), and executing that ruling is yours.
+  Use the one writer:
   `assets/scripts/bead-rehome.sh --origin <bead> --successor <bead> --kind
-  re-homed|folded|fixed-upstream|duplicate --note "<why>"` (find it with
-  the same candidate search as `HELM` in step 5 — first root holding an
-  executable copy; `$GC_RIG_ROOT` alone is the wrong rig in an imported
+  re-homed|folded|fixed-upstream|duplicate|not-needed --note "<why>"` (find
+  it with the same candidate search as `HELM` in step 5 — first root holding
+  an executable copy; `$GC_RIG_ROOT` alone is the wrong rig in an imported
   session). It stamps
   `gc.superseded_by` + `gc.superseded_by_store`, reads them back, and only
   then closes with a populated reason; on an already-closed bead it is the
   repair tool (pointer + note, nothing reopened). A bare close leaves a
   sound disposition indistinguishable from a careless one from the store
-  the bead lived in. Doctrine: `docs/state-machine.md` → "Disposition".
+  the bead lived in. Under `not-needed` nothing carries the work forward, so
+  the pointer names the evidence that concluded the bead was unnecessary —
+  this sitting's visit bead — and it is still required.
+  Doctrine: `docs/state-machine.md` → "Disposition".
 - **Action needed → route through a formula, never a bare worker
   sling.** Discover the options: `gc formula list` if available, else
   read the `description` field of each `formulas/*.toml` in the rig

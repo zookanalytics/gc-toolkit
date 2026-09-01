@@ -29,10 +29,15 @@ usage() {
     cat <<'U'
 Usage:
   bead-rehome.sh --origin <bead-id> --successor <bead-id> \
-                 --kind re-homed|folded|fixed-upstream|duplicate \
+                 --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
                  [--note "<one sentence of why>"] \
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
                  [--dry-run]
+
+Under every kind but not-needed the successor is the bead that carries the
+work now. Under not-needed nothing carries it, and the successor is the
+evidence that concluded the bead was unnecessary — typically the visit bead
+from the sitting that ruled. It is required either way.
 
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
@@ -61,10 +66,14 @@ done
 [ -n "$SUCCESSOR" ] || die "--successor is required (try --help)" 64
 [ -n "$KIND" ]      || die "--kind is required (try --help)" 64
 
-# The kind shapes the close reason, so it is a closed set.
+# The kind shapes the close reason, so it is a closed set. All but one say the
+# work RELOCATED and the successor carries it now; under not-needed nothing
+# carries it and the successor is the evidence that concluded the bead was
+# unnecessary. The pointer is required under both readings — an unpointed close
+# is indistinguishable from a careless one whatever ended the bead.
 case "$KIND" in
-    re-homed|folded|fixed-upstream|duplicate) ;;
-    *) die "--kind must be one of re-homed|folded|fixed-upstream|duplicate (got '$KIND')" 64 ;;
+    re-homed|folded|fixed-upstream|duplicate|not-needed) ;;
+    *) die "--kind must be one of re-homed|folded|fixed-upstream|duplicate|not-needed (got '$KIND')" 64 ;;
 esac
 
 [ "$ORIGIN" != "$SUCCESSOR" ] || die "--origin and --successor are the same bead ($ORIGIN)" 64
@@ -166,6 +175,7 @@ case "$KIND" in
     folded)         PHRASE="folded into" ;;
     fixed-upstream) PHRASE="fixed upstream by" ;;
     duplicate)      PHRASE="duplicate of" ;;
+    not-needed)     PHRASE="not needed, per" ;;
 esac
 REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 [ -n "$NOTE" ] && REASON="$REASON — $NOTE"

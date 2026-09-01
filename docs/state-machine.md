@@ -485,11 +485,17 @@ sequenceDiagram
 
 ## Disposition
 
-A close that hands the work to a successor must say so from the store the
-bead lived in: `assets/scripts/bead-rehome.sh` closes the bead with
-`gc.superseded_by` + `gc.superseded_by_store` (and stamps the inverse
-`gc.supersedes*` on the successor), so a sound re-home and a careless false
-close are distinguishable on read. The read side searches every store before
-concluding a close was false. Consumers: the mechanik/converse close paths
+A close that is not a landing must say so from the store the bead lived in:
+`assets/scripts/bead-rehome.sh` closes the bead with `gc.superseded_by` +
+`gc.superseded_by_store` (and stamps the inverse `gc.supersedes*` on the
+successor), so a sound disposition and a careless false close are
+distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
+`duplicate` — say the work relocated, and the pointer names the bead that
+carries it now. The fifth, `not-needed`, says nothing carries it: the bead
+was not needed, and the pointer names the evidence that concluded so,
+typically the visit bead from the sitting that ruled. The pointer is required
+under every kind, because it is the whole of that distinction. The read side
+searches every store before concluding a close was false. Consumers: the
+mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
