@@ -7,8 +7,10 @@
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
 # close/terminal pairing guards (--close only into a closed state, closed states
 # must --close); --set-dated's compare-and-preserve rule for the @<since>
-# component; the reopen repair verb; and the drift assertion between
-# lifecycle/lifecycle.toml and the embedded lifecycle-state-table block.
+# component; the reopen repair verb; the park-route takeaway guard and its
+# --takeaway writer, capped and mirrored from gc-helm.sh; and the drift
+# assertion between lifecycle/lifecycle.toml and the embedded
+# lifecycle-state-table block.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -208,11 +210,19 @@ echo "# human states"
 store '[{"id":"a-6","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition a-6 --to abandoned --assignee "" \
-  --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
+  --set blocked_reason="PR#7 closed out-of-band" \
+  --takeaway "PR#7 was closed without merging — rework it or close this bead" 2>&1)"; rc=$?
 eq "$rc" 0 "transition to abandoned exits 0"
 eq "$(meta a-6 'gc.routed_to')" "human" "abandoned routes to human automatically"
 eq "$(bassignee a-6)" "" "--assignee '' cleared the assignee"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "route + clear + reason ride in ONE update"
+eq "$(meta a-6 'gc.takeaway')" "PR#7 was closed without merging — rework it or close this bead" \
+  "the park names what it wants"
+eq "$(meta a-6 'gc.takeaway_by')" "lifecycle" "the takeaway names its writer"
+case "$(meta a-6 'gc.takeaway_at')" in
+  ????-??-??T??:??:??Z) ok "the takeaway is dated" ;;
+  *) bad "the takeaway carries no gc.takeaway_at" ;;
+esac
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "route + clear + reason + takeaway ride in ONE update"
 
 # --- detached states clear the route in the same atomic call --------------------
 # A detached anchor rests unrouted so that no pool offers it. Any route but the
@@ -272,6 +282,144 @@ has "$out" "requires a route" "the refusal names the missing route"
 eq "$(meta tk-9heqfh merge_result)" "<absent>" "no state was recorded"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and no write was attempted"
 
+# --- a park must NAME what it waits for ------------------------------------------
+# The helm board spends gc.takeaway as a row's NEEDS sentence and, on a row
+# routed to a person with none, reports that nobody recorded a question. So
+# writing the park route without a takeaway is refused here.
+echo "# a park names what it waits for"
+store '[{"id":"p-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition p-1 --to abandoned --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
+eq "$rc" 1 "a park with no takeaway exits 1"
+has "$out" "no question recorded" "the refusal quotes what the board would render"
+has "$out" "--takeaway" "the refusal names the flag that fixes it"
+eq "$(meta p-1 merge_result)" "pull_request" "the refused park wrote nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+
+# The same refusal on an EXPLICIT --route human, whatever the state.
+store '[{"id":"p-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+out="$("$SUT" transition p-2 --to pull_request --route human 2>&1)"; rc=$?
+eq "$rc" 1 "an explicit --route human with no takeaway exits 1"
+has "$out" "no question recorded" "the refusal is the same one"
+
+# A bead that already carries a takeaway satisfies the guard: that is the
+# converse sitting which stamped its hold before transitioning.
+store '[{"id":"p-3","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — needs a ruling on the base branch"}}]'
+out="$("$SUT" transition p-3 --to blocked 2>&1)"; rc=$?
+eq "$rc" 0 "a bead already carrying a takeaway parks"
+eq "$(meta p-3 'gc.takeaway')" "holding — needs a ruling on the base branch" "and keeps the sentence it had"
+
+# Routing anywhere but the park sentinel is not a park.
+store '[{"id":"p-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition p-4 --to retargeted --route rig/mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "a route to a POOL needs no takeaway"
+
+# Preserving a park route this call did not set is not a park either: the
+# question stays with whoever asked it.
+store '[{"id":"p-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
+out="$("$SUT" transition p-5 --to pull_request --set pr_number=9 2>&1)"; rc=$?
+eq "$rc" 0 "a preserved park route needs no takeaway"
+eq "$(meta p-5 'gc.routed_to')" "human" "and the route survives"
+
+# Nor is naming the route the bead already rests on. gate-ensure.sh and merge.sh
+# carry gc.routed_to back on every pr.machine write so that recording a verdict
+# cannot clear a route they never looked at, and the anchors they most need to
+# record are the wedged ones a cap already parked.
+store '[{"id":"p-5b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human"}}]'
+out="$("$SUT" transition p-5b --to pull_request --route human --set-dated "pr.machine=wedged-exception@sha1" 2>&1)"; rc=$?
+eq "$rc" 0 "carrying an existing park route back needs no takeaway"
+eq "$(meta p-5b 'gc.routed_to')" "human" "and the route is unchanged"
+case "$(meta p-5b 'pr.machine')" in
+  wedged-exception@sha1@*) ok "…so the observer's verdict is recorded" ;;
+  *) bad "…so the observer's verdict is recorded (got '$(meta p-5b 'pr.machine')')" ;;
+esac
+
+# The narrowing is only for a route already there: the same call on a bead this
+# write would park is the refusal above.
+store '[{"id":"p-5c","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/mechanik"}}]'
+out="$("$SUT" transition p-5c --to pull_request --route human --set-dated "pr.machine=wedged-exception@sha1" 2>&1)"; rc=$?
+eq "$rc" 1 "moving a bead ONTO the park route still needs a takeaway"
+has "$out" "no question recorded" "…with the same refusal"
+eq "$(meta p-5c 'gc.routed_to')" "rig/mechanik" "…and the route it had is untouched"
+
+# The takeaway triple is this flag's to write.
+store '[{"id":"p-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition p-6 --to abandoned --set gc.takeaway="via --set" 2>&1)"; rc=$?
+eq "$rc" 1 "--set gc.takeaway is refused (owned by --takeaway)"
+has "$out" "--takeaway" "the refusal names the owning flag"
+
+# Over the cap the verb REJECTS rather than truncating: only the author knows
+# which clause is the headline, and a truncated one loses it silently.
+store '[{"id":"p-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+LONG=$(printf 'x%.0s' $(seq 141))
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition p-7 --to abandoned --takeaway "$LONG" 2>&1)"; rc=$?
+eq "$rc" 1 "a takeaway over the cap exits 1"
+has "$out" "141 chars" "the refusal reports the measured length"
+has "$out" "the cap is 140" "…and the cap"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and nothing was written"
+
+store '[{"id":"p-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition p-8 --to abandoned --takeaway "$(printf 'x%.0s' $(seq 140))" 2>&1)"; rc=$?
+eq "$rc" 0 "a takeaway AT the cap is accepted"
+
+# An EMPTY takeaway is not one. The flag's presence alone must not satisfy the
+# park guard: normalization can leave nothing behind, and the park then writes
+# the empty gc.takeaway that renders as the very row the guard exists to stop.
+store '[{"id":"p-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition p-9 --to abandoned --takeaway "" 2>&1)"; rc=$?
+eq "$rc" 1 "an empty --takeaway exits 1"
+has "$out" "no question recorded" "the refusal quotes what the board would render"
+eq "$(meta p-9 'gc.takeaway')" "<absent>" "no empty takeaway is written"
+eq "$(meta p-9 merge_result)" "pull_request" "the refused park wrote nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+
+store '[{"id":"p-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition p-10 --to abandoned --takeaway "   " 2>&1)"; rc=$?
+eq "$rc" 1 "a whitespace-only --takeaway exits 1"
+has "$out" "no question recorded" "…with the same refusal"
+eq "$(meta p-10 'gc.takeaway')" "<absent>" "…and nothing is written"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches bd"
+
+# The refusal belongs to the flag, not to the park: whatever the route, the
+# write itself is what the board reads.
+store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$("$SUT" transition p-11 --to retargeted --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
+eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
+
+# --- a takeaway that lands in part is not a transition ---------------------------
+# The verifier owes every written field, and a takeaway is three of them: the
+# text the board renders, the timestamp it dates and attributes the wait by, and
+# the writer that readers discriminate on. Checking only the text passes a park
+# the board can neither place nor attribute back as recorded.
+echo "# takeaway triple read-back"
+store '[{"id":"p-12","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="p-12:gc.takeaway_by" "$SUT" transition p-12 --to abandoned \
+  --takeaway "PR#7 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 2 "a dropped gc.takeaway_by exits 2"
+has "$out" "did NOT verify" "the half-landed triple is reported unverified"
+has "$out" "gc.takeaway_by" "…and the refusal names the missing provenance"
+
+store '[{"id":"p-13","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="p-13:gc.takeaway_at" "$SUT" transition p-13 --to abandoned \
+  --takeaway "PR#8 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 2 "a dropped gc.takeaway_at exits 2"
+has "$out" "gc.takeaway_at" "the refusal names the missing timestamp"
+
+store '[{"id":"p-14","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+out="$(STUB_DROP_KEYS="p-14:gc.takeaway" "$SUT" transition p-14 --to abandoned \
+  --takeaway "PR#9 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 2 "a dropped gc.takeaway exits 2"
+has "$out" "gc.takeaway=" "the refusal names the missing text"
+
+# --- the cap mirrors gc-helm.sh, the other takeaway writer ------------------------
+echo "# takeaway cap drift"
+HELM_MAX=$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)
+SUT_MAX=$(sed -n 's/^LIFECYCLE_TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$SUT" | head -1)
+eq "$SUT_MAX" "$HELM_MAX" "the takeaway cap matches gc-helm.sh's TAKEAWAY_MAX"
+
 # --- held: a sitting's hold is a state, entered only from unanchored ------------
 echo "# held"
 store '[{"id":"h-1","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — needs a ruling"}}]'
@@ -289,7 +437,7 @@ out="$("$SUT" transition h-2 --to held 2>&1)"; rc=$?
 eq "$rc" 1 "pull_request -> held is an illegal edge"
 has "$out" "illegal edge pull_request -> held" "the refusal names the edge"
 
-store '[{"id":"h-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"held","gc.routed_to":"human"}}]'
+store '[{"id":"h-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"held","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"}}]'
 out="$("$SUT" transition h-3 --to held 2>&1)"; rc=$?
 eq "$rc" 0 "re-holding is an idempotent self-edge"
 

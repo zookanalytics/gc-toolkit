@@ -2,7 +2,7 @@
 # lifecycle.sh — THE writer of anchor lifecycle transitions (lifecycle/lifecycle.toml).
 #   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
 #     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>]
-#     [--close] [--append-notes <t>] [--json]
+#     [--takeaway <text>] [--close] [--append-notes <t>] [--json]
 #   lifecycle.sh state <bead-id>
 #   lifecycle.sh reopen <bead-id>
 # transition: validate the edge against the declared machine, perform ONE atomic
@@ -17,7 +17,12 @@
 # call unless --route is given: human states stamp gc.routed_to=human, and
 # detached states clear it unless the bead already rests on the park route. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to
-# name one.
+# name one, and routing to the park sentinel refuses without a takeaway — the
+# board spends gc.takeaway as the row's NEEDS sentence, so a park with none
+# reaches the operator saying no question was recorded. --takeaway writes the
+# triple (text/_at/_by) in the same atomic call, capped at 140 codepoints and
+# refused when it normalizes to nothing; a bead that already carries a takeaway
+# satisfies the guard.
 # reopen: repair a bead closed while merge_result is a NON-closed state — set
 # status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
 # Callers: pr-open.sh, merge.sh, pr-facts.sh, mol-refinery-patrol.
@@ -65,6 +70,9 @@ refused_false_completion>unanchored
 held>unanchored
 "
 # <<< lifecycle-state-table
+
+# The board's NEEDS cell, in codepoints. Mirrors gc-helm.sh's TAKEAWAY_MAX.
+LIFECYCLE_TAKEAWAY_MAX=140
 
 is_state() { # <name>
   case " $LIFECYCLE_STATES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
@@ -139,7 +147,7 @@ cmd_transition() {
   local id="${1:-}"; shift || true
   [ -n "$id" ] || { echo "$PROG: transition needs a bead id" >&2; exit 1; }
   local TO="" EXPECT="" ROUTE="" ROUTE_SET=0 ASSIGNEE="" ASSIGNEE_SET=0
-  local CLOSE=0 NOTES="" NOTES_SET=0 JSON=0
+  local CLOSE=0 NOTES="" NOTES_SET=0 JSON=0 TAKEAWAY="" TAKEAWAY_SET=0
   local SETS=() UNSETS=() DATED=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -150,6 +158,7 @@ cmd_transition() {
       --unset)        UNSETS+=("${2:-}"); shift 2 ;;
       --assignee)     ASSIGNEE="${2-}"; ASSIGNEE_SET=1; shift 2 ;;
       --route)        ROUTE="${2:-}"; ROUTE_SET=1; shift 2 ;;
+      --takeaway)     TAKEAWAY="${2-}"; TAKEAWAY_SET=1; shift 2 ;;
       --close)        CLOSE=1; shift ;;
       --append-notes) NOTES="${2:-}"; NOTES_SET=1; shift 2 ;;
       --json)         JSON=1; shift ;;
@@ -183,6 +192,8 @@ cmd_transition() {
     case "${kv%%=*}" in
       merge_result) echo "$PROG: merge_result is written by --to, never by --set" >&2; exit 1 ;;
       gc.routed_to) echo "$PROG: route via --route, never by --set" >&2; exit 1 ;;
+      gc.takeaway|gc.takeaway_at|gc.takeaway_by)
+        echo "$PROG: the takeaway triple is written by --takeaway, never by --set" >&2; exit 1 ;;
     esac
   done
   # A dated key's ARGUMENT carries the two components its writer decided; this
@@ -201,6 +212,35 @@ cmd_transition() {
       *) echo "$PROG: --set-dated '$kv' must carry exactly <value>@<oid>; lifecycle.sh appends the @<since>" >&2; exit 1 ;;
     esac
   done
+
+  if [ "$TAKEAWAY_SET" = 1 ]; then
+    # Collapse whitespace runs and trim BEFORE the empty check and the cap.
+    TAKEAWAY=$(printf '%s' "$TAKEAWAY" | tr -s '[:space:]' ' ')
+    TAKEAWAY="${TAKEAWAY# }"; TAKEAWAY="${TAKEAWAY% }"
+    # The flag's presence is not a takeaway. Whitespace normalizes to nothing,
+    # and an empty one writes the exact row the park guard below refuses: the
+    # board renders a person-routed row that carries no takeaway as having no
+    # question recorded. gc-helm.sh, the other writer, refuses it here too.
+    if [ -z "$TAKEAWAY" ]; then
+      echo "$PROG: --takeaway is empty; it renders as the board's NEEDS cell, and a row with an empty one reads as 'routed to you — no question recorded'" >&2
+      echo "$PROG: give it the one sentence the operator needs, or drop the flag." >&2
+      exit 1
+    fi
+    # >>> takeaway-length-gate
+    # Mirrors gc-helm.sh's gate; lifecycle.test.sh fails on drift. REJECT over
+    # the cap, never truncate: only the author knows which clause is the
+    # headline. Measured in CODEPOINTS — what both renderers measure — with a
+    # shell-count fallback so the gate cannot silently fail open on a broken jq.
+    local tlen
+    tlen=$(printf '%s' "$TAKEAWAY" | jq -Rsr 'length' 2>/dev/null || true)
+    case "$tlen" in ''|*[!0-9]*) tlen=${#TAKEAWAY} ;; esac
+    if [ "$tlen" -gt "$LIFECYCLE_TAKEAWAY_MAX" ]; then
+      echo "$PROG: --takeaway is $tlen chars; the cap is $LIFECYCLE_TAKEAWAY_MAX" >&2
+      echo "$PROG: it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in --append-notes." >&2
+      exit 1
+    fi
+    # <<< takeaway-length-gate
+  fi
 
   local bead cur
   bead=$(read_bead "$id")
@@ -231,6 +271,28 @@ cmd_transition() {
     fi
   fi
 
+  # A park must NAME what is owed. The helm board spends an anchor's
+  # gc.takeaway as its NEEDS sentence and, finding none on a row routed to a
+  # person, reports that nobody recorded a question — so a route to the park
+  # sentinel without a takeaway hands the operator a row it cannot read. The
+  # sentence rides the same atomic write as the route; a bead that already
+  # carries one satisfies this, which is the sitting that stamped its hold
+  # before transitioning. Only the WRITE is guarded: a call that names the park
+  # route a bead already rests on establishes no park, so it leaves the question
+  # with whoever asked it. Observers do exactly that — gate-ensure.sh and
+  # merge.sh pass gc.routed_to back so recording a verdict cannot clear a route
+  # they never looked at — and a wedged anchor is the park they most need to
+  # record.
+  local cur_takeaway="" cur_route=""
+  if [ "$ROUTE_SET" = 1 ] && [ "$ROUTE" = "$LIFECYCLE_PARK_ROUTE" ] && [ "$TAKEAWAY_SET" = 0 ]; then
+    cur_takeaway=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
+    cur_route=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
+    if [ -z "$cur_takeaway" ] && [ "$cur_route" != "$LIFECYCLE_PARK_ROUTE" ]; then
+      echo "$PROG: --route $LIFECYCLE_PARK_ROUTE needs --takeaway \"<text>\" — $id carries no gc.takeaway, and the board renders a person-routed row with an empty takeaway as 'routed to you — no question recorded'" >&2
+      exit 1
+    fi
+  fi
+
   # Resolve each dated key against the bead already in hand, appending the
   # instant, then let it ride the ordinary --set path: one atomic write, and the
   # post-write verification below checks the whole three-component value.
@@ -251,6 +313,13 @@ cmd_transition() {
   local k
   for k in ${UNSETS[@]+"${UNSETS[@]}"}; do ARGS+=(--unset-metadata "$k"); done
   [ "$ROUTE_SET" = 1 ] && ARGS+=(--set-metadata "gc.routed_to=$ROUTE")
+  local TAKEAWAY_AT=""
+  if [ "$TAKEAWAY_SET" = 1 ]; then
+    TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    ARGS+=(--set-metadata "gc.takeaway=$TAKEAWAY"
+           --set-metadata "gc.takeaway_at=$TAKEAWAY_AT"
+           --set-metadata "gc.takeaway_by=$PROG")
+  fi
   [ "$ASSIGNEE_SET" = 1 ] && ARGS+=(--assignee="$ASSIGNEE")
   [ "$CLOSE" = 1 ] && ARGS+=(--status=closed)
   [ "$NOTES_SET" = 1 ] && ARGS+=(--append-notes "$NOTES")
@@ -286,6 +355,21 @@ cmd_transition() {
   if [ "$ROUTE_SET" = 1 ]; then
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     [ "$got" = "$ROUTE" ] || BAD="$BAD gc.routed_to='$got'(want '$ROUTE')"
+  fi
+  # All three fields of the takeaway triple, not just the text a person reads.
+  # The timestamp dates the wait: helm orders the operator's queue by it, and
+  # attributes a takeaway to the sitting whose span contains it, dropping one it
+  # cannot date. The writer is the provenance readers discriminate on to tell a
+  # sitting's decision from a park's own sentence. A triple that lands in part
+  # leaves a headline the board can neither place nor attribute, so it is a
+  # failed transition and not a recorded one.
+  if [ "$TAKEAWAY_SET" = 1 ]; then
+    got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
+    [ "$got" = "$TAKEAWAY" ] || BAD="$BAD gc.takeaway='$got'(want '$TAKEAWAY')"
+    got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway_at"] // "") | tostring')
+    [ "$got" = "$TAKEAWAY_AT" ] || BAD="$BAD gc.takeaway_at='$got'(want '$TAKEAWAY_AT')"
+    got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway_by"] // "") | tostring')
+    [ "$got" = "$PROG" ] || BAD="$BAD gc.takeaway_by='$got'(want '$PROG')"
   fi
   if [ "$ASSIGNEE_SET" = 1 ]; then
     got=$(printf '%s' "$bead" | jq -r '(.assignee // "") | tostring')
@@ -366,7 +450,7 @@ case "${1:-}" in
   state)      shift; cmd_state "$@" ;;
   reopen)     shift; cmd_reopen "$@" ;;
   *)
-    echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>] [--close] [--append-notes <text>] [--json]" >&2
+    echo "usage: lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <pool>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]" >&2
     echo "       lifecycle.sh state <bead-id>" >&2
     echo "       lifecycle.sh reopen <bead-id>   # repair a bead closed on a non-closed merge_result" >&2
     exit 1 ;;

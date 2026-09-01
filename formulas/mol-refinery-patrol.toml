@@ -429,7 +429,7 @@ branch_has_real_change() {
 branch that merges to a no-op is a false completion. Never silently retry:
 ```bash
 if ! branch_has_real_change "origin/$TARGET" temp; then
-  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close"
+  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
   SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
@@ -513,9 +513,11 @@ branch the prepare block put in merge mode.
 2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
 base==$TARGET, in the origin repo — `gh pr view <ref> --json
 url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
-not a retry:
+not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
+`--takeaway` the one line the operator's board renders as what this bead
+needs, capped at 140 characters.
 ```bash
-"$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>"
+"$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done

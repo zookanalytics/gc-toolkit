@@ -52,8 +52,8 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
 
 reset: retire a round cap under a ruling. Advances signoff_round_floor to the
   rounds already spent and retires the park the cap wrote — check.<gate>,
-  blocked_reason, signoff_cap, the human route and the dispatch tally — in one
-  write. Needs no PR and no review bead, and writes to no other bead. Refused
+  blocked_reason, signoff_cap, the human route, the cap's own gc.takeaway and
+  the dispatch tally — in one write. Needs no PR and no review bead, and writes to no other bead. Refused
   when the rework ledger the floor comes from does not read, or names no round.
   Refused while a live demand holds the anchor: a sitting is waiting on a
   person there, and this ruling would hand the decision back to a pool.
@@ -245,7 +245,7 @@ if [ "$MODE" = reset ]; then
   # The dispatch tally goes with it: released rounds nobody may dispatch are no
   # release.
   CAP_STAMP=$(row_meta "$ANCHOR_ROW" signoff_cap)
-  PARK_GATE=""; PARK_OID=""; RETIRED=""; TALLY_KEYS=()
+  PARK_GATE=""; PARK_OID=""; RETIRED=""; RETIRED_TAKEAWAY=""; TALLY_KEYS=()
   case "$CAP_STAMP" in
     ?*@?*) PARK_GATE="${CAP_STAMP%%@*}"; PARK_OID="${CAP_STAMP#*@}" ;;
   esac
@@ -253,6 +253,15 @@ if [ "$MODE" = reset ]; then
     WRITES+=(--unset-metadata "check.$PARK_GATE" --unset-metadata blocked_reason \
              --unset-metadata signoff_cap --set-metadata "gc.routed_to=")
     RETIRED="check.$PARK_GATE=exception@$PARK_OID, blocked_reason, signoff_cap and the human route"
+    # The cap writes the board's NEEDS sentence for this park, so the sentence
+    # goes with the park. Only its own: gc.takeaway_by names the writer, and a
+    # sitting's record of a decision on this anchor is not this verb's to clear.
+    if [ "$(row_meta "$ANCHOR_ROW" gc.takeaway_by)" = signoff ]; then
+      WRITES+=(--unset-metadata gc.takeaway --unset-metadata gc.takeaway_at \
+               --unset-metadata gc.takeaway_by)
+      RETIRED_TAKEAWAY=1
+      RETIRED="$RETIRED, the cap's takeaway"
+    fi
     while IFS= read -r K; do
       [ -n "${K:-}" ] || continue
       WRITES+=(--unset-metadata "$K"); TALLY_KEYS+=("$K"); RETIRED="$RETIRED, $K"
@@ -280,6 +289,11 @@ TALLY
     [ -z "$(row_meta "$AFTER" signoff_cap)" ]        || BAD="$BAD signoff_cap"
     [ -z "$(row_meta "$AFTER" blocked_reason)" ]     || BAD="$BAD blocked_reason"
     [ -z "$(row_meta "$AFTER" gc.routed_to)" ]       || BAD="$BAD gc.routed_to"
+    if [ -n "$RETIRED_TAKEAWAY" ]; then
+      [ -z "$(row_meta "$AFTER" gc.takeaway)" ]    || BAD="$BAD gc.takeaway"
+      [ -z "$(row_meta "$AFTER" gc.takeaway_at)" ] || BAD="$BAD gc.takeaway_at"
+      [ -z "$(row_meta "$AFTER" gc.takeaway_by)" ] || BAD="$BAD gc.takeaway_by"
+    fi
     # The tally is verified key by key: gate-ensure.sh holds dispatches at the
     # backstop while dispatch_count stands, so a tally unset that was denied or
     # lost while the rest of the write landed leaves the anchor undispatchable
@@ -568,15 +582,44 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # the cap's own gc.routed_to=human from a person's, so an anchor a human
   # parked by hand stays parked. It is written and verified with them: a park
   # nothing proves is the cap's can be lifted only by a person.
+  #
+  # The park is recorded twice, at two lengths. blocked_reason is the row's
+  # detail and names both the case and the verb that retires it; gc.takeaway is
+  # the headline the helm board renders for NEEDS, and a park that writes only
+  # the first arrives on the operator's board announcing that nobody recorded
+  # what is owed. They are separate strings because the detail passes the
+  # 140-codepoint takeaway cap in either case, while the headline holds under it
+  # at every round count the cap can reach.
+  #
+  # gc.takeaway_by carries the same provenance the cap stamp does, one level
+  # down: pr-facts.sh retires the cap's own sentence with the park and leaves a
+  # sitting's alone, and it tells them apart by that field. A takeaway whose
+  # writer did not land reads as the sitting's, so the feedback meant to lift
+  # the park leaves the exception and the human route standing. The whole
+  # triple is verified below, not just the text a person would see.
+  #
+  # The timestamp is captured before the write and verified against that exact
+  # value. An anchor can already carry an older gc.takeaway_at from a previous
+  # park, so a presence check passes while this verdict's timestamp is the one
+  # field that did not land — a headline helm dates and attributes to whatever
+  # sitting the stale timestamp falls in.
+  CAP_HEADLINE="signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor"
+  CAP_TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   gc bd update "$ANCHOR" \
     --set-metadata gc.routed_to=human \
     --set-metadata "signoff_cap=$CHECK_NAME@$REVIEWED_OID" \
     --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework rounds (cap $CAP); $CAP_WHY" \
+    --set-metadata "gc.takeaway=$CAP_HEADLINE" \
+    --set-metadata "gc.takeaway_at=$CAP_TAKEAWAY_AT" \
+    --set-metadata gc.takeaway_by=signoff \
     >/dev/null 2>&1 || true
   CAP_ROW=$(bd_json show "$ANCHOR")
   if [ "$(row_meta "$CAP_ROW" gc.routed_to)" != "human" ] \
-     || [ "$(row_meta "$CAP_ROW" signoff_cap)" != "$CHECK_NAME@$REVIEWED_OID" ]; then
-    warn "the cap park did not read back on $ANCHOR (gc.routed_to='$(row_meta "$CAP_ROW" gc.routed_to)', signoff_cap='$(row_meta "$CAP_ROW" signoff_cap)'); review left open for a retry"
+     || [ "$(row_meta "$CAP_ROW" signoff_cap)" != "$CHECK_NAME@$REVIEWED_OID" ] \
+     || [ "$(row_meta "$CAP_ROW" gc.takeaway)" != "$CAP_HEADLINE" ] \
+     || [ "$(row_meta "$CAP_ROW" gc.takeaway_by)" != "signoff" ] \
+     || [ "$(row_meta "$CAP_ROW" gc.takeaway_at)" != "$CAP_TAKEAWAY_AT" ]; then
+    warn "the cap park did not read back on $ANCHOR (gc.routed_to='$(row_meta "$CAP_ROW" gc.routed_to)', signoff_cap='$(row_meta "$CAP_ROW" signoff_cap)', gc.takeaway='$(row_meta "$CAP_ROW" gc.takeaway)', gc.takeaway_by='$(row_meta "$CAP_ROW" gc.takeaway_by)', gc.takeaway_at='$(row_meta "$CAP_ROW" gc.takeaway_at)' want '$CAP_TAKEAWAY_AT'); review left open for a retry"
     exit 2
   fi
   close_review

@@ -248,7 +248,8 @@ while IFS= read -r row; do
   if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ]; then
     if "$LIFECYCLE" transition "$id" --to abandoned --expect pull_request \
          --assignee "" \
-         --set "blocked_reason=PR#$num closed out-of-band without merging"; then
+         --set "blocked_reason=PR#$num closed out-of-band without merging" \
+         --takeaway "PR#$num was closed without merging — rework the branch, or close this bead as not-planned"; then
       flagged=$((flagged + 1))
       escalate "$id" "pr-abandoned.$num" \
         "PR#$num ($live_url) was closed out-of-band without merging. The anchor is left OPEN, routed to human (merge_result=abandoned). Decide: rework it, or close it as not-planned."
@@ -365,7 +366,8 @@ $(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
          --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
-         --set "blocked_reason=PR#$num retargeted: base '$base' != expected target '$rec_target'"; then
+         --set "blocked_reason=PR#$num retargeted: base '$base' != expected target '$rec_target'" \
+         --takeaway "PR#$num sits on a base other than its expected target — retarget it back, or update merged_target"; then
       flagged=$((flagged + 1))
       escalate "$id" "pr-retargeted.$num" \
         "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
@@ -641,6 +643,7 @@ GATES
     # Read once: both the cap retirement below and the routing choice after it
     # turn on the same question, and each answer costs a ledger read.
     holding=""; takeaway_is_holding "$id" && holding=1
+    takeaway_by=$(printf '%s' "$row" | jq -r '(.metadata["gc.takeaway_by"] // "") | tostring')
 
     # --- operator feedback resets the review-round cap ---------------------------
     # signoff.sh's cap bounds the city failing to converge against its own
@@ -674,7 +677,10 @@ TALLY
       # the exception the park belongs to, and the two must still agree: a park
       # a person put there, or one whose exception was already retired by hand,
       # is theirs and stays. A sitting still holding this anchor for a ruling
-      # outranks the reset the same way.
+      # outranks the reset the same way. The cap's own gc.takeaway is not such a
+      # decision — it is the sentence the board renders for this park — so it
+      # retires with the park, and gc.takeaway_by is what tells it from a
+      # sitting's, which is left alone.
       cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
       case "$cap" in
         ?*@?*)
@@ -683,6 +689,10 @@ TALLY
                '(.metadata[$k] // "") | tostring')" = "exception@$cap_oid" ]; then
             RSET+=(--unset "check.$cap_gate" --unset blocked_reason --unset signoff_cap --route "")
             undo="${undo:+$undo, }check.$cap_gate=exception@$cap_oid, blocked_reason and the human route"
+            if [ "$takeaway_by" = signoff ]; then
+              RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
+              undo="${undo:+$undo, }the cap's takeaway"
+            fi
             unparked=1
           fi ;;
       esac
