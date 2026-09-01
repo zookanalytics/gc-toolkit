@@ -58,7 +58,10 @@ CTRL_TR="tr[[:space:]]+-d[[:space:]]+[\"']?[^\"']*(\\\\0[0-9]|\[:cntrl:\])"
 # whether an arbitrary pipeline target resolves needs a shell parser.
 RETIRED_RE='(^|[^[:alnum:]_])(strip_ctl|strip_ctrl)([^[:alnum:]_]|$)'
 # `scrub` reached as a pipeline target, the one shape the pack calls it in.
-CALL_RE='\|[[:space:]]*scrub([[:space:]]|$)'
+# The terminator is any non-identifier byte, so a call closing a command
+# substitution (`| scrub)`) reads the same as `| scrub | jq .`, while a longer
+# name that merely starts with it (`| scrubbed`) is not a call to this helper.
+CALL_RE='\|[[:space:]]*scrub([^[:alnum:]_]|$)'
 OPEN_RE='^[[:space:]]*#[[:space:]]*>>>[[:space:]]+([A-Za-z0-9_-]+)[[:space:]]*$'
 CLOSE_RE='^[[:space:]]*#[[:space:]]*<<<[[:space:]]+([A-Za-z0-9_-]+)[[:space:]]*$'
 FIX="fix: use the shared \`scrub\` helper (learned rule: inline-ctrl-scrub)"

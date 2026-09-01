@@ -187,6 +187,15 @@ x=\$(gc bd show z --json | json_${RETIRED}_rows)"
 
     probe "flags a | scrub the file defines nowhere" 1 \
         "x=\$(gc bd show z --json | scrub | jq .)"
+    # The pack's prevailing call shape closes a command substitution, so the
+    # call is terminated by `)` rather than by whitespace.
+    probe "flags a | scrub closing a command substitution" 1 \
+        "x=\$(gc bd show z --json | scrub)"
+    probe "flags a | scrub terminated by a semicolon" 1 \
+        "x=\$(gc bd show z --json | scrub); echo done"
+    probe "passes a longer name that merely starts with scrub" 0 \
+        "scrubbed() { cat; }
+x=\$(gc bd show z --json | scrubbed)"
     probe "passes | scrub where the fenced copy defines it" 0 \
         "# >>> control-char-scrub
 $BLOCK
