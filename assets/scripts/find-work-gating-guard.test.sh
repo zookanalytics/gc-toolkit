@@ -192,10 +192,10 @@ echo "── 3. PRE_OPEN reads every key a PR can be recorded under ──"
 # preopen <existing_pr> <pr_url> <pr_number> -> "PRE_OPEN|RECORDED_PR"
 { cat "$TMP/preopen.sh"; printf 'printf "%%s|%%s\\n" "$PRE_OPEN" "$RECORDED_PR"\n'; } > "$TMP/run-preopen.sh"
 preopen() {
-  WORK_JSON=$(jq -nc --arg u "${2:-}" --arg n "${3:-}" \
+  BEAD_JSON=$(jq -nc --arg u "${2:-}" --arg n "${3:-}" \
     '[{metadata: ({} + (if $u != "" then {pr_url: $u} else {} end)
                     + (if $n != "" then {pr_number: ($n | tonumber)} else {} end))}]')
-  WORK="tk-w" EXISTING_PR="${1:-}" WORK_JSON="$WORK_JSON" CODEX_GATE=1 \
+  WORK="tk-w" EXISTING_PR="${1:-}" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 \
     bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1
 }
 # `gh` must be present for PRE_OPEN to be reachable at all (the resolver opens
@@ -214,8 +214,8 @@ eq "$(preopen '' '' '55')" "0|55" \
 # out-rank a real pr_number under a `//` chain and hand a PR reference of "" to
 # the post-open path.
 eq "$(preopen '' '' '' ; :)" "1|" "(16) no keys at all -> PRE_OPEN"
-WORK_JSON='[{"metadata":{"pr_url":"","pr_number":55}}]'
-eq "$(WORK="tk-w" EXISTING_PR="" WORK_JSON="$WORK_JSON" CODEX_GATE=1 bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1)" "0|55" \
+BEAD_JSON='[{"metadata":{"pr_url":"","pr_number":55}}]'
+eq "$(WORK="tk-w" EXISTING_PR="" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1)" "0|55" \
    "(17) empty pr_url does not out-rank a real pr_number (jq // only skips null)"
 
 # existing_pr keeps its own strict validation path; a refinery-minted pr_url

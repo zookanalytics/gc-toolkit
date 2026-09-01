@@ -304,10 +304,36 @@ fi
 PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 "$LC" transition "$WORK" --to unanchored --assignee "" --route "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat" --set rejection_reason="$REJECT_REASON" ${PR_URL:+--set existing_pr="$PR_URL"}
 # <<< mr-aware-rejection
+# >>> rejection-branch-keep
+# $BEAD_JSON is the read the repool above shape-validated, so an unreadable
+# bead has already exited and the branch it names is kept. A wrongly kept
+# branch is swept later; a wrongly deleted one strands a PR.
+# >>> merge-strategy-resolve
+# The one reading of the merge strategy. Every step that branches on it reads
+# it through this block, so the step that keeps a branch and the step that
+# opens a PR for that branch cannot disagree about the mode the bead is in.
+MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
+MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
+if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
+# <<< merge-strategy-resolve
+BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+# Nothing PR-shaped on the bead means "no PR will ever want this branch" only
+# in direct mode. In mr mode the PR is opened later, by the cadence's pr-open,
+# so that test is true for the whole pre-open window. A first-pass rejection
+# lands inside it.
+PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
+if [ -z "$BRANCH" ]; then
+  echo "no metadata.branch on $WORK — no branch to delete"
+elif [ "$MERGE_STRATEGY" != "direct" ]; then
+  echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
+elif [ "${PR_SHAPED:-1}" != "0" ]; then
+  echo "keeping origin/$BRANCH — the bead already records a PR"
+else
+  git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
+fi
+# <<< rejection-branch-keep
 ```
-Delete the branch only when NOTHING PR-shaped is on the bead (re-read it;
-an unreadable read keeps the branch — a wrongly kept branch is swept later,
-a wrongly deleted one strands a PR). Clean up temp, jump to next-iteration.
+Clean up temp, jump to next-iteration.
 
 **Pre-existing on target:** dedup FIRST, file only if none, then proceed
 with the merge. One block, one shell — a probe result that does not survive
@@ -363,13 +389,18 @@ description = """
 
 Read strategy and helpers once:
 ```bash
-WORK_JSON=$(gc bd show $WORK --json)
-BRANCH=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.branch')
-TARGET=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
-MERGE_STRATEGY=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
+BEAD_JSON=$(gc bd show $WORK --json)
+BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch')
+TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
+# >>> merge-strategy-resolve
+# The one reading of the merge strategy. Every step that branches on it reads
+# it through this block, so the step that keeps a branch and the step that
+# opens a PR for that branch cannot disagree about the mode the bead is in.
+MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
-[ "$MERGE_STRATEGY" = "pr" ] && MERGE_STRATEGY="mr"
-EXISTING_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.existing_pr // empty')
+if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
+# <<< merge-strategy-resolve
+EXISTING_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.existing_pr // empty')
 if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
   echo "metadata.existing_pr requires the PR pipeline; using merge_strategy=mr."
   MERGE_STRATEGY="mr"
@@ -500,7 +531,7 @@ route converges on its PR instead of being re-parked:
 # >>> pre-open-recorded-pr
 RECORDED_PR="$EXISTING_PR"
 if [ -z "$RECORDED_PR" ]; then
-  RECORDED_PR=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
+  RECORDED_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
 fi
 PRE_OPEN=0
 if [ -z "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then

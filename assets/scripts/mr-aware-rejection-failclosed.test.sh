@@ -13,6 +13,15 @@
 #      cleared, routed back to the polecat pool, rejection_reason carried.
 #   4. A bead with a live PR (pr_url) carries it over as existing_pr, so the
 #      rework reuses the same PR instead of minting a duplicate.
+#   5. The rejection KEEPS the branch unless the bead is direct-mode with
+#      nothing PR-shaped on it. In mr mode the PR is opened later by the
+#      cadence's pr-open, so "no PR on the bead yet" is not evidence that
+#      nothing needs the branch.
+#   6. Both steps that branch on the merge strategy read it through ONE
+#      spliced block, so keeping a branch and opening a PR for it cannot
+#      disagree about which mode the bead is in.
+#   7. The delete is cleanup behind a repool that already stands, so a push
+#      that cannot delete is reported and the cycle continues.
 #
 # Executes the real blocks extracted verbatim from the formula against stub
 # `gc` + `lifecycle.sh`. No live city, Dolt, network, or worktrees.
@@ -115,6 +124,127 @@ for i in 1 2; do
     && bad "block $i: no direct bead writes" "found a gc bd update" \
     || ok "block $i: no direct bead writes (lifecycle.sh is the writer)"
 done
+
+# --- One reading of the merge strategy. -----------------------------------------
+# handle-failures decides whether the branch survives a rejection; merge-push
+# decides whether a PR is opened for it. Two readings can disagree, and the
+# disagreement that matters is silent: a delete guard keyed on "nothing
+# PR-shaped on the bead" is satisfied for every mr-mode bead until pr-open runs.
+echo "── merge-strategy-resolve ──"
+NSTRAT=$(awk '
+  /# >>> merge-strategy-resolve$/ { n++; f=1; next }
+  /# <<< merge-strategy-resolve$/ { f=0; next }
+  f { print > ("'"$TMP"'/strategy-" n ".sh") }
+  END { print n }' "$TOML")
+eq "$NSTRAT" "2" "both steps that branch on the strategy carry the resolve block"
+cmp -s "$TMP/strategy-1.sh" "$TMP/strategy-2.sh" \
+  && ok "the two resolve blocks are byte-identical (they cannot drift apart)" \
+  || bad "the two resolve blocks are byte-identical (they cannot drift apart)"
+STRAY=$(awk '
+  /# >>> merge-strategy-resolve$/ { f=1; next }
+  /# <<< merge-strategy-resolve$/ { f=0; next }
+  !f' "$TOML" | grep -c 'jq .*metadata\.merge_strategy' || true)
+eq "$STRAY" "0" "no step reads metadata.merge_strategy outside that block"
+
+# --- The rejection's branch decision. -------------------------------------------
+echo "── rejection-branch-keep ──"
+awk '
+  /# >>> rejection-branch-keep$/ { f=1; next }
+  /# <<< rejection-branch-keep$/ { f=0; next }
+  f' "$TOML" > "$TMP/branch-keep.sh"
+[ -s "$TMP/branch-keep.sh" ] \
+  && ok "the rejection arm carries the branch decision" \
+  || bad "the rejection arm carries the branch decision"
+for b in strategy-1 strategy-2 branch-keep; do
+  grep -q '[\]' "$TMP/$b.sh" \
+    && bad "$b is backslash-free (TOML would eat it)" \
+    || ok "$b is backslash-free (TOML would eat it)"
+done
+
+# git: records the branch delete. Everything else fails, so the block's
+# `git rev-parse --show-toplevel` fallback stays unresolved and the stub
+# lifecycle.sh under the fake rig root remains the only candidate.
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+case "$1 $2 $3" in
+  "push origin --delete")
+    [ "${FAKE_DELETE_FAILS:-0}" = "1" ] && { printf 'DELETE-REFUSED|%s\n' "$4" >> "$FAKE_LOG"; exit 1; }
+    printf 'DELETE|%s\n' "$4" >> "$FAKE_LOG"; exit 0 ;;
+esac
+exit 1
+GIT
+chmod +x "$TMP/bin/git"
+
+# The decision reads $BEAD_JSON from the repool block above it — the same shell,
+# one read — so the whole arm is what gets executed here, not the tail alone.
+# arm <meta-json|-> [default_merge_strategy] -> "<rc>|<deletes>"
+arm() {
+  : > "$TMP/log"
+  local rc=0 fails=0 meta="$1"
+  [ "$meta" = "-" ] && { fails=1; meta='{}'; }
+  cat "$TMP/block-2.sh" "$TMP/branch-keep.sh" \
+    | sed -e "s|{{binding_prefix}}|gc-toolkit.|g" \
+          -e "s|{{default_merge_strategy}}|${2:-mr}|g" > "$TMP/run-arm.sh"
+  ( cd "$TMP" && \
+    WORK=tk-work REJECT_REASON="section 15e fixture clock" GC_RIG="" \
+    GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
+    FAKE_META="$meta" FAKE_BD_FAILS="$fails" FAKE_LOG="$TMP/log" \
+    bash "$TMP/run-arm.sh" > "$TMP/out" 2>&1 ) || rc=$?
+  printf '%s|%s' "$rc" "$(grep '^DELETE|' "$TMP/log" | tr '\n' ';')"
+}
+BR='"branch":"polecat/tk-work"'
+
+# (6) THE BUG: mr is the shipped default and the PR does not exist until the
+#     cadence's pr-open runs, so a first-pass test rejection lands in the
+#     window where the bead carries no PR and the branch is still needed.
+eq "$(arm "{$BR}")" "0|" \
+   "(6) default mr, no PR yet -> branch kept (pr-open has not run)"
+eq "$(arm "{$BR,\"merge_strategy\":\"mr\"}")" "0|" \
+   "(7) explicit mr -> branch kept"
+eq "$(arm "{$BR,\"merge_strategy\":\"pr\"}")" "0|" \
+   "(8) pr -> branch kept"
+grep -q 'merge_strategy=mr' "$TMP/out" \
+  && ok "(8b) pr is normalised to mr, the vocabulary merge-push branches on" \
+  || bad "(8b) pr is normalised to mr, the vocabulary merge-push branches on"
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}")" "0|DELETE|polecat/tk-work;" \
+   "(9) direct with nothing PR-shaped -> branch deleted"
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"pr_url\":\"https://github.com/o/r/pull/7\"}")" "0|" \
+   "(10) direct + pr_url -> branch kept"
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"pr_number\":7}")" "0|" \
+   "(11) direct + pr_number -> branch kept"
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\",\"existing_pr\":\"https://github.com/o/r/pull/7\"}")" "0|" \
+   "(12) direct + existing_pr -> branch kept"
+eq "$(arm -)" "1|" \
+   "(13) unreadable bead -> arm exits before the decision, branch kept"
+# The mode comes from the formula's own var, so a rig that ships direct still
+# gets the direct-mode cleanup.
+eq "$(arm "{$BR}" direct)" "0|DELETE|polecat/tk-work;" \
+   "(14) default_merge_strategy=direct, strategy unset -> branch deleted"
+eq "$(arm '{"merge_strategy":"direct"}')" "0|" \
+   "(15) direct with no metadata.branch -> no branch-less delete"
+arm "{$BR}" >/dev/null
+grep -q 'keeping origin/polecat/tk-work' "$TMP/out" \
+  && ok "(16) a kept branch is named in the cycle log, not silently skipped" \
+  || bad "(16) a kept branch is named in the cycle log, not silently skipped"
+eq "$(arm '{}')" "0|" \
+   "(17) mr with no metadata.branch -> nothing to delete"
+grep -q 'no metadata.branch on tk-work' "$TMP/out" \
+  && ok "(17b) a branch-less bead is named as such, not logged as 'keeping origin/'" \
+  || bad "(17b) a branch-less bead is named as such, not logged as 'keeping origin/'"
+
+# The delete is the last thing the arm does and the repool above it has already
+# committed. A push that cannot delete leaves a branch for the later sweep,
+# which the cycle tolerates; aborting here would strand the cycle instead.
+export FAKE_DELETE_FAILS=1
+eq "$(arm "{$BR,\"merge_strategy\":\"direct\"}")" "0|" \
+   "(18) a refused delete does not fail the cycle"
+grep -q 'could not delete origin/polecat/tk-work' "$TMP/out" \
+  && ok "(18b) a refused delete is reported, not swallowed" \
+  || bad "(18b) a refused delete is reported, not swallowed"
+grep -q '^DELETE-REFUSED|polecat/tk-work$' "$TMP/log" \
+  && ok "(18c) the delete was actually attempted (the case is not vacuous)" \
+  || bad "(18c) the delete was actually attempted (the case is not vacuous)"
+unset FAKE_DELETE_FAILS
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
