@@ -8,7 +8,9 @@
 # merge reads must be written in the same pass), merge (BEADS_ACTOR projected to
 # the refinery: it closes anchors assigned to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
-# review-sweep (cleanup over closed anchors; no projection, no merge authority).
+# review-sweep (cleanup over closed anchors; no projection, no merge authority),
+# duplicate-sweep (BEADS_ACTOR projected: it closes duplicate dispatches through
+# bead-rehome; no merge authority).
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
 # gate: the controller watchdog closes any tracking bead older than 2m, which
 # reopens that gate under a pass still running.
@@ -233,6 +235,15 @@ fi
 # because it reads only closed anchors — nothing earlier in the pass can see
 # them, and the residue this pass's merges create drains on the same tick.
 run_pass "(6) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
+
+# (7) duplicate-sweep: dispose of verified no-op duplicate dispatches. Last,
+# and after review-sweep, because the gate it re-verifies is a CLOSED
+# successor: a twin that arm 3 merged or arm 4 recorded this pass is
+# disposable on this tick rather than a minute later. BEADS_ACTOR projected —
+# the close it delegates to bead-rehome is attributed in the events table.
+( export BEADS_ACTOR="$AGENT"
+  run_pass "(7) duplicate-sweep" duplicate-sweep.sh ) \
+  || FAILED="${FAILED}duplicate-sweep rc=$?; "
 
 if [ -n "$LOG_SINK" ]; then
   {

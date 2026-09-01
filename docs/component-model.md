@@ -249,6 +249,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
+| `assets/scripts/review-sweep.sh` | merge | Arm 6: closes a dispatched review with no reviewable surface left. No merge authority. |
+| `assets/scripts/duplicate-sweep.sh` | merge | Arm 7: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, routed to the converse pool. |
 | `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of three dispositions: route the bead to a pool, hold it on an edge, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
@@ -260,7 +262,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
-| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions and operator re-homes. |
+| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, and `duplicate-sweep.sh`. |
 | `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
 | `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
 | `assets/scripts/tmux-bindings.sh` | visit | Installs the keybindings that reach the surfaces above. |

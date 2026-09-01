@@ -2,11 +2,11 @@
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
 # the arm ORDER (gate-ensure, pr-open, pr-facts --posture-only, merge, pr-facts,
-# convoy-graduate, review-sweep) — the posture arm runs BEFORE merge because
+# convoy-graduate, review-sweep, duplicate-sweep) — the posture arm runs BEFORE
 # merge.sh reads posture off the bead and would otherwise read one written a
 # pass ago;
 # the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
-# same pass, without failing the order; a non-zero posture arm holds it too,
+# merge because the same pass must not fail the order; a non-zero posture arm holds it too,
 # because merge.sh validates the posture that arm records), exercised by
 # extracting and executing the marked block against stubs; BEADS_ACTOR /
 # GC_AGENT projections scoped to their arms; a failing arm not skipping the
@@ -53,12 +53,14 @@ eq "$rc" 2 "no GC_RIG exits 2"
 has "$out" "GC_RIG is unset" "…and says why"
 
 echo "# arms run in order with derived pools and scoped identities"
-for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "gate-ensure.sh,pr-open.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh" "the arms ran in the load-bearing order"
+eq "$order" "gate-ensure.sh,pr-open.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,duplicate-sweep.sh" "the arms ran in the load-bearing order"
+dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
+has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
 has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"

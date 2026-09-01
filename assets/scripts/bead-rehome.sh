@@ -11,7 +11,7 @@
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
 # writes only the canonical gc.-prefixed pair.
-# Callers: converse dispositions, operator re-homes.
+# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh.
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 

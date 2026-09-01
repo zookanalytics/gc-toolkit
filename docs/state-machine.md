@@ -424,6 +424,13 @@ sequenceDiagram
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
+- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 8): a duplicate
+  dispatch a polecat diagnosed and parked has no other way out, since polecats
+  never close work beads. The arm closes it through `bead-rehome.sh --kind
+  duplicate` only when the named successor resolves and is closed or shipped
+  AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
+  or by carrying no work-product key at all. It writes nothing to the
+  successor's branch or PR, and holds on anything it cannot establish.
 - **Re-gate on head move**: any new commit stales every head-bound marker;
   gate-ensure sees a declared gate that is neither settled at the live head
   (`green@` or `exception@` at that head) nor in flight and dispatches one
@@ -442,5 +449,5 @@ bead lived in: `assets/scripts/bead-rehome.sh` closes the bead with
 `gc.supersedes*` on the successor), so a sound re-home and a careless false
 close are distinguishable on read. The read side searches every store before
 concluding a close was false. Consumers: the mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`) and any patrol judging a
-closed bead.
+(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
+cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
