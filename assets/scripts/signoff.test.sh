@@ -66,7 +66,11 @@ case "${1:-}" in
           printf '%s\n' "$id" >> "${STUB_UNSET_LOG:-/dev/null}"
           # A concurrent writer re-stamping the key loses the delete without
           # failing the call: rc 0, key untouched. Denial is STUB_UPD_FAIL.
-          if [ -n "${STUB_UNSET_NOOP:-}" ] && grep -qx "$id" "$STUB_UNSET_NOOP" 2>/dev/null; then :
+          # A line is "<id>" to lose every unset on that bead, or "<id> <key>"
+          # to lose exactly one while the rest of the write lands.
+          if [ -n "${STUB_UNSET_NOOP:-}" ] &&
+             { grep -qxF "$id" "$STUB_UNSET_NOOP" 2>/dev/null ||
+               grep -qxF "$id $1" "$STUB_UNSET_NOOP" 2>/dev/null; }; then :
           else
             jq -c --arg id "$id" --arg k "$1" \
               'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
@@ -729,6 +733,59 @@ out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
 eq "$rc" 2 "a denied write exits 2"
 has "$out" "did not read back" "…naming the failure"
 eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…and the park still stands"
+
+# The tally is the half of the park gate-ensure.sh reads. A reset whose floor,
+# marker and route all land while one tally unset is lost releases an anchor
+# nobody may dispatch, and says it retired the tally.
+echo "# a tally unset that is silently lost is not a retirement"
+capped_pre 3 dispatch_count=5 dispatch_backstop.codex=1
+printf 'tk-anc dispatch_count\n' > "$STUB_UNSET_NOOP"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-tally 2>&1); rc=$?
+eq "$rc" 2 "a lost dispatch_count unset exits 2"
+has "$out" "did not read back on tk-anc (dispatch_count)" "…naming the key that still stands"
+eq "$(meta tk-anc dispatch_count)" "5" "…which the anchor still carries"
+hasnt "$out" "reset to 0 of" "…and the retirement is never reported"
+
+echo "# …and a lost backstop unset is caught on the same terms"
+capped_pre 3 dispatch_count=5 dispatch_backstop.codex=1
+printf 'tk-anc dispatch_backstop.codex\n' > "$STUB_UNSET_NOOP"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-tally2 2>&1); rc=$?
+eq "$rc" 2 "a lost backstop unset exits 2"
+has "$out" "did not read back on tk-anc (dispatch_backstop.codex)" "…naming the backstop stamp"
+eq "$(meta tk-anc dispatch_count)" "<absent>" "…while the tally key that did land is gone"
+
+# The floor is written from the ledger count, so reset reads it strictly: 0 from
+# a walk that glitched writes signoff_round_floor=0@<batch>, and the next
+# verdict counts the real children from 0 and re-caps immediately.
+echo "# a rework ledger reset cannot read refuses before it writes anything"
+capped_pre 3 dispatch_count=5
+out=$(STUB_DEP_GARBAGE=1 "$SUT" reset tk-anc --reason "operator ruling" --batch ruling-garbage 2>&1); rc=$?
+eq "$rc" 1 "an unparseable dep listing refuses the reset"
+has "$out" "rework ledger" "…naming what it could not read"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes no floor"
+eq "$(meta tk-anc signoff_rounds_reset)" "<absent>" "…nor the batch it would pin it to"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…the park stands"
+eq "$(meta tk-anc gc.routed_to)" "human" "…the human route stands"
+eq "$(meta tk-anc dispatch_count)" "5" "…and the tally stands"
+
+echo "# …and a ledger naming no round is no cap to retire"
+reset "$ANCHOR_PRE"
+anchor_meta "check.codex=exception@$OID_HEAD" "signoff_cap=codex@$OID_HEAD" "gc.routed_to=human"
+out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "an anchor with no rework child refuses"
+has "$out" "no rework child" "…saying so"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes nothing"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…retiring no park it cannot account for"
+
+# The strict read belongs to reset alone. The cap path reads the same ledger
+# leniently, and the floor it re-baselines under a broken walk is a count rather
+# than the blank a strict reader would leave.
+echo "# the cap path still reads that same ledger leniently"
+spent 3
+anchor_meta signoff_rounds_reset=0.5001
+STUB_DEP_GARBAGE=1 "$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+eq "$(meta tk-anc signoff_round_floor)" "0@0.5001" "a broken walk floors at 0 rounds, never at nothing"
+eq "$(meta tk-anc check.codex)" "<absent>" "…and parks nothing"
 
 echo "# reset refuses what it cannot record or cannot read"
 capped_pre 3

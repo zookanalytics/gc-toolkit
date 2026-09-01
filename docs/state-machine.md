@@ -238,7 +238,15 @@ rounds as spent pre-open and names the verb that ends them. That verb is
 re-derive it — and retires the park in the same call, under the same
 `signoff_cap` agreement and takeaway guards the feedback reset uses. It reads
 no PR and touches no review bead, records the ruling on the anchor, and
-verifies every key it wrote.
+verifies every key it wrote, the retired tally keys included: `gate-ensure.sh`
+holds dispatches while `dispatch_count` stands, so an unset that was denied or
+lost leaves an anchor nobody may dispatch under a release that reported
+success. Because the floor comes from the rework ledger rather than from a batch
+someone else recorded, the count is read strictly — a walk that does not parse,
+or one naming no round at all, refuses the whole verb before it writes. Reading
+such a walk as zero rounds would write a floor of 0 and let the next pass count
+the real children from it and cap again, which is the deadlock the verb exists
+to end.
 
 A standing `CHANGES_REQUESTED` review resets nothing. It is the strongest
 posture there is, `merge.sh` vetoes on the review itself, and the arm that

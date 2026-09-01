@@ -53,7 +53,8 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
 reset: retire a round cap under a ruling. Advances signoff_round_floor to the
   rounds already spent and retires the park the cap wrote — check.<gate>,
   blocked_reason, signoff_cap, the human route and the dispatch tally — in one
-  write. Needs no PR and no review bead, and writes to no other bead.
+  write. Needs no PR and no review bead, and writes to no other bead. Refused
+  when the rework ledger the floor comes from does not read, or names no round.
   --reason  why the cap is retired; recorded on the anchor (required)
   --batch   the batch id the floor is pinned to (default: reset-<UTC stamp>)
 
@@ -132,14 +133,27 @@ stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did no
 # Every rework child ever filed against this anchor: one per round, each stamped
 # source_review_bead by the signoff that filed it. The cap bounds
 # non-convergence, which only an attempted rework can demonstrate, so review
-# dispatches are not rounds however many read the same commit. An unreadable
-# ledger reads 0 — capping on a guess parks live work. What counts against the
-# cap is this total minus the floor a reset records.
-rework_children() {
+# dispatches are not rounds however many read the same commit. What counts
+# against the cap is this total minus the floor a reset records.
+#
+# The two verbs read this ledger on opposite terms, because a wrong count is
+# spent in opposite directions. This reader fails rather than answer from a walk
+# it could not parse: the filter yields a number only from an array of rows, and
+# every other shape — an error payload, a bare string, nothing at all — leaves
+# jq failing and n empty.
+count_rework_children() {
   local kids n
   kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
   n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
+
+# An unreadable ledger reads 0 for the cap: a count guessed low only declines to
+# park, and capping on a guess parks live work.
+rework_children() {
+  local n
+  n=$(count_rework_children) || n=0
   printf '%s' "$n"
 }
 
@@ -163,7 +177,19 @@ if [ "$MODE" = reset ]; then
     exit 1
   fi
 
-  TOTAL=$(rework_children)
+  # The floor is written FROM this count, so it is read strictly: a floor
+  # guessed low is a cap the next pass re-fires, which is the deadlock this verb
+  # exists to end. An unreadable walk is not zero rounds, and zero rounds is
+  # nothing to release — the floor it would write is the 0 already in force.
+  TOTAL=$(count_rework_children) || TOTAL=""
+  if [ -z "$TOTAL" ]; then
+    warn "the rework ledger under $ANCHOR did not read as a dependency listing; nothing written — the floor comes from that count, and one guessed low re-caps on the next pass. Re-run once 'gc bd dep list $ANCHOR --direction=down -t blocks --json' answers."
+    exit 1
+  fi
+  if [ "$TOTAL" = 0 ]; then
+    warn "no rework child is filed under $ANCHOR: there is no round to retire, and the floor this would write is the 0 already in force. Nothing written — a park still standing here is not one the round counter can lift."
+    exit 1
+  fi
   CAP="${GC_MAX_REVIEW_ROUNDS:-3}"
   case "$CAP" in ''|*[!0-9]*) CAP=3 ;; esac
   BATCH="$RESET_BATCH_ARG"
@@ -183,7 +209,7 @@ if [ "$MODE" = reset ]; then
   # The dispatch tally goes with it: released rounds nobody may dispatch are no
   # release.
   CAP_STAMP=$(row_meta "$ANCHOR_ROW" signoff_cap)
-  PARK_GATE=""; PARK_OID=""; RETIRED=""
+  PARK_GATE=""; PARK_OID=""; RETIRED=""; TALLY_KEYS=()
   case "$CAP_STAMP" in
     ?*@?*) PARK_GATE="${CAP_STAMP%%@*}"; PARK_OID="${CAP_STAMP#*@}" ;;
   esac
@@ -193,7 +219,7 @@ if [ "$MODE" = reset ]; then
     RETIRED="check.$PARK_GATE=exception@$PARK_OID, blocked_reason, signoff_cap and the human route"
     while IFS= read -r K; do
       [ -n "${K:-}" ] || continue
-      WRITES+=(--unset-metadata "$K"); RETIRED="$RETIRED, $K"
+      WRITES+=(--unset-metadata "$K"); TALLY_KEYS+=("$K"); RETIRED="$RETIRED, $K"
     done <<TALLY
 $(printf '%s' "$ANCHOR_ROW" | jq -r '(.[0].metadata // {}) | keys[]?
   | select(. == "dispatch_count" or startswith("dispatch_backstop."))' 2>/dev/null)
@@ -218,6 +244,13 @@ TALLY
     [ -z "$(row_meta "$AFTER" signoff_cap)" ]        || BAD="$BAD signoff_cap"
     [ -z "$(row_meta "$AFTER" blocked_reason)" ]     || BAD="$BAD blocked_reason"
     [ -z "$(row_meta "$AFTER" gc.routed_to)" ]       || BAD="$BAD gc.routed_to"
+    # The tally is verified key by key: gate-ensure.sh holds dispatches at the
+    # backstop while dispatch_count stands, so a tally unset that was denied or
+    # lost while the rest of the write landed leaves the anchor undispatchable
+    # under a release that reported success.
+    for K in ${TALLY_KEYS[@]+"${TALLY_KEYS[@]}"}; do
+      [ -z "$(row_meta "$AFTER" "$K")" ] || BAD="$BAD $K"
+    done
   fi
   if [ -n "$BAD" ]; then
     warn "the reset did not read back on $ANCHOR (${BAD# }); the cap stands and the next signoff pass re-caps. Clear the named keys by hand, or re-run — a floor that did land is harmless to write again."
