@@ -110,7 +110,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
         warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability")
         continue
     fi
-    offered=$(printf '%s\n%s\n' "$ready_raw" "$blocked_raw" | strip_ctl \
+    offered=$(printf '%s\n%s\n' "$ready_raw" "$blocked_raw" | scrub \
         | jq -r '.[]? | (.id // empty) | tostring' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: the \`bd ready\`/\`bd blocked\` listings from $rig_path/.beads could not be parsed — routed work there was NOT checked for reachability")
@@ -120,7 +120,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
     while IFS= read -r oid; do
         [ -n "$oid" ] && offerable["$oid"]=1
     done <<< "$offered"
-    cand=$(printf '%s' "$raw" | strip_ctl | jq -r '
+    cand=$(printf '%s' "$raw" | scrub | jq -r '
         .[]?
         | select(((.assignee // "") | tostring) == "")
         | select(((((.metadata // {})["gc.routed_to"]) // "") | tostring) != "")
