@@ -55,6 +55,7 @@
       "rank_score": 3014004,
       "pr_number": 0,
       "pr_url": "",
+      "pr_branch": "",
       "pr_machine": "",
       "pr_conversation": "",
       "pr_approval": ""
@@ -100,6 +101,7 @@
       "rank_score": 3000,
       "pr_number": 0,
       "pr_url": "",
+      "pr_branch": "",
       "pr_machine": "",
       "pr_conversation": "",
       "pr_approval": ""
@@ -146,6 +148,7 @@
       "rank_score": 2003003,
       "pr_number": 0,
       "pr_url": "",
+      "pr_branch": "polecat/tk-01n5cc",
       "pr_machine": "wedged-exception",
       "pr_conversation": "unknown",
       "pr_approval": "unknown",
@@ -194,6 +197,7 @@
       "rank_score": -999002,
       "pr_number": 0,
       "pr_url": "",
+      "pr_branch": "",
       "pr_machine": "",
       "pr_conversation": "",
       "pr_approval": ""

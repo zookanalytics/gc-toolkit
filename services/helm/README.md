@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 46 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 47 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -66,7 +66,7 @@ stranded empty complete progress_mismatch
 stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
-pr_number pr_url pr_machine pr_conversation pr_approval pr_owed_since
+pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` — the three fields
@@ -197,6 +197,8 @@ Six kinds are gathered. The first three are selected by the bead's issue
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number
 yet, so a number-keyed query cannot see a gate that wedges before the PR opens.
+`pr_branch` is what identifies those rows, and it travels as its own field
+because a table without a `frontier` column has nothing else to name them with.
 It is gathered LAST, so a wedged anchor — which carries `gc.routed_to=human` too
 — keeps its `human` row through the dedup instead of flipping kind between
 passes.

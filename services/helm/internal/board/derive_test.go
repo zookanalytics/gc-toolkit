@@ -2031,10 +2031,15 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	if !exc.PROwedSince.Equal(wedgedAt) {
 		t.Errorf("pr_owed_since = %v, want the wedge stamp %v", exc.PROwedSince, wedgedAt)
 	}
-	// No PR number: the identity is the branch, which is the majority case.
+	// No PR number: the identity is the branch, which is the majority case. It
+	// travels as a field as well as in the prose, because the tables that have
+	// no frontier column are the ones the operator reads first.
 	if exc.PRNumber != 0 || !strings.Contains(exc.Frontier, "polecat/tk-exc") {
 		t.Errorf("a pre-open row identifies itself by branch, got number=%d frontier=%q",
 			exc.PRNumber, exc.Frontier)
+	}
+	if exc.PRBranch != "polecat/tk-exc" {
+		t.Errorf("pr_branch = %q, want the branch the row is identified by", exc.PRBranch)
 	}
 	if !strings.Contains(exc.Frontier, "owed 3d") {
 		t.Errorf("the row carries the age the queue is sorted by, got %q", exc.Frontier)
@@ -2052,6 +2057,11 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	}
 	if veto.PRNumber != 513 || veto.PRURL == "" {
 		t.Errorf("an open PR carries its number and link, got %d / %q", veto.PRNumber, veto.PRURL)
+	}
+	// The branch does not stop being true once the PR opens: the number is what
+	// a surface leads with, not the only thing it may hold.
+	if veto.PRBranch != "polecat/tk-veto" {
+		t.Errorf("pr_branch = %q, want the branch an open PR is still cut from", veto.PRBranch)
 	}
 }
 
@@ -2370,8 +2380,11 @@ func TestOwedSinceTakesTheEarliestCause(t *testing.T) {
 func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
 	b := BuildBoard([]Anchor{
 		mergeAnchor("tk-silent", nil),
+		// It carries a branch, which every work bead does. That is what makes
+		// the axes' merge-anchor gate load-bearing rather than decorative.
 		{ID: "tk-epic", Title: "an ordinary epic", Kind: "epic", Source: "epic",
-			Rig: "gc-toolkit", Prefix: "tk", Children: []Child{{ID: "c1", Status: "open"}}},
+			Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{"branch": "polecat/tk-epic"},
+			Children: []Child{{ID: "c1", Status: "open"}}},
 	}, fixtureNow, false, nil, Facts{})
 
 	silent := mustTile(t, b, "tk-silent")
@@ -2389,6 +2402,9 @@ func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
 	if epic.PRMachine != "" || epic.PRConversation != "" || epic.PRApproval != "" {
 		t.Errorf("a non-merge row carries no axes, got %q/%q/%q",
 			epic.PRMachine, epic.PRConversation, epic.PRApproval)
+	}
+	if epic.PRBranch != "" {
+		t.Errorf("a non-merge row names no pull request branch, got %q", epic.PRBranch)
 	}
 
 	c := Coverage(b.Tiles)

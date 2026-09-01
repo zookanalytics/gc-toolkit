@@ -336,8 +336,15 @@ type Tile struct {
 
 	// PRNumber is 0 before the PR opens; PRURL is the operator's way into
 	// GitHub, which is where the conversation stays.
+	//
+	// PRBranch is the identity for the whole span before there is a number,
+	// and it is a field of its own because a surface cannot recover it from
+	// [Tile.Frontier]: that line is prose, and it is not on every table. A row
+	// that can name neither carries both empty, which is the anchor at a human
+	// state that records no branch.
 	PRNumber int    `json:"pr_number"`
 	PRURL    string `json:"pr_url"`
+	PRBranch string `json:"pr_branch"`
 
 	// PRMachine is what the merge cadence can do with this anchor on its next
 	// pass: progressing, settled, wedged-exception, wedged-veto, or unknown.

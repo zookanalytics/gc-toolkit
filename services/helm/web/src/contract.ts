@@ -157,6 +157,13 @@ export interface Tile {
   /** The operator's way into GitHub, which is where the conversation stays. */
   pr_url: string;
   /**
+   * The branch the anchor's work sits on — the row's identity for the whole
+   * span before a number exists, which is where most wedged anchors are. A
+   * field of its own rather than a read out of `frontier`, which is prose and
+   * is not rendered on every table. `''` when the anchor records no branch.
+   */
+  pr_branch: string;
+  /**
    * What the merge cadence can do next: `'progressing'`, `'settled'`,
    * `'wedged-exception'`, `'wedged-veto'`, or `'unknown'`.
    *

@@ -613,9 +613,11 @@ func fixtureBoard() board.Board {
 				RankScore: 2003003,
 
 				// No PR number: the branch is pushed and gated, and nothing has
-				// opened a pull request for it.
+				// opened a pull request for it, so the branch is what names the
+				// row wherever a surface has to identify it.
 				PRNumber:       0,
 				PRURL:          "",
+				PRBranch:       "polecat/tk-01n5cc",
 				PRMachine:      board.MachineWedgedException,
 				PRConversation: board.ConversationUnknown,
 				PRApproval:     board.AxisUnknown,

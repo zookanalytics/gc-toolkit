@@ -109,8 +109,10 @@ function isPRRow(tile: Tile): boolean {
  * The pull request this row is about, as a link when one is open.
  *
  * Before the PR opens there is no link to give and the branch is the identity —
- * which is the common case among wedged rows, not an edge one. The conversation
- * lives in GitHub and this is the one click to it; the board never reproduces a
+ * which is the common case among wedged rows, not an edge one. A row that can
+ * name neither says so; it is the anchor at a human state that records no
+ * branch, and there the absence is the whole answer. The conversation lives in
+ * GitHub and the link is the one click to it; the board never reproduces a
  * comment thread.
  */
 function PRLink({ tile }: { tile: Tile }) {
@@ -121,6 +123,9 @@ function PRLink({ tile }: { tile: Tile }) {
         PR #{tile.pr_number}
       </a>
     );
+  }
+  if (tile.pr_branch) {
+    return <span className="sub">{tile.pr_branch}</span>;
   }
   return <span className="sub">not open yet</span>;
 }

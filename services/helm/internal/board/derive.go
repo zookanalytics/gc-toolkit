@@ -1090,6 +1090,17 @@ func prIdentity(a Anchor) string {
 	if n := prNumber(a); n > 0 {
 		return fmt.Sprintf("PR #%d", n)
 	}
+	return prBranch(a)
+}
+
+// prBranch is the branch half of [prIdentity], on its own so the wire can carry
+// it as data. It is gated on the anchor being a merge anchor for the reason the
+// other axes are: an ordinary work bead carries `branch` too, and a row that is
+// not a pull request's must answer "" rather than name one.
+func prBranch(a Anchor) string {
+	if !isMergeAnchor(a) {
+		return ""
+	}
 	return a.Metadata[mdBranch]
 }
 
@@ -1246,6 +1257,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		PRNumber:       prNumber(a),
 		PRURL:          a.Metadata[mdPRURL],
+		PRBranch:       prBranch(a),
 		PRMachine:      machine,
 		PRConversation: prConversation(a),
 		PRApproval:     approval,

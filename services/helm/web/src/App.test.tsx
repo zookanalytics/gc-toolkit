@@ -51,6 +51,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     // different answers, and only the second is a gap in coverage.
     pr_number: 0,
     pr_url: '',
+    pr_branch: '',
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
@@ -70,6 +71,7 @@ function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
     title: 'a merge anchor',
     severity: 'ELEVATED',
     owed: true,
+    pr_branch: `polecat/${over.id}`,
     pr_machine: 'wedged-exception',
     pr_conversation: 'unknown',
     pr_approval: 'unknown',
@@ -585,6 +587,20 @@ it('identifies a pre-open row without inventing a link', async () => {
 
   const row = within(owedSection()).getByText(/wedged before the PR opened/).closest('tr');
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
+  // The branch, not a sentence about the absence of a number. It is what the
+  // operator inspects and what correlates the row with the gate.
+  expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
+});
+
+// The one row that has neither. An anchor at a human state carries
+// merge_result and can carry no branch and no number, and a cell that named an
+// absence as if it were an identity would be the same failure inverted.
+it('says so on a row that records neither number nor branch', async () => {
+  serve([prTile({ id: 'tk-bare', title: 'a merge anchor with no branch recorded', pr_branch: '' })]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/no branch recorded/)).toBeTruthy());
+
+  const row = within(owedSection()).getByText(/no branch recorded/).closest('tr');
   expect(within(row as HTMLElement).getByText('not open yet')).toBeTruthy();
 });
 
