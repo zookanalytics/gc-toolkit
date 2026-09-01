@@ -46,6 +46,7 @@ case "$1 $2" in
   "session list") rc="${SESSIONS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$SESSIONS_JSON" ;;
   "rig list")     rc="${RIGS_RC:-0}";     [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
   "agent list")   rc="${AGENTS_RC:-0}";   [ "$rc" -eq 0 ] || exit "$rc"; cat "$AGENTS_JSON" ;;
+  "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
 GC
@@ -58,6 +59,9 @@ GC
 # bead as busy, so the check does that filtering itself and the fixtures prove it.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
+# The check reaches the store through `gc bd`; a direct `bd` is the regression
+# this guard catches, so only the gc stub above may run this one.
+[ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 db=""; status=""; key=""; ids=""; all=0; prev=""
 for a in "$@"; do
   case "$prev" in

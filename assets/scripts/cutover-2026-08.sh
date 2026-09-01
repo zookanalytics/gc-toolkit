@@ -40,19 +40,19 @@ scrub() { tr -d '\000-\011\013-\037'; }
 RIG_DB=""
 bd_list() { # guarded array read from the current rig store
   local raw rc
-  raw=$(run_bounded bd list "$@" --json --limit 0 --db "$RIG_DB" 2>/dev/null); rc=$?
+  raw=$(run_bounded gc bd list "$@" --json --limit 0 --db "$RIG_DB" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   raw=$(printf '%s' "$raw" | scrub)
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   printf '%s' "$raw"
 }
-bd_show() { run_bounded bd show "$1" --json --db "$RIG_DB" 2>/dev/null | scrub; }
-bd_update() { run_bounded bd update "$@" --db "$RIG_DB" >/dev/null 2>&1; }
+bd_show() { run_bounded gc bd show "$1" --json --db "$RIG_DB" 2>/dev/null | scrub; }
+bd_update() { run_bounded gc bd update "$@" --db "$RIG_DB" >/dev/null 2>&1; }
 meta_of() { bd_show "$1" | jq -r --arg k "$2" '.[0].metadata[$k] // ""' 2>/dev/null; }
 status_of() { bd_show "$1" | jq -r '.[0].status // ""' 2>/dev/null; }
 blocked_now() { # 0 while an open blocker (or an unreadable probe) holds the bead
   local rows
-  rows=$(run_bounded bd dep list "$1" --direction=down -t blocks --json --db "$RIG_DB" 2>/dev/null | scrub)
+  rows=$(run_bounded gc bd dep list "$1" --direction=down -t blocks --json --db "$RIG_DB" 2>/dev/null | scrub)
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
   printf '%s' "$rows" | jq -e '[ .[] | select((.status // "open") != "closed") ] | length > 0' >/dev/null 2>&1
 }

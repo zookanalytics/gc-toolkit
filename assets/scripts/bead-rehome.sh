@@ -69,8 +69,8 @@ esac
 
 [ "$ORIGIN" != "$SUCCESSOR" ] || die "--origin and --successor are the same bead ($ORIGIN)" 64
 
-# Store refs are `rig:<name>`; reads go through `bd --db <path>/.beads` (the
-# `gc bd --rig` form answers empty for the HQ store).
+# Store refs are `rig:<name>`; reads go through `gc bd --db <path>/.beads`
+# (the `--rig` form answers empty for the HQ store, `--db` does not).
 RIGS_JSON=""
 rigs_json() {
     [ -n "$RIGS_JSON" ] && { printf '%s' "$RIGS_JSON"; return 0; }
@@ -117,9 +117,9 @@ ACTOR="${BEADS_ACTOR:-${GC_SESSION_NAME:-${GC_AGENT:-}}}"
 bd_at() {
     local db="$1"; shift
     if [ -n "$ACTOR" ]; then
-        bd --db "$db/.beads" --actor "$ACTOR" "$@"
+        gc bd --db "$db/.beads" --actor "$ACTOR" "$@"
     else
-        bd --db "$db/.beads" "$@"
+        gc bd --db "$db/.beads" "$@"
     fi
 }
 

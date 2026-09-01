@@ -31,7 +31,11 @@ K_BY="gc.dispatch_when_ready_armed_by"
 K_AT="gc.dispatch_when_ready_armed_at"
 K_REASON="gc.dispatch_when_ready_reason"
 
-BD_DB=""          # optional --db passthrough; otherwise BEADS_DIR pins the rig
+# The store, pinned: `gc bd` resolves its ledger from the invoking rig and
+# ignores BEADS_DIR, so an unpinned read in the rig-scoped order env answers
+# about whatever rig gc resolves rather than the one the pass is for.
+# `--db` overrides it.
+BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 DRY_RUN=0
 
 TMPFILES=()
@@ -40,7 +44,7 @@ trap cleanup EXIT
 mktemp_tracked() { local f; f="$(mktemp)" || return 1; TMPFILES+=("$f"); printf '%s' "$f"; }
 
 bd_() {
-    if [ -n "$BD_DB" ]; then bd --db "$BD_DB" "$@"; else bd "$@"; fi
+    if [ -n "$BD_DB" ]; then gc bd --db "$BD_DB" "$@"; else gc bd "$@"; fi
 }
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }

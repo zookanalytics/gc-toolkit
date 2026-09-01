@@ -33,11 +33,15 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
   "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+  "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
 GC
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
+# The check reaches the store through `gc bd`; a direct `bd` is the regression
+# this guard catches, so only the gc stub above may run this one.
+[ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 db=""; prev=""
 for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
 name=$(basename "$(dirname "$db")")

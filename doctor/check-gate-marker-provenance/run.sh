@@ -73,7 +73,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     # Candidates: well-formed green markers on open gating anchors that are not
     # themselves review beads.
-    raw=$(run_bounded bd list --db "$rig_path/.beads" --status open \
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open \
         --has-metadata-key merge_result --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list open anchors in $rig_path/.beads (rc=$rc) — this store was NOT checked")
@@ -99,7 +99,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     # RESOLVE A. Read ALL statuses: signoff.sh closes a review bead when it
     # records its verdict, so the evidence for a live anchor is usually closed.
-    idx_raw=$(run_bounded bd list --db "$rig_path/.beads" --all \
+    idx_raw=$(run_bounded gc bd list --db "$rig_path/.beads" --all \
         --has-metadata-key reviewed_oid --json --limit 0 2>/dev/null); irc=$?
     if [ "$irc" -ne 0 ] || [ -z "$idx_raw" ]; then
         warnings+=("$label: could not read the review-bead index in $rig_path/.beads (rc=$irc) — this store was NOT checked")

@@ -59,7 +59,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
     label="${rig_name:-<city>}"
     qualifier="$rig_name"
     [ -n "$city_path" ] && [ "$rig_path" = "$city_path" ] && qualifier=""
-    raw=$(run_bounded bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue
@@ -104,8 +104,8 @@ while IFS=$'\037' read -r rig_name rig_path; do
     # Arm 4 — reachability. A valid address is not an offer: a pool offers what
     # `bd ready` returns, so a routed bead in neither `bd ready` nor `bd blocked`
     # is offered by nobody and shows its wait to nobody.
-    ready_raw=$(run_bounded bd ready --db "$rig_path/.beads" --json --limit 0 2>/dev/null); ready_rc=$?
-    blocked_raw=$(run_bounded bd blocked --db "$rig_path/.beads" --json 2>/dev/null); blocked_rc=$?
+    ready_raw=$(run_bounded gc bd ready --db "$rig_path/.beads" --json --limit 0 2>/dev/null); ready_rc=$?
+    blocked_raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>/dev/null); blocked_rc=$?
     if [ "$ready_rc" -ne 0 ] || [ -z "$ready_raw" ] || [ "$blocked_rc" -ne 0 ] || [ -z "$blocked_raw" ]; then
         warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability")
         continue

@@ -60,12 +60,16 @@ cat > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-rehome.sh touches.
 case "$1 $2" in
   "rig list") cat "$FAKE_RIGS_JSON" ;;
+  "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 1 ;;
 esac
 GC
 
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
+# The check reaches the store through `gc bd`; a direct `bd` is the regression
+# this guard catches, so only the gc stub above may run this one.
+[ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 # Fake bd: --db <path>/.beads [--actor X] <show|update|close> <id> ...
 set -euo pipefail
 DB=""

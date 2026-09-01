@@ -118,7 +118,7 @@ resolve_holds() {
     unset -v root_held root_seen; declare -gA root_held=() root_seen=()
     holds_ok=1; holds_missing=0
     [ -n "$ids" ] || return 0
-    raw=$(run_bounded bd list --db "$db" --id "$ids" --all --json --limit 0 2>/dev/null)
+    raw=$(run_bounded gc bd list --db "$db" --id "$ids" --all --json --limit 0 2>/dev/null)
     if [ $? -ne 0 ] || [ -z "$raw" ]; then holds_ok=0; return 0; fi
     out=$(printf '%s' "$raw" | scrub | jq -r '.[]? | select(type == "object")
         | (.metadata // {}) as $m
@@ -203,7 +203,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    claims_raw=$(run_bounded bd list --db "$db" --status in_progress --json --limit 0 2>/dev/null); rc=$?
+    claims_raw=$(run_bounded gc bd list --db "$db" --status in_progress --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$claims_raw" ]; then
         warnings+=("$label: could not list in-progress beads in $db (rc=$rc) — this store was NOT checked")
         continue
@@ -298,7 +298,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         done <<< "$held_ids"
     fi
 
-    open_raw=$(run_bounded bd list --db "$db" --status open --has-metadata-key gc.step_ref --json --limit 0 2>/dev/null); open_rc=$?
+    open_raw=$(run_bounded gc bd list --db "$db" --status open --has-metadata-key gc.step_ref --json --limit 0 2>/dev/null); open_rc=$?
     if [ "$open_rc" -ne 0 ] || [ -z "$open_raw" ]; then
         warnings+=("$label: could not list open step beads in $db (rc=$open_rc) — never-claimed steps there were NOT checked")
         continue
@@ -341,7 +341,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
     # predecessor by design and is nobody's fault yet. Probed only once a store
     # has a candidate, because most stores have none and the offer list is the
     # expensive half.
-    ready_raw=$(run_bounded bd ready --db "$db" --json --limit 0 2>/dev/null); ready_rc=$?
+    ready_raw=$(run_bounded gc bd ready --db "$db" --json --limit 0 2>/dev/null); ready_rc=$?
     ready_ids=""
     if [ "$ready_rc" -eq 0 ] && [ -n "$ready_raw" ]; then
         ready_ids=$(printf '%s' "$ready_raw" | scrub | jq -r '.[]? | (.id // empty) | tostring' 2>/dev/null)
