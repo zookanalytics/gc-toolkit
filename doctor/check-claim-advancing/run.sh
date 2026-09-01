@@ -58,6 +58,19 @@
 # The roster supplies liveness here too, so a stale one degrades the error to a
 # warning exactly as it does in arm 1.
 #
+# Held on purpose — both arms. A step nobody is meant to run is outside every
+# class above. The hold is a non-empty gc.takeaway or hold_reason, and it may
+# sit on the step or on the root the molecule was parked at, so both are read:
+# gc.root_bead_id names the root, and one listing per arm resolves the roots of
+# that store's candidates. A held step is a note, and the resting state it
+# names is `blocked` — the one state neither arm scans, so no pool is offered
+# it. Releasing it to `open` instead hands it to the pool its route still
+# names, which is the opposite of the hold. A root the lookup does not return
+# is a root that was not read: `bd list --id` drops an id it cannot resolve and
+# still exits 0, so the ids asked for are compared against the ids that came
+# back. Steps whose root went unread go unjudged, because a hold that cannot be
+# seen must not be released.
+#
 # last_active is derived from tmux pane changes and is hardened upstream
 # against self-inflation (gc's own nudge keystrokes do not ratchet it), so a
 # working agent refreshes it and a parked one does not.
@@ -71,9 +84,15 @@ STALL_MINUTES="${GC_DOCTOR_CLAIM_STALL_MINUTES:-30}"
 case "$STALL_MINUTES" in *[!0-9]*|"") STALL_MINUTES=30 ;; esac
 STALL=$((STALL_MINUTES * 60))
 SEP=$'\037'
+# What a hold looks like, spliced into both arms and the root lookup so the
+# three readings cannot drift. `$m` is the bead's own metadata; an EMPTY value
+# is a hold that was CLEARED, which is the state a released step is left in.
+HELD='((($m["gc.takeaway"] // "") | tostring) != "")
+      or ((($m["hold_reason"] // "") | tostring) != "")'
 
 errors=(); warnings=(); notes=()
 unclaimed=(); occupied_list=(); occupancy_partial=0
+declare -A root_held=() root_seen=() held_count=() held_age=(); holds_ok=1; holds_missing=0
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
@@ -82,6 +101,52 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # consumers downstream split jq's own @tsv, emitted after this runs.
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
+
+# Which of a store's candidate steps are held by their root. A step carrying
+# its own marker is already answered and never arrives here; the rest are
+# resolved in ONE listing, which is why the ids arrive as a set. --all because
+# a hold outlives its root's close, and a husk step under a retired root is
+# exactly the one that must not be handed back to a pool.
+#
+# Sets root_seen beside root_held, because a root the listing does not return
+# has not been judged either way: `bd list --id` drops an id it cannot resolve
+# and still exits 0, so an absent row reads identically to a root with no hold
+# unless the two id sets are compared. holds_ok=0 is the whole lookup failing;
+# holds_missing counts the roots an otherwise good lookup answered without.
+resolve_holds() {
+    local db="$1" ids="$2" raw out r h
+    unset -v root_held root_seen; declare -gA root_held=() root_seen=()
+    holds_ok=1; holds_missing=0
+    [ -n "$ids" ] || return 0
+    raw=$(run_bounded bd list --db "$db" --id "$ids" --all --json --limit 0 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$raw" ]; then holds_ok=0; return 0; fi
+    out=$(printf '%s' "$raw" | scrub | jq -r '.[]? | select(type == "object")
+        | (.metadata // {}) as $m
+        | (((.id // "") | tostring) | gsub("[[:cntrl:]]"; " ")) as $rid
+        | select($rid != "")
+        | [$rid, (if '"$HELD"' then "1" else "0" end)] | join("\u001f")' 2>/dev/null)
+    if [ $? -ne 0 ]; then holds_ok=0; return 0; fi
+    while IFS="$SEP" read -r r h; do
+        [ -n "$r" ] || continue
+        root_seen["$r"]=1
+        [ "$h" = "1" ] && root_held["$r"]=1
+    done <<< "$out"
+    while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        [ -n "${root_seen[$r]:-}" ] || holds_missing=$((holds_missing + 1))
+    done <<< "$(printf '%s' "$ids" | tr ',' '\n' | LC_ALL=C sort -u)"
+    return 0
+}
+
+# One note per (store, resting state), not per bead: a held cohort is one
+# decision, and a line each would bury the findings that have to be read.
+held_note() {
+    local key="${1}${SEP}${2}" age="$3"
+    case "$age" in *[!0-9]*|"") age=0 ;; esac
+    held_count["$key"]=$(( ${held_count["$key"]:-0} + 1 ))
+    [ "${held_age["$key"]:-0}" -lt "$age" ] && held_age["$key"]="$age"
+    return 0
+}
 
 sessions_raw=$(run_bounded gc session list --json 2>/dev/null); sessions_rc=$?
 sessions=$(printf '%s' "$sessions_raw" | scrub \
@@ -153,11 +218,14 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
                       | map(select(. != ""))))[]) as $k (.; .[$k] = $s)) ) as $S
         | ($cache > $stall) as $stale
         | [ .[]? | . as $b
-            | (($b.metadata // {})["gc.step_ref"] // "" | trim) as $ref
+            | ($b.metadata // {}) as $m
+            | ($m["gc.step_ref"] // "" | trim) as $ref
             | select($ref != "")
             | (($b.assignee // "") | trim) as $as
             | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $bid
-            | (($b.metadata // {})["gc.claimed_at"] // $b.updated_at // $b.created_at // "" | trim) as $ca
+            | (if '"$HELD"' then "1" else "0" end) as $hm
+            | ((($m["gc.root_bead_id"] // "") | tostring) | gsub("[[:cntrl:]]"; " ")) as $root
+            | ($m["gc.claimed_at"] // $b.updated_at // $b.created_at // "" | trim) as $ca
             | ($ca | ep) as $ce
             | select($ce != null and (now - $ce) > $stall)
             | ((now - $ce) / 60 | floor) as $held
@@ -180,15 +248,28 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
                              bid: $bid, as: $as, held: $held,
                              ex: (((now - $le) / 60 | floor) | tostring)}
                        else empty end)
-               end) ]
-        | .[] | [.cls, .bid, .as, (.held | tostring), .ex] | join("\u001f")' 2>/dev/null)
+               end | . + {hm: $hm, root: $root}) ]
+        | .[] | [.cls, .bid, .as, (.held | tostring), .ex, .hm, .root] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: in-progress listing from $db could not be parsed — this store was NOT checked")
         continue
     fi
     if [ -n "$rows" ]; then
-        while IFS="$SEP" read -r cls bid as held ex; do
+        hroots=""
+        while IFS="$SEP" read -r cls bid as held ex hm root; do
             [ -n "$cls" ] || continue
+            [ "$hm" = "0" ] && [ -n "$root" ] && hroots="${hroots}${root},"
+        done <<< "$rows"
+        resolve_holds "$db" "${hroots%,}"
+        [ "$holds_ok" = "1" ] || warnings+=("$label: the roots named by this store's stalled step(s) could not be read — a deliberate hold cannot be told from a strand there, so those steps were NOT judged")
+        [ "$holds_ok" != "1" ] || [ "$holds_missing" -eq 0 ] || warnings+=("$label: $holds_missing of the roots named by this store's stalled step(s) returned no row. An id the lookup cannot resolve is a root that went unread, not a root without a hold, so those steps were NOT judged")
+        while IFS="$SEP" read -r cls bid as held ex hm root; do
+            [ -n "$cls" ] || continue
+            if [ "$hm" = "1" ] || { [ -n "$root" ] && [ -n "${root_held[$root]:-}" ]; }; then
+                held_note "$label" in_progress "$held"
+                continue
+            fi
+            [ -z "$root" ] || [ -n "${root_seen[$root]:-}" ] || continue
             case "$cls" in
                 unheld)   errors+=("$label step $bid: in_progress for ${held}m with NO assignee. Nothing holds it, and \`bd ready\` cannot offer it either because its status is not open, so it is reachable by neither path; release it (status=open) so a pool can re-offer it.") ;;
                 orphaned) errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — id, session_name and alias were all tried. Nothing holds this step and nothing will advance it; release it (status=open, assignee=\"\") so a pool can re-offer it.") ;;
@@ -245,7 +326,9 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         | select($ue != null and (now - $ue) > $stall)
         | [ ($raw | gsub("[[:cntrl:]]"; " ")), ($route | gsub("[[:cntrl:]]"; " ")),
             ($ref | gsub("[[:cntrl:]]"; " ")),
-            (((now - $ue) / 60 | floor) | tostring) ]
+            (((now - $ue) / 60 | floor) | tostring),
+            (if '"$HELD"' then "1" else "0" end),
+            ((($m["gc.root_bead_id"] // "") | tostring) | gsub("[[:cntrl:]]"; " ")) ]
         | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: the open step listing from $db could not be parsed — never-claimed steps there were NOT checked")
@@ -272,11 +355,29 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
     while IFS= read -r oid; do
         [ -n "$oid" ] && offerable["$oid"]=1
     done <<< "$ready_ids"
-    while IFS="$SEP" read -r uid urest; do
+    # Narrowed to the offered rows before the roots are read: every downstream
+    # step of every live molecule is open, routed and unclaimed, and only the
+    # offered ones are ever judged.
+    orows=""; oroots=""
+    while IFS="$SEP" read -r uid uroute uref uage uhm uroot; do
         [ -n "$uid" ] || continue
         [ -n "${offerable[$uid]:-}" ] || continue
-        unclaimed+=("${label}${SEP}${uid}${SEP}${urest}")
+        orows="${orows}${uid}${SEP}${uroute}${SEP}${uref}${SEP}${uage}${SEP}${uhm}${SEP}${uroot}"$'\n'
+        [ "$uhm" = "0" ] && [ -n "$uroot" ] && oroots="${oroots}${uroot},"
     done <<< "$urows"
+    [ -n "$orows" ] || continue
+    resolve_holds "$db" "${oroots%,}"
+    [ "$holds_ok" = "1" ] || warnings+=("$label: the roots named by this store's unclaimed step(s) could not be read — a deliberate hold cannot be told from a strand there, so those steps were NOT judged")
+    [ "$holds_ok" != "1" ] || [ "$holds_missing" -eq 0 ] || warnings+=("$label: $holds_missing of the roots named by this store's unclaimed step(s) returned no row. An id the lookup cannot resolve is a root that went unread, not a root without a hold, so those steps were NOT judged")
+    while IFS="$SEP" read -r uid uroute uref uage uhm uroot; do
+        [ -n "$uid" ] || continue
+        if [ "$uhm" = "1" ] || { [ -n "$uroot" ] && [ -n "${root_held[$uroot]:-}" ]; }; then
+            held_note "$label" open "$uage"
+            continue
+        fi
+        [ -z "$uroot" ] || [ -n "${root_seen[$uroot]:-}" ] || continue
+        unclaimed+=("${label}${SEP}${uid}${SEP}${uroute}${SEP}${uref}${SEP}${uage}")
+    done <<< "$orows"
 done <<< "$scopes"
 
 # Arm 2's verdict. Deferred to here because occupancy is a city-wide question:
@@ -362,6 +463,18 @@ if [ "${#unclaimed[@]}" -ne 0 ]; then
             notes+=("$qlabel: ${quiet_count[$qkey]} step(s) offered and unclaimed for up to ${quiet_age[$qkey]}m, routed to \"$qroute\" — $qreason; reported, not judged")
         done <<< "$(printf '%s\n' "${!quiet_count[@]}" | LC_ALL=C sort)"
     fi
+fi
+
+if [ "${#held_count[@]}" -ne 0 ]; then
+    while IFS="$SEP" read -r hlabel hstate; do
+        [ -n "$hlabel$hstate" ] || continue
+        hkey="${hlabel}${SEP}${hstate}"
+        case "$hstate" in
+            in_progress) hwhy="no path reaches them, but releasing one to open would hand it to the pool its route still names" ;;
+            *)           hwhy="\`bd ready\` is offering them, so the pool their route names can claim one" ;;
+        esac
+        notes+=("$hlabel: ${held_count[$hkey]} step(s) held on purpose — gc.takeaway or hold_reason, on the step or on its root — resting at $hstate for up to ${held_age[$hkey]}m; $hwhy. Park them at status=blocked, which neither arm scans; reported, not judged")
+    done <<< "$(printf '%s\n' "${!held_count[@]}" | LC_ALL=C sort)"
 fi
 
 if [ "${#errors[@]}" -ne 0 ]; then

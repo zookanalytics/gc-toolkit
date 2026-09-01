@@ -10,6 +10,9 @@
 # it fires only when the routed pool has a running session holding nothing, and
 # stays silent for a suspended pool, an empty one, a full one, and a queue that
 # `bd ready` is not offering yet.
+# Section 15 covers the hold: a step parked on purpose must leave both arms as
+# a note recommending `blocked`, because the release hint the check exists to
+# give is, for that step, an instruction to hand it back to the pool.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -20,13 +23,18 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
+# For a value the check derives from elapsed time. Bounds are inclusive, and
+# the span is what the fixture's age can drift by while the check runs.
+between() { if [ "${1:-x}" -ge "$2" ] 2>/dev/null && [ "$1" -le "$3" ]; then ok "$4"; else bad "$4 (got '$1' want $2..$3)"; fi; }
 
 mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha" "$TMP/beta"
 
 # Fixtures are written relative to real time because the check does its date
-# arithmetic with jq's `now`.
-NOW=$(date -u +%s)
-ago() { date -u -d "@$((NOW - $1))" +%Y-%m-%dT%H:%M:%SZ; }
+# arithmetic with jq's `now`. Each age is read when its fixture is written: a
+# single suite-start reference drifts by the suite's whole runtime, which is
+# longer than the minute the check rounds an age down to, so an age landing on
+# a minute boundary would read a minute older than it says.
+ago() { date -u -d "$1 seconds ago" +%Y-%m-%dT%H:%M:%SZ; }
 
 cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"},{"name":"beta","path":"$TMP/beta"}]}
@@ -41,24 +49,31 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 GC
-# The stub applies the same --status and --has-metadata-key filters the real bd
-# applies server-side, so a fixture row the real tool would never return cannot
-# reach the check here either. The in-progress listing is deliberately NOT
-# filtered on gc.step_ref: arm 2 counts a worker holding any bead as busy, so
-# the check does that filtering itself and the fixtures prove it.
+# The stub applies the same --status, --id and --has-metadata-key filters the
+# real bd applies server-side, so a fixture row the real tool would never
+# return cannot reach the check here either — including the default that hides
+# closed issues unless --all is passed, which is what the hold lookup relies on
+# to see a root that has since been retired. The in-progress listing is
+# deliberately NOT filtered on gc.step_ref: arm 2 counts a worker holding any
+# bead as busy, so the check does that filtering itself and the fixtures prove it.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
-db=""; status=""; key=""; prev=""
+db=""; status=""; key=""; ids=""; all=0; prev=""
 for a in "$@"; do
   case "$prev" in
     --db) db="$a" ;;
     --status) status="$a" ;;
     --has-metadata-key) key="$a" ;;
+    --id) ids="$a" ;;
   esac
+  [ "$a" = "--all" ] && all=1
   prev="$a"
 done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
+# The hold lookup is the only listing that asks by id, so failing it alone
+# isolates the degrade from the arm listings that ran fine.
+[ -n "$ids" ] && [ "$name" = "${BD_HOLD_FAIL_STORE:-}" ] && exit 3
 # `bd ready` answers from a separate fixture: what a store HOLDS and what it
 # OFFERS are different questions, and arm 2 turns on the difference.
 if [ "$1" = "ready" ]; then
@@ -67,9 +82,13 @@ if [ "$1" = "ready" ]; then
   cat "$r"; exit 0
 fi
 f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
-jq -c --arg s "$status" --arg k "$key" '
-  [ .[] | select($s == "" or (.status // "") == $s)
-        | select($k == "" or (((.metadata // {}) | has($k)))) ]' "$f"
+jq -c --arg s "$status" --arg k "$key" --arg ids "$ids" --argjson all "$all" '
+  ($ids | split(",") | map(select(. != ""))) as $I
+  | [ .[] | ((.id // "") | tostring) as $bid
+          | select($s == "" or (.status // "") == $s)
+          | select($k == "" or (((.metadata // {}) | has($k))))
+          | select(($I | length) == 0 or (($I | index($bid)) != null))
+          | select($all == 1 or $s != "" or (.status // "") != "closed") ]' "$f"
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
@@ -93,6 +112,13 @@ live() { printf '{"id":"%s","session_name":"%s","alias":"%s","state":"active","r
 ready() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.ready.json"; }
 # openstep <id> <route> <seconds-ago> — open, routed, unassigned, never claimed
 openstep() { printf '{"id":"%s","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"%s"}}' "$1" "$(ago "$3")" "$2"; }
+# unheld <id> <seconds-ago> [extra-metadata-json] — in_progress, no assignee
+unheld() { printf '{"id":"%s","status":"in_progress","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin"%s}}' "$1" "$(ago "$2")" "${3:+,$3}"; }
+# openstep_md <id> <route> <seconds-ago> <extra-metadata-json>
+openstep_md() { printf '{"id":"%s","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"%s",%s}}' "$1" "$(ago "$3")" "$2" "$4"; }
+# root <id> <status> <metadata-json> — the molecule root a step names. Neither
+# arm's listing returns it; only the hold lookup, which asks for it by id.
+root() { printf '{"id":"%s","status":"%s","assignee":"","metadata":%s}' "$1" "$2" "$3"; }
 # agent <qualified_name> <suspended> <pool-max>
 agent() { printf '{"qualified_name":"%s","suspended":%s,"pool":{"min":0,"max":%s}}' "$1" "$2" "$3"; }
 agents() { local IFS=,; printf '{"agents":[%s]}' "$*" > "$TMP/agents.json"; }
@@ -483,6 +509,194 @@ eq "$RC" "1" "an unreadable \`bd ready\` WARNS and says the store was not checke
 has "$OUT" "NOT checked" "the warning names the unchecked store"
 clear_stores
 agents "$(agent rig/pool.polecat false 2)"
+
+# --- 15. a step held on purpose leaves both arms ---------------------------
+# The shape this exists to stop: the release hint applied to a parked step puts
+# it back at `open` while it still carries its pool route, and the pool claims
+# it. A hold is a non-empty gc.takeaway or hold_reason.
+sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+agents "$(agent rig/pool.polecat false 2)"
+
+store alpha "$(unheld a-held 7200 '"gc.takeaway":"parked pending a ruling"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step carrying gc.takeaway is not UNHELD"
+has "$OUT" "held on purpose" "the note says the step is parked, not stranded"
+has "$OUT" "status=blocked" "the note names the resting state a pool cannot reach"
+hasnt "$OUT" "status=open" "the note never recommends the state that hands it to the pool"
+hasnt "$OUT" "release it" "the release hint is withheld from a held step"
+clear_stores
+
+store alpha "$(unheld a-held 7200 '"hold_reason":"awaiting the sitting"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "hold_reason holds exactly as gc.takeaway does"
+has "$OUT" "held on purpose" "the hold_reason note is emitted"
+clear_stores
+
+# An EMPTY marker is a hold that was CLEARED, which is the state a released
+# step is left in — reading it as a hold would silence the check forever.
+store alpha "$(unheld a-held 7200 '"gc.takeaway":""')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an EMPTY gc.takeaway is a cleared hold, not a hold"
+has "$OUT" "NO assignee" "the cleared-hold step is still reported UNHELD"
+clear_stores
+
+# The live shape: the park was expressed on the ROOT and the step kept only its
+# route, so the step read as stranded to a check that looked at it alone.
+store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')" \
+             "$(root r-1 blocked '{"gc.routed_to":"human","gc.takeaway":"held for a ruling"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step whose ROOT carries the hold is not UNHELD"
+has "$OUT" "held on purpose" "the root's hold reaches the step"
+hasnt "$OUT" "status=open" "the release hint is withheld on the root's authority"
+clear_stores
+
+# A hold outlives the root's close: a husk step under a retired root is the one
+# that must not be handed back, so the lookup asks with --all.
+store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')" \
+             "$(root r-1 closed '{"gc.takeaway":"retired under a ruling"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a hold on a CLOSED root still holds"
+has "$OUT" "held on purpose" "the closed root is reached by the --all lookup"
+clear_stores
+
+# The direction the check was built for is untouched.
+store alpha "$(unheld a-strand 7200 '"gc.root_bead_id":"r-1"')" \
+             "$(root r-1 open '{}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a step with no hold marker anywhere is still UNHELD"
+has "$OUT" "release it (status=open)" "the stranded step still gets the release hint"
+hasnt "$OUT" "held on purpose" "a stranded step is not reported as held"
+clear_stores
+
+# ORPHANED reaches the same exit: its remedy is the same release.
+store alpha "$(printf '{"id":"a-orph","status":"in_progress","assignee":"rig/pool.gone","metadata":{"gc.step_ref":"mol-review.pin","gc.claimed_at":"%s","gc.takeaway":"parked"}}' "$(ago 7200)")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a held step whose assignee names no session is a note, not ORPHANED"
+hasnt "$OUT" "names no session" "the orphan error is withheld from a held step"
+clear_stores
+
+# --- 15b. arm 2: a held step must not be offered to the pool ---------------
+# Worse than arm 1: this step is `open`, routed and offered, so the advice the
+# check would otherwise give is what causes the claim.
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.takeaway":"parked pending a ruling"')"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an offered step carrying a hold is not the never-claimed ERROR"
+has "$OUT" "held on purpose" "the held step is reported as a note"
+hasnt "$OUT" "nudge the pool" "the pool is never nudged at a held step"
+clear_stores
+
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-1"')" \
+             "$(root r-1 blocked '{"gc.takeaway":"held for a ruling"}')"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an offered step whose ROOT is held is not the never-claimed ERROR"
+has "$OUT" "held on purpose" "the root's hold reaches arm 2 too"
+clear_stores
+
+# ...and an offered step with no hold is still the finding.
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-1"')" \
+             "$(root r-1 open '{}')"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an offered step with no hold anywhere is still an ERROR"
+has "$OUT" "NEVER claimed" "the never-claimed error survives the hold lookup"
+clear_stores
+
+# --- 15c. an unreadable root is not a licence to release -------------------
+# A hold that cannot be seen must not be released, so the step goes unjudged
+# and the run WARNS rather than passing or erroring.
+store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')"
+OUT=$(BD_HOLD_FAIL_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable root lookup WARNS, never errors"
+has "$OUT" "NOT judged" "the warning says the step was not judged"
+hasnt "$OUT" "status=open" "no release hint is given against an unreadable root"
+clear_stores
+
+# A step that names no root at all is judged anyway: there was nothing to read.
+store alpha "$(unheld a-strand 7200)"
+OUT=$(BD_HOLD_FAIL_STORE=alpha run_check); RC=$?
+eq "$RC" "2" "a step naming no root is still judged when the lookup fails"
+has "$OUT" "NO assignee" "the rootless stranded step is still UNHELD"
+clear_stores
+
+# Arm 2 degrades the same way, and for the sharper reason: the advice it would
+# otherwise give is the claim itself.
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-1"')"
+ready alpha '{"id":"a-u1"}'
+OUT=$(BD_HOLD_FAIL_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable root leaves arm 2 a warning, not the never-claimed error"
+has "$OUT" "NOT judged" "the arm 2 warning says the step was not judged"
+hasnt "$OUT" "nudge the pool" "the pool is not nudged against an unreadable root"
+clear_stores
+sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
+
+# --- 15d. a hold belongs to its own store ----------------------------------
+# Bead ids are per-store, so a root that holds in one store says nothing about
+# the same id in another; carrying the answer over would silence a real strand.
+store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')" \
+            "$(root r-1 blocked '{"gc.takeaway":"held for a ruling"}')"
+store beta  "$(unheld b-strand 7200 '"gc.root_bead_id":"r-1"')" \
+            "$(root r-1 open '{}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a hold in one store does not reach the same id in another"
+has "$OUT" "beta step b-strand" "the other store's strand is still reported"
+has "$OUT" "alpha: 1 step(s) held on purpose" "and the held step is still a note"
+clear_stores
+
+# --- 15e. the notes are per store, not per bead ----------------------------
+# A held cohort is one decision; a line each would bury the real findings.
+store alpha "$(unheld a-h1 7200 '"gc.takeaway":"parked"')" \
+            "$(unheld a-h2 9000 '"gc.takeaway":"parked"')" \
+            "$(unheld a-h3 3600 '"gc.takeaway":"parked"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a cohort of held steps is silent"
+has "$OUT" "3 step(s) held on purpose" "the note counts the cohort"
+# The age is floored to the minute and can only grow while the check runs, so
+# the oldest fixture is pinned from below rather than to its exact minute.
+AGE=$(printf '%s' "$OUT" | sed -n 's/.*held on purpose.*up to \([0-9]*\)m.*/\1/p')
+between "$AGE" 150 159 "the note reports the oldest of them"
+eq "$(printf '%s' "$OUT" | grep -c 'held on purpose')" "1" "one line for the whole cohort"
+clear_stores
+
+# --- 15f. a root that returns no row is unread, not unheld -----------------
+# `bd list --id` drops an id it cannot resolve and still exits 0, so a lookup
+# that answers about none of the roots it was asked about reads exactly like
+# one that found no hold on any of them. The step goes unjudged, and only the
+# step whose root actually came back may be judged.
+store alpha "$(unheld a-noroot 7200 '"gc.root_bead_id":"r-gone"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a step naming a root the store does not return WARNS, never errors"
+has "$OUT" "returned no row" "the warning says the root came back with no row"
+has "$OUT" "NOT judged" "the warning says the step was not judged"
+hasnt "$OUT" "status=open" "no release hint is given against a root that went unread"
+hasnt "$OUT" "held on purpose" "an unread root is not read as a hold either"
+clear_stores
+
+# Per root, not per store: one unresolvable root must not silence the strand
+# beside it, whose own root came back carrying nothing.
+store alpha "$(unheld a-noroot 7200 '"gc.root_bead_id":"r-gone"')" \
+            "$(unheld a-strand 7200 '"gc.root_bead_id":"r-1"')" \
+            "$(root r-1 open '{}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the strand whose root came back is still an ERROR"
+has "$OUT" "alpha step a-strand" "the judged strand is named"
+hasnt "$OUT" "alpha step a-noroot" "the step whose root went unread is not"
+has "$OUT" "1 of the roots" "the warning counts the unresolved root alone"
+clear_stores
+
+# Arm 2 the same way, and for the sharper reason: the advice withheld here is
+# the claim itself.
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-gone"')"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unread root leaves arm 2 a warning, not the never-claimed error"
+has "$OUT" "returned no row" "the arm 2 warning names the unresolved root"
+hasnt "$OUT" "nudge the pool" "the pool is not nudged against a root that went unread"
+clear_stores
 
 echo
 echo "passed: $PASS  failed: $FAIL"
