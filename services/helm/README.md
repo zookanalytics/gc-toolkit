@@ -331,18 +331,20 @@ since converse never closes a subject by contract, nothing in the city could
 ever have retired them. Two constants that never stand down are not
 *unmissable*; uniform is the same thing as invisible.
 
-A row is **ruled** when all three hold:
+A row is **ruled** when all four hold:
 
 1. it is human-gated — kind `decision` or `human`, or a bead carrying
    `gc.routed_to=human` (which is how the `parked` twin of one is recognised);
-2. it carries a `gc.takeaway`; and
-3. its `blocks` waits were READ, and none of them is still open.
+2. it carries a `gc.takeaway`;
+3. its `blocks` waits were READ, and none of them is still open; and
+4. it is not a demand — no `gc.demand_for`.
 
 | shape | row |
 |---|---|
 | no takeaway | unchanged: ELEVATED, frontier "human-gated decision"; NEEDS names the silence (below) |
 | takeaway, waits unreadable | unchanged — an unread graph proves nothing |
 | takeaway, a wait still open | unchanged — answering is not finishing |
+| open demand (`gc.demand_for`) | unchanged — its takeaway is the question, not an answer to it |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
 | takeaway, every wait landed, *with* children | banded by the roll-up, like a decomposed `parked` subject |
 
@@ -370,6 +372,13 @@ Three properties carry over from the disposition rule, and one is new:
 - **LOW, not NORMAL.** NORMAL is stale-bumped past fourteen days, which would
   put `tk-z130v` — thirty days old — straight back in the band it was standing
   down from.
+- **A demand is exempt.** `gc-helm demand` stamps the authored ask as the
+  demand bead's own `gc.takeaway` so the board has a sentence to show, and the
+  demand carries no blocker of its own — it *is* the blocker, and the edge
+  points at it from the gated work. Clauses 2 and 3 are therefore satisfied the
+  moment it is filed, and without clause 4 the row the verb exists to raise
+  stood down on the render that first saw it. A demand is answered by being
+  CLOSED, which is what makes the gated work ready; until then it is owed.
 - **`dispositionDue` yields to it.** That promotion exists to lift a row out of
   the parked LOW *floor*; a human-gated bead was never in that floor, and the
   stand-down answers for the same state at the volume the operator asked for.
