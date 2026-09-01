@@ -1051,6 +1051,20 @@ eq "$(meta PC pr_comment_watermark)" "9712" "the watermark follows the comment t
 has "$(desc new-2)" "this one stands alone" "the child carries it"
 hasnt "$(desc new-2)" "WHY IS THIS HERE?" "…and not the retired comment beside it"
 
+echo "# …and an APPROVED review retires nothing it carried"
+# Only a dismissal retires a comment. An approval is a live review, and an
+# inline comment under it is feedback nobody has answered; dropping it would let
+# a PR green everywhere else merge over the objection.
+store "[$(anchor PD 66)]"
+printf '%s' "$(prview 66 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_66.json"
+printf '[{"id":9720,"user":{"login":"human1"},"state":"APPROVED","body":"","commit_id":"sha-66"}]' > "$GH_DIR/reviews_66.json"
+printf '[{"id":9721,"user":{"login":"human1"},"body":"one more thing","path":"docs/state-machine.md","line":7,"pull_request_review_id":9720}]' > "$GH_DIR/comments_66.json"
+out=$(run)
+eq "$(meta PD pr_posture)" "commented@sha-66" "an approval does not retire the comment it carried"
+has "$out" "routed to rework:new-2" "…so the comment under it routes"
+eq "$(meta PD pr_comment_watermark)" "9721" "…and the watermark follows it"
+has "$(desc new-2)" "one more thing" "the child carries the comment"
+
 echo "# …a review BODY with no inline comment is carried too"
 # An objection stated in the review body alone has nothing on the /files page,
 # so a work order that names only that page hands the child an empty read.

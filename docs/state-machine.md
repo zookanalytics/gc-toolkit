@@ -420,10 +420,12 @@ city's own veto raises no batch, because both spaces count only ids authored by
 some other login — `signoff.sh`'s rework loop owns those, and reaches them
 through the review bead rather than through this arm. A review that is later
 dismissed leaves both `COMMENTED` and `CHANGES_REQUESTED`, so the same read
-that would have counted it drops it. The comment space asks that same question
-of each inline comment's parent review, so a dismissal retires the comments it
-carried along with the body; a comment behind no review, or behind one the
-review list does not carry, stands on its own and is counted.
+that would have counted it drops it. The comment space asks a narrower question
+of each inline comment's parent review: whether that review was dismissed. A
+dismissal therefore retires the comments it carried along with the body, and an
+approving review's inline comments stay in the batch, because an approval
+retires nothing it carried. A comment behind no review, or behind one the review
+list does not carry, stands on its own and is counted.
 
 **Outstanding feedback routes to something.** It becomes a fix-pool rework
 child carrying the review bodies and inline comments verbatim in its

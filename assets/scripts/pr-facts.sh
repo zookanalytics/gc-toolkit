@@ -245,16 +245,17 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
    | join("\n\n")) | clip(16000)' 2>/dev/null
 }
 # A comment outlives the review that carried it: GitHub keeps the inline rows of
-# a dismissed review on /pulls/N/comments. The comment space therefore needs the
-# review space's own state filter, or a dismissal takes the body out of the
-# batch and leaves the inline comments under it routing, which is the feedback
-# the dismissal retired. A comment naming no review, or naming one the review
-# list does not carry, is standalone and stays.
-live_comments() { # <reviews-json> <comments-json> — comments whose review still carries feedback
+# a dismissed review on /pulls/N/comments, so a dismissal that takes the body
+# out of the batch leaves the comments under it routing. A dismissal is the only
+# thing that retires them. The review space's filter is narrower than that and
+# cannot stand in for this one: it also drops an APPROVED review, whose inline
+# comments are live feedback, and a PR green everywhere else would merge over
+# them. A comment naming no review, or naming one the review list does not
+# carry, is standalone and stays.
+live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
   jq -nc --argjson revs "$1" --argjson cmts "$2" '
     ([ $revs[]
-       | (((.state // "") | tostring)) as $st
-       | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) == null)
+       | select(((.state // "") | tostring) == "DISMISSED")
        | ((.id // 0) | tostring) ]) as $retired
   | [ $cmts[]
       | (((.pull_request_review_id // "") | tostring)) as $parent
@@ -413,11 +414,11 @@ while IFS= read -r row; do
         echo "$PROG: $id — PR#$num review history unreadable; posture not recorded (retry next pass)" >&2
       fi
     else
-      # The comment space is filtered to the reviews still in the batch before
-      # anything counts it, so the two spaces agree about what a dismissal
-      # retires. A filter that cannot run counts the unfiltered list: over-
-      # routing costs a rework round an operator can close, dropping the batch
-      # costs the objection itself.
+      # The comment space drops what a dismissal retired before anything counts
+      # it, so the two spaces agree about what a dismissal takes out. A filter
+      # that cannot run counts the unfiltered list: over-routing costs a rework
+      # round an operator can close, dropping the batch costs the objection
+      # itself.
       cmts_live=$(live_comments "$revs_raw" "$cmts_raw")
       if [ -z "$cmts_live" ]; then
         echo "$PROG: $id — PR#$num could not filter retired reviews out of the comment list; counting it unfiltered" >&2
