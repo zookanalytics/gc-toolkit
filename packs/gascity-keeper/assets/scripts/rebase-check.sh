@@ -40,10 +40,11 @@
 #
 # ## Why resolution is bd-only
 #
-# Every bead lookup here goes through `bd`, never `gc`. `bd` talks to the bead
-# store directly; most `gc` subcommands first load the full city config,
-# including the pack import closure. In the condition env that closure can be
-# cold, and then the `gc` call dies before doing anything:
+# Every bead lookup here goes through `bd`, never `gc` — and `gc bd` is `gc`
+# for this purpose. `bd` talks to the bead store directly; `gc` subcommands
+# first load the full city config, including the pack import closure, and
+# `gc bd` loads it before it reads its own `--db`. In the condition env that
+# closure can be cold, and then the `gc` call dies before doing anything:
 #
 #     city import <pack> ... locked but not cached at <path>;
 #     run 'gc import install'
@@ -59,6 +60,12 @@
 # `aborted_at` and nothing on anyone's hook, the exact failure this script's
 # handback exists to prevent. Keeping resolution on `bd` keeps the exit
 # condition and the handback working in a minimal env. (tk-9l9ka)
+#
+# This is the one place in the pack that may run `bd` itself, and the
+# `# raw-bd:` marker on each call site is what the raw-bd-invocation lint
+# reads. Everywhere else `gc bd --db <path>` selects a store just as well and
+# carries gc's wiring, so a new call site here owes the same argument rather
+# than inheriting this one.
 #
 # ## Why this script writes to the work bead on the LAST failing attempt
 #
@@ -116,6 +123,7 @@ incomplete() {
 resolve_budget() {
 	local subject_json step
 	[ -n "${GC_BEAD_ID:-}" ] || return 0
+	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 	subject_json=$(bd show "$GC_BEAD_ID" --json 2>/dev/null) || return 0
 
 	# GC_BEAD_ID is normally the iteration bead, but the runtime falls back to
@@ -133,6 +141,7 @@ resolve_budget() {
 	# gc.step_id (internal/formula/ralph.go) — the join key when a molecule has
 	# more than one check loop.
 	step=$(printf '%s' "$subject_json" | jq -r '.[0].metadata."gc.control_for" // empty')
+	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 	bd list --all --include-infra --limit 0 --json \
 		--metadata-field "gc.root_bead_id=$ROOT" \
 		--metadata-field "gc.kind=ralph" 2>/dev/null |
@@ -161,6 +170,7 @@ handback_if_budget_exhausted() {
 	# conflict_questions after this script started, and a retried exec of this
 	# same attempt must not append a second handback.
 	local issue_json
+	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 	issue_json=$(bd show "$ISSUE" --json 2>/dev/null) || {
 		note "WARN: could not re-read $ISSUE for the exhaustion handback"
 		return 0
@@ -227,6 +237,7 @@ EOF
 ROOT="${GC_WISP_ID:-}"
 if [ -z "$ROOT" ]; then
 	[ -n "${GC_BEAD_ID:-}" ] || fail "neither GC_WISP_ID nor GC_BEAD_ID is set"
+	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 	ROOT=$(bd show "$GC_BEAD_ID" --json 2>/dev/null |
 		jq -r '.[0].metadata."gc.root_bead_id" // empty') ||
 		fail "could not read root bead id from $GC_BEAD_ID"
@@ -244,6 +255,7 @@ fi
 #
 # Membership is authoritative when it can be read, because it is the invariant;
 # gc.var.issue is the resilient fallback and the cross-check against it.
+# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
 [ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
 
@@ -257,6 +269,7 @@ ROOT_ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // e
 # under the convoy itself). Empty output means the query failed outright, which
 # is a different thing from a convoy that genuinely has no members: the first
 # falls back to gc.var.issue, the second is a hard fail.
+# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 MEMBER_JSON=$(bd dep tree "$CONVOY" --json 2>/dev/null)
 MEMBER=""
 MEMBER_COUNT=""
@@ -301,6 +314,7 @@ esac
 [ -n "$ISSUE" ] || fail "could not resolve the work bead from root $ROOT / convoy $CONVOY"
 
 # --- 3. The rebase worktree, as recorded by workspace-setup ------------------
+# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 ISSUE_JSON=$(bd show "$ISSUE" --json 2>/dev/null) || fail "could not read work bead $ISSUE"
 WORKTREE=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.work_dir // empty')
 [ -n "$WORKTREE" ] || fail "work bead $ISSUE has no metadata.work_dir yet"

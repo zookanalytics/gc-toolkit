@@ -24,8 +24,9 @@ harness_init
 hasin() { grep -q -- "$2" <<< "$1"; }
 lineof() { grep -n -- "$1" "$STUB_GC_LOG" | head -n 1 | cut -d: -f1; }
 
-# The SUT enumerates rigs via `gc rig list` and reaches each store with bare
-# `bd ... --db <path>`; shim both onto the harness gc stub.
+# The SUT enumerates rigs via `gc rig list` and reaches each store with
+# `gc bd ... --db <path>`; shim both onto the harness gc stub, which ignores
+# the --db it is handed because each run already points at one fixture store.
 mkdir -p "$TMP/bin2" "$TMP/rig"
 export STUB_RIGS="$TMP/rigs.json"
 printf '{"rigs":[{"name":"gc-toolkit","path":"%s"}]}\n' "$TMP/rig" > "$STUB_RIGS"
@@ -34,14 +35,11 @@ cat > "$TMP/bin2/gc" <<SHIM
 if [ "\${1:-}" = "rig" ] && [ "\${2:-}" = "list" ]; then cat "\$STUB_RIGS"; exit 0; fi
 exec "$BIN/gc" "\$@"
 SHIM
-cat > "$TMP/bin2/bd" <<SHIM
+cat > "$TMP/bin2/bd" <<'SHIM'
 #!/usr/bin/env bash
-args=(); skip=0
-for a in "\$@"; do
-  if [ "\$skip" = 1 ]; then skip=0; continue; fi
-  case "\$a" in --db) skip=1 ;; --db=*) : ;; *) args+=("\$a") ;; esac
-done
-exec "$BIN/gc" bd "\${args[@]+"\${args[@]}"}"
+# The SUT reaches the store through `gc bd`; a direct `bd` is the regression
+# this guard catches.
+echo "stub bd: called directly, not through gc bd" >&2; exit 127
 SHIM
 chmod +x "$TMP/bin2/gc" "$TMP/bin2/bd"
 export PATH="$TMP/bin2:$PATH"

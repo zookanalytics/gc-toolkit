@@ -81,7 +81,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    raw=$(run_bounded bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
         continue

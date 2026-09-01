@@ -50,7 +50,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    steps_raw=$(run_bounded bd list --db "$db" --status open --has-metadata-key gc.root_bead_id --json --limit 0 2>/dev/null); rc=$?
+    steps_raw=$(run_bounded gc bd list --db "$db" --status open --has-metadata-key gc.root_bead_id --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$steps_raw" ]; then
         warnings+=("$label: could not list open step beads in $db (rc=$rc) — this store was NOT checked")
         continue
@@ -70,7 +70,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     flush_chunk() {
         [ "${#chunk[@]}" -ne 0 ] || return 0
         local out merged
-        out=$(run_bounded bd show --db "$db" "${chunk[@]}" --json 2>/dev/null) && [ -n "$out" ] || { chunk_failed=yes; return 1; }
+        out=$(run_bounded gc bd show --db "$db" "${chunk[@]}" --json 2>/dev/null) && [ -n "$out" ] || { chunk_failed=yes; return 1; }
         # `bd show` answers an ARRAY normally, an OBJECT when NO id resolves
         # (rc=0 either way); the object's ids surface as unresolved-root notes.
         merged=$(printf '%s' "$out" | scrub | jq -c --argjson a "$roots_json" '

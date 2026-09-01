@@ -29,7 +29,7 @@ not the city:
 
 ```bash
 gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do
-  bd --db "$RP/.beads" search "<distinctive words>" --status all --limit 20 --json 2>/dev/null \
+  gc bd --db "$RP/.beads" search "<distinctive words>" --status all --limit 20 --json 2>/dev/null \
     | jq -r --arg rp "$RP" '.[]? | $rp + " " + .id + " [" + .status + "] " + .title'
 done
 ```

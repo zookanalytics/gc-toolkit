@@ -25,7 +25,8 @@
 #   (m) the legacy bare `superseded_by` still counts as a prior disposition;
 #   (n) a `blocks` edge naming the SUCCESSOR is dropped, so the wait a converse
 #       sitting wired beside the ruling does not refuse the ruling's own close;
-#   (o) any OTHER blocker is left alone and its refusal still stands.
+#   (o) any OTHER blocker is left alone and its refusal still stands;
+#   (p) every repair command the script hands back runs through `gc bd`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,12 +61,16 @@ cat > "$TMP/bin/gc" <<'GC'
 # Only the surface bead-rehome.sh touches.
 case "$1 $2" in
   "rig list") cat "$FAKE_RIGS_JSON" ;;
+  "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 1 ;;
 esac
 GC
 
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
+# The check reaches the store through `gc bd`; a direct `bd` is the regression
+# this guard catches, so only the gc stub above may run this one.
+[ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 # Fake bd: --db <path>/.beads [--actor X] <show|update|close> <id> ...
 set -euo pipefail
 DB=""
@@ -90,7 +95,11 @@ if [ "$sub" = "dep" ]; then
     add)    printf 'dep.%s=blocks\n' "$other" >> "$f" ;;
     # Real `bd dep remove` prints ✓ and exits 0 for an edge that never existed,
     # so a stub that failed there would let a read-back-free caller pass.
-    remove) { grep -v "^dep\.$other=" "$f" || true; } > "$f.tmp"; mv "$f.tmp" "$f"
+    # FAKE_BD_DEP_REMOVE_NOOP keeps that success report over an edge that
+    # survives — the case the read-back guard exists for.
+    remove) if [ -z "${FAKE_BD_DEP_REMOVE_NOOP:-}" ]; then
+              { grep -v "^dep\.$other=" "$f" || true; } > "$f.tmp"; mv "$f.tmp" "$f"
+            fi
             echo "✓ removed dependency: $id -> $other" ;;
     *)      exit 1 ;;
   esac
@@ -220,7 +229,8 @@ rc=0; FAKE_BD_CLOSE_REFUSE=1 run --origin al-origin4 --successor bt-succ4 --kind
 eq "$rc" 5 "a refused close exits non-zero"
 eq "$(field alpha m.gc.superseded_by al-origin4)" bt-succ4 "the pointer survives a refused close"
 eq "$(field alpha status al-origin4)" open "the bead is left open, pointed and visible"
-has "$(cat "$TMP/err")" "close al-origin4 --reason" "the refusal prints the finishing command"
+has "$(cat "$TMP/err")" "gc bd --db $TMP/rigs/alpha/.beads close al-origin4 --reason" \
+   "the refusal's finishing command runs through gc bd, against the origin's store"
 
 # --- (e) a different prior disposition is never overwritten ---------------
 mkbead alpha open al-origin5
@@ -335,6 +345,20 @@ eq "$(grep -c '^dep\.al-block14=' "$TMP/rigs/alpha/.beads/al-origin14")" 1 \
 eq "$(grep -c '^dep\.al-succ14=' "$TMP/rigs/alpha/.beads/al-origin14")" 0 \
    "…while the successor's edge goes even though the close was refused"
 has "$(cat "$TMP/err")" "blocked by" "the refusal names the hold the caller must judge"
+
+# --- (p) a drop that does not stick: the WARN hands back a gc bd command ---
+# `bd dep remove` reports success either way, so the read-back decides. When
+# the edge survives, the close below is refused and a human finishes by hand
+# — through the same client the script reaches the store with, since raw bd
+# resolves that store from ambient state instead.
+mkbead alpha open al-origin16
+mkbead alpha open al-succ16
+printf 'dep.al-succ16=blocks\n' >> "$TMP/rigs/alpha/.beads/al-origin16"
+rc=0; FAKE_BD_DEP_REMOVE_NOOP=1 run --origin al-origin16 --successor al-succ16 --kind folded || rc=$?
+eq "$rc" 5 "a wait edge that survives the drop still refuses the close"
+has "$(cat "$TMP/err")" "WARN could not drop" "the surviving edge is reported, not swallowed"
+has "$(cat "$TMP/err")" "gc bd --db $TMP/rigs/alpha/.beads dep remove al-origin16 al-succ16" \
+   "the WARN's repair command runs through gc bd, against the origin's store"
 
 # --- (i) --dry-run writes nothing ----------------------------------------
 mkbead alpha open al-origin9

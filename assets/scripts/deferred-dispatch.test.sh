@@ -53,9 +53,15 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 
 cat > "$BIN/bd" <<'STUB'
 #!/usr/bin/env bash
+# The check reaches the store through `gc bd`; a direct `bd` is the regression
+# this guard catches, so only the gc stub above may run this one.
+[ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 # Minimal bd stub over $STORE. Understands only the calls the SUT makes.
 set -u
 STORE="${STUB_STORE:?}"
+# Global flags precede the verb, as they do for real bd. The store is a single
+# fixture file, so --db is consumed and discarded rather than honoured.
+while [ "${1:-}" = "--db" ]; do shift 2 || shift || true; done
 if [ -n "${STUB_BD_LIST_FAIL:-}" ] && [ "${1:-}" = "list" ]; then
     echo "bd: simulated listing failure" >&2; exit 1
 fi
@@ -144,6 +150,11 @@ STUB
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
+if [ "${1:-}" = "bd" ]; then
+    shift
+    printf '%s\n' "$*" >> "${STUB_BD_LOG:-/dev/null}"
+    VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@"
+fi
 if [ "${1:-}" = "sling" ]; then
     shift
     printf '%s\n' "$*" >> "${STUB_SLING_LOG:?}"
@@ -157,7 +168,7 @@ export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
 export BEADS_ACTOR="test-actor"
-unset GC_AGENT GC_RIG 2>/dev/null || true
+unset GC_AGENT GC_RIG GC_RIG_ROOT 2>/dev/null || true
 
 store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
@@ -327,6 +338,27 @@ eq "$(meta b-1 gc.dispatch_when_ready_armed_at)" "<absent>" "disarm clears the t
 eq "$(meta b-1 gc.dispatch_when_ready_reason)" "<absent>" "disarm clears the reason"
 has "$(notes b-1)" "keep me" "disarm appends to notes rather than replacing"
 has "$(notes b-1)" "superseded" "disarm records why"
+
+# --- the store the reads are pinned to ---------------------------------------
+# `gc bd` resolves its ledger from the invoking rig and ignores BEADS_DIR, so a
+# rig-scoped pass that does not pin --db reads whatever rig gc resolves.
+echo "# store pinning"
+export STUB_BD_LOG="$TMP/bd.log"
+store '[{"id":"p-1","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":""}]'
+
+: > "$STUB_BD_LOG"
+(GC_RIG_ROOT="$TMP/rigroot" "$SUT" reconcile >/dev/null 2>&1)
+has "$(cat "$STUB_BD_LOG")" "--db $TMP/rigroot/.beads" "GC_RIG_ROOT pins the reads to that rig's store"
+
+: > "$STUB_BD_LOG"
+("$SUT" reconcile >/dev/null 2>&1)
+hasnt "$(cat "$STUB_BD_LOG")" "--db" "with no GC_RIG_ROOT and no --db, nothing is pinned"
+
+: > "$STUB_BD_LOG"
+(GC_RIG_ROOT="$TMP/rigroot" "$SUT" reconcile --db "$TMP/explicit/.beads" >/dev/null 2>&1)
+has "$(cat "$STUB_BD_LOG")" "--db $TMP/explicit/.beads" "an explicit --db overrides GC_RIG_ROOT"
+hasnt "$(cat "$STUB_BD_LOG")" "--db $TMP/rigroot/.beads" "and the rig-root default is not also passed"
+unset STUB_BD_LOG
 
 # --- positive control over the shipped cadence -------------------------------
 # The arm is only half the mechanism: without the order nothing consumes these

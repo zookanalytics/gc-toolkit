@@ -198,7 +198,7 @@ mechanik in a non-gascity rig does not receive it.
 ```bash
 gc mail inbox                    # Check messages
 gc hook                          # Check for assigned/routed beads
-bd create "..." -t decision      # File decisions for human review
+gc bd create "..." -t decision   # File decisions for human review
 ```
 
 {{ template "file-work-records" . }}

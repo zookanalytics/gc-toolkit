@@ -54,7 +54,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
     # Every status, not just closed: an OPEN parent is what proves a closed
     # child is not the anchor.
-    raw=$(run_bounded bd list --db "$rig_path/.beads" --all \
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --all \
         --has-metadata-key merge_result --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list merge_result-carrying beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
