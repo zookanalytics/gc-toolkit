@@ -433,9 +433,9 @@ guard is correct — blocked status cascades to descendants, so the
 descendant would inherit the block it exists to lift:
 
 ```
-$ gc bd dep add tk-z9nln tk-wvrga -t blocks
-Error: tk-z9nln cannot be blocked by its descendant tk-wvrga:
-blocked status cascades to descendants, so tk-wvrga would inherit
+$ gc bd dep add <parent> <descendant> -t blocks
+Error: <parent> cannot be blocked by its descendant <descendant>:
+blocked status cascades to descendants, so <descendant> would inherit
 the block and never close
 ```
 
@@ -937,22 +937,24 @@ Revised 2026-08-08 after the build-factory trial and operator probing —
 this is the genuinely native ground, and it is deliberately small. A
 definition first, because everything below uses it:
 
-> **A visit** is a filed request for one bounded sitting of a subject's
-> dialogue, stored as a bead: a small child of the subject whose body
-> says what that sitting would be for ("ratify this plan", "review
-> posted — decision needed"), whose metadata routes it to the converse
-> pool and names the subject's continuation group, whose `gc.outcome`
-> records how it resolved, and which closes when it does (the subject
-> never closes this way). A visit that is *held* becomes the sitting it
-> asked for, and ends out loud, with a sign-off naming the outcome and
-> the subject to look at next, because the ending is the one part of a
+> **A visit** is a filed request for one bounded sitting of a
+> subject's dialogue, stored as a bead linked to the subject by a
+> `tracks` edge and never as its child, whose body says what that
+> sitting would be for ("ratify this plan", "review posted — decision
+> needed"), whose metadata routes it to the converse pool and names
+> the subject's continuation group, whose `gc.outcome` records how it
+> resolved, and which closes when it does (the subject never closes
+> this way). A visit that is *held* becomes the sitting it asked for,
+> and ends out loud, with a sign-off naming the outcome and the
+> subject to look at next, because the ending is the one part of a
 > sitting the operator cannot reconstruct from the record ("How a held
-> sitting ends", above). A visit that is claimed and found not to need a
-> human never becomes a sitting at all: it closes silently against its
-> subject, because a visit is a request for attention and the loop has
-> to be able to answer it with *no* (tk-mndjz). The sequence of visits
-> under a subject is the dialogue's durable spine — board-legible,
-> cold-reconstructable, no provider transcript required.
+> sitting ends", above). A visit that is claimed and found not to need
+> a human never becomes a sitting at all: it closes silently against
+> its subject, because a visit is a request for attention and the loop
+> has to be able to answer it with *no* (tk-mndjz). The sequence of
+> visits under a subject is the dialogue's durable spine —
+> board-legible, cold-reconstructable, no provider transcript
+> required.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and
 > those are routinely a day or more apart — a queued visit holds its
