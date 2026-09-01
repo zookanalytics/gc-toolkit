@@ -366,6 +366,17 @@ since_format = "RFC 3339 UTC"
 #   directly assigned work reads as demand for work no pool will ever be
 #   offered.
 #
+# gc.claimed_at — when the claim that holds the bead started. Written by the
+#   runtime's claim path, and re-stamped on an adopted hold only where it is
+#   absent, so it dates the hold rather than the last touch. Read as a clock:
+#   doctor/check-claim-advancing ages a claimed step against it, falling back to
+#   updated_at, and the Helm board opens a conversation's span at it, falling
+#   back to the bead's creation. Absent means never claimed, which is not the
+#   same as not currently held: releasing a turn unsets gc.session_id and
+#   gc.session_name and leaves this key standing, so an open step carrying it
+#   was claimed once and re-offered, and only a step without it is one no
+#   worker has ever reached. Nothing clears it.
+#
 # gc.takeaway — the operator-facing question, and the only field the board
 #   renders as one. Written by `gc-helm.sh takeaway`, capped at 140 codepoints
 #   and stamped with gc.takeaway_at and gc.takeaway_by. Read by the Helm board.
@@ -404,10 +415,11 @@ since_format = "RFC 3339 UTC"
 #
 # what this registry does NOT speak for — the `gc.` namespace belongs to the Gas
 #   City runtime, which declares its own keys in the binary on its own release
-#   cycle. The few the pack stamps are listed under [metadata.runtime_owned];
-#   the rest are not registered here and copying them would assert a list this
-#   repo cannot keep true. Bead types the runtime owns whole, `session` among
-#   them, carry runtime bookkeeping rather than pack state for the same reason.
+#   cycle. The few the pack writes, clears or reads are listed under
+#   [metadata.runtime_owned]; the rest are not registered here and copying them
+#   would assert a list this repo cannot keep true. Bead types the runtime owns
+#   whole, `session` among them, carry runtime bookkeeping rather than pack
+#   state for the same reason.
 #   The boundary has one sharp edge: a key that becomes a registered key once
 #   that prefix is added or removed is pack state written where the pack's
 #   reader never looks, so nothing reads it and nothing reports it missing.
@@ -514,12 +526,16 @@ keys = [
 keys = ["doctor_check", "doctor_finding_predecessor", "reconcile_rig"]
 
 # Runtime-owned: documented here so readers know they exist; written by the
-# Gas City runtime, not by pack transitions. The pack stamps gc.routed_to only
-# as a routing decision (stamp-don't-sling, lifecycle.sh --route); the claim
-# semantics belong to the runtime.
+# Gas City runtime, not by pack transitions. A runtime key earns a line here by
+# being one pack code writes, clears or reads, which is what makes its absence
+# something this file has to define; the rest of the namespace is the runtime's
+# alone. The pack stamps gc.routed_to only as a routing decision
+# (stamp-don't-sling, lifecycle.sh --route); the claim semantics belong to the
+# runtime.
 [metadata.runtime_owned]
 keys = [
   "gc.routed_to", "gc.step_ref", "gc.root_bead_id", "gc.execution_routed_to",
   "assignee", "gc.input_convoy_id", "gc.kind", "gc.outcome",
   "gc.session_id", "gc.session_name", "gc.session_affinity",
+  "gc.claimed_at",
 ]
