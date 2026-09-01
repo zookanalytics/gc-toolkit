@@ -6,7 +6,9 @@
 # marker; the posted artifact carries the anchor link; --approve is NEVER used.
 # It also pins what a round IS — an attempted rework child, never a review
 # dispatch — and what it is counted from: the floor pr-facts.sh's record of
-# operator feedback sets, written once per batch and never re-derived.
+# operator feedback sets, written once per batch and never re-derived. The
+# `reset` verb is the other way that floor moves, for the anchor whose cap
+# fired before it had a PR to be commented on.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -554,10 +556,10 @@ eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "garbage dep list reads as 0 rou
 # review the branch has never been answered against is not one of those rounds,
 # so pr-facts.sh records the batch that carried it and the rounds spent before
 # it become a floor this script subtracts.
-spent() { # <n> — n closed rework children, edged to the anchor
+spent() { # <n> [anchor-json] — n closed rework children, edged to the anchor
   local i extra=""
   for i in $(seq 1 "$1"); do extra="$extra$(kid "$i" closed "\"source_review_bead\":\"r$i\"")"; done
-  reset "$ANCHOR_PR" "$extra"
+  reset "${2:-$ANCHOR_PR}" "$extra"
   for i in $(seq 1 "$1"); do printf 'tk-anc|c%s|blocks\n' "$i" >> "$STUB_DEPS"; done
 }
 anchor_meta() { # <k=v>... — stamp the anchor before the run
@@ -617,6 +619,135 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 2 "an unrecorded floor exits 2"
 has "$out" "signoff_round_floor did not read back" "…naming the write that did not stick"
 eq "$(status rv-1)" "in_progress" "…and the review bead stays open, the gate still owed"
+
+# --- a cap that fires before the PR exists ---------------------------------------
+# The release the cap is designed for is the next operator comment on the PR.
+# An anchor capped pre-open has no conversation that could carry one, so the
+# park it writes has to say which case it is.
+echo "# a cap fired pre-open reports as pre-open and names the verb that retires it"
+spent 3 "$ANCHOR_PRE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the pre-open cap path exits 0"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…and records the exception"
+has "$(meta tk-anc blocked_reason)" "spent pre-open" "blocked_reason says the rounds were pre-open"
+has "$(meta tk-anc blocked_reason)" "signoff.sh reset tk-anc" "…and names the verb that retires it"
+has "$out" "pre-open (no PR)" "the report tells a pre-open cap from a PR one"
+
+echo "# …while a cap on an open PR still points at the conversation that releases it"
+spent 3
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1
+has "$(meta tk-anc blocked_reason)" "operator feedback on PR#42" "a post-open cap names the feedback that retires it"
+hasnt "$(meta tk-anc blocked_reason)" "signoff.sh reset" "…and does not send a human to the verb"
+
+# --- reset: the cap retirement a PR cannot deliver -------------------------------
+# Clearing the exception by hand leaves the rounds standing, so the next pass
+# recomputes the same count and re-caps. The verb writes the floor itself.
+capped_pre() { # <n spent> [extra k=v]... — a pre-open anchor parked by its own cap
+  local n="$1"; shift
+  spent "$n" "$ANCHOR_PRE"
+  anchor_meta "check.codex=exception@$OID_HEAD" "signoff_cap=codex@$OID_HEAD" \
+    "gc.routed_to=human" "blocked_reason=signoff did not converge after $n rework rounds (cap 3)" "$@"
+}
+
+echo "# reset retires a pre-open cap: floor, exception, park, route and tally in one write"
+capped_pre 3 dispatch_count=5 dispatch_backstop.codex=1
+out=$("$SUT" reset tk-anc --reason "operator ruling: the findings were answered" --batch ruling-1 2>&1); rc=$?
+eq "$rc" 0 "reset exits 0"
+eq "$(meta tk-anc signoff_round_floor)" "3@ruling-1" "the floor advances to the rounds already spent"
+eq "$(meta tk-anc signoff_rounds_reset)" "ruling-1" "…pinned to the same batch, so the next verdict does not move it again"
+eq "$(meta tk-anc check.codex)" "<absent>" "the exception is retired"
+eq "$(meta tk-anc signoff_cap)" "<absent>" "…with the stamp that claimed it"
+eq "$(meta tk-anc blocked_reason)" "<absent>" "…and the reason that named it"
+eq "$(meta tk-anc gc.routed_to)" "" "the human route is cleared"
+eq "$(meta tk-anc dispatch_count)" "<absent>" "the dispatch tally goes with the park"
+eq "$(meta tk-anc dispatch_backstop.codex)" "<absent>" "…and its backstop stamp"
+has "$(notes tk-anc)" "operator ruling: the findings were answered" "the ruling is recorded on the anchor"
+has "$out" "reset to 0 of 3" "…and reported"
+
+echo "# …and the next verdict does not re-cap — the deadlock this verb exists to break"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the verdict after a reset exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…stamps no exception"
+eq "$(meta tk-anc signoff_cap)" "<absent>" "…re-writes no park"
+eq "$(meta tk-anc gc.routed_to)" "" "…and does not route the anchor back to a human"
+eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…the released round is spent on a rework child"
+has "$(meta fix-1 rejection_reason)" "round 1" "…numbered from the ruling"
+
+echo "# reset writes to the anchor and to nothing else"
+capped_pre 3
+"$SUT" reset tk-anc --reason "operator ruling" >/dev/null 2>&1
+eq "$(grep -c 'bd update' "$STUB_GC_LOG")" "1" "exactly one write"
+hasnt "$(grep 'bd update' "$STUB_GC_LOG")" "rv-1" "…never to a review bead"
+eq "$(status rv-1)" "in_progress" "…which is left open for the dispatch it still owes"
+eq "$(cat "$STUB_GH_LOG")" "" "…and nothing is posted to GitHub"
+
+echo "# an omitted --batch mints one, so the floor is always pinned to a batch"
+capped_pre 2
+"$SUT" reset tk-anc --reason "operator ruling" >/dev/null 2>&1
+case "$(meta tk-anc signoff_round_floor)" in
+  2@reset-*) ok "the floor names the rounds spent and a minted batch" ;;
+  *)         bad "the floor names the rounds spent and a minted batch (got '$(meta tk-anc signoff_round_floor)')" ;;
+esac
+eq "$(meta tk-anc signoff_rounds_reset)" "$(meta tk-anc signoff_round_floor | cut -d@ -f2-)" "…and signoff_rounds_reset carries that batch"
+
+echo "# the verb is PR-blind: a post-open cap retires the same way"
+spent 3
+anchor_meta "check.codex=exception@$OID_HEAD" "signoff_cap=codex@$OID_HEAD" "gc.routed_to=human"
+"$SUT" reset tk-anc --reason "operator ruling" --batch ruling-pr >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "reset on an anchor with a PR exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…and retires that park too"
+
+echo "# a live takeaway outranks the ruling"
+capped_pre 3 "gc.takeaway=held for a sitting"
+out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "a held anchor refuses the reset"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and nothing is written, not even the floor"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…the park stands"
+has "$out" "takeaway" "…and the refusal names the hold"
+
+echo "# an exception no signoff_cap claims is a person's: the counter resets, the park stays"
+spent 3 "$ANCHOR_PRE"
+anchor_meta "check.codex=exception@$OID_HEAD" "gc.routed_to=human"
+"$SUT" reset tk-anc --reason "operator ruling" --batch ruling-2 >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "the reset still exits 0"
+eq "$(meta tk-anc signoff_round_floor)" "3@ruling-2" "the rounds are the cap's wherever the park came from"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…but an unclaimed exception is not this verb's to clear"
+eq "$(meta tk-anc gc.routed_to)" "human" "…and the route a person is waiting on stands"
+has "$(notes tk-anc)" "No park was retired" "…and the anchor records that it kept the park"
+
+echo "# …and a signoff_cap that no longer matches the standing marker retires nothing"
+spent 3 "$ANCHOR_PRE"
+anchor_meta "check.codex=exception@$OID_MOVED" "signoff_cap=codex@$OID_HEAD" "gc.routed_to=human"
+"$SUT" reset tk-anc --reason "operator ruling" --batch ruling-3 >/dev/null 2>&1
+eq "$(meta tk-anc check.codex)" "exception@$OID_MOVED" "an exception at another oid is left alone"
+eq "$(meta tk-anc signoff_cap)" "codex@$OID_HEAD" "…and the stamp that disagrees with it"
+
+echo "# a reset that does not read back is never reported as retired"
+capped_pre 3
+printf 'tk-anc\n' > "$STUB_UPD_FAIL"
+out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 2 "a denied write exits 2"
+has "$out" "did not read back" "…naming the failure"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…and the park still stands"
+
+echo "# reset refuses what it cannot record or cannot read"
+capped_pre 3
+out=$("$SUT" reset tk-anc 2>&1); rc=$?
+eq "$rc" 1 "no --reason refuses"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes nothing"
+has "$out" "needs --reason" "…saying what is missing"
+out=$("$SUT" reset tk-nope --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "an anchor that does not resolve refuses"
+has "$out" "does not resolve" "…saying so"
+out=$("$SUT" reset --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "reset with no anchor refuses"
+has "$out" "anchor bead id" "…rather than reading the next flag as one"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "reset carrying verdict flags refuses — it answers no review bead"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and writes nothing"
+out=$("$SUT" --review-bead rv-1 --verdict approve --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "a verdict carrying --reason refuses"
+eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…and stamps no marker"
 
 # --- supersede-dismiss -----------------------------------------------------------
 echo "# supersede: dismiss own stale CHANGES_REQUESTED only"

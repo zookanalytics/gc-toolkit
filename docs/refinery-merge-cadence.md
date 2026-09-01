@@ -56,6 +56,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    arm 5 records: the cap counts non-convergence, and a review the branch has
    never answered is not that
    ([state-machine.md](state-machine.md#the-round-cap-counts-from-the-last-operator-feedback)).
+   An anchor capped before its PR was opened can receive neither, and says so
+   in its `blocked_reason`; `signoff.sh reset <anchor> --reason <why>` is its
+   release.
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict
