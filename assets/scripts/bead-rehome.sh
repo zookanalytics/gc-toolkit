@@ -209,7 +209,7 @@ if [ "$(wait_edge_count "$CHECK_JSON")" -gt 0 ]; then
     # `bd dep remove` reports success for an edge that never existed; read the
     # graph back instead.
     if [ "$(wait_edge_count "$(bead_json "$ORIGIN_PATH" "$ORIGIN")")" -gt 0 ]; then
-        echo "bead-rehome: WARN could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge; while it stands the close below is refused — clear it with: bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
+        echo "bead-rehome: WARN could not drop the '$ORIGIN blocked by $SUCCESSOR' wait edge; while it stands the close below is refused — clear it with: gc bd --db $ORIGIN_PATH/.beads dep remove $ORIGIN $SUCCESSOR" >&2
     else
         printf 'bead-rehome: dropped the wait edge (%s blocked by %s) — a disposed bead is not waiting on its successor; gc.superseded_by is the record\n' \
             "$ORIGIN" "$SUCCESSOR"
@@ -243,7 +243,7 @@ else
         echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close was refused:" >&2
         printf '%s\n' "$CLOSE_ERR" >&2
         echo "bead-rehome: the disposition is legible either way — the bead is open, pointed, and findable. Judge the refusal, then finish it:" >&2
-        echo "  bd --db $ORIGIN_PATH/.beads close $ORIGIN --reason \"$REASON\"" >&2
+        echo "  gc bd --db $ORIGIN_PATH/.beads close $ORIGIN --reason \"$REASON\"" >&2
         exit 5
     fi
 fi
