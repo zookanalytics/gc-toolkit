@@ -31,6 +31,7 @@ harness_init() {
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
+  export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
@@ -313,18 +314,93 @@ case "$sub" in
       *) echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
     esac ;;
   api)
-    path=""; jqexpr=""
+    path=""; jqexpr=""; gqvars='{}'; gqquery=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --hostname|--jq) [ "$1" = "--jq" ] && { shift; jqexpr="${1:-}"; } || shift ;;
+        --hostname) shift ;;
+        --jq) shift; jqexpr="${1:-}" ;;
         --paginate) : ;;
         -X) shift ;;
-        -f) shift ;;
+        -f|-F)
+          kv="${2:-}"; shift
+          k="${kv%%=*}"; v="${kv#*=}"
+          if [ "$k" = "query" ]; then gqquery="$v"
+          else gqvars=$(printf '%s' "$gqvars" | jq -c --arg k "$k" --arg v "$v" '.[$k] = $v'); fi ;;
         --*) : ;;
         *) [ -z "$path" ] && path="$1" ;;
       esac
       shift || true
     done
+    if [ "$path" = "graphql" ]; then
+      # The write-back surface: one read plus three mutations, over a fixture the
+      # mutations actually MUTATE. A stub that forgot the write would let a
+      # second pass look idempotent when the real API would have written twice.
+      num=$(printf '%s' "$gqvars" | jq -r '.num // ""')
+      f="$G/threads_$num.json"
+      # A mutation carries only the global node id, exactly as the real API takes
+      # it, so the fixture holding that node has to be found rather than named.
+      locate() { # <node-id> <node|thread>
+        local cand filt
+        if [ "$2" = "thread" ]; then filt='[ .threads[]? | select(.id == $i) ] | length > 0'
+        else filt='[ (.reviews[]?, (.threads[]? | .comments.nodes[]?)) | select(.id == $i) ] | length > 0'; fi
+        for cand in "$G"/threads_*.json; do
+          [ -s "$cand" ] || continue
+          jq -e --arg i "$1" "$filt" "$cand" >/dev/null 2>&1 && { printf '%s' "$cand"; return 0; }
+        done
+        return 1
+      }
+      case "$gqquery" in
+        *addReaction*)
+          [ "${STUB_REACT_RC:-0}" = "0" ] || exit "${STUB_REACT_RC:-0}"
+          sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
+          c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
+          f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
+          t=$(mktemp)
+          jq --arg id "$sid" --arg c "$c" '
+            def mark: if (.id == $id)
+              then .reactionGroups = ((((.reactionGroups // []) | map(select(.content != $c)))) + [{content: $c, viewerHasReacted: true}])
+              else . end;
+            .reviews = ((.reviews // []) | map(mark))
+            | .threads = ((.threads // []) | map(.comments.nodes = ((.comments.nodes // []) | map(mark))))
+          ' "$f" > "$t" && mv "$t" "$f"
+          printf 'REACT %s %s\n' "$sid" "$c" >> "${STUB_GH_LOG:?}"
+          echo '{"data":{"addReaction":{"clientMutationId":null}}}'; exit 0 ;;
+        *addPullRequestReviewThreadReply*)
+          [ "${STUB_REPLY_RC:-0}" = "0" ] || exit "${STUB_REPLY_RC:-0}"
+          tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
+          body=$(printf '%s' "$gqvars" | jq -r '.b // ""')
+          f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
+          t=$(mktemp)
+          # databaseId 0 and our own login keep the reply out of every react and
+          # acted-on filter, exactly as a real reply of ours is kept out.
+          jq --arg t "$tid" --arg b "$body" --arg self "${STUB_SELF_LOGIN:-}" '
+            .threads = ((.threads // []) | map(
+              if .id == $t then
+                .comments.nodes = ((.comments.nodes // []) + [{
+                  id: ($t + "-reply"), databaseId: 0,
+                  author: {login: $self}, body: $b, reactionGroups: []}])
+              else . end))
+          ' "$f" > "$t" && mv "$t" "$f"
+          printf 'REPLY %s\n' "$tid" >> "${STUB_GH_LOG:?}"
+          echo '{"data":{"addPullRequestReviewThreadReply":{"clientMutationId":null}}}'; exit 0 ;;
+        *resolveReviewThread*)
+          [ "${STUB_RESOLVE_RC:-0}" = "0" ] || exit "${STUB_RESOLVE_RC:-0}"
+          tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
+          f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
+          t=$(mktemp)
+          jq --arg t "$tid" '.threads = ((.threads // []) | map(if .id == $t then .isResolved = true else . end))' "$f" > "$t" && mv "$t" "$f"
+          printf 'RESOLVE %s\n' "$tid" >> "${STUB_GH_LOG:?}"
+          echo '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'; exit 0 ;;
+        *reviewThreads*)
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          jq -c '{data: {repository: {pullRequest: {
+              reviews: {nodes: (.reviews // [])},
+              reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null}, nodes: (.threads // [])}}}}}' "$f"
+          exit 0 ;;
+        *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
+      esac
+    fi
     out=""
     case "$path" in
       user) out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;

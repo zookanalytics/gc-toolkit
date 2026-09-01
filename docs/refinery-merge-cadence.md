@@ -151,6 +151,24 @@ the cadence — the arms run whether or not any refinery session is awake.
    arm: arm 3 records, this one decides what answers the comment. Each batch it
    routes also resets `signoff.sh`'s round cap, once per batch, retiring the
    cap's own park with it when `signoff_cap` still claims that park.
+   A write-back sweep then answers the operator in the PR itself. On an anchor
+   carrying `pr_comment_disposition`, every comment at or below the recorded
+   watermark gets an EYES reaction, and once the bead that disposition names
+   closes, each thread holding one of the comments that bead answers gets one
+   reply naming the commit and is resolved behind that reply. The watermark is
+   cumulative and a disposition holds one batch at a time, so `pr_comment_batch`
+   carries the history it cannot: one `<disposition>|<floor>|<mark>` record per
+   batch, oldest first, written in the same transition that advances the
+   disposition. A thread belongs to every record whose range holds one of its
+   comments and whose disposition names a bead, and it is answered only once all
+   of them have landed, by one reply naming each. A record is dropped once its
+   batch has nothing left owing. The reactions are written first and bounded per
+   pass; when the cap or a failed write leaves one owing, that pass replies to
+   and resolves nothing, so no thread is answered over a comment still awaiting
+   its acknowledgement. A thread a human answered after the city's own is left
+   open, and a `visit:` disposition earns the reaction but never a reply,
+   because no commit answered it. Idempotence is read back off GitHub, so a
+   repeat pass writes nothing and a failed write is retried by the next one.
 6. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.
