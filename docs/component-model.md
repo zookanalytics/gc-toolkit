@@ -108,7 +108,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 | # | Proposition | Check |
 |---|---|---|
-| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`), a first reaction's blocked disposition writes one (`first-reaction-dispose.sh`), and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check. |
+| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | `doctor/check-wait-is-an-edge`: a LIVE bead carrying one of the hold markers declared in `lifecycle/lifecycle.toml` `[holds]` must also carry a `blocks` edge to a bead still live in the same store. Live is every non-closed status, because claiming or parking a bead does not answer the hold it states. Only `blocks` counts: it is the one edge type that holds a bead out of `bd ready`, so a `tracks` or `parent-child` record leaves the hold as unanswerable as the marker did. Only the same store counts, because a cross-store `bd dep add` reports success and holds nothing. Two degrees are reported apart, since their remedies differ: a bead with no `blocks` edge at all needs one filed, and a bead whose every blocker has closed, or names another store, needs its disposition instead. The markers are read from the declaration and never parsed out of prose, because a conclusion is prose by design and no list of wait verbs finishes, so every phrase one missed would report a clean pass. `hold_severity` in the same declaration sets how findings are reported: a warning while the standing backlog of marker-only holds is converted, an error once it is. Takeaway holds are written as edges by `gc-helm.sh takeaway --waiting-on`, which warns when it could wire only the string; a first reaction's blocked disposition writes one (`first-reaction-dispose.sh`); gate holds stay head-bound markers by design. |
 | **I2** | The state space is closed: every `merge_result` value and status combo is declared in `lifecycle/lifecycle.toml`, and a bead in a declared detached state rests unheld and offered to no pool. | `doctor/check-state-space` |
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
@@ -127,7 +127,7 @@ resolves in the composed config), `doctor/check-seed-audit-current`
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: the city name
 resolves, the supervisor endpoint carries a numeric `input_tokens` for every
 awake patrol agent, and no refinery's git-op defer guard has been latched past
-a bound). That is the whole set: **13 checks, each asserting a live structural
+a bound). That is the whole set: **14 checks, each asserting a live structural
 property** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
@@ -185,11 +185,12 @@ which also carries the one dispatch path that reads no edges at all. `gc sling
 dependencies, so a blocked bead dispatched that way is held by nothing. On that
 path the pending dispatch is recorded with `deferred-dispatch.sh arm` instead.
 
-I1 is PARTIAL for two reasons. `check-wait-is-an-edge` does not exist yet, and
-no pass ages a demand: `liveness-sweep.sh` classifies over `bd ready`, so an
-edge-blocked bead is outside its funnel and a demand owed for a month is
-invisible. Until both land, converting a hold to an edge makes it quieter than
-the prose it replaced, not louder.
+I1 is PARTIAL because no pass ages a demand. `check-wait-is-an-edge` asserts
+the hold half, so a live bead whose only hold is a marker is a finding. What
+nothing catches is a demand that is correctly edged and then owed for a month:
+`liveness-sweep.sh` classifies over `bd ready`, so an edge-blocked bead is
+outside its funnel. Until that lands, converting a hold to an edge makes it
+quieter than the prose it replaced, not louder.
 
 The census of every mechanism the pack had accreted, the measurements behind
 each judgment, and the migration are `specs/tk-s4fg87/`.
@@ -332,4 +333,4 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
   by construction. If you find the ledger disagreeing with this document, one
-  of the twelve checks is missing a case; fix the check, not the prose.
+  of the fourteen checks is missing a case; fix the check, not the prose.
