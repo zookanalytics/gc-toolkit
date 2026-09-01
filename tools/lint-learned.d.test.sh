@@ -33,18 +33,24 @@ trap 'rm -rf "$TMP"' EXIT
 # run <file>... -> sets RC and OUT
 run() { OUT="$("$DET" "$@" 2>&1)"; RC=$?; }
 
+# plant <file> — write a fixture from stdin, expanding the @BD@ placeholder to
+# the bare client name. The placeholder is what keeps this suite honest: the
+# runner scans every tracked file, so a fixture spelled literally here would be
+# a finding against the test that proves the finding.
+plant() { sed 's/@BD@/bd/g' > "$1"; }
+
 echo "── raw-bd-invocation: what is a finding ──"
 
 # Every shape a real invocation takes in this pack, one per line so the
 # assertions can name the line they expect.
-cat > "$TMP/violations.sh" <<'FIX'
+plant "$TMP/violations.sh" <<'FIX'
 #!/usr/bin/env bash
-bd list --status open
-raw=$(bd show "$1" --json)
-out=$(run_bounded bd list --db "$db" --json)
-if [ -n "$D" ]; then bd --db "$D" "$@"; else bd "$@"; fi
-ROOT=`bd show "$X" --json`
-bd close "$id" && echo done
+@BD@ list --status open
+raw=$(@BD@ show "$1" --json)
+out=$(run_bounded @BD@ list --db "$db" --json)
+if [ -n "$D" ]; then @BD@ --db "$D" "$@"; else @BD@ "$@"; fi
+ROOT=`@BD@ show "$X" --json`
+@BD@ close "$id" && echo done
 FIX
 run "$TMP/violations.sh"
 eq "$RC" 1 "a file with raw bd exits 1"
@@ -82,27 +88,27 @@ eq "$OUT" "" "a clean file prints nothing"
 
 echo "── raw-bd-invocation: the waiver ──"
 
-cat > "$TMP/waived.sh" <<'FIX'
+plant "$TMP/waived.sh" <<'FIX'
 #!/usr/bin/env bash
-bd show "$X" --json   # raw-bd: gc bd loads the city config, cold here
-# raw-bd: gc bd loads the city config, cold here
-bd dep tree "$C" --json
+@BD@ show "$X" --json   # raw-bd: gc @BD@ loads the city config, cold here
+# raw-bd: gc @BD@ loads the city config, cold here
+@BD@ dep tree "$C" --json
 FIX
 run "$TMP/waived.sh"
 eq "$RC" 0 "a stated reason waives the line, trailing or on the line above"
 
-cat > "$TMP/bare-waiver.sh" <<'FIX'
+plant "$TMP/bare-waiver.sh" <<'FIX'
 #!/usr/bin/env bash
-bd show "$X" --json   # raw-bd:
+@BD@ show "$X" --json   # raw-bd:
 FIX
 run "$TMP/bare-waiver.sh"
 eq "$RC" 1 "a waiver with no reason does not waive"
 
 # The waiver is per line: it must not carry to the next invocation.
-cat > "$TMP/waiver-scope.sh" <<'FIX'
+plant "$TMP/waiver-scope.sh" <<'FIX'
 #!/usr/bin/env bash
-bd show "$X" --json   # raw-bd: a documented gc limitation
-bd show "$Y" --json
+@BD@ show "$X" --json   # raw-bd: a documented gc limitation
+@BD@ show "$Y" --json
 FIX
 run "$TMP/waiver-scope.sh"
 eq "$RC" 1 "the line after a waived line is still checked"
