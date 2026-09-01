@@ -200,10 +200,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
-   any of those arms run, and routes an unanswered review comment to a rework
-   child or a visit. The posture write is idempotent, so re-running it here
-   after arm 3 costs nothing when nothing changed. Routing lives only in this
-   arm: arm 3 records, this one decides what answers the comment. Each batch it
+   any of those arms run, and routes unanswered review feedback — under a
+   `commented` posture and equally under a human `changes_requested` — to a
+   rework child or a visit. The posture write is idempotent, so re-running it
+   here after arm 3 costs nothing when nothing changed. Routing lives only in
+   this arm: arm 3 records, this one decides what answers it. Each batch it
    routes also resets `signoff.sh`'s round cap, once per batch, retiring the
    cap's own park with it — but only while `merge_hold` still reads the
    literal `signoff_cap` with a non-empty `signoff_cap=<gate>` beside it; an

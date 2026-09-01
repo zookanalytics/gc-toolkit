@@ -952,17 +952,100 @@ printf '[{"id":9500,"user":{"login":"human2"},"body":"but what about this?"}]' >
 out=$(run)
 eq "$(meta_pinned P5 pr_posture)" "commented@sha-49" "one reviewer's approval does not answer another's question"
 
-echo "# a standing CHANGES_REQUESTED outranks everything and watermarks nothing"
+echo "# a human CHANGES_REQUESTED is a veto AND a batch to answer"
+# The tk-zina89/PR#496 fixture: objections that converged to codex-green
+# untouched, because nothing read the feedback under a standing
+# CHANGES_REQUESTED. The veto is the posture; what sits under it routes like
+# any other feedback. The review body is empty on purpose — an operator whose
+# whole objection is inline leaves it that way.
+desc() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .description) // "<absent>"' "$STUB_STORE"; }
 store "[$(anchor P6 51)]"
 printf '%s' "$(prview 51 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_51.json"
-printf '[{"id":9600,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","commit_id":"sha-51","submitted_at":"2026-08-19T00:00:00Z"}]' \
+printf '[{"id":9600,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"","commit_id":"sha-51","submitted_at":"2026-08-19T00:00:00Z"}]' \
   > "$GH_DIR/reviews_51.json"
-printf '[{"id":9601,"user":{"login":"human1"},"body":"fix this"}]' > "$GH_DIR/comments_51.json"
-: > "$STUB_GH_LOG"
+printf '[{"id":9601,"user":{"login":"human1"},"body":"WHY IS THIS HERE?","path":"docs/file-structure.md","line":12}]' > "$GH_DIR/comments_51.json"
+: > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "the veto is the posture"
-eq "$(meta P6 pr_comment_watermark)" "<absent>" "its comments belong to signoff's rework loop, not this arm"
-hasnt "$(cat "$STUB_GH_LOG")" "pulls/51/comments" "…and the comment read is not even made"
+eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "the veto is still the posture"
+has "$out" "routed to rework:new-2" "…and the feedback under it routed to work"
+eq "$(meta P6 pr_comment_watermark)" "9601" "the watermark advanced to the routed comment"
+eq "$(meta new-2 anchor_bead)" "P6" "the child hangs off the same anchor"
+eq "$(meta new-2 source_review)" "9600" "…and names the review it came from"
+eq "$(meta new-2 branch)" "polecat/x51" "…resuming the PR's own branch"
+has "$(desc new-2)" "WHY IS THIS HERE?" "the child carries the comment verbatim"
+has "$(desc new-2)" "docs/file-structure.md:12" "…and where it was left"
+hasnt "$(desc new-2)" "## Review bodies" "an empty review body renders no section"
+grep -qxF "new-2|blocks|P6" "$STUB_DEPS" && ok "…and the child holds the merge" || bad "blocks edge missing"
+has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+
+echo "# …the same standing review is not filed twice"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "no twin child"
+hasnt "$out" "routed to rework" "…nothing re-routes"
+eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "…and the veto stands on its own, answered or not"
+
+echo "# …and the veto resets the round cap like any other operator feedback"
+# The cap's release was unreachable for the strongest signal an operator has,
+# because the batch that performs it was never read under a veto.
+CAPCR=',"check.codex":"exception@sha-56","signoff_cap":"codex@sha-56"'
+CAPCR="$CAPCR"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
+CAPCR="$CAPCR"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-56"'
+store "[$(anchor PB 56 "$CAPCR")]"
+printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_56.json"
+printf '[{"id":9660,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"not what I asked for","commit_id":"sha-56"}]' > "$GH_DIR/reviews_56.json"
+echo '[]' > "$GH_DIR/comments_56.json"
+out=$(run)
+eq "$(meta PB signoff_rounds_reset)" "9660.0" "the veto's own batch resets the cap"
+eq "$(meta PB dispatch_count)" "<absent>" "…retiring the tally no head move could clear while it stood"
+eq "$(meta PB 'check.codex')" "<absent>" "…and the park the cap put there"
+eq "$(meta PB pr_comment_disposition)" "rework:new-2" "…so the objection routes to work, not to the visit the park would have forced"
+
+echo "# …a review DISMISSED before it routed is never filed"
+# A dismissal moves the review out of COMMENTED and CHANGES_REQUESTED both, so
+# it leaves the batch by the same read that would have counted it.
+store "[$(anchor P7 52)]"
+printf '%s' "$(prview 52 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_52.json"
+printf '[{"id":9700,"user":{"login":"human1"},"state":"DISMISSED","body":"never mind"}]' > "$GH_DIR/reviews_52.json"
+echo '[]' > "$GH_DIR/comments_52.json"
+out=$(run)
+eq "$(meta_pinned P7 pr_posture)" "review_required@sha-52" "a dismissed review is not a human waiting"
+hasnt "$out" "routed to rework" "…so nothing is filed for it"
+eq "$(meta P7 pr_review_watermark)" "<absent>" "…and nothing is watermarked"
+
+echo "# …a review BODY with no inline comment is carried too"
+# An objection stated in the review body alone has nothing on the /files page,
+# so a work order that names only that page hands the child an empty read.
+store "[$(anchor P8 53)]"
+printf '%s' "$(prview 53 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_53.json"
+printf '[{"id":9800,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"This is still 30 lines of workflow descriptions.","commit_id":"sha-53"}]' > "$GH_DIR/reviews_53.json"
+echo '[]' > "$GH_DIR/comments_53.json"
+out=$(run)
+has "$out" "routed to rework:new-2" "a body-only objection routes"
+eq "$(meta P8 pr_review_watermark)" "9800" "the review id space carries it"
+eq "$(meta P8 pr_comment_watermark)" "0" "…and the comment id space stays put"
+has "$(desc new-2)" "This is still 30 lines of workflow descriptions." "the child carries the review body"
+eq "$(meta new-2 source_review)" "9800" "…and names the review"
+
+echo "# …the city's OWN CHANGES_REQUESTED files nothing: that is signoff's loop"
+store "[$(anchor P9 54)]"
+printf '%s' "$(prview 54 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_54.json"
+printf '[{"id":9900,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","body":"finding","commit_id":"sha-54"}]' > "$GH_DIR/reviews_54.json"
+printf '[{"id":9901,"user":{"login":"gc-city-bot"},"body":"finding"}]' > "$GH_DIR/comments_54.json"
+out=$(run)
+eq "$(meta_pinned P9 pr_posture)" "changes_requested@sha-54" "the veto is recorded"
+hasnt "$out" "routed to rework" "…and this arm files nothing against the city's own verdict"
+eq "$(meta P9 pr_comment_watermark)" "<absent>" "…nor watermarks it"
+
+echo "# …an unreadable review list still records the veto, and routes nothing"
+store "[$(anchor PA 55)]"
+printf '%s' "$(prview 55 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_55.json"
+printf '[{"id":9950,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"unread","commit_id":"sha-55"}]' > "$GH_DIR/reviews_55.json"
+printf '[{"id":9951,"user":{"login":"human1"},"body":"unread"}]' > "$GH_DIR/comments_55.json"
+out=$(STUB_GH_LIST_RC=1 run)
+eq "$(meta_pinned PA pr_posture)" "changes_requested@sha-55" "reviewDecision alone settles the posture merge.sh reads"
+has "$out" "the feedback under it not routed" "…and the pass says the batch is deferred"
+hasnt "$out" "routed to rework" "…having routed nothing on a read it could not make"
 
 echo "# a read that cannot tell records NOTHING rather than clear a standing hold"
 store "[$(anchor P7 52 ',"pr_posture":"commented@sha-52","pr_comment_watermark":"1"')]"
