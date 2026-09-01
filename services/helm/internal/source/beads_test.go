@@ -45,15 +45,19 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	// Every other gather query must scope its statuses; a fake that ignored the
 	// filter would let a regression through silently. Three shapes are legal:
 	//
-	//   Status=open              the ANCHOR queries — an anchor is an open bead.
+	//   Status=open              the LIVE ANCHOR queries — an anchor is an open bead.
+	//   Status=closed + ClosedAfter
+	//                            the closed-row passes — the DONE band and the
+	//                            recently-closed sittings. The bound is half the
+	//                            shape, not a refinement of it: unbounded, the
+	//                            query returns every anchor the ledger ever
+	//                            closed, which is the board flooded rather than
+	//                            the board stable. A fake that accepted it would
+	//                            leave that untested.
 	//   Statuses=[open,inprog]   the JOIN queries (visits, workflow roots and
 	//                            steps) — a CLAIMED visit is a held conversation,
 	//                            not a finished one, and a claimed step is the
 	//                            normal state of a live molecule.
-	//   Status=closed            the recently-closed sitting pass, which MUST
-	//                            carry a window: closed beads accumulate without
-	//                            limit, so an unbounded one is a bug the fake
-	//                            refuses rather than serves.
 	//
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
@@ -65,7 +69,7 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 		}
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
 	default:
-		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins) or status=closed+ClosedAfter (sittings)")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins) or status=closed+ClosedAfter (closed rows)")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -74,7 +78,11 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 		}
 		return f.matching(f.issues[kind], filter), nil
 	}
-	return f.searchByMetadata(filter)
+	out, err := f.searchByMetadata(filter)
+	if err != nil {
+		return nil, err
+	}
+	return f.matching(out, filter), nil
 }
 
 // searchByIDs models `id IN (...)`, which is what the shared SQL builder emits
@@ -100,7 +108,8 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 
 // matching applies the status and closed-window predicates the library applies
 // in SQL. Without it the fake would hand an open-visit query the closed visits
-// too, and the two sitting passes could not be told apart.
+// too: the two sitting passes could not be told apart, and the done pass would
+// re-return every OPEN anchor as a closed one.
 func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
 	var out []*beads.Issue
 	for _, iss := range in {
@@ -205,6 +214,18 @@ func issue(id, title, kind string, prio int, updated time.Time, meta string) *be
 	if meta != "" {
 		i.Metadata = json.RawMessage(meta)
 	}
+	return i
+}
+
+// closedIssue is issue() for the done pass: same fixture, status closed, with
+// the close instant the DONE band reads. Both are set, because the library sets
+// both and a fixture carrying only one would exercise a state the store cannot
+// produce.
+func closedIssue(id, title, kind string, prio int, updated, closed time.Time, meta string) *beads.Issue {
+	i := issue(id, title, kind, prio, updated, meta)
+	i.Status = beads.StatusClosed
+	c := closed
+	i.ClosedAt = &c
 	return i
 }
 
@@ -373,8 +394,8 @@ func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore,
 		WithCityPath(root),
 		withGCClient(&fakeGC{}),
 		// A pinned clock, so a fixture's close stamp sits a fixed distance
-		// inside or outside the sitting window instead of drifting with the
-		// wall clock. A caller that needs another one appends its own.
+		// inside or outside the closed-row windows instead of drifting with
+		// the wall clock. A caller that needs another one appends its own.
 		withClock(func() time.Time { return testNow }),
 		withStoreOpener(func(_ context.Context, beadsDir string) (beadStore, error) {
 			rig := filepath.Base(filepath.Dir(beadsDir))
@@ -1567,5 +1588,207 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 	}
 	if !res.Partial {
 		t.Error("a failed subject read is reported as partial")
+	}
+}
+
+// ── The done pass ────────────────────────────────────────────────────────
+//
+// The anchor queries ask for open beads, so a closing anchor leaves the board
+// on the next gather unless something else keeps it. These pin the second pass
+// that does, and the two things that bound it.
+
+// doneStore is one rig's worth of recently closed anchors: one inside the
+// window, one outside it, and one inside it that the operator has dismissed.
+func doneStore() *fakeStore {
+	return &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"epic": {
+				issue("tk-live", "still open", "epic", 2, testNow.Add(-time.Hour), ""),
+				closedIssue("tk-fresh", "closed yesterday", "epic", 2,
+					testNow.Add(-24*time.Hour), testNow.Add(-24*time.Hour), ""),
+				closedIssue("tk-ancient", "closed last month", "epic", 2,
+					testNow.Add(-30*24*time.Hour), testNow.Add(-30*24*time.Hour), ""),
+				closedIssue("tk-gone", "closed yesterday, dismissed since", "epic", 2,
+					testNow.Add(-24*time.Hour), testNow.Add(-24*time.Hour),
+					`{"gc.dismissed_at":"2026-08-01T09:00:00Z","gc.dismissed_by":"operator"}`),
+			},
+			"bug": {
+				closedIssue("tk-subject", "a conversation subject that closed", "bug", 2,
+					testNow.Add(-2*time.Hour), testNow.Add(-2*time.Hour),
+					`{"gc.takeaway":"settled — nothing further"}`),
+				// Dismissed while it was closed, then REOPENED. It is live work
+				// again and the stale marker must not follow it.
+				issue("tk-reopened", "dismissed, then reopened", "bug", 1, testNow.Add(-time.Hour),
+					`{"gc.takeaway":"back open","gc.dismissed_at":"2026-07-30T09:00:00Z"}`),
+			},
+		},
+	}
+}
+
+func TestGatherKeepsRecentlyClosedAnchors(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Fatalf("unexpected partial: %v", res.PartialErrors)
+	}
+
+	i, ok := findAnchor(res, "tk-fresh")
+	if !ok {
+		t.Fatal("an anchor that closed yesterday must still be gathered — otherwise its row vanishes the moment it is answered")
+	}
+	if res.Anchors[i].ClosedAt.IsZero() {
+		t.Error("a closed anchor carries closed_at; the derivation bands and orders the row by it")
+	}
+
+	// The metadata-keyed kinds close too, and a conversation subject closing is
+	// the case the operator actually watched happen.
+	if _, ok := findAnchor(res, "tk-subject"); !ok {
+		t.Error("a closed metadata-keyed anchor is gathered on the same pass")
+	}
+
+	// The live anchor must not acquire a close time from the second pass.
+	j, ok := findAnchor(res, "tk-live")
+	if !ok {
+		t.Fatal("the open anchor is still gathered")
+	}
+	if !res.Anchors[j].ClosedAt.IsZero() {
+		t.Error("an open anchor must read as live; a non-zero closed_at would band it DONE")
+	}
+}
+
+func TestGatherBoundsAndDismissesTheDoneBand(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if _, ok := findAnchor(res, "tk-ancient"); ok {
+		t.Error("the window bounds the pass: an anchor closed a month ago is history, not layout")
+	}
+	if _, ok := findAnchor(res, "tk-gone"); ok {
+		t.Error("gc.dismissed_at is the operator's explicit clear; a dismissed row must not come back")
+	}
+}
+
+// The marker retires a DONE row and nothing else. A dismissed anchor that is
+// later reopened is live work, and hiding it would be the same disappearance
+// the band exists to stop, with a stale marker as the cause.
+func TestDismissMarkerDoesNotHideALiveAnchor(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok := findAnchor(res, "tk-reopened")
+	if !ok {
+		t.Fatal("a reopened anchor carrying a stale gc.dismissed_at is live work and belongs on the board")
+	}
+	if !res.Anchors[i].ClosedAt.IsZero() {
+		t.Error("...and reads as live, not DONE")
+	}
+}
+
+// The opt-out has to actually switch the pass off, not merely narrow it: a
+// query that still runs against a store with no ClosedAfter bound is the
+// unbounded read this window exists to prevent.
+func TestDoneWindowOptOut(t *testing.T) {
+	t.Setenv("GC_HELM_DONE_WINDOW", "0")
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if _, ok := findAnchor(res, "tk-fresh"); ok {
+		t.Error("GC_HELM_DONE_WINDOW=0 turns the DONE band off entirely")
+	}
+	if _, ok := findAnchor(res, "tk-live"); !ok {
+		t.Error("...and leaves the live board untouched")
+	}
+}
+
+// A gather that reads the clock again per rig measures each rig's DONE window
+// from a different instant, so a row at the boundary is kept or dropped by how
+// long the gather took to reach its rig rather than by the board's own clock.
+// The pinned-clock fixtures cannot see that — their clock never moves — so this
+// one advances on every read.
+func TestDoneWindowUsesOneClockAcrossRigs(t *testing.T) {
+	t.Setenv("GC_HELM_DONE_WINDOW", "24h")
+	// Closed 23h before the pass clock: inside a 24h window measured at the
+	// captured instant, outside one measured from any later read.
+	boundary := func(prefix string) *fakeStore {
+		return &fakeStore{issues: map[string][]*beads.Issue{
+			"epic": {closedIssue(prefix+"-edge", "closed just inside the window", "epic", 2,
+				testNow.Add(-23*time.Hour), testNow.Add(-23*time.Hour), "")},
+		}}
+	}
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{
+		"gc-toolkit":  boundary("tk"),
+		"signal-loom": boundary("sl"),
+	}, withClock(advancingClock(testNow, 2*time.Hour)))
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, id := range []string{"tk-edge", "sl-edge"} {
+		if _, ok := findAnchor(res, id); !ok {
+			t.Errorf("%s closed inside the window at the pass clock and must be gathered; a per-rig clock read ages it out", id)
+		}
+	}
+}
+
+// advancingClock moves on every read, so a second read is always a later
+// instant than the one the gather captured.
+func advancingClock(start time.Time, step time.Duration) func() time.Time {
+	var reads int
+	return func() time.Time {
+		t := start.Add(time.Duration(reads) * step)
+		reads++
+		return t
+	}
+}
+
+func TestDoneSince(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		env  string
+		want time.Duration
+		off  bool
+	}{
+		{name: "unset is the default week", want: defaultDoneWindow},
+		{name: "a Go duration", env: "48h", want: 48 * time.Hour},
+		{name: "bare seconds", env: "3600", want: time.Hour},
+		{name: "zero switches the band off", env: "0", off: true},
+		// A typo degrades to the DEFAULT, never to off, and a negative value is
+		// a typo. Reading "-24h" as an opt-out would silently restore the
+		// vanishing this band exists to stop; only the literal "0" does that.
+		// Same reading as durationEnv in cmd/helm-svc.
+		{name: "a negative duration degrades to the default", env: "-24h", want: defaultDoneWindow},
+		{name: "so does an unparseable one", env: "seven days", want: defaultDoneWindow},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("GC_HELM_DONE_WINDOW", c.env)
+			since, ok := doneSince(now)
+			if ok == c.off {
+				t.Fatalf("window enabled = %v, want %v", ok, !c.off)
+			}
+			if !c.off && !since.Equal(now.Add(-c.want)) {
+				t.Errorf("since = %s, want %s", since, now.Add(-c.want))
+			}
+		})
 	}
 }

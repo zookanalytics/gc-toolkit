@@ -122,6 +122,22 @@ th {
 }
 
 /*
+ * Recently closed. Its own section, dimmed: these rows are on the board only so
+ * that closing one is not the same as it disappearing, and they must read as
+ * finished at a glance rather than compete with either table above.
+ */
+
+.done {
+  margin-top: 2rem;
+  opacity: 0.7;
+}
+
+.done h2 {
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+/*
  * Terminal tile. Same brief as the rest of this file: enough shape to show the
  * two states (peek at rest, live on focus) and no further. The spatial
  * placement this tile eventually gets belongs to U6.

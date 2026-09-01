@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +65,7 @@ type BeadsSource struct {
 	// rather than a contract violation.
 	gc gcClient
 
-	// now is the gather's clock. The closed-sitting window is measured from it,
+	// now is the gather's clock. Both closed-row windows are measured from it,
 	// so it is injectable for the same reason the stores are: a test that had to
 	// place its fixtures relative to wall-clock time would be asserting against
 	// a moving target.
@@ -342,9 +343,10 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	g := &gatherState{rigByPrefix: map[string]string{}}
 	convoys := s.convoyIndex(ctx, g)
 
-	// One clock for the whole pass, so the closed-sitting window and the
-	// takeaway spans it feeds are measured against the same instant on every
-	// rig rather than drifting across a slow gather.
+	// One clock for the whole pass, so every window measured against it — the
+	// closed-sitting window, the DONE window, the takeaway spans it feeds —
+	// lands on the same instant on every rig rather than drifting across a
+	// slow gather.
 	now := s.now().UTC()
 
 	var sittings []board.Sitting
@@ -355,7 +357,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 			g.note(true, []string{"rig " + r.name + ": " + err.Error()})
 			continue
 		}
-		s.gatherRig(ctx, g, st, r, convoys)
+		s.gatherRig(ctx, g, st, r, convoys, now)
 		sittings = append(sittings, s.rigSittings(ctx, st, r, g, now)...)
 		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
 	}
@@ -451,17 +453,66 @@ var metadataAnchors = []metadataAnchor{
 	{kind: "parked", key: "gc.takeaway", label: "parked-visits"},
 }
 
-// gatherRig collects every anchor kind from one rig's store. Each kind fails
+// gatherRig collects every anchor kind from one rig's store, twice: once at
+// status OPEN, and once at status CLOSED over the done window. Each kind fails
 // independently: a rig whose convoys error still contributes its epics.
-func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow) {
-	// Anchors are OPEN beads only, mirroring gc-helm.sh's `--status open` on
-	// each anchor query. Children below are read at ALL statuses so n_closed is
-	// a real count rather than a count of the still-open ones.
-	open := beads.StatusOpen
+//
+// THE SECOND PASS is the only thing that gives a closed anchor a row: the open
+// queries stop returning it the instant it is answered. It derives into the
+// terminal DONE band, below every live row. `gc-helm dismiss` retires it on the
+// operator's word; doneSince ages it out on a clock once it has been closed
+// longer than the window. That clock is the caller's captured `now`, so every
+// rig is bounded at the same cutoff and a row at the boundary does not turn on
+// which rig the gather reached last.
+func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, now time.Time) {
+	// Children are read at ALL statuses in both passes, so n_closed is a real
+	// count rather than a count of the still-open ones.
+	s.gatherAnchors(ctx, g, st, r, convoys, beads.StatusOpen, nil)
+	if since, ok := doneSince(now); ok {
+		s.gatherAnchors(ctx, g, st, r, convoys, beads.StatusClosed, &since)
+	}
+}
 
+// defaultDoneWindow bounds how far back the closed pass reaches.
+//
+// Some bound is unavoidable: this city's ledger holds hundreds of closed
+// anchors and the board is read 36 rows at a time, so an unbounded pass would
+// bury the live rows under years of finished ones — a different way of losing
+// the operator's view. The guarantee the window buys is the one that was
+// actually broken: a row does not vanish BECAUSE it closed. It does age out
+// eventually, and a week is the span in which an operator can still recognise
+// what they were looking at. GC_HELM_DONE_WINDOW retunes it; 0 turns the DONE
+// band off entirely, which is the opt-out for anyone who wants the old
+// behaviour back.
+const defaultDoneWindow = 7 * 24 * time.Hour
+
+// doneSince resolves the closed pass's lower bound. ok is false when the band
+// is switched off, which is the only case where no closed query runs at all.
+func doneSince(now time.Time) (time.Time, bool) {
+	w := defaultDoneWindow
+	if v := strings.TrimSpace(os.Getenv("GC_HELM_DONE_WINDOW")); v != "" {
+		switch d, err := time.ParseDuration(v); {
+		case err == nil && d >= 0:
+			w = d
+		default:
+			if secs, atoiErr := strconv.Atoi(v); atoiErr == nil && secs >= 0 {
+				w = time.Duration(secs) * time.Second
+			}
+		}
+	}
+	if w <= 0 {
+		return time.Time{}, false
+	}
+	return now.Add(-w), true
+}
+
+// gatherAnchors runs every anchor kind for one rig at one status. closedAfter
+// is non-nil only on the closed pass, where it both bounds the query and marks
+// the anchors it produces as DONE.
+func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, status beads.Status, closedAfter *time.Time) {
 	for _, kind := range typedAnchorKinds {
 		it := beads.IssueType(kind)
-		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &open})
+		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{IssueType: &it, Status: &status, ClosedAfter: closedAfter})
 		if err != nil {
 			g.note(true, []string{kind + "s@" + r.name + ": " + err.Error()})
 			continue
@@ -472,6 +523,9 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 				continue
 			}
 			if kind == "convoy" && !admitConvoy(iss.Title) {
+				continue
+			}
+			if closedAfter != nil && dismissed(iss) {
 				continue
 			}
 			a := newAnchor(iss, kind, r)
@@ -493,7 +547,17 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 		}
 	}
 
-	s.gatherMetadataAnchors(ctx, g, st, r, open)
+	s.gatherMetadataAnchors(ctx, g, st, r, status, closedAfter)
+}
+
+// dismissed reports the operator's explicit "take this out of my view", written
+// by `gc-helm dismiss`. Both callers gate it on the CLOSED pass, and that gate
+// is load-bearing rather than an optimisation: the marker retires a DONE row,
+// and a dismissed anchor that is later REOPENED is live work again. Applied to
+// the open pass it would hide that row from the live board — the same
+// disappearance this band exists to stop, with a stale marker as the cause.
+func dismissed(iss *beads.Issue) bool {
+	return strings.TrimSpace(decodeMetadata(iss.Metadata)["gc.dismissed_at"]) != ""
 }
 
 // gatherMetadataAnchors runs the metadata-keyed gathers for one rig. They fail
@@ -509,14 +573,15 @@ func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStor
 // from a parent to its own descendant, so the canonical converse shape — file
 // the routed work as a CHILD of the subject — can never express its wait as a
 // waiting edge (tk-2cyxo).
-func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, open beads.Status) {
+func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, status beads.Status, closedAfter *time.Time) {
 	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
 	for _, kind := range typedAnchorKinds {
 		excluded = append(excluded, beads.IssueType(kind))
 	}
 	for _, ma := range metadataAnchors {
 		filter := beads.IssueFilter{
-			Status:       &open,
+			Status:       &status,
+			ClosedAfter:  closedAfter,
 			ExcludeTypes: excluded,
 			// The board answers for durable city state. A type-keyed query
 			// never reaches the ephemeral wisp side by accident; a query keyed
@@ -537,6 +602,9 @@ func (s *BeadsSource) gatherMetadataAnchors(ctx context.Context, g *gatherState,
 		g.ok()
 		for _, iss := range issues {
 			if iss == nil {
+				continue
+			}
+			if closedAfter != nil && dismissed(iss) {
 				continue
 			}
 			a := newAnchor(iss, ma.kind, r)
@@ -609,6 +677,7 @@ func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
 		Prefix:    r.prefix,
 		Priority:  clonePriority(iss.Priority),
 		UpdatedAt: iss.UpdatedAt,
+		ClosedAt:  closedAt(iss),
 		// Carried for the cross-rig-ref scan only; never rendered.
 		Description: iss.Description,
 		Metadata:    md,
@@ -618,6 +687,20 @@ func newAnchor(iss *beads.Issue, kind string, r rigRef) board.Anchor {
 		TakeawayAt: md["gc.takeaway_at"],
 		TakeawayBy: md["gc.takeaway_by"],
 	}
+}
+
+// closedAt is the anchor's own close instant, and zero for a live one. The
+// status test is what decides; the nil guard covers a degraded read of a
+// closed bead whose timestamp did not come back, where a zero value would
+// otherwise be read as "closed today" and pin the row to the top of the band.
+// Falling back to live in that case is the quiet direction only because the
+// closed pass filters on closed_at server-side, so such a row cannot reach the
+// derivation from it.
+func closedAt(iss *beads.Issue) time.Time {
+	if iss.Status != beads.StatusClosed || iss.ClosedAt == nil {
+		return time.Time{}
+	}
+	return iss.ClosedAt.UTC()
 }
 
 // applyConvoyOwnership folds `gc convoy list`'s view of a convoy onto its

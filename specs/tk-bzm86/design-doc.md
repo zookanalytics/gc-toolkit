@@ -140,7 +140,15 @@ whose last known state is on the record with a timestamp.
 It is deliberately cheap: one Dolt write at human pace, on a bead that
 was going to be written anyway at close.
 
-### 3. Should read-activity stay the reap clock — **decided: no change to the clock**
+### 3. Should read-activity stay the reap clock — **decided: no change to the clock; SUPERSEDED 2026-08-26**
+
+> **Superseded by `tk-ghlg1e`** (cutover runbook step 9, item 6). The operator's
+> layout rule — nothing leaves their view without an explicit human act — removed
+> the clock outright rather than retuning it: `agents/converse/agent.toml` now
+> sets `idle_timeout = "0"`, and a sitting ends when its visit closes. The
+> analysis below is why *raising* the timeout was refused, and that part still
+> stands; what changed is that removing it stopped being a longevity question and
+> became a layout one.
 
 It cannot, as configured: activity is pane output, and tmux cannot
 observe reading. There is no `idle_timeout` value that distinguishes a

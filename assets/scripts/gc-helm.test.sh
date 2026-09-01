@@ -7,6 +7,7 @@
 #   --waiting-on edges (tk-2plde)
 #   the ≤140-codepoint length gate (tk-9tbbk.1)
 #   the retired board verb refuses and names helm-svc board
+#   the dismiss verb: both halves of the operator's explicit clear
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,15 +66,43 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
   "rig list")
-    # One rig; its path has no .beads dir, so gc-helm issues un-scoped bd calls.
-    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+    # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
+    # un-scoped bd calls for `tk-` ids; signal-loom's does, so an `sl-` id
+    # exercises the rig pin.
+    jq -n --arg sl "$FAKE_SL_PATH" \
+       '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
+               {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
   "bd list")
+    # Record the store this list actually read, so a lookup that searched the
+    # caller's rig instead of the subject's is visible rather than silent.
+    printf '%s\n' "${BEADS_DIR:-<unpinned>}" >> "$FAKE_LISTS"
+    # A store that will not answer. Distinct from one that answers "none":
+    # callers that read the two the same way act on an absence they never saw.
+    # FAKE_LIST_RC is the non-answer that carries an exit code; FAKE_LIST_OUT
+    # is the one that does not, and it is set to the payload to emit at rc 0.
+    [ -n "${FAKE_LIST_RC:-}" ] && exit "$FAKE_LIST_RC"
+    [ -n "${FAKE_LIST_OUT+x}" ] && { printf '%s' "$FAKE_LIST_OUT"; exit 0; }
     cat "$FAKE_STEPS_JSON" ;;
   "bd show")
     id="$3"
+    # UNKNOWN- ids resolve to nothing, the way `bd show` answers for a bead
+    # that is not there: a bare error OBJECT, never an array.
+    case "$id" in UNKNOWN-*) printf '{"error":"no issues found"}\n'; exit 0 ;; esac
+    # CLOSED- ids answer status=closed; everything else is open. dismiss says
+    # different things about the two, and the DONE row only exists for one.
+    st=open; case "$id" in CLOSED-*) st=closed ;; esac
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
-    if [ -n "$convoy" ]; then jq -n --arg c "$convoy" '[{metadata:{"gc.input_convoy_id":$c}}]'
-    else printf '[{"metadata":{}}]\n'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c}}]'
+    else jq -n --arg i "$id" --arg s "$st" '[{id:$i,status:$s,metadata:{}}]'; fi ;;
+  "bd close")
+    printf '%s\n' "$*" >> "$FAKE_CLOSES"
+    # Model bd's close-authority guard: a visit HELD by another session is
+    # refused unless --force. A stub that closed it either way would leave the
+    # escalation path untested behind a green suite.
+    case "$3" in
+      *HELD*) case "$*" in *--force*) ;; *) exit 1 ;; esac ;;
+      *STUCK*) exit 1 ;;
+    esac ;;
   "convoy status")
     anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
@@ -92,8 +121,10 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
-       FAKE_DEPS="$TMP/deps"
-: > "$TMP/deps"
+       FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists"
+mkdir -p "$TMP/signal-loom/.beads"
+export FAKE_SL_PATH="$TMP/signal-loom"
+: > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"
 unset GC_HELM_FIXTURE || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
@@ -305,6 +336,234 @@ grep -q 'helm-svc board' <<< "$BERRTXT" \
   && ok "(NOBOARD) …and the refusal points at helm-svc board" \
   || bad "(NOBOARD) refusal must name the successor (got: $BERRTXT)"
 
+# ── dismiss: the operator's one explicit "take this out of my view" ─────────
+# Two surfaces hold a subject in view and neither lets go on its own: converse
+# runs with no idle_timeout so a held visit keeps its pane, and a closed anchor
+# keeps a DONE row on the board. dismiss is the single act that releases both,
+# so each half is asserted separately — a verb that did one and silently
+# skipped the other would look like it worked.
+
+cat > "$TMP/visits.json" <<'JSON'
+[
+  {"id":"v-HELD","assignee":"gc-toolkit__converse-lx-1",
+   "metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},
+  {"id":"v-EDGE","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":""},
+   "dependencies":[{"type":"tracks","depends_on_id":"A-EDGE"}]},
+  {"id":"v-OTHER","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-OTHER"}},
+  {"id":"n-NOTAVISIT","assignee":"","metadata":{"gc.continuation_group":"A-PARKED"}},
+  {"id":"v-STUCK","assignee":"gc-toolkit__converse-lx-2",
+   "metadata":{"task_kind":"visit","gc.continuation_group":"A-STUCK"}}
+]
+JSON
+export FAKE_STEPS_JSON="$TMP/visits.json"
+
+: > "$TMP/updates"; : > "$TMP/closes"
+DOUT="$(sh "$SCRIPT" dismiss A-PARKED --reason "settled offline" 2>"$TMP/derr")"
+DERR="$(cat "$TMP/derr")"
+
+# (DISMISS-SITTING) the held visit is closed, and over its holder's claim: bd
+# refuses a close by anyone but the assignee, and the assignee is the session
+# the operator is dismissing. Assert on what the VERB reported, not on the
+# stub's log — the log records the attempt, and a refused close is logged too.
+CL="$(grep -E '^bd close v-HELD' "$TMP/closes" || true)"
+if grep -q 'closed visit v-HELD' <<< "$DOUT"; then
+    ok "(DISMISS-SITTING) the subject's open visit is closed"
+else
+    bad "(DISMISS-SITTING) no visit was closed (said: ${DOUT:-<nothing>} / ${DERR:-<nothing>})"
+fi
+eq "$(grep -c -- '--force' "$TMP/closes" || true)" "1" \
+   "(DISMISS-FORCE) the holder's claim is overridden exactly once, after the plain close is refused"
+if grep -q 'settled offline' <<< "$CL"; then
+    ok "(DISMISS-WHY) the close reason carries the operator's words"
+else
+    bad "(DISMISS-WHY) reason not recorded (got: $CL)"
+fi
+
+# (DISMISS-ROW) …and the board row is cleared in the same act.
+DU="$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)"
+if grep -q 'gc.dismissed_at=' <<< "$DU"; then
+    ok "(DISMISS-ROW) the subject is stamped dismissed, so its DONE row leaves the board"
+else
+    bad "(DISMISS-ROW) gc.dismissed_at not stamped (got: $DU)"
+fi
+if grep -q -- '--append-notes' <<< "$DU"; then
+    ok "(DISMISS-NOTES) the reason is appended, never replacing the dispatch note"
+else
+    bad "(DISMISS-NOTES) reason not appended (got: $DU)"
+fi
+if grep -q -- '--notes ' <<< "$DU"; then
+    bad "(DISMISS-NOTES) a replacing --notes write erases the dispatch note"
+else
+    ok "(DISMISS-NOTES) no replacing --notes write"
+fi
+
+# (DISMISS-SCOPE) another subject's visit is not collateral.
+if [ -z "$(grep -E '^bd close v-OTHER' "$TMP/closes" || true)" ]; then
+    ok "(DISMISS-SCOPE) a visit on a different subject is untouched"
+else
+    bad "(DISMISS-SCOPE) dismissed a foreign subject's visit"
+fi
+if [ -z "$(grep -E '^bd close n-NOTAVISIT' "$TMP/closes" || true)" ]; then
+    ok "(DISMISS-KIND) a non-visit bead in the group is never closed"
+else
+    bad "(DISMISS-KIND) closed a bead that is not a visit"
+fi
+
+# (DISMISS-EDGE) the subject is recorded twice — the group stamp and the tracks
+# edge — and only the edge has proved reliable. Matching the stamp alone leaves
+# the sitting the dismiss was asked to end still holding the pane.
+: > "$TMP/updates"; : > "$TMP/closes"
+sh "$SCRIPT" dismiss A-EDGE >/dev/null 2>&1 || true
+if grep -qE '^bd close v-EDGE' "$TMP/closes"; then
+    ok "(DISMISS-EDGE) a visit found only by its tracks edge is closed too"
+else
+    bad "(DISMISS-EDGE) an empty group stamp hid the visit (closes: $(cat "$TMP/closes"))"
+fi
+
+# (DISMISS-IDEM) a subject with no open visit is already dismissed and says so;
+# the row half still runs, so a second dismiss is not a no-op that half-worked.
+: > "$TMP/updates"; : > "$TMP/closes"
+IOUT="$(sh "$SCRIPT" dismiss A-QUIET 2>&1 || true)"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-IDEM) nothing to close, nothing closed"
+if grep -q 'no open visit' <<< "$IOUT"; then
+    ok "(DISMISS-IDEM) …and the run says so rather than reporting a sitting it did not end"
+else
+    bad "(DISMISS-IDEM) silent about the absent sitting (got: $IOUT)"
+fi
+if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-QUIET' "$TMP/updates" || true)"; then
+    ok "(DISMISS-IDEM) …and the row is still cleared"
+else
+    bad "(DISMISS-IDEM) the board half was skipped when there was no visit"
+fi
+
+# (DISMISS-STUCK) a visit that will not close must not take the row with it.
+# The quiet direction is a pane that stays up; the loud one is a row that
+# disappears while the sitting behind it is still live. The row is the
+# operator's only evidence that the sitting exists, so the row half runs only
+# when the visit half accounted for every sitting.
+: > "$TMP/updates"; : > "$TMP/closes"
+SRC=0
+SOUT="$(sh "$SCRIPT" dismiss A-STUCK 2>&1)" || SRC=$?
+if grep -q 'could not close visit v-STUCK' <<< "$SOUT"; then
+    ok "(DISMISS-STUCK) an unclosable visit is reported, not swallowed"
+else
+    bad "(DISMISS-STUCK) the failure was silent (got: $SOUT)"
+fi
+if grep -q 'gc bd close v-STUCK --force' <<< "$SOUT"; then
+    ok "(DISMISS-STUCK) …and the message names the command that finishes the job"
+else
+    bad "(DISMISS-STUCK) no recovery command offered"
+fi
+eq "$(grep -c '^bd update A-STUCK' "$TMP/updates" || true)" "0" \
+   "(DISMISS-STUCK) …and the row is NOT retired over a sitting that is still up"
+eq "$SRC" "4" "(DISMISS-STUCK) …and the run fails, so a caller cannot read it as a dismiss"
+if grep -q 'was NOT dismissed' <<< "$SOUT"; then
+    ok "(DISMISS-STUCK) …and it says the subject was not dismissed"
+else
+    bad "(DISMISS-STUCK) the refusal is not stated as one (got: $SOUT)"
+fi
+
+# (DISMISS-BLIND) a visit lookup that did not ANSWER is not a subject with no
+# visit. Reading the two the same way stamps the marker over a sitting the verb
+# never saw — the same lost row as DISMISS-STUCK, reached without a close.
+: > "$TMP/updates"; : > "$TMP/closes"
+BRC=0
+BOUT="$(FAKE_LIST_RC=1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || BRC=$?
+eq "$BRC" "4" "(DISMISS-BLIND) an unanswered visit lookup is a failed dismiss"
+eq "$(grep -c '^bd update A-PARKED' "$TMP/updates" || true)" "0" \
+   "(DISMISS-BLIND) …and nothing was stamped on a subject whose sittings were never read"
+if grep -q 'could not read the visits' <<< "$BOUT"; then
+    ok "(DISMISS-BLIND) …and the refusal names the read that failed"
+else
+    bad "(DISMISS-BLIND) unclear refusal (got: $BOUT)"
+fi
+
+# (DISMISS-BLIND) …and the non-answer that carries NO exit code is the same
+# non-answer. Empty stdout and a bare `null` leave a `.[]?` derive exiting 0
+# with no visits, which is indistinguishable from a subject that has none, so
+# the shape is what gets checked rather than the status. An error object errors
+# inside the derive and was already refused; it is pinned here beside the two
+# that were not.
+for blind_payload in '' '{"error":"no issues found"}' 'null'; do
+    blind_label="${blind_payload:-<empty stdout>}"
+    : > "$TMP/updates"; : > "$TMP/closes"
+    ZRC=0
+    ZOUT="$(FAKE_LIST_OUT="$blind_payload" sh "$SCRIPT" dismiss A-PARKED 2>&1)" || ZRC=$?
+    eq "$ZRC" "4" "(DISMISS-BLIND) rc=0 with $blind_label is a failed dismiss"
+    eq "$(grep -c '^bd update A-PARKED' "$TMP/updates" || true)" "0" \
+       "(DISMISS-BLIND) …and $blind_label stamped nothing"
+    if grep -q 'could not read the visits' <<< "$ZOUT"; then
+        ok "(DISMISS-BLIND) …and the refusal for $blind_label names the read"
+    else
+        bad "(DISMISS-BLIND) silent on $blind_label (got: $ZOUT)"
+    fi
+done
+
+# …and the gate must not swallow the honest answer: an EMPTY ARRAY is a subject
+# with no visit, which dismisses. Without it the shape gate above trades a lost
+# row for a verb that can never clear one.
+: > "$TMP/updates"; : > "$TMP/closes"
+ERC=0
+EOUT="$(FAKE_LIST_OUT='[]' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || ERC=$?
+eq "$ERC" "0" "(DISMISS-BLIND) an empty visit array is an answer, not a blind read"
+if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)"; then
+    ok "(DISMISS-BLIND) …and the row half still runs on it"
+else
+    bad "(DISMISS-BLIND) the shape gate refused a legitimate empty result (got: $EOUT)"
+fi
+
+# (DISMISS-VERIFY) an id nothing answers for writes NOTHING. A marker stamped on
+# an unverified id is a row nobody can ever bring back.
+: > "$TMP/updates"; : > "$TMP/closes"
+VRC=0
+VERR="$(sh "$SCRIPT" dismiss UNKNOWN-9 2>&1 >/dev/null)" || VRC=$?
+eq "$VRC" "4" "(DISMISS-VERIFY) an unresolvable subject is a runtime failure"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-VERIFY) …and nothing was written"
+if grep -q 'could not verify' <<< "$VERR"; then
+    ok "(DISMISS-VERIFY) …and the refusal says why"
+else
+    bad "(DISMISS-VERIFY) unclear refusal (got: $VERR)"
+fi
+
+# (DISMISS-LIVE) dismissing a bead that is still OPEN ends its sitting but must
+# not claim to have taken its row off the board: the row is live work, and a
+# verb that said otherwise would teach the operator that dismiss hides things
+# that still need them.
+: > "$TMP/updates"; : > "$TMP/closes"
+LOUT="$(sh "$SCRIPT" dismiss A-PARKED 2>&1 || true)"
+if grep -q 'still open, so it keeps its live row' <<< "$LOUT"; then
+    ok "(DISMISS-LIVE) an open subject is told it keeps its live row"
+else
+    bad "(DISMISS-LIVE) an open subject was told its row left the board (got: $LOUT)"
+fi
+: > "$TMP/updates"; : > "$TMP/closes"
+COUT="$(sh "$SCRIPT" dismiss CLOSED-7 2>&1 || true)"
+if grep -q "leaves the board's DONE band" <<< "$COUT"; then
+    ok "(DISMISS-LIVE) …and a closed subject is told its DONE row leaves"
+else
+    bad "(DISMISS-LIVE) a closed subject got the live-row wording (got: $COUT)"
+fi
+
+# (DISMISS-RIG) a subject in ANOTHER rig: the visit lookup must read that rig's
+# ledger. Unpinned it reads the caller's, finds nothing, and reports a sitting
+# ended while its pane is still up.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/lists"
+sh "$SCRIPT" dismiss sl-9001 >/dev/null 2>&1 || true
+if grep -qF "$TMP/signal-loom/.beads" "$TMP/lists"; then
+    ok "(DISMISS-RIG) the visit lookup is pinned at the subject's rig"
+else
+    bad "(DISMISS-RIG) the visit lookup ran against the wrong store" \
+        "read: $(cat "$TMP/lists")"
+fi
+
+# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs.
+ARC=0; sh "$SCRIPT" dismiss >/dev/null 2>&1 || ARC=$?
+eq "$ARC" "2" "(DISMISS-ARGS) a missing bead-id is a usage error"
+ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
+eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
+
+export FAKE_STEPS_JSON="$TMP/steps.json"
+
 echo ""
-echo "gc-helm takeaway (release quiesce, waiting-on edges, length gate): $PASS passed, $FAIL failed"
+echo "gc-helm takeaway (release quiesce, waiting-on edges, length gate) + dismiss: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

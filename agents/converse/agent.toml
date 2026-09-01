@@ -1,9 +1,10 @@
 # converse — works visits: filed requests for bounded sittings of a subject
 # bead's dialogue. A visit that still needs a human is held and becomes the
 # sitting; one whose premise died closes silently. Design authority:
-# specs/tk-h9pq5/design-doc.md; session-ending mechanics (idle_timeout DOES
-# end a held sitting; the no-wake-reason drain takes the pane after it) are
-# verified in docs/gascity-human-engagement.md — read that before tuning.
+# specs/tk-h9pq5/design-doc.md; session-ending mechanics (what ends a held
+# sitting now that no idle clock does, and the no-wake-reason drain that takes
+# the pane once one ends) are verified in docs/gascity-human-engagement.md —
+# read that before tuning.
 # Demand is the default routed-pool predicate; a filed visit IS the demand.
 scope = "rig"
 wake_mode = "fresh"
@@ -13,9 +14,12 @@ work_dir = ".gc/agents/converse/{{.AgentBase}}"
 # and it must never be empty (a CLI agent needs typed text to start a turn).
 # Keep it at peer length; fixes go in the prompt or a script.
 nudge = "Run assets/scripts/converse-claim.sh; work the visit it returns."
-# Bounds how long an unattended HELD sitting survives; open visits outlive
-# sessions either way (recovery reconstitutes from the record).
-idle_timeout = "8h"
+# 0 disables the idle reap for this role; any positive value re-arms it. A
+# sitting then ends only when its visit closes — the agent's own sign-off, or
+# the operator's `gc-helm dismiss <subject>` — so a held visit holds a
+# max_active_sessions slot until one of those runs. Why, and the endings this
+# does not remove: docs/gascity-human-engagement.md.
+idle_timeout = "0"
 min_active_sessions = 0
 # Bounds concurrently LIVE sittings only; open visits queue at zero cost.
 max_active_sessions = 6

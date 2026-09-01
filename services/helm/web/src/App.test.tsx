@@ -3,12 +3,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { Board, Sitting, Tile } from './contract';
 
-// A board carrying all five shapes the sections have to tell apart: an
-// ordinary ranked anchor, an operator-owned bead that is the DEFAULT answer, a
-// parked conversation that is neither, a parked conversation whose routed work
-// has landed — which stopped being "wants nothing" and has to leave the quiet
-// section (tk-2plde) — and a parked conversation whose routed work is still
-// OPEN, which never was "wants nothing" (tk-a9k0l).
+// A board carrying all six shapes the sections have to tell apart: an ordinary
+// ranked anchor, an operator-owned bead that is the DEFAULT answer, a parked
+// conversation that is neither, a parked conversation whose routed work has
+// landed — which stopped being "wants nothing" and has to leave the quiet
+// section (tk-2plde) — a parked conversation whose routed work is still OPEN,
+// which never was "wants nothing" (tk-a9k0l), and a parked conversation whose
+// own bead has closed, which belongs to none of them.
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     rig: 'gc-toolkit',
@@ -79,7 +80,7 @@ const SITTINGS: Sitting[] = [
 
 const BOARD: Board = {
   generated_at: '2026-08-21T19:14:00Z',
-  total: 5,
+  total: 6,
   sittings: SITTINGS,
   tiles: [
     // Owed rows lead the wire (contract.ts), so the fixture is in wire order.
@@ -146,6 +147,20 @@ const BOARD: Board = {
       needs: 'kept open as the seat for the strategic conversation',
       rank_score: 3_005_000,
     }),
+    // A parked subject whose own bead has CLOSED. It is `parked` by kind and
+    // quiet by every other test, so without the DONE filter it would read as a
+    // live conversation to pick back up — in the section whose whole promise is
+    // that its rows are resumable.
+    tile({
+      id: 'tk-9tbbk',
+      kind: 'parked',
+      title: 'the takeaway cap conversation',
+      severity: 'DONE',
+      closed_at: '2026-08-20T19:14:00Z',
+      frontier: 'closed 1d ago',
+      needs: 'closed — dismiss to clear',
+      rank_score: -999_002,
+    }),
   ],
 };
 
@@ -187,12 +202,17 @@ function sittingsSection(): HTMLElement {
   return screen.getByRole('region', { name: /converse sittings/i });
 }
 
-/** The city overview — the one table outside both sections. */
+function doneSection(): HTMLElement {
+  return screen.getByRole('region', { name: /recently closed/i });
+}
+
+/** The city overview — the one table outside every section. */
 function attentionTable(): HTMLElement {
   const tables = screen.getAllByRole('table');
   const sectioned = [
     owedSection(),
     screen.queryByRole('region', { name: /parked conversations/i }),
+    screen.queryByRole('region', { name: /recently closed/i }),
     screen.queryByRole('region', { name: /converse sittings/i }),
   ];
   const found = tables.find((t) => !sectioned.some((s) => s?.contains(t)));
@@ -266,9 +286,46 @@ it('lists a parked conversation in its own section, not in the ranked table', as
   expect(within(row as HTMLElement).getByText('parked for you — no question recorded')).toBeTruthy();
 });
 
-it('counts the three sections separately in the header', async () => {
+it('counts each section separately in the header', async () => {
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/1 owed · 3 anchors · 1 parked/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/1 owed · 3 anchors · 1 parked · 1 closed/)).toBeTruthy());
+});
+
+// The layout-stability rule for the board: a row the operator was looking at
+// does not leave because it was answered. It sinks into its own section and
+// waits there for an explicit dismiss.
+it('keeps a closed anchor on the board, in the recently-closed section', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
+
+  const row = within(doneSection()).getByText(/takeaway cap conversation/).closest('tr');
+  expect(row).not.toBeNull();
+  expect(within(row as HTMLElement).getByText('closed 1d ago')).toBeTruthy();
+  expect(within(doneSection()).getByText(/gc-helm dismiss/)).toBeTruthy();
+});
+
+// The section's copy is the operator's only statement of what the band
+// promises, and the promise the band actually keeps is narrower than "nothing
+// leaves on its own": the gather reaches back GC_HELM_DONE_WINDOW, so a row
+// does age out of the band on that clock. Copy that says otherwise teaches the
+// operator to stop looking for a row that is gone.
+it('states the window bound rather than promising an unbounded band', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
+
+  const done = doneSection();
+  expect(within(done).getByText(/GC_HELM_DONE_WINDOW/)).toBeTruthy();
+  expect(done.textContent).not.toMatch(/leaves it on its own/);
+});
+
+// It is `parked` by kind, so the DONE filter is what keeps it out of a section
+// that tells the operator these threads can be picked back up.
+it('keeps a closed parked subject out of the parked and ranked tables', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
+
+  expect(within(parkedSection()).queryByText(/takeaway cap conversation/)).toBeNull();
+  expect(within(attentionTable()).queryByText(/takeaway cap conversation/)).toBeNull();
 });
 
 // The defect this split exists to prevent (tk-2plde): a subject that routed

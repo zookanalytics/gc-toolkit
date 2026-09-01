@@ -452,6 +452,12 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
 func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) Severity {
+	// A closed anchor is not competing for attention, so no attention branch
+	// below applies to it and none of them may run: a closed epic with open
+	// children would otherwise band HIGH and sit at the top of the board.
+	if !a.ClosedAt.IsZero() {
+		return SevDone
+	}
 	var sev0 Severity
 	inProgressLive := len(r.liveHeads)
 	switch {
@@ -491,7 +497,19 @@ func weight(r rollup, priority *int, xrefs []string) int {
 // rankScore is sevrank*1e6 + weight*1e3 + min(stale,999). The weight is capped
 // so it can never bleed into the severity lane; stale arrives already clamped
 // to the units lane by [staleDays].
-func rankScore(sev Severity, w, stale int) int {
+//
+// The DONE band is scored differently, because the two live lanes answer a
+// question it does not have. Blast radius and staleness rank rows by how badly
+// they want a human; a closed row wants nothing. What orders it is recency —
+// most-recently-closed first — so the row the operator just watched close sits
+// at the top of the band rather than wherever its old weight left it.
+// closedDays is passed already floored by [staleDays]; the inverted term stays
+// inside the units lane, so the whole band still lands at or below -1 and can
+// never reach a live row's floor of 0.
+func rankScore(sev Severity, w, stale, closedDays int) int {
+	if sev == SevDone {
+		return sev.rank()*rankSeverityMultiplier + (rankTermCap - min(closedDays, rankTermCap))
+	}
 	return sev.rank()*rankSeverityMultiplier +
 		min(w, rankTermCap)*rankWeightMultiplier +
 		min(stale, rankTermCap)
@@ -500,7 +518,7 @@ func rankScore(sev Severity, w, stale int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool) string {
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool, closedDays int) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	parked := len(r.parkedHeads)
@@ -517,6 +535,8 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	}
 
 	switch {
+	case !a.ClosedAt.IsZero():
+		return "closed " + agePhrase(closedDays)
 	case a.Source == "unowned":
 		return "unowned convoy — no owning bead"
 	// Parallel to the parked phrase below, and for the same reason: the row is
@@ -579,6 +599,13 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool) string {
+	// A closed anchor outranks even the takeaway. The sentence a sitting left
+	// describes what the row wanted while it was live; what it wants now is to
+	// stop being on the board, and only a human can decide that. The takeaway
+	// itself stays on the wire.
+	if !a.ClosedAt.IsZero() {
+		return "closed — dismiss to clear"
+	}
 	// The disposition phrase OUTRANKS the takeaway, and only here. Every other
 	// row spends its takeaway as NEEDS because the sentence is the best answer
 	// available; on this row the sentence is precisely what has gone stale —
@@ -648,6 +675,16 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	}
 }
 
+// agePhrase renders whole days as the terminal table's age idiom. It exists so
+// the DONE band answers "when" without a timestamp column: the row's own
+// closed_at is on the wire for anything that wants the instant.
+func agePhrase(days int) string {
+	if days == 0 {
+		return "today"
+	}
+	return fmt.Sprintf("%dd ago", days)
+}
+
 // nilIfEmpty renders an absent string field as a JSON null rather than "". The
 // takeaway triple is always-present-but-nullable in the bash contract, and a
 // consumer tells "no takeaway" from "field gone" by the null.
@@ -665,6 +702,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	r := rollUp(a.Children, f)
 	held := f.Visits[a.ID]
 	stale := staleDays(a.UpdatedAt, now)
+	closedDays := staleDays(a.ClosedAt, now)
 	xrefs := crossRigRefs(a, f)
 	waiting, waitingOpen := waitingSplit(a)
 	takeaway := collapseWS(a.Takeaway)
@@ -691,7 +729,12 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// produces: `unowned` is checked first there and would swallow a
 		// human-routed convoy, and the stale bump can lift an ordinary row into
 		// the same band without any person owing anything.
-		Owed: (humanGated(a) && !isRuled) || dispDue,
+		//
+		// A CLOSED anchor is never owed, whatever markers it still carries. The
+		// queue is ordered by how long a demand has waited, so admitting one
+		// would hoist it above every live demand — the exact opposite of the
+		// terminal band [rankScore] floors it into.
+		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled) || dispDue),
 
 		Weight: w,
 		Held:   held,
@@ -739,9 +782,10 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		TakeawayBy: nilIfEmpty(a.TakeawayBy),
 
 		UpdatedAt: a.UpdatedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled),
+		ClosedAt:  a.ClosedAt,
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, closedDays),
 		Needs:     needs(a, r, held, takeaway, dispDue, isRuled),
-		RankScore: rankScore(sev, w, stale),
+		RankScore: rankScore(sev, w, stale, closedDays),
 	}
 }
 
@@ -950,10 +994,12 @@ func CityOverview(tiles []Tile) []Tile {
 }
 
 // DefaultMaxRows and DefaultMaxParked mirror gc-helm.sh's GC_HELM_MAX_ROWS=50
-// and GC_HELM_MAX_PARKED=15.
+// and GC_HELM_MAX_PARKED=15. DefaultMaxDone is the third budget, for the
+// terminal band.
 const (
 	DefaultMaxRows   = 50
 	DefaultMaxParked = 15
+	DefaultMaxDone   = 10
 )
 
 // CapRows applies gc-helm.sh's SPLIT row cap and returns one globally ranked
@@ -968,21 +1014,33 @@ const (
 //
 // So the budgets are separate: attention rows keep the whole of limit (their
 // budget is not reduced by parked existing) and parked rows draw on maxParked.
-// The two slices are re-merged by rank_score, so the output stays one ranked
+// The three slices are re-merged by rank_score, so the output stays one ranked
 // array and the --json shape is unchanged.
-func CapRows(tiles []Tile, limit, maxParked int) []Tile {
+//
+// The DONE band draws on maxDone for the same reason and one more. It is
+// floored below parked, so a shared budget would drop every closed row before
+// any parked one — and unlike a parked row, a DONE row is on the board
+// precisely because it was about to disappear on its own. Letting the cap take
+// it would restore the vanishing this band exists to stop, one layer down.
+func CapRows(tiles []Tile, limit, maxParked, maxDone int) []Tile {
 	if limit <= 0 {
 		return tiles
 	}
-	out := make([]Tile, 0, min(len(tiles), limit+maxParked))
-	var attention, parked int
+	out := make([]Tile, 0, min(len(tiles), limit+maxParked+maxDone))
+	var attention, parked, done int
 	for _, t := range tiles {
-		if t.Kind == "parked" {
+		switch {
+		case t.Severity == SevDone:
+			if done >= maxDone {
+				continue
+			}
+			done++
+		case t.Kind == "parked":
 			if parked >= maxParked {
 				continue
 			}
 			parked++
-		} else {
+		default:
 			if attention >= limit {
 				continue
 			}
