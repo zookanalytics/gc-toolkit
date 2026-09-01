@@ -241,6 +241,15 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
     and ((((.title // "") | startswith("sling-"))
           or ((.title // "") | startswith("input convoy for"))
           or ((.metadata["gc.synthetic"] // "") == "true")));
+  # The tracking bead of an order is a wisp: issue_type task, no metadata
+  # until it closes, and no edges, so its id and its title are the only
+  # durable structural signals it carries. Both are machine-minted and
+  # immutable, which keeps the exclusion locally decidable and monotone.
+  # Requiring BOTH is what keeps a human bead titled "order: ..." visible,
+  # and a wisp of some other kind too.
+  def order_wisp:
+    ((.id // "") | contains("-wisp-"))
+    and ((.title // "") | startswith("order:"));
   def pre_open_all_green:
     (.metadata // {}) as $m
     | (($m.check_set // "")
@@ -264,7 +273,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
        | select((.type // "") == "parent-child") | (.depends_on_id // empty) ] | unique) as $gatedparents
   | [ ($ready[0] // [])[]
       | . as $b
-      | (if machine_convoy then "machine"
+      | (if machine_convoy or order_wisp then "machine"
          elif ($husks | index($b.id)) != null then "husk"
          elif ((.metadata["gc.routed_to"] // "") != "") then "routed-and-claimable"
          elif (($worked | index($b.id)) != null) then "worked"
