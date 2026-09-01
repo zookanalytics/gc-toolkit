@@ -74,7 +74,7 @@ inventory_files() {
     local f
     for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
              "$REPO"/template-fragments/operator-profile.template.md \
-             "$REPO"/template-fragments/learning-exemplars.md \
+             "$REPO"/template-fragments/learning-exemplars.template.md \
              "$REPO"/formulas/mol-review.toml; do
       [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"
     done

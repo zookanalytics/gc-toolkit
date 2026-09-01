@@ -173,10 +173,10 @@ sharpened or added. The anchor goes in the TOML comment ledger above the
 review step, not beside the dimension: the step description renders into a
 step bead, where an HTML comment is noise in the text a reviewer reads.
 
-**`exemplar` — the exemplar corpus.** `template-fragments/learning-exemplars.md`, at most
-**8** before/after pairs, resolved on demand during a review rather than
-injected into any prompt. For lessons that are a shape rather than a
-statement.
+**`exemplar` — the exemplar corpus.**
+`template-fragments/learning-exemplars.template.md`, at most **8**
+before/after pairs, resolved on demand during a review rather than injected
+into any prompt. For lessons that are a shape rather than a statement.
 
 Every adopted entry carries an anchor comment — immediately above it in the
 three fragment carriers, in the ledger for `review-rubric`:

@@ -120,7 +120,7 @@ target file, the budget, and what the adoption costs to keep.
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
 | `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
-| `exemplar` | `template-fragments/learning-exemplars.md` | `exemplar_cap` entries | per review, resolved on demand |
+| `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | per review, resolved on demand |
 
 Choose by what the learning *is*:
 
@@ -150,6 +150,25 @@ review step in `formulas/mol-review.toml`, not beside the dimension it
 amends: the step description renders into step beads, where an HTML comment
 is noise in the text an agent reads. The ledger line names the dimension, so
 the retirement pass can find what an anchor refers to.
+
+An `exemplar` entry is a `###` section under its anchor, holding a trigger
+line and the pair:
+
+```
+### <what the pair is about>
+
+**Trigger.** <the recognizable situation that selects this exemplar>
+
+**Instead of:**
+<the shape that drew the correction>
+
+**Write:**
+<the shape that answers it>
+```
+
+The trigger line only says when to look; the pair does the teaching. Draw
+both halves from what actually happened, with identifiers scrubbed to the
+role.
 
 ## Two gates on promotion into a paid carrier
 

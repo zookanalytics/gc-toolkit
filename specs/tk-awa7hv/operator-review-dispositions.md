@@ -19,7 +19,7 @@ for has landed; six stay open behind `tk-ixpfau`.
 
 | Thread | Comment | What answers it |
 |---|---|---|
-| `template-fragments/learning-exemplars.md:71` | the corpus should sit with the other learnings, not in `docs/` | moved from `docs/learning-exemplars.md` to `template-fragments/learning-exemplars.md`, beside the profile and both learned-conventions fragments |
+| `template-fragments/learning-exemplars.md:71` | the corpus should sit with the other learnings, not in `docs/` | moved from `docs/learning-exemplars.md` to `template-fragments/learning-exemplars.template.md`, beside the profile and both learned-conventions fragments |
 | `converse.md:596` | the lead-with-the-decision entry contradicts ending with the decision | the ordering half of `rule:tk-vglpm` is gone; the entry now states self-containment only (`operator-profile.template.md:9-12`) |
 | `converse.md:612` | structural cause should also mean preventing the thing by design | `rule:tk-b80kkz` now says find what allowed it and prefer a design in which it cannot happen again (`operator-profile.template.md:25-29`) |
 | `converse.md:625` | a code-comment rule landed in an agent that never writes code | moved to `learned-conventions-polecat.template.md:7` and `learned-conventions-mechanik.template.md:21`; it reaches polecat, polecat-codex and mechanik, and no longer reaches converse |
