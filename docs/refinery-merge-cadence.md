@@ -162,6 +162,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 1 and arm 5.
+8. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+   A polecat that diagnoses a duplicate dispatch stamps the marker and parks
+   the bead, because polecats never close work beads; with no reader the bead
+   waits for a human ruling, one bead at a time. This arm closes the ones that
+   are provably safe through `bead-rehome.sh --kind duplicate`, which is the
+   one writer of a successor pointer, and leaves every other one alone with the
+   reason on stdout. The stamp is never enough on its own: the named successor
+   must resolve and be closed or shipped, and the duplicate must be proved to
+   have recorded no work — either `work_outcome=no-op`, or no work-product key
+   at all (`branch`, `work_dir`, `pr_number`, `pr_url`, `merge_result`,
+   `gc.work_commit`). "No work" cannot be read off an absent `branch`: on a
+   rebase or rework dispatch that field names the TWIN's branch, so most
+   verified no-op duplicates carry one. A bead somebody else owns — assigned,
+   `in_progress`, a review bead, a step bead, or already pointed at a different
+   successor — is out of the population by construction. It runs after
+   review-sweep so a twin that arm 4 merged or arm 5 recorded on this pass is
+   disposable on the same tick.
 
 ## Single-flight: the tracking gate and the pass lock
 

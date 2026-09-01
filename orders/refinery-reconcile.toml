@@ -1,6 +1,6 @@
 # refinery-reconcile — the merge cadence, controller-owned. Runs the arms
 # (gate-ensure, pr-open, pr-facts --posture-only, merge, pr-facts,
-# convoy-graduate) once per tick. The dispatcher's open-tracking gate keys on
+# convoy-graduate, review-sweep, duplicate-sweep) once per tick. The dispatcher's open-tracking gate keys on
 # ScopedName() (refinery-reconcile:rig:<rig>) and is the first half of
 # single-flight — never set no_work_gate, that flag opts out of exactly that
 # gate. It is not the whole of it: the controller watchdog closes any tracking
