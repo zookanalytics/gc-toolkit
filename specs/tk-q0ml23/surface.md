@@ -84,16 +84,25 @@ in `model.go`. The TypeScript mirror in `contract.ts` follows.
 |---|---|---|
 | `pr_number` | int, 0 when absent | the anchor's `pr_number` |
 | `pr_url` | string | the anchor's `pr_url`; the operator's way into GitHub |
+| `pr_branch` | string, empty on a non-merge row | the anchor's `branch`; the row's identity before the PR opens |
 | `pr_machine` | string | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, or `unknown` |
 | `pr_conversation` | string | `quiet`, `outstanding`, `covered`, `asking`, `answered`, or `unknown` |
 | `pr_approval` | string | `required`, `met`, `not_required`, or `unknown` |
 | `pr_owed_since` | timestamp, zero when not owed | when the operator's turn began |
 
-Six fields, and five of them are a value read off the bead. The board computes
+Seven fields, and six of them are a value read off the bead. The board computes
 nothing about a merge anchor that the cadence has not already decided. The
 `pr.` prefix is the metadata key's, kept because `pr-facts.sh` and `merge.sh`
 are the writers; `pr_machine` is present on a `pre_open_gate` anchor that has
 no PR number yet.
+
+`pr_branch` is what identifies those rows. A row names its pull request by
+number once one is open, and by branch for the whole span before that, which is
+where six of the seven measured wedged anchors sit. It is a field of its own
+rather than something the renderer recovers from `Frontier`, because that line
+is prose written for a different purpose and is not on every row. A row that can
+name neither carries both empty, which is the anchor at a human state that
+records no branch.
 
 `pr_approval` is the owed rule's approval clause on the wire, read from the
 recorded posture. The mapping is total over the posture's value set, because a
@@ -271,10 +280,11 @@ itself when the partition it renders into lands. Its shape:
   extends the value set rather than introducing it.
 - Derive `pr_owed_since` in the board's source layer as the earliest timestamp
   among the row's live causes, and leave it zero when there are none.
-- Add the six `Tile` fields, the source gather that fills them from the
-  anchor, and the `Owed` contribution. `pr_conversation` ships in phase 1 as a
-  field that always reads `unknown`, so the wire contract does not change
-  shape when phase 2 lands.
+- Add the seven `Tile` fields, the source gather that fills them from the
+  anchor, and the `Owed` contribution. `pr_branch` is read from the anchor's
+  `branch` and is empty on a row that is not a merge anchor.
+  `pr_conversation` ships in phase 1 as a field that always reads `unknown`,
+  so the wire contract does not change shape when phase 2 lands.
 - Render the row and its link in the owed partition, and extend the coverage
   sentence.
 - Cover the machine derivation with tests built from the live shapes in
@@ -291,6 +301,11 @@ itself when the partition it renders into lands. Its shape:
   passes at an unchanged head, which must report the same `pr_owed_since` both
   times, and across a head move, which must restart it. Cover the earliest-wins
   rule with a row owed by a wedge and a demand bead at once.
+- Cover the row's identity at each of its three shapes: an open pull request
+  renders the linked number, a `pre_open_gate` anchor renders `pr_branch`, and
+  a row with neither says so rather than rendering a blank cell. The middle
+  shape is the majority of the wedge condition, so a fallback that is never
+  exercised by a test is one that ships broken.
 
 It depends on tk-lb3u4m, which builds the partition it renders into, and on
 tk-s4fg87's phase 1 for the demand edge that `asking` reads. It does not depend
