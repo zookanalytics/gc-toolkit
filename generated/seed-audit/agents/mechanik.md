@@ -199,7 +199,7 @@ not the city:
 
 ```bash
 gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do
-  bd --db "$RP/.beads" search "<distinctive words>" --status all --limit 20 --json 2>/dev/null \
+  gc bd --db "$RP/.beads" search "<distinctive words>" --status all --limit 20 --json 2>/dev/null \
     | jq -r --arg rp "$RP" '.[]? | $rp + " " + .id + " [" + .status + "] " + .title'
 done
 ```
@@ -420,7 +420,7 @@ operator's wording as `## Statement`, plus `obs.source=operator` and
 ```bash
 gc mail inbox                    # Check messages
 gc hook                          # Check for assigned/routed beads
-bd create "..." -t decision      # File decisions for human review
+gc bd create "..." -t decision   # File decisions for human review
 ```
 
 
