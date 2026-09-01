@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-wait-is-an-edge (I1). Stub gc/bd; no live city.
+# Hermetic test for doctor/check-wait-is-an-edge (I1). Stubs `gc`; no live city.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -11,25 +11,19 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
-mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/alpha/.beads" "$TMP/beta/.beads"
-# `aa-tool` is a rig whose NAME matches the id shape, which is the collision the
-# known-identifier filter exists for.
+mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/pack/lifecycle"
 cat > "$TMP/rigs.json" <<EOF
-{"rigs":[{"name":"alpha","prefix":"aa","path":"$TMP/alpha","suspended":false},
-         {"name":"beta","prefix":"bb","path":"$TMP/beta","suspended":false},
-         {"name":"aa-tool","prefix":"","path":"","suspended":false}]}
+{"rigs":[{"name":"hq","prefix":"hh","path":"$TMP/hq","hq":true,"suspended":false},
+         {"name":"alpha","prefix":"aa","path":"$TMP/alpha","suspended":false},
+         {"name":"beta","prefix":"bb","path":"$TMP/beta","suspended":false}]}
 EOF
 
+# The stub answers `gc bd` the way the real one does, and refuses what it
+# refuses: `--rig` names a RIG and never the HQ entry, an unknown status fails
+# the read, and the three hidden bead categories stay hidden unless their
+# --include-* flag is passed. A stub that served every row would pass this
+# suite just as happily with the scan narrowed back.
 cat > "$TMP/bin/gc" <<'GC'
-#!/usr/bin/env bash
-case "$1 $2" in
-  "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
-  *) exit 0 ;;
-esac
-GC
-# `show` serves <store>.show.json when present, so a fixture can render an edge
-# in the bd-show spelling ({dependency_type,id}) that bd-list never emits.
-cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
@@ -37,26 +31,51 @@ cat > "$TMP/bin/bd" <<'BD'
 # consumers downstream split jq's own @tsv, emitted after this runs.
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
+city=""; rig=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --city) city="${2:-}"; shift 2 ;;
+    --rig)  rig="${2:-}";  shift 2 ;;
+    *) break ;;
+  esac
+done
+case "${1:-}" in
+  rig) [ "${2:-}" = "list" ] || exit 0
+       rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON"; exit 0 ;;
+  bd)  shift ;;
+  *)   exit 0 ;;
+esac
+if [ -n "$rig" ]; then
+  case "$rig" in
+    alpha|beta) store="$rig" ;;
+    *) echo "gc bd: rig \"$rig\" not found" >&2; exit 1 ;;
+  esac
+else
+  [ -n "$city" ] || { echo "gc bd: no city" >&2; exit 1; }
+  store="hq"
+fi
 sub="${1:-}"; shift || true
-db=""; status=""; prev=""; ids=()
+status=""; prev=""; ids=(); gates=0; infra=0; templates=0
 for a in "$@"; do
+  case "$a" in
+    --include-gates) gates=1 ;;
+    --include-infra) infra=1 ;;
+    --include-templates) templates=1 ;;
+  esac
   case "$prev" in
-    --db) db="$a" ;;
     --status|-s) status="$a" ;;
-    *) case "$a" in --*) ;; *) ids+=("$a") ;; esac ;;
+    *) case "$a" in --*|-n) ;; *) [ "$prev" = "--limit" ] || ids+=("$a") ;; esac ;;
   esac
   prev="$a"
 done
-name=$(basename "$(dirname "$db")")
-[ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
+[ "$store" = "${BD_FAIL_STORE:-}" ] && exit 3
+[ "$sub" = "show" ] && [ -n "${SHOW_FAIL:-}" ] && exit 5
+[ "$store" = "${BD_EMPTY_STORE:-}" ] && { printf ''; exit 0; }
+[ "$store" = "${BD_JUNK_STORE:-}" ] && { printf 'not json'; exit 0; }
+f="$STORES/$store.json"
 case "$sub" in
   list)
-    f="$STORES/$name.json"; if [ ! -f "$f" ]; then printf '[]'; exit 0; fi
-    # `list` FILTERS BY STATUS, because that is the thing under test: a stub
-    # that served every row would pass this suite just as happily with the scan
-    # narrowed back to open. Unfiltered means open only and an unknown value is
-    # refused, both as real bd behaves — a typo in the status list must fail the
-    # store closed here too, not quietly select nothing.
+    [ -f "$f" ] || { printf '[]'; exit 0; }
     sel="${status:-open}"
     IFS=, read -ra want <<< "$sel"
     for one in "${want[@]}"; do
@@ -65,9 +84,16 @@ case "$sub" in
         *) printf 'Error: invalid status "%s"\n' "$one" >&2; exit 1 ;;
       esac
     done
-    # The row's status is bound BEFORE the pipe: read as `.status` to the right
-    # of one, it would resolve against the split array and select every row.
-    if out=$(jq -c --arg sel "$sel" '[ .[] | select((.status // "open") as $st | ($sel | split(",")) | index($st) != null) ]' < "$f" 2>/dev/null); then
+    # Hidden categories are bd's: gate issues, the agent/role/message infra
+    # types, and molecules labelled template.
+    if out=$(jq -c --arg sel "$sel" --argjson g "$gates" --argjson i "$infra" --argjson t "$templates" '
+        [ .[]
+          | (.issue_type // "task") as $ty
+          | select((.status // "open") as $st | ($sel | split(",")) | index($st) != null)
+          | select(($g == 1) or ($ty != "gate"))
+          | select(($i == 1) or (([ "agent","role","message" ] | index($ty)) == null))
+          | select(($t == 1) or ($ty != "molecule")
+                             or (((.labels // []) | index("template")) == null)) ]' < "$f" 2>/dev/null); then
       printf '%s' "$out"
     else
       # A fixture carrying RAW control bytes is not parseable JSON and cannot be
@@ -76,280 +102,342 @@ case "$sub" in
       cat "$f"
     fi ;;
   show)
-    f="$STORES/$name.show.json"; [ -f "$f" ] || f="$STORES/$name.json"
+    # `show` serves <store>.show.json when present, so a fixture can render an
+    # edge in the bd-show spelling ({dependency_type,id}) that list never emits.
+    sf="$STORES/$store.show.json"; [ -f "$sf" ] && f="$sf"
+    echo "$store:${#ids[@]}" >> "${SHOW_CALLS:-/dev/null}"
     if [ ! -f "$f" ] || [ "${#ids[@]}" -eq 0 ]; then
       printf '{"error":"no issues found matching the provided IDs"}'; exit 1
     fi
-    echo "${#ids[@]}" >> "${SHOW_CALLS:-/dev/null}"
-    # Real bd reads a DB and emits parseable JSON, so the stub scrubs the raw
-    # control bytes a fixture puts in the LIST payload before parsing it here.
-    out=$(scrub < "$f" \
-          | jq -c '[ .[] | select(.id as $i | ($ARGS.positional | index($i))) ]' --args "${ids[@]}")
+    out=$(scrub < "$f" | jq -c '[ .[] | select(.id as $i | ($ARGS.positional | index($i))) ]' --args "${ids[@]}")
     if [ "$out" = "[]" ]; then
       printf '{"error":"no issues found matching the provided IDs"}'; exit 1
     fi
     printf '%s' "$out" ;;
 esac
+GC
+# Nothing in the check may reach for raw `bd`. This one fails every call, so a
+# read that skipped `gc` would fail the store closed and be seen.
+cat > "$TMP/bin/bd" <<'BD'
+#!/usr/bin/env bash
+echo "raw bd: circuit breaker open" >&2
+exit 7
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
-run_check() { RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1; }
-store() { printf '%s' "$1" > "$TMP/stores/alpha.json"; rm -f "$TMP/stores/alpha.show.json"; }
+
+cat > "$TMP/pack/lifecycle/lifecycle.toml" <<'TOML'
+[machine]
+park_route = "human"
+
+[holds]
+marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
+marker_prefixes = ["dispatch_backstop."]
+gate_marker_prefix = "check."
+gate_hold_verb = "exception"
+route_key = "gc.routed_to"
+hold_severity = "warn"
+TOML
+
+run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="${PACK:-$TMP/pack}" bash "$CHECK" 2>&1; }
+store()  { printf '%s' "$1" > "$TMP/stores/alpha.json"; rm -f "$TMP/stores/alpha.show.json"; }
+showq()  { printf '%s' "$1" > "$TMP/stores/alpha.show.json"; }
 bstore() { printf '%s' "$1" > "$TMP/stores/beta.json"; }
-reset_beta() { printf '[]' > "$TMP/stores/beta.json"; rm -f "$TMP/stores/beta.show.json"; }
-reset_beta
+hstore() { printf '%s' "$1" > "$TMP/stores/hq.json"; }
+reset()  { bstore '[]'; hstore '[]'; rm -f "$TMP/stores/beta.show.json" "$TMP/stores/hq.show.json"; }
+reset
 
 # --- 1. a clean store passes ---------------------------------------------
 store '[{"id":"aa-101","status":"open","metadata":{}},
-        {"id":"aa-202","status":"open","metadata":{"gc.takeaway":"routed, nothing pending"}}]'
+        {"id":"aa-202","status":"open","metadata":{"other":"nothing held here"}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a store with no stated wait passes"
+eq "$RC" "0" "a store with no hold marker passes"
 has "$OUT" "OK:" "the pass message is the OK line"
+hasnt "$OUT" "circuit breaker" "no read reached for raw bd"
 
-# --- 2. RULE A: a wait-declaring KEY with no edge --------------------------
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
+# --- 2. a marker with no edge is the finding ------------------------------
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"waiting for the operator"}},
         {"id":"aa-202","status":"open","metadata":{}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a blocked_on key naming a bead with no edge is an ERROR"
-has "$OUT" "aa-101" "the finding names the waiting bead"
-has "$OUT" "aa-202" "the finding names the bead waited on"
-has "$OUT" "blocked_on" "the finding names the metadata key that stated the wait"
-has "$OUT" "aa-202 is open" "an OPEN target reports as the unedged case"
+eq "$RC" "1" "a hold marker with no blocks edge warns"
+has "$OUT" "aa-101" "the finding names the held bead"
+has "$OUT" "triage.hold=waiting for the operator" "and the marker that holds it"
+has "$OUT" "no \`blocks\` edge" "and says the graph carries nothing"
 
-# --- 3. RULE A: the same wait on an already-CLOSED bead --------------------
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
-        {"id":"aa-202","status":"closed","metadata":{}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a wait on a CLOSED bead with no edge is an ERROR"
-has "$OUT" "already CLOSED" "the frozen case is called out separately"
-
-# --- 4. a BLOCKING edge in EITHER direction satisfies the invariant --------
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
-         "dependencies":[{"type":"blocks","depends_on_id":"aa-202"}]},
+# --- 3. the same marker beside a live blocks edge is clean ----------------
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"waiting for the operator"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-202","type":"blocks"}]},
         {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a forward edge satisfies the wait"
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{},
-         "dependencies":[{"type":"blocks","depends_on_id":"aa-101"}]}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "an edge from the OTHER side also satisfies it"
-# type=blocks is the only type that holds a bead out of `bd ready`, so every
-# other type records the relation while leaving the wait as unanswerable as the
-# bare string. Both projections are filtered, so both are pinned here.
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a hold marker beside a live blocks edge is not a finding"
+
+# --- 4. the blocker has closed: the terminal degree, and an ERROR ----------
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"waiting for the operator"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-909","type":"blocks"}]}]'
+showq '[{"id":"aa-909","status":"closed","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a hold whose only blocker has closed is a finding"
+has "$OUT" "aa-909 is closed" "the finding names the dead blocker and its status"
+has "$OUT" "rests on the string alone" "and says what the state now is"
+has "$OUT" "whose every \`blocks\` blocker is gone" "and is grouped apart from the unedged half"
+
+# --- 5. only a blocks edge answers a hold ---------------------------------
 for t in tracks parent-child related; do
-    store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
-             "dependencies":[{"type":"'"$t"'","depends_on_id":"aa-202"}]},
-            {"id":"aa-202","status":"open","metadata":{}}]'
-    eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a $t edge on the source does not satisfy the wait"
-    store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
-            {"id":"aa-202","status":"open","metadata":{},
-             "dependencies":[{"type":"'"$t"'","depends_on_id":"aa-101"}]}]'
-    eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a reverse $t edge does not satisfy it either"
+  store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+           "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-202","type":"'"$t"'"}]},
+          {"id":"aa-202","status":"open","metadata":{}}]'
+  OUT=$(run_check); RC=$?
+  eq "$RC" "1" "a $t edge does not answer a hold"
 done
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
-         "dependencies":[{"type":"tracks","depends_on_id":"aa-202"}]},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-OUT=$(run_check)
-has "$OUT" 'no `blocks` edge records it' "the finding says which edge type is missing, not that there is none"
-# A wait that carries BOTH kinds is satisfied: the filter drops the tracks row,
-# not the whole bead's edge list.
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
-         "dependencies":[{"type":"tracks","depends_on_id":"aa-202"},
-                         {"type":"blocks","depends_on_id":"aa-202"}]},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a blocks edge beside a tracks edge still satisfies the wait"
 
-# --- 5. both edge spellings are read --------------------------------------
-# bd list renders {type,depends_on_id}; bd show renders {dependency_type,id}
-# for the same edge. Reading one spelling only reports every edged wait.
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-cat > "$TMP/stores/alpha.show.json" <<'EOF'
-[{"id":"aa-202","status":"open","metadata":{},"dependencies":[{"dependency_type":"blocks","id":"aa-101"}]}]
-EOF
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "an edge rendered in the bd-show spelling still counts"
-# The type is keyed `.dependency_type` in that spelling. Reading only `.type`
-# would leave every candidate-side edge bd show renders unfiltered.
-cat > "$TMP/stores/alpha.show.json" <<'EOF'
-[{"id":"aa-202","status":"open","metadata":{},"dependencies":[{"dependency_type":"tracks","id":"aa-101"}]}]
-EOF
-eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a NON-blocking edge in that spelling is refused, not passed"
-rm -f "$TMP/stores/alpha.show.json"
-# Both projections read both spellings, so both are pinned to. The source side
-# is fed by bd list today; a source edge keyed the other way must still count,
-# or a change of listing spelling reports every edged wait in the city as
-# unedged.
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},
-         "dependencies":[{"dependency_type":"blocks","id":"aa-202"}]},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a SOURCE-side edge in the bd-show spelling counts too"
-
-# --- 6. RULE B: the bead's own status prose -------------------------------
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"held, waiting on aa-202 to land"}},
+# --- 6. the edge is read in the bd-show spelling too -----------------------
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"id":"aa-202","dependency_type":"blocks"}]},
         {"id":"aa-202","status":"open","metadata":{}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "wait language in the bead's own takeaway is an ERROR"
-has "$OUT" "waiting on aa-202" "the finding quotes the phrase it matched"
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_reason":"blocked by aa-202 until it lands"}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a *_reason value is read as the bead's own prose"
+eq "$RC" "0" "a blocks edge keyed dependency_type/id is read"
 
-# --- 7. the verb is bounded on BOTH sides ---------------------------------
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"unblocked by aa-202, shipping"}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "\"unblocked by\" does not match \"blocked by\""
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"blocked only on mechanism, see aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a verb matching a PREFIX of a longer word is not a wait"
+# --- 7. every declared marker shape, and the values that are NOT holds -----
+held() { # <metadata-json> <label>
+  store '[{"id":"aa-101","status":"open","metadata":'"$1"'}]'
+  OUT=$(run_check); RC=$?
+  eq "$RC" "1" "$2 is a hold"
+  has "$OUT" "aa-101" "$2 names the held bead"
+}
+notheld() { # <metadata-json> <label>
+  store '[{"id":"aa-101","status":"open","metadata":'"$1"'}]'
+  OUT=$(run_check); RC=$?
+  eq "$RC" "0" "$2 is not a hold"
+}
+held '{"triage.hold":"x"}'                       "triage.hold"
+held '{"blocked_reason":"the cap fired"}'        "blocked_reason"
+held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
+held '{"gc.routed_to":"human"}'                  "gc.routed_to on the park route"
+held '{"check.codex":"exception@abc123"}'        "check.<g> at the exception verb"
+held '{"dispatch_backstop.codex":"5@abc123"}'    "dispatch_backstop.<g>"
+notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
+notheld '{"check.codex":"green@abc123"}'         "a green gate marker"
+notheld '{"check.codex":"fixable@abc123"}'       "a fixable gate marker"
+notheld '{"blocked_reason":""}'                  "an empty blocked_reason"
+notheld '{"gc.takeaway":""}'                     "an empty gc.takeaway"
+notheld '{"dispatch_count":"5"}'                 "a dispatch tally with no backstop stamp"
 
-# --- 8. a wait whose stated subject is ANOTHER bead is not this bead's -----
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"survey: aa-303 is blocked by aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{}},
-        {"id":"aa-303","status":"open","metadata":{}}]'
+# --- 8. every non-closed status is in scope -------------------------------
+for st in open in_progress blocked deferred hooked pinned; do
+  store '[{"id":"aa-101","status":"'"$st"'","metadata":{"triage.hold":"held"}}]'
+  OUT=$(run_check); RC=$?
+  eq "$RC" "1" "a held bead in status=$st is scanned"
+done
+# The guard mutated out: the stub refuses a status it does not know, so a scan
+# narrowed to a typo fails the store closed rather than reading as clean.
+OUT=$(printf '[]' > "$TMP/stores/alpha.json"; gc --city "$TMP" --rig alpha bd list --status nonesuch --json 2>&1); RC=$?
+eq "$RC" "1" "the stub refuses an unknown status, so a narrowed scan cannot read as clean"
+
+# --- 9. the hidden bead categories are scanned ----------------------------
+for cat in '"issue_type":"gate"' '"issue_type":"agent"' '"issue_type":"molecule","labels":["template"]'; do
+  store '[{"id":"aa-101","status":"open",'"$cat"',"metadata":{"triage.hold":"held"}}]'
+  OUT=$(run_check); RC=$?
+  eq "$RC" "1" "a held bead with $cat is scanned"
+done
+# Vacuity guard: the stub really does hide those rows without the flags, so the
+# assertions above are testing the flags and not a stub that serves everything.
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"triage.hold":"held"}}]'
+OUT=$(gc --city "$TMP" --rig alpha bd list --status open --json 2>&1)
+eq "$OUT" "[]" "without --include-gates the stub hides the gate bead"
+
+# --- 10. a live blocker in a hidden category still answers the hold --------
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-777","type":"blocks"}]}]'
+showq '[{"id":"aa-777","status":"open","metadata":{}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a wait attributed to a named third party is not reported against the writer"
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"aa-101 is blocked by aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "2" "a wait whose named subject IS this bead is still reported"
+eq "$RC" "0" "a blocker the listing did not carry, but the store reports live, answers the hold"
+has "$OUT" "the live listing did not carry aa-777 (open)" "and the short listing is noted as its own defect"
 
-# --- 9. a hierarchical subject id does not hide itself --------------------
-# The sentence boundary is a period followed by space or end of line. A bare
-# period would fall INSIDE aa-909.4 and put the subject outside the window.
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"* aa-909.4 -- collection bead, blocked by aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{}},
-        {"id":"aa-909.4","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a subject whose id contains a dot is still seen as the subject"
-
-# --- 10. EVERY id in a list, not just the first ---------------------------
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"blocked by aa-202, aa-303 and aa-404"},
-         "dependencies":[{"type":"blocks","depends_on_id":"aa-202"}]},
-        {"id":"aa-202","status":"open","metadata":{}},
-        {"id":"aa-303","status":"open","metadata":{}},
-        {"id":"aa-404","status":"open","metadata":{}}]'
+# --- 11. a cross-store blocker holds nothing ------------------------------
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"bb-500","type":"blocks"}]}]'
+bstore '[{"id":"bb-500","status":"open","metadata":{}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a list after one verb is examined past its first member"
-hasnt "$OUT" "aa-202," "the edged first member is not reported"
-has "$OUT" "aa-303" "the second list member is judged"
-has "$OUT" "aa-404" "the third list member is judged"
+eq "$RC" "1" "a hold whose only blocker lives in another store is a finding"
+has "$OUT" "bb-500 is in no store this scope can read" "the finding says the foreign blocker resolved nowhere here"
+reset
 
-# --- 11. a sentence-final period is not part of the id --------------------
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"awaiting aa-202."}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a trailing period is stripped so the id still resolves"
-hasnt "$OUT" "resolves to no bead" "it is a real wait, not an unresolved note"
-
-# --- 12. NOTES ARE NOT SCANNED -------------------------------------------
-# Survey and audit beads record other beads' waits in first-person wording, so
-# a free-text note cannot be attributed to the bead carrying it.
-store '[{"id":"aa-101","status":"open","notes":"aa-101 is blocked by aa-202 and always will be","metadata":{}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "wait language in free-form notes is not a finding"
-
-# --- 13. a name that merely shares the id SHAPE ---------------------------
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"blocked on aa-tool being installed"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a rig name matching the id shape is not a wait"
-hasnt "$OUT" "aa-tool" "and it is not left as noise in the output either"
-
-# --- 14. an id that resolves nowhere is a NOTE, not a pass and not an error -
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-9999"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "an unresolvable candidate does not manufacture an error"
-has "$OUT" "resolves to no bead" "but it is reported as a note"
-
-# --- 15. resolution crosses stores ---------------------------------------
-# A candidate resolves in the store its PREFIX names. Looked up store-locally
-# a cross-rig wait answers "no issues found" and downgrades to a note.
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"bb-707"}}]'
-bstore '[{"id":"bb-707","status":"open","metadata":{}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a cross-rig wait is resolved in the OWNING store and judged"
-hasnt "$OUT" "resolves to no bead" "it is not downgraded to an unresolved note"
-bstore '[{"id":"bb-707","status":"open","metadata":{},"dependencies":[{"type":"blocks","depends_on_id":"aa-101"}]}]'
-eq "$(run_check >/dev/null 2>&1; echo $?)" "0" "a cross-rig wait that IS edged reads as ok"
-reset_beta
-
-# --- 16. batching stays within the chunk bound ---------------------------
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202, aa-303, aa-404, aa-505, aa-606"}},
-        {"id":"aa-202","status":"open","metadata":{}},{"id":"aa-303","status":"open","metadata":{}},
-        {"id":"aa-404","status":"open","metadata":{}},{"id":"aa-505","status":"open","metadata":{}},
-        {"id":"aa-606","status":"open","metadata":{}}]'
-: > "$TMP/show-calls"
-OUT=$(SHOW_CALLS="$TMP/show-calls" GC_DOCTOR_WAIT_CHUNK=2 run_check); RC=$?
-eq "$RC" "2" "a candidate set larger than the chunk bound still yields findings"
-for want in aa-202 aa-303 aa-404 aa-505 aa-606; do has "$OUT" "$want" "chunked resolve still judges $want"; done
-OVER=$(awk '$1 > 2' "$TMP/show-calls" | wc -l | tr -d ' ')
-eq "$OVER" "0" "no bd show batch exceeded the chunk bound"
-
-# --- 17. fail-CLOSED arms -------------------------------------------------
+# --- 12. the HQ store is read through --city, never as a rig --------------
+hstore '[{"id":"hh-1","status":"open","metadata":{"gc.routed_to":"human"}}]'
 store '[]'
-eq "$(RIGS_RC=1 run_check >/dev/null 2>&1; echo $?)" "1" "a failed \`gc rig list\` warns, never passes"
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}}]'
-OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
-eq "$RC" "1" "an unreadable store warns"
-has "$OUT" "NOT checked" "the warning says the store was skipped, not clean"
-printf 'not json' > "$TMP/stores/alpha.json"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an unparseable store listing warns"
-has "$OUT" "NOT checked" "the unparseable store is reported as unchecked"
-cat > "$TMP/rigs-noprefix.json" <<EOF
-{"rigs":[{"name":"alpha","prefix":"","path":"$TMP/alpha","suspended":false}]}
-EOF
-store '[]'
-OUT=$(RIGS_JSON="$TMP/rigs-noprefix.json" bash "$CHECK" 2>&1); RC=$?
-eq "$RC" "1" "a roster with no usable issue prefixes warns rather than guessing"
+eq "$RC" "1" "a held bead in the HQ store is found"
+has "$OUT" "hh-1" "the HQ finding names its bead"
+hasnt "$OUT" "rig \"hq\" not found" "the HQ entry was never addressed as a rig"
+has "$OUT" "across 3 store(s)" "all three stores were checked"
+reset
 
-# --- 18. a suspended rig is skipped, not probed --------------------------
-cat > "$TMP/rigs-susp.json" <<EOF
-{"rigs":[{"name":"alpha","prefix":"aa","path":"$TMP/alpha","suspended":true},
-         {"name":"beta","prefix":"bb","path":"$TMP/beta","suspended":false}]}
-EOF
-store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"}},{"id":"aa-202","status":"open","metadata":{}}]'
-OUT=$(RIGS_JSON="$TMP/rigs-susp.json" bash "$CHECK" 2>&1); RC=$?
-eq "$RC" "0" "a suspended rig is skipped rather than probed"
-has "$OUT" "suspended" "the skip is noted, not silent"
+# --- 13. the marker list comes from lifecycle.toml ------------------------
+mkdir -p "$TMP/pack2/lifecycle"
+cat > "$TMP/pack2/lifecycle/lifecycle.toml" <<'TOML'
+[machine]
+park_route = "parked"
 
-# --- 19. a rig with no bead store is noted, not silently dropped ---------
-cat > "$TMP/rigs-nostore.json" <<EOF
-{"rigs":[{"name":"alpha","prefix":"aa","path":"$TMP/alpha","suspended":false},
-         {"name":"gamma","prefix":"cc","path":"$TMP/gamma-never-initialised","suspended":false}]}
-EOF
+[holds]
+marker_keys = ["site.hold"]
+marker_prefixes = ["quarantine."]
+gate_marker_prefix = "gate."
+gate_hold_verb = "waived"
+route_key = "routed"
+TOML
+store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"declared only in the fixture"}}]'
+OUT=$(PACK="$TMP/pack2" run_check); RC=$?
+eq "$RC" "1" "a marker declared only in lifecycle.toml is asserted"
+has "$OUT" "site.hold" "and the finding names it"
+store '[{"id":"aa-101","status":"open","metadata":{"quarantine.a":"x"}}]'
+OUT=$(PACK="$TMP/pack2" run_check); RC=$?
+eq "$RC" "1" "a declared marker PREFIX is asserted"
+store '[{"id":"aa-101","status":"open","metadata":{"gate.codex":"waived@abc"}}]'
+OUT=$(PACK="$TMP/pack2" run_check); RC=$?
+eq "$RC" "1" "the declared gate prefix and hold verb are asserted"
+store '[{"id":"aa-101","status":"open","metadata":{"routed":"parked"}}]'
+OUT=$(PACK="$TMP/pack2" run_check); RC=$?
+eq "$RC" "1" "the declared route key and park_route are asserted"
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"x","gc.takeaway":"y"}}]'
+OUT=$(PACK="$TMP/pack2" run_check); RC=$?
+eq "$RC" "0" "a marker the declaration drops is no longer asserted"
+
+# A declaration that names only marker_keys does not inherit the rest: the
+# built-ins are a whole substitute for an unreadable file, never a filler for
+# fields a declaration dropped on purpose.
+mkdir -p "$TMP/pack5/lifecycle"
+{ echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
+  echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
+for m in '{"dispatch_backstop.codex":"5@abc"}' '{"check.codex":"exception@abc"}' '{"gc.routed_to":"human"}'; do
+  store '[{"id":"aa-101","status":"open","metadata":'"$m"'}]'
+  OUT=$(PACK="$TMP/pack5" run_check); RC=$?
+  eq "$RC" "0" "a declaration that drops a marker does not inherit it: $m"
+done
+store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"x"}}]'
+OUT=$(PACK="$TMP/pack5" run_check); RC=$?
+eq "$RC" "1" "...and the marker it does declare still asserts"
+
+# Each half of a two-field arm is required. A gate prefix with no hold verb
+# declares no gate hold, so nothing under that prefix is one — including the
+# value an unguarded `startswith($verb + "@")` would match on an empty verb.
+mkdir -p "$TMP/pack6/lifecycle"
+{ echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
+  echo 'marker_keys = ["site.hold"]'; echo 'gate_marker_prefix = "check."'; } > "$TMP/pack6/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"check.codex":"@abc"}}]'
+OUT=$(PACK="$TMP/pack6" run_check); RC=$?
+eq "$RC" "0" "a gate prefix with no hold verb declares no gate hold"
+# A route key with no park route likewise declares no route hold. The value to
+# test with is the empty string, because clearing a route by setting it empty
+# does not remove the key, so live beads really do carry it.
+mkdir -p "$TMP/pack7/lifecycle"
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'; echo 'route_key = "gc.routed_to"'; } > "$TMP/pack7/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":""}}]'
+OUT=$(PACK="$TMP/pack7" run_check); RC=$?
+eq "$RC" "0" "a route key with no park route declares no route hold"
+
+# --- 14. no declaration: the built-in list, and a note that says so -------
+mkdir -p "$TMP/pack3"
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"x"}}]'
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+eq "$RC" "1" "with no lifecycle.toml the built-in marker list still asserts"
+has "$OUT" "built-in list" "and the substitution is noted rather than silent"
+
+# --- 15. an unreadable probe warns and never passes -----------------------
 store '[{"id":"aa-101","status":"open","metadata":{}}]'
-OUT=$(RIGS_JSON="$TMP/rigs-nostore.json" bash "$CHECK" 2>&1); RC=$?
-eq "$RC" "0" "a rig whose store does not exist does not fail the run"
-has "$OUT" "no bead store" "an absent store is reported rather than skipped in silence"
+OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "a store whose listing fails warns"
+has "$OUT" "could not list live beads (rc=3)" "and names the read that failed and its status"
+has "$OUT" "was NOT checked" "and says the store was not checked"
+has "$OUT" "across 2 store(s)" "the checked count excludes it"
+OUT=$(BD_EMPTY_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "an empty-STRING listing is not an empty store"
+has "$OUT" "the live listing returned no output" "and is told apart from a store that answered []"
+OUT=$(BD_JUNK_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "a listing that is not a JSON array warns"
+has "$OUT" "is not a JSON array" "and says what was wrong with it"
+OUT=$(BD_FAIL_STORE=alpha BD_EMPTY_STORE=beta BD_JUNK_STORE=hq run_check); RC=$?
+eq "$RC" "1" "with no store readable the check cannot determine the answer"
+has "$OUT" "No bead store could be examined." "and says exactly that"
 
-# --- 20. control characters do not cost the store ------------------------
-printf '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202"},"notes":"tab\there\001etc"},
-        {"id":"aa-202","status":"open","metadata":{}}]' > "$TMP/stores/alpha.json"
+# --- 16. a blocker resolve that FAILS fails the store closed --------------
+# The listing is served and `show` is then refused. A partial resolve would
+# report a live blocker as a dead one, which is an invented error, and would
+# bury the real findings behind it.
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-909","type":"blocks"}]}]'
+OUT=$(SHOW_FAIL=1 run_check); RC=$?
+eq "$RC" "1" "a store whose blocker resolve fails is not checked"
+has "$OUT" "could not resolve the blockers" "and says which probe failed"
+hasnt "$OUT" "aa-101" "no finding is invented from the unresolved half"
+
+# --- 17. the rig roster itself ------------------------------------------
+OUT=$(RIGS_RC=4 run_check); RC=$?
+eq "$RC" "1" "a failed rig listing cannot determine the answer"
+has "$OUT" "gc rig list" "and names the probe that failed"
+printf '{"rigs":[]}' > "$TMP/rigs2.json"
+OUT=$(RIGS_JSON="$TMP/rigs2.json" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "1" "an empty roster cannot determine the answer"
+
+# --- 18. a suspended rig is skipped, not read ----------------------------
+cat > "$TMP/rigs3.json" <<EOF
+{"rigs":[{"name":"hq","prefix":"hh","path":"$TMP/hq","hq":true,"suspended":false},
+         {"name":"alpha","prefix":"aa","path":"$TMP/alpha","suspended":true}]}
+EOF
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"}}]'
+OUT=$(RIGS_JSON="$TMP/rigs3.json" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "0" "a suspended rig is skipped, and its beads are not read"
+has "$OUT" "skipped (suspended" "and the skip is noted"
+has "$OUT" "across 1 store(s)" "the checked count counts only what was read"
+
+# --- 19. raw control bytes do not abort the scan -------------------------
+printf '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held\001here"}}]' > "$TMP/stores/alpha.json"
+rm -f "$TMP/stores/alpha.show.json"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a payload carrying raw control characters still yields the finding"
-has "$OUT" "aa-101" "the finding survives the control characters"
+eq "$RC" "1" "a payload carrying a raw C0 byte is still scanned"
+has "$OUT" "aa-101" "and the finding survives the scrub"
 
-# --- 21. the scan covers every LIVE status, not just open -----------------
-# A wait does not become answerable because the bead stating it was claimed or
-# parked. Filtering to `open` drops exactly the waits that have sat long enough
-# for their bead to move status, and calls the store clean.
-for st in in_progress blocked deferred hooked pinned; do
-    store '[{"id":"aa-101","status":"'"$st"'","metadata":{"blocked_on":"aa-202"}},
-            {"id":"aa-202","status":"open","metadata":{}}]'
-    OUT=$(run_check); RC=$?
-    eq "$RC" "2" "an unedged wait stated by a $st bead is reported"
-    has "$OUT" "aa-101" "the $st bead is named as the waiter"
+# --- 20. the detail cap prints less, never finds less ---------------------
+rows=""
+for i in 1 2 3 4 5 6; do
+  rows="$rows{\"id\":\"aa-10$i\",\"status\":\"open\",\"metadata\":{\"triage.hold\":\"held\"}},"
 done
+store "[${rows%,}]"
+OUT=$(GC_DOCTOR_WAIT_DETAILS=2 run_check); RC=$?
+eq "$RC" "1" "the capped run still warns"
+has "$OUT" "6 finding(s)" "the headline count is taken before the cap"
+has "$OUT" "and 4 more, not printed" "and the remainder is counted, not dropped"
+OUT=$(GC_DOCTOR_WAIT_DETAILS=0 run_check)
+hasnt "$OUT" "not printed" "cap 0 prints every finding"
+has "$OUT" "aa-106" "including the last one"
 
-# --- 22. a CLOSED bead's stated wait is not a finding ---------------------
-# Closed is the one status that ends a wait, so the scan stops there rather
-# than reaching for --all. This also pins the stub: were --status ignored, the
-# closed bead below would be listed and reported, and every case in 21 would
-# pass against a scan that never left `open`.
-store '[{"id":"aa-101","status":"closed","metadata":{"blocked_on":"aa-202"}},
-        {"id":"aa-202","status":"open","metadata":{}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a wait stated by a CLOSED bead is not reported"
-hasnt "$OUT" "aa-101" "the closed bead is not named in the output"
+# --- 21. the reporting posture is declared, not compiled in ---------------
+mkdir -p "$TMP/pack4/lifecycle"
+posture_pack() { # <hold_severity line>
+  { echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
+    echo 'marker_keys = ["triage.hold"]'; echo "$1"; } > "$TMP/pack4/lifecycle/lifecycle.toml"
+}
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"}}]'
+posture_pack 'hold_severity = "error"'
+OUT=$(PACK="$TMP/pack4" run_check); RC=$?
+eq "$RC" "2" "hold_severity=error makes a finding an error"
+hasnt "$OUT" "reported as a warning" "and the headline drops the warn-only clause"
+posture_pack 'hold_severity = "warn"'
+OUT=$(PACK="$TMP/pack4" run_check); RC=$?
+eq "$RC" "1" "hold_severity=warn makes the same finding a warning"
+has "$OUT" "while the conversion backlog stands" "and the headline says why"
+posture_pack 'hold_severity = "loud"'
+OUT=$(PACK="$TMP/pack4" run_check); RC=$?
+eq "$RC" "1" "an undeclared posture reports as a warning rather than guessing"
+has "$OUT" "is not one of warn|error" "and says the declaration is unreadable"
+posture_pack '# no posture declared'
+OUT=$(PACK="$TMP/pack4" run_check); RC=$?
+eq "$RC" "1" "with no posture declared the built-in one warns"
+# The same store, clean, under the error posture: a posture is not a finding.
+store '[{"id":"aa-101","status":"open","metadata":{}}]'
+posture_pack 'hold_severity = "error"'
+OUT=$(PACK="$TMP/pack4" run_check); RC=$?
+eq "$RC" "0" "the error posture still passes a store with nothing held"
 
 echo
-echo "check-wait-is-an-edge: $PASS passed, $FAIL failed"
+echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

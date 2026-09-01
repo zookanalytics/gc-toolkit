@@ -181,6 +181,37 @@ marker_verbs = ["green", "fixable", "exception"]
 # review at the live head, never by a check.approval marker.
 approval_member = "approval"
 
+# The hold markers: the metadata a live bead carries to say it is not moving.
+# I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
+# each key below records a hold the graph cannot answer, and a live bead
+# carrying one with no such blocker is what doctor/check-wait-is-an-edge
+# reports. The check reads this declaration instead of carrying its own list,
+# so a marker added here is asserted without a code change. A hold is a KEY,
+# never a sentence: prose is where a conclusion is recorded beside the edge,
+# and reading it for holds would make prose a hold carrier again.
+[holds]
+# Present with a non-empty value, and the bead is held, whatever it says.
+marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
+# One key per gate, so the declaration is a prefix. dispatch_backstop.<g> is
+# written by gate-ensure.sh only where a gate has spent its dispatch ceiling,
+# and its value carries the count and the head it holds, so its presence is
+# "dispatch_count at the ceiling" as the writer itself recorded it.
+marker_prefixes = ["dispatch_backstop."]
+# check.<g> holds the merge when its verb is `exception`; the other verbs in
+# marker_verbs above are verdicts, and a verdict moves the anchor on.
+gate_marker_prefix = "check."
+gate_hold_verb = "exception"
+# The route that parks a bead for a person is park_route in [machine]. A bead
+# resting on it waits on somebody, and that wait has the same shape as any
+# other.
+route_key = "gc.routed_to"
+# How doctor/check-wait-is-an-edge reports a marker with no live blocker.
+# "warn" while the standing backlog of marker-only holds is still being
+# converted (phase 3 of specs/tk-s4fg87/proposal.md); "error" once it is. The
+# posture is declared here rather than compiled into the check, so ending the
+# migration is this line, and so it is readable beside the markers it governs.
+hold_severity = "warn"
+
 [posture]
 # What the PR is doing, recorded on the anchor by pr-facts.sh in the same
 # `<value>@<oid>` shape the check keys use. merge.sh reads these off the bead;
