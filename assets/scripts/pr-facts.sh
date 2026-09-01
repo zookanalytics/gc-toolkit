@@ -36,8 +36,8 @@
 # human already holds the anchor — with the watermarks advancing only once that
 # routing reads back. It routes under posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
-# dismissed review is in neither state, so a dismissal takes it out of the
-# batch.
+# dismissed review is in neither state, so a dismissal takes it and the inline
+# comments under it out of the batch.
 # Such a batch also resets signoff.sh's review-round cap, once per batch: it is
 # review the branch has never been answered against, not a round of the loop the
 # cap measures. The reset retires the dispatch tally with it, and the cap's own
@@ -244,6 +244,22 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
       else [] end)
    | join("\n\n")) | clip(16000)' 2>/dev/null
 }
+# A comment outlives the review that carried it: GitHub keeps the inline rows of
+# a dismissed review on /pulls/N/comments. The comment space therefore needs the
+# review space's own state filter, or a dismissal takes the body out of the
+# batch and leaves the inline comments under it routing, which is the feedback
+# the dismissal retired. A comment naming no review, or naming one the review
+# list does not carry, is standalone and stays.
+live_comments() { # <reviews-json> <comments-json> — comments whose review still carries feedback
+  jq -nc --argjson revs "$1" --argjson cmts "$2" '
+    ([ $revs[]
+       | (((.state // "") | tostring)) as $st
+       | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) == null)
+       | ((.id // 0) | tostring) ]) as $retired
+  | [ $cmts[]
+      | (((.pull_request_review_id // "") | tostring)) as $parent
+      | select(($retired | index($parent)) == null) ]' 2>/dev/null
+}
 # A batch names the reviews it answers, the way a signoff-sourced child names
 # its review bead. An empty-bodied CHANGES_REQUESTED is named here even though
 # the body filter above keeps it out of the watermark: it is the review holding
@@ -370,7 +386,7 @@ while IFS= read -r row; do
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; revs_raw=""; cmts_raw=""
+  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; revs_raw=""; cmts_raw=""; cmts_live=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
@@ -397,6 +413,16 @@ while IFS= read -r row; do
         echo "$PROG: $id — PR#$num review history unreadable; posture not recorded (retry next pass)" >&2
       fi
     else
+      # The comment space is filtered to the reviews still in the batch before
+      # anything counts it, so the two spaces agree about what a dismissal
+      # retires. A filter that cannot run counts the unfiltered list: over-
+      # routing costs a rework round an operator can close, dropping the batch
+      # costs the objection itself.
+      cmts_live=$(live_comments "$revs_raw" "$cmts_raw")
+      if [ -z "$cmts_live" ]; then
+        echo "$PROG: $id — PR#$num could not filter retired reviews out of the comment list; counting it unfiltered" >&2
+        cmts_live="$cmts_raw"
+      fi
       # A review with an empty body carries only its inline comments, which the
       # comment read below already sees; counting it here would leave a posture
       # no comment id can ever answer. CHANGES_REQUESTED counts beside
@@ -409,7 +435,7 @@ while IFS= read -r row; do
           | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
           | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
           | (.id // 0) ] | max // 0' 2>/dev/null)
-      max_c=$(printf '%s' "$cmts_raw" | jq -r --arg self "$SELF_LOGIN" '
+      max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" '
         [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
       case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
       case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
@@ -805,7 +831,7 @@ TALLY
       # IS that probe's key, so rewording it strands every child in flight under
       # the old one.
       CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
-      CBODY=$(feedback_body "$revs_raw" "$cmts_raw" "$rwm" "$cwm")
+      CBODY=$(feedback_body "$revs_raw" "$cmts_live" "$rwm" "$cwm")
       [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c). The bodies could not be rendered; read them at $live_url."
       CBODY="## Unanswered review feedback on PR#$num
 

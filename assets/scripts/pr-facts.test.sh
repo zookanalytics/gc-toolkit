@@ -963,7 +963,7 @@ store "[$(anchor P6 51)]"
 printf '%s' "$(prview 51 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_51.json"
 printf '[{"id":9600,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"","commit_id":"sha-51","submitted_at":"2026-08-19T00:00:00Z"}]' \
   > "$GH_DIR/reviews_51.json"
-printf '[{"id":9601,"user":{"login":"human1"},"body":"WHY IS THIS HERE?","path":"docs/file-structure.md","line":12}]' > "$GH_DIR/comments_51.json"
+printf '[{"id":9601,"user":{"login":"human1"},"body":"WHY IS THIS HERE?","path":"docs/file-structure.md","line":12,"pull_request_review_id":9600}]' > "$GH_DIR/comments_51.json"
 : > "$STUB_SESSION_LOG"
 out=$(run)
 eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "the veto is still the posture"
@@ -1012,6 +1012,31 @@ out=$(run)
 eq "$(meta_pinned P7 pr_posture)" "review_required@sha-52" "a dismissed review is not a human waiting"
 hasnt "$out" "routed to rework" "…so nothing is filed for it"
 eq "$(meta P7 pr_review_watermark)" "<absent>" "…and nothing is watermarked"
+
+echo "# …nor the inline comments that dismissal left behind"
+# The comment rows outlive the review that carried them: GitHub still serves
+# them under /pulls/N/comments. Counting one without asking what carried it
+# re-raises the feedback the dismissal retired, and steps the watermark past it
+# so no later pass can notice.
+store "[$(anchor PC 57)]"
+printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_57.json"
+printf '[{"id":9710,"user":{"login":"human1"},"state":"DISMISSED","body":"never mind"}]' > "$GH_DIR/reviews_57.json"
+printf '[{"id":9711,"user":{"login":"human1"},"body":"WHY IS THIS HERE?","path":"docs/file-structure.md","line":12,"pull_request_review_id":9710}]' > "$GH_DIR/comments_57.json"
+out=$(run)
+eq "$(meta PC pr_posture)" "review_required@sha-57" "what a dismissal left behind is not a human waiting"
+hasnt "$out" "routed to rework" "…so nothing is filed for it"
+eq "$(meta PC pr_comment_watermark)" "<absent>" "…and the watermark does not step past it"
+
+echo "# …while a comment no dismissal covers still routes"
+# The filter asks what carried each comment, not whether a dismissal exists on
+# the PR. A comment standing on its own is feedback nobody retired, and it has
+# to keep routing beside one that was.
+printf '[{"id":9711,"user":{"login":"human1"},"body":"WHY IS THIS HERE?","path":"docs/file-structure.md","line":12,"pull_request_review_id":9710},{"id":9712,"user":{"login":"human1"},"body":"this one stands alone","path":"docs/state-machine.md","line":3}]' > "$GH_DIR/comments_57.json"
+out=$(run)
+has "$out" "routed to rework:new-2" "the standalone comment routes"
+eq "$(meta PC pr_comment_watermark)" "9712" "the watermark follows the comment that routed"
+has "$(desc new-2)" "this one stands alone" "the child carries it"
+hasnt "$(desc new-2)" "WHY IS THIS HERE?" "…and not the retired comment beside it"
 
 echo "# …a review BODY with no inline comment is carried too"
 # An objection stated in the review body alone has nothing on the /files page,
