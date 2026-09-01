@@ -337,6 +337,14 @@ keys = [
   "review_branch", "review_base", "reviewed_oid", "review_pool",
   "source_review_bead", "task_kind", "dispatch_count", "dispatch_backstop.<g>",
   "fix_target_pool",
+  # Which feedback a rework child answers. The two writers name it in
+  # different id spaces and cannot share a key: signoff.sh stamps
+  # source_review_bead = the review BEAD it filed the child from, and both its
+  # round cap and gate-ensure's already-answered probe count a child by that
+  # key. pr-facts.sh stamps source_review = the comma-joined GitHub review ids
+  # whose bodies its child carries verbatim, a comment batch rather than a
+  # signoff round, so it counts against no cap.
+  "source_review",
   # The review-round cap. signoff_cap = <gate> names the gate whose rounds ran
   # out, so the cap's own merge_hold park can be told from one a person made.
   # pr-facts.sh records each batch of such feedback in

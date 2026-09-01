@@ -121,6 +121,19 @@ xd() { awk '/^[[:space:]]*# >>> takeaway-hold-discriminator[[:space:]]*$/{inb=1;
 [ -n "$(xd "$HERE/pr-facts.sh")" ] && ok "block present here" || bad "block missing from pr-facts.sh"
 eq "$(xd "$HERE/pr-facts.sh")" "$(xd "$HERE/signoff.sh")" "…byte-identical to signoff.sh's copy (both retirement writers read one rule)"
 
+echo "# metadata-key drift against lifecycle.toml"
+# A metadata key is state, and the registry is the exhaustive declaration
+# downstream audits read (docs/component-model.md). A key this script writes
+# but nothing registers is state no audit can account for.
+REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
+  | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
+WRITTEN=$(grep -oE -- '--set-metadata "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" \
+  | sed -E 's/^--set-metadata "?//; s/=$//' | sort -u)
+[ -n "$WRITTEN" ] && ok "set-metadata writes extracted" || bad "no --set-metadata writes found in pr-facts.sh"
+UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
+  | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
+eq "$UNREGISTERED" "" "every metadata key pr-facts.sh writes is registered in lifecycle.toml"
+
 echo "# out-of-band merge is recorded"
 store "[$(anchor F1 10)]"
 printf '%s' "$(prview 10 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_10.json"
