@@ -814,32 +814,51 @@ NUDGE_VAL="$TMPD/converse-nudge.txt"
 # `tr -d` the newline: sed prints an empty LINE for an empty capture, so
 # without it `nudge = ""` writes one byte and reads as non-empty below.
 sed -n 's/^nudge = "\(.*\)"$/\1/p' "$ATOML" | tr -d '\n' > "$NUDGE_VAL"
-if [ -s "$NUDGE_VAL" ]; then
-    ok "agent.toml still carries a non-empty nudge"
+# An absent key and a deliberately empty one are the same value to the engine
+# and different to a reader, so the field has to stay written out.
+if grep -qE '^nudge = ' "$ATOML"; then
+    ok "agent.toml states its nudge explicitly"
 else
-    bad "agent.toml still carries a non-empty nudge" \
-        "a CLI agent needs something typed to start a turn; an empty nudge wakes a session that then does nothing"
+    bad "agent.toml states its nudge explicitly" \
+        "the key is gone; deleting it loses the record of why the field is empty"
 fi
-have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$NUDGE_VAL"
-lacks "…and does not still tell the session to run the raw claim" \
-      'gc hook --claim' "$NUDGE_VAL" \
-      "the nudge teaches the unscoped claim the prompt just removed"
-# Converse is the ONE role whose pane is a human conversation surface — core
-# types this text into it and submits it as if the operator had. Every other
-# pane is a machine work-log, so only here does nudge length cost the operator
-# anything. It ratcheted 21 -> 40 -> 55 words in 13 days because each incident
-# appended a clause and none removed one, and the operator read the result in
-# their own thread (tk-82epi -> tk-mpl1c). The standing rule is "put the fix in
-# the prompt or a script, not another clause here"; an instruction-dependent
-# rule fails silently, so the cap is the enforcement. It sits just above the
-# longest peer (proactive, 23 words) and well under the 40 that drew the first
-# complaint.
-NUDGE_WORDS=$(wc -w < "$NUDGE_VAL" | tr -d ' ')
-if [ "$NUDGE_WORDS" -le 25 ]; then
-    ok "the wake nudge stays at peer length ($NUDGE_WORDS words)"
+if [ -s "$NUDGE_VAL" ]; then
+    have "the wake nudge names the claimer, not the raw claim" 'converse-claim.sh' "$NUDGE_VAL"
+    lacks "…and does not still tell the session to run the raw claim" \
+          'gc hook --claim' "$NUDGE_VAL" \
+          "the nudge teaches the unscoped claim the prompt just removed"
+    # Converse is the ONE role whose pane is a human conversation surface — core
+    # types this text into it and submits it as if the operator had. Every other
+    # pane is a machine work-log, so only here does nudge length cost the operator
+    # anything. It ratcheted 21 -> 40 -> 55 words in 13 days because each incident
+    # appended a clause and none removed one, and the operator read the result in
+    # their own thread (tk-82epi -> tk-mpl1c). The standing rule is "put the fix in
+    # the prompt or a script, not another clause here"; an instruction-dependent
+    # rule fails silently, so the cap is the enforcement. It sits just above the
+    # longest peer (proactive, 23 words) and well under the 40 that drew the first
+    # complaint.
+    NUDGE_WORDS=$(wc -w < "$NUDGE_VAL" | tr -d ' ')
+    if [ "$NUDGE_WORDS" -le 25 ]; then
+        ok "the wake nudge stays at peer length ($NUDGE_WORDS words)"
+    else
+        bad "the wake nudge stays at peer length ($NUDGE_WORDS words)" \
+            "converse's pane is the operator's conversation surface — put the fix in the prompt or a script, not another clause here (tk-mpl1c)"
+    fi
 else
-    bad "the wake nudge stays at peer length ($NUDGE_WORDS words)" \
-        "converse's pane is the operator's conversation surface — put the fix in the prompt or a script, not another clause here (tk-mpl1c)"
+    # The field is empty on purpose. All three claim backstops resolve their
+    # re-delivery text from it and skip an empty one before reserving an
+    # attempt, so no backstop nudge reaches a sitting that is holding for the
+    # operator and the attempt-cap drain behind them cannot be reached. That
+    # takes the idle-claim rescue with it. There is no value left to read here,
+    # so unlike the pair above these DO read the file: what an empty nudge rests
+    # on is only ever recorded in prose, and prose is where it silently rots.
+    have "config records what the empty nudge silences" 'claim backstops' "$ATOML"
+    have "config records the cost of silencing them" 'idle-claim rescue' "$ATOML"
+    have "config keeps the claimer constraint for anyone re-arming it" \
+         'converse-claim.sh' "$ATOML"
+    lacks "config no longer asserts the superseded never-empty rule" \
+          'must never be empty' "$ATOML" \
+          "the field is empty, so the claim that it cannot be is now false in the file that carries it"
 fi
 
 CTMP="$TMPD/claim"
@@ -1272,12 +1291,18 @@ have "…and sends a scrollback-less respawn back through prep and the re-stamp"
 
 # The nudge is read before step 1, so naming the script alone lands the session
 # outside the block where the hold verdict is read, and passes no group, which
-# disables the out-of-group guard on every wake.
-have "the wake nudge sends the session through the prompt's claim block" \
-     "step 1's claim block" "$NUDGE_VAL"
-lacks "…and no longer reads as an instruction to run the visit to its close" \
-      'work the visit it returns' "$NUDGE_VAL" \
-      "this sentence directs a mid-hold session to run the visit to its close"
+# disables the out-of-group guard on every wake. The field is empty while the
+# backstops are silenced, and these bind whatever text re-arms them.
+if [ -s "$NUDGE_VAL" ]; then
+    have "the wake nudge sends the session through the prompt's claim block" \
+         "step 1's claim block" "$NUDGE_VAL"
+    lacks "…and no longer reads as an instruction to run the visit to its close" \
+          'work the visit it returns' "$NUDGE_VAL" \
+          "this sentence directs a mid-hold session to run the visit to its close"
+else
+    have "config binds a re-armed nudge to the prompt's step-1 block" \
+         "step-1 block" "$ATOML"
+fi
 
 echo "── a routed wait is written as an EDGE, not only as prose (tk-2plde) ──"
 # The same failure mode as the stamp, one level up. A takeaway is ONE frozen
