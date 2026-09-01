@@ -8,7 +8,11 @@
 #               [--pool <rig-qualified converse pool>]
 # Callers: patrol formulas (refinery/witness/deacon), signoff.sh peers, and any
 # script that would otherwise mail. A changed situation gets a NEW key.
-# Exit: 0 filed or already open · 1 could not file/verify · 2 usage
+# The route is proved against the live agent set before anything is created,
+# and an already-open visit carrying an unroutable route is repointed rather
+# than counted as a satisfied escalation. A rig-qualified --pool also selects
+# the store the visit lands in, so route and store cannot disagree.
+# Exit: 0 filed, already open or repointed · 1 unroutable/could not file/verify · 2 usage
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -33,7 +37,11 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              the key (`wedged-<target>`)
   --message  what the visit needs from a human; first line becomes the
              visit title's headline (required)
-  --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse
+  --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse.
+             The route must name a live agent identity that reads this rig's
+             store, so a caller with GC_RIG unset must pass this explicitly —
+             the bare default matches no rig-scoped pool. A rig-qualified pool
+             also selects the store, so the two always agree.
 U
 }
 
@@ -58,7 +66,84 @@ case "$KEY" in
   *[!A-Za-z0-9._-]*) warn "--key must contain only [A-Za-z0-9._-] (got '$KEY')"; exit 2 ;;
 esac
 
+# GC_RIG selects the store `gc bd` reads and writes, outranking BEADS_DIR and
+# the working directory, and a pool offer is claimed only by an agent that
+# reads that store. A rig-less caller naming a rig-qualified pool therefore
+# adopts that rig: one flag names the route and the store, and they agree.
+POOL_RIG="${POOL_ARG%%/*}"
+if [ -z "${GC_RIG:-}" ] && [ -n "$POOL_ARG" ] && [ "$POOL_RIG" != "$POOL_ARG" ]; then
+  export GC_RIG="$POOL_RIG"
+  warn "GC_RIG unset; adopting rig '$POOL_RIG' from --pool so the visit lands in the store that pool reads"
+fi
+
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
+
+# The live agent identity set, read once. Empty means UNREADABLE, never "no
+# agents" — an empty answer is the absence of proof, not a refusal.
+AGENT_IDS=""; AGENT_IDS_READ=0
+agent_ids() {
+  if [ "$AGENT_IDS_READ" = 0 ]; then
+    AGENT_IDS_READ=1
+    AGENT_IDS=$(if command -v timeout >/dev/null 2>&1; then timeout 15 gc agent list --json 2>/dev/null
+                else gc agent list --json 2>/dev/null; fi \
+      | scrub \
+      | jq -c '[.agents[]? | (.qualified_name // "") | select(. != "")]' 2>/dev/null)
+    [ "$AGENT_IDS" = "[]" ] && AGENT_IDS=""
+  fi
+  printf '%s' "$AGENT_IDS"
+}
+
+# ok | unknown | cross-rig | no-identity. A pool offer matches by exact byte
+# equality (gascity hookClaimMatchesRoute), so a well-formed name no agent
+# carries is never claimed. GC_RIG picks both the store `gc bd create` writes
+# to and the rig segment a rig-scoped pool must carry, so a route naming
+# another rig addresses a pool that never reads the store its visit lands in.
+route_verdict() {
+  local route="$1" rig_seg ids
+  [ -z "$route" ] && { printf 'no-identity'; return 0; }
+  # `human` is the city's durable "the operator owns it; no agent will take
+  # it" marker (services/helm/README.md), so it is already held by the reader
+  # an escalation wants — not a pool name that failed to resolve.
+  [ "$route" = "human" ] && { printf 'ok'; return 0; }
+  rig_seg="${route%%/*}"; [ "$rig_seg" = "$route" ] && rig_seg=""
+  if [ -n "${GC_RIG:-}" ] && [ -n "$rig_seg" ] && [ "$rig_seg" != "$GC_RIG" ]; then
+    printf 'cross-rig'; return 0
+  fi
+  ids=$(agent_ids)
+  [ -z "$ids" ] && { printf 'unknown'; return 0; }
+  printf '%s' "$ids" | jq -e --arg r "$route" 'index($r) != null' >/dev/null 2>&1 \
+    && printf 'ok' || printf 'no-identity'
+}
+
+# Only proof refuses: an unreadable identity set warns and files, because an
+# unverified visit still beats the silent mute this script exists to end.
+assert_routable() {
+  local route="$1" rig_seg near
+  case "$(route_verdict "$route")" in
+    ok) return 0 ;;
+    unknown)
+      warn "could not read the live agent set (\`gc agent list --json\`); filing with route '$route' UNVERIFIED — confirm a pool claims it"
+      return 0 ;;
+    cross-rig)
+      rig_seg="${route%%/*}"
+      warn "route '$route' is scoped to rig '$rig_seg' but this visit lands in the '${GC_RIG:-}' store, which that pool never reads — nothing filed. Use a '${GC_RIG:-}/' pool, or run with GC_RIG=$rig_seg so the store and the route agree."
+      return 1 ;;
+  esac
+  near=$(agent_ids | jq -r --arg r "$route" \
+    '[.[] | select(endswith("/" + $r))] | join(", ")' 2>/dev/null)
+  warn "route '$route' matches no live agent identity — nothing filed (an unroutable visit reports success while no human is ever asked)."
+  [ -n "$near" ] && warn "  live rig-qualified forms of that name: $near"
+  warn "  repair: re-run with --pool <rig>/<pool>, or with GC_RIG set so the default qualifies itself."
+  return 1
+}
+
+HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
+
+# >>> gate-visit
+# Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
+# checks this copy's invariants. escalation_key rides its own flag beside it.
+POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+[ -n "$POOL_ARG" ] && POOL="$POOL_ARG"
 
 # Idempotence: an open (or claimed) visit for this situation means the human is
 # already asked. What "this situation" is depends on whether the subject
@@ -75,6 +160,10 @@ bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 # field by field, because a listing that silently ignored a filter would
 # suppress everything.
 #
+# The matched row's own route rides the listing too: a visit nothing can claim
+# has asked nobody, so counting it as satisfied is the same mute one pass
+# later.
+#
 # An unreadable listing files anyway — a duplicate visit is a bounded nuisance,
 # a silent mute is the failure this replaces.
 case "$SUBJECT" in
@@ -83,30 +172,42 @@ case "$SUBJECT" in
 esac
 if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
   DEDUP_SCOPE="[$KEY]"
-  OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" --limit=20 \
+  OPEN_ROW=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" --limit=20 \
     | jq -r --arg k "$KEY" \
-        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k) | .id) else empty end' 2>/dev/null \
+        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k) | [.id, (.metadata["gc.routed_to"] // "")] | @tsv) else empty end' 2>/dev/null \
     | head -n 1)
 else
   DEDUP_SCOPE="$SUBJECT [$KEY]"
-  OPEN=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" \
+  OPEN_ROW=$(bd_json list --status=open,in_progress --metadata-field "escalation_key=$KEY" \
       --metadata-field "gc.continuation_group=$SUBJECT" --limit=20 \
     | jq -r --arg k "$KEY" --arg s "$SUBJECT" \
-        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id) else empty end' 2>/dev/null \
+        'if type == "array" then (.[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | [.id, (.metadata["gc.routed_to"] // "")] | @tsv) else empty end' 2>/dev/null \
     | head -n 1)
 fi
+OPEN="${OPEN_ROW%%$'\t'*}"; OPEN_ROUTE=""
+case "$OPEN_ROW" in *$'\t'*) OPEN_ROUTE="${OPEN_ROW#*$'\t'}" ;; esac
 if [ -n "$OPEN" ]; then
-  echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another"
+  case "$(route_verdict "$OPEN_ROUTE")" in
+    ok)
+      echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another"
+      exit 0 ;;
+    unknown)
+      echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another; its route '$OPEN_ROUTE' is UNVERIFIED"
+      exit 0 ;;
+  esac
+  assert_routable "$POOL" || exit 1
+  warn "visit $OPEN is open for $DEDUP_SCOPE but routes to '$OPEN_ROUTE', which no live pool claims — repointing it at '$POOL'."
+  gc bd update "$OPEN" --set-metadata "gc.routed_to=$POOL" >/dev/null 2>&1
+  OPEN_GOT=$(bd_json show "$OPEN" | jq -r '.[0].metadata["gc.routed_to"] // ""' 2>/dev/null)
+  if [ "$OPEN_GOT" != "$POOL" ]; then
+    warn "the repoint did not land on $OPEN (route reads '$OPEN_GOT'); repair: gc bd update $OPEN --set-metadata gc.routed_to=$POOL"
+    exit 1
+  fi
+  echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — repointed to $POOL, not filing another"
   exit 0
 fi
 
-HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
-
-# >>> gate-visit
-# Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
-# checks this copy's invariants. escalation_key rides its own flag beside it.
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-[ -n "$POOL_ARG" ] && POOL="$POOL_ARG"
+assert_routable "$POOL" || exit 1
 VISIT=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$MESSAGE" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { echo "escalate: bd create returned no id — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
