@@ -8,8 +8,8 @@ work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
 # The nudge is the whole instruction a woken pool slot acts on, so it names the
 # task and not just the command that starts it. A nudge naming only a command is
 # obeyed literally: the session runs the claim, reports the JSON, and stops, and
-# nothing re-offers a held claim. The two pools differ only in provider, so both
-# carry this same nudge text.
+# nothing re-offers a held claim. Both pools wake into the same startup and
+# claim contract, so the text is identical in both.
 nudge = """
 Claim and complete one work item: gc hook --claim --json returns assigned work \
 first and routed pool work second, and the bead it names is yours to carry \
