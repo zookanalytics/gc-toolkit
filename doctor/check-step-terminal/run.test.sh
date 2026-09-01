@@ -29,7 +29,9 @@ GC
 # id-scoped root listing (which DROPS ids it cannot resolve, exactly as bd
 # does, so the check's own id-set comparison is what has to catch them), the
 # --status pushdown, and `bd count`. Every --id argument is logged so the
-# argv bound can be asserted rather than assumed.
+# argv bound can be asserted rather than assumed, and BD_STEPS_BODY substitutes
+# an arbitrary payload for the listing so the shapes a reader must refuse can
+# be handed to it.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
@@ -63,8 +65,13 @@ if [ -n "$ids" ]; then
        | {issues: ., meta: {count: length}, schema_version: 1}' "$roots_f"
   exit 0
 fi
+[ -n "${BD_STEPS_BODY:-}" ] && { cat "$BD_STEPS_BODY"; exit 0; }
 [ -f "$steps_f" ] || { printf '%s' "$empty"; exit 0; }
-jq -c '{issues: ., meta: {count: length}, schema_version: 1}' "$steps_f"
+# The wrapper is printed around the fixture, not rebuilt from it. A stub that
+# parses the whole store would dominate any measurement of what the CHECK holds.
+printf '{"schema_version":1,"issues":'
+cat "$steps_f"
+printf ',"meta":{}}'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
@@ -218,6 +225,74 @@ eq "$RC" "2" "a closed root batched with an absent one is still an ERROR"
 has "$OUT" "yet 1 step(s) never closed — s-11." "the strand keeps its verdict and names only its own step"
 has "$OUT" "open step(s) s-12 name root r-gone" "the absent root beside it is still reported as a note"
 has "$OUT" "1 molecule(s)" "the absent root did not become a second error"
+clear_fixtures
+
+# --- 14. one molecule, steps split across windows: still ONE finding -------------------
+# Roots are deduped per window, not per store, so a molecule whose steps land in
+# different windows is resolved more than once. Grouping must not follow the
+# windows: three stranded steps read across two of them are one defect, and a
+# window boundary is the cheapest way to split a molecule the reporting joins.
+steps "$(step s-w1 r-w)" "$(step s-w2 r-w)" "$(step s-w3 r-w)"
+roots "{\"id\":\"r-w\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(GC_DOCTOR_ROOT_CHUNK=2 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "2" "steps split across two windows are still an ERROR"
+has "$OUT" "1 molecule(s)" "the split molecule is ONE finding, not one per window"
+has "$OUT" "3 step(s) never closed" "every step lands on the same finding"
+has "$OUT" "s-w1, s-w2, s-w3" "and all three are named on it"
+clear_fixtures
+
+# --- 15. a body that is not a listing is not an empty store ----------------------------
+# The listing is consumed as parse events, and an event stream cannot assert its
+# own shape: an error body and a store with nothing open both yield no rows. A
+# store that yields none is asked again, bounded to one row, under the shape
+# assertion a whole payload can carry.
+steps "$(step s-e r-e)"
+roots "{\"id\":\"r-e\",\"status\":\"open\"}"
+printf '{"error":"boom"}' > "$TMP/body.json"
+OUT=$(BD_STEPS_BODY="$TMP/body.json" run_check); RC=$?
+eq "$RC" "1" "an error body where the listing belongs warns, never passes"
+has "$OUT" "NOT checked" "the error body says the store was skipped"
+printf '{"schema_version":1,"issues":[{"id":"s-e","stat' > "$TMP/body.json"
+OUT=$(BD_STEPS_BODY="$TMP/body.json" run_check); RC=$?
+eq "$RC" "1" "a truncated listing warns, never passes"
+has "$OUT" "NOT checked" "the truncated listing says the store was skipped"
+clear_fixtures
+
+# --- 16. a store with nothing open still passes quietly ---------------------------------
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a store holding no open step bead is clean, not unreadable"
+hasnt "$OUT" "NOT checked" "an empty store is not mistaken for a listing that failed"
+
+# --- 17. the working set does not grow with the store -----------------------------------
+# `bd list --offset` is proxied-server-only, so the listing cannot be split at the
+# CLI and the guarantee has to be that reading it costs a window, never the store.
+# At a FIXED window, ten times the open steps must not cost ten times the memory:
+# a parser holding the whole listing fails that, an event stream holds flat. Few
+# molecules and many steps, so what is measured is the step side.
+if command -v /usr/bin/time >/dev/null 2>&1; then
+    ROOTS=20; WINDOW=1000; SMALL_N=2000; BIG_N=20000
+    jq -cn --argjson n "$ROOTS" '[range(0;$n) | {id: ("rw-" + (.|tostring)), status: "open"}]' \
+        > "$TMP/stores/alpha.roots.json"
+    peak_rss() {  # open-step count -> peak RSS in KB across the check and its children
+        jq -cn --argjson n "$1" --argjson r "$ROOTS" --arg ua "$RECENT" '[range(0;$n)
+            | {id: ("sw-" + (.|tostring)), status: "open", updated_at: $ua,
+               metadata: {"gc.root_bead_id": ("rw-" + ((. % $r) | tostring))}}]' \
+            > "$TMP/stores/alpha.steps.json"
+        /usr/bin/time -f '%M' -o "$TMP/rss" \
+            env RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" GC_DOCTOR_ROOT_CHUNK="$WINDOW" \
+            bash "$CHECK" > "$TMP/scale.out" 2>&1
+        echo "$?" > "$TMP/scale.rc"
+        cat "$TMP/rss"
+    }
+    RSS_SMALL=$(peak_rss "$SMALL_N")
+    RSS_BIG=$(peak_rss "$BIG_N")
+    lt "$RSS_BIG" "$(( RSS_SMALL * 2 ))" \
+        "$BIG_N open steps peak at ${RSS_BIG}K, under twice the ${RSS_SMALL}K of $SMALL_N — flat, not proportional"
+    eq "$(cat "$TMP/scale.rc")" "0" "$BIG_N open steps over $ROOTS live molecules still return a real verdict"
+    has "$(cat "$TMP/scale.out")" "OK:" "the verdict at $BIG_N open steps is the OK line"
+else
+    ok "peak-RSS bound skipped (/usr/bin/time not installed)"
+fi
 clear_fixtures
 
 echo
