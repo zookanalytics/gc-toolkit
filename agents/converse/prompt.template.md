@@ -61,12 +61,17 @@ The loop, every visit:
      RAW=$(gc hook --claim --json 2>/dev/null | tr -d '[:cntrl:]')
      B=$(printf '%s' "$RAW" | jq -r '.bead_id // ""')
      G=$(printf '%s' "$RAW" | jq -r '.continuation_group // ""')
+     R=$(printf '%s' "$RAW" | jq -r '.reason // ""')
+     A=$(printf '%s' "$RAW" | jq -r '(.continuation_assigned // []) | map(select(type == "string" and . != "")) | join(",")')
      if [ -z "$B" ]; then CLAIM="action=drain reason=no-work"
+     elif [ "$R" = "existing_assignment" ]; then CLAIM="action=hold bead=$B group=$G reason=already-underway${A:+ adopted=$A}"
      else CLAIM="action=work bead=$B group=$G reason=unreleasable"; fi
    fi
    echo "$CLAIM"
    case "$CLAIM" in
      action=drain*) gc runtime drain-ack; exit 0 ;;
+     # No action=hold arm: a hold falls through with VISIT and SUBJECT set,
+     # which is what re-opening the sitting needs.
    esac
    VISIT=$(printf '%s' "$CLAIM" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')
    SUBJECT=$(printf '%s' "$CLAIM" | sed -n 's/.*group=\([^ ]*\).*/\1/p')
@@ -93,6 +98,17 @@ The loop, every visit:
    assign several turns, and the one still stuck may be a sibling of the
    claimed one. Either way `VISIT` is the one turn to work; anything the
    script did put back is no longer yours.
+
+   **`action=hold` — this visit is a sitting already underway.** Do not
+   `drain-ack` it and do not work it: draining acknowledges a stop, and
+   working runs the loop to step 7's close, so either one ends a sitting
+   the operator has not ruled on. If this thread posted the framing,
+   there is nothing to do; go back to waiting. If it did not, a restart
+   took the scrollback and the sitting now exists only in the record, so
+   re-open it at step 4 and then step 5. Skip steps 2 and 3: the premise
+   was tested and the fold check ran when the sitting began, and running
+   the fold again can fold a sitting the operator is engaged with into a
+   sibling.
 
    Before prepping, resolve what this sitting is about and who holds it:
    ```bash
@@ -495,7 +511,9 @@ The loop, every visit:
    1's block again with `$SUBJECT` still set, so the claim is scoped to
    the group this thread is about. When it prints `action=drain` — the
    group is dry, or the turn it found belongs to someone else's subject
-   and has been put back — `gc runtime drain-ack` and stop.
+   and has been put back — `gc runtime drain-ack` and stop. `action=hold`
+   is step 1's case, not this one: it names a sitting still underway, so
+   go back and read it there rather than draining on it.
 
    Draining here is not a failure to find work; it is the boundary the
    design authority puts the session's life at: "drains when the group is
@@ -522,7 +540,9 @@ Rules:
   record. The decision is still open on this exit, so leave step 7's
   `RULED=no`. The item stays `held`, still naming the person it waits
   on, and step 7's takeaway refreshes the stamp that earns the next
-  visit.
+  visit. This is the ONLY path to `cut-short`. A sitting the operator
+  has not ruled on is never ended to unblock something else, and the
+  loop that made that look like the way out is `action=hold` in step 1.
 - **How this thread ends — a closed visit, and nothing else on a clock.**
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7), and the operator's
