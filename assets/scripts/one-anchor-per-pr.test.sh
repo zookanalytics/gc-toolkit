@@ -38,10 +38,18 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 mkdir -p "$TMP/bin"
 
 # --- gc stub: the anchor lookup the resolve snippet performs. -----------------
-# `gc bd list --status=open --metadata-field merge_result=<v> --metadata-field
-# branch=<b> --limit=N --json` filtered against a fixture of
+# `gc bd list --status=open --metadata-field branch=<b> --limit=0 --json`
+# filtered against a fixture of
 #   id|merge_result|branch|created_at
-# rows (open beads). Everything else exits 0 with no output.
+# rows (open beads). `gc bd update` and `gc bd close` append to $GCLOG when it
+# is set. Everything else exits 0 with no output.
+#
+# The stub honours EVERY --metadata-field it is given, the way bd does: the
+# shipped lookup filters on branch alone and applies the anchor half in its own
+# jq, but a lookup that also narrowed on `merge_result=<state>` must still see
+# only that state here — otherwise a resolver that walks past a parked anchor
+# reads as if it found one. An empty merge_result column emits a row with NO
+# merge_result key, which is how a plain sibling child is represented.
 #
 # The emitted row shape mirrors REAL `gc bd list --json`: the creation timestamp
 # is `created_at`, and there is NO `created` key. Emitting `created` here is what
@@ -50,26 +58,34 @@ mkdir -p "$TMP/bin"
 # the key entirely (exercises the last-resort `.id` tiebreak).
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+if [ "$1" = "bd" ] && { [ "$2" = "update" ] || [ "$2" = "close" ]; }; then
+  [ -n "${GCLOG:-}" ] && printf '%s\n' "$*" >> "$GCLOG"
+  exit 0
+fi
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
-mr=""; br=""
+br=""; mr=""; mr_given=0
 for a in "$@"; do
   case "$a" in
-    merge_result=*) mr="${a#merge_result=}" ;;
     branch=*)       br="${a#branch=}" ;;
+    merge_result=*) mr="${a#merge_result=}"; mr_given=1 ;;
   esac
 done
 out=""
 while IFS='|' read -r id rmr rbr created_at; do
   [ -n "$id" ] || continue
-  [ "$rmr" = "$mr" ] || continue
   [ "$rbr" = "$br" ] || continue
+  [ "$mr_given" = 0 ] || [ "$rmr" = "$mr" ] || continue
   if [ -n "$created_at" ]; then
     ts=$(printf '"created_at":"%s",' "$created_at")
   else
     ts=""
   fi
-  obj=$(printf '{"id":"%s",%s"metadata":{"merge_result":"%s","branch":"%s"}}' \
-    "$id" "$ts" "$rmr" "$rbr")
+  if [ -n "$rmr" ]; then
+    meta=$(printf '{"merge_result":"%s","branch":"%s"}' "$rmr" "$rbr")
+  else
+    meta=$(printf '{"branch":"%s"}' "$rbr")
+  fi
+  obj=$(printf '{"id":"%s",%s"metadata":%s}' "$id" "$ts" "$meta")
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
 done < "$FAKE_ANCHORS"
 printf '[%s]\n' "$out"
@@ -120,6 +136,37 @@ anchor-pre|pre_open_gate|polecat/parent|2026-07-01T00:00:00Z
 A
 eq "$(resolve rework-1 polecat/parent)" "anchor-pre|anchor-pre" \
    "(3) pre_open_gate anchor on same branch -> resolved as gating anchor"
+
+# (3b) THE PR #522 REGRESSION. The anchor is parked in a HUMAN state — signoff
+#      capped its rework rounds and routed it to a person — so it is not in
+#      either gating sub-state. It still carries a merge_result, still owns the
+#      PR, and doctor still counts it as an open anchor. A lookup restricted to
+#      pull_request/pre_open_gate walks straight past it and stamps the child as
+#      a second anchor, which is exactly what PR #522 ended up with.
+for HUMAN_STATE in blocked held abandoned retargeted refused_false_completion; do
+  printf 'anchor-h|%s|polecat/parent|2026-07-01T00:00:00Z\n' "$HUMAN_STATE" > "$FAKE_ANCHORS"
+  eq "$(resolve rework-1 polecat/parent)" "anchor-h|anchor-h" \
+     "(3b) anchor parked in '$HUMAN_STATE' is still the gating anchor"
+done
+
+# (3c) The other half of the predicate: carrying a merge_result is what makes a
+#      row an anchor. A sibling child on the same branch has none, so a
+#      branch-only lookup must not elect it — that would close a first handoff
+#      as if it were a rework of its own sibling.
+cat > "$FAKE_ANCHORS" <<'A'
+sibling-child||polecat/parent|2026-07-01T00:00:00Z
+A
+eq "$(resolve work-1 polecat/parent)" "|work-1" \
+   "(3c) a sibling carrying no merge_result is not an anchor"
+
+# (3d) An unrecorded branch must not run the lookup at all: `--metadata-field
+#      branch=` with an empty value matches every bead that records no branch,
+#      and electing one of those hands the merge to a stranger's anchor.
+cat > "$FAKE_ANCHORS" <<'A'
+tk-elsewhere|pull_request||2026-07-01T00:00:00Z
+A
+eq "$(resolve work-1 '')" "|work-1" \
+   "(3d) empty BRANCH resolves to no anchor rather than matching branchless beads"
 
 # (4) Self-exclusion: the only row on the branch is $WORK itself (an idempotent
 #     re-run inspecting its own stamped state) -> NOT its own existing anchor.
@@ -191,6 +238,7 @@ export LCLOG="$TMP/lc.log"
 cat > "$TMP/bin/lc-stub" <<'L'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${LCLOG:?}"
+exit "${LCRC:-0}"
 L
 chmod +x "$TMP/bin/lc-stub"
 printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
@@ -211,6 +259,56 @@ case "$lc_out" in
   *"--to pull_request"*) bad "(9c) unresolved PR coordinates must NEVER stamp pull_request (got: $lc_out)" ;;
   *"--to pre_open_gate"*) ok "(9c) unresolved PR coordinates fall back to pre_open_gate (pr-open adopts the PR)" ;;
   *) bad "(9c) expected a pre_open_gate fallback transition (got: $lc_out)" ;;
+esac
+
+# --- The rework hand-back's exit from the anchor class. -----------------------
+# THE INVARIANT (doctor/check-one-anchor-per-pr, I4): after a child's submit is
+# processed, exactly ONE open bead on that metadata.branch carries a non-empty
+# merge_result — the anchor. The child gets there by leaving through
+# lifecycle.sh: `--to unanchored` unsets merge_result on any state it inherited,
+# and `unanchored -> unanchored` is a legal self-edge, so the normal child (which
+# never had one) takes the same path. Closing while still carrying one is an I5
+# error (doctor/check-closed-implies-landed), which is why the close is
+# conditional on the transition.
+run_rework() { # <lc-rc> -> "<lifecycle calls>#<gc bd calls>"
+  : > "$LCLOG"; : > "$TMP/gc.log"
+  EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
+    LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" \
+    LCRC="$1" GCLOG="$TMP/gc.log" \
+    bash "$TMP/terminal.sh" >/dev/null 2>&1
+  printf '%s#%s' "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")"
+}
+
+REWORK_OK="$(run_rework 0)"
+case "$REWORK_OK" in
+  *"transition w1 --to unanchored --unset rejection_reason"*)
+    ok "(10a) the child leaves the anchor class through lifecycle.sh before it closes" ;;
+  *) bad "(10a) expected a --to unanchored transition on the child (got: $REWORK_OK)" ;;
+esac
+case "$REWORK_OK" in
+  *"#"*"close w1"*) ok "(10b) the child then closes landed-on-branch" ;;
+  *)               bad "(10b) the child must close after the transition (got: $REWORK_OK)" ;;
+esac
+# The anchor keeps its own state: the arm annotates it and transitions nothing.
+case "$REWORK_OK" in
+  *"transition anchor-po"*) bad "(10c) the arm must not transition the existing anchor (got: $REWORK_OK)" ;;
+  *)                        ok "(10c) the existing anchor is annotated, never transitioned" ;;
+esac
+# The whole point: the child never joins the anchor class, so the branch still
+# has exactly the one anchor it had before.
+case "$REWORK_OK" in
+  *"--to pull_request"*|*"--to pre_open_gate"*)
+    bad "(10d) the rework arm must stamp no gating state on the child (got: $REWORK_OK)" ;;
+  *) ok "(10d) branch keeps one anchor: the child is stamped into no gating state" ;;
+esac
+
+# A refused transition must NOT close. A child closed still carrying an
+# inherited merge_result is invisible to merge.sh and reads as an anchor that
+# left the queue without landing; leaving it open lets the next pass retry.
+REWORK_REFUSED="$(run_rework 1)"
+case "$REWORK_REFUSED" in
+  *"#"*"close w1"*) bad "(10e) a refused transition must not close the child (got: $REWORK_REFUSED)" ;;
+  *)                ok "(10e) a refused transition leaves the child open for the next pass" ;;
 esac
 
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining

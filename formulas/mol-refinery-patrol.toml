@@ -571,34 +571,48 @@ unset _cs_canon
 ```
 
 5. One-anchor-per-PR guard, then ONE lifecycle transition. If another OPEN
-bead already gates this branch (either sub-state — branch is the join key),
-$WORK is a rework hand-back: close it landed-on-branch, never stamp
-`merge_result` on it (a merge_result-carrying rework child joins the anchor
-enumeration as a gateless second anchor), and let gating continue on the
-existing anchor — the pushed head moved, so its head-bound markers are
-already stale and the cadence re-gates them. Multi-candidate tiebreak: the
+bead already gates this branch, $WORK is a rework hand-back: move it to
+`unanchored` and close it landed-on-branch, never stamp `merge_result` on it
+(a merge_result-carrying rework child joins the anchor enumeration as a
+gateless second anchor), and let gating continue on the existing anchor — the
+pushed head moved, so its head-bound markers are already stale and the cadence
+re-gates them.
+
+Branch is the join key and `merge_result` present is the whole predicate: any
+declared state carries one, so an anchor parked for a person (`blocked`,
+`held`, `abandoned`, `retargeted`, `refused_false_completion`) still owns its
+PR, and a search restricted to the two gating states walks past it and mints
+the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);
 `created_at` is the real field, `.created`/`.id` only defensive fallbacks.
+
+The child leaves through `lifecycle.sh` because `merge_result` is the
+lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
+declared edge out of every gating state. A child closed still carrying one is
+an I5 error (`doctor/check-closed-implies-landed`), so a refused transition
+leaves it open for the next pass instead.
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
-for MR_STATE in pull_request pre_open_gate; do
-  [ -n "$EXISTING_ANCHOR" ] && continue
-  EXISTING_ANCHOR=$(gc bd list --status=open \
-    --metadata-field merge_result="$MR_STATE" \
-    --metadata-field branch="$BRANCH" \
-    --limit=10 --json 2>/dev/null \
-    | jq -r --arg self "$WORK" \
-        '[.[] | select(.id != $self)] | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null)
-done
+if [ -n "${BRANCH:-}" ]; then
+  ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
+    --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
+  EXISTING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
+    '[ .[]? | select(.id != $self)
+       | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
+     | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || EXISTING_ANCHOR=""
+fi
 GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
 if [ -n "$EXISTING_ANCHOR" ]; then
   REWORK_SHA=$(git rev-parse --short temp 2>/dev/null || echo "")
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
-  gc bd update "$WORK" --unset-metadata rejection_reason >/dev/null 2>&1 || true
-  gc bd close "$WORK" --reason "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"
+  if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
+    gc bd close "$WORK" --reason "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"
+  else
+    echo "merge-push: $WORK could not be moved off its anchor state; left OPEN for the next pass rather than closed still carrying one (doctor/check-closed-implies-landed)" >&2
+  fi
 elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
   if [ "$PRE_OPEN" != 1 ]; then
     echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
