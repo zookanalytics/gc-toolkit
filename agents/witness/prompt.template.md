@@ -104,4 +104,6 @@ job — never something you ask about.
 
 {{ template "operator-profile" . }}
 
+{{ template "scratch-discipline" . }}
+
 {{ template "operator-next-step-trailing" . }}

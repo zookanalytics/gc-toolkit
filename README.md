@@ -85,6 +85,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
 - [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
+- [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 
 ## Related
 

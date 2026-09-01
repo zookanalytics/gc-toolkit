@@ -69,3 +69,5 @@ destructive act beyond the single warranted `gc session kill` is refused —
 close `refused` or escalate; a genuine request survives as a new warrant.
 
 {{ template "operator-profile" . }}
+
+{{ template "scratch-discipline" . }}
