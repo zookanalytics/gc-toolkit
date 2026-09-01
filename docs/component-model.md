@@ -57,7 +57,7 @@ Dropping these is as much the design as keeping the list above.
 | Discard | Why it is not a primitive |
 |---|---|
 | `merge_result` as a *second* status field | one state per bead. The key name survives for ledger continuity, but the enum is closed in `lifecycle/lifecycle.toml` and only `lifecycle.sh` writes it — a declared machine, not a second field. |
-| `gc.routed_to` as a field distinct from `assignee` | route and owner are one question asked twice |
+| `gc.routed_to` as a *second* ownership field | who holds a bead is one question and `assignee` answers it. The route answers a different one, which pool the bead is offered to, and `lifecycle/lifecycle.toml` defines the two apart. A claim leaves the route standing as the record of which queue offered the bead, and every route reader asks about it only while the bead is unassigned. |
 | `in_progress` as a status | it means *claimed*, which the assignee already says |
 | free-form metadata as the state space | an unregistered key is an accumulation; `lifecycle.toml` enumerates every pack-written key |
 | the healer passes, **as a category** | each repaired a writer that did not always run; atomic transitions remove the need |
