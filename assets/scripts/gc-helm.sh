@@ -173,14 +173,20 @@ rig_name_for_bead() {
 # -> root's gc.input_convoy_id -> the convoy's single tracked member) and
 # clear the pins on exactly the steps whose root resolves to THIS anchor.
 # Guards: fail closed on an unresolved/other anchor; NEVER close a step or
-# rewrite its status; never de-route workflow-finalize; all pins in ONE
-# update per step; selected by contract (gc.step_ref), never formula name
-# (tk-q5r65); an absent root is the witness patrol's, not ours. Best-effort
-# subshell. $1 = parked anchor id, $2 = rig .beads path or "".
+# rewrite its status; never de-route workflow-finalize; never de-pin a step the
+# RELEASING session holds, which is the live step performing the release and
+# not a husk; all pins in ONE update per step; selected by contract
+# (gc.step_ref), never formula name (tk-q5r65); an absent root is the witness
+# patrol's, not ours. Best-effort subshell. $1 = parked anchor id, $2 = rig
+# .beads path or "".
 # >>> quiesce-release-molecule-steps
 quiesce_release_molecule_steps() (
     set +e
     _anchor="$1"; _db="$2"
+
+    # The spellings a step bead's assignee can carry for THIS session — the
+    # same three step-close.sh resolves by.
+    _me=$(printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
 
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
     _steps=$(gc bd list --status=open,in_progress ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
@@ -226,6 +232,19 @@ quiesce_release_molecule_steps() (
             # Never de-route the finalize step (the molecule's only escape path).
             case "$_step" in *.workflow-finalize) continue ;; esac
             case "$_routed" in *control-dispatcher*) continue ;; esac
+
+            # Never de-pin the step this release is being performed FROM. The
+            # quiesce exists to stop an ABANDONED molecule's steps re-attracting
+            # spawns; a step the releasing session holds is the live one, and
+            # step-close.sh resolves it by (assignee, gc.step_ref), so clearing
+            # that assignee strands the molecule this release is completing.
+            # With no identity in the environment step-close.sh refuses to close
+            # anything at all, so there is no case where the skip is needed and
+            # unavailable.
+            if [ -n "$_who" ] && [ -n "$_me" ] && printf '%s\n' "$_me" | grep -qxF -- "$_who"; then
+                echo "$PROG: takeaway: kept live step $_sid ($_step) — this session holds it and still has to close it"
+                continue
+            fi
 
             # Idempotent: already quiet -> nothing left to clear.
             [ -n "$_routed" ] || [ -n "$_who" ] || [ -n "$_affinity" ] || continue

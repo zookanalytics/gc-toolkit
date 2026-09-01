@@ -13,8 +13,10 @@
 #   deliverable          "would a sling be picked up?" — no when the city's
 #                        agent roster says this pool cannot pick it up
 #                        (absent, suspended, or capped at zero), exit 0/1
-# The only throttle is the pool's max_active_sessions
-# (agents/proactive/agent.toml); slung beads queue until a slot frees.
+# The pool's only throttle is its max_active_sessions
+# (agents/proactive/agent.toml); slung beads queue until a slot frees. That
+# bounds how many reactions run at once. GC_PROACTIVE_SLING_CAP is a different
+# bound: how many one `scan --sling` sweep may hand out.
 # Tunables: GC_PROACTIVE_POOL / _MERGE / _SCAN_LIMIT / _SLING_CAP / _FIXTURE
 # (test hook: canned ready/scan/agents .json instead of gc calls).
 set -euo pipefail

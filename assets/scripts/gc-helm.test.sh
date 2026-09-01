@@ -131,6 +131,7 @@ mkdir -p "$TMP/signal-loom/.beads"
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 unset GC_HELM_FIXTURE || true
+unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release 2>"$TMP/err" || true)"
@@ -670,6 +671,119 @@ ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 
 export FAKE_STEPS_JSON="$TMP/steps.json"
+
+# ── The releasing session's own step survives the release ────────────────────
+# mol-first-reaction's terminal step disposes by calling `takeaway --release` on
+# the bead its own molecule is anchored to, and then has to close its own step
+# bead. step-close.sh resolves that bead by (assignee, gc.step_ref), so a
+# quiesce that clears the live step's assignee lands the disposition and strands
+# the molecule: the step stays open and is re-offered forever. This section runs
+# the real release and then the real step-close.sh against ONE mutating store —
+# a logging-only stub cannot show the second command failing on what the first
+# wrote.
+LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
+export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
+SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
+POOL="gc-toolkit/gc-toolkit.polecat"
+
+# A-LIVE is the anchor; root-LIVE its molecule root. L-live is the terminal step
+# this session is executing the release FROM; L-peer is a sibling step left
+# pinned to a session that is gone, which is what the quiesce exists for.
+cat > "$LIVE_STORE" <<JSON
+[
+ {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.input_convoy_id":"convoy-LIVE"}},
+ {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}}
+]
+JSON
+printf 'convoy-LIVE|A-LIVE\n' > "$LIVE_CONVOYS"
+: > "$LIVE_LOG"
+
+cat > "$LIVE/bin/gc" <<'GCL'
+#!/usr/bin/env bash
+# A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
+# answers the state the earlier write left behind.
+sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE"; }
+case "$1 ${2:-}" in
+  "rig list") printf '{"rigs":[{"name":"gc-toolkit","path":"/nonexistent-rig","prefix":"tk"}]}\n' ;;
+  "bd list")
+    st=""; who=""; seen_who=0
+    for a in "$@"; do
+      case "$a" in
+        --status=*)   st="${a#--status=}" ;;
+        --assignee=*) who="${a#--assignee=}"; seen_who=1 ;;
+      esac
+    done
+    jq --arg st "$st" --arg who "$who" --argjson sw "$seen_who" '
+      [ .[] | . as $b
+        | select($st == "" or (($st | split(",")) | index($b.status // "")) != null)
+        | select($sw == 0 or (($b.assignee // "") == $who)) ]' "$LIVE_STORE" ;;
+  "bd show")
+    row=$(jq -c --arg i "$3" '[ .[] | select(.id == $i) ]' "$LIVE_STORE")
+    [ "$row" != "[]" ] && printf '%s\n' "$row" || printf '[{"id":"%s","status":"open","metadata":{}}]\n' "$3" ;;
+  "convoy status")
+    a=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$LIVE_CONVOYS")
+    [ -n "$a" ] && jq -n --arg a "$a" '{children:[{id:$a}]}' || printf '{"children":[]}\n' ;;
+  "bd update")
+    printf 'update %s\n' "$*" >> "$LIVE_LOG"
+    id="$3"; shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --db)             shift 2 ;;
+        --assignee=*)     sw --arg i "$id" --arg v "${1#--assignee=}" 'map(if .id==$i then .assignee=$v else . end)'; shift ;;
+        --assignee)       sw --arg i "$id" --arg v "${2:-}" 'map(if .id==$i then .assignee=$v else . end)'; shift 2 ;;
+        --status=*)       sw --arg i "$id" --arg v "${1#--status=}" 'map(if .id==$i then .status=$v else . end)'; shift ;;
+        --set-metadata)   sw --arg i "$id" --arg k "${2%%=*}" --arg v "${2#*=}" 'map(if .id==$i then .metadata[$k]=$v else . end)'; shift 2 ;;
+        --unset-metadata) sw --arg i "$id" --arg k "$2" 'map(if .id==$i then (.metadata |= del(.[$k])) else . end)'; shift 2 ;;
+        *)                shift ;;
+      esac
+    done ;;
+  "bd dep") printf 'dep %s\n' "$*" >> "$LIVE_LOG" ;;
+esac
+exit 0
+GCL
+chmod +x "$LIVE/bin/gc"
+
+field() { jq -r --arg i "$1" --arg k "$2" '.[] | select(.id==$i) | (if $k=="status" then .status elif $k=="assignee" then (.assignee // "") else (.metadata[$k] // "") end)' "$LIVE_STORE"; }
+
+SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
+RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+  sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
+
+eq "$(field L-live assignee)" "$SESSION" \
+   "(LIVESTEP) the step the release runs FROM keeps its assignee"
+eq "$(field L-live gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(LIVESTEP) …and its route"
+eq "$(field L-live gc.session_affinity)" "require" \
+   "(LIVESTEP) …and its session affinity"
+grep -q 'kept live step L-live' <<< "$RELOUT" \
+  && ok "(LIVESTEP) …and the run says which step it kept" \
+  || bad "(LIVESTEP) the kept step is unreported (out: $RELOUT)"
+
+# The guard is narrow: a sibling pinned to a session that is GONE is exactly the
+# husk the quiesce exists for, and it must still be cleared.
+eq "$(field L-peer assignee)" "" \
+   "(LIVESTEP) a peer session's step under the same anchor is still quiesced"
+eq "$(field L-peer gc.routed_to)" "" \
+   "(LIVESTEP) …and de-routed"
+
+# The disposition itself still lands whole.
+eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
+eq "$(field A-LIVE assignee)" ""    "(LIVESTEP) …and unassigned"
+eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
+
+# The proof the guard exists for: the terminal step is still CLOSABLE after the
+# release, by the same resolution the formula's terminal block uses.
+SCRC=0
+SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+  bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
+eq "$(field L-live status)" "closed" \
+   "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
+[ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
+PATH="$SAVED_PATH"
+
 
 echo ""
 echo "gc-helm takeaway (release quiesce, waiting-on edges, length gate) + dismiss: $PASS passed, $FAIL failed"

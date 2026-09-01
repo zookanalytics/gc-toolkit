@@ -11,10 +11,11 @@
 # accepts/redirects in one move; AND any code-producing proactive output takes
 # the codex-gated mr path, never direct. (The design's enable-gate and
 # city-cap legs were retired: the pool is always on, and its own
-# max_active_sessions is the only throttle — routed beads queue until a slot
-# frees.) The human accept/redirect leg is the same operator-judged capstone
-# Phase 3 already gates (board → pick → land → answer), so this fixture is NOT
-# that. It locks down the deterministic Phase-4 machinery underneath it:
+# max_active_sessions is the only bound on how many reactions run at once —
+# routed beads queue until a slot frees.) The human accept/redirect leg is the
+# same operator-judged capstone Phase 3 already gates (board → pick → land →
+# answer), so this fixture is NOT that. It locks down the deterministic
+# Phase-4 machinery underneath it:
 #
 #   • ALWAYS-ON — tools/gc-proactive.sh `demand` (the pool's work_query,
 #     mirrored) flows routed work unconditionally: no enable flag, no
@@ -26,7 +27,8 @@
 #     ends in ONE of three dispositions (route it, hold it, ask), records which
 #     one and why, flags the bead onto the board, and NEVER closes the target.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
-#     (max 2-3, the only throttle), and it defaults to mr.
+#     (max 2-3, the pool's only throttle), it defaults to mr, and one
+#     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
 #   • THE PROVENANCE DISCIPLINE — tools/gc-bd-universe.sh fences reached content
 #     (PR/CI/comments/neighbor) as untrusted data; the fed slice stays unfenced.
 #
@@ -401,6 +403,26 @@ has "work_query ranks routed demand by board weight (prio_w)" "prio_w"   "$A"
 has "pool carries a scale_check SPAWN predicate (tk-8j2g1)" "scale_check = '''" "$A"
 has "pool defaults the mr merge strategy"        'GC_DEFAULT_MERGE_STRATEGY = "mr"' "$A"
 has "pool is rig-scoped"                         'scope = "rig"'          "$A"
+
+echo "── the live prose surfaces state the current contract ──"
+# These four are read as contract, not commentary. A reader who takes
+# max_active_sessions for the whole story sizes a `scan --sling` sweep by it,
+# and one who reads "file a visit" as the result plans for a queue of operator
+# conversations that the routing and holding exits no longer produce. Compared
+# flattened, because the claim wraps differently in each file — and stripped of
+# leading comment markers first, or a `#` lands mid-sentence and the wrapped
+# form never matches.
+flat() { sed -e 's/^[[:space:]]*#[[:space:]]*//' "$1" | tr '\n' ' ' | tr -s ' '; }
+for surface in "agents/proactive/agent.toml" "tools/gc-proactive.sh" \
+               "agents/proactive/PROVENANCE.md" "docs/gascity-human-engagement.md"; do
+    S="$(flat "$ROOT/$surface")"
+    absent "$surface does not call max_active_sessions the ONLY bound" \
+           "the only throttle" "$(printf '%s' "$S" | tr 'A-Z' 'a-z')"
+    has    "$surface names the separate per-sweep cap" "GC_PROACTIVE_SLING_CAP" "$S"
+done
+AF="$(flat "$AGENT_TOML")"
+has "the pool config states the routing exit, not the visit alone" "route the bead to a pool" "$AF"
+has "…and the holding exit"                                        "hold it on a" "$AF"
 
 echo "── the worker prompt names the contract ──"
 PM="$(cat "$PROMPT_MD")"

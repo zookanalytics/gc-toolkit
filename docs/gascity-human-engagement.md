@@ -290,11 +290,13 @@ the same terms as the formula ones.
 **Why the fallback stays.** The react path is fire-and-forget: `gc sling`
 routes the subject and returns 0, and the visit appears only when a
 proactive session runs the formula. Proactive is always-on
-(`max_active_sessions = 2` is its only throttle; routed beads queue until a
-slot frees), so a queued reaction is picked up rather than dropped — but the
-path is still chosen by asking `tools/gc-proactive.sh deliverable` first
-(exit 0/1 plus the reason, printed either way), and the fallback files the
-visit directly whenever the answer is no. That verb answers no on a positive
+(`max_active_sessions = 2` bounds how many reactions run at once, and routed
+beads queue until a slot frees; what one `scan --sling` sweep hands out is
+bounded separately by `GC_PROACTIVE_SLING_CAP`), so a queued reaction is
+picked up rather than dropped — but the path is still chosen by asking
+`tools/gc-proactive.sh deliverable` first (exit 0/1 plus the reason, printed
+either way), and the fallback files the visit directly whenever the answer is
+no. That verb answers no on a positive
 finding in this city's agent roster: the pool is not registered, it is
 suspended, or it is capped at zero slots. A roster it cannot read answers yes,
 because absence of evidence is not evidence the pool is gone. The seam is

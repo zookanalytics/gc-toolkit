@@ -33,8 +33,10 @@ security commitments:
 
 **Update (2026-08-25):** the enable gate (`GC_PROACTIVE_ENABLED`) and the
 city-wide shed clamp (item 2 below) were removed at operator direction in
-the rewrite review — the pool is always-on and `max_active_sessions` is
-the only throttle. Item 2 stands as the v1 design record.
+the rewrite review — the pool is always-on and `max_active_sessions` is its
+only throttle. What one `tools/gc-proactive.sh scan --sling` sweep may hand it
+is bounded separately, by `GC_PROACTIVE_SLING_CAP`. Item 2 stands as the v1
+design record.
 
 1. **Dedicated + small** (`max_active_sessions = 2`). Routing proactive work
    into the impl pool would starve real implementation (head-of-line blocking
