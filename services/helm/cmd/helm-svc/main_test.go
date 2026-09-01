@@ -311,6 +311,66 @@ func TestEmptyQueueRendersItsCoverage(t *testing.T) {
 	}
 }
 
+// TestEmptyQueueWithholdsTheAllClearWhileAPRPositionIsUnread.
+//
+// PR rows extend the empty-state contract rather than adding a second one, and
+// they add a way for it to go quietly wrong that beads alone did not have: an
+// axis nothing has recorded looks exactly like an axis with nothing to say.
+// Tile.Owed is a boolean and cannot carry the third value the axes do, so the
+// gap has to surface here — a board that says "nothing is owed" while a pull
+// request's position is unread has told the operator to stop looking on the
+// strength of a question it never asked.
+func TestEmptyQueueWithholdsTheAllClearWhileAPRPositionIsUnread(t *testing.T) {
+	now := time.Now().UTC()
+	head := strings.Repeat("a", 40)
+	mergeAnchor := func(id string, md map[string]string) board.Anchor {
+		full := map[string]string{"merge_result": "pull_request", "branch": "polecat/" + id}
+		for k, v := range md {
+			full[k] = v
+		}
+		return board.Anchor{ID: id, Title: id, Kind: "merge", Source: "merge",
+			Rig: "gc-toolkit", Prefix: "tk", Metadata: full}
+	}
+
+	// Nothing recorded: the cadence has not judged this pull request.
+	silent := board.BuildBoard([]board.Anchor{mergeAnchor("tk-silent", nil)}, now, false, nil, board.Facts{})
+	var buf bytes.Buffer
+	renderQueue(&buf, silent, nil, now, 5)
+	out := buf.String()
+	if !strings.Contains(out, "NOT an all-clear") {
+		t.Errorf("an unread position must withhold the all-clear:\n%s", out)
+	}
+	if !strings.Contains(out, "1 of 1 have no position recorded") {
+		t.Errorf("…and say how much was unread:\n%s", out)
+	}
+
+	// Read on the machine axis and the approval clause. The conversation axis is
+	// unread on every row in this phase, so the row still holds the sentence
+	// open — and names the reason rather than letting the silence pass for an
+	// answer.
+	clear := board.BuildBoard([]board.Anchor{mergeAnchor("tk-green", map[string]string{
+		"pr.machine": "settled@" + head + "@2026-08-28T04:05:06Z",
+		"pr_posture": "none@" + head + "@2026-08-28T04:05:06Z",
+	})}, now, false, nil, board.Facts{})
+	buf.Reset()
+	renderQueue(&buf, clear, nil, now, 5)
+	out = buf.String()
+	if !strings.Contains(out, "acknowledgement watermarks are not built yet") {
+		t.Errorf("the conversation gap has to name itself:\n%s", out)
+	}
+	if strings.Contains(out, "no position recorded") {
+		t.Errorf("the machine axis WAS read here and must not count as a gap:\n%s", out)
+	}
+
+	// With no merge anchors at all the original sentence is unchanged.
+	buf.Reset()
+	renderQueue(&buf, board.BuildBoard(nil, now, false, nil, board.Facts{}), nil, now, 5)
+	if out := buf.String(); !strings.Contains(out, "Nothing is owed by you.") ||
+		strings.Contains(out, "NOT an all-clear") {
+		t.Errorf("a city with no merge anchors keeps the plain sentence:\n%s", out)
+	}
+}
+
 // TestBoardFlagParsing pins that the overview needs an explicit flag.
 func TestBoardFlagParsing(t *testing.T) {
 	o, err := parseBoardArgs(nil)

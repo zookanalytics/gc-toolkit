@@ -213,9 +213,12 @@ route_key = "gc.routed_to"
 hold_severity = "warn"
 
 [posture]
-# What the PR is doing, recorded on the anchor by pr-facts.sh in the same
-# `<value>@<oid>` shape the check keys use. merge.sh reads these off the bead;
-# nothing else re-derives them from GitHub.
+# What the PR is doing, recorded on the anchor by pr-facts.sh. pr_posture is a
+# dated key, `<value>@<oid>@<since>`: its review_required value is a cause of an
+# owed row, so the instant the requirement was first read at this head is what
+# orders that row in the operator's queue. pr_merge_state keeps the plain
+# `<value>@<oid>` shape the check keys use — nothing queues on it. merge.sh
+# reads these off the bead; nothing else re-derives them from GitHub.
 posture_key = "pr_posture"
 # The pack's own vocabulary, lowercase, derived in this precedence order: a
 # standing CHANGES_REQUESTED outranks an unanswered comment, which outranks an
@@ -239,6 +242,45 @@ review_watermark_key = "pr_review_watermark"
 # blocks edge: escalate.sh files it depending on its subject, so an edge back
 # would be a cycle.
 disposition_key = "pr_comment_disposition"
+
+[machine_axis]
+# What the merge cadence can do with this anchor on its next pass, recorded by
+# whichever stage reached the verdict. Every stage already computes it once per
+# pass and prints it to a log; this key is where the answer is kept, so a reader
+# never re-implements two scripts' predicates to learn it.
+machine_key = "pr.machine"
+# The wedge shape is part of the value: both shapes mean no automated actor can
+# move the anchor, and they are released by different things, so a reader that
+# has to act on one must not have to re-derive which it is.
+#   progressing       some automated actor will act — a pool-routed blocker is
+#                     open, or a gate marker is not bound to the live head
+#   settled           every declared gate reads green@<live head>; the cadence
+#                     is done and the PR waits on approval, on the merge pass,
+#                     or on nothing
+#   wedged-exception  a gate reads exception@<live head>: the convergence cap
+#                     stamped it and routed the anchor to a person, and every
+#                     actor that could move the head has been told not to
+#   wedged-veto       a non-city CHANGES_REQUESTED stands with the signoff round
+#                     cap spent, so nothing will file further rework
+machines = ["progressing", "settled", "wedged-exception", "wedged-veto"]
+# Written from pre_open_gate onward, before a PR number exists: a pre-open
+# anchor wedges the same way, and most wedged anchors are in that state.
+writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
+
+[dated_keys]
+# Keys in the shape <value>@<oid>@<since>. The queue the helm board renders is
+# ordered by how long a row has been owed, so a cause of an owed row has to
+# carry the instant its turn began. Head-pinned causes keep it inside the value
+# rather than in a key beside it: a timestamp that can be written when the value
+# is not ends up dating a state that no longer holds, with nothing in either key
+# saying so.
+keys = ["pr.machine", "pr_posture"]
+# lifecycle.sh --set-dated is the only writer, and it applies one rule: preserve
+# the existing instant while the value and the oid both hold, stamp the current
+# one when either differs. Set, preserve and clear all fall out of it — the
+# reconcile cadence re-deriving the same verdict at the same head leaves the
+# instant alone, and a head move arrives with a fresh one no owed row reads.
+since_format = "RFC 3339 UTC"
 
 # The metadata-key registry: every key the rewritten pack writes, grouped.
 [metadata.merge_identity]
@@ -269,6 +311,9 @@ keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_comment_disposition",
 ]
+
+[metadata.pr_round_trip]
+keys = ["pr.machine"]
 
 [metadata.holds]
 keys = ["merge_hold", "rebase_hold", "tracking_only"]

@@ -33,6 +33,11 @@ scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
+
+# The signoff round cap, mirrored from signoff.sh: past it no further rework is
+# filed, which is what turns a standing veto from a hold into a wedge.
+MAX_REVIEW_ROUNDS="${GC_MAX_REVIEW_ROUNDS:-3}"
+case "$MAX_REVIEW_ROUNDS" in ''|*[!0-9]*) MAX_REVIEW_ROUNDS=3 ;; esac
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
 # The repository this pass merges into, resolved through git so a run with no
@@ -79,6 +84,22 @@ canon_pr_url() {
   printf '%s' "${1:-}" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
+
+# Record the machine axis this pass reached, at the head it was read at. Every
+# hold below already decides it and spends the answer on a log line; this keeps
+# it, so a reader learns whether an anchor is moving without re-implementing
+# these predicates. lifecycle.sh owns the @<since> component and preserves it
+# across a pass that reaches the same verdict at the same head.
+#
+# --route carries the anchor's own route back: recording a verdict is an
+# observation, not a routing decision, and an omitted --route would let a
+# detached state's default clear a route this pass never looked at.
+record_machine() { # <anchor-id> <value> <head-oid> <current-route>
+  [ -n "${3:-}" ] || return 0
+  "$LIFECYCLE" transition "$1" --to pull_request --expect pull_request \
+    --route "${4:-}" --set-dated "pr.machine=$2@$3" >/dev/null 2>&1 && return 0
+  echo "$PROG: WARN $1 machine axis '$2@$3' did not record; the board reads it as unknown until the next pass" >&2
+}
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
@@ -199,6 +220,7 @@ while IFS= read -r row; do
   dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
+  aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
   if [ -n "$prurl" ] && [ "$(canon_pr_url "$prurl")" != "$live_url" ]; then
     echo "$PROG: anchor $id records pr_url '$prurl' but PR#$num is '$live_url'; merge held — operator must repair"
     held=$((held + 1)); continue
@@ -260,6 +282,15 @@ while IFS= read -r row; do
   fi
   if [ -n "$hg" ]; then
     have=$(printf '%s' "$fresh" | jq -r --arg k "check.$hg" '.meta[$k] // "none"')
+    # The convergence cap's exception, bound to the live head, is ungreenable by
+    # anything the cadence will do: gate-ensure reads it as settled and
+    # dispatches nothing, and the release is a head move nobody is going to
+    # make. Every other shape here is a gate a review is due to raise.
+    if [ "$have" = "exception@$head_oid" ]; then
+      record_machine "$id" "wedged-exception" "$head_oid" "$aroute"
+    else
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
+    fi
     echo "$PROG: PR#$num check '$hg' not green at live head (have '$have', want 'green@$head_oid'); merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
@@ -293,6 +324,18 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   if [ -n "$inflight" ]; then
+    # An open blocker is only `progressing` when a POOL is behind it. The route
+    # is the discriminator: a rework or review child carries one and will be
+    # claimed, while an ordinary prerequisite and the demand bead that makes an
+    # anchor `asking` carry none and no automated actor will touch them.
+    pool_holder=$(printf '%s' "$blockers" | jq -r --arg live "$LIVE_STATUSES" '
+      ($live | split(",")) as $ls
+      | [ .[] | select(type == "object")
+          | select((((.status // "open") | ascii_downcase) as $st | ($ls | index($st)) != null))
+          | ((.metadata["gc.routed_to"] // "") | tostring) as $r
+          | select($r != "" and $r != "human")
+          | .id ] | .[0] // empty' 2>/dev/null)
+    [ -n "$pool_holder" ] && record_machine "$id" "progressing" "$head_oid" "$aroute"
     echo "$PROG: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
@@ -322,7 +365,40 @@ while IFS= read -r row; do
   veto=$(printf '%s' "$rstate" | jq -r '.veto // ""')
   if [ -n "$veto" ]; then
     # A human's standing NO holds every candidate, whatever the check_set says.
-    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED; merge held (anchor $id)"
+    # Whether anything will ANSWER it is the round count: signoff.sh files a
+    # rework child per round and stops at the cap, so a veto standing past the
+    # cap is one nothing will act on. signoff.sh owns that count, and reading it
+    # any other way records the wedge over work it would still send back: its
+    # cap measures rounds since the operator's last feedback, so the total is
+    # wrong by exactly the floor that feedback sets. Both halves come off reads
+    # this pass already has — the blockers, and the anchor row re-read above.
+    # The floor's stamp is signoff's alone; nothing here writes it.
+    total=$(printf '%s' "$blockers" | jq -r '
+      [ .[] | select(type == "object")
+        | select(((.metadata.source_review_bead // "") | tostring) != "") ] | length' 2>/dev/null)
+    case "$total" in ''|*[!0-9]*) total=0 ;; esac
+    floor_raw=$(printf '%s' "$fresh" | jq -r '(.meta.signoff_round_floor // "") | tostring')
+    case "$floor_raw" in
+      *@*) floor="${floor_raw%%@*}"; floor_batch="${floor_raw#*@}" ;;
+      *)   floor=""; floor_batch="" ;;
+    esac
+    case "$floor" in ''|*[!0-9]*) floor=0; floor_batch="" ;; esac
+    # Feedback signoff has not answered yet retires every round filed before it:
+    # the next verdict writes the floor at the total and files rework. Holding
+    # the older floor here would wedge the anchor for the whole window between
+    # the feedback and that verdict, which is as long as a review takes.
+    reset_batch=$(printf '%s' "$fresh" | jq -r '(.meta.signoff_rounds_reset // "") | tostring')
+    if [ -n "$reset_batch" ] && [ "$reset_batch" != "$floor_batch" ]; then
+      floor="$total"
+    fi
+    rounds=$((total - floor))
+    [ "$rounds" -ge 0 ] || rounds=0
+    if [ "$rounds" -ge "$MAX_REVIEW_ROUNDS" ]; then
+      record_machine "$id" "wedged-veto" "$head_oid" "$aroute"
+    else
+      record_machine "$id" "progressing" "$head_oid" "$aroute"
+    fi
+    echo "$PROG: PR#$num reviewer '$veto' has a standing CHANGES_REQUESTED; merge held (anchor $id, rework rounds $rounds/$MAX_REVIEW_ROUNDS)"
     held=$((held + 1)); continue
   fi
   needs_approval=""
@@ -339,6 +415,11 @@ while IFS= read -r row; do
     fi
     approver=$(printf '%s' "$rstate" | jq -r '.approver // ""')
     if [ -z "$approver" ]; then
+      # Every declared gate is green at the live head and no pool-routed blocker
+      # is open: the cadence is done and the pull request is waiting on a person.
+      # That is `settled`, and the approval clause of the owed rule is what makes
+      # the row the operator's rather than nobody's.
+      record_machine "$id" "settled" "$head_oid" "$aroute"
       echo "$PROG: PR#$num no external APPROVED review at the live head $head_oid (approval armed by: check_set/signoff_dismissed/own dismissed review); merge held (anchor $id)"
       held=$((held + 1)); continue
     fi
@@ -381,6 +462,8 @@ while IFS= read -r row; do
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
     *)
+      # The cadence has nothing left to do; GitHub is not ready. Still `settled`.
+      record_machine "$id" "settled" "$head_oid" "$aroute"
       echo "$PROG: PR#$num not mergeable yet (mergeStateStatus='${merge_state:-unknown}'); merge held (anchor $id)"
       held=$((held + 1)); continue ;;
   esac

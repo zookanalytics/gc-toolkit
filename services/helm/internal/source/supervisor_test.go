@@ -428,6 +428,83 @@ func TestMetadataAnchorPredicateMatchesTheStoreFilter(t *testing.T) {
 	if parked.matches(map[string]string{"gc.takeaway_at": "2026-08-26T00:00:00Z"}) {
 		t.Error("a neighbouring key must not match")
 	}
+
+	// The merge kind, also presence-keyed. Keyed on merge_result rather than on
+	// pr_number because an anchor at pre_open_gate has a machine axis and no
+	// number yet, and most wedged anchors are in that state — a number-keyed
+	// selector would omit the majority of the condition the row exists to show.
+	var merge metadataAnchor
+	for _, ma := range metadataAnchors {
+		if ma.kind == "merge" {
+			merge = ma
+		}
+	}
+	if merge.key != "merge_result" || merge.value != "" {
+		t.Fatalf("the merge kind selects on merge_result presence, got key=%q value=%q",
+			merge.key, merge.value)
+	}
+	if !merge.matches(map[string]string{"merge_result": "pre_open_gate"}) {
+		t.Error("a pre-open anchor is a merge anchor: it has a branch, a gate set and a machine axis")
+	}
+	if !merge.matches(map[string]string{"merge_result": "pull_request"}) {
+		t.Error("an open PR's anchor is a merge anchor")
+	}
+	if merge.matches(map[string]string{"pr_number": "512"}) {
+		t.Error("pr_number is a field on the row, never the selector")
+	}
+
+	// The human kind comes FIRST so BuildBoard's id-dedup — which keeps the
+	// first at equal rank — leaves a wedged anchor, which carries both markers,
+	// on its human row instead of flipping kind between passes.
+	humanAt, mergeAt := -1, -1
+	for i, ma := range metadataAnchors {
+		switch ma.kind {
+		case "human":
+			humanAt = i
+		case "merge":
+			mergeAt = i
+		}
+	}
+	if humanAt < 0 || mergeAt < 0 || humanAt > mergeAt {
+		t.Errorf("human must be gathered before merge: human at %d, merge at %d", humanAt, mergeAt)
+	}
+}
+
+// TestSupervisorBackendReadsThePRAxes. This backend gathers the merge kind too —
+// the selector list is shared, so a kind added on one side cannot go missing on
+// the other — and the axes are read off the scanned bead's own metadata.
+//
+// It is NARROWER here, and that is the backend's standing posture: it cannot
+// resolve a blocker's status, so it never claims `asking` and never upgrades a
+// row to `progressing` on a pool-routed child.
+// Every such row reads what the merge cadence recorded, which is the honest
+// answer for a backend that did not read the graph.
+func TestSupervisorBackendReadsThePRAxes(t *testing.T) {
+	var merge metadataAnchor
+	for _, ma := range metadataAnchors {
+		if ma.kind == "merge" {
+			merge = ma
+		}
+	}
+	md := map[string]string{
+		"merge_result": "pre_open_gate",
+		"branch":       "polecat/tk-w",
+		"pr.machine":   "wedged-exception@" + strings.Repeat("a", 40) + "@2026-08-28T04:05:06Z",
+	}
+	if !merge.matches(md) {
+		t.Fatal("the scan must admit a wedged pre-open anchor")
+	}
+	a := (&SupervisorSource{}).metadataAnchorFor(&gatherState{}, apiBead{ID: "tk-w", Title: "wedged"},
+		md, merge.kind, nil)
+	if a.Metadata["pr.machine"] == "" {
+		t.Error("the recorded position has to ride on the anchor, or the axis is unreadable here")
+	}
+	if !a.WaitingUnknown {
+		t.Error("this backend cannot resolve blocker statuses and must keep saying so")
+	}
+	if len(a.Blockers) != 0 {
+		t.Error("no edges were resolved, so none are reported")
+	}
 }
 
 // TestOpenBeadsTruncationIsReported: a scan that comes back short must SAY so.

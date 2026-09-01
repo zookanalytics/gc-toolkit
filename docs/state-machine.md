@@ -299,13 +299,13 @@ sight as fail-closed defense.
 ## Posture
 
 Gates record what the machine decided. **Posture** records what the pull request
-is doing, in the same `<value>@<oid>` shape, written by `pr-facts.sh` on every
-open non-draft anchor and read off the bead by everything downstream. Declared
-in `lifecycle/lifecycle.toml` `[posture]`.
+is doing, head-pinned the same way, written by `pr-facts.sh` on every open
+non-draft anchor and read off the bead by everything downstream. Declared in
+`lifecycle/lifecycle.toml` `[posture]`.
 
 | Key | Value | Meaning |
 |---|---|---|
-| `pr_posture` | `<posture>@<oid>` | the review posture at `<oid>` |
+| `pr_posture` | `<posture>@<oid>@<since>` | the review posture at `<oid>`, and when it was first read there |
 | `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
 | `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
 | `pr_review_watermark` | `<id>` | highest routed COMMENTED `pulls/N/reviews` id |
@@ -366,6 +366,35 @@ visit through the `pr_number` stamp that `merge.sh`'s in-flight-holder probe
 reads. A visit takes no `blocks` edge: `escalate.sh` files it *depending on*
 its subject, so an edge back would be a cycle. `pr_comment_disposition` records
 which was chosen. Silence is not one of the options.
+
+## The machine axis
+
+Gates say whether one review passed. **`pr.machine`** says what the merge cadence
+can do with the anchor as a whole on its next pass, so a reader learns whether an
+anchor is moving without re-implementing two scripts' predicates. Declared in
+`lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh` and
+`merge.sh` through `lifecycle.sh` at the points where each already reaches the
+verdict, from `pre_open_gate` onward — most wedged anchors have no PR number yet,
+so a key written only for open pull requests would miss the majority of them.
+
+| Value | Meaning |
+|---|---|
+| `progressing` | some automated actor will act: a pool-routed blocker is open, or a gate marker is not bound to the live head |
+| `settled` | every declared gate reads `green@<live head>`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
+| `wedged-exception` | a gate reads `exception@<live head>`: the convergence cap stamped it and routed the anchor to a person, and every actor that could move the head has been told not to |
+| `wedged-veto` | a non-city `CHANGES_REQUESTED` stands with the signoff round cap spent, so nothing will file further rework |
+
+The two wedge shapes are separate values because they are released by different
+things, and a reader that has to act on one must not re-derive which it is.
+
+**Dated keys.** `pr.machine` and `pr_posture` carry a third component,
+`<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`
+owns: keep the existing instant while the value and the oid both hold, stamp the
+current one when either differs. The reconcile cadence re-derives the same
+verdict at the same head every few minutes, so a naive clock would restart a
+three-day wait on every pass. The instant lives inside the value rather than in a
+key beside it, because a timestamp that can be written when the value is not ends
+up dating a state that no longer holds, with nothing in either key saying so.
 
 ## The handoff
 

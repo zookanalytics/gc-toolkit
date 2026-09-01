@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 40 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 47 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -66,12 +66,13 @@ stranded empty complete progress_mismatch
 stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
+pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 ```
 
-`updated_at` and `closed_at` are `omitzero`, and they are the only two fields a
-tile may omit. A source that cannot read `updated_at` (the supervisor backend)
+`updated_at`, `closed_at` and `pr_owed_since` are `omitzero` — the three fields
+a tile may omit. A source that cannot read `updated_at` (the supervisor backend)
 omits it on every row; `closed_at` is present on a `DONE` row and absent from
-every live one.
+every live one; `pr_owed_since` is omitted on every row nothing is owed on.
 
 Tiles are deduplicated by id and **partitioned**: every `owed` row first,
 longest-waiting first, then everything else by `rank_score` descending.
@@ -89,8 +90,10 @@ demand owed by a person has a subtree near 1 where an epic has up to 999. On one
 globally ranked list the operator's own queue therefore sorts under the city's
 containers by construction, whatever the bands say. Inside the queue, size is
 not the question either: it is a list of decisions, so it is ordered by how long
-each has been owed (`gc.takeaway_at`, falling back to `updated_at`; a row
-neither can date sorts last).
+each has been owed — `pr_owed_since`, then `gc.takeaway_at`, then `updated_at`;
+a row none of the three can date sorts last. A merge anchor has no takeaway and
+is touched by every reconcile pass, so on those rows only the first of the three
+dates the turn rather than the last look at it.
 
 | surface | default | the overview |
 |---|---|---|
@@ -179,8 +182,8 @@ on every tick.
 
 ### Anchor kinds
 
-Five kinds are gathered. The first three are selected by the bead's issue
-**type**; the last two by its **metadata** (`tk-2v08m`).
+Six kinds are gathered. The first three are selected by the bead's issue
+**type**; the last three by its **metadata** (`tk-2v08m`).
 
 | kind | selected by | band | why |
 |---|---|---|---|
@@ -189,8 +192,18 @@ Five kinds are gathered. The first three are selected by the bead's issue
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED, LOW once *ruled* | the operator owns it; no agent will take it |
 | `parked` | `gc.takeaway` present | LOW while childless, else derived from the roll-up; ELEVATED once every `blocks` blocker has closed | a conversation that reached a takeaway |
+| `merge` | `merge_result` present | derived from the roll-up, so LOW while childless | a branch the city is trying to land — the PR round-trip's row |
 
-All five are gathered by **both** backends. The library backend filters the two
+`merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
+at `pre_open_gate` has a branch, a gate set and a machine axis with no number
+yet, so a number-keyed query cannot see a gate that wedges before the PR opens.
+`pr_branch` is what identifies those rows, and it travels as its own field
+because a table without a `frontier` column has nothing else to name them with.
+It is gathered LAST, so a wedged anchor — which carries `gc.routed_to=human` too
+— keeps its `human` row through the dedup instead of flipping kind between
+passes.
+
+All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
 over one paged `/beads?status=open` scan (`tk-lb3u4m`). The two selectors live
 in `source.metadataAnchor` — one field set, read two ways — because a bead that
@@ -421,6 +434,64 @@ Measured on the live board the day this landed: `sl-kg9z6.1` had been reporting
 `7 open, 0 in flight (stranded)` while three of those seven were waiting on a
 named operator ruling, and `tk-eemvf` and `tk-9tbbk` were reading `decomposed,
 idle — assign or visit` with nothing under them but a parked child.
+
+### The PR round-trip
+
+A pull request has two things going on at once and they move independently. The
+merge cadence is somewhere in its own loop; separately, a conversation is running
+with the operator. Two axes, rendered together, is the smallest shape that does
+not have to choose between them — and both are true at once often enough that one
+field would be lying on a normal day.
+
+| field | values | read from |
+|---|---|---|
+| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, `unknown` | `pr.machine` on the anchor |
+| `pr_conversation` | `unknown` (see below) | — |
+| `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
+| `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
+
+**Recorded, not re-derived.** Every stage of the merge cadence reaches the
+machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
+marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
+record it through `lifecycle.sh`, in the head-pinned `<value>@<oid>@<since>`
+shape the gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+
+**No per-PR GitHub call.** A conversation read costs one GitHub round trip per
+open pull request, and a backlog of ordinary size spends the board's whole cache
+TTL on them. A cold `gh pr list` also reports `mergeStateStatus=UNKNOWN` for much
+of that backlog, so a surface derived from that field would render most of its
+rows unknown on a cold read and change its answer on the next one with nothing
+having happened. The rows render from the bead, and
+`TestPRRowsCostNoCallPerPullRequest` pins that the gather's subprocess count does
+not grow with the number of pull requests.
+
+**One live upgrade.** An anchor with an open blocker carrying a POOL route reads
+`progressing` whatever the last gate pass recorded, because that half of the
+derivation is a bead read the gather already makes. The route is the
+discriminator: an anchor also blocks on ordinary prerequisites and on the demand
+bead that makes it `asking`, and no pool will claim either. A recorded wedge
+always stands, since an operator who loses sight of a wedge has lost the row this
+surface exists to show.
+
+**Whose move.** A row is owed by the operator when the machine axis is wedged,
+when an open `blocks` edge to a demand bead means the city is asking, or when the
+cadence is `settled` and GitHub wants a review nobody has given. A standing
+`changes_requested` renders `pr_approval=required` and is *not* owed: the
+requirement is unmet, but answering a rejecting review is the city's move, and it
+returns as `review_required` once the fix moves the head.
+
+**`pr_conversation` is a constant `unknown`.** Its other values — `quiet`,
+`outstanding`, `covered`, `answered` — all resolve to acknowledgement watermarks
+the city does not record. Deriving them without those marks means guessing, and
+every failed guess resolves to silence, which is the one answer that tells the
+operator to stop looking. The field is on the wire so the contract does not
+change shape once the marks exist.
+
+**The empty state.** `owed` is a boolean and cannot carry the third value the
+axes do, so an unread position surfaces as coverage rather than as a false
+negative on a row nobody sees. The section withholds "Nothing is owed by you"
+while any PR row's position, conversation or approval clause is unreadable, and
+says which. `board.Coverage` computes it for both renderers.
 
 ## Converse sittings (`tk-ghlg1e.1`)
 

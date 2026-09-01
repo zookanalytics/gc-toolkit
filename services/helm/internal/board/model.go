@@ -148,6 +148,19 @@ type Anchor struct {
 	WaitingOn       []string `json:"waiting_on,omitempty"`
 	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
 
+	// Blockers is the same `blocks` edge set as WaitingOn, carrying the fields
+	// the PR round-trip derivation discriminates on: the route, which separates
+	// a pool-routed rework or review child (machine `progressing`) from an
+	// ordinary prerequisite and from the demand bead that makes an anchor
+	// `asking`; the title, which is the demand's authored headline; and the
+	// creation instant, which is when an unanswered demand's turn began.
+	//
+	// It is the SAME read as WaitingOn, not a second one — [source.waitingEdges]
+	// produces both from one dependency query — so an anchor whose edges could
+	// not be read reports the empty set here and WaitingUnknown below, exactly
+	// as it does for the id slices.
+	Blockers []Blocker `json:"blockers,omitempty"`
+
 	// WaitingUnknown says the source could not READ this anchor's edges at
 	// all: the per-anchor dependency query itself failed, so the empty
 	// WaitingOn above is an absence of knowledge rather than a proof that
@@ -167,6 +180,25 @@ type Anchor struct {
 	// for an epic or a convoy: they never asked, so nothing about them is
 	// unknown.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
+}
+
+// Blocker is one `blocks` dependency of an anchor, as the gather read it.
+//
+// Gather-side only: it never crosses the wire. What reaches a consumer is the
+// derived axis, not the graph the axis was read off.
+type Blocker struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	// RoutedTo is gc.routed_to. A value naming a POOL means an automated actor
+	// is due to claim this blocker; "human" and the empty string both mean no
+	// actor will, and the two are not distinguished here because neither makes
+	// the anchor `progressing`.
+	RoutedTo string `json:"routed_to,omitempty"`
+	// IssueType is what the bead IS. A `decision` is a demand by construction,
+	// the way the board's own `decision` kind is.
+	IssueType string    `json:"issue_type,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
 // Progress is a convoy's self-reported roll-up, mirroring the `progress` object
@@ -282,6 +314,75 @@ type Tile struct {
 	Frontier  string    `json:"frontier"`
 	Needs     string    `json:"needs"`
 	RankScore int       `json:"rank_score"`
+
+	// --- the PR round-trip (specs/tk-q0ml23) -------------------------------
+	//
+	// Where a pull request sits in its round-trip with the operator, as two
+	// independent axes rather than one enum. They move independently and are
+	// true at once often enough that one field would have to pick: an anchor
+	// can carry a review the cadence dispatched AND an unanswered comment from
+	// the operator, and reporting either one hides the other.
+	//
+	// A row is a MERGE ANCHOR's, not a pull request's. An anchor at
+	// pre_open_gate has a branch, a gate set and a machine axis with no PR
+	// number yet, and most wedged anchors are in exactly that state, so
+	// PRNumber is a field on the row and never the selector.
+	//
+	// Every value here is read off beads: the board computes nothing about a
+	// merge anchor that the cadence has not already decided, and the render path
+	// makes no GitHub call.
+
+	// PRNumber is 0 before the PR opens; PRURL is the operator's way into
+	// GitHub, which is where the conversation stays.
+	//
+	// PRBranch is the identity for the whole span before there is a number,
+	// and it is a field of its own because a surface cannot recover it from
+	// [Tile.Frontier]: that line is prose, and it is not on every table. A row
+	// that can name neither carries both empty, which is the anchor at a human
+	// state that records no branch.
+	PRNumber int    `json:"pr_number"`
+	PRURL    string `json:"pr_url"`
+	PRBranch string `json:"pr_branch"`
+
+	// PRMachine is what the merge cadence can do with this anchor on its next
+	// pass: progressing, settled, wedged-exception, wedged-veto, or unknown.
+	//
+	// `unknown` is a rendered value, not a fallback to the quiet end — the same
+	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An
+	// unreadable axis and a clear one are not interchangeable, and a missing
+	// key means the cadence has not written one yet, which is a fact about the
+	// city rather than an all-clear.
+	PRMachine string `json:"pr_machine"`
+
+	// PRConversation is where the exchange with the operator stands. It reads
+	// `unknown` on every row today: its other values all resolve to
+	// acknowledgement watermarks that do not exist yet, and a surface that
+	// guesses is wrong in the one direction that matters — every failed
+	// derivation looks like silence, which is the answer that tells the
+	// operator to stop looking. It ships now so the wire contract does not
+	// change shape when the watermarks land.
+	PRConversation string `json:"pr_conversation"`
+
+	// PRApproval is whether GitHub is withholding the merge for a human review:
+	// required, met, not_required, or unknown. Read from the recorded posture,
+	// which is GitHub's own requirement rather than the city's gate set — a
+	// repository can require a review that check_set never declared, and keyed
+	// on the gate set a green pull request nobody has approved reads as settled
+	// and nobody's move.
+	//
+	// A separate field rather than a fourth machine value, because a PR can
+	// need an approval while the cadence is still progressing, and folding the
+	// two would make the axis pick again.
+	PRApproval string `json:"pr_approval"`
+
+	// PROwedSince is when the operator's turn began — the clock [owedFirst]
+	// ranks the queue by. Zero when nothing makes the row owed, and zero when
+	// the only candidate cause reads unknown: an unreadable input belongs in
+	// the coverage sentence, not in a clock reporting the wait as new.
+	//
+	// Not UpdatedAt. A wedged anchor is touched by every reconcile pass, so
+	// ordering by that sorts the most neglected rows last.
+	PROwedSince time.Time `json:"pr_owed_since,omitzero"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

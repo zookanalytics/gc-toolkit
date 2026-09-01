@@ -419,6 +419,128 @@ has "$out" "head moved during the freshness probe (fetched 'sha-moved', validate
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 export STUB_TOPLEVEL="" STUB_FETCHED_HEAD=""
 
+# --- the machine axis (lifecycle/lifecycle.toml [machine_axis]) ------------------
+# Every hold above already decides what the cadence can do next and spends the
+# answer on a log line. These assert that the answer is kept, so a reader learns
+# whether an anchor is moving without re-implementing these predicates.
+machine() { printf '%s' "$(meta "$1" pr.machine)"; }
+pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
+
+echo "# machine axis: a standing veto is a wedge only once the round cap is spent"
+# The live shape of the seventh wedged anchor: gates green at the live head, a
+# non-city CHANGES_REQUESTED standing, and the signoff round cap spent, so
+# nothing will file further rework and nothing reads the review to decide
+# whether it was answered.
+store "[$(anchor V1 80),
+        {\"id\":\"rw-v1a\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-a\"}},
+        {\"id\":\"rw-v1b\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-b\"}},
+        {\"id\":\"rw-v1c\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-c\"}}]"
+printf 'rw-v1a|blocks|V1\nrw-v1b|blocks|V1\nrw-v1c|blocks|V1\n' > "$STUB_DEPS"
+printf '%s' "$(prview 80 OPEN CLEAN)" > "$GH_DIR/pr_view_80.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_80.json"
+out=$("$SUT" 2>&1)
+has "$out" "standing CHANGES_REQUESTED" "the veto still holds"
+has "$out" "rework rounds 3/3" "…and the pass names the round count it decided on"
+eq "$(pinned V1)" "wedged-veto@sha-80" "a veto past the cap records the veto wedge"
+case "$(machine V1)" in
+  *@*@20[0-9][0-9]-*Z) ok "…dated at the turn it began" ;;
+  *) bad "no @<since> component: '$(machine V1)'" ;;
+esac
+
+echo "# …and under the cap it is a hold something will still answer"
+store "[$(anchor V2 81),
+        {\"id\":\"rw-v2a\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"source_review_bead\":\"rev-a\"}}]"
+printf 'rw-v2a|blocks|V2\n' > "$STUB_DEPS"
+printf '%s' "$(prview 81 OPEN CLEAN)" > "$GH_DIR/pr_view_81.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_81.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned V2)" "progressing@sha-81" "a veto under the cap is progressing — signoff can still file rework"
+
+echo "# the cap a veto is measured against is signoff's, floor and all"
+# signoff.sh counts rework rounds since the operator's last feedback: the rounds
+# filed before it are a floor it subtracts, because they answered a review that
+# feedback had not yet given. A veto weighed against the raw total wedges an
+# anchor whose next verdict would file another round.
+kid() { printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"source_review_bead":"%s"}}' "$1" "$2"; }
+store "[$(anchor V8 87 ',"signoff_round_floor":"3@batch-1","signoff_rounds_reset":"batch-1"'),
+        $(kid rw-v8a rev-a), $(kid rw-v8b rev-b), $(kid rw-v8c rev-c), $(kid rw-v8d rev-d)]"
+printf 'rw-v8a|blocks|V8\nrw-v8b|blocks|V8\nrw-v8c|blocks|V8\nrw-v8d|blocks|V8\n' > "$STUB_DEPS"
+printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_87.json"
+out=$("$SUT" 2>&1)
+has "$out" "rework rounds 1/3" "the rounds a floor retired are not counted against the cap"
+eq "$(pinned V8)" "progressing@sha-87" "…so a veto signoff will answer again is progressing, not a wedge"
+
+echo "# …and feedback signoff has not answered yet retires every round so far"
+# pr-facts.sh records the batch the moment it routes the feedback; the floor is
+# written by the verdict after it. Between the two the anchor carries rounds the
+# cap no longer counts and a floor that predates them.
+store "[$(anchor V9 88 ',"signoff_round_floor":"0@batch-1","signoff_rounds_reset":"batch-2"'),
+        $(kid rw-v9a rev-a), $(kid rw-v9b rev-b), $(kid rw-v9c rev-c)]"
+printf 'rw-v9a|blocks|V9\nrw-v9b|blocks|V9\nrw-v9c|blocks|V9\n' > "$STUB_DEPS"
+printf '%s' "$(prview 88 OPEN CLEAN)" > "$GH_DIR/pr_view_88.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_88.json"
+out=$("$SUT" 2>&1)
+has "$out" "rework rounds 0/3" "a batch no verdict has answered retires the rounds filed before it"
+eq "$(pinned V9)" "progressing@sha-88" "…and the anchor reads as progressing until the cap is spent again"
+eq "$(meta V9 signoff_round_floor)" "0@batch-1" "the floor is signoff's stamp; this pass only reads it"
+
+echo "# …and the cap still trips on the rounds that answer the feedback"
+store "[$(anchor V10 89 ',"signoff_round_floor":"3@batch-1","signoff_rounds_reset":"batch-1"'),
+        $(kid rw-v10a rev-a), $(kid rw-v10b rev-b), $(kid rw-v10c rev-c),
+        $(kid rw-v10d rev-d), $(kid rw-v10e rev-e), $(kid rw-v10f rev-f)]"
+printf 'rw-v10a|blocks|V10\nrw-v10b|blocks|V10\nrw-v10c|blocks|V10\nrw-v10d|blocks|V10\nrw-v10e|blocks|V10\nrw-v10f|blocks|V10\n' > "$STUB_DEPS"
+printf '%s' "$(prview 89 OPEN CLEAN)" > "$GH_DIR/pr_view_89.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_89.json"
+out=$("$SUT" 2>&1)
+has "$out" "rework rounds 3/3" "rounds above the floor spend the cap"
+eq "$(pinned V10)" "wedged-veto@sha-89" "…and a veto nothing will answer is the veto wedge"
+
+echo "# a gate the head moved past is progressing; the cap's exception is the wedge"
+store "[$(anchor V3 82 ',"check.codex":"green@sha-STALE"'),
+        $(anchor V4 83 ',"check.codex":"exception@sha-83","gc.routed_to":"human"')]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
+printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
+echo '[]' > "$GH_DIR/reviews_82.json"
+echo '[]' > "$GH_DIR/reviews_83.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned V3)" "progressing@sha-82" "a marker the head moved past is a gate a review is due to raise"
+eq "$(pinned V4)" "wedged-exception@sha-83" "exception@<live head> is the convergence cap's wedge"
+
+echo "# gates green and waiting on a person: settled, not wedged"
+store "[$(anchor V5 84 ',"check_set":"codex,approval","check.codex":"green@sha-84"')]"
+printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
+echo '[]' > "$GH_DIR/reviews_84.json"
+out=$("$SUT" 2>&1)
+has "$out" "no external APPROVED review" "the approval hold fires"
+eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
+
+echo "# recording a verdict moves no route"
+store "[$(anchor V8 87 ',"check.codex":"exception@sha-87","gc.routed_to":"human"')]"
+: > "$STUB_DEPS"
+printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
+echo '[]' > "$GH_DIR/reviews_87.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned V8)" "wedged-exception@sha-87" "the verdict is recorded"
+eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the park route the cap gave it"
+
+echo "# an open blocker is progressing only when a POOL is behind it"
+store "[$(anchor V6 85),
+        {\"id\":\"rw-v6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\"}},
+        $(anchor V7 86),
+        {\"id\":\"dm-v7\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"human\"}}]"
+printf 'rw-v6|blocks|V6\ndm-v7|blocks|V7\n' > "$STUB_DEPS"
+printf '%s' "$(prview 85 OPEN CLEAN)" > "$GH_DIR/pr_view_85.json"
+printf '%s' "$(prview 86 OPEN CLEAN)" > "$GH_DIR/pr_view_86.json"
+echo '[]' > "$GH_DIR/reviews_85.json"
+echo '[]' > "$GH_DIR/reviews_86.json"
+out=$("$SUT" 2>&1)
+eq "$(pinned V6)" "progressing@sha-85" "a pool-routed rework child is an actor that will act"
+# The demand bead that makes an anchor `asking` blocks it the same way and has
+# no automated actor behind it, so it must not read as the machine working.
+eq "$(machine V7)" "<absent>" "a demand bead blocking the anchor is not the machine progressing"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

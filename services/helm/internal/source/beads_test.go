@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -364,9 +365,20 @@ type fakeGC struct {
 	members  map[string]string // convoy id -> single tracked member
 	err      error             // when set, every call fails with it
 	memberN  int               // ConvoyMember call count
+	// sessionsN and convoysN complete the tally. Together with memberN they are
+	// every external command a gather runs, which is what lets a test assert
+	// the cost of the board rather than only its contents.
+	sessionsN int
+	convoysN  int
 }
 
+// externalCalls is every subprocess this gather made. The gather's whole
+// external surface is this interface: the rest is the bead store, opened
+// in-process.
+func (f *fakeGC) externalCalls() int { return f.sessionsN + f.convoysN + f.memberN }
+
 func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
+	f.sessionsN++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -374,6 +386,7 @@ func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 }
 
 func (f *fakeGC) Convoys(context.Context) ([]convoyRow, error) {
+	f.convoysN++
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -1790,5 +1803,182 @@ func TestDoneSince(t *testing.T) {
 				t.Errorf("since = %s, want %s", since, now.Add(-c.want))
 			}
 		})
+	}
+}
+
+// TestMergeAnchorsAreGathered is the PR round-trip's gather (specs/tk-q0ml23).
+//
+// `doctor/check-one-anchor-per-pr` asserts one open gating anchor per pull
+// request, so the anchor already IS the PR's row. A merge anchor is otherwise
+// an ordinary task or bug: `merge_result` is the only marker that tells it from
+// the rest of the store, and a `progressing` or `settled` anchor carries no
+// human route for any other gather kind to select on.
+//
+// Keyed on merge_result PRESENCE, never on pr_number: an anchor that wedges at
+// pre_open_gate has no pull request open, so a number-keyed query would omit
+// the bulk of the condition.
+func mergeStore() *fakeStore {
+	return &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"task": {
+				issue("tk-pre", "wedged before the PR opened", "task", 1, testNow.Add(-3*24*time.Hour),
+					`{"merge_result":"pre_open_gate","branch":"polecat/tk-pre","gc.routed_to":"human","pr.machine":"wedged-exception@aaaa@2026-08-28T04:05:06Z"}`),
+				issue("tk-open", "an ordinary open PR", "task", 2, testNow,
+					`{"merge_result":"pull_request","pr_number":"512","branch":"polecat/tk-open"}`),
+				issue("tk-quiet", "no merge_result at all", "task", 2, testNow, `{"branch":"polecat/tk-quiet"}`),
+			},
+		},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-open": {
+				withDepType(child("tk-rev", "open", testNow,
+					`{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","anchor_bead":"tk-open"}`), "blocks"),
+				withDepType(child("tk-dem", "open", testNow, `{"gc.routed_to":"human"}`), "blocks"),
+				// Not a `blocks` edge: it holds nothing and must not be read as
+				// an actor or as a demand.
+				withDepType(child("tk-rel", "open", testNow, `{"gc.routed_to":"gc-toolkit/x"}`), "related"),
+			},
+		},
+	}
+}
+
+func TestMergeAnchorsAreGathered(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": mergeStore()})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	kinds := map[string][]string{}
+	for _, a := range res.Anchors {
+		kinds[a.ID] = append(kinds[a.ID], a.Kind)
+	}
+	// A wedged anchor carries BOTH markers and gathers twice, exactly as a
+	// human+parked bead does. `human` comes FIRST so BuildBoard's id-dedup —
+	// which keeps the first at equal rank — leaves it a human row rather than
+	// letting the kind flip between passes.
+	if got := kinds["tk-pre"]; len(got) != 2 || got[0] != "human" || got[1] != "merge" {
+		t.Errorf("tk-pre kinds = %v, want [human merge] in that order", got)
+	}
+	if got := kinds["tk-open"]; len(got) != 1 || got[0] != "merge" {
+		t.Errorf("tk-open kinds = %v, want [merge] — a detached anchor has no route to gather it", got)
+	}
+	if got := kinds["tk-quiet"]; got != nil {
+		t.Errorf("a bead with no merge_result is not a merge anchor: %v", got)
+	}
+
+	i, ok := findAnchor(res, "tk-open")
+	if !ok {
+		t.Fatal("merge anchor missing")
+	}
+	open := res.Anchors[i]
+	if got := open.Metadata["pr_number"]; got != "512" {
+		t.Errorf("the PR identity rides on the anchor: %v", open.Metadata)
+	}
+
+	// The blockers carry what the two axes discriminate on. The ROUTE is what
+	// separates a review or rework child, which a pool will claim, from the
+	// demand bead that makes the anchor `asking` — and the ids alone, which is
+	// all WaitingOn carries, cannot answer either question.
+	if len(open.Blockers) != 2 {
+		t.Fatalf("blockers = %+v, want the two `blocks` edges only", open.Blockers)
+	}
+	byID := map[string]board.Blocker{}
+	for _, b := range open.Blockers {
+		byID[b.ID] = b
+	}
+	if got := byID["tk-rev"].RoutedTo; got != "gc-toolkit/gc-toolkit.polecat-codex" {
+		t.Errorf("the pool route must ride on the blocker: %q", got)
+	}
+	if got := byID["tk-dem"].RoutedTo; got != "human" {
+		t.Errorf("the demand's route must ride on it too: %q", got)
+	}
+	if byID["tk-rev"].Status != "open" || byID["tk-dem"].Status != "open" {
+		t.Errorf("blocker statuses: %+v", open.Blockers)
+	}
+	// Same read, not a second one: the id slices still come out of it.
+	if len(open.WaitingOn) != 2 || open.WaitingUnknown {
+		t.Errorf("waiting_on = %v (unknown=%v) — the blockers and the ids are one query",
+			open.WaitingOn, open.WaitingUnknown)
+	}
+}
+
+// TestMergeAnchorUnreadableEdgesStayUnknown. An edge set that could not be read
+// is not an anchor with no blockers: it looks identical, and the PR axes would
+// silently report "nothing is holding this" for a row whose demand bead the
+// store simply failed to return.
+func TestMergeAnchorUnreadableEdgesStayUnknown(t *testing.T) {
+	st := mergeStore()
+	st.failDeps = map[string]error{"tk-open": errors.New("dolt timeout")}
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	i, ok := findAnchor(res, "tk-open")
+	if !ok {
+		t.Fatal("merge anchor missing")
+	}
+	if !res.Anchors[i].WaitingUnknown {
+		t.Error("an unreadable edge set must say so rather than read as no blockers")
+	}
+	if len(res.Anchors[i].Blockers) != 0 {
+		t.Errorf("nothing was read, so nothing is reported: %+v", res.Anchors[i].Blockers)
+	}
+	if !res.Partial {
+		t.Error("the gather is degraded and the board has to say so out loud")
+	}
+}
+
+// TestPRRowsCostNoCallPerPullRequest pins surface.md's cost argument, which is
+// an acceptance criterion rather than an aspiration.
+//
+// Reading the conversation from GitHub for the fourteen pull requests open when
+// the surface was designed took about twenty seconds against a 45-second cache
+// TTL, so a cold render would spend half a cache generation inside `gh`. Worse,
+// a single `gh pr list` reported mergeStateStatus=UNKNOWN for nine of those
+// fourteen, because GitHub computes mergeability lazily — a surface deriving its
+// state from that field would render two thirds of its rows unknown on a cold
+// read and change its answer on the next one with nothing having happened.
+//
+// So the rows render from the bead, and the number of subprocesses a gather runs
+// cannot grow with the number of pull requests. The gather's whole external
+// surface is the gcClient; everything else is the store, opened in-process.
+func TestPRRowsCostNoCallPerPullRequest(t *testing.T) {
+	storeWith := func(n int) *fakeStore {
+		anchors := make([]*beads.Issue, 0, n)
+		for i := range n {
+			id := fmt.Sprintf("tk-pr%02d", i)
+			anchors = append(anchors, issue(id, "an open PR", "task", 2, testNow,
+				fmt.Sprintf(`{"merge_result":"pull_request","pr_number":"%d","branch":"polecat/%s"}`, 500+i, id)))
+		}
+		return &fakeStore{issues: map[string][]*beads.Issue{"task": anchors}}
+	}
+
+	gather := func(n int) (anchors, calls int) {
+		t.Helper()
+		gc := &fakeGC{}
+		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": storeWith(n)},
+			withGCClient(gc))
+		res, err := src.Gather(context.Background())
+		if err != nil {
+			t.Fatalf("Gather(%d): %v", n, err)
+		}
+		return len(res.Anchors), gc.externalCalls()
+	}
+
+	oneAnchors, oneCalls := gather(1)
+	manyAnchors, manyCalls := gather(25)
+
+	if oneAnchors != 1 || manyAnchors != 25 {
+		t.Fatalf("fixture no longer scales the rows: got %d and %d", oneAnchors, manyAnchors)
+	}
+	if manyCalls != oneCalls {
+		t.Errorf("the gather spent %d external calls on 25 pull requests and %d on one — "+
+			"a per-PR call is exactly what the bead is read to avoid", manyCalls, oneCalls)
 	}
 }

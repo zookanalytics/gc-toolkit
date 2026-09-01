@@ -140,6 +140,69 @@ export interface Tile {
   frontier: string;
   needs: string;
   rank_score: number;
+
+  /**
+   * The PR round-trip, as two independent axes rather than one enum. They move
+   * independently and are often true at once — an anchor can carry a review the
+   * cadence dispatched AND an unanswered comment from the operator — so one
+   * field would have to pick, and either pick hides the other.
+   *
+   * A row is a MERGE ANCHOR's, not a pull request's. An anchor at
+   * `pre_open_gate` has a branch, a gate set and a machine axis with no PR
+   * number yet, so `pr_number` is a field on the row and never the selector;
+   * it is `0` until the PR opens. Every field is `''` (or `0`) on a row that is
+   * not a merge anchor at all, which is a different answer from `'unknown'`.
+   */
+  pr_number: number;
+  /** The operator's way into GitHub, which is where the conversation stays. */
+  pr_url: string;
+  /**
+   * The branch the anchor's work sits on — the row's identity for the whole
+   * span before a number exists, which is where most wedged anchors are. A
+   * field of its own rather than a read out of `frontier`, which is prose and
+   * is not rendered on every table. `''` when the anchor records no branch.
+   */
+  pr_branch: string;
+  /**
+   * What the merge cadence can do next: `'progressing'`, `'settled'`,
+   * `'wedged-exception'`, `'wedged-veto'`, or `'unknown'`.
+   *
+   * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
+   * same choice `waiting_unknown` makes on the gather side. A missing key means
+   * the cadence has not recorded a position yet, which is a fact about the city
+   * rather than an all-clear, and it counts against the section's coverage.
+   */
+  pr_machine: string;
+  /**
+   * Where the exchange with the operator stands. Reads `'unknown'` on every row
+   * today: its other values all resolve to acknowledgement watermarks nothing
+   * records yet, and every failed guess resolves to silence — the one answer
+   * that tells the operator to stop looking. It ships now so this contract does
+   * not change shape when the watermarks land.
+   */
+  pr_conversation: string;
+  /**
+   * Whether GitHub is withholding the merge for a human review: `'required'`,
+   * `'met'`, `'not_required'`, or `'unknown'`. Read from the recorded review
+   * decision, which is GitHub's own requirement rather than the city's gate
+   * set — a repository can require a review `check_set` never declared.
+   *
+   * `'required'` covers a standing `changes_requested` too, so a pull request
+   * GitHub is blocking never renders as one it will let through. That row is
+   * not `owed` by the operator, though: answering a rejecting review is the
+   * city's move.
+   */
+  pr_approval: string;
+  /**
+   * RFC 3339. When the operator's turn began — the clock the owed partition is
+   * ranked by, taken as the EARLIEST instant among the causes the row currently
+   * holds. Omitted (Go `omitzero`) when nothing makes the row owed, and omitted
+   * when the only candidate cause reads `'unknown'`: an unreadable input
+   * belongs in the coverage sentence, not in a clock reporting the wait as new.
+   *
+   * Not `updated_at`, which a wedged anchor's every reconcile pass touches.
+   */
+  pr_owed_since?: string;
 }
 
 /**

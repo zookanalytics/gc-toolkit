@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -541,7 +542,8 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // frontier is the one-line human summary. Display-only; it does not feed
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
-func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool, closedDays int) string {
+func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled bool,
+	closedDays int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	parked := len(r.parkedHeads)
@@ -569,6 +571,23 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "ruled — takeaway recorded"
 	case !isRuled && a.Source == "decision":
 		return "human-gated decision"
+	// A merge anchor names the pull request instead, and OUTRANKS the
+	// human-routed phrase below, which is not a competing fact but a less
+	// specific version of the same one: a wedged anchor is routed to a person
+	// precisely because no agent will take it, and the operator still has to
+	// know WHICH pull request that is.
+	//
+	// Only while the anchor names one. An anchor at a human state can carry
+	// merge_result with no branch and no number, and there the naming is not
+	// more specific than the phrase below but emptier than it.
+	//
+	// And only over a phrase that says WHO holds the row. The identity is the
+	// specific version of "routed to a person"; it is not a version of
+	// "a blocker landed", which is news the identity does not carry, so the
+	// disposition phrase further down keeps its row. NEEDS already orders the
+	// two that way, ahead of everything.
+	case isMergeAnchor(a) && !dispDue && prIdentity(a) != "":
+		return prFrontier(a, owedSince, now)
 	// The marker, not the kind, for the reason [severity] gives: a bead's
 	// `human` and `parked` rows are one bead and must not describe it two ways.
 	case !isRuled && humanGated(a):
@@ -621,7 +640,8 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool) string {
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool,
+	machine, approval string, ask *Blocker, prIsOwed bool) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; what it wants now is to
 	// stop being on the board, and only a human can decide that. The takeaway
@@ -664,6 +684,20 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "unowned — assign an owning bead"
 	case a.Source == "decision":
 		return "operator decision"
+	// A merge anchor whose POSITION is what puts it in the queue answers with
+	// that position, and outranks the human-routed phrase below: a wedged or
+	// asked-about anchor is routed to a person precisely because nothing else
+	// will move it, so "no question recorded" would deny the one question the
+	// row is carrying.
+	//
+	// Only then. A person also routes an anchor the cadence is happily working
+	// — for a reason the machine axis knows nothing about — and there the
+	// position is not the ask but a denial of it: a row in the operator's own
+	// queue reading "in the merge cadence" says an agent has it. The empty
+	// takeaway under a hand-set route is the finding on those rows, and the
+	// phrase below is the one that names it.
+	case isMergeAnchor(a) && prIsOwed:
+		return prNeeds(machine, approval, ask)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -672,6 +706,13 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return "routed to you — no question recorded"
 	case a.Source == "parked" && r.mTotal == 0:
 		return "parked for you — no question recorded"
+	// Nobody is owed this one, so it reports where the cadence has it. Ahead of
+	// the roll-up phrases below because a merge anchor does not decompose: its
+	// children are the rework and review beads the cadence files, and
+	// "no children — decompose or assign" would ask for work that is not the
+	// row's to do.
+	case isMergeAnchor(a):
+		return prNeeds(machine, approval, ask)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -708,6 +749,437 @@ func agePhrase(days int) string {
 	return fmt.Sprintf("%dd ago", days)
 }
 
+// --- the PR round-trip (specs/tk-q0ml23) --------------------------------------
+
+// The two axes and the approval clause, as the wire spells them. The machine
+// values are lifecycle/lifecycle.toml's [machine_axis].machines; lifecycle.test.sh
+// fails on drift between the two lists.
+const (
+	MachineProgressing     = "progressing"
+	MachineSettled         = "settled"
+	MachineWedgedException = "wedged-exception"
+	MachineWedgedVeto      = "wedged-veto"
+
+	// AxisUnknown is a RENDERED value on both axes, never a fallback to the
+	// quiet end. An unreadable axis and a clear one are not interchangeable,
+	// and only the gather can tell them apart — the same rule
+	// [Anchor.WaitingUnknown] already applies to an unreadable edge set.
+	AxisUnknown = "unknown"
+
+	// ConversationUnknown is what every row reads today. The other values all
+	// resolve to acknowledgement watermarks that do not exist yet, and a guess
+	// resolves to silence, which is the one answer that tells the operator to
+	// stop looking.
+	ConversationUnknown = AxisUnknown
+
+	ApprovalRequired    = "required"
+	ApprovalMet         = "met"
+	ApprovalNotRequired = "not_required"
+)
+
+// The anchor metadata the axes are read from.
+const (
+	mdMergeResult = "merge_result"
+	mdPRMachine   = "pr.machine"
+	mdPRPosture   = "pr_posture"
+	mdPRNumber    = "pr_number"
+	mdPRURL       = "pr_url"
+	mdBranch      = "branch"
+
+	// The posture vocabulary pr-facts.sh records, mirroring
+	// lifecycle/lifecycle.toml [posture].postures.
+	postureChangesRequested = "changes_requested"
+	postureCommented        = "commented"
+	postureApproved         = "approved"
+	postureReviewRequired   = "review_required"
+	postureNone             = "none"
+)
+
+// isMergeAnchor reports whether this row is a merge anchor at all. Only those
+// carry the PR axes; every other row leaves them EMPTY rather than `unknown`,
+// because "not a pull request" and "a pull request whose position could not be
+// read" are different answers and only the second counts against coverage.
+func isMergeAnchor(a Anchor) bool { return a.Metadata[mdMergeResult] != "" }
+
+// splitDated reads the <value>@<oid>@<since> shape lifecycle.sh writes. The
+// instant lives INSIDE the value rather than in a key beside it, so a reader
+// that trusts the value has already trusted the instant; a value in any other
+// shape yields ok=false and is treated as unread.
+func splitDated(v string) (value, oid string, since time.Time, ok bool) {
+	parts := strings.Split(v, "@")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return "", "", time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, parts[2])
+	if err != nil {
+		return "", "", time.Time{}, false
+	}
+	return parts[0], parts[1], ts, true
+}
+
+func isWedge(v string) bool {
+	return v == MachineWedgedException || v == MachineWedgedVeto
+}
+
+func knownMachine(v string) bool {
+	return v == MachineProgressing || v == MachineSettled || isWedge(v)
+}
+
+// poolRouted reports whether an open blocker has an automated actor behind it.
+//
+// The ROUTE is the discriminator, and both halves of that matter. Keying on
+// `anchor_bead` would be too narrow: only review children carry it, while the
+// rework children that hold an anchor between rounds carry `source_review_bead`
+// or nothing. Reading every open blocker would be too wide the other way: an
+// anchor also blocks on ordinary prerequisites and on the demand bead that
+// makes it `asking`, and no pool will claim either. signoff.sh and pr-facts.sh
+// both stamp the route on the child and read it back before reporting it
+// dispatched, so it is exactly the beads a pool can take.
+func poolRouted(b Blocker) bool {
+	return b.Status != "closed" && b.RoutedTo != "" && b.RoutedTo != routedHuman
+}
+
+// demand reports whether an open blocker is something a PERSON owes.
+//
+// Read with the board's own vocabulary: a ruling only the operator can give is
+// a `decision`, and anything else a person holds carries the route that says
+// so. Either way no automated actor will close it, which is what makes the
+// anchor `asking` rather than busy.
+//
+// The route clause is deliberately wider than the `decision` type alone. An
+// anchor parked for the operator is a person's to answer whether or not that
+// wait has been expressed as a decision bead, so narrowing this to the type
+// would hide every wait that has not been. The row names what it is waiting
+// on, so a reader can see that two rows in the queue share one cause.
+//
+// A visit never reaches here: escalate.sh attaches one with a `tracks` edge, so
+// it is not a blocker at all.
+func demand(b Blocker) bool {
+	return b.Status != "closed" &&
+		(b.IssueType == "decision" || b.RoutedTo == routedHuman)
+}
+
+// prMachine is what the merge cadence can do with this anchor on its next pass.
+//
+// Read off the bead, with ONE live upgrade. A recorded wedge always stands: it
+// is the stronger statement, and an operator who loses sight of a wedge has
+// lost the row this surface exists to show. Below that, an open pool-routed
+// blocker means an actor is due to act whatever the last gate pass recorded —
+// that half of the derivation is a bead read the gather already makes, while
+// the marker-versus-live-head half needs a `git ls-remote` the render path must
+// not do, which is why the cadence records it.
+func prMachine(a Anchor, blockers []Blocker) string {
+	if !isMergeAnchor(a) {
+		return ""
+	}
+	v, _, _, ok := splitDated(a.Metadata[mdPRMachine])
+	if ok && isWedge(v) {
+		return v
+	}
+	for _, b := range blockers {
+		if poolRouted(b) {
+			return MachineProgressing
+		}
+	}
+	if ok && knownMachine(v) {
+		return v
+	}
+	return AxisUnknown
+}
+
+// prApproval answers one question: is GitHub withholding the merge for a human
+// review? It reads the posture pr-facts.sh records off the review decision it
+// already fetches, and the mapping is TOTAL over the posture's value set,
+// because a partial one leaves the rest to be invented.
+//
+//	review_required, changes_requested -> required
+//	approved                           -> met
+//	commented, none                    -> not_required
+//
+// `not_required` has to be reachable from an ordinary row: most pull requests
+// carry no protection rule and no review, so if `none` fell through to unknown
+// the field would report a gap that is not there and hold the coverage sentence
+// open forever. `changes_requested` is `required` because the requirement
+// stands and is unmet, and a pull request GitHub is blocking must never render
+// as one it will let through.
+//
+// The reference head is the one pr.machine was last recorded at — the newest
+// head the merge cadence actually resolved. A posture pinned to any other head
+// was read before the cadence moved on and says nothing about the current one,
+// which is the "pinned to a head that is no longer live" case. The board learns
+// the live head this way rather than by asking GitHub, which the render path
+// must not do.
+func prApproval(a Anchor) string {
+	if !isMergeAnchor(a) {
+		return ""
+	}
+	posture, postureHead, _, postureOK := splitDated(a.Metadata[mdPRPosture])
+	_, machineHead, _, machineOK := splitDated(a.Metadata[mdPRMachine])
+	if !postureOK || !machineOK || postureHead != machineHead {
+		return AxisUnknown
+	}
+	switch posture {
+	case postureReviewRequired, postureChangesRequested:
+		return ApprovalRequired
+	case postureApproved:
+		return ApprovalMet
+	case postureCommented, postureNone:
+		return ApprovalNotRequired
+	}
+	return AxisUnknown
+}
+
+// askingDemand is the open demand bead this anchor is waiting on, or nil.
+//
+// `asking` needs no key of its own: it IS the edge, and closing the bead is
+// what ends the state.
+// The OLDEST demand wins, because it is the one whose turn started first and
+// the queue is ordered by how long a row has been owed.
+func askingDemand(blockers []Blocker) *Blocker {
+	var oldest *Blocker
+	for i := range blockers {
+		b := &blockers[i]
+		if !demand(*b) {
+			continue
+		}
+		if oldest == nil || (!b.CreatedAt.IsZero() &&
+			(oldest.CreatedAt.IsZero() || b.CreatedAt.Before(oldest.CreatedAt))) {
+			oldest = b
+		}
+	}
+	return oldest
+}
+
+// prOwed applies the owed rule to a merge anchor, and dates it.
+//
+// A row is owed by the operator when the machine axis is wedged, when the city
+// is asking and waiting on an answer, or when the cadence is done and GitHub is
+// holding the merge for a review nobody has given. A standing
+// `changes_requested` is excluded on purpose: the requirement is unmet, and
+// `pr_approval` says so, but ANSWERING a rejecting review is the city's move.
+// It returns to the operator as `review_required` once the fix moves the head.
+//
+// since is the EARLIEST instant among the causes the row currently holds. A row
+// wedged three days ago and asked about an hour ago has been owed for three
+// days, and the queue ranks it there. No single stage of the cadence evaluates
+// the whole rule, so no single writer could keep one owed-since key honest;
+// each cause is dated instead by the writer that already decides it, and a
+// cause whose input reads unknown contributes no instant at all — an unreadable
+// input belongs in the coverage sentence, not in a clock reporting the wait as
+// new.
+func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) {
+	if !isMergeAnchor(a) {
+		return false, time.Time{}
+	}
+	var since time.Time
+	note := func(t time.Time) {
+		if t.IsZero() {
+			return
+		}
+		if since.IsZero() || t.Before(since) {
+			since = t
+		}
+	}
+	owed := false
+
+	if isWedge(machine) {
+		owed = true
+		// A head move is what releases a wedge, so the instant rides the
+		// head-pinned key that records it.
+		if _, _, at, ok := splitDated(a.Metadata[mdPRMachine]); ok {
+			note(at)
+		}
+	}
+	if ask != nil {
+		owed = true
+		// A demand still holds its question after the branch advances, so it is
+		// read at the bead's own created_at rather than at a head-pinned key.
+		note(ask.CreatedAt)
+	}
+	if machine == MachineSettled && approval == ApprovalRequired {
+		if posture, _, at, ok := splitDated(a.Metadata[mdPRPosture]); ok &&
+			posture != postureChangesRequested {
+			owed = true
+			// A new commit is a new thing to approve, so this one is
+			// head-pinned too.
+			note(at)
+		}
+	}
+	return owed, since
+}
+
+// PRCoverage is what the board could and could not read about the pull requests
+// it holds — the counts the owed section states alongside its store coverage.
+//
+// That section's empty state is a contract: it renders its coverage or it
+// renders the error, never a blank. PR rows add a way for it to go quietly
+// wrong that beads alone did not have, because an axis nothing has recorded
+// looks exactly like an axis with nothing to say.
+type PRCoverage struct {
+	// Rows is every LIVE merge anchor on the board, owed or not. A closed
+	// anchor keeps its axes so the DONE band can render them, but an unread
+	// position on a row nobody will act on is not a gap in what the operator
+	// needs to see.
+	Rows int
+	// MachineUnknown is the rows whose position the merge cadence has not
+	// recorded. A missing key is a fact about the city, not an all-clear.
+	MachineUnknown int
+	// ConversationUnknown is the rows whose exchange with the operator cannot
+	// be read. In this phase that is every row: the values depend on
+	// acknowledgement watermarks nothing records yet.
+	ConversationUnknown int
+	// ApprovalUnanswered is the SETTLED rows whose approval clause could not be
+	// read. Those are the rows where the question "is GitHub holding this for a
+	// human?" is both live and unanswerable, which is exactly the shape that
+	// would otherwise read as nobody's move.
+	ApprovalUnanswered int
+}
+
+// Complete reports whether every PR row on the board had a readable position.
+// [Tile.Owed] is a boolean and cannot carry the third value the axes do, so an
+// unread input has to surface as coverage rather than as a false negative on
+// the row — which is why an empty queue is only an all-clear when this holds.
+func (c PRCoverage) Complete() bool {
+	return c.MachineUnknown == 0 && c.ConversationUnknown == 0 && c.ApprovalUnanswered == 0
+}
+
+// Coverage counts the PR rows across the WHOLE board, not just the queue. The
+// sentence it feeds is printed when the queue is empty, and a row missing from
+// an empty queue is precisely the row that might have belonged in it.
+//
+// Closed rows are the exception, and they have to be, because the queue and
+// this count have to empty together. The gather makes a second pass at closed
+// anchors to fill the DONE band, and those rows carry the same axes as live
+// ones — including the unknowns. [Tile.Owed] already excludes them, so counting
+// them here would withhold the all-clear over rows the queue is right to omit,
+// for as long as the done window holds them.
+func Coverage(tiles []Tile) PRCoverage {
+	var c PRCoverage
+	for _, t := range tiles {
+		if t.PRMachine == "" || !t.ClosedAt.IsZero() {
+			continue // not a merge anchor, or closed: nothing left to cover
+		}
+		c.Rows++
+		if t.PRMachine == AxisUnknown {
+			c.MachineUnknown++
+		}
+		if t.PRConversation == AxisUnknown {
+			c.ConversationUnknown++
+		}
+		if t.PRMachine == MachineSettled && t.PRApproval == AxisUnknown {
+			c.ApprovalUnanswered++
+		}
+	}
+	return c
+}
+
+// prNumber reads the anchor's recorded PR number, 0 before the PR opens.
+func prNumber(a Anchor) int {
+	n, err := strconv.Atoi(strings.TrimSpace(a.Metadata[mdPRNumber]))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// prConversation is where the exchange with the operator stands. Every merge
+// anchor reads `unknown` in this phase: `outstanding`, `covered` and `answered`
+// all resolve to acknowledgement watermarks nothing records yet, and building
+// them before those land means guessing. Every failed guess resolves to
+// "nothing has been said", which is the one answer that tells the operator to
+// stop looking. The field ships now so the wire contract does not change shape
+// when the watermarks do land.
+func prConversation(a Anchor) string {
+	if !isMergeAnchor(a) {
+		return ""
+	}
+	return ConversationUnknown
+}
+
+// prFrontier identifies the pull request and says how long the turn has been
+// running. The queue is ordered by that age and nothing else, so the row has to
+// carry it: an operator scanning a sorted list cannot see the sort key.
+//
+// A row nothing is owed on prints no age. Zero is not "owed since the epoch"
+// and not "owed for no time" — it is the absence of a cause, and inventing a
+// duration for it would report a wait that is not happening.
+func prFrontier(a Anchor, owedSince, now time.Time) string {
+	id := prIdentity(a)
+	if owedSince.IsZero() {
+		return id
+	}
+	return id + " · owed " + humanSince(owedSince, now)
+}
+
+// prIdentity names the pull request: its number once one is open, the branch
+// before that, and the EMPTY string when the anchor records neither. The branch
+// is an ordinary case rather than a fallback, because most wedged anchors have
+// no pull request open at all.
+//
+// The empty string is what keeps [frontier] honest. An anchor at a human state
+// carries merge_result and can carry nothing else, and a row's one summary line
+// is worth more spent on who holds it than on naming an absence.
+func prIdentity(a Anchor) string {
+	if n := prNumber(a); n > 0 {
+		return fmt.Sprintf("PR #%d", n)
+	}
+	return prBranch(a)
+}
+
+// prBranch is the branch half of [prIdentity], on its own so the wire can carry
+// it as data. It is gated on the anchor being a merge anchor for the reason the
+// other axes are: an ordinary work bead carries `branch` too, and a row that is
+// not a pull request's must answer "" rather than name one.
+func prBranch(a Anchor) string {
+	if !isMergeAnchor(a) {
+		return ""
+	}
+	return a.Metadata[mdBranch]
+}
+
+// humanSince is a coarse age for a queue ordered by it. Days once there is a
+// day to report, hours below that, and "just now" below an hour: the queue
+// spans days, and a minute-accurate figure on a three-day wedge is noise
+// pretending to be precision.
+func humanSince(t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Hour:
+		return "just now"
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// prNeeds is a merge anchor's one-glance ask, in the order an operator can act
+// on: a wedge names its shape and its release, a question names itself, an
+// unmet approval names the one thing that would land the row, and a row nothing
+// is owed on says who has it. `unknown` says the cadence has not recorded a
+// position, which is a fact about the city rather than an all-clear.
+func prNeeds(machine, approval string, ask *Blocker) string {
+	switch {
+	case machine == MachineWedgedException:
+		return "wedged: the review cap's exception stands at the live head — only a new commit clears it"
+	case machine == MachineWedgedVeto:
+		return "wedged: a standing CHANGES_REQUESTED with the rework rounds spent"
+	case ask != nil:
+		if t := collapseWS(ask.Title); t != "" {
+			return "asking: " + t
+		}
+		return "asking — waiting on an answer"
+	case machine == MachineSettled && approval == ApprovalRequired:
+		return "green, waiting on your review"
+	case machine == MachineProgressing:
+		return "in the merge cadence"
+	case machine == MachineSettled:
+		return "green — waiting on the merge pass"
+	default:
+		return "position unknown — the merge cadence has recorded none"
+	}
+}
+
 // nilIfEmpty renders an absent string field as a JSON null rather than "". The
 // takeaway triple is always-present-but-nullable in the bash contract, and a
 // consumer tells "no takeaway" from "field gone" by the null.
@@ -734,6 +1206,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	sev := severity(a, r, held, stale, dispDue, isRuled)
 	w := weight(r, a.Priority, xrefs)
 
+	machine := prMachine(a, a.Blockers)
+	approval := prApproval(a)
+	ask := askingDemand(a.Blockers)
+	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
+
 	// progress_mismatch: the convoy's own closed/total claim disagrees with the
 	// membership actually rolled up. Only meaningful where the source supplied
 	// a progress object.
@@ -756,8 +1233,9 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		// A CLOSED anchor is never owed, whatever markers it still carries. The
 		// queue is ordered by how long a demand has waited, so admitting one
 		// would hoist it above every live demand — the exact opposite of the
-		// terminal band [rankScore] floors it into.
-		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled) || dispDue),
+		// terminal band [rankScore] floors it into. It gates every cause,
+		// the merge anchor's included.
+		Owed: a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled) || dispDue || prIsOwed),
 
 		Weight: w,
 		Held:   held,
@@ -785,7 +1263,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		Stranded: r.mTotal > 0 && r.idle() > 0 && len(r.liveHeads) == 0 && !held &&
 			!(humanGated(a) && !isRuled),
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
-			a.Source != "human" && a.Source != "parked",
+			a.Source != "human" && a.Source != "parked" && a.Source != "merge",
 		Complete:         r.mTotal > 0 && r.open == 0,
 		ProgressMismatch: mismatch,
 
@@ -806,9 +1284,17 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, closedDays),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, closedDays, owedSince, now),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed),
 		RankScore: rankScore(sev, w, stale, closedDays),
+
+		PRNumber:       prNumber(a),
+		PRURL:          a.Metadata[mdPRURL],
+		PRBranch:       prBranch(a),
+		PRMachine:      machine,
+		PRConversation: prConversation(a),
+		PRApproval:     approval,
+		PROwedSince:    owedSince,
 	}
 }
 
@@ -975,10 +1461,20 @@ func owedFirst(a, b Tile) bool {
 	return a.ID < b.ID
 }
 
-// owedSince is when the row started asking. gc.takeaway_at is the moment a
-// sitting authored what is owed, which is the true start of the wait;
-// updated_at only bounds it from below, and neither may be readable.
+// owedSince is when the row started asking, in decreasing order of how
+// directly the stamp dates the TURN.
+//
+// PROwedSince first, and on a merge anchor it is the only honest answer:
+// gc.takeaway_at is absent there, and updated_at is touched by every reconcile
+// pass, so falling through to it would file the three-day wedge behind the one
+// raised an hour ago — the exact inversion the queue exists to prevent.
+//
+// Then gc.takeaway_at, the moment a sitting authored what is owed. updated_at
+// only bounds the wait from below, and none of the three may be readable.
 func owedSince(t Tile) time.Time {
+	if !t.PROwedSince.IsZero() {
+		return t.PROwedSince
+	}
 	if t.TakeawayAt != nil {
 		if ts, err := time.Parse(time.RFC3339, *t.TakeawayAt); err == nil {
 			return ts

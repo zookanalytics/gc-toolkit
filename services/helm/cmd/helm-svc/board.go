@@ -350,7 +350,13 @@ func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, 
 		// Coverage, not a bare blank line. "Nothing is owed" is a claim about
 		// every store in the city, so the sentence carries what it was checked
 		// against; a partial gather never reaches here (runBoard exits 3).
-		fmt.Fprintf(w, "Nothing is owed by you. %d rigs checked, all reachable.\n", rigCount)
+		//
+		// The PR rows extend that contract rather than adding a second one. The
+		// all-clear is withheld while any pull request's position is unreadable,
+		// because Tile.Owed is a boolean and cannot carry the third value the
+		// axes do — an unread input has to surface here rather than as a false
+		// negative on a row that never appears.
+		fmt.Fprint(w, renderCoverage(board.Coverage(b.Tiles), rigCount))
 		renderSittings(w, b.Sittings, now)
 		fmt.Fprint(w, "\nhelm-svc board --all (prefix+B in tmux) for the city overview.\n")
 		return
@@ -416,6 +422,35 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 
 // renderRows writes the table proper — the sized header and one line per tile.
 // Shared by both views so a column can never mean two things.
+// renderCoverage is the empty queue's sentence: what the emptiness was checked
+// against, and what it could not check.
+//
+// The all-clear and the gap are two different claims and never share a line. A
+// board that says "nothing is owed" while a pull request's position is unread
+// has told the operator to stop looking on the strength of a question it did
+// not ask.
+func renderCoverage(c board.PRCoverage, rigCount int) string {
+	if c.Rows == 0 {
+		return fmt.Sprintf("Nothing is owed by you. %d rigs checked, all reachable; no open merge anchors.\n", rigCount)
+	}
+	if c.Complete() {
+		return fmt.Sprintf("Nothing is owed by you. %d rigs checked, all reachable; %d pull requests read, all with a position.\n",
+			rigCount, c.Rows)
+	}
+	var gaps []string
+	if c.MachineUnknown > 0 {
+		gaps = append(gaps, fmt.Sprintf("%d of %d have no position recorded by the merge cadence", c.MachineUnknown, c.Rows))
+	}
+	if c.ConversationUnknown > 0 {
+		gaps = append(gaps, fmt.Sprintf("%d cannot say where the conversation stands (the acknowledgement watermarks are not built yet)", c.ConversationUnknown))
+	}
+	if c.ApprovalUnanswered > 0 {
+		gaps = append(gaps, fmt.Sprintf("%d are green with no readable answer on whether GitHub wants a review", c.ApprovalUnanswered))
+	}
+	return fmt.Sprintf("Nothing readable is owed by you — but this is NOT an all-clear. %d rigs checked, all reachable; of %d pull requests, %s.\n",
+		rigCount, c.Rows, strings.Join(gaps, "; "))
+}
+
 func renderRows(w io.Writer, shown []board.Tile) {
 	// The two identifier columns are sized to what this board actually holds;
 	// every other column carries prose, where a fixed width and a trimmed tail
