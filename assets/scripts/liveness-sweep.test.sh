@@ -137,6 +137,9 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-realconvoy","title":"an unowned floating convoy — the orphan to catch","issue_type":"convoy","metadata":{}},
   {"id":"c-titletalk","title":"input convoy for tk-x never closes","issue_type":"bug","metadata":{}},
   {"id":"c-slingtalk","title":"sling-created convoys are never reaped","issue_type":"bug","metadata":{}},
+  {"id":"c-wisp-order","title":"order:liveness-sweep:rig:testrig","issue_type":"task","metadata":{}},
+  {"id":"c-ordertalk","title":"order: wisps outlive the pass that cut them","issue_type":"bug","metadata":{}},
+  {"id":"c-wisp-other","title":"a wisp of some other kind","issue_type":"task","metadata":{}},
   {"id":"c-husk-step-1","title":"load context","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}},
   {"id":"c-husk-step-2","title":"implement","issue_type":"task","metadata":{"gc.root_bead_id":"root-landed"}},
   {"id":"c-live-step","title":"a step of an in-flight workflow","issue_type":"task","metadata":{"gc.root_bead_id":"root-live"}},
@@ -188,7 +191,7 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
 # delta-test survivor assertion, plus the two structural-edge candidates the
 # exec script now folds in: c-parented is gated by its open child, and
 # c-trackslive by its outgoing tracks edge to a live bead).
-EXPECT_SURVIVORS="c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway-empty,c-titletalk"
+EXPECT_SURVIVORS="c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-ordertalk,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway-empty,c-titletalk,c-wisp-other"
 
 echo "── first run: absent baseline → full census filed, baseline advanced ──"
 run_sweep ABSENT
@@ -212,7 +215,7 @@ echo "── each named class drops, each inverse-defect shape stays visible ─
 for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
             c-takeaway c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
-            c-slingconvoy c-synthconvoy c-husk-step-1 c-husk-step-2 \
+            c-slingconvoy c-synthconvoy c-wisp-order c-husk-step-1 c-husk-step-2 \
             c-rootvisit-step c-parented c-trackslive; do
     case ",$EXPECT_SURVIVORS," in
         *",$drop,"*) bad "dropped $drop" "still in the survivor set" ;;
@@ -222,6 +225,7 @@ done
 for keep in c-pr-merged c-pr-closed c-pr-otherrepo c-pr-nourl c-preopen-fixable \
             c-preopen-partial c-preopen-nomarker c-preopen-noset c-preopen-none \
             c-husk-tracked c-live-step c-noconvoy-step c-titletalk c-slingtalk \
+            c-ordertalk c-wisp-other \
             c-realconvoy c-docupdate c-takeaway-empty c-hold-empty; do
     case ",$(cat "$BASELINE_FILE")," in
         *",$keep,"*) ok "kept $keep" ;;
@@ -232,7 +236,7 @@ done
 echo "── the delta splits new from carried; index 0 is a real hit ──"
 PARTIAL="$(printf '%s' "$EXPECT_SURVIVORS" | cut -d, -f2-)"   # all but the FIRST id
 run_sweep "$PARTIAL"
-grep -q "delta: 1 new, 18 carried" <<< "$OUT" \
+grep -q "delta: 1 new, 20 carried" <<< "$OUT" \
     && ok "baseline missing one id → exactly 1 new (and position 0 counts as carried)" \
     || bad "delta split" "$OUT"
 grep -q "c-docupdate" "$ESC_BODIES" && ok "the new one is enumerated" || bad "new enumeration" "$(cat "$ESC_BODIES")"
