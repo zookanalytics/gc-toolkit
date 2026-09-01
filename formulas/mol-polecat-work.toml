@@ -6,8 +6,9 @@ carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, ONE atomic handoff update to the refinery -> close own step
-chain -> drain. NEVER close the work bead (the refinery closes it after a
-verified merge). ALWAYS close your own step beads through
+chain -> drain. NEVER close the work bead: the refinery closes an anchor on a
+verified merge, and closes a rework hand-back landed-on-branch, both from
+merge-push. ALWAYS close your own step beads through
 assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
 own bead, and step-close.sh resolves it from the (assignee, gc.step_ref)
 pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead after a claim.
@@ -19,6 +20,11 @@ metadata.target is where the work LANDS. submit-and-exit resolves the
 landing target once and fails closed; the marked submit-* blocks are
 extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
 after any edit here.
+
+Two distinct BEAD questions, the same way: the bead you claimed is not always
+the bead the branch is gated by. On a rework or rebase child the anchor is a
+separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
+submit-and-exit resolves it once, in step 4c, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
 attempt bounced with the branch intact — resume it per metadata.prepare_mode
@@ -346,12 +352,54 @@ Quote the delimiter as written: an unquoted `<<PRSUMMARY` runs any backticks
 in your prose. Leaving the file empty carries no summary and the PR body
 falls back to the dispatch text.
 
+What the summary describes is the BRANCH, not this pass. On a rework or
+rebase child the PR body publishes the whole branch, so an account of only
+the fix you just made describes something no reviewer is looking at.
+
+**4c. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
+`pr_summary` off the anchor row it enumerates: the open bead that carries a
+`merge_result` for this branch. On fresh work that is the bead you claimed
+and one write serves both. On a rework or rebase child the anchor is a
+DIFFERENT bead, and a summary stamped on the child is never read — the PR
+body falls back to the dispatch text, which was written before the diff
+existed. An anchor in a gating state rests unheld (`lifecycle/lifecycle.toml`
+`detached_states`), so stamping it races no one:
+
+```bash
+# >>> submit-anchor-resolve
+GATING_ANCHOR=""
+if [ -n "${CURRENT_BRANCH:-}" ]; then
+    ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$CURRENT_BRANCH" --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
+    GATING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK_BEAD_ID" '
+        [ .[]? | select(.id != $self)
+          | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
+        | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || GATING_ANCHOR=""
+fi
+if [ -n "$GATING_ANCHOR" ]; then
+    echo "gating anchor: $GATING_ANCHOR (this bead is a child; the summary goes there)"
+else
+    echo "gating anchor: none other on this branch (the claimed bead is the anchor)"
+fi
+# <<< submit-anchor-resolve
+```
+
+The query asks the branch, not the state name: every state that carries a
+`merge_result` is an anchor state, so a new one needs no edit here. An
+unreadable probe resolves to empty and the step behaves as it did before this
+block existed — degraded to the dispatch-text fallback, never stranded.
+
 **5. ONE atomic handoff.** A single `gc bd update` carries the whole
 transition — target, PR summary, notes, refinery assignee, cleared route — so
 no partial handoff can strand the bead between writes. `--append-notes`, never
 `--notes` (which REPLACES and erases the dispatch note). The empty
 `gc.routed_to` is deliberate: the direct assignment IS the handoff, and
 named-session work must not read as pool demand.
+
+The summary is the one field addressed to a bead other than the claimed one.
+When 4c named an anchor, it is stamped there in its own write, before the
+handoff: it is metadata on a bead this session does not hold, and a failure to
+land it costs a good PR body, not the handoff. Everything the refinery reads
+still arrives in the single atomic write below.
 
 ```bash
 # >>> submit-target-consume
@@ -371,7 +419,13 @@ fi
 PR_SUMMARY=""
 if [ -s "${PR_SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$PR_SUMMARY_FILE"); fi
 HANDOFF=(--status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="")
-if [ -n "$PR_SUMMARY" ]; then HANDOFF+=(--set-metadata pr_summary="$PR_SUMMARY"); fi
+if [ -n "$PR_SUMMARY" ]; then
+    if [ -n "${GATING_ANCHOR:-}" ]; then
+        gc bd update "$GATING_ANCHOR" --set-metadata pr_summary="$PR_SUMMARY" || echo "pr_summary did not reach anchor $GATING_ANCHOR; its PR body falls back to the dispatch text"
+    else
+        HANDOFF+=(--set-metadata pr_summary="$PR_SUMMARY")
+    fi
+fi
 gc bd update "$WORK_BEAD_ID" "${HANDOFF[@]}" --append-notes "Implemented: <brief summary>"
 # <<< submit-target-consume
 ```

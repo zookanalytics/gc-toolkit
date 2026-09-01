@@ -6,8 +6,9 @@ carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, ONE atomic handoff update to the refinery -> close own step
-chain -> drain. NEVER close the work bead (the refinery closes it after a
-verified merge). ALWAYS close your own step beads through
+chain -> drain. NEVER close the work bead: the refinery closes an anchor on a
+verified merge, and closes a rework hand-back landed-on-branch, both from
+merge-push. ALWAYS close your own step beads through
 assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
 own bead, and step-close.sh resolves it from the (assignee, gc.step_ref)
 pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead after a claim.
@@ -19,6 +20,11 @@ metadata.target is where the work LANDS. submit-and-exit resolves the
 landing target once and fails closed; the marked submit-* blocks are
 extracted and executed by assets/scripts/submit-branch-gate.test.sh — run it
 after any edit here.
+
+Two distinct BEAD questions, the same way: the bead you claimed is not always
+the bead the branch is gated by. On a rework or rebase child the anchor is a
+separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
+submit-and-exit resolves it once, in step 4c, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
 attempt bounced with the branch intact — resume it per metadata.prepare_mode

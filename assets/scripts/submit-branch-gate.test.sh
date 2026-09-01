@@ -47,6 +47,7 @@ extract() {
 
 GATE="$(extract submit-branch-gate)"
 RESOLVE="$(extract submit-target-resolve)"
+ANCHOR="$(extract submit-anchor-resolve)"
 CONSUME="$(extract submit-target-consume)"
 CLOSE="$(extract submit-chain-close)"
 HALT="$(extract submit-auto-push-halt)"
@@ -78,13 +79,16 @@ eq "$(sed -n '/^# >>> submit-chain-close$/p' "$TOML" | wc -l | tr -d ' ')" "1" \
 [ -n "$RESOLVE" ] \
   && ok "resolver extracted between submit-target-resolve markers" \
   || bad "resolver extraction EMPTY — markers missing from $TOML"
+[ -n "$ANCHOR" ] \
+  && ok "anchor resolver extracted between submit-anchor-resolve markers" \
+  || bad "anchor-resolver extraction EMPTY — markers missing from $TOML"
 
 # TOML `"""` strings treat a trailing backslash as a line-ending escape and eat
 # the newline plus the following indentation. A shell line-continuation written
 # inside one therefore silently joins lines. Both snippets are written
 # backslash-free so what the polecat reads is what this test runs; assert it,
 # because reintroducing a continuation is an easy and invisible edit.
-case "$GATE$RESOLVE$CONSUME$CLOSE$HALT$HALT_CLOSE" in
+case "$GATE$RESOLVE$ANCHOR$CONSUME$CLOSE$HALT$HALT_CLOSE" in
   *\\*) bad "snippets contain a backslash — TOML line-ending escapes will mangle them" ;;
   *)    ok  "snippets are backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
@@ -128,6 +132,7 @@ case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
+  "bd list")           printf '%s\n' "${FAKE_ANCHOR_ROWS-[]}"; exit 0 ;;
   "agent list")        [ "${FAKE_AGENTS-}" = "UNREADABLE" ] && exit 1
                        printf '{"agents":%s}\n' "${FAKE_AGENTS:-[]}"; exit 0 ;;
 esac
@@ -447,6 +452,129 @@ eq "$(run_strict_consume main gc-toolkit '[{"qualified_name":"gc-toolkit/gc-tool
    "1|DRAIN;" \
    "strict shell: a roster without the address still halts, and the diagnostic does not die on an empty grep"
 
+# --- 3c. The anchor the summary belongs on. -----------------------------------
+# pr-open.sh reads pr_summary off the row it enumerates: the OPEN bead carrying
+# a merge_result for this branch. On fresh work that is the claimed bead. On a
+# rework or rebase child it is a different bead, and a summary written to the
+# child is never published — the PR body silently falls back to the dispatch
+# text, which is the fallback the summary exists to remove.
+#
+# run_anchor_resolve <current-branch> <bd-list-rows-json> -> "<rc>|<GATING_ANCHOR>"
+#   Rows are the shape real `gc bd list --json` returns. The block runs under
+#   `set -euo pipefail`: it sits between a push and a handoff, so a crash here
+#   costs the handoff, and both of its reads are pipefail traps.
+run_anchor_resolve() {
+  : > "$TMP/log"
+  { printf 'set -euo pipefail\n'
+    printf '%s\n' "$ANCHOR"
+    printf 'printf "RESOLVED:%%s\\n" "$GATING_ANCHOR"\n'; } > "$TMP/anchor.sh"
+  local rc=0
+  CURRENT_BRANCH="$1" FAKE_ANCHOR_ROWS="$2" FAKE_LOG="$TMP/log" \
+    bash "$TMP/anchor.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(sed -n 's/^RESOLVED://p' "$TMP/out")"
+}
+
+printf '%s\n' "$ANCHOR" > "$TMP/anchor-syntax.sh"
+bash -n "$TMP/anchor-syntax.sh" \
+  && ok "extracted anchor resolver is syntactically valid bash" \
+  || bad "extracted anchor resolver failed bash -n"
+
+ANCHOR_ROW='[{"id":"tk-anchor","created_at":"2026-07-01T00:00:00Z","metadata":{"merge_result":"pull_request","branch":"polecat/su-uzy9.5"}}]'
+
+# Fresh work: nothing else on the branch. The claimed bead IS the anchor, and
+# the summary rides the handoff exactly as it did before this block existed.
+eq "$(run_anchor_resolve polecat/tk-work '[]')" "0|" \
+   "fresh: no other bead on the branch -> no anchor, the claimed bead is it"
+
+# THE CASE THIS EXISTS FOR. A rework child standing on the reviewed branch: the
+# anchor is a different, open, merge_result-carrying bead.
+eq "$(run_anchor_resolve polecat/su-uzy9.5 "$ANCHOR_ROW")" "0|tk-anchor" \
+   "rework child: the open merge_result-carrying bead on the branch is the anchor"
+
+# Self-exclusion. An idempotent re-run reads its own stamped row back; a bead
+# that elected itself would then stamp the summary onto itself twice and call
+# it delivered.
+eq "$(run_anchor_resolve polecat/tk-work \
+      '[{"id":"tk-work","created_at":"2026-07-01T00:00:00Z","metadata":{"merge_result":"pull_request","branch":"polecat/tk-work"}}]')" \
+   "0|" \
+   "the claimed bead's own row is excluded from its anchor lookup"
+
+# Carrying a merge_result is the whole predicate. A sibling child on the same
+# branch has none and is not an anchor.
+eq "$(run_anchor_resolve polecat/su-uzy9.5 \
+      '[{"id":"tk-sibling","created_at":"2026-07-01T00:00:00Z","metadata":{"branch":"polecat/su-uzy9.5"}}]')" \
+   "0|" \
+   "a sibling carrying no merge_result is not an anchor"
+
+# Every anchor state counts, not just the two gating ones: an anchor parked for
+# a person still owns the PR, and the summary still belongs on it.
+eq "$(run_anchor_resolve polecat/su-uzy9.5 \
+      '[{"id":"tk-anchor","created_at":"2026-07-01T00:00:00Z","metadata":{"merge_result":"blocked","branch":"polecat/su-uzy9.5"}}]')" \
+   "0|tk-anchor" \
+   "an anchor parked in a human state is still the summary's destination"
+
+# Two candidates: the OLDEST wins, the same tiebreak merge-push applies, so the
+# two never disagree about which bead is the anchor.
+eq "$(run_anchor_resolve polecat/su-uzy9.5 \
+      '[{"id":"tk-aaaa1","created_at":"2026-07-15T00:00:00Z","metadata":{"merge_result":"pull_request","branch":"polecat/su-uzy9.5"}},{"id":"tk-zzzz9","created_at":"2026-07-01T00:00:00Z","metadata":{"merge_result":"pull_request","branch":"polecat/su-uzy9.5"}}]')" \
+   "0|tk-zzzz9" \
+   "two candidates -> oldest on created_at, matching merge-push's tiebreak"
+
+# Step 4 detaches HEAD, so a re-run reaches this with no branch name. An empty
+# branch must not be sent to `--metadata-field branch=`, which matches every
+# bead recording no branch at all.
+eq "$(run_anchor_resolve '' "$ANCHOR_ROW")" "0|" \
+   "detached HEAD: no lookup rather than matching branchless beads"
+
+# Unreadable answer. The step is between a push and a handoff; degrading to the
+# dispatch-text fallback costs a good PR body, halting costs the handoff.
+eq "$(run_anchor_resolve polecat/su-uzy9.5 'not json at all')" "0|" \
+   "an unparseable probe resolves to no anchor instead of killing the step"
+
+# --- 3d. The summary follows the anchor. --------------------------------------
+# run_consume_anchor <summary-file> <gating-anchor> -> "<rc>|<log>"
+run_consume_anchor() {
+  : > "$TMP/log"
+  printf 'set -euo pipefail\n' > "$TMP/anchor-consume.sh"
+  printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/anchor-consume.sh"
+  local rc=0
+  LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
+    GATING_ANCHOR="$2" PR_SUMMARY_FILE="$1" bash "$TMP/anchor-consume.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+# THE ACCEPTANCE. A child's summary is stamped on the anchor — the row
+# pr-open.sh enumerates — and the claimed bead's handoff carries no pr_summary,
+# because writing it there would assert a summary nothing reads.
+eq "$(run_consume_anchor "$TMP/summary.txt" tk-anchor)" \
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "child: the summary is stamped on the anchor, and the handoff stays otherwise atomic"
+
+# The anchor write comes FIRST. It is metadata on a bead this session does not
+# hold; sequencing it before the handoff keeps the write that releases the bead
+# last, so a failure between the two loses a PR body, never the handoff.
+eq "$(run_consume_anchor "$TMP/summary.txt" tk-anchor | tr ';' '\n' | sed -n '1p')" \
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names." \
+   "the anchor stamp is written before the handoff, not after it"
+
+# Prose reaches the anchor whole, the same as it does the claimed bead.
+eq "$(run_consume_anchor "$TMP/summary-multiline.txt" tk-anchor)" \
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Line one.;Line two.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "a multi-line summary reaches the anchor whole"
+
+# No summary composed: nothing is written to the anchor at all. An empty
+# metadata value round-trips as set-but-empty, which would assert a summary the
+# polecat never wrote and suppress pr-open.sh's own description fallback.
+eq "$(run_consume_anchor "$TMP/summary-empty.txt" tk-anchor)" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "no summary: the anchor is not touched"
+
+# An empty GATING_ANCHOR is the fresh-work case and must be byte-identical to
+# the pre-change behavior: one write, carrying the summary.
+eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "fresh work: unchanged single atomic write carrying the summary"
+
 # --- 4. The snippets compose. -------------------------------------------------
 # They share variables across the step: the resolver reads $CURRENT_BRANCH from
 # the gate, and the handoff reads $LANDING_TARGET from the resolver. Run all
@@ -467,6 +595,23 @@ eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
 eq "$(tr '\n' ';' < "$TMP/log")" \
    "UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
    "composed run writes only the atomic handoff, with target=main"
+
+# The same four snippets on the shape the whole change is for: a rework child
+# whose branch is anchored by another open bead, with a summary composed. End to
+# end, the summary must land on tk-anchor and the handoff on tk-work.
+: > "$TMP/log"
+printf '%s\n' "$GATE" > "$TMP/four.sh"
+printf '%s\n' "$RESOLVE" | sed "s|{{base_branch}}|polecat/su-uzy9.5|g" >> "$TMP/four.sh"
+printf '%s\n' "$ANCHOR" >> "$TMP/four.sh"
+printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" >> "$TMP/four.sh"
+FOUR_RC=0
+FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":"main"}' \
+  FAKE_ANCHOR_ROWS="$ANCHOR_ROW" PR_SUMMARY_FILE="$TMP/summary.txt" \
+  GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" bash "$TMP/four.sh" > "$TMP/out" 2>&1 || FOUR_RC=$?
+eq "$FOUR_RC" "0" "composed rework run exits 0"
+eq "$(tr '\n' ';' < "$TMP/log")" \
+   "UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "composed rework run: summary to the anchor, handoff to the claimed bead"
 
 # --- 5. Step-chain close. -----------------------------------------------------
 # The husk generator (tk-y389z, tk-zab6q): mol-polecat-work closed no step

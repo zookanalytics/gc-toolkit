@@ -124,7 +124,7 @@ read "landed in the refinery" as "main moved".
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
-| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text |
+| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
 | `prepare_mode` | refinery | `rebase` (disposable branch) or `merge` (shared) — honor it on resume |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
@@ -136,18 +136,33 @@ says: `merge` means the branch is SHARED — merge the base in, never rebase,
 never force-push; anything else rebases. The formula's workspace-setup step
 carries the exact block.
 
+## The claimed bead and the anchor
+
+The bead you claimed is not always the bead your branch is gated by. Fresh
+work claims its own anchor and the two are one bead. A rework or rebase child
+stands on a branch some OTHER open bead anchors, and every reader that matters
+— `pr-open.sh` for the PR body, `pr-facts.sh` for the PR's facts, `merge.sh`
+for the merge — enumerates anchors by `merge_result` and reads that bead. A
+write aimed at the claimed bead lands, errors nowhere, and is never read.
+
+Submit step 4c resolves it: the open bead on this branch that carries a
+`merge_result`. Write to the anchor what the anchor's readers read, and to
+your claimed bead everything else.
+
 ## Beads: what you close and what you never close
 
 | Bead | Closed by |
 |---|---|
-| the work bead | the refinery, after a verified merge — **NEVER you** |
+| the work bead | the refinery, from merge-push — the anchor on a verified merge, a rework hand-back landed-on-branch — **NEVER you** |
 | a review bead | `signoff.sh` after the verdict, or the cadence's `review-sweep.sh` when there is none to give — **NEVER you** |
 | your step beads | **you**, via `assets/scripts/step-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
 - **Never close the work bead** — no `bd close`, no `--status=closed` — even
-  if the work looks already merged. Hand it to the refinery with a note; only
-  the refinery verifies merges and closes work beads.
+  if the work looks already merged, and equally when it is a child whose
+  anchor is elsewhere. Hand it to the refinery with a note: merge-push is
+  where a bead leaves the anchor class and closes, and it is the only thing
+  that verifies a merge.
 - **Always close your own step beads.** A graph.v2 step advances only by
   closing its own bead; a run that closes nothing leaves its whole chain open
   and re-offered as new work (the husk generator). Close ONLY through
