@@ -138,9 +138,14 @@ function PRLink({ tile }: { tile: Tile }) {
  * wrong, because an axis nothing has recorded looks exactly like an axis with
  * nothing to say — so the all-clear is withheld while any position is unread.
  * `owed` is a boolean and cannot carry the third value the axes do.
+ *
+ * Closed rows are excluded, and they have to be: the DONE band's rows carry the
+ * same axes as live ones, unknowns included, while `owed` already excludes
+ * them. Counting them would withhold the all-clear over rows the queue is right
+ * to omit, for as long as the done window holds them.
  */
 function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
-  const rows = tiles.filter(isPRRow);
+  const rows = tiles.filter((t) => isPRRow(t) && !t.closed_at);
   const gaps: string[] = [];
   const noPosition = rows.filter((t) => t.pr_machine === 'unknown').length;
   const noConversation = rows.filter((t) => t.pr_conversation === 'unknown').length;

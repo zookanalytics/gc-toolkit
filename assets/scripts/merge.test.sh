@@ -456,6 +456,46 @@ printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha
 out=$("$SUT" 2>&1)
 eq "$(pinned V2)" "progressing@sha-81" "a veto under the cap is progressing — signoff can still file rework"
 
+echo "# the cap a veto is measured against is signoff's, floor and all"
+# signoff.sh counts rework rounds since the operator's last feedback: the rounds
+# filed before it are a floor it subtracts, because they answered a review that
+# feedback had not yet given. A veto weighed against the raw total wedges an
+# anchor whose next verdict would file another round.
+kid() { printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"source_review_bead":"%s"}}' "$1" "$2"; }
+store "[$(anchor V8 87 ',"signoff_round_floor":"3@batch-1","signoff_rounds_reset":"batch-1"'),
+        $(kid rw-v8a rev-a), $(kid rw-v8b rev-b), $(kid rw-v8c rev-c), $(kid rw-v8d rev-d)]"
+printf 'rw-v8a|blocks|V8\nrw-v8b|blocks|V8\nrw-v8c|blocks|V8\nrw-v8d|blocks|V8\n' > "$STUB_DEPS"
+printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_87.json"
+out=$("$SUT" 2>&1)
+has "$out" "rework rounds 1/3" "the rounds a floor retired are not counted against the cap"
+eq "$(pinned V8)" "progressing@sha-87" "…so a veto signoff will answer again is progressing, not a wedge"
+
+echo "# …and feedback signoff has not answered yet retires every round so far"
+# pr-facts.sh records the batch the moment it routes the feedback; the floor is
+# written by the verdict after it. Between the two the anchor carries rounds the
+# cap no longer counts and a floor that predates them.
+store "[$(anchor V9 88 ',"signoff_round_floor":"0@batch-1","signoff_rounds_reset":"batch-2"'),
+        $(kid rw-v9a rev-a), $(kid rw-v9b rev-b), $(kid rw-v9c rev-c)]"
+printf 'rw-v9a|blocks|V9\nrw-v9b|blocks|V9\nrw-v9c|blocks|V9\n' > "$STUB_DEPS"
+printf '%s' "$(prview 88 OPEN CLEAN)" > "$GH_DIR/pr_view_88.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_88.json"
+out=$("$SUT" 2>&1)
+has "$out" "rework rounds 0/3" "a batch no verdict has answered retires the rounds filed before it"
+eq "$(pinned V9)" "progressing@sha-88" "…and the anchor reads as progressing until the cap is spent again"
+eq "$(meta V9 signoff_round_floor)" "0@batch-1" "the floor is signoff's stamp; this pass only reads it"
+
+echo "# …and the cap still trips on the rounds that answer the feedback"
+store "[$(anchor V10 89 ',"signoff_round_floor":"3@batch-1","signoff_rounds_reset":"batch-1"'),
+        $(kid rw-v10a rev-a), $(kid rw-v10b rev-b), $(kid rw-v10c rev-c),
+        $(kid rw-v10d rev-d), $(kid rw-v10e rev-e), $(kid rw-v10f rev-f)]"
+printf 'rw-v10a|blocks|V10\nrw-v10b|blocks|V10\nrw-v10c|blocks|V10\nrw-v10d|blocks|V10\nrw-v10e|blocks|V10\nrw-v10f|blocks|V10\n' > "$STUB_DEPS"
+printf '%s' "$(prview 89 OPEN CLEAN)" > "$GH_DIR/pr_view_89.json"
+printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha-old","submitted_at":"2026-08-19T00:00:00Z","id":1}]' > "$GH_DIR/reviews_89.json"
+out=$("$SUT" 2>&1)
+has "$out" "rework rounds 3/3" "rounds above the floor spend the cap"
+eq "$(pinned V10)" "wedged-veto@sha-89" "…and a veto nothing will answer is the veto wedge"
+
 echo "# a gate the head moved past is progressing; the cap's exception is the wedge"
 store "[$(anchor V3 82 ',"check.codex":"green@sha-STALE"'),
         $(anchor V4 83 ',"check.codex":"exception@sha-83","gc.routed_to":"human"')]"

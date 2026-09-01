@@ -2019,6 +2019,41 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	}
 }
 
+// A closed merge anchor is not a coverage gap either, and this is the half the
+// owed test cannot cover: the queue and the coverage sentence have to empty
+// together. The closed pass fills the DONE band with rows carrying the same
+// axes as live ones, unrecorded positions among them, so counting those holds
+// the all-clear open over an empty queue for as long as the done window keeps
+// the row.
+func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
+	shut := mergeAnchor("tk-shut", nil) // nothing recorded: unknown on every axis
+	shut.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+
+	done := BuildBoard([]Anchor{shut}, fixtureNow, false, nil, Facts{})
+	// The axes still travel — the row is closed, not unreadable.
+	if got := mustTile(t, done, "tk-shut").PRMachine; got != AxisUnknown {
+		t.Errorf("the closed row keeps its axes: pr_machine = %q", got)
+	}
+	if c := Coverage(done.Tiles); c.Rows != 0 || !c.Complete() {
+		t.Errorf("a board holding only finished pull requests owes the operator nothing: %+v", c)
+	}
+
+	live := mergeAnchor("tk-live", map[string]string{
+		"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+		"pr_posture": dated(postureNone, headLive, fixtureNow),
+	})
+	c := Coverage(BuildBoard([]Anchor{live, shut}, fixtureNow, false, nil, Facts{}).Tiles)
+	if c.Rows != 1 {
+		t.Errorf("coverage speaks for the live rows: got %d, want 1", c.Rows)
+	}
+	if c.MachineUnknown != 0 {
+		t.Errorf("a closed row's unread position is not a gap: got %d", c.MachineUnknown)
+	}
+	if c.ConversationUnknown != 1 {
+		t.Errorf("the live row's unread conversation still is: got %d", c.ConversationUnknown)
+	}
+}
+
 // TestWedgedAnchorIsOwedAndNamed covers both wedge shapes.
 //
 // The exception wedge is the state six of the seven wedged anchors were in, and

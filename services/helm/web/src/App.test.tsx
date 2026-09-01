@@ -651,6 +651,43 @@ it('withholds the all-clear while a PR position is unread', async () => {
   expect(sub.textContent).not.toMatch(/^Nothing is owed by you\./);
 });
 
+// The DONE band is not coverage debt. Its rows carry the same axes as live ones
+// and reach the browser with the same unknowns, so counting them would keep the
+// queue's own emptiness from ever reading as an all-clear.
+it('does not count closed pull requests as unread positions', async () => {
+  const shut = prTile({
+    id: 'tk-shut',
+    title: 'a pull request that landed',
+    owed: false,
+    severity: 'DONE',
+    closed_at: '2026-08-20T19:14:00Z',
+    pr_machine: 'unknown',
+    pr_owed_since: undefined,
+    needs: 'closed — dismiss to clear',
+  });
+  serve([shut]);
+  const view = render(<App />);
+  await waitFor(() => expect(screen.getByText(/Nothing is owed by you/)).toBeTruthy());
+  expect(within(owedSection()).getByRole('status').textContent).not.toMatch(/all-clear/);
+  view.unmount();
+
+  // And beside a live row, it neither adds a gap nor inflates the denominator.
+  serve([
+    shut,
+    prTile({
+      id: 'tk-silent',
+      title: 'a pull request the cadence has not judged',
+      owed: false,
+      pr_machine: 'unknown',
+      pr_owed_since: undefined,
+      needs: 'position unknown — the merge cadence has recorded none',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/NOT an all-clear/)).toBeTruthy());
+  expect(within(owedSection()).getByRole('status').textContent).toMatch(/1 of 1 have no position recorded/);
+});
+
 // …and it is a real all-clear when every position was readable. A coverage
 // sentence that can never clear is one an operator learns to ignore.
 it('gives the all-clear when every PR position was readable', async () => {

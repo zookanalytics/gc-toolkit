@@ -993,7 +993,10 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 // wrong that beads alone did not have, because an axis nothing has recorded
 // looks exactly like an axis with nothing to say.
 type PRCoverage struct {
-	// Rows is every merge anchor on the board, owed or not.
+	// Rows is every LIVE merge anchor on the board, owed or not. A closed
+	// anchor keeps its axes so the DONE band can render them, but an unread
+	// position on a row nobody will act on is not a gap in what the operator
+	// needs to see.
 	Rows int
 	// MachineUnknown is the rows whose position the merge cadence has not
 	// recorded. A missing key is a fact about the city, not an all-clear.
@@ -1020,11 +1023,18 @@ func (c PRCoverage) Complete() bool {
 // Coverage counts the PR rows across the WHOLE board, not just the queue. The
 // sentence it feeds is printed when the queue is empty, and a row missing from
 // an empty queue is precisely the row that might have belonged in it.
+//
+// Closed rows are the exception, and they have to be, because the queue and
+// this count have to empty together. The gather makes a second pass at closed
+// anchors to fill the DONE band, and those rows carry the same axes as live
+// ones — including the unknowns. [Tile.Owed] already excludes them, so counting
+// them here would withhold the all-clear over rows the queue is right to omit,
+// for as long as the done window holds them.
 func Coverage(tiles []Tile) PRCoverage {
 	var c PRCoverage
 	for _, t := range tiles {
-		if t.PRMachine == "" {
-			continue // not a merge anchor: no axes, and nothing to cover
+		if t.PRMachine == "" || !t.ClosedAt.IsZero() {
+			continue // not a merge anchor, or closed: nothing left to cover
 		}
 		c.Rows++
 		if t.PRMachine == AxisUnknown {
