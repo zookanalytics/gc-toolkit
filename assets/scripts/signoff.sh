@@ -11,7 +11,12 @@
 # stamp check.<name>=exception@<head> and route the anchor to a human instead.
 # The cap counts rework rounds since the last operator feedback, not since the
 # branch was cut: pr-facts.sh records each batch of feedback on the anchor, and
-# the rounds spent before it become a floor this script subtracts.
+# the rounds spent before it become a floor this script subtracts. An anchor
+# capped before its PR was opened has no review conversation whose next comment
+# could record such a batch, so the cap also has a verb:
+#   signoff.sh reset <anchor> --reason <why>
+# advances the floor to the rounds already spent and retires the park the cap
+# wrote, in one audited write, with the ruling recorded on the anchor.
 # The city never approves its own PRs: nothing here ever passes --approve.
 # Every oid stamped into a marker is a full 40 lowercase hex; a shorter one is
 # refused, since merge.sh can only read the marker by comparing it to a head.
@@ -34,6 +39,7 @@ usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--reviewed-oid <oid>]
+       signoff.sh reset <anchor> --reason <why> [--batch <id>]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
@@ -44,6 +50,14 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  anchor's branch (git ls-remote origin <branch>). A pin that
                  has left the branch is refused, not bound.
 
+reset: retire a round cap under a ruling. Advances signoff_round_floor to the
+  rounds already spent and retires the park the cap wrote — check.<gate>,
+  blocked_reason, signoff_cap, the human route and the dispatch tally — in one
+  write. Needs no PR and no review bead, and writes to no other bead. Refused
+  when the rework ledger the floor comes from does not read, or names no round.
+  --reason  why the cap is retired; recorded on the anchor (required)
+  --batch   the batch id the floor is pinned to (default: reset-<UTC stamp>)
+
 env: GC_MAX_REVIEW_ROUNDS  rework rounds before the gate records
                            exception@<head> and routes to a human (default 3).
                            Counted since the last operator feedback on the PR.
@@ -52,24 +66,50 @@ U
 
 warn() { echo "signoff: $*" >&2; }
 
+# Two verbs. The default records a verdict against a review bead; `reset`
+# names its anchor positionally, answers no dispatch, and writes to nothing
+# else. The verb is read before the flag loop so an anchor id is never taken
+# for a stray argument.
+MODE=verdict; ANCHOR=""; RESET_REASON=""; RESET_BATCH_ARG=""
+if [ "${1:-}" = "reset" ]; then
+  MODE=reset; shift
+  case "${1:-}" in
+    ''|-*) warn "reset needs the anchor bead id as its first argument"; usage; exit 1 ;;
+    *)     ANCHOR="$1"; shift ;;
+  esac
+fi
+
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --review-bead)  REVIEW_BEAD="${2:-}";  shift 2 || { usage; exit 1; } ;;
-    --verdict)      VERDICT="${2:-}";      shift 2 || { usage; exit 1; } ;;
-    --notes-file)   NOTES_FILE="${2:-}";   shift 2 || { usage; exit 1; } ;;
-    --reviewed-oid) OID_OVERRIDE="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
+    --verdict)      VERDICT="${2:-}";         shift 2 || { usage; exit 1; } ;;
+    --notes-file)   NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
+    --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --reason)       RESET_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --batch)        RESET_BATCH_ARG="${2:-}"; shift 2 || { usage; exit 1; } ;;
     -h|--help)      usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
 done
-[ -n "$REVIEW_BEAD" ] || { usage; exit 1; }
-case "$VERDICT" in
-  approve|request-changes) ;;
-  *) warn "--verdict must be approve or request-changes (got '$VERDICT')"; usage; exit 1 ;;
-esac
-if [ -n "$NOTES_FILE" ] && [ ! -r "$NOTES_FILE" ]; then
-  warn "--notes-file '$NOTES_FILE' is not readable; nothing written"; exit 1
+if [ "$MODE" = reset ]; then
+  # The ruling is the whole audit trail for a retirement no dispatch justifies.
+  [ -n "$RESET_REASON" ] || { warn "reset needs --reason: a cap retired with nothing recorded leaves the anchor unable to say who released it or why"; usage; exit 1; }
+  if [ -n "$REVIEW_BEAD$VERDICT$NOTES_FILE$OID_OVERRIDE" ]; then
+    warn "reset records no verdict and answers no review bead; drop the verdict flags"; usage; exit 1
+  fi
+else
+  [ -n "$REVIEW_BEAD" ] || { usage; exit 1; }
+  if [ -n "$RESET_REASON$RESET_BATCH_ARG" ]; then
+    warn "--reason and --batch belong to 'signoff.sh reset', not to a verdict"; usage; exit 1
+  fi
+  case "$VERDICT" in
+    approve|request-changes) ;;
+    *) warn "--verdict must be approve or request-changes (got '$VERDICT')"; usage; exit 1 ;;
+  esac
+  if [ -n "$NOTES_FILE" ] && [ ! -r "$NOTES_FILE" ]; then
+    warn "--notes-file '$NOTES_FILE' is not readable; nothing written"; exit 1
+  fi
 fi
 
 # bd JSON with the C0 set stripped: a raw control byte in notes breaks jq.
@@ -77,6 +117,148 @@ bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
+
+# Both verbs write to the anchor; these two read and write it.
+stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did not stick
+  local args=(--set-metadata "$1=$2")
+  [ $# -lt 3 ] || args+=(--append-notes "$3")
+  gc bd update "$ANCHOR" "${args[@]}" >/dev/null 2>&1 || true
+  local got; got=$(row_meta "$(bd_json show "$ANCHOR")" "$1")
+  if [ "$got" != "$2" ]; then
+    warn "$1 did not read back on anchor $ANCHOR (got '${got:-}', want '$2'); review bead left OPEN so the gate stays owed"
+    exit 2
+  fi
+}
+
+# Every rework child ever filed against this anchor: one per round, each stamped
+# source_review_bead by the signoff that filed it. The cap bounds
+# non-convergence, which only an attempted rework can demonstrate, so review
+# dispatches are not rounds however many read the same commit. What counts
+# against the cap is this total minus the floor a reset records.
+#
+# The two verbs read this ledger on opposite terms, because a wrong count is
+# spent in opposite directions. This reader fails rather than answer from a walk
+# it could not parse: the filter yields a number only from an array of rows, and
+# every other shape — an error payload, a bare string, nothing at all — leaves
+# jq failing and n empty.
+count_rework_children() {
+  local kids n
+  kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
+  n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
+
+# An unreadable ledger reads 0 for the cap: a count guessed low only declines to
+# park, and capping on a guess parks live work.
+rework_children() {
+  local n
+  n=$(count_rework_children) || n=0
+  printf '%s' "$n"
+}
+
+# --- reset: retire a round cap under a ruling -----------------------------------
+# The counter otherwise moves on one condition: operator feedback, which
+# pr-facts.sh records from review comments on a PR. An anchor capped before its
+# PR was opened has no such conversation, so no batch can ever be recorded, and
+# clearing the exception by hand only lets the next pass recompute the same
+# rounds and re-cap. This verb writes the floor itself and retires the park in
+# the same call, so the release survives the next pass.
+if [ "$MODE" = reset ]; then
+  ANCHOR_ROW=$(bd_json show "$ANCHOR")
+  is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing written"; exit 1; }
+
+  # A sitting's decision outranks the ruling this verb carries, exactly as it
+  # outranks pr-facts.sh's reset: releasing an anchor a sitting is holding hands
+  # work back to the pool the sitting took it from.
+  TAKEAWAY=$(row_meta "$ANCHOR_ROW" gc.takeaway)
+  if [ -n "$TAKEAWAY" ]; then
+    warn "anchor $ANCHOR is held by a live takeaway ('$TAKEAWAY'); nothing written — release the takeaway, or rule through the sitting that set it"
+    exit 1
+  fi
+
+  # The floor is written FROM this count, so it is read strictly: a floor
+  # guessed low is a cap the next pass re-fires, which is the deadlock this verb
+  # exists to end. An unreadable walk is not zero rounds, and zero rounds is
+  # nothing to release — the floor it would write is the 0 already in force.
+  TOTAL=$(count_rework_children) || TOTAL=""
+  if [ -z "$TOTAL" ]; then
+    warn "the rework ledger under $ANCHOR did not read as a dependency listing; nothing written — the floor comes from that count, and one guessed low re-caps on the next pass. Re-run once 'gc bd dep list $ANCHOR --direction=down -t blocks --json' answers."
+    exit 1
+  fi
+  if [ "$TOTAL" = 0 ]; then
+    warn "no rework child is filed under $ANCHOR: there is no round to retire, and the floor this would write is the 0 already in force. Nothing written — a park still standing here is not one the round counter can lift."
+    exit 1
+  fi
+  CAP="${GC_MAX_REVIEW_ROUNDS:-3}"
+  case "$CAP" in ''|*[!0-9]*) CAP=3 ;; esac
+  BATCH="$RESET_BATCH_ARG"
+  [ -n "$BATCH" ] || BATCH="reset-$(date -u +%Y%m%dT%H%M%SZ)"
+
+  # The floor and the batch it is pinned to are written together. A floor whose
+  # batch differs from signoff_rounds_reset is re-derived at the next verdict,
+  # which would move it past the rounds this ruling released and cap again.
+  WANT_FLOOR="$TOTAL@$BATCH"
+  WRITES=(--set-metadata "signoff_round_floor=$WANT_FLOOR" --set-metadata "signoff_rounds_reset=$BATCH")
+
+  # Retire the cap's own park with the counter: an exception still bound to the
+  # head re-settles the gate and a human route keeps the anchor queued, so a
+  # reset leaving either standing would not be one. signoff_cap names the
+  # exception the park belongs to and the two must still agree — an exception a
+  # person stamped, or one already retired by hand, is not this cap's to clear.
+  # The dispatch tally goes with it: released rounds nobody may dispatch are no
+  # release.
+  CAP_STAMP=$(row_meta "$ANCHOR_ROW" signoff_cap)
+  PARK_GATE=""; PARK_OID=""; RETIRED=""; TALLY_KEYS=()
+  case "$CAP_STAMP" in
+    ?*@?*) PARK_GATE="${CAP_STAMP%%@*}"; PARK_OID="${CAP_STAMP#*@}" ;;
+  esac
+  if [ -n "$PARK_GATE" ] && [ "$(row_meta "$ANCHOR_ROW" "check.$PARK_GATE")" = "exception@$PARK_OID" ]; then
+    WRITES+=(--unset-metadata "check.$PARK_GATE" --unset-metadata blocked_reason \
+             --unset-metadata signoff_cap --set-metadata "gc.routed_to=")
+    RETIRED="check.$PARK_GATE=exception@$PARK_OID, blocked_reason, signoff_cap and the human route"
+    while IFS= read -r K; do
+      [ -n "${K:-}" ] || continue
+      WRITES+=(--unset-metadata "$K"); TALLY_KEYS+=("$K"); RETIRED="$RETIRED, $K"
+    done <<TALLY
+$(printf '%s' "$ANCHOR_ROW" | jq -r '(.[0].metadata // {}) | keys[]?
+  | select(. == "dispatch_count" or startswith("dispatch_backstop."))' 2>/dev/null)
+TALLY
+  fi
+
+  NOTE="signoff: round cap retired by ruling — $RESET_REASON. The floor is set to the $TOTAL rework round(s) already filed under this anchor, pinned to batch $BATCH, so the next verdict counts from 0 of $CAP"
+  if [ -n "$RETIRED" ]; then
+    NOTE="$NOTE, and the park the cap wrote is retired with it ($RETIRED)."
+  else
+    NOTE="$NOTE. No park was retired: signoff_cap claims no standing exception here, so an exception on this anchor is a person's and stays."
+  fi
+  gc bd update "$ANCHOR" "${WRITES[@]}" --append-notes "$NOTE" >/dev/null 2>&1 || true
+
+  AFTER=$(bd_json show "$ANCHOR")
+  is_rows "$AFTER" || { warn "anchor $ANCHOR would not resolve on the read-back, so whether the reset landed is unproven; read it with: gc bd show $ANCHOR --json"; exit 2; }
+  BAD=""
+  [ "$(row_meta "$AFTER" signoff_round_floor)" = "$WANT_FLOOR" ] || BAD="$BAD signoff_round_floor"
+  [ "$(row_meta "$AFTER" signoff_rounds_reset)" = "$BATCH" ]     || BAD="$BAD signoff_rounds_reset"
+  if [ -n "$RETIRED" ]; then
+    [ -z "$(row_meta "$AFTER" "check.$PARK_GATE")" ] || BAD="$BAD check.$PARK_GATE"
+    [ -z "$(row_meta "$AFTER" signoff_cap)" ]        || BAD="$BAD signoff_cap"
+    [ -z "$(row_meta "$AFTER" blocked_reason)" ]     || BAD="$BAD blocked_reason"
+    [ -z "$(row_meta "$AFTER" gc.routed_to)" ]       || BAD="$BAD gc.routed_to"
+    # The tally is verified key by key: gate-ensure.sh holds dispatches at the
+    # backstop while dispatch_count stands, so a tally unset that was denied or
+    # lost while the rest of the write landed leaves the anchor undispatchable
+    # under a release that reported success.
+    for K in ${TALLY_KEYS[@]+"${TALLY_KEYS[@]}"}; do
+      [ -z "$(row_meta "$AFTER" "$K")" ] || BAD="$BAD $K"
+    done
+  fi
+  if [ -n "$BAD" ]; then
+    warn "the reset did not read back on $ANCHOR (${BAD# }); the cap stands and the next signoff pass re-caps. Clear the named keys by hand, or re-run — a floor that did land is harmless to write again."
+    exit 2
+  fi
+  echo "signoff: round cap on $ANCHOR reset to 0 of $CAP (floor $WANT_FLOOR)${RETIRED:+ — retired $RETIRED}"
+  exit 0
+fi
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
 is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; nothing written"; exit 1; }
@@ -245,17 +427,6 @@ post_artifact() {
   fi
 }
 
-stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did not stick
-  local args=(--set-metadata "$1=$2")
-  [ $# -lt 3 ] || args+=(--append-notes "$3")
-  gc bd update "$ANCHOR" "${args[@]}" >/dev/null 2>&1 || true
-  local got; got=$(row_meta "$(bd_json show "$ANCHOR")" "$1")
-  if [ "$got" != "$2" ]; then
-    warn "$1 did not read back on anchor $ANCHOR (got '${got:-}', want '$2'); review bead left OPEN so the gate stays owed"
-    exit 2
-  fi
-}
-
 close_review() {
   gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=recorded --status=closed >/dev/null 2>&1 || true
   local row st oc
@@ -302,20 +473,6 @@ dismiss_superseded() {
   done
 }
 
-# Every rework child ever filed against this anchor: one per round, each stamped
-# source_review_bead by the signoff that filed it. The cap bounds
-# non-convergence, which only an attempted rework can demonstrate, so review
-# dispatches are not rounds however many read the same commit. An unreadable
-# ledger reads 0 — capping on a guess parks live work. What counts against the
-# cap is this total minus the floor the reset below records.
-rework_children() {
-  local kids n
-  kids=$(bd_json dep list "$ANCHOR" --direction=down -t blocks)
-  n=$(printf '%s' "$kids" | jq '[.[] | select((.metadata.source_review_bead // "") != "")] | length' 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
-}
-
 if [ "$VERDICT" = "approve" ]; then
   post_artifact
   stamp_anchor "check.$CHECK_NAME" "green@$REVIEWED_OID"
@@ -360,15 +517,25 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # Terminal verdict: ONE write under check.<name> (the exception), never a
   # clear beside it — an absent marker re-arms the dispatch this cap refuses.
   stamp_anchor "check.$CHECK_NAME" "exception@$REVIEWED_OID"
-  # signoff_cap names the exception this park belongs to. Operator feedback
-  # retires the park with the cap, and only this stamp tells the cap's own
-  # gc.routed_to=human from a person's, so an anchor a human parked by hand
-  # stays parked. It is written and verified with them: a park nothing proves
-  # is the cap's can be lifted only by a person.
+  # A cap before the PR is open is a different report. The release this cap is
+  # designed for is the next operator comment on the PR, and an anchor with no
+  # PR has no conversation that could carry one — its rounds were spent
+  # answering the city's own reviewer pre-open. Name which case this is, and
+  # name the verb that retires the one nothing else can.
+  if [ -n "$POST_OPEN" ]; then
+    CAP_WHY="findings are in the review beads under this anchor; new operator feedback on PR#$PR_NUMBER retires this cap and its park"
+  else
+    CAP_WHY="these rounds were spent pre-open, on a branch with no PR, so no review comment can retire this cap; findings are in the review beads under this anchor. Retire it with: signoff.sh reset $ANCHOR --reason '<ruling>'"
+  fi
+  # signoff_cap names the exception this park belongs to. Operator feedback and
+  # the reset verb each retire the park with the cap, and only this stamp tells
+  # the cap's own gc.routed_to=human from a person's, so an anchor a human
+  # parked by hand stays parked. It is written and verified with them: a park
+  # nothing proves is the cap's can be lifted only by a person.
   gc bd update "$ANCHOR" \
     --set-metadata gc.routed_to=human \
     --set-metadata "signoff_cap=$CHECK_NAME@$REVIEWED_OID" \
-    --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor" \
+    --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework rounds (cap $CAP); $CAP_WHY" \
     >/dev/null 2>&1 || true
   CAP_ROW=$(bd_json show "$ANCHOR")
   if [ "$(row_meta "$CAP_ROW" gc.routed_to)" != "human" ] \
@@ -377,7 +544,10 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
     exit 2
   fi
   close_review
-  echo "signoff: round cap on $ANCHOR ($ROUNDS/$CAP) — check.$CHECK_NAME=exception@$REVIEWED_OID, anchor routed to human, no rework filed"
+  CAP_WHERE="pre-open (no PR)"
+  [ -z "$POST_OPEN" ] || CAP_WHERE="PR#$PR_NUMBER"
+  echo "signoff: round cap on $ANCHOR ($ROUNDS/$CAP, $CAP_WHERE) — check.$CHECK_NAME=exception@$REVIEWED_OID, anchor routed to human, no rework filed"
+  [ -n "$POST_OPEN" ] || echo "signoff: no PR means no review conversation can release this cap — retire it with: signoff.sh reset $ANCHOR --reason '<ruling>'"
   exit 0
 fi
 
