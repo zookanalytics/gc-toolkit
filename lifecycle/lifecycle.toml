@@ -377,6 +377,35 @@ since_format = "RFC 3339 UTC"
 #   was claimed once and re-offered, and only a step without it is one no
 #   worker has ever reached. Nothing clears it.
 #
+# gc.formula_source — the formula file a molecule poured from, as a path,
+#   written by the runtime's pour onto the root bead. It answers two questions
+#   for doctor/check-pour-text-current: the key's presence is how that check
+#   finds live molecule roots at all, and the file the value names carries the
+#   git history that dates the poured step text against the pour.
+#   Absent means the bead is not a poured root and the check never considers
+#   it. Present but empty is a root whose step text cannot be dated, which the
+#   check counts and reports rather than passing over. Nothing clears it.
+#
+# gc.root_store_ref — which store a molecule's root lives in, in the canonical
+#   scoped spelling `city:<name>` or `rig:<name>`. Written by the runtime on
+#   the root and copied onto each step it dispatches, so a step carries the
+#   address of a root that need not share its store. Read by
+#   doctor/check-step-terminal on the orphan finding, where an open step names
+#   a root that resolves nowhere in the store being queried and this key says
+#   where else to look. Absent prints as `<unset>` there, which leaves a
+#   cross-store root with no address and is why that finding reports the orphan
+#   without judging it. Nothing clears it.
+#
+# gc.synthetic — `"true"` on a convoy the runtime minted for its own
+#   bookkeeping rather than one a caller asked for, which is what a graph.v2
+#   invocation convoy and a drain's per-unit convoy are. Read by
+#   assets/scripts/liveness-sweep.sh, which drops machine convoys from the
+#   unnamed waits it reports. The stamp is one of three tests there, beside the
+#   `sling-` and `input convoy for` title prefixes, because a convoy minted
+#   without it is recognizable only by its title. Absent means this test does
+#   not claim the convoy is machine-made and the title tests decide it. Nothing
+#   clears it.
+#
 # gc.takeaway — the operator-facing question, and the only field the board
 #   renders as one. Written by `gc-helm.sh takeaway`, capped at 140 codepoints
 #   and stamped with gc.takeaway_at and gc.takeaway_by. Read by the Helm board.
@@ -385,6 +414,16 @@ since_format = "RFC 3339 UTC"
 #   never cleared, being the durable record of what the sitting concluded.
 #   `blocked_reason` is not a substitute, recording why work stopped, which is
 #   a conclusion rather than a question.
+#
+# gc.proactive — the per-bead opt-in that asks for a first reaction.
+#   `tools/gc-proactive.sh` selects `gc.proactive=1` among ready unassigned
+#   beads and unions that set with the beads it finds movable on their own.
+#   Nothing in the pack or the runtime writes it: it is set by hand on a bead
+#   whose holder wants it picked up. A live reader is what earns a key a line,
+#   so it is registered here rather than unset as residue. Absent means the
+#   bead is not opted in and reaches the scan only by the movable-forward path.
+#   The match is exact, so any value but `1` is also not an opt-in;
+#   `--unset-metadata` removes the key.
 #
 # labels — a set both the runtime and the pack read. `warrant`, `learning`,
 #   `observation`, `feedback-pattern` and `prompt-update` mark a bead's role in
@@ -415,11 +454,14 @@ since_format = "RFC 3339 UTC"
 #
 # what this registry does NOT speak for — the `gc.` namespace belongs to the Gas
 #   City runtime, which declares its own keys in the binary on its own release
-#   cycle. The few the pack writes, clears or reads are listed under
-#   [metadata.runtime_owned]; the rest are not registered here and copying them
-#   would assert a list this repo cannot keep true. Bead types the runtime owns
-#   whole, `session` among them, carry runtime bookkeeping rather than pack
-#   state for the same reason.
+#   cycle. The runtime-written ones the pack writes, clears or reads are listed
+#   under [metadata.runtime_owned]; the rest are not registered here and copying
+#   them would assert a list this repo cannot keep true. The prefix does not
+#   decide the group: a key the PACK writes is registered beside its writer
+#   whatever it is spelled, which is where gc.takeaway, gc.origin and the
+#   deferred-dispatch family sit. Bead types the runtime owns whole, `session`
+#   among them, carry runtime bookkeeping rather than pack state for the same
+#   reason.
 #   The boundary has one sharp edge: a key that becomes a registered key once
 #   that prefix is added or removed is pack state written where the pack's
 #   reader never looks, so nothing reads it and nothing reports it missing.
@@ -484,6 +526,9 @@ keys = [
   # gc-helm.sh's other write verbs: `react` stamps the reaction it slung,
   # `dismiss` stamps who set a row aside and when.
   "gc.proactive_reaction", "gc.dismissed_by", "gc.dismissed_at",
+  # The per-bead opt-in the same scan selects on. Nothing writes it: it is set
+  # by hand on a bead whose holder wants a first reaction.
+  "gc.proactive",
 ]
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
@@ -537,5 +582,5 @@ keys = [
   "gc.routed_to", "gc.step_ref", "gc.root_bead_id", "gc.execution_routed_to",
   "assignee", "gc.input_convoy_id", "gc.kind", "gc.outcome",
   "gc.session_id", "gc.session_name", "gc.session_affinity",
-  "gc.claimed_at",
+  "gc.claimed_at", "gc.formula_source", "gc.root_store_ref", "gc.synthetic",
 ]
