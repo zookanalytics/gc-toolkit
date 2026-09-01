@@ -11,6 +11,8 @@
 #   - the rescue property doctor/check-state-space depends on: a raw TAB
 #     inside a JSON string must not cost the whole payload;
 #   - no in-script inline scrub outside the fence;
+#   - no dead call: a scrub reached by a name the file defines nowhere, which
+#     `bash -n` passes and only the branch reaching the call ever reports;
 #   - the lint enforcement (tools/lint-learned.d/inline-ctrl-scrub.sh)
 #     still fires on each shape it exists to catch.
 #
@@ -154,6 +156,55 @@ V=\$(gc bd show \"\$V\" --json | tr -d '$CNTRL')
     probe "passes the shape quoted in a comment" 0 \
         "# prose citing tr -d '$ALL_C0' as an example"
     probe "passes a non-control tr -d" 0 "z=\$(printf x | tr -d '[:space:]')"
+
+    # A dead call cannot be inferred from a shape, so the detector lists the
+    # names the consolidation retired. Split across a concatenation here for
+    # the same reason as the shapes above: spelled whole, this file would
+    # carry the token its own rule forbids.
+    RETIRED="strip_ct""l"
+    RETIRED_ALT="strip_ct""rl"
+    probe "flags a call to a retired helper name" 1 \
+        "x=\$(gc bd show z --json | $RETIRED | jq .)"
+    probe "flags the other retired spelling" 1 \
+        "x=\$(gc bd show z --json | $RETIRED_ALT | jq .)"
+    # The shape that reaches production: the fence is present and correct, and
+    # a later edit calls the name it replaced.
+    probe "flags a retired name in a file that also defines scrub" 1 \
+        "# >>> control-char-scrub
+$BLOCK
+# <<< control-char-scrub
+rows=\$(gc bd show z --json | scrub | jq .)
+offered=\$(gc bd ready --json | $RETIRED | jq .)"
+    probe "flags a retired name inside another fence" 1 \
+        "# >>> gate-visit
+V=\$(gc bd show \"\$V\" --json | $RETIRED)
+# <<< gate-visit"
+    probe "passes a retired name quoted in a comment" 0 \
+        "# prose naming $RETIRED as the helper the consolidation replaced"
+    probe "passes a longer identifier that merely contains one" 0 \
+        "json_${RETIRED}_rows() { cat; }
+x=\$(gc bd show z --json | json_${RETIRED}_rows)"
+
+    probe "flags a | scrub the file defines nowhere" 1 \
+        "x=\$(gc bd show z --json | scrub | jq .)"
+    probe "passes | scrub where the fenced copy defines it" 0 \
+        "# >>> control-char-scrub
+$BLOCK
+# <<< control-char-scrub
+x=\$(gc bd show z --json | scrub | jq .)"
+    probe "passes | scrub defined below the call" 0 \
+        "x=\$(gc bd show z --json | scrub | jq .)
+# >>> control-char-scrub
+$BLOCK
+# <<< control-char-scrub"
+    probe "flags | scrub where the fence carries no definition" 1 \
+        "# >>> control-char-scrub
+# <<< control-char-scrub
+x=\$(gc bd show z --json | scrub | jq .)"
+    probe "passes | scrub inside another fence" 0 \
+        "# >>> gate-visit
+V=\$(gc bd show \"\$V\" --json | scrub)
+# <<< gate-visit"
     # The detector's own canonical constant must agree with the block, or it
     # would police a byte set the pack does not use.
     DET_CANON="$(sed -n 's/^CANON="\(.*\)"$/\1/p' "$DETECTOR")"
