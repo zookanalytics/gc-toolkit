@@ -43,14 +43,14 @@ disabled (see [The distiller is off](#the-distiller-is-off)). Judgment 1
 (adjudicate against what exists), judgment 5 (how the entry is written). The
 two promotion gates were checked on every cluster:
 
-- **Gate 1, source diversity.** `distinct_sources=1` on every cluster —
-  every observation is `obs.source=operator`. The gate exists to stop a
-  self-report → self-promote → self-inject loop with no external check, and
-  an all-operator cluster is the opposite case: the external check is the
-  only source. The rubric did not say so, and as written it would have
-  blocked every possible `profile` promotion — a cluster that must be
-  operator-sourced is a cluster with `distinct_sources=1`. This PR states the
-  reading in Gate 1 rather than leaving each run to re-derive it.
+- **Gate 1, external check.** Every observation in every cluster is
+  `obs.source=operator`. The gate blocks a cluster with no external check —
+  a self-report that promotes itself — and treats an all-operator cluster as
+  corroborated once it spans two or more distinct `obs.provenance` events.
+  The evidence column below lists four or more observations for every entry.
+  `distinct_sources=1` throughout and does not settle the question on its
+  own: it reports 1 for the blocked all-self case and for this promotable
+  one alike.
 - **Gate 2, remedy class.** Each entry states a concrete behavior on a
   recognizable trigger. Two candidate clusters failed this gate and were
   dropped; they are recorded under [Left out](#left-out).
