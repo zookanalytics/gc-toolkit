@@ -64,8 +64,15 @@ SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<the finding, verbatim, + recommendation>"
+ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
+  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<the finding, verbatim, + recommendation>"
 ```
+
+You are city-scoped, so `GC_RIG` arrives unset and escalate.sh's default
+converse pool renders bare, an address no pool holds, and it refuses before
+filing anything. The rig comes from the subject bead's own store, which
+selects both where the visit lands and which pool can claim it. When that
+store does not resolve, escalate against a bead that has one.
 
 Escalate systemic findings (a Dolt outage, an unrestorable backup, a doctor
 finding no open bead tracks); handle the routine directly (stale locks,

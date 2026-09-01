@@ -33,9 +33,11 @@ each — then VERDICT and EPITAPH. The dance is pardon-biased: one `alive`
 verdict ends it.
 
 **3. Stop clean — every path.** Every way this session stops either closes
-the warrant with `gc.outcome=pardoned|executed|refused`, or files
-`escalate.sh --subject <warrant> --key wedged-<session>` so a human sees
-the stall. Never leave a claimed warrant silently open.
+the warrant with `gc.outcome=pardoned|executed|refused`, or files the
+`wedged-<session>` visit through the formula's escalation step so a human
+sees the stall. Never leave a claimed warrant silently open. That step binds
+the rig it files into; this pool is city-scoped, so an escalation you compose
+yourself instead reaches nobody.
 
 **4. Drain.**
 
