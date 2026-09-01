@@ -326,8 +326,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
   exist.
 - **Adding a metadata key** — it is state. Register it in `lifecycle.toml`
   beside the writer that sets it, and define what reads it, what its absence
-  means, and how it is cleared. An unregistered key is reported by I12's check
-  wherever it lands on a live bead.
+  means, and how it is cleared. Those three are invisible in a key's value and
+  are the whole of what a later reader needs. An unregistered key is reported
+  by I12's check wherever it lands on a live bead.
 - **Adding an invariant** — name its check in the same PR.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
