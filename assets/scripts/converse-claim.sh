@@ -1,19 +1,23 @@
 #!/bin/sh
-# converse-claim.sh — claim one turn FOR A CONTINUATION GROUP, and put back
-# anything that belongs to a different one (tk-msfmu; `gc hook --claim` has no
-# group filter, so re-claim-within-the-group is claim-then-release until it
-# grows one).
+# converse-claim.sh — claim one turn FOR A CONTINUATION GROUP, put back
+# anything that belongs to a different one (`gc hook --claim` has no group
+# filter, so re-claim-within-the-group is claim-then-release until it grows
+# one), and name a turn this session is ALREADY working so the caller neither
+# restarts it nor ends it.
 # Usage:
 #   converse-claim.sh                 first claim of a session: any group
 #   converse-claim.sh <current-group> re-claim: only this group is workable
 # Output: one key=value line; exit status says what to do:
 #   action=work  bead=<id> group=<g> [reason=unreleasable]     exit 0
+#   action=hold  bead=<id> group=<g> reason=already-underway [adopted=<ids>] exit 3
 #   action=drain reason=no-work                                exit 1
 #   action=drain reason=out-of-group bead=<id> group=<g>       exit 1
 # The RELEASE is the load-bearing half: never drain on a turn not put back
 # (a held visit waits for witness patrol otherwise), release the WHOLE claim
 # (the vacuumed continuation_assigned siblings too), and when part of the set
 # will not go back, work the first still-HELD turn instead of draining.
+# The HOLD verdict is load-bearing for the opposite reason: it is the only
+# answer that neither works a live sitting nor ends it.
 # Caller: the converse prompt's claim loop.
 set -u
 
@@ -27,7 +31,7 @@ scrub() { tr -d '\000-\011\013-\037'; }
 PROG="converse-claim"
 
 usage() {
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1-}" in
@@ -48,6 +52,7 @@ if [ -z "$BEAD" ]; then
     exit 1
 fi
 
+REASON=$(printf '%s' "$CLAIM" | jq -r '.reason // ""' 2>/dev/null || printf '')
 GROUP=$(printf '%s' "$CLAIM" | jq -r '.continuation_group // ""' 2>/dev/null || printf '')
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
@@ -70,6 +75,43 @@ if [ -z "$GROUP" ]; then
                        | ((.depends_on_id // .id // "") | tostring)) ]
                  | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf '')
     [ -n "$GROUP" ] && echo "$PROG: the claim reported no continuation group for $BEAD; recovered '$GROUP' from its tracks edge" >&2
+fi
+
+# A turn already in_progress under this session's identity is a sitting
+# UNDERWAY, not an offer to accept or refuse. `gc hook --claim` reports that
+# case as reason=existing_assignment and runs no claim CAS
+# (hookClaimExistingAssignment, cmd/gc/cmd_hook_claim.go), so the sitting's
+# status and assignee stand as the turn that opened it left them. A turn the
+# claim actually started reports `claimed` or `ready_assignment`, so the two
+# are distinct on the wire, and no argument from the caller is needed to tell
+# them apart.
+#
+# Adoption is not free of writes. The result path that reports the reason also
+# re-stamps the session identity on the visit (gc.session_id, gc.session_name,
+# gc.work_branch, and gc.claimed_at when it is absent), which is how a respawn
+# becomes the recorded holder of a hold it inherited. It also pre-assigns open
+# same-group siblings, but only when the visit carries gc.root_bead_id
+# alongside the group, and names them in continuation_assigned; molecule
+# instantiation stamps that root and filing a visit does not, so on a visit the
+# set arrives empty. Those siblings are later turns of the sitting's own group,
+# so the hold reports them and keeps them: putting a turn of the conversation
+# being held back in the pool is the same destruction by a third door.
+#
+# Neither other verdict is safe on a live sitting: `work` sends the caller back
+# through a visit loop that ends at the close, and `drain` acks a stop while
+# the operator may still be reading the thread.
+#
+# This precedes the group guard because the guard's remedy is the release, and
+# releasing a turn mid-sitting is the same destruction by the other door. A
+# turn only reaches in_progress under this identity because an earlier turn of
+# this session decided to work it, so the guard has had its say.
+if [ "$REASON" = "existing_assignment" ]; then
+    ADOPTED=$(printf '%s' "$CLAIM" | jq -r '
+        (.continuation_assigned // [])
+        | map(select(type == "string" and . != ""))
+        | join(",")' 2>/dev/null || printf '')
+    echo "action=hold bead=$BEAD group=$GROUP reason=already-underway${ADOPTED:+ adopted=$ADOPTED}"
+    exit 3
 fi
 
 # Work on a match, a first claim, or no group to compare — the unknown cases

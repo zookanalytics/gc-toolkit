@@ -528,6 +528,43 @@ vanishing thread reads as a crash; where no framing was ever posted there
 is no question to abandon, and holding a sitting anyway spends the
 attention the whole engagement model is trying to conserve.
 
+*A third way a held sitting can end, and the only one the pack owns
+outright:* not an interruption and not a deliberate close, but the claim
+loop. A wake nudge reaches a session that is mid-hold, `gc hook --claim`
+answers with `reason=existing_assignment`, and the visit it hands back
+is the one that session is already holding. Re-claiming produces that
+same bead every time. Neither of the claimer's other two verdicts is
+safe there: `work` sends the session back through a visit loop that ends
+at the close, which ends a sitting the operator has not ruled on, and
+`drain` acknowledges a stop while the operator may still be reading the
+thread. Without a third verdict the loop has nowhere left to go but the
+sitting it is holding.
+
+`assets/scripts/converse-claim.sh` has that third verdict, `action=hold`,
+keyed on the `existing_assignment` reason. A turn already `in_progress`
+under this session's identity is a sitting underway rather than an offer,
+so the loop leaves the sitting where it found it: nothing claimed,
+nothing released, nothing closed. Adoption still writes. The same hook
+result re-stamps the session identity on the visit, which is how a respawn
+becomes the recorded holder of a hold it inherited, and it pre-assigns open
+same-group siblings when the visit carries `gc.root_bead_id`. Those
+siblings are later turns of the same conversation, so the hold names them
+on its output line and keeps them rather than putting them back. Which of
+two shapes it is, a thread still carrying its own framing or a fresh
+session respawned onto a hold whose scrollback a restart took, is a
+question about this session's scrollback that no script can read, so the
+claimer states the fact and the prompt makes the choice.
+
+Two constraints follow for anyone tuning this. With the idle clock off no
+clock ends a held sitting, so the wake path is the only pack-owned way one
+ends without a ruling and `action=hold` is the whole of that guard;
+re-arming `idle_timeout` adds a clock, not a substitute for it. And a
+wake nudge that names the claimer directly rather than sending the
+session through the prompt's claim block passes no continuation group,
+which silently disables the out-of-group guard above on every wake, so
+`agents/converse/agent.toml` carries that as a third constraint on the
+nudge text.
+
 *The core seam, now closed (landed 2026-08-12):* attachment is observable —
 `runtime.Provider.IsAttached` — and the idle ladder now consults it.
 gascity merged `gc-rjtk1` (PR #126, commit `c8bff331d`; confirmed in

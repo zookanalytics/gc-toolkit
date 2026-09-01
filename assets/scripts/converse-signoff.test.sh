@@ -1122,6 +1122,163 @@ run_claim '{"bead_id":"tk-foreign","continuation_group":"tk-other"}' "tk-subj" "
 eq "$(grep -c -- '--status=open' <<< "$CUPD")" "1" \
    "(VACUUM-ABSENT) a claim naming no siblings still releases exactly one turn"
 
+echo "── a turn already underway is held, not worked and not drained ──"
+
+UNDERWAY='{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"existing_assignment"}'
+
+# --- (HOLD) the sitting this thread is in ------------------------------------
+run_claim "$UNDERWAY" "tk-subj" "$RELEASED"
+eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
+   "(HOLD) a turn already in_progress under this session is a sitting underway"
+eq "$CRC" "3" "(HOLD) …with an exit status distinct from work and from drain"
+eq "${CUPD:-<none>}" "<none>" "(HOLD) …and the claimer issues no write of its own"
+
+# --- (HOLD-BARE) the claimer invoked with no group ---------------------------
+# An invocation naming no group leaves CURRENT_GROUP empty, so the out-of-group
+# guard cannot fire; the hold must not depend on the caller passing its subject.
+run_claim "$UNDERWAY" "" "$RELEASED"
+eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
+   "(HOLD-BARE) an unscoped nudge invocation still holds"
+eq "${CUPD:-<none>}" "<none>" "(HOLD-BARE) …and still writes nothing of its own"
+
+# --- (HOLD-FOREIGN) the hold outranks the out-of-group guard -----------------
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existing_assignment"}' \
+          "tk-subj" "$RELEASED"
+eq "$COUT" "action=hold bead=tk-held group=tk-other reason=already-underway" \
+   "(HOLD-FOREIGN) a sitting underway is not released for being out of group"
+eq "${CUPD:-<none>}" "<none>" "(HOLD-FOREIGN) …and the release never runs"
+
+# --- (HOLD-VACUUM) a hold keeps the siblings adoption took, and says so ------
+# The claim is not side-effect free on this path: the same result that reports
+# existing_assignment can pre-assign open same-group siblings and name them in
+# continuation_assigned. They are later turns of the sitting's OWN group, so
+# releasing them is the destruction this verdict exists to prevent by a third
+# door — but a hold that drops the field silently leaves the caller believing
+# it holds one turn when it holds several.
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existing_assignment","continuation_assigned":["tk-sib1","tk-sib2"]}' \
+          "tk-subj" "$RELEASED"
+eq "$COUT" "action=hold bead=tk-held group=tk-other reason=already-underway adopted=tk-sib1,tk-sib2" \
+   "(HOLD-VACUUM) a held sitting names the siblings the claim assigned to it"
+eq "${CUPD:-<none>}" "<none>" "(HOLD-VACUUM) …and puts no sibling back"
+eq "$CRC" "3" "(HOLD-VACUUM) …and still holds rather than working or draining"
+
+# The caller parses `bead=` and `group=` off this same line, so the added field
+# must not move what those resolve to.
+eq "$(printf '%s' "$COUT" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')" "tk-held" \
+   "(HOLD-VACUUM) …and the caller still parses the held turn off the line"
+eq "$(printf '%s' "$COUT" | sed -n 's/.*group=\([^ ]*\).*/\1/p')" "tk-other" \
+   "(HOLD-VACUUM) …and its group with it"
+
+# --- (HOLD-VACUUM-ABSENT) no siblings, no field ------------------------------
+# The mirror. An empty adopted= would read as a set that arrived and name none
+# of it, and visits are filed without gc.root_bead_id, so preassignment returns
+# nothing and this is the shape every hold has today.
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"existing_assignment","continuation_assigned":[]}' \
+          "tk-subj" "$RELEASED"
+eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
+   "(HOLD-VACUUM-ABSENT) an empty sibling set adds no field to the line"
+
+# --- (HOLD-FRESH) the mirror: a turn this claim STARTED is ordinary work -----
+# `gc hook --claim` reports a turn it moved to in_progress as `claimed` or
+# `ready_assignment`; only a turn that was ALREADY in_progress under this
+# identity reports `existing_assignment` (hookClaimExistingAssignment,
+# cmd/gc/cmd_hook_claim.go).
+for fresh in claimed ready_assignment; do
+    run_claim "{\"bead_id\":\"tk-new\",\"continuation_group\":\"tk-subj\",\"reason\":\"$fresh\"}" \
+              "tk-subj" "$RELEASED"
+    eq "$COUT" "action=work bead=tk-new group=tk-subj" \
+       "(HOLD-FRESH) reason=$fresh is fresh work, not a sitting underway"
+    eq "$CRC" "0" "(HOLD-FRESH) …and exits 0"
+done
+
+run_claim '{"bead_id":"tk-new","continuation_group":"tk-other","reason":"claimed"}' "tk-subj" "$RELEASED"
+eq "$COUT" "action=drain reason=out-of-group bead=tk-new group=tk-other" \
+   "(HOLD-FRESH) a freshly claimed foreign turn is still released and drained"
+
+# --- the prompt is the half that decides what a hold MEANS -------------------
+# The script can state that a sitting is underway; whether this session's
+# scrollback still carries the framing is answerable only in the thread, so
+# both arms of that choice live in the prompt — as prose, which reverts
+# silently unless pinned here.
+have "the prompt has a branch for a sitting already underway" 'action=hold' "$PROMPT"
+have "…and the claimer-less fallback renders the same verdict" \
+     'existing_assignment' "$PROMPT"
+have "…and step 8 sends a hold back to step 1 instead of draining on it" \
+     "is step 1's case, not this one" "$PROMPT"
+# cut-short is a real outcome with one legitimate door; left unqualified it
+# reads as the generic way out of any stuck sitting.
+have "…and cut-short is confined to the low-context exit" \
+     'This is the ONLY path to `cut-short`' "$PROMPT"
+# The hold's boundary is the other half of what it means, and it is stated in
+# three places that can drift apart. `existing_assignment` skips the claim CAS
+# and nothing else: the same result path re-stamps the session identity on the
+# visit and can pre-assign open same-group siblings. A "nothing is written"
+# reading is the one a later fix would reason from, so each surface is pinned
+# to the boundary it actually has.
+lacks "the claimer does not promise the hook writes nothing" \
+      'changes no state' "$CLAIMER" \
+      "existing_assignment skips only the CAS — the result path still stamps identity and can pre-assign siblings"
+# Scoped to the hold arm's own comment: `continuation_assigned` is named twice
+# more in this script, in the header contract and in the foreign-group release,
+# so an unscoped pin passes over a hold comment that has gone quiet about it.
+HOLD_NOTE="$(awk '/^# A turn already in_progress under this session/ {f=1}
+                  f && /^if \[ "\$REASON" = "existing_assignment" \]/ {exit}
+                  f {print}' "$CLAIMER")"
+if printf '%s\n' "$HOLD_NOTE" | grep -qF 'continuation_assigned'; then
+    ok "…and names the preassignment the hold inherits"
+else
+    bad "…and names the preassignment the hold inherits" \
+        "the hold arm must say the adoption can assign siblings, not only that it claims nothing"
+fi
+# Scoped to the hold section and matched on the bare key. The doc is
+# hard-wrapped, so a multi-word literal breaks the moment a sentence in front
+# of it grows; and `gc.root_bead_id` appears again in the routing section
+# further down, which would carry an unscoped pin over a deleted boundary.
+HOLD_DOC="$(awk '/has that third verdict/ {f=1}
+                 f && /^Two constraints follow/ {exit}
+                 f {print}' "$ENGAGE")"
+if printf '%s\n' "$HOLD_DOC" | grep -qF 'gc.root_bead_id'; then
+    ok "the central doc states the same boundary"
+else
+    bad "the central doc states the same boundary" \
+        "the doc must name the key preassignment is gated on, not just that it can happen"
+fi
+# Same wrapping hazard, opposite polarity, and here it fails OPEN: a banned
+# phrase split across two lines would read as absent. Collapse the whitespace
+# before looking.
+if tr '\n' ' ' < "$ENGAGE" | tr -s ' ' | grep -qF 'nothing written'; then
+    bad "…and does not restate the retired side-effect-free claim" \
+        "the doc is what a later fix reads as the hook contract"
+else
+    ok "…and does not restate the retired side-effect-free claim"
+fi
+# Scoped to the hold prose and collapsed to one line, because the prompt is
+# hard-wrapped and a multi-word literal breaks the moment a sentence in front
+# of it grows. Both arms are pinned: whether this session's scrollback still
+# carries the framing is answerable only in the thread, so the verdict resolves
+# to two different acts, and a hold that keeps one and loses the other either
+# leaves a reaped sitting with nothing posted or re-opens one the operator is
+# already reading.
+HOLD_PROSE="$TMPD/hold-prose.txt"
+awk '/is a sitting already underway/ {f=1}
+     f && /^   Before prepping/ {exit}
+     f {print}' "$PROMPT" | tr '\n' ' ' | tr -s ' ' >"$HOLD_PROSE"
+have "…and forbids the drain-ack that would take the operator's pane" \
+     'Do not `drain-ack`' "$HOLD_PROSE"
+have "…and leaves a thread that already carries the sitting alone" \
+     'nothing to do' "$HOLD_PROSE"
+have "…and sends a scrollback-less respawn back through prep and the re-stamp" \
+     're-open it at step 4' "$HOLD_PROSE"
+
+# The nudge is read before step 1, so naming the script alone lands the session
+# outside the block where the hold verdict is read, and passes no group, which
+# disables the out-of-group guard on every wake.
+have "the wake nudge sends the session through the prompt's claim block" \
+     "step 1's claim block" "$NUDGE_VAL"
+lacks "…and no longer reads as an instruction to run the visit to its close" \
+      'work the visit it returns' "$NUDGE_VAL" \
+      "this sentence directs a mid-hold session to run the visit to its close"
+
 echo "── a routed wait is written as an EDGE, not only as prose (tk-2plde) ──"
 # The same failure mode as the stamp, one level up. A takeaway is ONE frozen
 # string, so a sitting that routes work leaves the subject saying "routed —
