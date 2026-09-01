@@ -349,12 +349,14 @@ since_format = "RFC 3339 UTC"
 #   value is a rig-qualified pool identity or the park_route sentinel above;
 #   the rig-unqualified form matches nothing, and
 #   doctor/check-routed-work-claimable reports it. Empty means unrouted and is
-#   what the pack writes to clear a route: setting any key to "" leaves the key
-#   present carrying an empty value, so `--unset-metadata` is the only removal,
-#   and the pack does not use it here. Every route reader treats absent and
-#   empty alike, and the empty value keeps the record that a route was cleared
-#   deliberately. An empty route is also the state a re-routing lane fills, so
-#   clearing one does not park a bead.
+#   what the pack writes to clear a route on an anchor: setting any key to ""
+#   leaves the key present carrying an empty value, so `--unset-metadata` is the
+#   only removal, and the one place the pack removes this key is `gc-helm.sh
+#   takeaway` quiescing the routed STEPS of a parked molecule. Every route
+#   reader treats absent and empty alike. Neither is a park: pr-facts.sh's
+#   stranded-rework rescue selects on an empty route to re-stamp one, so an open
+#   unassigned bead with no route is a candidate for re-routing rather than a
+#   bead at rest. What parks a bead is the park_route sentinel.
 #
 # assignee with gc.routed_to — both may be set, and on a claimed pool bead both
 #   are. A claim writes the assignee and leaves the route as the record of which
