@@ -108,13 +108,14 @@ Not every earned pattern may be auto-adopted into the always-injected
 `learning-distill` rubric, `skills/learning-distill/SKILL.md` — guard that
 surface:
 
-- **Source diversity (Gate 1).** A cluster that is entirely
-  `obs.source=self`, or whose `distinct_sources=1`, cannot auto-promote
-  into an always-injected fragment without an `obs.endorsed=operator`
-  observation — a self-report → self-promote → self-inject loop has no
-  external check. A blocked pattern is *surfaced* to the operator (held
-  with the block stated), never adopted; it promotes later on independent
-  corroboration (a second distinct source) or an explicit `learn this`
+- **External check (Gate 1).** A cluster that is entirely
+  `obs.source=self` cannot auto-promote into an always-injected fragment
+  without an `obs.endorsed=operator` observation: a self-report that
+  promotes itself has no external check. An all-operator cluster spanning
+  two or more distinct `obs.provenance` events is corroborated and promotes
+  unendorsed, because the operator's correction is that check. A blocked
+  pattern is *surfaced* to the operator (held with the block stated), never
+  adopted; it promotes later on corroboration or an explicit `learn this`
   endorsement.
 - **Remedy class (Gate 2).** A remedy that is an exhortation ("be
   thorough", "try harder") or that fixes a structural failure (a
@@ -156,12 +157,12 @@ comment:
 ```
 
 Each fragment holds at most **15 bullets**. A promotion into one of these
-always-injected fragments must clear the two promotion gates above (source
-diversity, remedy class). A promotion that would exceed the cap must also
-name the bullet it displaces — the weakest incumbent goes in the same PR,
-or the promotion does not file. The polecat fragment is injected by both
-polecat prompts (`agents/polecat` and `agents/polecat-codex` both render
-`{{ template "learned-conventions-polecat" . }}`).
+always-injected fragments must clear the two promotion gates above
+(external check, remedy class). A promotion that would exceed the cap must
+also name the bullet it displaces — the weakest incumbent goes in the same
+PR, or the promotion does not file. The polecat fragment is injected by
+both polecat prompts (`agents/polecat` and `agents/polecat-codex` both
+render `{{ template "learned-conventions-polecat" . }}`).
 
 ## Retirement and hardening
 
