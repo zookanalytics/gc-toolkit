@@ -205,6 +205,21 @@ WIDEST10=$(sort -rn "$ARGV_LOG" | head -1)
 lt "$WIDEST10" "$WIDEST" "a smaller batch size narrows the widest argument ($WIDEST10 < $WIDEST), so the bound is the batch"
 clear_fixtures
 
+# --- 13. a closed root and an absent root inside ONE batch -----------------------------
+# Classification reads root_missing before root_closed, and the existence probe
+# runs only when a batch comes back short a row. A batch carrying both defects is
+# what proves the probe names the absent id rather than condemning the whole short
+# batch: were the closed root swept in with it, every strand would downgrade from
+# an error to an orphan note and I8 would go quiet on the defect it exists to find.
+steps "$(step s-11 r-closed)" "$(step s-12 r-gone ',"gc.root_store_ref":"other-rig"')"
+roots "{\"id\":\"r-closed\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a closed root batched with an absent one is still an ERROR"
+has "$OUT" "yet 1 step(s) never closed — s-11." "the strand keeps its verdict and names only its own step"
+has "$OUT" "open step(s) s-12 name root r-gone" "the absent root beside it is still reported as a note"
+has "$OUT" "1 molecule(s)" "the absent root did not become a second error"
+clear_fixtures
+
 echo
 echo "check-step-terminal: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
