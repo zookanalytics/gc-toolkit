@@ -14,6 +14,13 @@
 # it — a finalized chain has no assignees left, and a blank one inside our own
 # molecule is still ours (tk-xgfhj3).
 #
+# Deriving that molecule from the assignee borrows the same non-unique pair, so
+# it settles nothing by itself: this chain's own bead may be one the finalizer
+# stripped, sitting in a molecule the assignee never mentions. Where `--root` or
+# the gc.session_id stamp names the molecule independently, the close proceeds;
+# where only the assignee does and another live bead for this step could equally
+# be ours, it is refused rather than guessed.
+#
 # --bead is a HINT (e.g. `.bead_id` from `gc hook --claim --json`): used only if
 # it verifies as this session's bead for this step inside the molecule being
 # executed. It never establishes which molecule that is: a hint scoped by a root
@@ -179,12 +186,17 @@ roots_from() { # <bd list args...>
   ' 2>/dev/null | awk 'NF && !seen[$0]++'
 }
 
-# The molecule this shell is executing, empty when nothing proves which it is.
-# Each source answers only when it names exactly one root; an ambiguous source
-# is no answer rather than a refusal, so a session carrying husks from earlier
-# runs still resolves through a later source. Order is most to least
-# trustworthy: the session stamp a claim leaves on the step it hands out, this
-# step's own live bead, then any live bead of this formula.
+# The molecule this shell is executing, as "<source> <root>" — empty when
+# nothing proves which it is. Each source answers only when it names exactly one
+# root; an ambiguous source is no answer rather than a refusal, so a session
+# carrying husks from earlier runs still resolves through a later source. Order
+# is most to least trustworthy: the session stamp a claim leaves on the step it
+# hands out, this step's own live bead, then any live bead of this formula.
+#
+# The source is half the answer. `session` names the molecule independently of
+# the assignee; `assignee` names it with the same non-unique pair the scoping
+# exists to replace, and a root only that pair vouches for cannot authorize a
+# close on its own (see unproven_rivals).
 #
 # --bead is not a source. $ROOT is empty here, so verify() is down to the
 # (assignee, gc.step_ref) pair one pool assignee shares with every molecule it
@@ -196,7 +208,7 @@ derive_root() {
   if [ -n "${GC_SESSION_ID:-}" ]; then
     found=$(roots_from --metadata-field "gc.session_id=$GC_SESSION_ID" \
                        --status=open,in_progress,blocked,closed)
-    [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
+    [ "$(count "$found")" = "1" ] && { printf 'session %s' "$found"; return 0; }
   fi
   while IFS= read -r ident; do
     [ -n "$ident" ] || continue
@@ -216,9 +228,9 @@ $(printf '%s' "$json" | jq -r --arg f "$FORMULA." '
       else empty end' 2>/dev/null)"
   done <<< "$IDENTITIES"
   found=$(printf '%s\n' "$this_step" | awk 'NF && !seen[$0]++')
-  [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
+  [ "$(count "$found")" = "1" ] && { printf 'assignee %s' "$found"; return 0; }
   found=$(printf '%s\n' "$same_formula" | awk 'NF && !seen[$0]++')
-  [ "$(count "$found")" = "1" ] && { printf '%s' "$found"; return 0; }
+  [ "$(count "$found")" = "1" ] && { printf 'assignee %s' "$found"; return 0; }
   return 0
 }
 
@@ -269,6 +281,47 @@ molecule_rows() { # <status-list>
       ' 2>/dev/null
 }
 
+# Live beads for this step, outside <root>, that this shell could itself be
+# executing. The finalizer strips assignees, so an unassigned live bead for this
+# step is a candidate for "our own"; so is one under our own assignee in another
+# molecule. A bead another session holds — by assignee, or by the gc.session_id
+# a claim stamped on it — is that session's and is not counted.
+unproven_rivals() { # <root the close would act in>
+  bd_json list --metadata-field "gc.step_ref=$STEP" --status=open,in_progress --limit=0 \
+    | jq -r --arg step "$STEP" --arg root "${1:-}" --arg ids "$IDENTITIES" \
+            --arg sid "${GC_SESSION_ID:-}" '
+        ($ids | split("\n") | map(select(. != ""))) as $me
+        | if type == "array" then
+            .[] | . as $b
+                | select(($b.metadata["gc.step_ref"] // "") == $step)
+                | select(($b.metadata["gc.root_bead_id"] // "") != $root)
+                | select((($b.assignee // "") == "") or (($me | index($b.assignee // "")) != null))
+                | select((($b.metadata["gc.session_id"] // "") | . == "" or . == $sid))
+                | "\($b.id) (molecule \($b.metadata["gc.root_bead_id"] // "?"))"
+          else empty end
+      ' 2>/dev/null
+}
+
+# A close may rest on the molecule only when something other than the assignee
+# named it. `--root` and the gc.session_id stamp are such sources; the assignee
+# is not — one pool assignee covers every molecule the agent has ever run, so
+# the root it names is this chain's only if no other live bead for this step
+# could equally be ours. When one could, the answer is a guess, and this refuses
+# it: a stalled step is visible and the finalizer still reaches it, while a
+# close in another chain is silent and takes a step out of a workflow nobody was
+# running.
+guard_unproven() { # <root the arm would act in> <what it would act on>
+  local acting="$1" subject="$2" rival
+  case "$ROOT_SOURCE" in flag|session) return 0 ;; esac
+  rival=$(unproven_rivals "$acting")
+  [ -n "$rival" ] || return 0
+  echo "step-close: FATAL — refusing to act on $subject for step '$STEP': nothing but this session's assignee names molecule ${acting:-<none>}, and that assignee covers every molecule this agent has ever run." >&2
+  echo "step-close:   Live for this step and equally ours: $(printf '%s' "$rival" | tr '\n' ' ')" >&2
+  echo "step-close:   Pass --root <root bead id> (\`.root_bead_id\` from \`gc hook --claim --json\`) to name the molecule this shell is executing." >&2
+  echo "step-close:   The step bead is still UNCLOSED and will be re-offered until it is closed." >&2
+  exit 2
+}
+
 close_bead() {
   local target="$1" via="$2" err
   if [ "$DRY_RUN" = "1" ]; then
@@ -294,7 +347,16 @@ warn_env_mismatch() {
 
 # The molecule scopes every resolution below, so it is established first. A
 # caller-supplied --root is taken as given; deriving it costs one listing.
-[ -n "$ROOT" ] || ROOT=$(derive_root)
+ROOT_SOURCE=""
+if [ -n "$ROOT" ]; then
+  ROOT_SOURCE=flag
+else
+  DERIVED=$(derive_root)
+  case "$DERIVED" in
+    *' '*) ROOT_SOURCE="${DERIVED%% *}"; ROOT="${DERIVED#* }" ;;
+    *)     ROOT_SOURCE=""; ROOT="" ;;
+  esac
+fi
 
 TIER=in_progress
 FOUND=$(discover in_progress | sort -u)
@@ -332,9 +394,11 @@ if [ -n "$HINT" ]; then
         echo "step-close: NOTE — $N $TIER beads match $STEP in ${ROOT:+molecule $ROOT}${ROOT:-this session} ($(printf '%s' "$FOUND" | tr '\n' ' ')); using the caller's verified --bead $HINT" >&2
       fi
       warn_env_mismatch "$HINT"
+      guard_unproven "$ROOT" "--bead $HINT"
       close_bead "$HINT" "--bead, verified" || exit 2
       exit 0 ;;
     closed)
+      guard_unproven "$ROOT" "--bead $HINT"
       echo "step-close: $HINT ($STEP) is already closed — nothing to do"
       exit 0 ;;
     '')
@@ -353,6 +417,7 @@ fi
 if [ "$N" -eq 1 ]; then
   TARGET=$(printf '%s' "$FOUND" | head -n 1)
   warn_env_mismatch "$TARGET"
+  guard_unproven "${ROOT:-$(root_of "$TARGET")}" "$TARGET"
   if [ -n "$ROOT" ]; then
     close_bead "$TARGET" "resolved by (molecule $ROOT, step_ref)" || exit 2
   else
@@ -375,6 +440,7 @@ fi
 if [ -n "$ROOT" ]; then
   ALREADY=$(molecule_rows closed | awk 'NF {print $1}' | sort -u | head -n 1)
   if [ -n "$ALREADY" ]; then
+    guard_unproven "$ROOT" "$ALREADY"
     echo "step-close: $ALREADY ($STEP) is already closed — nothing to do"
     exit 0
   fi

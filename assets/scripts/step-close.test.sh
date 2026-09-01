@@ -140,6 +140,7 @@ case "$1" in
         "") ;;
         gc.root_bead_id) [ "$root" = "$wval" ] || continue ;;
         gc.session_id)   [ "${sid:-}" = "$wval" ] || continue ;;
+        gc.step_ref)     [ "$step" = "$wval" ] || continue ;;
         *) continue ;;
       esac
       obj=$(emit_one "$id" "$assignee" "$step" "$status" "$root" "${sid:-}")
@@ -346,6 +347,87 @@ eq "$RC" "0" "(LIVE-HINT-ROOT) a live foreign hint does not stop the close"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-HINT-ROOT) closed the bead in the named molecule"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(LIVE-HINT-ROOT) the other molecule's live step was NOT closed"
 has "$OUT" "belongs to molecule root-old" "(LIVE-HINT-ROOT) the hint's own molecule is named"
+
+# (i) THE ROUND-4 ANCHOR — the wrong-close half with nothing independent naming
+#     the molecule. Our own bead carries no assignee and no session stamp, and
+#     an earlier molecule's bead for the same step is live under our assignee:
+#     the derivation reads that one, names its molecule, and the scoped close
+#     then lands there while our own step stays open. The assignee cannot tell
+#     the two apart, so the answer is a guess and the guess is refused.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|
+tk-old222|$MINE|$FSTEP|in_progress|root-old|
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+eq "$RC" "2" "(ASSIGNEE-ONLY) a molecule named by the assignee alone does not authorize a close"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(ASSIGNEE-ONLY) nothing was written"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(ASSIGNEE-ONLY) the other molecule's live step was NOT closed"
+has "$OUT" "tk-mine11 (molecule root-mine)" "(ASSIGNEE-ONLY) the bead that could equally be ours is named"
+has "$OUT" "Pass --root" "(ASSIGNEE-ONLY) names what would settle it"
+has "$OUT" "still UNCLOSED" "(ASSIGNEE-ONLY) names the consequence"
+
+# (j) ...and the two independent sources both settle it, on the same store.
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" --root root-mine 2>&1) || RC=$?
+eq "$RC" "0" "(ASSIGNEE-ONLY) --root closes the bead in the named molecule"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) it is our own bead that closes"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(ASSIGNEE-ONLY) the earlier molecule stays untouched"
+
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+tk-old222|$MINE|$FSTEP|in_progress|root-old|
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP"
+eq "$RC" "0" "(ASSIGNEE-ONLY) the gc.session_id stamp settles it too"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) the stamped molecule is the one closed in"
+
+# (k) The refusal is scoped to the doubt, not to the derivation. With no live
+#     bead for this step outside the derived molecule there is nothing this
+#     shell could be running instead, and the close proceeds on the assignee as
+#     it always has.
+cat > "$FAKE_BEADS" <<B
+tk-mine11|$MINE|$FSTEP|in_progress|root-mine|
+tk-oldsib|$MINE|mol-polecat-work.implement|open|root-old|
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+eq "$RC" "0" "(ASSIGNEE-ONLY) an assignee-derived molecule with no rival still closes"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) closed the bead for this step"
+
+# (l) A live same-step bead another session holds is that session's, not a
+#     candidate for ours: neither its assignee nor the stamp a claim left on it
+#     can be this shell, so it must not stall a close.
+cat > "$FAKE_BEADS" <<B
+tk-mine11|$MINE|$FSTEP|in_progress|root-mine|
+tk-their1|gc-toolkit__polecat-lx-other|$FSTEP|open|root-thm|
+tk-their2||$FSTEP|open|root-thn|lx-other
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+eq "$RC" "0" "(ASSIGNEE-ONLY) another session's live step is not a rival for ours"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) our own bead still closes"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-their" "(ASSIGNEE-ONLY) nothing of theirs was written"
+
+# (m) The false-green half: reporting another molecule's closed bead as done is
+#     an acting verdict, so it takes the same gate.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|
+tk-oldsib|$MINE|mol-polecat-work.implement|in_progress|root-old|
+tk-old111|$MINE|$FSTEP|closed|root-old|
+B
+: > "$FAKE_CLOSED"
+RC=0
+OUT=$(gcenv GC_SESSION_NAME="$MINE" bash "$SCRIPT" --step "$FSTEP" 2>&1) || RC=$?
+eq "$RC" "2" "(ASSIGNEE-ONLY) a closed bead in an assignee-derived molecule is not a pass"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(ASSIGNEE-ONLY) nothing was written"
+hasnt "$OUT" "nothing to do" "(ASSIGNEE-ONLY) the false-green line is not emitted"
+has "$OUT" "tk-mine11 (molecule root-mine)" "(ASSIGNEE-ONLY) the bead that could be ours is named"
 
 # --- 1d. a step of our own molecule held by another session ------------------
 # Molecule scope answers "which chain", not "who is running it". A second

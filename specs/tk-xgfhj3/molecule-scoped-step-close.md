@@ -69,9 +69,9 @@ while the molecule is still being derived, so at that point a same-assignee,
 same-step bead from an earlier run verifies exactly as this chain's own would. A
 root taken from one scopes every resolution below it to the wrong chain, and
 then vouches for that same hint on the way back out — which is how the
-closed-hint arm reports another chain's bead as already closed at exit 0. Every
-source that does answer is either independent of the assignee or already inside
-the molecule.
+closed-hint arm reports another chain's bead as already closed at exit 0. A hint
+is thus refused as a source outright, while sources 2 and 3 answer but do not
+authorize on their own, which is §2a.
 
 An ambiguous source is treated as no answer rather than as a refusal, so a
 session carrying husks from earlier runs still resolves through a later source.
@@ -81,8 +81,9 @@ candidate whose `gc.root_bead_id` differs is rejected and named, whatever its
 assignee says.
 
 When nothing establishes the molecule, an executable bead is still closed on the
-old pair — that path is unchanged — but a *closed* match is refused, because a
-closed match is exactly the shape that cannot be told apart from a foreign one.
+old pair where no rival contradicts it (§2a), but a *closed* match is refused
+outright, because a closed match is exactly the shape that cannot be told apart
+from a foreign one.
 The `--bead` arms that act take the same rule: with no molecule `verify()` is
 back to the non-unique pair, so a hint reading `open` or `in_progress` is not
 closed and one reading `closed` is not reported as done. Both fall through to
@@ -93,20 +94,33 @@ nothing.
 The cost of that refusal is a visible line on a step that was already closed;
 the cost of the alternative is the silent husk this bead is about.
 
-## 2a. What the scoping does not reach
+## 2a. An assignee-derived molecule authorizes nothing on its own
 
-One shape survives all of it. This chain's own bead carries no assignee, no
+Sources 2 and 3 read the assignee, which is the pair the scoping exists to
+replace. A root they name is therefore not independent evidence, and one shape
+turns that into a wrong close: this chain's own bead carries no assignee, no
 `gc.session_id` and no `--root`, while an earlier molecule's bead for the same
-step is still live under the same assignee. Source 2 then names the earlier
-molecule and the close lands there.
+step is still live under the same assignee. Source 2 names the earlier
+molecule, the scoped close lands there, and this chain's step stays open.
 
-Nothing in the store separates that from the ordinary case. A live
-same-assignee bead at this step is precisely what source 2 exists to read, and
-refusing it would stall every close that carries no session stamp — which is
-most of them. The remedy is upstream of this script: the claim stamps
-`gc.session_id`, or the caller passes `--root`. What is removed here is the
-half a hint could reach on its own, where the only thing naming the molecule
-was the bead the molecule was then used to vouch for.
+So the molecule has to be named by something the assignee did not supply —
+`--root`, or the `gc.session_id` a claim stamps — before a close may rest on
+it. Where only the assignee names it, the script asks whether anything else
+could be this shell's own bead: a live bead for this step, outside that
+molecule, that no other session holds by assignee or by session stamp. One such
+bead makes the answer a guess, and the guess is refused.
+
+The refusal is scoped to that doubt rather than to the derivation, so the
+common case is unchanged: with no live rival for this step outside the derived
+molecule there is nothing else this shell could be running, and the close
+proceeds on the assignee as before. What it costs is a stalled step whenever a
+same-step husk is live and the chain carries no stamp — visible, and still
+reachable by the finalizer. What it buys is that no close lands in a chain this
+shell never ran.
+
+Deriving the molecule from a `--bead` hint is refused outright rather than
+guarded, because a hint is not evidence at all: the only thing naming the
+molecule would be the bead the molecule was then used to vouch for.
 
 ## 3. The second defect: assignees cleared mid-run
 
@@ -122,8 +136,9 @@ thing that must be true before the chain unwinds, and closing the chain first
 lets the finalizer force-close stragglers while `submit-and-exit` is still
 running. What the finalizer writes belongs to the control-dispatcher in the gc
 binary, which this pack does not contain. The fix available here is the one
-above — make the close path independent of the assignee, so a chain that has
-lost its assignees still closes.
+above — key the close to the molecule, so a chain that has lost its assignees
+still closes wherever the molecule is named, and refuses rather than lands in
+another chain where it is not.
 
 The stranded work-bead shape does not reproduce as an outstanding population.
 Measured 2026-08-26 over the gc-toolkit store, the query from the bead (open,

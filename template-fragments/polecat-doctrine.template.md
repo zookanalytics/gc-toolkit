@@ -146,7 +146,10 @@ your claimed bead everything else.
   `step-close.sh`, which resolves the bead from the `(gc.root_bead_id,
   gc.step_ref)` pair — `$GC_BEAD_ID` and `$GC_TRIGGER_BEAD_ID` both name the
   wrong bead after a hook-claim and fail silently, and your assignee names
-  every molecule this pool slot has ever run, not this one.
+  every molecule this pool slot has ever run, not this one. When it refuses
+  because only that assignee names your molecule, re-run it with
+  `--root <root_bead_id>` from your claim; nothing else can tell your chain
+  from an earlier one.
 - **Close the chain in FORWARD order** (first step first, terminal step
   last): each step blocks the next and `bd` refuses to close a blocked
   issue, so the chain only unwinds from the unblocked end. Run the
