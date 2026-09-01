@@ -92,8 +92,12 @@ case "$1 ${2:-}" in
     # different things about the two, and the DONE row only exists for one.
     st=open; case "$id" in CLOSED-*) st=closed ;; esac
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c}}]'
-    else jq -n --arg i "$id" --arg s "$st" '[{id:$i,status:$s,metadata:{}}]'; fi ;;
+    # What gc.routed_to reads back as. FAKE_ROUTED holds it, so a test can
+    # model the route LANDING and the route landing EMPTY (the silent drop a
+    # multi-pair --set-metadata update can produce) with the same stub.
+    routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -121,10 +125,11 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
-       FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists"
+       FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
+       FAKE_ROUTED="$TMP/routed"
 mkdir -p "$TMP/signal-loom/.beads"
 export FAKE_SL_PATH="$TMP/signal-loom"
-: > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"
+: > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 unset GC_HELM_FIXTURE || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
@@ -275,6 +280,77 @@ eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(EDGENONE) no --waiting-on, n
 grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
+
+# ── takeaway --release --route: release the bead TO a pool ────────────────────
+# A first reaction that concludes "this is work" hands the bead on instead of
+# back. The route rides the release write, so the disposition lands whole or
+# not at all. Covered:
+#   (ROUTE)     the route replaces the empty clear, in the SAME single update
+#   (ROUTECLR)  no --route still clears the route (the release is unchanged)
+#   (ROUTEQUAL) a bare agent name is refused before anything is written
+#   (ROUTEREL)  --route without --release is refused (the unreadable half-state)
+#   (ROUTEOK)   a route that reads back correct is not re-written
+#   (ROUTEFIX)  a route that reads back EMPTY is repaired and reported
+POOL="gc-toolkit/gc-toolkit.polecat"
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
+   --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
+RLINE="$(grep -E "^bd update A-PARKED( |$)" "$TMP/updates" | head -n1)"
+case "$RLINE" in
+  *"--set-metadata gc.routed_to=$POOL"*) ok "(ROUTE) the release routes the bead to the pool" ;;
+  *) bad "(ROUTE) no route stamp in the release write (got: ${RLINE:-<none>})" ;;
+esac
+case "$RLINE" in
+  *"--status=open"*"--assignee="*) ok "(ROUTE) …in the same write that reopens and unassigns" ;;
+  *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
+esac
+case "$RLINE" in
+  *"--set-metadata gc.takeaway=actionable — routed to the polecat pool"*) ok "(ROUTE) …and the headline still rides it" ;;
+  *) bad "(ROUTE) the headline was lost: ${RLINE:-<none>}" ;;
+esac
+
+# (ROUTECLR) the plain release is untouched: it still hands the bead back.
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release >/dev/null 2>&1 || true
+grep -q -- '--set-metadata gc.routed_to= ' "$TMP/updates" \
+  && ok "(ROUTECLR) no --route still clears the route" \
+  || bad "(ROUTECLR) the plain release changed shape: $(cat "$TMP/updates")"
+
+# (ROUTEQUAL) a bare name is matched against nothing and would sit forever.
+: > "$TMP/updates"
+QRC=0
+sh "$SCRIPT" takeaway A-PARKED "bare" --release --route "gc-toolkit.polecat" >/dev/null 2>"$TMP/rerr" || QRC=$?
+eq "$QRC" "2" "(ROUTEQUAL) a bare agent name is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEQUAL) …and nothing was written"
+grep -q 'rig-qualified' "$TMP/rerr" \
+  && ok "(ROUTEQUAL) …and the refusal names the cause" \
+  || bad "(ROUTEQUAL) the refusal does not explain itself (stderr: $(cat "$TMP/rerr"))"
+
+# (ROUTEREL) routed but still assigned to the reacting session reads as neither.
+: > "$TMP/updates"
+RRC=0
+sh "$SCRIPT" takeaway A-PARKED "no release" --route "$POOL" >/dev/null 2>"$TMP/rerr" || RRC=$?
+eq "$RRC" "2" "(ROUTEREL) --route without --release is a usage error"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEREL) …and nothing was written"
+
+# (ROUTEOK) a landed route is verified once and left alone.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "landed" --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
+eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
+   "(ROUTEOK) a route that reads back correct is written once (the anchor, not its quiesced steps)"
+
+# (ROUTEFIX) the silent drop: the stamp lands empty, so the bead is visible to
+# no pool. The verb must notice and repair rather than report success.
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "dropped" --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
+eq "$(grep -c -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" || true)" "2" \
+   "(ROUTEFIX) an empty read-back is re-stamped"
+grep -q 'read back as' "$TMP/rerr" \
+  && ok "(ROUTEFIX) …and the miss is reported" \
+  || bad "(ROUTEFIX) the dropped route was silent (stderr: $(cat "$TMP/rerr"))"
+grep -q 'visible to no pool' "$TMP/rerr" \
+  && ok "(ROUTEFIX) …and a repair that also misses says what it costs" \
+  || bad "(ROUTEFIX) the persistent miss does not name its consequence (stderr: $(cat "$TMP/rerr"))"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the

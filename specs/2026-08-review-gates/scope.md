@@ -136,6 +136,12 @@ split later only if load or model choice demands it).
   the triage skill's fallback is "add `arch` when the diff creates a file,
   crosses a top-level directory, or changes a public interface," plus the
   charter-gap observation.
-- Open: where proactive/first-reaction sits in the workflow once triage
-  exists — first-reaction is approximately triage-for-conversations, and may
-  become the triage gate's front half. Decide during implementation.
+- Resolved: proactive/first-reaction does NOT become this gate's front half.
+  The two share a shape and nothing else — triage's subject is a diff and its
+  output is machine-consumed by `gate-ensure.sh` and `merge.sh`, while a first
+  reaction's subject is a bead and its output is a disposition, and the two
+  fail in opposite directions. First-reaction is the city's first-level
+  triage on the filing axis: its terminal step routes the bead to a pool,
+  holds it on an edge, or files a visit. The evidence, and what each mechanism
+  owes the other, is in
+  [specs/tk-diqxx9/first-reaction-triage.md](../tk-diqxx9/first-reaction-triage.md).

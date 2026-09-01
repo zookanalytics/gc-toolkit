@@ -133,7 +133,11 @@ says OPERATOR is their decision, not yours. Work the steps in order.
    11. WORK FEEDER (carried from PR #464): nothing converts ready beads
        into dispatches (252 ready unrouted, oldest 123d, at last count).
        Fold this evidence into bead 1 (review-gates/triage) — the feeder is
-       a triage-design decision, not a bolt-on arm.
+       a triage-design decision, not a bolt-on arm. Partly answered by
+       tk-diqxx9: a first reaction now converts the bead it reacted to into a
+       dispatch, a wait, or a visit (specs/tk-diqxx9/). What remains is the
+       candidate query that decides which beads get looked at, which is what
+       `tools/gc-proactive.sh scan` does by hand today.
    12. PLAN-TO-BEADS PIPELINE (carried from PR #455): a merged plan's
        targets do not reliably become beads (the consolidation plan dropped
        its largest target silently). Decide the mechanism that makes a

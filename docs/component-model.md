@@ -108,7 +108,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 | # | Proposition | Check |
 |---|---|---|
-| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`) and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check. |
+| **I1** | Every dependency is recorded in the bead graph — no wait lives only in prose or a metadata string. The shape it asserts is [I1 in full](#i1-in-full-the-hold-the-demand-and-the-shape-law) below. | **PARTIAL.** Takeaway waits are edges (`gc-helm.sh takeaway --waiting-on`), a first reaction's blocked disposition writes one (`first-reaction-dispose.sh`), and the liveness sweep re-derives stalled waits from the graph (`liveness-sweep.sh`); gate waits are head-bound markers by design. No total check. |
 | **I2** | The state space is closed: every `merge_result` value and status combo is declared in `lifecycle/lifecycle.toml`, and a bead in a declared detached state rests unheld and offered to no pool. | `doctor/check-state-space` |
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
@@ -251,7 +251,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, routed to the converse pool. |
-| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`. What it produces is something a human reads, not a branch. |
+| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of three dispositions: route the bead to a pool, hold it on an edge, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
+| `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
 | `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, react. |

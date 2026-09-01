@@ -5,7 +5,7 @@
 # Contract:
 #   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit (one open visit per subject)
 #   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
-#   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release]
+#   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
 #   gc-helm dismiss  <bead-id> [--reason "..."]               end the sitting and clear the row
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
@@ -33,7 +33,7 @@ usage() {
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm dismiss  <bead-id> [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -43,8 +43,10 @@ tail and --body the brief the converse session reads at claim time. react
 slings a proactive first reaction via tools/gc-proactive.sh (its --reason is
 log-only operator intent). takeaway stamps gc.takeaway (+_at/+_by) in one
 update; --release also reopens/unassigns/clears the route and quiesces the
-parked molecule's step beads; --waiting-on (repeatable) records the wait as a
-`blocks` edge beside the prose so the board can re-ask whether it landed.
+parked molecule's step beads; --route <rig>/<agent> releases it TO a pool
+instead of back to the human, in the same write; --waiting-on (repeatable)
+records the wait as a `blocks` edge beside the prose so the board can re-ask
+whether it landed.
 
 dismiss is the operator's one explicit act for "take this out of my view",
 and both halves of it exist because the alternative is something leaving on
@@ -247,11 +249,15 @@ quiesce_release_molecule_steps() (
 # Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release
 # folds the proactive reaction-release (reopen, unassign, clear route,
 # gc.proactive_reaction=1) into the same write and quiesces the parked
-# molecule's steps. --waiting-on records each wait as a `blocks` edge —
-# best-effort: the stamp is what the sitting owes the operator, so a
-# rejected edge only warns and never fails the verb (tk-2plde).
+# molecule's steps. --route names a pool to release TO, so a reaction that
+# concludes "this is work" hands the bead on in the SAME write that stamps the
+# headline: either the whole disposition lands or none of it does. The target
+# is rig-qualified or refused — gc.routed_to is read by exact string, so a bare
+# agent name routes to nobody and sits forever. --waiting-on records each wait
+# as a `blocks` edge — best-effort: the stamp is what the sitting owes the
+# operator, so a rejected edge only warns and never fails the verb (tk-2plde).
 cmd_takeaway() {
-    bead=""; text=""; by="host"; release=""; npos=0
+    bead=""; text=""; by="host"; release=""; route=""; npos=0
     waiting_ids=""
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -261,6 +267,8 @@ cmd_takeaway() {
             --waiting-on)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --waiting-on requires a bead id" >&2; exit 2; }
                             waiting_ids="$waiting_ids $1"; shift ;;
             --release) release=1; shift ;;
+            --route=*) route="${1#--route=}"; shift ;;
+            --route)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --route requires a <rig>/<agent> target" >&2; exit 2; }; route="$1"; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: takeaway: unknown flag '$1'" >&2; exit 2 ;;
             *)
@@ -296,6 +304,17 @@ cmd_takeaway() {
 
     [ -n "$by" ] || by="host"
 
+    # --route rides --release: a route stamped without the release would leave
+    # the bead assigned to this session AND routed to a pool, which is the
+    # half-state no reader can act on.
+    if [ -n "$route" ]; then
+        [ -n "$release" ] || { echo "$PROG: takeaway: --route needs --release (it names where the bead is released TO)" >&2; exit 2; }
+        case "$route" in
+            */*) : ;;
+            *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
+        esac
+    fi
+
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
@@ -306,10 +325,33 @@ cmd_takeaway() {
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by"
     [ -n "$release" ] && set -- "$@" --status=open --assignee= \
-               --set-metadata "gc.routed_to=" --set-metadata "gc.proactive_reaction=1"
+               --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
+    # A route that lands EMPTY is the worst outcome of all: the bead is open,
+    # unassigned and routed to nobody, which no pool's exact-match query can
+    # see. One `--set-metadata` pair in a multi-pair update can land
+    # present-but-empty while its siblings land, so read this one back and
+    # repair it. Warn rather than fail: the headline and the release are
+    # already written, and a warned miss is recoverable where a silent one is
+    # not.
+    if [ -n "$route" ]; then
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+            | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.routed_to"] // "") else "" end' 2>/dev/null || printf '')
+        if [ "$route_got" != "$route" ]; then
+            echo "$PROG: takeaway: gc.routed_to on $bead read back as '$route_got', expected '$route' — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.routed_to=$route" >/dev/null 2>&1 || true
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+                | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.routed_to"] // "") else "" end' 2>/dev/null || printf '')
+            [ "$route_got" = "$route" ] \
+                && echo "$PROG: takeaway: the route repair landed on $bead" >&2 \
+                || echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is visible to no pool until the route is stamped by hand" >&2
+        fi
+    fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads.
@@ -330,7 +372,7 @@ cmd_takeaway() {
     if [ -n "$release" ]; then
         quiesce_release_molecule_steps "$bead" "$db"
     fi
-    echo "takeaway set on $bead (by $by)${release:+ [released]}: $text"
+    echo "takeaway set on $bead (by $by)${release:+ [released${route:+ to $route}]}: $text"
 }
 
 # ── Verb: open ───────────────────────────────────────────────────────

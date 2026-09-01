@@ -9,9 +9,12 @@
 The dedicated, small, mr-only pool that runs slung first reactions — Phase 4
 of the Bead-Universe Operating Model (specs/bead-universe/design-doc.md — Key
 Components 5-6). A proactive worker takes one bead, gives it a cheap first
-reaction (read the body, write a first-reaction card to the notes, file a
-visit on it), and drains. It makes the human arrive at *advanced*
-work — a bead that already moved one step.
+reaction (read the body, write a first-reaction card to the notes, then
+dispose: route the bead to the pool that does that work, hold it on the bead it
+waits for, or file a visit), and drains. It is the city's first-level triage:
+it makes the human arrive at *advanced* work — a bead that already moved one
+step — and it keeps the beads it can schedule out of the human's queue
+entirely.
 
 That design is **v1**, superseded in part by specs/tk-h9pq5/design-doc.md
 (v2, 2026-07-29): v2 replaced the binding and lifecycle and left Phase 4
@@ -63,13 +66,21 @@ Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
 --merge mr` (operator/board one-shot) or `tools/gc-proactive.sh scan --sling`
 (process-scan). NOT a resident loop either way.
 
-The first reaction NEVER closes the target work bead — it advances it (card +
-a filed conversation turn) and releases it open for the human to accept/redirect.
-The `gc.proactive_reaction` marker stops the scan from re-reacting. The card
-shape (Understanding · Found · Proposal · Decision needed) is the same one a
-converse session opens with and the board's pick-a-row visit lands the human on.
+The first reaction NEVER closes the target work bead — every disposition
+advances it and leaves it open. `assets/scripts/first-reaction-dispose.sh`
+performs the three and records which one and why (`gc.first_reaction*`), so a
+wrong call is visible rather than silent. The `gc.proactive_reaction` marker
+stops the scan from re-reacting. The card shape (Understanding · Found ·
+Proposal · Decision needed · Disposition) is the same one a converse session
+opens with and the board's pick-a-row visit lands the human on.
+
+One bead is never triaged on its merits: a subject carrying `gc.origin=operator`
+came from `gc-visit-open`, where a human typed a topic and is waiting to talk
+about it, so the visit is the only disposition the script will perform on it.
 
 Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — demand flows
-unconditionally; the mr-invariant refuses `direct`; the formula
-writes the card and files the visit without closing; the slice tool fences reached
-content. Design refs: design-doc.md Key Components 5-6, Phase 4.
+unconditionally; the mr-invariant refuses `direct`; the formula writes the card
+and ends in one of three recorded dispositions without closing; one `scan
+--sling` sweep is capped; the slice tool fences reached content.
+`assets/scripts/first-reaction-dispose.test.sh` covers the exits themselves.
+Design refs: design-doc.md Key Components 5-6, Phase 4.

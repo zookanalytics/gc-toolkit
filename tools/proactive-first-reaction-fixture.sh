@@ -18,11 +18,13 @@
 #
 #   • ALWAYS-ON — tools/gc-proactive.sh `demand` (the pool's work_query,
 #     mirrored) flows routed work unconditionally: no enable flag, no
-#     city-cap shed. `deliverable` answers yes.
+#     city-cap shed. `deliverable` answers yes while the city's roster carries
+#     the pool, and no on the positive finding that it cannot claim.
 #   • THE mr-INVARIANT — `sling` bakes in --on mol-first-reaction --merge mr and
 #     HARD-REFUSES --merge direct (the security invariant).
 #   • THE FORMULA CONTRACT — mol-first-reaction writes the fixed card shape,
-#     flags the bead onto the board (advanced), and NEVER closes the target.
+#     ends in ONE of three dispositions (route it, hold it, ask), records which
+#     one and why, flags the bead onto the board, and NEVER closes the target.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the only throttle), and it defaults to mr.
 #   • THE PROVENANCE DISCIPLINE — tools/gc-bd-universe.sh fences reached content
@@ -125,14 +127,65 @@ eq "lower-priority bead ranks LAST despite being oldest"  "px-old-lo" \
    "$(printf '%s' "$RANK" | jq -r '.[2].id')"
 
 echo "── deliverable: will a slung reaction actually be PICKED UP? ──"
-# The verb survives for its callers (assets/scripts/gc-visit-open.sh branches
-# on the exit status), but the answer is now always yes: the pool is always
-# on, and its max_active_sessions cap only QUEUES a routed bead — it never
-# drops one — so a slung reaction is always eventually picked up.
+# A real branch for its callers (assets/scripts/gc-visit-open.sh files a bare
+# visit on a no). The QUEUE is not what makes a sling vanish — a routed bead
+# waits at zero cost — so what the verb asks is whether this city's agent
+# roster carries a pool that can claim at all. NO is a positive finding: an
+# unreadable roster answers YES, because absence of evidence would otherwise
+# retire the framing city-wide.
+has "usage advertises the verb" "deliverable" "$(P --help 2>&1 || true)"
+
+# No agents.json yet: the roster cannot be read.
 ec=0; P deliverable >/dev/null 2>&1 || ec=$?
-eq  "deliverable answers yes (exit 0)"          "0"    "$ec"
-has "deliverable says yes and names the queue"  "yes:" "$(P deliverable 2>&1 || true)"
-has "usage advertises the verb"                 "deliverable" "$(P --help 2>&1 || true)"
+eq  "an unreadable roster answers yes (exit 0)" "0" "$ec"
+has "…and says so rather than inventing an absence" "could not read" \
+    "$(P deliverable 2>&1 || true)"
+
+cat > "$FXDIR/agents.json" <<'JSON'
+{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat","suspended":false,"pool":{"min":0,"max":5}},
+           {"qualified_name":"gc-toolkit/gc-toolkit.proactive","suspended":false,"pool":{"min":0,"max":2}}]}
+JSON
+ec=0; P deliverable >/dev/null 2>&1 || ec=$?
+eq  "a registered, unsuspended pool answers yes (exit 0)" "0" "$ec"
+has "…and names the pool it checked" "gc-toolkit/gc-toolkit.proactive" \
+    "$(P deliverable 2>&1 || true)"
+
+# ABSENT — the pool is not in this city at all: the sling that vanishes.
+cat > "$FXDIR/agents.json" <<'JSON'
+{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat","suspended":false,"pool":{"min":0,"max":5}}]}
+JSON
+ec=0; P deliverable >/dev/null 2>&1 || ec=$?
+eq  "an unregistered pool answers NO (exit 1)" "1" "$ec"
+has "…and says a slung reaction would route to nobody" "routes to nobody" \
+    "$(P deliverable 2>&1 || true)"
+
+# SUSPENDED and ZERO-CAP — registered, but unable to claim.
+cat > "$FXDIR/agents.json" <<'JSON'
+{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","suspended":true,"pool":{"min":0,"max":2}}]}
+JSON
+ec=0; P deliverable >/dev/null 2>&1 || ec=$?
+eq  "a suspended pool answers NO (exit 1)" "1" "$ec"
+cat > "$FXDIR/agents.json" <<'JSON'
+{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","suspended":false,"pool":{"min":0,"max":0}}]}
+JSON
+ec=0; P deliverable >/dev/null 2>&1 || ec=$?
+eq  "a pool with no session slots answers NO (exit 1)" "1" "$ec"
+
+# ANY pool, not only proactive: the first reaction's actionable exit asks this
+# same question about the pool it is about to route a bead to.
+cat > "$FXDIR/agents.json" <<'JSON'
+{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat","suspended":false,"pool":{"min":0,"max":5}}]}
+JSON
+ec=0; P deliverable gc-toolkit/gc-toolkit.polecat >/dev/null 2>&1 || ec=$?
+eq  "a named target answers for THAT pool (exit 0)" "0" "$ec"
+ec=0; P deliverable gc-toolkit/gc-toolkit.nosuch >/dev/null 2>&1 || ec=$?
+eq  "…and a target nothing runs answers NO (exit 1)" "1" "$ec"
+
+# A malformed roster is unreadable, not absent — same fail-open answer.
+printf 'not json at all' > "$FXDIR/agents.json"
+ec=0; P deliverable >/dev/null 2>&1 || ec=$?
+eq  "a malformed roster answers yes (exit 0), never a false no" "0" "$ec"
+rm -f "$FXDIR/agents.json"
 
 echo "── the REAL work_query flows unconditionally (agent.toml, no gate) ──"
 # Drive the agent.toml work_query directly (not just the tool mirror): extract
@@ -233,6 +286,23 @@ eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --js
 eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
 has "scan (human) lists a candidate"                      "px-hi" "$(P scan)"
 
+echo "── one sweep is CAPPED: a reaction can end in a dispatch ──"
+# A first reaction may route its bead to an implementation pool, so an
+# uncapped sweep files as many downstream sessions as the scan found
+# candidates. The cap spends the sweep on the highest-ranked candidates and
+# names what it left; the skipped beads are not consumed, so the next sweep
+# still sees them.
+SWEEP="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>&1 || true)"
+eq  "the cap stops the sweep at its limit (1 of 2)" "1" "$(printf '%s\n' "$SWEEP" | grep -c '^gc sling')"
+has "the highest-ranked candidate is the one spent on" "px-hi" "$SWEEP"
+has "what the cap left is named, not dropped silently" "left for the next sweep" "$SWEEP"
+SWEEP_ALL="$(P scan --sling 2>&1 || true)"
+eq  "under the default cap both candidates are slung" "2" "$(printf '%s\n' "$SWEEP_ALL" | grep -c '^gc sling')"
+absent "…and a sweep inside the cap reports nothing left" "left for the next sweep" "$SWEEP_ALL"
+ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
+eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
+has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
+
 echo "── usage/parser agree: no advertised-but-unimplemented flags ──"
 # Finding: usage advertised `sling --reason R` but the parser rejected it.
 # gc sling has no --reason and the formula has no reason var, so it was removed
@@ -248,12 +318,14 @@ F="$(cat "$FORMULA_TOML")"
 has "formula declares its name"                 'formula = "mol-first-reaction"' "$F"
 has "step: load the bead + universe slice"      'id = "load-bead"'        "$F"
 has "step: do the reaction + write the card"    'id = "first-reaction"'   "$F"
-has "step: flag + advance, do not close"        'id = "advance-and-drain"' "$F"
-# The fixed four-part card shape (design Interface).
+has "step: dispose + advance, do not close"     'id = "advance-and-drain"' "$F"
+# The fixed card shape (design Interface), now ending in the line the
+# terminal step acts on.
 has "card · Understanding"                      "Understanding"           "$F"
 has "card · Found (freshness-stamped)"          "Found"                   "$F"
 has "card · Proposal"                           "Proposal"                "$F"
 has "card · Decision needed"                    "Decision needed"         "$F"
+has "card · Disposition"                        "## Disposition"          "$F"
 # Surfaces as advanced: it flags the bead onto the board.
 has "formula flags the bead onto the board"     "gc-helm.sh"         "$F"
 # There is no longer a `flag` verb to assert: gc-helm.sh's verbs are
@@ -272,10 +344,42 @@ has "formula tags reached content untrusted"    "UNTRUSTED DATA"          "$F"
 # (reopen, unassign, clear route, the gc.proactive_reaction advance marker) into
 # the SAME Dolt write — one call replaces the takeaway stamp + a separate release
 # update. The raw metadata moved into the wrapper, so we assert the call shape.
-has "formula stamps the board takeaway via the wrapper" 'takeaway "$WORK_BEAD_ID"' "$F"
+has "formula stamps the board takeaway on every exit"   "--takeaway"              "$F"
 has "formula attributes the takeaway to proactive"      "--by proactive"          "$F"
 has "formula collapses stamp+release into one --release call" "--release"         "$F"
 has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
+
+echo "── the terminal step has THREE exits, not one hardcoded visit ──"
+# The defect this replaces: every bead a reaction touched became a request for
+# the operator's attention, whatever the bead actually needed. The exits are
+# named in the formula and performed by one script, so the choice is a branch
+# rather than a paragraph.
+DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
+[ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
+                  || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
+has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
+has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
+has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
+has "the exits are performed by one script"        "first-reaction-dispose.sh" "$F"
+has "the blocked exit names an existing wait"      "--waiting-on"             "$F"
+has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
+has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
+has "every exit records WHY it was chosen"         "--reason"                 "$F"
+# The three exits must be distinguishable to the reader, not one exit with
+# three labels: the actionable exit routes to the pool that does the work.
+has "the actionable exit names the pool that works it" "polecat pool"         "$F"
+D="$(cat "$DISPOSE")"
+has "…and the route default lives in the script, once" "gc-toolkit.polecat"   "$D"
+has "the script records the choice on the bead"    "gc.first_reaction="       "$D"
+has "…and the reason beside it"                    "gc.first_reaction_reason=" "$D"
+has "…and what the choice named"                   "gc.first_reaction_target=" "$D"
+has "the blocked exit refuses a cross-store edge"  "another store"            "$D"
+# The operator-intake contract: a topic a human typed is a conversation, and
+# routing it silently answers a question nobody asked
+# (docs/gascity-human-engagement.md, gc-visit-open's react path).
+has "an operator-commissioned subject is always the visit" "gc.origin=operator" "$D"
+has "…and the formula says so before the script refuses"   "gc.origin=operator" "$F"
+absent "no exit closes the work bead"              "bd close"                 "$D"
 
 echo "── the pool budget (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"
@@ -298,8 +402,13 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
-has "prompt stamps the board takeaway via the wrapper" "takeaway <id>"           "$PM"
+has "prompt stamps the board takeaway on every exit"    "--takeaway"              "$PM"
 has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
+has "prompt teaches the actionable exit"               "--disposition actionable" "$PM"
+has "prompt teaches the blocked exit"                  "--disposition blocked"    "$PM"
+has "prompt teaches the ruling exit"                   "--disposition ruling"     "$PM"
+has "prompt says a visit is the minority case"         "minority case"            "$PM"
+has "prompt carries the operator-commission rule"     "gc.origin=operator"       "$PM"
 has "prompt collapses stamp+release into one --release call" "--release"         "$PM"
 has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1" "$PM"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"

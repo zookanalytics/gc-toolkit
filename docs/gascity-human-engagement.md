@@ -225,7 +225,8 @@ the alert model rather than duplicating them.
 ## How a conversation starts: operator-origin intake (2026-08-14)
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
-bead that already exists — `mol-first-reaction` files one after reacting,
+bead that already exists — `mol-first-reaction` files one when its reaction
+concludes the next move is the operator's,
 `liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
 agent on topic X," where X has no bead yet. That affordance existed under the
@@ -269,6 +270,14 @@ conversation with a first-reaction card already written, not a blank one. The
 script files nothing on that path; a second visit would split one conversation
 into two sittings of the same subject.
 
+That step has three dispositions, and only one of them files a visit — but a
+subject this intake creates always gets it. `gc.origin=operator`, stamped here,
+is what `first-reaction-dispose.sh` reads to refuse the routing and holding
+exits: the operator typed a topic because they want the conversation, so
+answering it with a dispatch would leave them with a topic that looks filed and
+is silently forgotten. Beads that reach the reaction any other way are triaged
+on their merits.
+
 The fallback path (`--no-react`, or automatically) files the visit
 immediately, through `gc-helm.sh open --reason/--body`. **Visit filing lives
 in exactly one place** — that verb's marked `gate-visit` block — and the intake
@@ -285,11 +294,13 @@ proactive session runs the formula. Proactive is always-on
 slot frees), so a queued reaction is picked up rather than dropped — but the
 path is still chosen by asking `tools/gc-proactive.sh deliverable` first
 (exit 0/1 plus the reason, printed either way), and the fallback files the
-visit directly whenever the answer is no. The seam is fail-safe by design:
-if proactive could ever again decline work, an unguarded react path would
-leave a routed bead nobody picks up and *no visit at all* — a topic that
-looks filed and is silently forgotten, the one outcome this channel exists
-to prevent.
+visit directly whenever the answer is no. That verb answers no on a positive
+finding in this city's agent roster: the pool is not registered, it is
+suspended, or it is capped at zero slots. A roster it cannot read answers yes,
+because absence of evidence is not evidence the pool is gone. The seam is
+fail-safe by design: a react path that could not tell would leave a routed bead
+nobody picks up and *no visit at all* — a topic that looks filed and is
+silently forgotten, the one outcome this channel exists to prevent.
 
 Note what is *not* here: there is no mail-to-visit bridge, and no seam for one.
 A mailbox whose endpoint spins up a visit per message was considered and
