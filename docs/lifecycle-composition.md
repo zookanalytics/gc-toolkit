@@ -85,6 +85,20 @@ free-form notes usually names some *other* bead as the waiter, and no pattern
 separates the two reliably, so the check declines to guess rather than
 reporting a correct graph as broken.
 
+The same check holds the other half of the pairing, the prose. A bead parked on
+the park route with no `gc.takeaway` has an owner and no question, which is the
+sentence half missing rather than the edge half, and it renders on the board as
+a person owing an answer nobody stated. The field that carries the question is
+`gc.takeaway` and only that one: `blocked_reason` records why work stopped,
+which is a conclusion and not a question, and the board does not read it.
+
+Both halves rest on the vocabulary being closed, which is the same check's
+third arm. A wait or a conclusion written under a key
+`lifecycle/lifecycle.toml` does not register is state nothing was written to
+read, so it is unanswerable for the same reason the bare string is. The sharp
+case is a key one namespace prefix from a registered one: the value is there,
+every reader of the real key misses it, and nothing reports it missing.
+
 ### 2. The waiting side re-derives; it never trusts stored state
 
 Whoever needs to know "has this landed yet?" asks the question fresh, at the

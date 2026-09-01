@@ -92,7 +92,30 @@ case "$sub" in
 esac
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
-export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# The vocabulary arm reads lifecycle/lifecycle.toml under GC_PACK_DIR. A
+# fixture registry keeps the suite independent of the pack's live one, whose
+# key list changes with every writer added.
+mkdir -p "$TMP/pack/lifecycle"
+registry() { # [<unregistered severity>] [<parked severity>]
+    cat > "$TMP/pack/lifecycle/lifecycle.toml" <<REG
+[machine]
+park_route = "human"
+
+[metadata]
+runtime_namespace = "gc."
+runtime_issue_types = ["session"]
+unregistered_key_severity = "${1:-warn}"
+parked_without_question_severity = "${2:-warn}"
+
+[metadata.fixture]
+keys = [
+  "blocked_on", "blocked_reason", "gc.takeaway", "gc.routed_to",
+  "work_dir", "gc.origin", "check.<g>", "triage.*",
+]
+REG
+}
+registry
+export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" GC_PACK_DIR="$TMP/pack"
 run_check() { RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1; }
 store() { printf '%s' "$1" > "$TMP/stores/alpha.json"; rm -f "$TMP/stores/alpha.show.json"; }
 bstore() { printf '%s' "$1" > "$TMP/stores/beta.json"; }
@@ -349,6 +372,171 @@ store '[{"id":"aa-101","status":"closed","metadata":{"blocked_on":"aa-202"}},
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a wait stated by a CLOSED bead is not reported"
 hasnt "$OUT" "aa-101" "the closed bead is not named in the output"
+
+# --- 23. the registry is the only authority -------------------------------
+# With no registry there is no vocabulary, and every key in every store would
+# read as unregistered. The arm says it did not run rather than inventing one.
+store '[{"id":"aa-101","status":"open","metadata":{"whatever_key":"x"}}]'
+OUT=$(GC_PACK_DIR="$TMP/nowhere" run_check); RC=$?
+eq "$RC" "1" "an absent registry warns rather than reporting every key"
+has "$OUT" "NOT checked in any store" "the missing registry says the arm did not run"
+hasnt "$OUT" "whatever_key" "no key is judged against a vocabulary that was never read"
+mkdir -p "$TMP/packempty/lifecycle"
+printf '[machine]\npark_route = "human"\n\n[metadata]\nruntime_namespace = "gc."\n' \
+    > "$TMP/packempty/lifecycle/lifecycle.toml"
+OUT=$(GC_PACK_DIR="$TMP/packempty" run_check); RC=$?
+eq "$RC" "1" "a registry declaring no keys warns rather than failing every store"
+hasnt "$OUT" "whatever_key" "an empty registry judges no key rather than condemning all of them"
+
+# --- 24. an unregistered key is a finding, graded by the registry ----------
+store '[{"id":"aa-101","status":"open","metadata":{"promotion_hold":"gate1"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unregistered key is reported at the declared warn severity"
+has "$OUT" "promotion_hold" "the finding names the unregistered key"
+has "$OUT" "aa-101" "the finding names a bead carrying it"
+has "$OUT" "warn-only" "the run line says the finding is graded warn-only"
+registry error
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the same key is an ERROR when the registry grades it error"
+has "$OUT" "promotion_hold" "the error names the unregistered key"
+# A severity the registry does not declare must not downgrade the finding.
+registry sometimes
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an undeclared severity value fails closed to error"
+registry
+
+# --- 25. one key on many beads is ONE line carrying the count -------------
+# A line per bead buries every other finding under whichever key spread widest.
+store '[{"id":"aa-101","status":"open","metadata":{"promotion_hold":"a"}},
+        {"id":"aa-102","status":"open","metadata":{"promotion_hold":"b"}},
+        {"id":"aa-103","status":"open","metadata":{"promotion_hold":"c"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "three beads carrying one unregistered key still warn"
+has "$OUT" "on 3 live bead(s)" "the single line carries the bead count"
+eq "$(printf '%s\n' "$OUT" | grep -c 'registers no such key')" "1" "three beads yield one line, not three"
+
+# --- 26. the three registered spellings ------------------------------------
+store '[{"id":"aa-101","status":"open","metadata":{"blocked_reason":"held","work_dir":"/tmp/x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "exactly-named registered keys are silent"
+store '[{"id":"aa-101","status":"open","metadata":{"check.codex":"green@abc"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "check.<g> admits one dotted segment"
+# `<g>` is a gate NAME, so a longer dotted key is a different key wearing the
+# marker's prefix, not a marker.
+store '[{"id":"aa-101","status":"open","metadata":{"check.codex.exception_escalated":"abc"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "check.<g> refuses a second dotted segment"
+has "$OUT" "check.codex.exception_escalated" "the deeper key is named as unregistered"
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold_superseded":"x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a trailing .* family admits any suffix"
+# The family is a PREFIX, not a synonym for the bare name.
+store '[{"id":"aa-101","status":"open","metadata":{"triage":"x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the bare family name is not itself registered by triage.*"
+
+# --- 27. the runtime namespace is out of scope, not registered -------------
+# Those keys are declared in another repo on its own release cycle.
+store '[{"id":"aa-101","status":"open","metadata":{"gc.claimed_at":"now","gc.drain_state":"x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "keys inside the runtime namespace are not reported"
+
+# --- 28. a NEAR-TWIN is an error on either side of the namespace ----------
+# Pack state one prefix from its reader: nothing reads it, nothing reports it
+# missing. Graded nowhere, because there is no reading under which it is right.
+store '[{"id":"aa-101","status":"open","metadata":{"gc.work_dir":"/tmp/x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a namespaced twin of a registered key is an ERROR"
+has "$OUT" "gc.work_dir" "the error names the key as written"
+has "$OUT" "work_dir" "the error names the registered key it should have been"
+store '[{"id":"aa-101","status":"open","metadata":{"origin":"audit:aa-9"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bare twin of a namespaced registered key is an ERROR"
+has "$OUT" "gc.origin" "the error names the registered spelling"
+registry error
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a twin stays an error when the registry grades unregistered keys error"
+registry
+
+# --- 29. runtime-owned bead types are skipped whole ------------------------
+# A session row's metadata is the runtime's session bookkeeping; scanning it
+# would report another repo's fields as this pack's residue.
+store '[{"id":"aa-101","status":"open","issue_type":"session","metadata":{"pool_slot":"3","instance_token":"x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a session bead's metadata is not scanned"
+hasnt "$OUT" "pool_slot" "no session field is reported"
+store '[{"id":"aa-101","status":"open","issue_type":"task","metadata":{"pool_slot":"3"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the same key on a task bead IS reported"
+
+# --- 30. an empty value does not remove a key -----------------------------
+# Setting a key to "" leaves the key present carrying an empty value, so the
+# scan sees it: an unregistered key emptied rather than unset is still there,
+# and a registered one emptied is still registered. `--unset-metadata` is the
+# only removal.
+store '[{"id":"aa-101","status":"open","metadata":{"promotion_hold":""}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unregistered key set to \"\" is still on the bead and still reported"
+has "$OUT" "promotion_hold" "emptying a key does not hide it from the scan"
+store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":""}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an empty gc.routed_to is a cleared route, not a park and not a bad address"
+
+# --- 31. a route names its rig ---------------------------------------------
+# The claim predicate is exact byte equality, so a rig-unqualified route is
+# offered to nobody. Read here only on the statuses
+# doctor/check-routed-work-claimable does not scan, so one defect is reported
+# once.
+store '[{"id":"aa-101","status":"blocked","metadata":{"gc.routed_to":"pack.mayor"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a rig-unqualified route on a non-open live bead is an ERROR"
+has "$OUT" "pack.mayor" "the error quotes the route as stored"
+has "$OUT" "blocked" "the error names the status the other check does not read"
+store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":"pack.mayor"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the same route on an OPEN bead is left to check-routed-work-claimable"
+store '[{"id":"aa-101","status":"blocked","metadata":{"gc.routed_to":"alpha/pack.polecat"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a rig-qualified route is accepted"
+# The park sentinel names a person, not a rig, and is the one route that is
+# legitimately unqualified.
+store '[{"id":"aa-101","status":"blocked","metadata":{"gc.routed_to":"human","gc.takeaway":"decide the base"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the declared park sentinel is not a rig-unqualified route"
+
+# --- 32. a park records the question it is waiting on ---------------------
+store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":"human"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a park with no takeaway is reported at the declared severity"
+has "$OUT" "aa-101" "the finding names the parked bead"
+registry warn error
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the park finding is an ERROR when the registry grades it error"
+registry
+store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":"human","gc.takeaway":"land it, or read the findings first?"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a park carrying a takeaway is silent"
+
+# --- 33. the line cap bounds the report, never the scan -------------------
+store '[{"id":"aa-101","status":"open","metadata":{"key_one":"1","key_two":"2","key_three":"3"}}]'
+OUT=$(GC_DOCTOR_VOCAB_MAX=1 run_check); RC=$?
+eq "$RC" "1" "a capped report still warns"
+eq "$(printf '%s\n' "$OUT" | grep -c 'registers no such key')" "1" "the cap bounds the listed keys"
+has "$OUT" "2 further unregistered key(s)" "the overflow line carries the true remainder"
+OUT=$(run_check); RC=$?
+eq "$(printf '%s\n' "$OUT" | grep -c 'registers no such key')" "3" "uncapped, every key is listed"
+hasnt "$OUT" "further unregistered" "no overflow line when nothing overflowed"
+
+# --- 34. the wait arm and the vocabulary arm read one listing -------------
+# Both findings come out of the same store read, so a store cannot pass one arm
+# against a snapshot the other never saw.
+store '[{"id":"aa-101","status":"open","metadata":{"blocked_on":"aa-202","promotion_hold":"gate1"}},
+        {"id":"aa-202","status":"open","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an unedged wait still fails the run while a vocabulary finding warns"
+has "$OUT" "aa-202" "the wait finding survives"
+has "$OUT" "promotion_hold" "the vocabulary finding is reported beside it"
 
 echo
 echo "check-wait-is-an-edge: $PASS passed, $FAIL failed"

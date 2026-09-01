@@ -209,13 +209,121 @@ review_watermark_key = "pr_review_watermark"
 # would be a cycle.
 disposition_key = "pr_comment_disposition"
 
-# The metadata-key registry: every key the rewritten pack writes, grouped.
+# ---------------------------------------------------------------------------
+# The metadata-key registry: every key the pack writes, grouped, and the
+# vocabulary those keys are read with. A key absent from the groups below is
+# not pack state.
+#
+# Each definition names four things, because a reader needs all four and three
+# of them are invisible in the value: what writes the key, what reads it, what
+# its ABSENCE means, and how it is cleared.
+#
+# owner — the git identity of whoever's `bd` wrote the row. bd sets it; the
+#   pack has no flag for it and never writes it. It is neither an agent nor a
+#   holder: `created_by` names the agent that filed the bead, `assignee` names
+#   whoever holds it now. Never absent, never cleared. A jq filter that stamps
+#   its own `.owner` onto a listing (mol-witness-patrol) is a computed field of
+#   that listing and is a different thing under the same name.
+#
+# assignee — who holds the bead. Written by a claim, and by a handoff that
+#   names its successor directly. Read by exact string equality: the refinery's
+#   find-work and every `bd list --assignee` match the stored bytes, so the
+#   value is a rig-qualified agent identity or a session name, never a
+#   description. Empty means nobody holds it. Cleared with `--assignee=""`,
+#   which bd refuses on a bead another actor holds in_progress, and the refusal
+#   drops the whole atomic update with it.
+#
+# gc.routed_to — the pool offer, which is the question `assignee` does not
+#   answer. Written on an anchor only through `lifecycle.sh --route`, which
+#   refuses `--set gc.routed_to` and re-reads the value to prove it landed.
+#   Read by the runtime's claim predicate, again by exact byte equality. The
+#   value is a rig-qualified pool identity or the park_route sentinel above;
+#   the rig-unqualified form matches nothing, and
+#   doctor/check-routed-work-claimable reports it. Empty means unrouted and is
+#   what the pack writes to clear a route: setting any key to "" leaves the key
+#   present carrying an empty value, so `--unset-metadata` is the only removal,
+#   and the pack does not use it here. Every route reader treats absent and
+#   empty alike, and the empty value keeps the record that a route was cleared
+#   deliberately. An empty route is also the state a re-routing lane fills, so
+#   clearing one does not park a bead.
+#
+# assignee with gc.routed_to — both may be set, and on a claimed pool bead both
+#   are. A claim writes the assignee and leaves the route as the record of which
+#   queue offered the bead; every route reader, the claim predicate included,
+#   asks about the route only while the bead is unassigned. What clears a route
+#   is a handoff to a NAMED agent rather than to a pool, because a pool route on
+#   directly assigned work reads as demand for work no pool will ever be
+#   offered.
+#
+# gc.takeaway — the operator-facing question, and the only field the board
+#   renders as one. Written by `gc-helm.sh takeaway`, capped at 140 codepoints
+#   and stamped with gc.takeaway_at and gc.takeaway_by. Read by the Helm board.
+#   Absent on a bead parked for a person means the park was never finished: the
+#   board can say a human owns the bead and not what they were asked. It is
+#   never cleared, being the durable record of what the sitting concluded.
+#   `blocked_reason` is not a substitute, recording why work stopped, which is
+#   a conclusion rather than a question.
+#
+# labels — a set both the runtime and the pack read. `warrant`, `learning`,
+#   `observation`, `feedback-pattern` and `prompt-update` mark a bead's role in
+#   a pack loop. `hold:mayor` and `hold:external` are the gascity binary's
+#   dispatch-hold terms; nothing here writes them. Absent means the bead is in
+#   no such loop. Cleared with `bd update --remove-label`.
+#
+# issue_type=decision — a ruling only the operator can give, filed as a bead so
+#   that whatever waits on it can hold a `blocks` edge to something real. The
+#   bead's title carries the question. Written by whoever concludes the answer
+#   is not an agent's to give; closing it is the ruling, and the close is what
+#   releases the waiter.
+#
+# parent-child against blocks — two edges saying different things, neither
+#   substituting for the other. `parent-child` is decomposition: the child is
+#   PART of the parent's work, and a held parent correctly holds every part of
+#   it. `blocks` is a wait: the source cannot proceed until the target closes,
+#   and it is the one edge type that holds a bead out of `bd ready`. Work
+#   handed out by a sitting is what that sitting waits on, so it is a `blocks`
+#   target beside its subject, never a `parent-child` child of it. A bead that
+#   will carry a `blocks` edge has no `parent-child` children.
+#
+# the visit and its subject — `escalate.sh` files a visit that depends on its
+#   subject through a `tracks` edge, so the visit names what it is about and
+#   gates nothing on its own. The subject does not block on the visit: the edge
+#   already runs that way and the reverse would close a cycle. What holds the
+#   subject is the pr_number stamp merge.sh's in-flight-holder probe reads.
+# ---------------------------------------------------------------------------
+[metadata]
+# The Gas City runtime owns this namespace and declares its own keys in the
+# binary. The pack stamps a few of them, listed under [metadata.runtime_owned];
+# the rest belong to a repo this file cannot speak for, so keys inside the
+# namespace are outside the unregistered scan. One exception: a key that is a
+# registered key with this prefix added or removed is reported on either side
+# of the boundary, being pack state written where the pack's reader never looks.
+runtime_namespace = "gc."
+# Bead types the runtime owns whole. Their metadata is session bookkeeping and
+# registering it here would enumerate another repo's fields.
+runtime_issue_types = ["session"]
+# How doctor/check-wait-is-an-edge grades the two findings whose backlogs are
+# still being converted: a key this registry does not list, and a bead parked
+# on park_route that records no question. "warn" while the residue is draining,
+# "error" once it is gone. Two values because the two backlogs drain
+# separately, and an escalation is this declaration rather than a code change.
+# A value that is neither reads as "error", so a typo cannot quietly downgrade
+# a finding. The sharper defects are not graded here and always error: a key
+# one namespace prefix away from a registered one, and a bead offered to a pool
+# while somebody already holds it.
+unregistered_key_severity = "warn"
+parked_without_question_severity = "warn"
+
 [metadata.merge_identity]
 keys = [
   "branch", "target", "merged_target", "merged_sha", "pr_url", "pr_number",
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
+  # What the diff does, composed by the polecat that wrote it. pr-open.sh
+  # publishes it as the PR's `## Summary` and falls back to the anchor's
+  # description when it is absent.
+  "pr_summary",
 ]
 
 [metadata.gates]
@@ -231,6 +339,7 @@ keys = [
   # signoff_round_floor = <rework children then>@<batch>, the rounds that no
   # longer count (docs/state-machine.md).
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
+  "wedge_seen_root",
 ]
 
 [metadata.pr_posture]
@@ -247,6 +356,9 @@ keys = [
   "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",
   "sweep.*", "triage.*", "stall_root",
+  # gc-helm.sh's other write verbs: `react` stamps the reaction it slung,
+  # `dismiss` stamps who set a row aside and when.
+  "gc.proactive_reaction", "gc.dismissed_by", "gc.dismissed_at",
 ]
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
@@ -264,8 +376,29 @@ keys = [
   "gc.dispatch_when_ready_reason",
 ]
 
+# The feedback-learning loop. obs.* is an observation bead's own record;
+# the rest sit on a pattern bead and are recomputed from its observation set on
+# every distiller pass, so each is a derived count and never a hold.
 [metadata.learning]
-keys = ["obs.*"]
+keys = [
+  "obs.*", "eng_bead", "remedy_class",
+  "evidence_count", "distinct_sources", "first_seen", "last_seen",
+]
+
+# One bead replacing another. Both directions are stored, each beside the store
+# that owns the named bead, because a supersession routinely crosses rigs and a
+# bare id resolves in the wrong one.
+[metadata.supersession]
+keys = [
+  "gc.supersedes", "gc.supersedes_store",
+  "gc.superseded_by", "gc.superseded_by_store",
+]
+
+# Bookkeeping the cadences carry on a bead they filed: which doctor check
+# produced a finding, the finding bead it replaced, and the rig a checkout
+# reconcile ran against.
+[metadata.cadence]
+keys = ["doctor_check", "doctor_finding_predecessor", "reconcile_rig"]
 
 # Runtime-owned: documented here so readers know they exist; written by the
 # Gas City runtime, not by pack transitions. The pack stamps gc.routed_to only
@@ -275,4 +408,5 @@ keys = ["obs.*"]
 keys = [
   "gc.routed_to", "gc.step_ref", "gc.root_bead_id", "gc.execution_routed_to",
   "assignee", "gc.input_convoy_id", "gc.kind", "gc.outcome",
+  "gc.session_id", "gc.session_name", "gc.session_affinity",
 ]

@@ -119,6 +119,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
+| **I12** | The field vocabulary is closed: every metadata key a live bead carries is one `lifecycle/lifecycle.toml` registers, no key sits one namespace prefix away from a registered one, every route names its rig, and a bead parked for a person records the question it waits on. | `doctor/check-wait-is-an-edge`, vocabulary arm: the registry is the only authority, so an absent or unparseable one reports that the arm could not run rather than judging keys against a vocabulary nothing declares. Keys inside the declared runtime namespace are out of scope rather than registered, being the Gas City binary's to declare on its own release cycle; the exception is a key that becomes a registered key once that prefix is added or removed, which is pack state written one prefix from its reader. Runtime-owned bead types are skipped whole. The registry grades the two backlogs still draining, unregistered keys and questionless parks, as warn or error. Route addresses are `doctor/check-routed-work-claimable`'s on open beads and this arm's shape check on the live statuses that scan does not read. |
 
 Three further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
@@ -323,8 +324,10 @@ prerequisite, and the four exclusions above are what such a check encodes.
 - **Adding a state** — declare it in `lifecycle/lifecycle.toml`, name its
   writer in [state-machine.md](state-machine.md)'s table, or it does not
   exist.
-- **Adding a metadata key** — it is state. Register it in `lifecycle.toml`, or
-  accept that nothing downstream can be proven exhaustive over it.
+- **Adding a metadata key** — it is state. Register it in `lifecycle.toml`
+  beside the writer that sets it, and define what reads it, what its absence
+  means, and how it is cleared. An unregistered key is reported by I12's check
+  wherever it lands on a live bead.
 - **Adding an invariant** — name its check in the same PR.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero

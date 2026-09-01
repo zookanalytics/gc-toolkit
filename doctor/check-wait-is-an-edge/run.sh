@@ -33,9 +33,13 @@ CHUNK="${GC_DOCTOR_WAIT_CHUNK:-100}"
 # because repeating `--status` silently overwrites the previous one.
 LIVE_STATUSES='open,in_progress,blocked,deferred,hooked,pinned'
 
-errors=(); warnings=(); notes=()
+errors=(); warnings=(); notes=(); vocab=()
 run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
+vocab_add() { # <declared severity> <finding> — "error" joins the errors that
+    # fail the run; anything else is reported without failing it.
+    if [ "$1" = "error" ]; then errors+=("$2"); else vocab+=("$2"); fi
+}
 # Rows below are joined on 0x1F, which this scrub also clears, so no payload
 # byte can pose as a field separator.
 # >>> control-char-scrub
@@ -161,6 +165,133 @@ def blocking: (.type // "") == "blocks" or (.dependency_type // "") == "blocks";
 | join("\u001f")
 '
 
+# ---------------------------------------------------------------------------
+# The declared field vocabulary (lifecycle/lifecycle.toml [metadata]).
+#
+# The same invariant read the other way round. A wait must be an edge the graph
+# can answer; the state a bead carries beside that edge must be a key the
+# registry declares. An unregistered key is state nothing was written to read,
+# so what it says is as unanswerable as the string-shaped wait above.
+#
+# THE REGISTRY IS THE ONLY AUTHORITY. Absent or unparseable, this arm reports
+# that it could not run. A built-in fallback list would assert a vocabulary no
+# file declares and pass a store on it.
+# ---------------------------------------------------------------------------
+LIFECYCLE="${GC_PACK_DIR:-.}/lifecycle/lifecycle.toml"
+toml_scalar() { # <file> <key> — the quoted string of the first `<key> = "..."`
+    awk -v k="$2" '$0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"") {
+        sub(/^[^"]*"/, ""); sub(/".*$/, ""); print; exit }' "$1" 2>/dev/null
+}
+toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
+    awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
+        | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
+}
+# Every `keys = [...]` under a [metadata.<group>] table, comments stripped
+# first: those arrays carry explanatory comments between their entries, and a
+# quoted key name inside one would otherwise enter the vocabulary.
+registry_keys() { # <file>
+    awk '
+        /^\[metadata\./ { inmeta = 1; next }
+        /^\[/           { inmeta = 0 }
+        inmeta && /keys[[:space:]]*=[[:space:]]*\[/ { inarr = 1 }
+        inarr {
+            line = $0; sub(/#.*$/, "", line)
+            n = split(line, a, "\"")
+            for (i = 2; i <= n; i += 2) print a[i]
+            if (line ~ /\]/) inarr = 0
+        }' "$1" 2>/dev/null | sort -u
+}
+REG_JSON=$(registry_keys "$LIFECYCLE" | jq -R . | jq -cs 'map(select(. != ""))' 2>/dev/null)
+RUNTIME_NS=$(toml_scalar "$LIFECYCLE" "runtime_namespace")
+RTYPES_JSON=$(toml_array "$LIFECYCLE" "runtime_issue_types" | jq -R . | jq -cs 'map(select(. != ""))' 2>/dev/null)
+UNREG_SEVERITY=$(toml_scalar "$LIFECYCLE" "unregistered_key_severity")
+PARKED_SEVERITY=$(toml_scalar "$LIFECYCLE" "parked_without_question_severity")
+PARK_ROUTE=$(toml_scalar "$LIFECYCLE" "park_route")
+VOCAB_READY=1
+VOCAB_UNREADY_WHY=""
+if [ ! -f "$LIFECYCLE" ]; then
+    VOCAB_READY=0; VOCAB_UNREADY_WHY="no registry at $LIFECYCLE (GC_PACK_DIR names the pack root)"
+elif [ -z "$REG_JSON" ] || [ "$REG_JSON" = "[]" ]; then
+    VOCAB_READY=0; VOCAB_UNREADY_WHY="$LIFECYCLE declares no [metadata] keys; every key in every store would read as unregistered"
+elif [ -z "$RUNTIME_NS" ] || [ -z "$PARK_ROUTE" ]; then
+    VOCAB_READY=0; VOCAB_UNREADY_WHY="$LIFECYCLE is missing runtime_namespace or park_route; the scan cannot tell a foreign key from a stray one"
+fi
+[ -n "$RTYPES_JSON" ] || RTYPES_JSON='[]'
+# An undeclared or misspelled severity fails CLOSED, to error: a typo must not
+# quietly downgrade the finding it was meant to grade.
+case "$UNREG_SEVERITY" in warn|error) ;; *) UNREG_SEVERITY=error ;; esac
+case "$PARKED_SEVERITY" in warn|error) ;; *) PARKED_SEVERITY=error ;; esac
+# Bounds the DETAIL LINES per store, never the scan: each store's overflow line
+# carries the true count, so a lowered cap shortens the report and cannot make
+# a store read as clean.
+VOCAB_MAX="${GC_DOCTOR_VOCAB_MAX:-8}"
+[ "$VOCAB_READY" = 1 ] || warnings+=("field vocabulary NOT checked in any store: $VOCAB_UNREADY_WHY")
+
+# One jq program per store, over the live listing the wait scan already read.
+# Emits <class> US <bead-id> US <subject> US <detail>.
+#
+# A KEY IS REGISTERED BY ONE OF THREE SPELLINGS. An exact name; a `<g>`
+# placeholder standing for ONE dotted segment, so `check.<g>` admits
+# `check.codex` and refuses `check.codex.exception_escalated`, a different key
+# wearing a gate marker's prefix; or a trailing `.*` family admitting any
+# suffix.
+#
+# THE RUNTIME NAMESPACE IS OUT OF SCOPE RATHER THAN REGISTERED. Those keys are
+# declared in the Gas City binary on its own release cycle, and copying them
+# here would assert a list this repo cannot keep true. The one exception is a
+# NEAR-TWIN: a key that becomes a registered key once the namespace prefix is
+# added or removed. That is pack state written one prefix away from its reader,
+# so nothing reads it and nothing reports it missing.
+#
+# RUNTIME-OWNED BEAD TYPES ARE SKIPPED WHOLE. A session row's metadata is the
+# runtime's own session bookkeeping, and scanning it would report another
+# repo's fields as this pack's residue.
+#
+# TWO ROUTE ARMS. A bead resting on the park route with no takeaway is parked
+# for a person with no question recorded. A route that names no rig is matched
+# by nothing, and is read here only on the statuses
+# doctor/check-routed-work-claimable does not scan, so one defect is not
+# reported twice. Neither arm reads the route against the assignee: a claim
+# leaves the route it came from in place as the record of which queue offered
+# the bead, and every route reader ignores it once a bead is held. An EMPTY
+# route is likewise no finding, being what the pack writes to clear one.
+VOCAB_JQ='
+def isreg($k): [ $reg[]
+  | . as $r
+  | if $r == $k then true
+    elif ($r | endswith("<g>")) then
+      (($r | rtrimstr("<g>")) as $p
+       | ($k | startswith($p))
+         and (($k | ltrimstr($p)) | length > 0)
+         and (($k | ltrimstr($p)) | contains(".") | not))
+    elif ($r | endswith(".*")) then
+      (($r | rtrimstr("*")) as $p
+       | ($k | startswith($p)) and (($k | ltrimstr($p)) | length > 0))
+    else false end ] | any;
+def twin($k): (if ($k | startswith($ns)) then ($k | ltrimstr($ns)) else $ns + $k end);
+.[]?
+| . as $b
+| (($b.issue_type // "") | tostring) as $type
+| select(($rtypes | index($type)) == null)
+| (($b.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
+| ($b.metadata // {}) as $meta
+| ( ( $meta | keys[]
+      | select(isreg(.) | not)
+      | . as $k
+      | if isreg(twin($k)) then ["twin", $id, $k, twin($k)]
+        elif ($k | startswith($ns)) then empty
+        else ["unreg", $id, $k, ""] end )
+  , ( ((($meta["gc.routed_to"] // "") | tostring) as $rt
+     | ($rt | gsub("[[:cntrl:]]"; " ")) as $rtc
+     | (($b.status // "") | tostring) as $status
+     | ( if $rt == $park and ((($meta["gc.takeaway"] // "") | tostring) | length) == 0
+         then [["parked", $id, $rtc, ""]] else [] end )
+       + ( if $rt != "" and $rt != $park and ($rt | contains("/") | not) and $status != "open"
+           then [["bareroute", $id, $rtc, $status]] else [] end ))[] )
+  )
+| join("\u001f")
+'
+
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 if [ "$rigs_rc" -ne 0 ] || [ -z "$rigs_raw" ]; then
     echo "cannot determine whether every wait is recorded as an edge (I1)"
@@ -251,6 +382,61 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
     checked=$((checked + 1))
+
+    # --- the field vocabulary, over the listing this store already returned --
+    # Reuses live_json rather than re-listing: one read answers both arms, and
+    # two reads could answer them against different snapshots of one store.
+    if [ "$VOCAB_READY" = 1 ]; then
+        vrows=$(printf '%s' "$live_json" | jq -r --argjson reg "$REG_JSON" \
+            --argjson rtypes "$RTYPES_JSON" --arg ns "$RUNTIME_NS" \
+            --arg park "$PARK_ROUTE" "$VOCAB_JQ" 2>/dev/null); vrows_rc=$?
+        if [ "$vrows_rc" -ne 0 ]; then
+            warnings+=("$label: could not read the metadata in $db against the declared vocabulary — its keys were NOT checked")
+        else
+            # UNREGISTERED IS GROUPED BY KEY, never listed per bead. One
+            # unregistered key is one decision, register it or unset it, and a
+            # line per bead buries every other finding under the widest key.
+            unreg_rows=$(printf '%s\n' "$vrows" \
+                | awk -F'\037' '$1 == "unreg" { n[$3]++; if (!($3 in ex)) ex[$3] = $2 }
+                                END { for (k in n) printf "%d\t%s\t%s\n", n[k], k, ex[k] }' \
+                | sort -t$'\t' -k1,1nr -k2,2)
+            shown=0; over_keys=0; over_beads=0
+            while IFS=$'\t' read -r n key example; do
+                [ -n "$key" ] || continue
+                shown=$((shown + 1))
+                if [ "$shown" -gt "$VOCAB_MAX" ]; then
+                    over_keys=$((over_keys + 1)); over_beads=$((over_beads + n)); continue
+                fi
+                vocab_add "$UNREG_SEVERITY" "$label: \"$key\" is on $n live bead(s) (e.g. $example) and lifecycle/lifecycle.toml registers no such key, so it is state nothing was written to read. Register it beside the writer that sets it, or unset it (I1)"
+            done <<UNREG_EOF
+$unreg_rows
+UNREG_EOF
+            if [ "$over_keys" -gt 0 ]; then
+                vocab_add "$UNREG_SEVERITY" "$label: and $over_keys further unregistered key(s) across $over_beads live bead(s), not listed (GC_DOCTOR_VOCAB_MAX=$VOCAB_MAX bounds the lines printed, never the scan)"
+            fi
+
+            other_rows=$(printf '%s\n' "$vrows" | awk -F'\037' '$1 != "unreg"' | sort -u)
+            parked_n=0
+            while IFS=$'\037' read -r class id subject extra; do
+                [ -n "$class" ] || continue
+                case "$class" in
+                    twin)
+                        errors+=("$label bead $id: carries \"$subject\" where the registry declares \"$extra\" — one namespace prefix apart, so every reader of \"$extra\" misses this value and nothing reports it missing. Move it to \"$extra\" (I1)") ;;
+                    bareroute)
+                        errors+=("$label bead $id: gc.routed_to=\"$subject\" is rig-unqualified, and every route but the \"$PARK_ROUTE\" park names its rig — the claim predicate is exact byte equality, so this address is offered to nobody. doctor/check-routed-work-claimable resolves the repair on OPEN beads; this one is $extra, which that scan does not read (I1)") ;;
+                    parked)
+                        parked_n=$((parked_n + 1))
+                        [ "$parked_n" -le "$VOCAB_MAX" ] || continue
+                        vocab_add "$PARKED_SEVERITY" "$label bead $id: gc.routed_to=\"$subject\" parks it for a person and no gc.takeaway records what they were asked, so the board can name the owner and not the question. Write one with \`gc-helm.sh takeaway\` (I1)" ;;
+                esac
+            done <<VOCAB_EOF
+$other_rows
+VOCAB_EOF
+            if [ "$parked_n" -gt "$VOCAB_MAX" ]; then
+                vocab_add "$PARKED_SEVERITY" "$label: and $((parked_n - VOCAB_MAX)) further bead(s) parked with no question recorded, not listed (GC_DOCTOR_VOCAB_MAX=$VOCAB_MAX bounds the lines printed, never the scan)"
+            fi
+        fi
+    fi
 
     pairs=$(printf '%s' "$live_json" | jq -r --arg prefixes "$PREFIXES" --arg waitkey "$WAITKEY_RE" --arg prosekey "$PROSEKEY_RE" "$WAIT_JQ" 2>/dev/null); pairs_rc=$?
     if [ "$pairs_rc" -ne 0 ]; then
@@ -392,18 +578,29 @@ if [ "$checked" -eq 0 ]; then
     exit 1
 fi
 if [ "${#errors[@]}" -ne 0 ]; then
-    echo "waits recorded only as a string, with no edge the graph can answer (I1): ${#errors[@]} finding(s)"
+    echo "state the graph cannot answer (I1): ${#errors[@]} finding(s)"
     detail "${errors[@]}"
+    detail ${vocab[@]+"${vocab[@]}"}
     detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
     exit 2
 fi
-if [ "${#warnings[@]}" -ne 0 ]; then
-    echo "every stated wait found across $checked store(s) is an edge, but some probes could not be read (I1)"
-    detail "${warnings[@]}"
+if [ "${#vocab[@]}" -ne 0 ] || [ "${#warnings[@]}" -ne 0 ]; then
+    # Two different reasons not to say OK, and the line names whichever
+    # applies: a vocabulary finding the registry grades as warn-only while its
+    # backlog drains, and a probe that could not be read at all.
+    if [ "${#vocab[@]}" -ne 0 ] && [ "${#warnings[@]}" -ne 0 ]; then
+        echo "every stated wait across $checked store(s) is an edge; ${#vocab[@]} field-vocabulary finding(s) are recorded warn-only, and some probes could not be read (I1)"
+    elif [ "${#vocab[@]}" -ne 0 ]; then
+        echo "every stated wait across $checked store(s) is an edge; ${#vocab[@]} field-vocabulary finding(s) are recorded warn-only (lifecycle/lifecycle.toml grades these; raise them to \"error\" once the backlog is drained) (I1)"
+    else
+        echo "every stated wait found across $checked store(s) is an edge, but some probes could not be read (I1)"
+    fi
+    detail ${vocab[@]+"${vocab[@]}"}
+    detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every wait a live bead states about itself across $checked store(s) is also a graph edge"
+echo "OK: across $checked store(s) every wait a live bead states about itself is also a graph edge, and every metadata key it carries is one lifecycle/lifecycle.toml declares"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
