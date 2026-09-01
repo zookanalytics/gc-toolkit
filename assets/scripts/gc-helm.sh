@@ -13,7 +13,8 @@
 # converse and the proactive worker (takeaway), operators by hand.
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move, tk-lzdty),
-# 4 verb runtime failure (bead not found / unverifiable / filing failed).
+# 4 verb runtime failure (bead not found / unverifiable / filing failed /
+# a --route that will not stamp).
 
 set -eu
 
@@ -333,9 +334,11 @@ cmd_takeaway() {
     # unassigned and routed to nobody, which no pool's exact-match query can
     # see. One `--set-metadata` pair in a multi-pair update can land
     # present-but-empty while its siblings land, so read this one back and
-    # repair it. Warn rather than fail: the headline and the release are
-    # already written, and a warned miss is recoverable where a silent one is
-    # not.
+    # repair it. A repair that also misses is a verb failure, because --route
+    # promises the pool can see the bead and a caller reading a zero exit as
+    # "released to that pool" would be wrong. The writes that did land stay,
+    # and the message names them, so the miss is repairable by hand.
+    route_missed=""
     if [ -n "$route" ]; then
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
@@ -347,9 +350,11 @@ cmd_takeaway() {
             # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
             route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
                 | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.routed_to"] // "") else "" end' 2>/dev/null || printf '')
-            [ "$route_got" = "$route" ] \
-                && echo "$PROG: takeaway: the route repair landed on $bead" >&2 \
-                || echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is visible to no pool until the route is stamped by hand" >&2
+            if [ "$route_got" = "$route" ]; then
+                echo "$PROG: takeaway: the route repair landed on $bead" >&2
+            else
+                route_missed=1
+            fi
         fi
     fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
@@ -371,6 +376,10 @@ cmd_takeaway() {
     bust_cache
     if [ -n "$release" ]; then
         quiesce_release_molecule_steps "$bead" "$db"
+    fi
+    if [ -n "$route_missed" ]; then
+        echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
+        exit 4
     fi
     echo "takeaway set on $bead (by $by)${release:+ [released${route:+ to $route}]}: $text"
 }

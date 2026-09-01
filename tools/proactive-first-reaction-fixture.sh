@@ -380,6 +380,12 @@ has "the blocked exit refuses a cross-store edge"  "another store"            "$
 has "an operator-commissioned subject is always the visit" "gc.origin=operator" "$D"
 has "…and the formula says so before the script refuses"   "gc.origin=operator" "$F"
 absent "no exit closes the work bead"              "bd close"                 "$D"
+# A disposition that did not land is not a disposition. The script fails
+# non-zero when the route never stamped or the wait never became an edge, and
+# the terminal step reads that exit rather than closing over a bead that is
+# recorded as routed or waiting and is neither.
+has "the formula reads the exit code before it closes" "exited zero"          "$F"
+has "…naming the two ways a disposition fails to land" "never became a"     "$F"
 
 echo "── the pool budget (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"

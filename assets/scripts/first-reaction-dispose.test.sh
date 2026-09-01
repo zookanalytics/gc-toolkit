@@ -151,7 +151,7 @@ has "routes to nobody" "$ERR" "(ACTRIG) …and names what a bare target would co
 #   (BLKSELF)  a bead never waits on itself
 #   (BLKNEW)   --blocker files the missing bead and waits on it
 #   (BLKDEDUP) --blocker-key reuses the bead a prior reaction filed
-#   (BLKEDGE)  an edge that did not land is reported, not assumed
+#   (BLKEDGE)  an edge that did not land fails the exit, so nothing closes over it
 #   (BLKARM)   --then-route arms the dispatch that resumes the work
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "waits on the schema migration" \
@@ -201,9 +201,26 @@ unset FAKE_LIST_JSON FAKE_NEW_ID
 
 export FAKE_DEPS_JSON='[]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1
-eq "$RC" "0" "(BLKEDGE) a dropped edge does not fail the verb"
-has "not held by tk-blk1" "$ERR" "(BLKEDGE) …but it is reported"
+eq "$RC" "4" "(BLKEDGE) a dropped edge fails the verb — the bead is recorded as waiting and nothing holds it"
+has "not held by tk-blk1" "$ERR" "(BLKEDGE) …the missing edge is named"
 has "gc bd dep add tk-sub tk-blk1 -t blocks" "$ERR" "(BLKEDGE) …with the repair spelled out"
+has "still ready" "$ERR" "(BLKEDGE) …and the failure says what it costs"
+hasnt "disposed as blocked" "$OUT" "(BLKEDGE) …and the run does not report a disposition"
+
+# A partial landing is still a failure: one edge holds, the other does not, and
+# the record names both.
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --waiting-on tk-blk2
+eq "$RC" "4" "(BLKEDGE) one of two edges landing is still a failed exit"
+has "not held by tk-blk2" "$ERR" "(BLKEDGE) …naming only the one that missed"
+hasnt "not held by tk-blk1" "$ERR" "(BLKEDGE) …and not the one that landed"
+
+# The arm is downstream of the hold: no edge, no deferred dispatch.
+export FAKE_DEPS_JSON='[]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "4" "(BLKEDGE) a dropped edge fails before the deferred dispatch is armed"
+hasnt "DEFERRED arm" "$LOG" "(BLKEDGE) …so nothing is armed on a wait that does not exist"
 
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
@@ -265,11 +282,16 @@ hasnt "CLOSE" "$LOG" "(NEVERCLOSE) no exit closes the work bead"
 grep -q 'status=closed' "$SCRIPT" && bad "(NEVERCLOSE) the script can set a closed status" \
                                  || ok "(NEVERCLOSE) …and the script has no close path at all"
 
-# ── A failed act leaves the record and says the bead is unreleased ───────────
+# ── A failed act leaves the record and refers to the cause ───────────────────
+# gc-helm.sh exits non-zero for a release that did not write AND for a release
+# whose route would not stamp, and only it knows which — so this refers to its
+# message rather than asserting a state it cannot see.
 export FAKE_HELM_FAILS=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "4" "(HELMFAIL) a failed release is a runtime failure"
-has "unreleased" "$ERR" "(HELMFAIL) …and says the bead is still held"
+has "gc.first_reaction=actionable" "$LOG" "(HELMFAIL) …the record was written first and stands"
+has "what landed and what did not" "$ERR" "(HELMFAIL) …and the failure refers to the cause gc-helm.sh named"
+hasnt "disposed as actionable" "$OUT" "(HELMFAIL) …and nothing reports a disposition"
 unset FAKE_HELM_FAILS
 
 echo ""

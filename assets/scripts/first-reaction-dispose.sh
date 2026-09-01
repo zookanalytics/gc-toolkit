@@ -263,19 +263,25 @@ case "$DISPOSITION" in
     actionable) set -- "$@" --route "$ROUTE" ;;
     blocked)    for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
 esac
-"$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; the disposition record stands and the bead is unreleased — re-run this command"
+"$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."
 
 # The edge is the hold. gc-helm.sh warns on a rejected edge and keeps going,
 # which is right for a headline but not for this exit: a blocked disposition
-# whose edge never landed leaves the bead ready, and nothing says so.
+# whose edge never landed leaves the bead ready, and nothing says so. A
+# missing edge fails the whole exit, so the terminal step stops rather than
+# closing over a bead that is recorded as waiting and is not held.
 if [ "$DISPOSITION" = "blocked" ]; then
     HELD=$(gc_bd dep list "$BEAD" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[]?.id // empty) else empty end' 2>/dev/null || printf '')
+    MISSING=""
     for w in $WAITING; do
         case " $(printf '%s' "$HELD" | tr '\n' ' ') " in
             *" $w "*) : ;;
-            *) note "WARNING: $BEAD is not held by $w — the wait was recorded but the edge did not land, so the bead stays ready. Wire it by hand: gc bd dep add $BEAD $w -t blocks" ;;
+            *) note "$BEAD is not held by $w — wire it by hand: gc bd dep add $BEAD $w -t blocks"
+               MISSING="$MISSING $w" ;;
         esac
     done
+    [ -z "$MISSING" ] \
+        || die "the blocked disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is still ready and the next worker claims it. The record and the headline stand; wire the edge above and re-run this command."
     if [ -n "$THEN_ROUTE" ]; then
         if [ -x "$DEFERRED" ]; then
             # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields

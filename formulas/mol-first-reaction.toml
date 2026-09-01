@@ -320,11 +320,16 @@ fi
 "$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer>" --takeaway "<the ≤140-char headline>" --visit "$VISIT"
 ```
 
-**2. Close THIS step bead, then drain.** The reaction session is one-shot —
-it ends here. This is the terminal graph step, so it still closes its own step
-bead: that is how a graph.v2 step advances, and the dispatcher's
-`workflow-finalize` closes the `kind=workflow` root only once every step is
-closed. Skip the close and this drained session leaves an open assigned step
+**2. Close THIS step bead, then drain.** Run this only after the exit block
+above exited zero. `first-reaction-dispose.sh` returns non-zero when the route
+never stamped or the wait never became a `blocks` edge, and a bead in that
+state is neither routed nor held, so closing over it strands the subject. Fix
+what its message names and re-run the exit block first.
+
+The reaction session is one-shot — it ends here. This is the terminal graph
+step, so it still closes its own step bead: that is how a graph.v2 step
+advances, and the dispatcher's `workflow-finalize` closes the `kind=workflow`
+root only once every step is closed. Skip the close and this drained session leaves an open assigned step
 bead behind, so a fresh worker re-pools on it forever — which on a POOL-routed
 formula means one spawned session per cycle, indefinitely.
 

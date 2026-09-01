@@ -291,6 +291,7 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
 #   (ROUTEREL)  --route without --release is refused (the unreadable half-state)
 #   (ROUTEOK)   a route that reads back correct is not re-written
 #   (ROUTEFIX)  a route that reads back EMPTY is repaired and reported
+#   (ROUTEDEAD) a repair that also misses is a verb failure, with its writes kept
 POOL="gc-toolkit/gc-toolkit.polecat"
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
@@ -342,7 +343,8 @@ eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
 # (ROUTEFIX) the silent drop: the stamp lands empty, so the bead is visible to
 # no pool. The verb must notice and repair rather than report success.
 : > "$TMP/updates"; : > "$TMP/routed"
-sh "$SCRIPT" takeaway A-PARKED "dropped" --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
+FRC=0
+sh "$SCRIPT" takeaway A-PARKED "dropped" --release --route "$POOL" >"$TMP/rout" 2>"$TMP/rerr" || FRC=$?
 eq "$(grep -c -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" || true)" "2" \
    "(ROUTEFIX) an empty read-back is re-stamped"
 grep -q 'read back as' "$TMP/rerr" \
@@ -351,6 +353,35 @@ grep -q 'read back as' "$TMP/rerr" \
 grep -q 'visible to no pool' "$TMP/rerr" \
   && ok "(ROUTEFIX) …and a repair that also misses says what it costs" \
   || bad "(ROUTEFIX) the persistent miss does not name its consequence (stderr: $(cat "$TMP/rerr"))"
+
+# (ROUTEDEAD) --route promises the pool can see the bead. A caller that reads a
+# zero exit as "released to that pool" would drain over a bead nothing can
+# claim, so the persistent miss is a verb failure — with every write that DID
+# land kept, and named, so a hand repair finishes it.
+eq "$FRC" "4" "(ROUTEDEAD) a route that will not stamp is a verb runtime failure"
+grep -q 'takeaway set on' "$TMP/rout" \
+  && bad "(ROUTEDEAD) the verb reported success on an unrouted bead" \
+  || ok "(ROUTEDEAD) …and it does not report the takeaway as set"
+grep -q -- '--set-metadata gc.routed_to=' "$TMP/rerr" \
+  && ok "(ROUTEDEAD) …the message carries the by-hand repair" \
+  || bad "(ROUTEDEAD) no repair spelled out (stderr: $(cat "$TMP/rerr"))"
+RD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$RD" in
+  *"--status=open"*"--assignee="*) ok "(ROUTEDEAD) …the release it already wrote is kept, not rolled back" ;;
+  *) bad "(ROUTEDEAD) the release write was lost: ${RD:-<none>}" ;;
+esac
+grep -qE "^bd update s-impl( |\$)" "$TMP/updates" \
+  && ok "(ROUTEDEAD) …and the molecule steps the release quiesced stay quiesced" \
+  || bad "(ROUTEDEAD) the failure exited before quiescing the released molecule"
+
+# A route that lands is unaffected by any of that.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+GRC=0
+sh "$SCRIPT" takeaway A-PARKED "landed clean" --release --route "$POOL" >"$TMP/rout" 2>/dev/null || GRC=$?
+eq "$GRC" "0" "(ROUTEDEAD) a route that stamps still exits zero"
+grep -q "released to $POOL" "$TMP/rout" \
+  && ok "(ROUTEDEAD) …and says where the bead went" \
+  || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
