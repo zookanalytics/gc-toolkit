@@ -1992,6 +1992,33 @@ func mustTile(t *testing.T, b Board, id string) Tile {
 	return tile
 }
 
+// A closed anchor is never owed, and the merge axes are no exception. A wedge
+// is a live claim on the operator's time; on a bead that has closed it is a
+// leftover marker, and admitting it would put a finished row at the head of a
+// queue ordered by how long each has waited.
+func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
+	a := mergeAnchor("tk-shut", map[string]string{
+		"pr.machine":   dated(MachineWedgedException, headLive, fixtureNow.Add(-72*time.Hour)),
+		"gc.routed_to": "human",
+	})
+	a.ClosedAt = fixtureNow.Add(-24 * time.Hour)
+
+	tile := computeTile(a, fixtureNow, Facts{})
+	if tile.Owed {
+		t.Error("a closed merge anchor is not owed, whatever markers it still carries")
+	}
+	if tile.Severity != SevDone {
+		t.Errorf("it bands DONE like every other closed row: got %s", tile.Severity)
+	}
+	if tile.Needs != "closed — dismiss to clear" {
+		t.Errorf("needs names the one act that clears it: got %q", tile.Needs)
+	}
+	// The axes still travel: the row is closed, not unreadable.
+	if tile.PRMachine != MachineWedgedException {
+		t.Errorf("pr_machine = %q, want the recorded wedge", tile.PRMachine)
+	}
+}
+
 // TestWedgedAnchorIsOwedAndNamed covers both wedge shapes.
 //
 // The exception wedge is the state six of the seven wedged anchors were in, and
