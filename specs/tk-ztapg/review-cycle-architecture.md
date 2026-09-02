@@ -111,9 +111,22 @@ that worker completes, all three are answered.
 | `finding.disposition` | `unvalidated`, `must-fix`, `deferred`, or `declined` |
 | `finding.source` | `machine:<lane>` or `human:<login>` |
 
-`finding.key` is what keeps a re-raised objection from becoming a second bead;
-`tk-elc0x` already names this shape and its design lives in
-`specs/tk-zgse0.2/merge-gate-exception-lifecycle.md`.
+`finding.key` is what keeps a re-raised objection from becoming a second bead.
+`tk-elc0x` names this shape, and the design it cites is
+`specs/tk-zgse0.2/merge-gate-exception-lifecycle.md`, which the rewrite deleted
+and which survives only in git history at
+`9a6b86ae^:specs/tk-zgse0.2/merge-gate-exception-lifecycle.md`. Its definition
+holds: the key is the reviewer's name plus a normalized locus and message, and
+re-evaluating a gate that already carries a finding for a key creates no
+duplicate. Idempotency is by key, never by evaluation count.
+
+**The interlock is the predicate, not an edge.** That earlier design held the
+merge with an open parent-child link from the finding to the anchor. This one
+does not, and the difference matters: `merge.sh` holds a PR on any live
+`blocks` blocker on the anchor, so a finding attached by an edge deadlocks the
+anchor the moment anyone wants the finding tracked past the merge. The merge
+predicate below queries the findings by `anchor_bead` and disposition instead,
+which lets a `deferred` finding stay open without holding anything.
 
 The same model absorbs human PR comments. A human comment becomes a finding
 with `finding.source=human:<login>`, which is what closes the gap `tk-zina89`
@@ -337,10 +350,11 @@ a gate needing raising; no arm produces it.
   is a lane entering `validating`. That makes the validator a second dispatch
   shape in the same authority rather than a second authority, which is what the
   one-authority ruling wants. Stated here as the intended shape, not as a ruling.
-- **What is the stable form of `finding.key`?** `tk-elc0x` carries the design
-  and the carve inherits it. The requirement this design adds is only that the
-  key survives a rebase, which rules out anything containing a commit oid or a
-  line number.
+- **How is a finding's locus normalized?** The recovered design gives the key's
+  shape as reviewer name plus normalized locus and message, and the requirement
+  this design adds is that the key survives a rebase, which rules out a commit
+  oid and a line number. What remains open is what a locus normalizes to when
+  the finding is about a file the rework then renames.
 - **Does a human feedback batch reset a lane whose reviewer the human never
   read?** The ruling says a batch resets the lane. Whether that means every
   lane on the anchor or only the lanes whose findings the comment touches is
