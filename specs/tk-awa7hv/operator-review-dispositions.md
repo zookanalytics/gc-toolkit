@@ -12,14 +12,17 @@ path fires on a COMMENTED review, so nothing routed them and they sat
 unanswered through three codex rounds. The CHANGES_REQUESTED review of
 2026-08-27 said so in one line: "Comments still don't have replies."
 
-Each thread now carries a reply. Nine are resolved because what they asked
-for has landed; six stay open behind `tk-ixpfau`.
+Every thread carries a reply and every thread is resolved. Nine were
+resolved because what they asked for has landed. The remaining six are one
+defect that is tangential to this PR, and review 5074283592 set the rule for
+that case: a comment that is not about the process at hand is triaged to a
+bead rather than waited on.
 
 ## Resolved: changed in this PR
 
 | Thread | Comment | What answers it |
 |---|---|---|
-| `template-fragments/learning-exemplars.md:71` | the corpus should sit with the other learnings, not in `docs/` | moved from `docs/learning-exemplars.md` to `template-fragments/learning-exemplars.template.md`, beside the profile and both learned-conventions fragments |
+| `template-fragments/learning-exemplars.md:71` | the corpus should sit with the other learnings, not in `docs/`; then, on the reply, that the whole file is loaded as "the exemplars" and that it breaks the sibling naming format | moved from `docs/learning-exemplars.md` to `template-fragments/learning-exemplars.template.md`, beside the profile and both learned-conventions fragments; the 74 lines of authoring doctrine moved to `skills/learning-distill/SKILL.md`, leaving a 331-byte carrier of the managed-by anchor and the entries, and the filename, define and heading now match the sibling fragments (`tk-z01mq2`) |
 | `converse.md:596` | the lead-with-the-decision entry contradicts ending with the decision | the ordering half of `rule:tk-vglpm` is gone; the entry now states self-containment only (`operator-profile.template.md:9-12`) |
 | `converse.md:612` | structural cause should also mean preventing the thing by design | `rule:tk-b80kkz` now says find what allowed it and prefer a design in which it cannot happen again (`operator-profile.template.md:25-29`) |
 | `converse.md:625` | a code-comment rule landed in an agent that never writes code | moved to `learned-conventions-polecat.template.md:7` and `learned-conventions-mechanik.template.md:21`; it reaches polecat, polecat-codex and mechanik, and no longer reaches converse |
@@ -57,10 +60,10 @@ and the agent runs the bash itself at claim time.
 is `tk-h3kum6` (P2, open). It was filed depending on the `:596` contradiction
 above, which this PR settles, so it now has one rule to write against.
 
-## Open: the broadcast has no per-role targeting
+## Triaged to a bead: the broadcast has no per-role targeting
 
-Six threads across `deacon.md:1`, `:78`, `:125`, `keeper.md:345`,
-`refinery.md:127` and `:188` are all one defect, filed as `tk-ixpfau` (P1,
+Six threads across `deacon.md:1`, `:85`, `:132`, `keeper.md:345`,
+`refinery.md:127` and `:184` are all one defect, filed as `tk-ixpfau` (P1,
 open): shared fragments render into every agent that includes them, with no
 per-role gate. Two of the six name fragments this branch does not touch at
 all — **Rename yourself when your focus shifts**, and **End With the
@@ -72,7 +75,12 @@ files, and that set is identical on `origin/main` and on this branch. What the
 PR changes is the content: the profile grows from three entries to nine, which
 makes an untargeted broadcast more expensive without changing who receives it.
 
-These stay unresolved. Resolving them would claim a fix that has not landed.
+An earlier round left the six open, on the reasoning that resolving them
+would claim a fix that had not landed. Review 5074283592 rejected that
+reasoning: a tangential comment is triaged to a bead and worked there, and
+only a comment about the process at hand is waited on. Nothing this PR could
+change is what these six want, so they are resolved against `tk-ixpfau`
+rather than held.
 
 # Replying is not blocked
 
