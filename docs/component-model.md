@@ -112,10 +112,13 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   carrying every field of the transition → read back. A single `bd update` is
   atomic ([gascity-routing-model.md](gascity-routing-model.md)); the old
   healer passes existed because writers split transitions across calls.
-- **One gate-verdict writer** — `signoff.sh`. Clearing a marker is a separate
-  power from writing one: a clear withdraws evidence where a verdict asserts
-  it, so no clearer can make a gate pass. Three components hold that power,
-  each under one condition stated in [authority-map.md](authority-map.md).
+- **One gate-verdict writer** — `signoff.sh`, which also owns the `check_set`
+  widening: adding a gate is a set union with read-back, from a `triage`
+  review only, so the checks-needed decision has one auditable writer.
+  Clearing a marker is a separate power from writing one: a clear withdraws
+  evidence where a verdict asserts it, so no clearer can make a gate pass.
+  Three components hold that power, each under one condition stated in
+  [authority-map.md](authority-map.md). None of them grows `check_set`.
 - **One posture writer** — `pr-facts.sh`, which records what the PR is doing
   (`pr_posture`, `pr_merge_state`, the comment watermarks) so every consumer
   reads it off the anchor instead of re-deriving it from GitHub. It runs twice
