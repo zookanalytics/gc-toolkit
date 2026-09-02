@@ -256,6 +256,56 @@ out="$(STUB_DROP_KEYS="d-5:gc.routed_to" "$SUT" transition d-5 --to pull_request
 eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
 has "$out" "gc.routed_to" "the unverified route is named"
 
+# --- detached states clear the assignee in the same atomic call ----------------
+# The unheld half of the same property. The refinery's find-work queue is
+# assignee-keyed and flags a merge_result-bearing bead it finds there instead of
+# taking it, so an assignee that survives the gating transition sits in that
+# queue for the life of the anchor.
+echo "# detached states clear the assignee"
+store '[{"id":"h-1","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition h-1 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
+eq "$rc" 0 "entry to pre_open_gate exits 0"
+eq "$(bassignee h-1)" "" "the handoff assignee is cleared without the caller asking"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update as the state"
+
+store '[{"id":"h-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
+"$SUT" transition h-2 --to pull_request --expect pull_request --route "" >/dev/null 2>&1
+eq "$(bassignee h-2)" "" "a self-edge observation converges a survivor already parked in the state"
+
+store '[{"id":"h-3","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+"$SUT" transition h-3 --to pull_request --assignee "rig/mechanik" >/dev/null 2>&1
+eq "$(bassignee h-3)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
+
+# bd refuses an assignee edit on a bead another actor holds in_progress and
+# drops the whole atomic update with it, so the arm must not reach for the
+# field there. The proof is the emitted call: no --assignee flag, no guard.
+store '[{"id":"h-4","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition h-4 --to pull_request --expect pull_request --route "" --set pr_number=9 2>&1)"; rc=$?
+eq "$rc" 0 "a transition on an in_progress anchor still lands"
+eq "$(bassignee h-4)" "rig/gc-toolkit.polecat-1" "a live claim is left for escalation, not overwritten"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--assignee" "no assignee flag reaches bd, so the anti-steal guard is never armed"
+eq "$(meta h-4 pr_number)" "9" "the rest of the transition landed"
+
+# An already-unheld anchor is the healthy case, and it must issue the bd call it
+# always did: an --assignee flag there buys nothing and arms the guard for free.
+store '[{"id":"h-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+: > "$STUB_GC_LOG"
+"$SUT" transition h-5 --to pull_request --set pr_number=9 >/dev/null 2>&1
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--assignee" "an empty assignee emits no flag"
+
+# A human state is not detached: it names a person by route, and the assignee is
+# the caller's to decide.
+store '[{"id":"h-6","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
+"$SUT" transition h-6 --to retargeted --route rig/mechanik >/dev/null 2>&1
+eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assignee alone"
+
+store '[{"id":"h-7","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+out="$(STUB_DROP_KEYS="h-7:assignee" "$SUT" transition h-7 --to pull_request 2>&1)"; rc=$?
+eq "$rc" 2 "a clear that did not land exits 2 (verification mismatch)"
+has "$out" "assignee" "the unverified assignee is named"
+
 store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 "$SUT" transition a-7 --to retargeted --route rig/mechanik >/dev/null 2>&1
 eq "$(meta a-7 'gc.routed_to')" "rig/mechanik" "an explicit --route overrides the human default"

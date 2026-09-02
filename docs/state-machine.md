@@ -84,13 +84,28 @@ carried neither, which is what the state exists to fix.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
-the anchor rests unheld and unrouted: `lifecycle.sh` clears `gc.routed_to` on
-entry to one. The exception is `park_route` (`human`), which `signoff.sh` writes
-when the review round cap is spent. No pool claims that value, so a transition
-that finds it leaves it in place. Any other route on a detached anchor is pool
-demand for work that is already in the merge queue. A worker claims it, the
-claim moves the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh`
-both enumerate from there. `doctor/check-state-space` reports the violation.
+the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
+entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
+still at `status=open`.
+
+The route exception is `park_route` (`human`), which `signoff.sh` writes when
+the review round cap is spent. No pool claims that value, so a transition that
+finds it leaves it in place. Any other route on a detached anchor is pool demand
+for work that is already in the merge queue. A worker claims it, the claim moves
+the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
+from there.
+
+An assignee is the same anchor still sitting in the refinery's own find-work
+queue, which is assignee-keyed and flags a `merge_result`-bearing bead it finds
+there rather than taking it. There is no park sentinel on this side: no
+component holds an anchor by assignee, and the polecat handoff pointer that put
+one there is spent the moment the anchor is gated. The clear stops at
+`status=open` for two reasons that agree. A live claim is a hold to escalate,
+not to overwrite; and bd refuses an assignee edit on a bead another actor holds
+`in_progress`, dropping the whole atomic update with it
+([gascity-routing-model.md](gascity-routing-model.md) row 46). No cadence pass
+reaches such a bead in any case, because every anchor enumeration is
+`--status=open`. `doctor/check-state-space` reports either violation.
 
 ## Transition table
 

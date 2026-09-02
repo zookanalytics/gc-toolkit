@@ -15,7 +15,9 @@
 # --close only into a closed state, and a closed state requires --close (status
 # and merge_result move together). A state's declared routing rides in the same
 # call unless --route is given: human states stamp gc.routed_to=human, and
-# detached states clear it unless the bead already rests on the park route. A
+# detached states clear it unless the bead already rests on the park route.
+# A detached state also clears the assignee of a bead still at status=open,
+# unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to
 # name one, and routing to the park sentinel refuses without a takeaway — the
 # board spends gc.takeaway as the row's NEEDS sentence, so a park with none
@@ -31,6 +33,7 @@
 # CAVEAT (docs/gascity-routing-model.md row 46): clearing an assignee on a bead
 # another actor holds in_progress is refused by bd, and the refusal drops the
 # WHOLE atomic update — a caller that passes --assignee "" must hold the claim.
+# The detached-state clear reads the status for that reason and stops at open.
 set -u
 
 PROG="lifecycle"
@@ -268,6 +271,29 @@ cmd_transition() {
     cur_route=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     if [ "$cur_route" != "$LIFECYCLE_PARK_ROUTE" ]; then
       ROUTE=""; ROUTE_SET=1
+    fi
+  fi
+
+  # The unheld half of the same property. An anchor's assignee is the polecat
+  # handoff pointer, and mol-refinery-patrol's find-work enumerates by it: a
+  # bead carrying a merge_result found in that queue is flagged, never taken,
+  # so a survivor sits there for the life of the anchor with nothing converging
+  # it. Setting ASSIGNEE_SET puts the clear under the post-write read-back, the
+  # same way the route arm does.
+  #
+  # Only at status=open. That is the status every detached state declares, and
+  # it is the term of bd's anti-steal guard that decides whether the edit lands
+  # at all: against an in_progress bead the clear is refused and takes the whole
+  # atomic update down with it. A live claim there is the retraction this must
+  # not perform, and no cadence pass reaches one anyway, because every anchor
+  # enumeration is --status=open. An assignee already empty emits no flag, so a
+  # healthy transition issues the same bd call it always did.
+  local cur_assignee="" cur_status=""
+  if [ "$ASSIGNEE_SET" = 0 ] && is_detached_state "$TO"; then
+    cur_assignee=$(printf '%s' "$bead" | jq -r '(.assignee // "") | tostring')
+    cur_status=$(printf '%s' "$bead" | jq -r '(.status // "") | tostring | ascii_downcase')
+    if [ -n "$cur_assignee" ] && [ "$cur_status" = "open" ]; then
+      ASSIGNEE=""; ASSIGNEE_SET=1
     fi
   fi
 

@@ -21,11 +21,18 @@ states = [
 # States that also route the bead to a human (lifecycle.sh stamps
 # gc.routed_to=human in the same atomic update).
 human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion", "held"]
-# States the merge cadence drives and no queue offers. lifecycle.sh clears
-# gc.routed_to in the same atomic update unless --route is given or the bead
-# already rests on park_route. A pool route on one of these is demand for work
+# States the merge cadence drives and no queue offers, so an anchor in one rests
+# both unrouted and unheld. lifecycle.sh writes the two halves in the same
+# atomic update: it clears gc.routed_to unless --route is given or the bead
+# already rests on park_route, and it clears the assignee unless --assignee is
+# given, at status=open only. A pool route on one of these is demand for work
 # already in the merge queue, and the claim it invites moves the anchor out of
-# `--status=open`, where merge.sh and pr-facts.sh both stop seeing it.
+# `--status=open`, where merge.sh and pr-facts.sh both stop seeing it. An
+# assignee is the same anchor still sitting in the refinery's own find-work
+# queue, which flags a merge_result-bearing bead it finds there and does not
+# take it. The assignee clear stops at status=open because bd refuses to take a
+# live claim and drops the whole update with it, and because a live claim is a
+# hold to escalate rather than one to overwrite.
 detached_states = ["pre_open_gate", "pull_request"]
 # The one route value that is not a queue. No pool claims it, so it parks the
 # bead for a person (docs/gascity-human-engagement.md). A detached state may
