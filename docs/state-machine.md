@@ -219,16 +219,19 @@ own, and a floor recomputed each pass would swallow every new round and the cap
 would never trip.
 
 A cap that resets while its own park stands has not reset, so the same write
-retires that park: the `exception@` marker, `blocked_reason`, and the human
-route. `signoff.sh` stamps `signoff_cap=<gate>@<oid>` alongside them, and the
-reset acts only while that stamp and the standing marker still agree — an
-anchor a person parked by hand, or one whose exception they already retired, is
-theirs and stays. A sitting still waiting on a person outranks the reset the
-same way, and what says so is the demand bead `gc-helm.sh demand` filed
-(`gc.demand_for=<anchor>`), never `gc.takeaway`. That field is stamped when a
-sitting begins and replaced by its outcome at sign-off, so it dates the last
-sitting rather than naming a live wait; read as a hold it parks an anchor from
-its first conversation onward, whatever the PR goes on to say. The dispatch tally
+retires that park: the `exception@` marker, `blocked_reason`, the human route,
+and the `gc.takeaway` the cap wrote for the board. `signoff.sh` stamps
+`signoff_cap=<gate>@<oid>` alongside them, and the reset acts only while that
+stamp and the standing marker still agree — an anchor a person parked by hand,
+or one whose exception they already retired, is theirs and stays. A sitting
+still waiting on a person outranks the reset the same way, and what says so is
+the demand bead `gc-helm.sh demand` filed (`gc.demand_for=<anchor>`), never
+`gc.takeaway`. That field is stamped when a sitting begins and replaced by its
+outcome at sign-off, so it dates the last sitting rather than naming a live
+wait; read as a hold it parks an anchor from its first conversation onward,
+whatever the PR goes on to say. Which takeaway the retire clears follows from
+the same fact. `gc.takeaway_by` names the writer, so the cap's own sentence
+goes with the park it describes, and a sitting's stays. The dispatch tally
 (`dispatch_count` and any `dispatch_backstop.<g>`) goes with the park, since
 rounds nobody may dispatch are no release.
 

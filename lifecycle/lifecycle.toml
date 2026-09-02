@@ -31,6 +31,9 @@ detached_states = ["pre_open_gate", "pull_request"]
 # bead for a person (docs/gascity-human-engagement.md). A detached state may
 # rest on it, which is where signoff.sh routes a round-capped anchor, and a
 # transition that finds it leaves it alone. Every other route is a pool offer.
+# A park must NAME what it waits for: writing this route without a gc.takeaway
+# is refused, because the helm board spends the takeaway as the row's NEEDS
+# sentence and reports a park without one as no question recorded.
 park_route = "human"
 # States whose legal status is closed; every other declared state is open.
 # lifecycle.sh enforces the pairing both ways: --close is accepted only into a
@@ -322,8 +325,10 @@ keys = ["merge_hold", "rebase_hold", "tracking_only"]
 keys = [
   # gc.demand_for names the bead a demand gates. It is what the merge cadence
   # reads to tell a sitting still waiting on a person from one that ended:
-  # gc.takeaway beside it is the headline, replaced at sign-off and never
-  # cleared, so only the demand's own liveness answers that question.
+  # gc.takeaway beside it is the headline, replaced at sign-off and cleared by
+  # nothing a sitting does, so only the demand's own liveness answers that
+  # question. The one takeaway that is retired is the round cap's own, which
+  # describes a park rather than a sitting and goes when the park does.
   "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.demand_for",
   "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",

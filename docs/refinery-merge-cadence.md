@@ -48,8 +48,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
    back). An `exception@` marker bound to the live head also ends the arm's
    interest with no dispatch, because it reads as settled. It holds the merge,
-   and it says so on the anchor: `signoff.sh` set `gc.routed_to=human` and a
-   `blocked_reason` naming the cap in the same act that wrote the marker. No
+   and it says so on the anchor: `signoff.sh` set `gc.routed_to=human`, a
+   `blocked_reason` naming the cap, and the shorter `gc.takeaway` headline the
+   helm board renders, in the same act that wrote the marker. No
    visit is filed for it, so the anchor is parked rather than queued. A head
    move past a recorded `exception@` undoes that. The gate is no longer
    settled and one dispatch is re-armed. So does new operator feedback, which

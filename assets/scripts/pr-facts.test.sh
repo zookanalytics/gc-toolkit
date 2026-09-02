@@ -23,10 +23,12 @@
 # answered, and the reads that record nothing rather than clear a standing
 # `commented`.
 # Also covers the review-round cap reset such a batch performs: once per batch,
-# retiring the dispatch tally and the cap's own park with it, while a park no
-# `signoff_cap` claims, a live demand, a verdict the city posted itself, and a
-# rework hand-back each leave the cap standing — and a takeaway whose sitting
-# already ended holds nothing, which is the shape a demand tells from a hold.
+# retiring the dispatch tally and the cap's own park with it, the takeaway the
+# cap wrote for the board included. A park no `signoff_cap` claims, a live
+# demand, a verdict the city posted itself, and a rework hand-back each leave
+# the cap standing. A takeaway whose sitting already ended holds nothing, which
+# is the shape a demand tells from a hold, and it survives the retire: only the
+# cap's own sentence is part of the park.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -681,6 +683,7 @@ eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answe
 # operator's own words.
 CAP_STATE=',"check.codex":"exception@sha-55","signoff_cap":"codex@sha-55"'
 CAP_STATE="$CAP_STATE"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
+CAP_STATE="$CAP_STATE"',"gc.takeaway":"signoff did not converge after 3 rework rounds (cap 3)","gc.takeaway_by":"signoff"'
 CAP_STATE="$CAP_STATE"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-55"'
 
 echo "# new operator feedback on a capped anchor resets it, park and all"
@@ -695,6 +698,8 @@ eq "$(meta R1 'check.codex')" "<absent>" "the exception is retired — a cap tha
 eq "$(meta R1 signoff_cap)" "<absent>" "…and the stamp that proved the park was the cap's"
 eq "$(meta R1 blocked_reason)" "<absent>" "…and the reason that named it"
 eq "$(meta R1 'gc.routed_to')" "" "…and the human park, so the anchor is back in the cadence"
+eq "$(meta R1 'gc.takeaway')" "<absent>" "…and the sentence the cap wrote for the board, which is part of that park"
+eq "$(meta R1 'gc.takeaway_by')" "<absent>" "…with the provenance that told it from a sitting's"
 eq "$(meta R1 dispatch_count)" "<absent>" "the dispatch tally goes too: released rounds nobody may dispatch are no release"
 eq "$(meta R1 'dispatch_backstop.codex')" "<absent>" "…with the backstop stamp that dedups its escalation"
 has "$(notes R1)" "operator feedback on PR#55 (review 0, comment 8500" "the reset names the feedback that caused it"

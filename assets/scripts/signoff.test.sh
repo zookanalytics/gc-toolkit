@@ -11,6 +11,8 @@
 # fired before it had a PR to be commented on, and for the one whose batch was
 # recorded while the park stood. Both retirements read the same discriminator:
 # a live demand holds the anchor, a takeaway from a sitting that ended does not.
+# Both also take the cap's OWN takeaway with the park, and leave a sitting's,
+# which gc.takeaway_by tells apart.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,12 +60,20 @@ case "${1:-}" in
     if [ -n "${STUB_UPD_FAIL:-}" ] && grep -qx "$id" "$STUB_UPD_FAIL" 2>/dev/null; then
       echo "bd: denied (stub)" >&2; exit 1
     fi
+    # STUB_DROP_KEYS="id:key1,key2 id2:key" — apply the update but silently drop
+    # the named keys, modelling a write that reported success and half-landed.
+    drops=""
+    for pair in ${STUB_DROP_KEYS:-}; do
+      case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
+    done
     tmp=$(mktemp); cp "$STORE" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
+          case ",$drops," in *",$k,"*) : ;; *)
           jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
             'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+          esac ;;
         --unset-metadata) shift
           printf '%s\n' "$id" >> "${STUB_UNSET_LOG:-/dev/null}"
           # A concurrent writer re-stamping the key loses the delete without
@@ -245,6 +255,14 @@ reset() { # $1 = anchor json, extra beads appended via $2
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 status() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
 notes()  { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
+anchor_meta() { # <k=v>... — stamp the anchor before the run
+  local kv
+  for kv in "$@"; do
+    jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" \
+      'map(if .id == "tk-anc" then .metadata[$k] = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n"
+    mv "$STUB_STORE.n" "$STUB_STORE"
+  done
+}
 
 # --- approve, post-open --------------------------------------------------------
 echo "# approve post-open"
@@ -550,8 +568,70 @@ hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata check.codex" "the cap never ALSO
 eq "$(meta tk-anc gc.routed_to)" "human" "the anchor is routed to a human"
 eq "$(meta tk-anc signoff_cap)" "codex@$OID_HEAD" "…and signoff_cap names the exception that park belongs to"
 has "$(meta tk-anc blocked_reason)" "did not converge" "blocked_reason says why it is held"
+# The board spends gc.takeaway as the row's NEEDS sentence; a park that writes
+# only blocked_reason reaches the operator saying no question was recorded. The
+# two are not the same string: blocked_reason is the row's detail and names the
+# case and the verb that retires it, which passes the board's cell, so the
+# takeaway carries the headline both cases share.
+eq "$(meta tk-anc gc.takeaway)" \
+  "signoff did not converge after 3 rework rounds (cap 3); findings are in the review beads under this anchor" \
+  "the park's takeaway is the headline the board can render"
+has "$(meta tk-anc blocked_reason)" \
+  "signoff did not converge after 3 rework rounds (cap 3)" \
+  "…and blocked_reason opens on the same sentence before adding the detail"
+eq "$(meta tk-anc gc.takeaway_by)" "signoff" "the takeaway names its writer"
+has "$(meta tk-anc gc.takeaway_at)" "T" "…and stamps when the wait started"
+eq "$(printf '%s' "$(meta tk-anc gc.takeaway)" | jq -Rsr 'length <= 140')" "true" \
+  "the takeaway fits the 140-codepoint board cap"
+eq "$(grep -c -- '--set-metadata gc.routed_to=human' "$STUB_GC_LOG")" "1" \
+  "route and takeaway ride in ONE update"
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no rework child is filed past the cap"
 eq "$(status rv-1)" "closed" "the review bead still closes (verdict recorded)"
+
+# pr-facts.sh's retire arm reads gc.takeaway_by to tell the cap's own board
+# sentence from a sitting's decision on the anchor. A takeaway that lands
+# without its provenance reads as the sitting's, so the operator feedback meant
+# to lift the park leaves the exception and the human route standing. The park
+# is proven only when the whole triple reads back.
+echo "# a cap park whose provenance stamp did not land is a read-back failure"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_by" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a dropped gc.takeaway_by exits 2"
+has "$out" "did not read back" "the refusal reports the half-landed park"
+has "$out" "gc.takeaway_by" "…and names the field that went missing"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
+
+echo "# …and so is a cap park with no gc.takeaway_at"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_at" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a dropped gc.takeaway_at exits 2"
+has "$out" "gc.takeaway_at" "the refusal names the missing timestamp"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
+
+# A timestamp that is merely present is not the one this verdict wrote. An
+# anchor parked before carries gc.takeaway_at already, so a cap update that
+# lands the headline and its provenance and drops only the timestamp satisfies
+# a non-empty check, and helm dates this wait to the earlier park and attributes
+# it to whatever sitting spans the old value.
+echo "# …and so is a cap park left holding a STALE gc.takeaway_at"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+anchor_meta gc.takeaway_at=1999-01-01T00:00:00Z
+out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_at" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a cap park left on a stale gc.takeaway_at exits 2"
+has "$out" "gc.takeaway_at" "the refusal names the timestamp field"
+eq "$(meta tk-anc gc.takeaway_at)" "1999-01-01T00:00:00Z" "…and the stale value is what read back"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
+
+echo "# …and so is a cap park with no takeaway at all"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a dropped gc.takeaway exits 2"
+has "$out" "did not read back" "the refusal reports the half-landed park"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
 
 echo "# only rework children count as rounds"
 reset "$ANCHOR_PR" "$(kid 1 open '"source_review_bead":"r1"')$(kid 2 open '')$(kid 3 open '"branch":"x"')"
@@ -590,14 +670,6 @@ spent() { # <n> [anchor-json] — n closed rework children, edged to the anchor
   for i in $(seq 1 "$1"); do extra="$extra$(kid "$i" closed "\"source_review_bead\":\"r$i\"")"; done
   reset "${2:-$ANCHOR_PR}" "$extra"
   for i in $(seq 1 "$1"); do printf 'tk-anc|c%s|blocks\n' "$i" >> "$STUB_DEPS"; done
-}
-anchor_meta() { # <k=v>... — stamp the anchor before the run
-  local kv
-  for kv in "$@"; do
-    jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" \
-      'map(if .id == "tk-anc" then .metadata[$k] = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n"
-    mv "$STUB_STORE.n" "$STUB_STORE"
-  done
 }
 
 echo "# a recorded floor is subtracted: the rounds before the feedback do not cap"
@@ -660,6 +732,11 @@ eq "$rc" 0 "the pre-open cap path exits 0"
 eq "$(meta tk-anc check.codex)" "exception@$OID_HEAD" "…and records the exception"
 has "$(meta tk-anc blocked_reason)" "spent pre-open" "blocked_reason says the rounds were pre-open"
 has "$(meta tk-anc blocked_reason)" "signoff.sh reset tk-anc" "…and names the verb that retires it"
+# The pre-open detail is the longest the cap composes. The board still gets a
+# sentence, and still gets one that fits.
+eq "$(printf '%s' "$(meta tk-anc gc.takeaway)" | jq -Rsr 'length <= 140')" "true" \
+  "a pre-open cap's takeaway fits the board cap the detail exceeds"
+has "$(meta tk-anc gc.takeaway)" "did not converge" "…and still says what is owed"
 has "$out" "pre-open (no PR)" "the report tells a pre-open cap from a PR one"
 
 echo "# …while a cap on an open PR still points at the conversation that releases it"
@@ -701,6 +778,30 @@ eq "$(meta tk-anc signoff_cap)" "<absent>" "…re-writes no park"
 eq "$(meta tk-anc gc.routed_to)" "" "…and does not route the anchor back to a human"
 eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "1" "…the released round is spent on a rework child"
 has "$(meta fix-1 rejection_reason)" "round 1" "…numbered from the ruling"
+
+echo "# …and the sentence the cap wrote for the board goes with that park"
+# The cap is the only writer that stamps a takeaway describing a park rather
+# than a sitting, so it is the only one this verb may clear. gc.takeaway_by is
+# what says which it is holding.
+capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" \
+  "gc.takeaway_at=2026-01-01T00:00:00Z" "gc.takeaway_by=signoff"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-ta 2>&1); rc=$?
+eq "$rc" 0 "the reset exits 0"
+eq "$(meta tk-anc gc.takeaway)" "<absent>" "the headline the board rendered for the park is retired with it"
+eq "$(meta tk-anc gc.takeaway_at)" "<absent>" "…with the instant that dated the wait"
+eq "$(meta tk-anc gc.takeaway_by)" "<absent>" "…and the provenance that told it from a sitting's"
+has "$out" "the cap's takeaway" "…and the report names it among what was retired"
+
+echo "# …and a takeaway unset that is silently lost is not a retirement"
+# Same shape as the tally: a park released while the board still renders its
+# question sends the operator to an anchor that is back in the cadence.
+capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" \
+  "gc.takeaway_at=2026-01-01T00:00:00Z" "gc.takeaway_by=signoff"
+printf 'tk-anc gc.takeaway\n' > "$STUB_UNSET_NOOP"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-ta2 2>&1); rc=$?
+eq "$rc" 2 "a lost gc.takeaway unset exits 2"
+has "$out" "did not read back on tk-anc (gc.takeaway)" "…naming the key the board still renders"
+eq "$(meta tk-anc gc.takeaway)" "signoff did not converge after 3 rework rounds (cap 3)" "…which the anchor still carries"
 
 echo "# reset writes to the anchor and to nothing else"
 capped_pre 3

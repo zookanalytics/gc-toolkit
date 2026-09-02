@@ -60,7 +60,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 cd7172b72903a33cd2a7c58ed5d4caa79b02158a4811803d22b22e1e4c63a73a
 formulas/mol-refinery-patrol.toml
-e00e3be268b8a62c62fb8013c7d2f16017c874d746eb7ee75f8064d7928862d4
+469ba7203f38ccc0bb80a17539998323e717a233f4cf0edd3620489574392a7e
 formulas/mol-review.toml
 1130577f6768bd392c0eb42e913a3573fe25c4f20ef45ec092754082dda48a2c
 formulas/mol-visit.toml
@@ -82,7 +82,7 @@ b4ae8ff150bf52f5f136cac177ab675d5cb4be74ae06567423635be6ee0052a5
 packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml
 0c629ce5dafea4edfdb879f374325f817481d5094d411b79f925642f9cf2696b
 packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml
-f0b58813a208baf7e27bd6a3326d22202e07379920cb6242f42dec3ea07a151b
+7da7b715c5ae0a770b64e106bf1860b53147ad1c35b2f951288839a48264ffa7
 packs/gascity-keeper/pack.toml
 e84856c3af15e76904d3bd57b8053a602b85c9f13dfde2e9de77a4d6abff0ed5
 packs/gascity-keeper/template-fragments/polecat-patterns.template.md
