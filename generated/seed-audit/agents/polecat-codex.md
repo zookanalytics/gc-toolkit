@@ -334,9 +334,11 @@ operator's wording as `## Statement`, plus `obs.source=operator` and
      docs/feedback-learning.md. -->
 
 <!-- rule:tk-98ekr src:pr:#542:review:5073311090 (operator feedback), pr:#485:comment:3867419877 (miner), pr:#511:review:5063149790 adopted:2026-09-01 -->
-- When a comment, spec, or config note states how another component
-  behaves, or names that component's file, symbol, or mechanism as its
-  authority, read that source before the sentence lands and claim only
-  the boundary it settles. A premise copied from a sibling file or rig,
-  and an unqualified absolute like "differs only in X", are claims about
-  everything you did not read.
+- Before you write a sentence about how another component behaves, open that
+  component and read it, then write only what you found there. This applies to
+  comments, specs, config notes, docs, and formula steps. When you name a file,
+  symbol, or command as the authority for a claim, read that exact thing and not
+  a sibling that resembles it. When you copy a rationale from another file, check
+  that its opening premise is still true where you paste it. Do not write
+  "differs only in X", "always", or "never" about code you have not read in full.
+  Name what you actually checked instead.
