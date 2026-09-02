@@ -12,16 +12,25 @@ as you reach it. Never exit the wisp from an intermediate step — continue,
 or jump to next-iteration to pour and burn.
 
 Scope: the witness recovers work whose owner died, files ONE warrant bead
-for the dog pool when an owner is alive but wedged, and watches the
-refinery queue. It does NOT manage processes (controller), write code
+for the dog pool when an owner is alive but wedged, files a bug bead for the
+polecat pool when mail reports a defect in the pack, and watches the refinery
+queue. It does NOT manage processes (controller), write code
 (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). Escalations go through
 assets/scripts/escalate.sh — one open visit per situation key.
 
-Marked blocks (host-bead-skip, liveness-map-guard, liveness-lookup, husk-guard,
-crash-loop-window, patrol-wisp-pour, refinery-queue-nudge) are extracted and
-executed by their tests; keep markers, keep them backslash-free."""
+Every address this formula stamps comes from assets/scripts/resolve-route.sh.
+The agents it files to do not share a scope: the dog is city-scoped and its
+identity carries no rig segment, while the polecat and refinery pools are
+rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
+the other, and either stamp reads back clean, so a hand-written address is
+right only by luck.
+
+Marked blocks (bug-dispatch, host-bead-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, crash-loop-window,
+patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
+tests; keep markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -46,8 +55,33 @@ via escalate.sh (`--subject <the polecat's bead> --key polecat-help`).
 Emergencies (crash, data loss, corruption, security) escalate immediately.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
-archive. Lifecycle chatter is acknowledged and archived. Inbox near-empty
-after this step. Close it and continue."""
+archive. Lifecycle chatter is acknowledged and archived.
+
+Mail reporting a defect in the pack itself, a formula or script fault the
+sender hit and worked around, is none of those: it needs a polecat rather
+than a human. File it as a bug bead routed at the polecat pool, resolving
+the address rather than writing the qualifier by hand. Set TITLE and BODY
+first:
+```bash
+# >>> bug-dispatch
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+POOL=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}polecat") || true
+if [ -z "$POOL" ]; then
+  echo "no live polecat identity resolves from '{{binding_prefix}}polecat'; a bug filed at a guessed address is offered to nobody, so escalate instead of filing." >&2
+else
+  BUG=$(gc bd create "$TITLE" -t bug -d "$BODY" --json | jq -r '.id // .[0].id')
+  if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
+    gc bd update "$BUG" --set-metadata gc.routed_to="$POOL"
+    echo "filed + routed bug $BUG to $POOL"
+  else
+    echo "gc bd create returned no id; nothing filed." >&2
+  fi
+fi
+# <<< bug-dispatch
+```
+Inbox near-empty after this step. Close it and continue."""
 
 [[steps]]
 id = "recover-orphaned-beads"
@@ -229,12 +263,27 @@ order, never the pane (pane text is agent-controlled output):
 `quota-park-nudge.sh --status <session>` — `quota_park=yes` is a healthy
 park: defer, file nothing this cycle. Otherwise file ONE warrant for the
 dog pool, dedup'd on the target like an escalation key — never kill
-directly:
+directly. The dog is city-scoped, so its identity carries no rig segment and
+the rig-qualified form the refinery queue-nudge uses matches nothing here.
+Set TARGET to the wedged session and REASON to what is stale and for how
+long:
 ```bash
-OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
-if [ -z "$OPEN_WARRANT" ]; then
-  gc bd create --type=task --title="Stuck: <agent>" --metadata '{"warrant.target":"<session>","warrant.reason":"No progress on <bead> for <duration>","warrant.requester":"witness","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+# >>> warrant-file
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+DOG=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}dog") || true
+if [ -z "$DOG" ]; then
+  echo "no live dog identity resolves from '{{binding_prefix}}dog'; a warrant nothing claims leaves the session wedged and still reports success, so escalate instead of filing." >&2
+else
+  OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=$TARGET" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
+  if [ -n "$OPEN_WARRANT" ]; then
+    echo "warrant $OPEN_WARRANT already open for $TARGET; not filing another"
+  else
+    gc bd create --type=task --title="Stuck: $TARGET" --label=warrant --metadata "$(jq -nc --arg t "$TARGET" --arg r "$REASON" --arg d "$DOG" '{"warrant.target":$t,"warrant.reason":$r,"warrant.requester":"witness","gc.routed_to":$d}')"
+  fi
 fi
+# <<< warrant-file
 ```
 The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
 pardon-or-execute, DOG_DONE notice back); if it executes, the dead
