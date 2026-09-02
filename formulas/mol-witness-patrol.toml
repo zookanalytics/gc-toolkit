@@ -172,9 +172,11 @@ and escalate
 (`escalate.sh --subject <the standing subject> --key witness-empty-liveness-map ...`),
 then continue to check-refinery. The subject is never this wisp: next-iteration
 burns it, and the converse sitting writes its takeaway to the subject the visit
-tracks, so a subject that dies each cycle loses its disposition. Use
-this rig's standing subject — the open bead carrying `task_kind=triage-subject`
-and `triage.scope=witness-findings`, created once if no open one exists.
+tracks. escalate.sh redirects a wisp subject onto a generic standing subject
+rather than lose that write, so naming one here is what keeps witness findings
+in a scope of their own. Use this rig's standing subject — the open bead
+carrying `task_kind=triage-subject` and `triage.scope=witness-findings`,
+created once if no open one exists.
 
 An owner that resolves `absent` against a POPULATED map is never grounds for
 the fail safe. Closed sessions are excluded from `gc session list` on every

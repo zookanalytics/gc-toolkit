@@ -11,7 +11,10 @@
 # The route is proved against the live agent set before anything is created,
 # and an already-open visit carrying an unroutable route is repointed rather
 # than counted as a satisfied escalation. A rig-qualified --pool also selects
-# the store the visit lands in, so route and store cannot disagree.
+# the store the visit lands in, so route and store cannot disagree. An
+# ephemeral --subject (a patrol wisp) is redirected onto this store's standing
+# triage subject, because the sitting that works the visit writes its outcome
+# and takeaway to the subject.
 # A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
 # is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
 # disables), and each suppressed repeat is tallied on that visit.
@@ -32,7 +35,11 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
 
   --subject  the bead the escalation is about; the visit tracks it (required).
              A durable bead also narrows the dedup to that bead; an ephemeral
-             one (a patrol wisp) cannot, so there the key alone is the identity
+             one (a patrol wisp) cannot, so there the key alone is the
+             identity, and the visit is filed on the standing triage subject
+             (task_kind=triage-subject, triage.scope=ephemeral-subject-findings)
+             instead — a wisp burns before a sitting can record anything to it.
+             The wisp rides the visit as escalation_raised_by
   --key      names the SITUATION, not the wording: one open visit per key,
              narrowed to the subject when the subject is durable.
              [A-Za-z0-9._-] only (required). To keep two situations apart
@@ -289,13 +296,84 @@ if [ "$VERDICT_WINDOW" -gt 0 ]; then
 fi
 
 assert_routable "$POOL" || exit 1
-VISIT=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$MESSAGE" --json | jq -r '.id // .[0].id')
+
+# The subject has to outlive the visit. A converse sitting records what it
+# settled by appending to the subject, and stamps the takeaway on the item —
+# which is the subject whenever the visit names no stall_root
+# (agents/converse/prompt.template.md, step 7). A wisp is burned at the end of
+# the iteration that poured it, so on a wisp subject both writes address a bead
+# that no longer exists, and the sitting's own guard ("NO TAKEAWAY ON $ITEM")
+# cannot be satisfied at all.
+#
+# So an ephemeral subject is redirected rather than filed on: the visit hangs
+# on this store's standing triage subject, and the wisp survives as
+# provenance. That subject is durable by construction: liveness-sweep.sh's
+# classify block reads a task_kind=triage-subject bead as held-by-design, and
+# its recurrence arm skips a scope carrying no schema token
+# (p<=N · label:X · kind:X · unrouted), so the bucket files no visits of its
+# own. Redirecting rather than refusing follows the rule the rest of this
+# script files under: a visit whose disposition is lost has still asked a
+# human, and refusing to file asks nobody.
+#
+# Only the FILING side moves. The dedup above still identifies a wisp-raised
+# situation by its key alone, which is what matches the visits already open
+# under a burned wisp's group; narrowing those to the bucket would match none
+# of them and re-file every one.
+TRIAGE_SCOPE="ephemeral-subject-findings"
+RAISED_BY=""
+if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
+  STANDING=$(bd_json list --status=open,in_progress \
+      --metadata-field "task_kind=triage-subject" \
+      --metadata-field "triage.scope=$TRIAGE_SCOPE" --limit=1 \
+    | jq -r 'if type == "array" then (.[0].id // "") else "" end' 2>/dev/null)
+  if [ -z "$STANDING" ]; then
+    # An unreadable listing arrives here too and mints a second bucket. That
+    # is the trade the dedup listing already makes: a duplicate bead is a
+    # bounded nuisance, a disposition written to a burned wisp is gone.
+    STANDING=$(gc bd create -t task \
+      --title "triage: escalations raised from an ephemeral subject (this rig)" \
+      -d "Standing subject for escalations whose caller named an ephemeral subject — a patrol wisp, which is burned and re-poured every cycle. One open visit per situation key hangs here; each visit names the wisp that raised it in escalation_raised_by, and a sitting's outcome and takeaway land on this bead." \
+      --json | jq -r '.id // .[0].id')
+    if [ -n "$STANDING" ] && [ "$STANDING" != "null" ]; then
+      gc bd update "$STANDING" --set-metadata "task_kind=triage-subject" \
+        --set-metadata "triage.scope=$TRIAGE_SCOPE" >/dev/null
+      # Both stamps are what the lookup above filters on, so a stamp that did
+      # not land costs a fresh bucket on every later ephemeral escalation.
+      STANDING_ROW=$(bd_json show "$STANDING")
+      STANDING_KIND=$(printf '%s' "$STANDING_ROW" | jq -r '.[0].metadata.task_kind // ""' 2>/dev/null)
+      STANDING_SCOPE=$(printf '%s' "$STANDING_ROW" | jq -r '.[0].metadata["triage.scope"] // ""' 2>/dev/null)
+      if [ "$STANDING_KIND" != "triage-subject" ] || [ "$STANDING_SCOPE" != "$TRIAGE_SCOPE" ]; then
+        warn "standing subject $STANDING was created but its markers did not read back (task_kind='$STANDING_KIND' triage.scope='$STANDING_SCOPE'); the next ephemeral escalation will mint another. repair: gc bd update $STANDING --set-metadata task_kind=triage-subject --set-metadata triage.scope=$TRIAGE_SCOPE"
+      fi
+    else
+      STANDING=""
+    fi
+  fi
+  if [ -n "$STANDING" ]; then
+    RAISED_BY="$SUBJECT"
+    SUBJECT="$STANDING"
+    warn "subject '$RAISED_BY' is ephemeral and cannot receive a sitting's outcome; filing on standing subject $SUBJECT instead."
+  else
+    warn "subject '$SUBJECT' is ephemeral and no standing subject could be read or created; filing on the wisp itself — a sitting's outcome and takeaway will be lost when it burns."
+  fi
+fi
+
+BODY="$MESSAGE"
+[ -n "$RAISED_BY" ] && BODY="$MESSAGE
+
+Raised from $RAISED_BY, which is ephemeral. The visit hangs on this standing subject so the sitting's outcome and takeaway have a bead that outlives the cycle."
+
+VISIT=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$BODY" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { echo "escalate: bd create returned no id — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }
 gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
   --set-metadata "gc.continuation_group=$SUBJECT" \
   --set-metadata "task_kind=visit" \
   --set-metadata "escalation_key=$KEY"
+# Provenance for a redirected visit: the subject is the bucket, so without
+# this the sitting cannot tell which cycle raised it. Not load-bearing — a
+# stamp that misses costs traceability, never the disposition.
+[ -n "$RAISED_BY" ] && gc bd update "$VISIT" --set-metadata "escalation_raised_by=$RAISED_BY"
 gc bd dep add "$VISIT" "$SUBJECT" --type=tracks
 # tracks, NOT parent-child: a parent-child edge transmits the subject's
 # blocked state to the visit, unclaimable exactly where conversation is owed.
