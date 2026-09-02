@@ -332,8 +332,8 @@ case "$sub" in
       shift || true
     done
     if [ "$path" = "graphql" ]; then
-      # The write-back surface: one read plus three mutations, over a fixture the
-      # mutations actually MUTATE. A stub that forgot the write would let a
+      # The write-back surface: three reads plus three mutations, over a fixture
+      # the mutations actually MUTATE. A stub that forgot the write would let a
       # second pass look idempotent when the real API would have written twice.
       num=$(printf '%s' "$gqvars" | jq -r '.num // ""')
       f="$G/threads_$num.json"
@@ -394,9 +394,30 @@ case "$sub" in
         *reviewThreads*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          # `first: 100` is a real cap, so a thread longer than a page comes back
+          # cut to one — which is the whole reason the caller tops such a thread
+          # up. A stub handing back the full list would make that read look
+          # unnecessary and hide the resolve it gets wrong.
           jq -c '{data: {repository: {pullRequest: {
-              reviews: {nodes: (.reviews // [])},
-              reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null}, nodes: (.threads // [])}}}}}' "$f"
+              reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
+                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+          exit 0 ;;
+        *PullRequestReviewThread*)
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -z "${STUB_GQL_THREAD_FAIL:-}" ] || exit 1
+          tid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
+          f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
+          # The caller pages this one to exhaustion, so it answers with the whole
+          # thread — the state the real API reaches after following its cursor.
+          jq -c --arg t "$tid" '{data: {node: {comments: {
+              pageInfo: {hasNextPage: false, endCursor: null},
+              nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+          exit 0 ;;
+        *reviews*)
+          [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
+          [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
+          jq -c '{data: {repository: {pullRequest: {
+              reviews: {pageInfo: {hasNextPage: false, endCursor: null}, nodes: (.reviews // [])}}}}}' "$f"
           exit 0 ;;
         *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
       esac

@@ -307,6 +307,7 @@ while IFS= read -r row; do
   posture=""; max_c=0; max_r=0; pinned=0
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
+  obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
   if [ -z "$head_oid" ]; then
@@ -876,8 +877,29 @@ TALLY
       fi
       DISP="visit:$VID"
     fi
+    # The batch boundary goes down WITH the disposition that names it. Derived
+    # later, off the disposition, it can be lost: a pass that exits after this
+    # stamp leaves the next one free to route a newer batch, and with no record
+    # of this one the write-back reads a single range running back to zero and
+    # answers these comments from the newer bead. The floor is the mark this
+    # transition replaces, which is exactly the span this disposition covers.
+    NBATCH=$(jq -rn --arg batch "$obatch" --arg disp "$DISP" \
+      --argjson lo "$cwm" --argjson hi "$max_c" '
+      def num: if test("^[0-9]+$") then tonumber else error("malformed record") end;
+      [ $batch | split(";")[] | select(length > 0)
+        | split("|") | if length == 3 then . else error("malformed record") end
+        | { disp: .[0], lo: (.[1] | num), hi: (.[2] | num) } ] as $rs
+      | ( if ($rs | length) > 0 and $rs[-1].disp == $disp
+          then $rs[0:-1] + [ $rs[-1] | .hi = ([ .hi, $hi ] | max) ]
+          else $rs + [ { disp: $disp, lo: $lo, hi: ([ $lo, $hi ] | max) } ] end )
+      | [ .[] | "\(.disp)|\(.lo)|\(.hi)" ] | join(";")' 2>/dev/null) || NBATCH=""
+    if [ -z "$NBATCH" ]; then
+      echo "$PROG: WARN $id — PR#$num comment batch history is unreadable; NOT watermarking (a mark past a batch whose range was never recorded lets a later disposition answer these comments)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
          --set "pr_comment_watermark=$max_c" --set "pr_review_watermark=$max_r" \
+         --set "pr_comment_batch=$NBATCH" \
          --set "pr_comment_disposition=$DISP" >/dev/null; then
       answered=$((answered + 1))
       echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c)"
@@ -952,16 +974,43 @@ ROWS_EOF
 # pr_comment_disposition is the honesty gate. It is written only once the routing
 # has read back, so an anchor carrying it has a bead that really does cover these
 # comments. An anchor without one costs a single ledger read and no GitHub call.
-WB_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+# The plan decides over WHOLE threads: it finds the city's own marker in one and
+# then asks whether a human has written since. A connection left at its first
+# page answers that from a fragment — it can miss a comment the city routed, and
+# it can resolve a thread a human replied to past the page boundary. So every
+# connection here is read to exhaustion. `gh --paginate` follows exactly one
+# cursor, so the reviews and the threads are separate reads rather than one
+# nested query, and neither carries a second cursor for it to choose between.
+WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$num){
-      reviews(first:100){nodes{id databaseId state body author{login}
-        reactionGroups{content viewerHasReacted}}}
+      reviews(first:100,after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{id databaseId state body author{login}
+          reactionGroups{content viewerHasReacted}}}}}}'
+# A thread's own comments stay nested: one read covers every thread short enough
+# to fit, which is nearly all of them. Truncation is read off the COUNT rather
+# than a nested pageInfo — a thread with more than a page returns exactly a full
+# one — so this query holds a single cursor and the top-up below is asked for
+# only the threads that need it.
+WB_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$num){
       reviewThreads(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
         nodes{id isResolved viewerCanResolve
           comments(first:100){nodes{id databaseId author{login} body
             reactionGroups{content viewerHasReacted}}}}}}}}'
+WB_THREAD_COMMENTS_QUERY='query($id:ID!,$endCursor:String){
+  node(id:$id){... on PullRequestReviewThread{
+    comments(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{id databaseId author{login} body
+        reactionGroups{content viewerHasReacted}}}}}}'
+# The nested `first:` above, named. A thread that comes back holding this many
+# comments is one the top-up has to re-read; change either without the other and
+# the long threads quietly stop being paged.
+WB_PAGE=100
 
 acked=0; replied=0; resolved=0
 # wowing collects the records that end an anchor's pass still owing a write, and
@@ -997,12 +1046,16 @@ while IFS= read -r wrow; do
   # answer it may not have closed yet, so the batch it covers has to outlive the
   # disposition that named it.
   # pr_comment_batch is that history: one `<disposition>|<exclusive floor>|
-  # <inclusive mark>` record per batch, oldest first, joined by ";". A new
-  # disposition starts at the highest mark any record reached. A record is
-  # dropped once its batch has nothing left owing, and the newest is kept
-  # whatever it owes, because its mark is the next batch's floor. The value is
-  # read back before it is trusted, the same shape as signoff_dismissed above,
-  # and an anchor whose history did not record reacts and answers nothing. It is written ahead of
+  # <inclusive mark>` record per batch, oldest first, joined by ";". Each record
+  # is written by the transition that routes its batch, so the range is durable
+  # before any later pass can route over it. What is left here is reconciliation:
+  # extend the standing record when the mark has moved under the same
+  # disposition, and mint one for an anchor whose disposition predates the
+  # history, whose single batch runs from zero. A record is dropped once its
+  # batch has nothing left owing, and the newest is kept whatever it owes,
+  # because its mark is the next batch's floor. The value is read back before it
+  # is trusted, the same shape as signoff_dismissed above, and an anchor whose
+  # history did not record reacts and answers nothing. It is written ahead of
   # every GitHub read, so an unreadable PR cannot let a batch pass unobserved and
   # leave the floor behind the mark.
   wbatch=$(printf '%s' "$wrow" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
@@ -1090,19 +1143,46 @@ WB_RECORDS
   fi
 
   wowner="${ORIGIN_REPO%%/*}"; wname="${ORIGIN_REPO#*/}"
-  wraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_QUERY" \
-    -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wraw=""
-  if [ -z "$wraw" ]; then
+  wrraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_REVIEWS_QUERY" \
+    -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wrraw=""
+  wtraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$WB_THREADS_QUERY" \
+    -f owner="$wowner" -f repo="$wname" -F num="$wnum" 2>/dev/null) || wtraw=""
+  if [ -z "$wrraw" ] || [ -z "$wtraw" ]; then
     echo "$PROG: $wid — PR#$wnum review threads unreadable; nothing written back (retry next pass)" >&2
     continue
   fi
-  # --paginate emits one document per page; slurp them back into one view.
-  wview=$(printf '%s' "$wraw" | scrub | jq -sc '{
-      reviews: (.[0].data.repository.pullRequest.reviews.nodes // []),
+  # --paginate emits one document per page; slurp both reads back into one view.
+  wview=$(printf '%s\n%s' "$wrraw" "$wtraw" | scrub | jq -sc '{
+      reviews: [ .[].data.repository.pullRequest.reviews.nodes[]? ],
       threads: [ .[].data.repository.pullRequest.reviewThreads.nodes[]? ]
     }' 2>/dev/null) || wview=""
   if [ -z "$wview" ] || [ "$wview" = "null" ]; then
     echo "$PROG: $wid — PR#$wnum review threads unreadable; nothing written back (retry next pass)" >&2
+    continue
+  fi
+
+  # Top up the threads that came back full: those are the ones with more
+  # comments than a page, and the plan has to see all of them. A thread that
+  # cannot be read to the end leaves the whole anchor to the next pass, because
+  # a partial thread is exactly what decides wrongly.
+  wtop_ok=1
+  while IFS= read -r wtid; do
+    [ -n "${wtid:-}" ] || continue
+    wcraw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate \
+      -f query="$WB_THREAD_COMMENTS_QUERY" -f id="$wtid" 2>/dev/null) || wcraw=""
+    wfull=$(printf '%s' "$wcraw" | scrub \
+      | jq -sc '[ .[].data.node.comments.nodes[]? ]' 2>/dev/null) || wfull=""
+    case "$wfull" in ''|null|'[]') wtop_ok=0; break ;; esac
+    wview=$(printf '%s' "$wview" | jq -c --arg t "$wtid" --argjson cs "$wfull" \
+      '.threads = [ .threads[] | if .id == $t then .comments = { nodes: $cs } else . end ]' \
+      2>/dev/null) || { wtop_ok=0; break; }
+    [ -n "$wview" ] || { wtop_ok=0; break; }
+  done <<WB_LONG_THREADS
+$(printf '%s' "$wview" | jq -r --argjson page "$WB_PAGE" \
+   '.threads[]? | select(((.comments.nodes // []) | length) >= $page) | .id' 2>/dev/null)
+WB_LONG_THREADS
+  if [ "$wtop_ok" != 1 ]; then
+    echo "$PROG: $wid — PR#$wnum has a review thread that could not be read to its end; nothing written back (retry next pass)" >&2
     continue
   fi
 
