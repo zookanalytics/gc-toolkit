@@ -131,14 +131,41 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
 
-<!-- rule:tk-vbyak0 src:pr:#465:review-conversation, bead:tk-447ql0, pr:#490:comment:3868559694 (operator feedback) adopted:2026-08-27 -->
-- Living code and documents — comments, prompts, formula steps, docs —
-  state what is true now and the constraints it rests on; never narrate
-  what the next line does, restate the diff, or carry incident history,
-  dates, or bead and PR ids. Specs and commit messages are where history
-  belongs; when unsure, omit. Managed provenance anchors are the one
-  exception. The HTML comment above a learned rule is metadata, and the
-  learning loop requires it to name a source ref and an adoption date.
+<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
+- State a decision or an action so the operator can accept or reject it
+  without looking anything up. A bare bead id, a title, or a pointer to a
+  queue is not a decision.
+
+<!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
+- The operator's own queues are state, not items to relay: a PR awaiting
+  their review, work already routed, an approval already pending. When work
+  has a proven remedy and raises no policy question, sling it instead of
+  asking them to fund it.
+
+<!-- rule:tk-uzkg2c src:audit:tk-awa7hv adopted:2026-08-26 -->
+- Derive a load-bearing claim at the moment you make it, and check that the
+  evidence you cite discriminates. A premise inherited from a bead body, a
+  design doc, or one transient measurement is an assertion, not evidence.
+
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv adopted:2026-08-26 -->
+- A rename, a re-framing, or a rendering change is not a fix for the thing
+  that produced the symptom. Take a report at the severity it was filed,
+  find what allowed it to happen, and prefer a design in which it cannot
+  happen again over a patch for the instance.
+
+<!-- rule:tk-lz8mpv src:audit:tk-awa7hv adopted:2026-08-26 -->
+- Read a standing ruling for its intent. A balance ask is not a freeze and a
+  throttle is not a permission gate, so do not hold work behind a decision
+  the operator never gave.
+
+<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
+- File work as a bead in the pass that names it, and put the bead id in the
+  row that proposed it. A prose promise loses members of a set.
+
+<!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
+- Documentation states what is true now, in the present tense. No "replaces
+  the old X", no proposed-amendment section, no rule justified by the history
+  of the change that produced it — the commit is the changelog.
 
 <!-- src:pr:#465:review:r3854321589 (operator feedback) adopted:2026-08-25 -->
 - Prose states its content, never its own worth. No "this document earns

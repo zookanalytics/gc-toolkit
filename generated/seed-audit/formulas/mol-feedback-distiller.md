@@ -14,6 +14,11 @@ arithmetic). Output: at most a few change-unit `prompt-update` beads into
 the pool worker -> refinery -> operator-review pipeline (D3). Base rate:
 ZERO or ONE proposals per run; a chatty run is a smell.
 
+A proposal names a CARRIER before it names rule text: a conventions bullet,
+an operator-profile entry, a review-rubric dimension, or an exemplar pair.
+The carrier decides the target file, the budget, and which gates apply; the
+rubric holds the selection rule.
+
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
@@ -33,8 +38,10 @@ Variables:
   {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this formula is poured by a gc order, and order dispatch injects no routing vars. (default=gc-toolkit.)
   {{distill_max_age_days}}: Trickle guard (D7): when the oldest pending observation exceeds this age, the run proceeds regardless of count. (default=14)
   {{distill_min_pending}}: Cadence-gate floor (D7): judge when pending observations reach this count. Urgent observations (obs.endorsed=operator or obs.directive=standing) never wait on volume. (default=5)
+  {{exemplar_cap}}: Entry budget for the exemplar corpus, template-fragments/learning-exemplars.template.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded. (default=8)
   {{fragment_bullet_cap}}: Bullet budget per learned-conventions fragment. A promotion past the cap must name a displacement in the same proposal or it does not file. (default=15)
   {{max_beads_per_run}}: Maximum prompt-update/engineering beads filed per run; dropped survivors re-surface next cycle (state is durable, so this is naturally resumable). (default=3)
+  {{profile_entry_cap}}: Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap. (default=12)
   {{rig_list}}: Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set. (default=)
 
 Steps (4):
