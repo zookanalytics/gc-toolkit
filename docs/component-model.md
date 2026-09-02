@@ -285,6 +285,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared gate raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of gate verdicts (I7). |
+| `assets/scripts/review-charter.sh` | review | The one parser of the charter's gate menu. Triage classifies over its rows and `signoff.sh` warrants a waiver from them, so the grammar has a single reader. |
 | `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
