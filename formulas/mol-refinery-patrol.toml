@@ -246,7 +246,7 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 ```
 
 Do NOT delete the branch (the resuming polecat needs it). Clean up:
-`git checkout {{target_branch}} && git branch -D temp && git switch --detach HEAD`.
+`git checkout {{target_branch}} && git branch -D temp`.
 Then jump to next-iteration (pour before burn) — the rejection ends this
 cycle."""
 
@@ -477,7 +477,7 @@ else
 fi
 rm -f "$PUSH_ERR"
 ```
-After a successful direct merge: detach and delete temp; if
+After a successful direct merge: check out `$TARGET` and delete temp; if
 delete_merged_branches = "true", `git push origin --delete $BRANCH`; and if
 auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
 (`$GC_RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on
@@ -631,8 +631,10 @@ later, on a verified merge, via the cadence — never here. A failed
 transition leaves $WORK assigned and open; the next patrol retries
 idempotently (push and anchor resolution are both re-runnable).
 
-6. Cleanup: `git checkout "$TARGET" && git branch -d temp && git switch
---detach HEAD`. Never delete `$BRANCH` in mr mode — the PR needs it.
+6. Cleanup: `git checkout "$TARGET" && git branch -d temp`. Never delete
+`$BRANCH` in mr mode — the PR needs it. Leave the checkout ON `$TARGET`: a
+detached rig root advances HEAD on later fast-forwards and strands the
+`$TARGET` ref behind it.
 
 **Unsupported strategies (e.g. `local`):** transition nothing; escalate
 via escalate.sh (`--subject $WORK --key refinery-unsupported-strategy`) and
