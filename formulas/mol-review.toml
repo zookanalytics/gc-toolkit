@@ -176,8 +176,10 @@ this branch's defect.
   was intended, docs the change just made false.
 - **The PR as published** — post-open, the page is what a human reads to
   decide the merge, so read its title and body against the diff you just
-  read, through the pin load-dispatch resolved rather than a bare number
-  (`gh pr view "$PR" --repo "$PR_REPO_Q" --json title,body`). A `## Summary`
+  read. Re-derive `PR` and `PR_REPO_Q` here the way load-dispatch did, then
+  read the page through that pin and never from a bare number against
+  ambient gh context:
+  `gh pr view "$PR" --repo "$PR_REPO_Q" --json title,body`. A `## Summary`
   that does not state what the diff does is a finding, whether it is a
   placeholder, a restatement of the dispatch, or an account of other work;
   so is a title that understates the scope. When the body looks wrong, read
@@ -224,15 +226,19 @@ with no probe, each round files another bug. `bd` fails open — errors on
 stderr, empty stdout — so an unreadable list reads exactly like "no match"
 until you shape-check it, and that is what files the duplicate:
 ```bash
-# A token the NEXT reviewer, looking at the same thing, would build the same
-# way: the PR number and the part for a finding on the page, the file path
-# for one in the tree.
+# The token is the finding's location, written as above, plus a short slug
+# for what is wrong: `PR #<n> body / ## Summary: placeholder`, or
+# `<path>: <slug>` in the tree. Location alone collides, and a second finding
+# at the same place reads as the first and is lost. The next reviewer, seeing
+# the same thing, has to build the same string.
 TOKEN="<stable identifier for this finding>"
 TITLE="<one line: what is wrong> ($TOKEN)"
 BODY="<what is wrong, why it matters, what would fix it>
 
-Found reviewing $BRANCH at $REVIEWED_OID; out of scope for that diff."
-DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$TOKEN" --json 2>/dev/null)
+Found reviewing <branch> at <reviewed oid>; out of scope for that diff."
+# No --status: the default already excludes closed, and a duplicate someone
+# has claimed or that is blocked is still a duplicate.
+DUP_JSON=$(gc bd list --type=bug --title-contains "$TOKEN" --json 2>/dev/null)
 if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
   FILED="unfiled — duplicate probe unreadable"
 else
