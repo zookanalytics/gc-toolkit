@@ -10,14 +10,15 @@
 # re-implementation of the awk.
 #
 # Two runs, because the picker classifies two ways. The first leaves
-# GC_CITY_PATH and friends unset, which makes gc_city_name return empty and
-# skips the supervisor API call entirely: that is the degraded path, where
-# the session-name shape is all the picker has. The second points GC_HOME
-# and GC_CITY_PATH at throwaway paths and stubs `curl` with a fixture
-# roster: that is the live path, where the agent template names the role.
+# GC_CITY_PATH and friends unset, which makes gc_city_name return empty, so
+# no cache is keyed and no roles resolve: that is the no-roles path, where
+# the picker knows nothing about any session's role. The second points
+# GC_HOME and GC_CITY_PATH at throwaway paths, primes the role cache through
+# the script's own `--refresh-cache` against a stubbed `curl`, and renders
+# from it: that is the live path, where the agent template names the role.
 # The SUT is copied to a private dir so its
 # `$(dirname $0)/tmux-keeper-toggle.sh` sibling does not resolve to the live
-# one.
+# one, and GC_PICKER_CACHE_DIR keeps the cache out of the operator's.
 #
 # What each case pins:
 #
@@ -42,21 +43,13 @@
 #   (MANUALSEP) a hand-made session that DOES carry "--" takes rule 2 like
 #              any other: the rig column and the display column never repeat
 #              the same rig.
-#   (COUNT)    the per-rig header counts the workers running in THAT rig.
-#              The count and the rig derivation share `rig`, so a row that
-#              derives the wrong rig is also counted under the wrong header.
-#   (FOLD)     with nothing to answer the role question, every "-<n>-pool"
-#              session is taken for a polecat: hidden, and counted. Keeping
-#              that fallback rather than showing everything is deliberate.
-#              A rig of thirty polecats must not flood the menu because one
-#              curl timed out.
-#   (KEEPNAMED) the bound on the suffix rule: `<rig>--<pack>__refinery` is a
-#              named refinery, not a pool instance, and stays visible beside
-#              the `refinery-1-pool` that is hidden.
-#   (NOUN)     the header says what it counts, and what it counts is
-#              polecats. "Pool worker" is the runtime word for any pool
-#              instance, a converse included, so it cannot be the word for
-#              a count a converse is deliberately absent from.
+#   (NOROLES)  with nothing to answer the role question, nothing is a
+#              worker: every pool slot stays visible and every count reads
+#              zero. Showing too much is recoverable and a wrong grouping is
+#              not — a hidden converse is a conversation the operator cannot
+#              reach from the menu at all.
+#   (MARKER)   and the menu title says so, because a menu that groups
+#              nothing looks the same as a city running no workers.
 #   (ALL)      --all is the escape hatch: everything hidden by default is
 #              reachable, and the pool rows carry the parsed display form
 #              there too.
@@ -77,10 +70,43 @@
 #              at all, not the string "null".
 #   (POOLED)   the rule read the other way. A pooled refinery is a refinery,
 #              and the polecat family is the whole of the worker set.
-#   (UNKNOWN)  a session the supervisor does not answer for falls back to
-#              the name shape per session, not per run.
+#   (UNCOVERED) a session the supervisor does not answer for has no role,
+#              and no role means shown and uncounted — per session, not per
+#              run, so one uncovered row cannot ungroup the rest.
+#   (HEADER)   a rig whose every session is folded away still gets its
+#              header. The picker is topology awareness, and a rig that
+#              vanishes when its polecats are hidden reports the wrong
+#              topology.
+#   (NOUN)     the header says what it counts, and what it counts is
+#              polecats. "Pool worker" is the runtime word for any pool
+#              instance, a converse included, so it cannot be the word for
+#              a count a converse is deliberately absent from.
 #   (TITLE)    template and title ride one API row through one call, so the
 #              title column has to survive the widened projection.
+#
+# On the cache itself:
+#
+#   (NOFETCH)  the keypress reads the file and makes no API call. That is
+#              the whole point of the cache: the call costs one to two
+#              seconds on an idle city and several on a busy one, so in
+#              front of an operator it is a visible delay that turns into a
+#              timeout under the load that makes the roster worth checking.
+#   (FRESH)    a map as young as the last keypress carries no marker.
+#   (STALE)    an old one does, with its age, because the counts and the
+#              folding are that old too.
+#   (REFRESH)  --refresh-cache writes the projected map, so what the picker
+#              renders from is what a real refresh produced.
+#   (KEEPLAST) a failed fetch keeps the last good map. An unreachable
+#              supervisor is not evidence that the city has no sessions, and
+#              an empty map ungroups every rig at once.
+#   (THROTTLE) a failed fetch is still an attempt, and the throttle counts
+#              attempts. Counting successes leaves a slow supervisor — the
+#              one case where overlapping fetches cost anything — throttled
+#              by nothing at all.
+#   (DETACH)   the refresh does not hold the keypress open. The binding is a
+#              foreground `run-shell` and tmux reads the child's stdout to
+#              EOF, so a fetch that inherits it stalls the menu for exactly
+#              the time the cache exists to avoid.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,6 +134,12 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 export STUB_SESSIONS="$TMP/sessions.txt"
 export STUB_MENU="$TMP/menu.txt"
 export STUB_ACTIVE=""
+# The role cache lives under TMP for the whole suite: a run that wrote the
+# operator's cache would leave a fixture roster behind for their next
+# keypress, and a run that read it would classify against a live city.
+export GC_PICKER_CACHE_DIR="$TMP/cache"
+export CURL_LOG="$TMP/curl.log"
+: > "$CURL_LOG"
 
 # tmux stub. Serves the fixture roster, an empty pane list (no sub-rows to
 # assert here) and an empty client_session, and dumps the display-menu argv
@@ -141,13 +173,14 @@ gc-toolkit--gc-toolkit__polecat-2-pool|0|1|gc-toolkit--gc-toolkit__polecat-2-poo
 gc-toolkit--gc-toolkit__refinery|0|1|gc-toolkit/gc-toolkit.refinery
 gc-toolkit--gc-toolkit__ripley|0|1|gc-toolkit/gc-toolkit.ripley
 gc-toolkit__deacon|0|1|gc-toolkit.deacon
+oversight--gc-toolkit__polecat-1-pool|0|1|oversight--gc-toolkit__polecat-1-pool
 signal-loom--gc-toolkit__refinery-1-pool|0|1|signal-loom--gc-toolkit__refinery-1-pool
 scratch|0|1|
 ops--notebook|0|1|
 ops--polecat-9-pool|0|1|
 ROSTER
 
-# Run the picker with no city resolvable (no supervisor API call) and no
+# Run the picker with no city resolvable (no cache key, so no roles) and no
 # inherited tmux socket, and return the captured menu.
 run_picker() {
     : > "$STUB_MENU"
@@ -170,18 +203,22 @@ cat > "$TMP/api.json" <<'API'
   {"session_name": "gc-toolkit--gc-toolkit__refinery",         "template": "gc-toolkit/gc-toolkit.refinery",      "title": "landing PR #497"},
   {"session_name": "gc-toolkit--gc-toolkit__ripley",           "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
   {"session_name": "gc-toolkit__deacon",                       "template": "gc-toolkit.deacon",                   "title": ""},
+  {"session_name": "oversight--gc-toolkit__polecat-1-pool",    "template": "oversight/gc-toolkit.polecat",        "title": ""},
   {"session_name": "signal-loom--gc-toolkit__refinery-1-pool", "template": "signal-loom/gc-toolkit.refinery",     "title": ""},
   {"session_name": "scratch"}
 ]}
 API
 
 # curl stub, not a mocked fetch: the real jq projection is part of what is
-# under test. No STUB_API in the environment exits like a failed connection,
-# which is what the degraded path above sees.
+# under test. No STUB_API in the environment exits like a failed connection.
+# Every call is logged, so a run can assert what it did NOT fetch, and
+# STUB_SLOW makes a fetch outlast the keypress that spawned it.
 cat > "$BIN/curl" <<'STUB'
 #!/usr/bin/env bash
 set -u
-[ -f "${STUB_API:-/nonexistent}" ] || exit 7
+if [ -n "${CURL_LOG:-}" ]; then printf 'call\n' >> "$CURL_LOG"; fi
+if [ -n "${STUB_SLOW:-}" ]; then sleep "$STUB_SLOW"; fi
+if [ ! -f "${STUB_API:-/nonexistent}" ]; then exit 7; fi
 cat "$STUB_API"
 STUB
 chmod +x "$BIN/curl"
@@ -189,14 +226,31 @@ chmod +x "$BIN/curl"
 # GC_HOME has no cities.toml, so gc_city_name falls through to the basename
 # of GC_CITY_PATH and the API URL resolves without touching the operator's
 # config. curl is stubbed, so the URL itself never leaves the process.
-run_picker_api() {
-    : > "$STUB_MENU"
+picker_env() {
     env -u GC_CITY -u GC_CITY_ROOT -u GC_TMUX_SOCKET -u GC_AGENT \
-        GC_HOME="$TMP/gchome" GC_CITY_PATH="$TMP/testcity" \
-        STUB_API="$TMP/api.json" \
-        "$SUT" "$@" >/dev/null 2>&1
+        GC_HOME="$TMP/gchome" GC_CITY_PATH="$TMP/testcity" "$@"
+}
+
+# Prime the cache through the script's own refresh mode, which is the same
+# code the detached background fetch runs — the suite renders from what a
+# real refresh writes, not from a hand-built file.
+prime_cache() {
+    picker_env STUB_API="${1:-$TMP/api.json}" "$SUT" --refresh-cache >/dev/null 2>&1
+}
+
+# Render from the primed cache with the API unreachable, and with the refresh
+# throttle set past any test run so no background fetch fires: what the curl
+# log holds afterwards is exactly what the keypress itself did.
+run_picker_api() {
+    : > "$STUB_MENU"; : > "$CURL_LOG"
+    picker_env GC_PICKER_REFRESH_EVERY=999999 "$SUT" "$@" >/dev/null 2>&1
     cat "$STUB_MENU"
 }
+
+prime_cache
+# The cache path is keyed by city inside the script; the suite finds the file
+# it wrote rather than recomputing the key and testing its own arithmetic.
+ROLES_CACHE="$(set -- "$TMP/cache"/roles-*.cache; printf '%s' "$1")"
 
 MENU="$(run_picker)"
 ALLMENU="$(run_picker --all)"
@@ -253,35 +307,27 @@ eq "$(derives "$MENU" 'ops--notebook')" 'ops|notebook' \
 hasnt "$ALLMENU" 'gc-toolkit--gc-toolkit__polecat-1-pool  ' \
     "POOL: the raw session name never reaches the display column"
 
-# --- headers ---------------------------------------------------------------
-# With no API, the suffix takes converse-1-pool for a polecat: it counts
-# alongside polecat-1-pool and polecat-2-pool = 3.
-has "$MENU" '── gc-toolkit • 3 polecats ──' \
-    "COUNT: per-rig header counts the workers in that rig"
-# gascity runs refinery-1-pool = 1.
-has "$MENU" '── gascity • 1 polecat ──' \
-    "NOUN: singular form, and the noun names what is counted"
+# --- no roles: nothing is a worker -----------------------------------------
+has "$MENU" 'converse-1-pool' \
+    "NOROLES: a converse on a pool slot is not guessed into a worker"
+has "$MENU" 'refinery-1-pool' \
+    "NOROLES: nor is a pooled refinery"
+has "$MENU" 'polecat-1-pool' \
+    "NOROLES: nor is the polecat the name would have been right about"
+has "$MENU" '── gc-toolkit ──' \
+    "NOROLES: the header renders with no count rather than a guessed one"
+hasnt "$MENU" 'polecat ──' \
+    "NOROLES: ...and no rig claims a worker"
 hasnt "$MENU" 'pool worker' \
     "NOUN: the count is polecats, and every pool instance is a pool worker"
-hasnt "$MENU" '── city • ' \
-    "COUNT: city holds no workers"
-
-# --- default filter --------------------------------------------------------
-hasnt "$MENU" 'converse-1-pool' \
-    "FOLD: converse-N-pool is hidden by default"
-hasnt "$MENU" 'refinery-1-pool' \
-    "FOLD: refinery-N-pool is hidden by default"
-hasnt "$MENU" 'polecat-1-pool' \
-    "FOLD: polecat-N-pool is hidden by default"
-eq "$(derives "$MENU" 'gascity--gc-toolkit__refinery')" 'gascity|gc-toolkit.refinery' \
-    "KEEPNAMED: the named refinery stays visible beside its hidden pool"
-has "$MENU" '── signal-loom • 1 polecat ──' \
-    "KEEPNAMED: a rig whose only session is hidden still gets its header"
-hasnt "$MENU" '[signal-loom]' \
-    "KEEPNAMED: ...and that header is the rig's only row"
+has "$MENU" ' Sessions ▫ no roles ' \
+    "MARKER: an ungrouped menu says it is ungrouped"
 
 has "$ALLMENU" 'converse-1-pool' "ALL: --all reveals converse-N-pool"
 has "$ALLMENU" 'refinery-1-pool' "ALL: --all reveals refinery-N-pool"
+has "$ALLMENU" 'gc-toolkit.deacon' "ALL: --all reveals the name-hidden roles"
+hasnt "$MENU" 'gc-toolkit.deacon' \
+    "NOROLES: the name-based hides are a separate rule and still apply"
 
 # --- template classification (live path) -----------------------------------
 hasnt "$APIMENU" 'gc-toolkit.hicks' \
@@ -310,11 +356,15 @@ has "$APIMENU" '── gascity ──' \
     "POOLED: ...so gascity counts no polecats and its header carries no count"
 
 eq "$(derives "$APIMENU" 'scratch')" 'city|scratch' \
-    "UNKNOWN: an API row with no template at all falls back to the name shape"
-hasnt "$APIMENU" 'polecat-9-pool' \
-    "UNKNOWN: a session the API never mentions falls back too"
-has "$APIMENU" '── ops • 1 polecat ──' \
-    "UNKNOWN: ...and the fallback is per session, not per run"
+    "UNCOVERED: an API row with no template at all resolves no role"
+has "$APIMENU" 'polecat-9-pool' \
+    "UNCOVERED: a session the API never mentions is shown, not guessed at"
+has "$APIMENU" '── ops ──' \
+    "UNCOVERED: ...and is counted under no rig"
+has "$APIMENU" '── oversight • 1 polecat ──' \
+    "NOUN: singular form, and the noun names what is counted"
+hasnt "$APIMENU" '[oversight]' \
+    "HEADER: the rig's every session is folded, and its header still renders"
 
 has "$APIMENU" '│ landing PR #497' \
     "TITLE: the title column survives the widened projection"
@@ -322,6 +372,50 @@ has "$APIMENU" '│ landing PR #497' \
 # --- switch target ---------------------------------------------------------
 has "$ALLMENU" 'switch-client -t gc-toolkit--gc-toolkit__polecat-1-pool' \
     "SWITCH: the command still targets the raw tmux session name"
+
+# --- the cache -------------------------------------------------------------
+# APIMENU above was rendered with the API unreachable and the refresh
+# throttled off, so its curl log is the keypress's own record.
+eq "$(wc -l < "$CURL_LOG" | tr -d ' ')" '0' \
+    "NOFETCH: rendering the menu makes no supervisor API call"
+[ -s "$ROLES_CACHE" ] && ok "REFRESH: --refresh-cache wrote the role map" \
+    || bad "REFRESH: --refresh-cache wrote no role map"
+has "$(cat "$ROLES_CACHE")" 'gc-toolkit/gc-toolkit.polecat-codex' \
+    "REFRESH: ...projected to <name>\\t<template>\\t<title>"
+
+hasnt "$APIMENU" '▫' \
+    "FRESH: a map as young as the last keypress carries no marker"
+
+# Backdate the file the picker reads: staleness is the cache's mtime, and
+# nothing else in the run has to move to make the map old.
+touch -d "@$(( $(date +%s) - 3700 ))" "$ROLES_CACHE"
+STALEMENU="$(run_picker_api)"
+has "$STALEMENU" ' Sessions ▫ roles 1h old ' \
+    "STALE: an old map is marked, with its age"
+has "$STALEMENU" '── gc-toolkit • 4 polecats ──' \
+    "STALE: ...and is still what the menu groups by, marker or not"
+
+# A refresh that cannot reach the API must not blank the map it has.
+BEFORE="$(cat "$ROLES_CACHE")"
+rm -f "$ROLES_CACHE.attempt"
+prime_cache "$TMP/nonexistent.json"
+eq "$(cat "$ROLES_CACHE")" "$BEFORE" \
+    "KEEPLAST: a failed fetch leaves the last good map in place"
+[ -f "$ROLES_CACHE.attempt" ] \
+    && ok "THROTTLE: ...and still records the attempt the throttle counts" \
+    || bad "THROTTLE: a failed fetch recorded no attempt"
+
+# The binding is a foreground `run-shell`, and tmux reads the child's stdout
+# to EOF. Command substitution reads the same way, so a refresh that keeps
+# the descriptor holds this line open for as long as the fetch runs.
+DETACH_T0=$(date +%s)
+DETACH_OUT="$(picker_env STUB_API="$TMP/api.json" STUB_SLOW=10 \
+    GC_PICKER_REFRESH_EVERY=0 CURL_LOG="" "$SUT" 2>/dev/null)"
+DETACH_ELAPSED=$(( $(date +%s) - DETACH_T0 ))
+[ "$DETACH_ELAPSED" -lt 5 ] \
+    && ok "DETACH: a slow refresh does not hold the keypress open" \
+    || bad "DETACH: the keypress waited ${DETACH_ELAPSED}s on the background fetch"
+eq "$DETACH_OUT" '' "DETACH: ...and the picker writes nothing to stdout itself"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

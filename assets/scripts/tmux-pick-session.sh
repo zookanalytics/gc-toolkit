@@ -1,7 +1,7 @@
 #!/bin/sh
 # tmux-pick-session.sh — Gas City session picker (prefix+S).
 #
-# Usage: tmux-pick-session.sh [--all] [--city-path <path>]
+# Usage: tmux-pick-session.sh [--all] [--city-path <path>] [--refresh-cache]
 #
 # Default filter hides the sessions an operator does not reach one at a
 # time: the polecats (folded into the per-rig count), control-dispatcher,
@@ -11,6 +11,8 @@
 # --city-path is the absolute path of the city this binding belongs
 # to — baked in by tmux-bindings.sh at install time so the API URL is
 # deterministic even though the key fires from tmux's bare env.
+# --refresh-cache refetches the role map and exits without rendering. The
+# picker spawns it detached on each keypress; nothing else calls it.
 #
 # Rig + identity derivation, in the order the awk block tries them:
 #   1. GC_AGENT is "<rig>/<pack>.<role>". Both fields come from it.
@@ -30,7 +32,10 @@
 # polecat runs under a character name ("hicks") and a converse runs on a
 # "-<n>-pool" slot, so the name carries the scheduling fact and not the
 # role. The template rides the supervisor-API row already fetched for
-# titles; a session that row does not cover falls back to the name shape.
+# titles, and a keypress reads both from a cache instead of the API. A
+# session the cached map does not cover has no role at all: it is neither
+# folded into a rig's count nor hidden, because the name shape that would
+# guess for it is exactly what the template is here to replace.
 #
 # Sort order:
 #   1. [city] group — alphabetical
@@ -43,6 +48,8 @@
 #         environment, vs single-window agent runtimes)
 #   •  — pane is the active pane within its window (only on inline
 #         pane sub-rows)
+#   ▫  — menu title only: the role map is older than the roster it groups,
+#         or missing entirely
 #
 # Multi-pane sessions get inline pane sub-rows in the SAME display-menu
 # (`choose-tree -F` cannot be used: its "session: window: pane:" prefix is
@@ -51,9 +58,11 @@ set -e
 
 ALL=0
 EXPLICIT_CITY_PATH=""
+REFRESH_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --all) ALL=1; shift ;;
+        --refresh-cache) REFRESH_ONLY=1; shift ;;
         --city-path) EXPLICIT_CITY_PATH="${2:-}"; shift 2 ;;
         --) shift; break ;;
         *) break ;;
@@ -62,7 +71,6 @@ done
 
 gcmux() { tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 SCRIPT="$(readlink -f "$0" 2>/dev/null || echo "$0")"
-ACTIVE=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
 TAB="$(printf '\t')"
 
 # sq <string> — POSIX shell-quote for safe embedding in a tmux command.
@@ -115,24 +123,140 @@ gc_city_name() {
     basename "$city_path"
 }
 
-# One row per pane across all sessions. pane_title can contain `|`,
-# so the awk pre-pass joins fields 6+ back into the title.
-PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
+# --- Role cache ----------------------------------------------------------
+# Per-session facts are "session_name\ttemplate\ttitle": one supervisor-API
+# row answers both the role and the title, and a second source for either
+# would put another subprocess on a keypress. The keypress reads them from a
+# file and never makes the call. The call costs one to two seconds on an idle
+# city and several on a busy one, so in front of an operator it is both a
+# visible delay and, exactly when the city is busiest, a timeout. The fetch
+# runs detached, for the NEXT keypress, which makes the rendered map as old
+# as the gap between keypresses — the title marker is how the operator sees
+# that.
 
-# Per-session facts (session_name\ttemplate\ttitle) from the supervisor API
-# (tens of ms vs a 5-20s gc subprocess under load); any failure renders
-# without titles and classifies by name shape, and no resolvable city skips
-# the call. One call answers both questions: a second source for the role
-# would put another subprocess on a keypress.
-FACTS=""
-CITY_NAME=$(gc_city_name)
-if [ -n "$CITY_NAME" ]; then
-    FACTS=$(curl -sf --max-time 3 \
+is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+cache_mtime() {
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'
+}
+
+# Cache location, keyed by city so one city's roster cannot answer another's.
+# GC_PICKER_CACHE_DIR overrides the directory; the default is per-uid and
+# 0700, because the cached rows carry session titles.
+roles_cache_init() {
+    if [ -n "${GC_PICKER_CACHE_DIR:-}" ]; then
+        ROLES_CACHE_DIR="$GC_PICKER_CACHE_DIR"
+        ROLES_CACHE_PRIVATE=0
+    else
+        uid=$(id -u 2>/dev/null || printf 'unknown')
+        ROLES_CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gc-picker-$uid"
+        ROLES_CACHE_PRIVATE=1
+    fi
+    safe_city=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+    city_key=$(printf '%s\n' "$1" | cksum | awk '{print $1}')
+    ROLES_CACHE="$ROLES_CACHE_DIR/roles-$safe_city-$city_key.cache"
+    # The throttle counts attempts, not successes. Counting successes means a
+    # supervisor that answers slowly is never throttled at all, which is the
+    # one state where a pile-up of overlapping fetches costs something.
+    ROLES_STAMP="$ROLES_CACHE.attempt"
+}
+
+# Refetch, then replace the file atomically. A failed or empty fetch keeps
+# the last good map: an unreachable supervisor is not evidence that the city
+# has no sessions, and an empty map ungroups every rig at once.
+roles_cache_refresh() {
+    mkdir -p "$ROLES_CACHE_DIR" 2>/dev/null || true
+    if [ "$ROLES_CACHE_PRIVATE" = 1 ]; then
+        chmod 700 "$ROLES_CACHE_DIR" 2>/dev/null || true
+    fi
+    : > "$ROLES_STAMP" 2>/dev/null || true
+    # A longer bound than the keypress could ever have afforded. Raising it
+    # was not an option while the fetch blocked the menu — it only traded a
+    # wrong grouping for a hanging key — but nothing waits on this one, and
+    # a busy supervisor outruns three seconds often enough that the shorter
+    # bound would leave the map to age untouched.
+    facts=$(curl -sf --max-time 15 \
         "$(gc_api_base)/v0/city/$CITY_NAME/sessions" 2>/dev/null \
         | jq -r '.items[]? | select(.session_name != null)
                  | "\(.session_name)\t\(.template // "")\t\(.title // "")"' 2>/dev/null \
         || true)
+    [ -n "$facts" ] || return 0
+    # Temp + rename, so overlapping refreshes cannot interleave a half-written
+    # map into a keypress that is reading one.
+    tmp="$ROLES_CACHE.$$.tmp"
+    if printf '%s\n' "$facts" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$ROLES_CACHE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    fi
+}
+
+CITY_NAME=$(gc_city_name)
+FACTS=""
+ROLES_AGE=""
+if [ -n "$CITY_NAME" ]; then
+    roles_cache_init "$CITY_NAME"
 fi
+if [ "$REFRESH_ONLY" -eq 1 ]; then
+    if [ -n "$CITY_NAME" ]; then
+        roles_cache_refresh
+    fi
+    exit 0
+fi
+if [ -n "$CITY_NAME" ]; then
+    now=$(date +%s 2>/dev/null || printf '0')
+    mtime=$(cache_mtime "$ROLES_CACHE")
+    if is_number "$now" && is_number "$mtime" && [ "$mtime" -gt 0 ]; then
+        FACTS=$(cat "$ROLES_CACHE" 2>/dev/null || true)
+        ROLES_AGE=$((now - mtime))
+        if [ "$ROLES_AGE" -lt 0 ]; then ROLES_AGE=0; fi
+    fi
+
+    # Refresh for the next keypress. The subshell exits at once and the fetch
+    # is reparented with all three descriptors redirected, so the `run-shell`
+    # that fired the binding keeps no output to wait on. Throttled, because
+    # [.] re-invokes the picker immediately and would otherwise refetch the
+    # roster the previous keypress just fetched.
+    REFRESH_EVERY="${GC_PICKER_REFRESH_EVERY:-10}"
+    is_number "$REFRESH_EVERY" || REFRESH_EVERY=10
+    attempted=$(cache_mtime "$ROLES_STAMP")
+    is_number "$attempted" || attempted=0
+    if [ "$attempted" -eq 0 ] || ! is_number "$now" \
+        || [ "$((now - attempted))" -ge "$REFRESH_EVERY" ]; then
+        # shellcheck disable=SC2086 # ${EXPLICIT_CITY_PATH:+…} expands to 0 or 2 fields
+        ( "$SCRIPT" --refresh-cache ${EXPLICIT_CITY_PATH:+--city-path "$EXPLICIT_CITY_PATH"} \
+            >/dev/null 2>&1 </dev/null & )
+    fi
+fi
+
+# Menu title. The grouping is only as current as the cached map, so the
+# marker rides the title rather than a row: it is a fact about every count
+# and every hidden row at once. No map at all — first keypress, cleared
+# cache, no reachable city — reads differently from a stale one, because it
+# groups nothing and hides nothing rather than grouping by old facts.
+STALE_AFTER="${GC_PICKER_STALE_AFTER:-120}"
+is_number "$STALE_AFTER" || STALE_AFTER=120
+MENU_TITLE=" Sessions "
+if [ -z "$FACTS" ]; then
+    MENU_TITLE=" Sessions ▫ no roles "
+elif is_number "$ROLES_AGE" && [ "$ROLES_AGE" -ge "$STALE_AFTER" ]; then
+    if [ "$ROLES_AGE" -lt 3600 ]; then
+        age_word="$((ROLES_AGE / 60))m"
+    elif [ "$ROLES_AGE" -lt 86400 ]; then
+        age_word="$((ROLES_AGE / 3600))h"
+    else
+        age_word="$((ROLES_AGE / 86400))d"
+    fi
+    MENU_TITLE=" Sessions ▫ roles $age_word old "
+fi
+
+ACTIVE=$(gcmux display-message -p '#{client_session}' 2>/dev/null || true)
+
+# One row per pane across all sessions. pane_title can contain `|`,
+# so the awk pre-pass joins fields 6+ back into the title.
+PANES=$(gcmux list-panes -aF '#{session_name}|#{window_index}|#{pane_index}|#{pane_active}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)
 
 LIST=$(gcmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}|#{E:GC_AGENT}' | awk -F'|' \
     -v all="$ALL" -v active="$ACTIVE" -v panes="$PANES" -v facts="$FACTS" '
@@ -212,14 +336,12 @@ BEGIN {
     # One predicate for the count, the hide and the sort rank: they must
     # agree. A worker is a polecat and no other pooled role. A converse and
     # a pooled refinery hold state an operator goes to, whatever slot they
-    # happen to run on. With no template (API down, or a session the
-    # supervisor does not know) the name shape is all there is.
+    # happen to run on. A session the map does not cover is not a worker:
+    # the only other thing to read is the name, and the name carries the
+    # slot rather than the role, so it hides converses and promotes
+    # character-named codex polecats. Uncovered means shown and uncounted.
     role = gc_role[name]
-    if (role != "") {
-        is_worker = (role == "polecat" || role ~ /^polecat-/)
-    } else {
-        is_worker = (name ~ /-[0-9]+-pool$/ || name ~ /polecat/)
-    }
+    is_worker = (role == "polecat" || role ~ /^polecat-/)
     if (is_worker) worker_count[rig]++
     rig_sort_of[rig] = rig_sort
     rig_seen[rig] = 1
@@ -399,7 +521,7 @@ else
 fi
 
 if [ "$ACTIVE_IDX" -ge 0 ]; then
-    gcmux display-menu -T " Sessions " -x C -y C -C "$ACTIVE_IDX" -- "$@"
+    gcmux display-menu -T "$MENU_TITLE" -x C -y C -C "$ACTIVE_IDX" -- "$@"
 else
-    gcmux display-menu -T " Sessions " -x C -y C -- "$@"
+    gcmux display-menu -T "$MENU_TITLE" -x C -y C -- "$@"
 fi
