@@ -2,7 +2,7 @@ description = """
 Deacon patrol loop — city infrastructure health. Poured as a root-only wisp
 on startup (the agent prompt's startup reconcile adopts before it pours):
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: mail, orphan-process cleanup, Dolt health,
@@ -26,6 +26,10 @@ default = ""
 [vars.event_timeout]
 description = "Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep). Ceiling 600: the harness caps one call at 600s."
 default = "600"
+
+[vars.doctor_interval]
+description = "Seconds between doctor sweeps. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep runs hourly. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still sweeps hourly."
+default = "3600"
 
 [[steps]]
 id = "check-inbox"
@@ -232,23 +236,41 @@ id = "system-health"
 title = "Run gc doctor sweep"
 needs = ["dolt-health"]
 description = """
-Run once, bounded, and reuse the payload (`gc doctor` exits 1 when findings
-exist — that is normal):
+**Config: doctor_interval = {{doctor_interval}}**
+
+A full sweep costs about ten minutes at this city's ordinary load, and the
+harness kills any one call at 600s. So the sweep never runs in the foreground:
+it would be killed before it emitted a payload, and this cycle would report
+"not clean" with nothing read. `doctor-sweep.sh` starts it detached and reads
+the result on a later cycle. Run the script once per cycle and let it decide
+whether to start a sweep, wait for one, or collect it:
 ```bash
-DOCTOR_JSON=$(timeout 300 gc doctor --json); DOCTOR_RC=$?
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/doctor-sweep.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+SWEEP=$(GC_DOCTOR_SWEEP_INTERVAL='{{doctor_interval}}' "$SCRIPTS/doctor-sweep.sh"); echo "$SWEEP"
+PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 ```
-Schema guard (one line, fail loud — a missing `.results` key means the
-contract drifted and the filter below is blind, which must never read as
-clean):
-```bash
-printf '%s' "$DOCTOR_JSON" | jq -e 'has("results")' >/dev/null 2>&1 || { echo "doctor payload invalid or schema drifted (rc=$DOCTOR_RC) — NOT reporting clean"; }
-```
-An rc other than 0/1, or a payload without `.results`, is a FAILED scan:
-escalate it (`--key doctor-sweep-failed`) and do not run the filter.
+The first line is `state=`, and it says what this cycle owes:
+
+- `idle`, `started` or `running`: there is no payload to read. Say which one
+  and close the step. A sweep started now is collected a cycle or two later.
+- `complete`: the payload is the file named by `payload=`. Filter it below.
+- `failed` or `exceeded`: a FAILED scan. Escalate it with
+  `--key doctor-sweep-failed` and the whole `state=` block as the message. It
+  carries `elapsed=`, and on `exceeded` the check the sweep was inside when
+  its bound stopped it. Do not run the filter.
+
+The script validates `.results` before it will say `complete`, so a drifted
+schema arrives as `failed` and can never read as clean. `abandoned=` above zero
+on a complete sweep means those checks hit their own `--check-timeout` and
+returned no verdict; `abandoned_checks=` names them. Such a sweep is not a
+clean one, and the missing verdicts are not passes. Report the count alongside
+the findings.
 
 The actionable subset:
 ```bash
-printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.status != "ok")'
+jq -c '.results[] | select(.status != "ok")' "$PAYLOAD"
 ```
 For each finding: act directly on the simple ones (stale locks, temp
 cleanup, `gc doctor --fix`-able); dedup the rest against existing beads
@@ -279,7 +301,7 @@ GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$SUBJECT" --key "doctor-<che
 State what the dedup found — bead ids on a match, the stores and terms
 searched on a miss.
 
-Two adjacent duties, same cadence:
+Two adjacent duties, run every cycle whatever the sweep is doing:
 - Closing a bead that names a doctor finding? Close it through
   `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
   ledger cannot say "fixed" while the check still fires.
@@ -301,7 +323,7 @@ Two adjacent duties, same cadence:
   quota-park surface, so a race with a fresh park still cannot execute a
   parked session.
 
-Close this step after the sweep."""
+Close this step after the script has been run and its state acted on."""
 
 [[steps]]
 id = "next-iteration"
@@ -316,7 +338,7 @@ description = """
 but unassigned wisp reaches no hook and drops the loop; forward every
 declared var — a --root-only pour materializes no defaults):
 ```bash
-NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --json | jq -r '.new_epic_id // empty')
+NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
   echo "Could not pour next deacon wisp; NOT burning this one."
   exit 1
