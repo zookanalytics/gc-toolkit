@@ -34,6 +34,18 @@
 # the pack directory itself. Worst case 0.04%.
 # specs/tk-yhwfv.3/seed-audit.md records the table and how to re-run it.
 #
+# WHOSE TEXT IT IS. Rendering every agent the synthetic city configures means
+# the tree also holds prompts this pack does not author. claude.md, codex.md
+# and gemini.md come from the `builtin:` providers, and their startup protocol
+# is the core pack's shared claim-protocol fragment; dog.md comes from the bd
+# example pack. In the gascity repo those two sources are
+# internal/bootstrap/packs/core/template-fragments/claim-protocol.template.md
+# and examples/bd/dolt/agents/dog/prompt.template.md. A render is a mirror of
+# what the running binary emits, so prose that reads wrong in one of these
+# files is corrected upstream and arrives here on the next regeneration.
+# Editing the render instead would make the audit disagree with the text the
+# agents actually receive.
+#
 # WHAT IS NOT RENDERED — and cannot be, by this or any `gc prime` caller.
 # `gc prime` resolves the CITY-scope agent and ignores rig-scoped patches
 # entirely: with a rig whose [[rigs.patches]] appends two fragments to polecat,
