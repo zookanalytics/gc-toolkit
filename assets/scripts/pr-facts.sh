@@ -123,6 +123,13 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 # operator-feedback reset arm below key on this same predicate.
 is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 
+# A check_set as one gate per line, for the two arms that walk it. The comma
+# split comes first and the whitespace strip is a per-line sed: a stream-wide
+# `tr -d` would take the newlines the split just made and fuse "codex,triage"
+# into one gate name nothing declares, and every marker lookup below would
+# then miss in silence.
+gate_tokens() { printf '%s' "${1:-}" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d'; }
+
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
 # say: it is one field a sitting stamps when it begins and REPLACES with its
@@ -561,7 +568,7 @@ while IFS= read -r row; do
     while IFS= read -r g; do
       [ -n "$g" ] && UNSETS+=(--unset "check.$g")
     done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+$(gate_tokens "$checkset")
 GATES
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
          --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
@@ -1067,7 +1074,7 @@ $CBODY"
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
     [ "$m" = "green" ] || all_green=0
   done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+$(gate_tokens "$checkset")
 GATES
   if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \
      && [ -n "$SELF_LOGIN" ]; then
