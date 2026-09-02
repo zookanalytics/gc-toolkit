@@ -167,7 +167,21 @@ into a gating state, and `gate-ensure.sh --default` normalizes an anchor whose
 set is absent or empty, taking its value from `REFINERY_RECONCILE_CHECK_SET`.
 The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
-[authority-map.md](authority-map.md).
+[authority-map.md](authority-map.md). Which gate names exist, when each
+applies, and what method answers it are declared once, in the reviewed repo's
+own [review-charter.md](review-charter.md).
+
+**The widening rule.** The set grows after that, and one writer grows it. A
+`triage` review classifies the diff over the charter's menu and hands the
+gates it decides on to `signoff.sh --add-gates`, which unions them into
+`check_set` and reads the result back. The union is monotonic: no dispatcher,
+formula or other reviewer can pre-set or shrink the set, and `signoff.sh`
+refuses the flags from any gate but `triage`. The one sanctioned narrowing is
+`--waive-gates`, accepted only for a gate the charter marks waivable and
+recorded as a `triage-waive:` note rather than a removal; `none` stays a
+human-only opt-out triage will not touch. Every add and every waiver carries a
+one-line justification on the anchor, which is what makes gate inflation
+countable.
 
 `codex` is one such review gate, opaque like the rest. Both transitions read
 the same declared list: `pr-open.sh` publishes once every marker-bearing gate

@@ -152,6 +152,14 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # Post-open or missing fields: re-derive exactly as load-dispatch did.
 ```
 
+**0. The gate method governs this step.** Your bead's dispatch note carries a
+`## Gate method` section naming the method for `metadata.check_name`. Read
+that method first and let it decide what you read and judge: `triage` skims
+and classifies, `arch` holds the diff against the charter, `codex` runs the
+correctness pass below. Steps 1-5 ARE the codex method — a named method
+replaces them where it says so, and everything outside this step (the pins,
+the one signoff call, the chain close) is unchanged for every gate.
+
 **1. Read the whole diff:**
 ```bash
 git diff --stat "origin/$BASE...$REVIEWED_OID"
@@ -339,6 +347,10 @@ remaining P2s ride along as non-blocking notes; it is posted as a COMMENT,
 never a GitHub approval (the city does not approve PRs; approval is external
 and human). **request-changes** — at least one P0 or P1, each with its
 required fix.
+
+The `triage` gate carries its widening on the same call
+(`--add-gates`/`--waive-gates` with `--justification`); its method states
+when. No other gate may pass those flags, and `signoff.sh` refuses them.
 
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, stamping `check.<gate>` with
