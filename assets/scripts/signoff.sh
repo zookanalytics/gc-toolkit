@@ -603,6 +603,13 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # park, so a presence check passes while this verdict's timestamp is the one
   # field that did not land — a headline helm dates and attributes to whatever
   # sitting the stale timestamp falls in.
+  #
+  # gc.takeaway_settled is cleared in the same write for the same reason from
+  # the other side: an anchor whose last sitting ended settled carries that
+  # disposition, and this park is a person owing an answer. Left standing it
+  # would answer for this headline too, and doctor/check-wait-is-an-edge would
+  # read the cap as a wait somebody already discharged. A stale value is the one
+  # miss a presence check cannot see, so the read-back requires it CLEARED.
   CAP_HEADLINE="signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor"
   CAP_TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   gc bd update "$ANCHOR" \
@@ -612,14 +619,16 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
     --set-metadata "gc.takeaway=$CAP_HEADLINE" \
     --set-metadata "gc.takeaway_at=$CAP_TAKEAWAY_AT" \
     --set-metadata gc.takeaway_by=signoff \
+    --set-metadata gc.takeaway_settled= \
     >/dev/null 2>&1 || true
   CAP_ROW=$(bd_json show "$ANCHOR")
   if [ "$(row_meta "$CAP_ROW" gc.routed_to)" != "human" ] \
      || [ "$(row_meta "$CAP_ROW" signoff_cap)" != "$CHECK_NAME@$REVIEWED_OID" ] \
      || [ "$(row_meta "$CAP_ROW" gc.takeaway)" != "$CAP_HEADLINE" ] \
      || [ "$(row_meta "$CAP_ROW" gc.takeaway_by)" != "signoff" ] \
-     || [ "$(row_meta "$CAP_ROW" gc.takeaway_at)" != "$CAP_TAKEAWAY_AT" ]; then
-    warn "the cap park did not read back on $ANCHOR (gc.routed_to='$(row_meta "$CAP_ROW" gc.routed_to)', signoff_cap='$(row_meta "$CAP_ROW" signoff_cap)', gc.takeaway='$(row_meta "$CAP_ROW" gc.takeaway)', gc.takeaway_by='$(row_meta "$CAP_ROW" gc.takeaway_by)', gc.takeaway_at='$(row_meta "$CAP_ROW" gc.takeaway_at)' want '$CAP_TAKEAWAY_AT'); review left open for a retry"
+     || [ "$(row_meta "$CAP_ROW" gc.takeaway_at)" != "$CAP_TAKEAWAY_AT" ] \
+     || [ -n "$(row_meta "$CAP_ROW" gc.takeaway_settled)" ]; then
+    warn "the cap park did not read back on $ANCHOR (gc.routed_to='$(row_meta "$CAP_ROW" gc.routed_to)', signoff_cap='$(row_meta "$CAP_ROW" signoff_cap)', gc.takeaway='$(row_meta "$CAP_ROW" gc.takeaway)', gc.takeaway_by='$(row_meta "$CAP_ROW" gc.takeaway_by)', gc.takeaway_at='$(row_meta "$CAP_ROW" gc.takeaway_at)' want '$CAP_TAKEAWAY_AT', gc.takeaway_settled='$(row_meta "$CAP_ROW" gc.takeaway_settled)' want cleared); review left open for a retry"
     exit 2
   fi
   close_review

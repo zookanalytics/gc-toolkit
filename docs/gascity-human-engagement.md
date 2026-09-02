@@ -477,13 +477,18 @@ stay readable throughout; nothing here breaks a live hold.
 ### Where prose alone is still correct
 
 `gc-helm.sh takeaway` keeps writing prose with no edge at two call sites,
-and both are right:
+and both are right. Both pass `--no-wait`, which is how they say so: the
+headline reads the same whether a sitting settled its subject or parked it
+on prose, and `lifecycle/lifecycle.toml` `[holds]` declares the marker a
+hold unless the writer stamped `gc.takeaway_settled` beside it. The flag is
+that stamp. It asserts nothing about the sentence and blanks nothing —
+`doctor/check-wait-is-an-edge` reads the key, never the prose.
 
 - **A settled sitting.** The takeaway records what the sitting concluded.
   Nothing is owed and nothing is waiting, so there is no bead to point an
   edge at. The stamp is a record, not a gate.
-- **A stand-down (`takeaway … --release`).** The dispatch's premise is
-  falsified and the work should NOT happen. That is a disposal: the anchor
+- **A stand-down (`takeaway … --release --no-wait`).** The dispatch's premise
+  is falsified and the work should NOT happen. That is a disposal: the anchor
   is parked, and both of the molecule's pool-routed doors are quiesced so the
   dead chain stops re-offering. Those are its step beads and its workflow
   root. An edge would assert a wait that does not exist.
@@ -498,6 +503,9 @@ and both are right:
 
 Everywhere else the takeaway carries its wait as an edge —
 `--waiting-on` for work a pool owes, a demand bead for what a person owes.
+A headline written with neither the edge nor the flag is a subject parked on
+a sentence, and it is reported as one: that is the third shape, and the check
+exists to find it while somebody can still say what the wait was.
 No agent in this pack writes a `triage.hold` any more; the sweep's
 disposition menu offers `demand` in its place
 (`assets/scripts/liveness-sweep.sh`). The readers of `triage.hold` remain,

@@ -15,6 +15,15 @@
 # prose as a hold carrier, which is the opposite of the rule this check
 # asserts, and no verb list ever finishes, so every gap in one reads as clean.
 #
+# One marker can be answered by its own writer instead, where lifecycle.toml
+# declares a settled-key for it in `settled_keys`: a bead carrying that key
+# non-empty is one whose writer said, at the moment it stamped the marker, that
+# nothing is waiting. That is the same refusal to read prose, from the other
+# side — a sitting knows whether it settled its subject or parked it, and no
+# reader can recover that afterwards from the sentence it left. The key is
+# structural and the marker still stands beside it, so nothing here is a
+# blanked hold.
+#
 # Two degrees, reported apart because their remedies differ: UNEDGED, where the
 # bead carries no `blocks` edge at all and one has to be filed, and STALE,
 # where every blocker it names has closed or lives in another store, so the
@@ -54,6 +63,9 @@ LIVE_STATUSES='open,in_progress,blocked,deferred,hooked,pinned'
 BUILTIN_MARKER_KEYS='triage.hold
 blocked_reason
 gc.takeaway'
+# <marker>=<settled-key>: the marker holds only while the settled-key is absent
+# or empty. Same list as the declaration, same standby role.
+BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
 BUILTIN_MARKER_PREFIXES='dispatch_backstop.'
 BUILTIN_GATE_PREFIX='check.'
 BUILTIN_GATE_VERB='exception'
@@ -72,9 +84,10 @@ toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
         | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
 }
 marker_keys=""; marker_prefixes=""; gate_prefix=""; gate_verb=""; route_key=""; park_route=""
-severity=""; declared=""
+settled_keys=""; severity=""; declared=""
 if [ -f "$lifecycle" ]; then
     marker_keys=$(toml_array "$lifecycle" "marker_keys")
+    settled_keys=$(toml_array "$lifecycle" "settled_keys")
     marker_prefixes=$(toml_array "$lifecycle" "marker_prefixes")
     gate_prefix=$(toml_scalar "$lifecycle" "gate_marker_prefix")
     gate_verb=$(toml_scalar "$lifecycle" "gate_hold_verb")
@@ -90,6 +103,7 @@ fi
 # omitted one disables that arm rather than matching everything.
 if [ -z "$declared" ]; then
     marker_keys="$BUILTIN_MARKER_KEYS"
+    settled_keys="$BUILTIN_SETTLED_KEYS"
     marker_prefixes="$BUILTIN_MARKER_PREFIXES"
     gate_prefix="$BUILTIN_GATE_PREFIX"
     gate_verb="$BUILTIN_GATE_VERB"
@@ -101,6 +115,14 @@ fi
 [ -n "$severity" ] || severity="$BUILTIN_SEVERITY"
 MKEYS_JSON=$(printf '%s\n' "$marker_keys" | jq -R . | jq -cs 'map(select(. != ""))')
 MPFX_JSON=$(printf '%s\n' "$marker_prefixes" | jq -R . | jq -cs 'map(select(. != ""))')
+# {<marker>: <settled-key>}. A pair with either half missing is dropped rather
+# than half-applied: half of this declaration is a marker answered by a key
+# nothing writes, which reads every hold as settled.
+SETTLED_JSON=$(printf '%s\n' "$settled_keys" | jq -R '
+    select(index("=") != null)
+    | (index("=")) as $i
+    | {key: .[0:$i], value: .[$i+1:]}
+    | select(.key != "" and .value != "")' | jq -cs 'from_entries')
 
 # The separator the jq programs join their fields on and every reader splits
 # on. Held once so no caller spells it differently.
@@ -150,6 +172,11 @@ scrub() { tr -d '\000-\011\013-\037'; }
 WAIT_JQ='
 def txt: (. // "") | tostring | gsub("[[:cntrl:]]"; " ");
 def clip: if (length > 60) then (.[0:57] + "...") else . end;
+# A declared marker whose settled-key reads non-empty on this bead was answered
+# by the writer that stamped it. No pair declared for the key means no such
+# answer exists, so the marker holds on its own.
+def unsettled($m; $k): ($settled[$k] // "") as $sk
+    | $sk == "" or (($m[$sk] | txt) | length) == 0;
 [ .[]? | select(((.id // "") | tostring) != "") ] as $beads
 | ( [ $beads[] | (.id | tostring) ] ) as $liveids
 | $beads[]
@@ -160,7 +187,7 @@ def clip: if (length > 60) then (.[0:57] + "...") else . end;
 | ( [ $m | to_entries[]
       | .key as $k | (.value | txt) as $v
       | select(
-            (($mkeys | index($k)) != null and ($v | length) > 0)
+            (($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k))
          or ($mpfx | any(. as $p | $k | startswith($p)))
          or ($gatepfx != "" and $gateverb != ""
              and ($k | startswith($gatepfx)) and ($v | startswith($gateverb + "@")))
@@ -242,6 +269,7 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
 
     rows=$(printf '%s' "$live_json" | jq -r \
         --argjson mkeys "$MKEYS_JSON" --argjson mpfx "$MPFX_JSON" \
+        --argjson settled "$SETTLED_JSON" \
         --arg gatepfx "$gate_prefix" --arg gateverb "$gate_verb" \
         --arg routekey "$route_key" --arg park "$park_route" \
         "$WAIT_JQ" 2>/dev/null); rows_rc=$?

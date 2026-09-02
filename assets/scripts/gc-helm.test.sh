@@ -121,12 +121,16 @@ case "$1 ${2:-}" in
     # model the route LANDING and the route landing EMPTY (the silent drop a
     # multi-pair --set-metadata update can produce) with the same stub.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
+    # What gc.takeaway_settled reads back as. Every landed write updates it
+    # below, so the default fixture models a store that keeps what it was told;
+    # FAKE_SETTLED_DROP models the pair that silently does not land.
+    settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
     # A folded anchor names the bead that carried its work on. The release
     # path reads it to say which disposition it is preserving; an empty
     # string reads the same as an absent key, which is every other bead.
     sup="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_SUPERSEDED" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" --arg sp "$sup" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -145,7 +149,23 @@ case "$1 ${2:-}" in
     # A store that rejects the write. NOPIN stands for every reason the route
     # pins fail to land; the quiesce must not go on to unassign a bead it has
     # just failed to de-route.
-    case "$3" in *NOPIN*) exit 1 ;; esac ;;
+    case "$3" in *NOPIN*) exit 1 ;; esac
+    # gc.takeaway_settled lands here so a read-back sees what was written.
+    # FAKE_SETTLED_DROP=1 loses every one of them (no repair recovers it);
+    # =multi loses it only out of a multi-pair stamp, which is the shape a lone
+    # repair write recovers — the two halves of one silent-drop story.
+    pairs=0
+    for a in "$@"; do [ "$a" = "--set-metadata" ] && pairs=$((pairs + 1)); done
+    for a in "$@"; do
+      case "$a" in
+        gc.takeaway_settled=*)
+          case "${FAKE_SETTLED_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
+            *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
+          esac ;;
+      esac
+    done ;;
   "bd dep")
     printf '%s\n' "$*" >> "$FAKE_DEPS"
     # A blocker named NOPE stands for every edge that cannot be written.
@@ -159,10 +179,12 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
-       FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded"
+       FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
+       FAKE_SETTLED="$TMP/settled"
 mkdir -p "$TMP/signal-loom/.beads"
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
+: > "$TMP/settled"
 unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
 
@@ -364,6 +386,127 @@ eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(EDGENONE) no --waiting-on, n
 grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
+
+# ── takeaway --no-wait: the disposition beside the headline ──────────────────
+# One ritual, two outcomes: a sitting that settled its subject and one that
+# parked it write the same sentence, and only the writer can tell them apart.
+# --no-wait is that answer, and lifecycle.toml [holds] settled_keys is what
+# reads it. Covered:
+#   (SETTLED)   --no-wait stamps gc.takeaway_settled=1 in the headline's write
+#   (UNSETTLED) every other takeaway stamps it EMPTY, so no stamp outlives its
+#               own sitting and answers for the park that follows
+#   (BOTH)      --no-wait and --waiting-on contradict, and nothing is written
+#   (SETTLEDREL) it rides a --release --route write like the rest of the stamp
+: > "$TMP/updates"; : > "$TMP/deps"
+sh "$SCRIPT" takeaway A-PARKED "resolved — the board was right" --by converse --no-wait >/dev/null 2>&1 || true
+U="$(cat "$TMP/updates")"
+grep -q -- '--set-metadata gc.takeaway_settled=1' <<< "$U" \
+  && ok "(SETTLED) --no-wait stamps the settled key" \
+  || bad "(SETTLED) no settled key stamped: $U"
+grep -q -- '--set-metadata gc.takeaway=resolved — the board was right' <<< "$U" \
+  && ok "(SETTLED) …in the same update as the headline" \
+  || bad "(SETTLED) the headline and the disposition did not ride together: $U"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(SETTLED) …and it writes no edge, having none to write"
+
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" --by converse >/dev/null 2>&1 || true
+U="$(cat "$TMP/updates")"
+grep -q -- '--set-metadata gc.takeaway_settled=$' <<< "$U" \
+  && ok "(UNSETTLED) a takeaway with no disposition clears the settled key" \
+  || bad "(UNSETTLED) the key was left standing for the next sitting to inherit: $U"
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --waiting-on tk-blk1 >/dev/null 2>&1 || true
+grep -q -- '--set-metadata gc.takeaway_settled=$' "$TMP/updates" \
+  && ok "(UNSETTLED) …and so does a takeaway whose wait is an edge" \
+  || bad "(UNSETTLED) --waiting-on left a settled key standing: $(cat "$TMP/updates")"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+BRC=0
+sh "$SCRIPT" takeaway A-PARKED "both" --no-wait --waiting-on tk-blk1 >/dev/null 2>"$TMP/berr" || BRC=$?
+eq "$BRC" "2" "(BOTH) --no-wait beside --waiting-on is refused"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(BOTH) …before anything is written"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(BOTH) …and no edge is wired"
+grep -q 'contradicts' "$TMP/berr" \
+  && ok "(BOTH) …and the refusal says why" \
+  || bad "(BOTH) the refusal does not name the contradiction (stderr: $(cat "$TMP/berr"))"
+
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "actionable — slung to the pool" \
+   --release --route "gc-toolkit/gc-toolkit.polecat" --no-wait >/dev/null 2>&1 || true
+U="$(cat "$TMP/updates")"
+case "$U" in
+  *"--set-metadata gc.takeaway_settled=1"*) ok "(SETTLEDREL) the disposition rides the release write" ;;
+  *) bad "(SETTLEDREL) the settled key is missing from the release write: $U" ;;
+esac
+
+# ── the disposition is READ BACK: a stamp that did not land is not one ───────
+# One `--set-metadata` pair in a multi-pair update can silently not land, which
+# is why the route beside it is read back. The settled-key is the pair whose
+# miss is a WRONG answer rather than a missing one: a park that inherits the
+# previous sitting's "1" reads as a wait already discharged, and
+# doctor/check-wait-is-an-edge — the one reader that would report it — skips it
+# for as long as the stamp stands. Covered:
+#   (SETTLEDOK)   a disposition that reads back is written once, exit 0
+#   (SETTLEDFIX)  a dropped clear over a stale "1" is repaired, and says so
+#   (SETTLEDDEAD) a repair that also misses is a verb failure, writes kept
+#   (SETTLEDBACK) the same guard the other way: a settled stamp that lands empty
+: > "$TMP/updates"; printf '1' > "$TMP/settled"
+ORC=0
+sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait >/dev/null 2>"$TMP/serr" || ORC=$?
+eq "$ORC" "0" "(SETTLEDOK) a disposition that reads back exits 0"
+eq "$(grep -c -- '--set-metadata gc.takeaway_settled=' "$TMP/updates" || true)" "1" \
+   "(SETTLEDOK) …and is written once, with no repair"
+eq "$(cat "$TMP/serr")" "" "(SETTLEDOK) …and says nothing about a read-back"
+
+# (SETTLEDFIX) the stale "1" of the sitting before this park, and a clear that
+# does not land: the multi-pair stamp drops it, the lone repair write carries it.
+: > "$TMP/updates"; printf '1' > "$TMP/settled"
+FRC=0
+FAKE_SETTLED_DROP=multi sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" \
+  >/dev/null 2>"$TMP/serr" || FRC=$?
+eq "$(grep -c -- '--set-metadata gc.takeaway_settled=$' "$TMP/updates" || true)" "2" \
+   "(SETTLEDFIX) a clear that did not land is re-written"
+grep -q "gc.takeaway_settled on A-PARKED read back as '1'" "$TMP/serr" \
+  && ok "(SETTLEDFIX) …and the miss is reported with the value that stood" \
+  || bad "(SETTLEDFIX) the dropped clear was silent (stderr: $(cat "$TMP/serr"))"
+grep -q 'the disposition repair landed' "$TMP/serr" \
+  && ok "(SETTLEDFIX) …and so is the repair that fixed it" \
+  || bad "(SETTLEDFIX) the repair did not report landing (stderr: $(cat "$TMP/serr"))"
+eq "$FRC" "0" "(SETTLEDFIX) …and a repaired disposition is not a verb failure"
+eq "$(cat "$TMP/settled")" "" "(SETTLEDFIX) …the bead ends on the park's own disposition"
+
+# (SETTLEDDEAD) the store that will not take the clear at all. The headline is
+# stamped and the bead reads settled, so a zero exit would report a park that
+# no wait check will ever report.
+: > "$TMP/updates"; printf '1' > "$TMP/settled"
+DRC=0
+FAKE_SETTLED_DROP=1 sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" \
+  >"$TMP/sout" 2>"$TMP/serr" || DRC=$?
+eq "$DRC" "4" "(SETTLEDDEAD) a disposition that will not stamp is a verb runtime failure"
+grep -q "still reads gc.takeaway_settled='1'" "$TMP/serr" \
+  && ok "(SETTLEDDEAD) …and the message names the value left standing" \
+  || bad "(SETTLEDDEAD) the persistent miss does not name the stale value (stderr: $(cat "$TMP/serr"))"
+grep -q -- '--set-metadata gc.takeaway_settled=' "$TMP/serr" \
+  && ok "(SETTLEDDEAD) …and carries the by-hand repair" \
+  || bad "(SETTLEDDEAD) no repair spelled out (stderr: $(cat "$TMP/serr"))"
+grep -q 'takeaway set on' "$TMP/sout" \
+  && bad "(SETTLEDDEAD) the verb reported success on a bead reading settled" \
+  || ok "(SETTLEDDEAD) …and does not report the takeaway as set"
+grep -q -- '--set-metadata gc.takeaway=holding — needs a ruling' "$TMP/updates" \
+  && ok "(SETTLEDDEAD) …the headline it did write is kept, not rolled back" \
+  || bad "(SETTLEDDEAD) the headline write was lost: $(cat "$TMP/updates")"
+
+# (SETTLEDBACK) the miss in the other direction costs a false finding rather
+# than a missing one, and is still a write that did not land.
+: > "$TMP/updates"; : > "$TMP/settled"
+BRC2=0
+FAKE_SETTLED_DROP=1 sh "$SCRIPT" takeaway A-PARKED "settled — nothing waits" --no-wait \
+  >/dev/null 2>"$TMP/serr" || BRC2=$?
+eq "$BRC2" "4" "(SETTLEDBACK) a settled stamp that reads back empty fails the verb too"
+grep -q "expected '1'" "$TMP/serr" \
+  && ok "(SETTLEDBACK) …and the message names what the writer asked for" \
+  || bad "(SETTLEDBACK) the refusal does not name the intended value (stderr: $(cat "$TMP/serr"))"
+: > "$TMP/settled"
 
 # ── takeaway --release --route: release the bead TO a pool ────────────────────
 # A first reaction that concludes "this is work" hands the bead on instead of
@@ -1045,14 +1188,29 @@ case "$1 ${2:-}" in
     id="$3"
     if grep -qx "$id" "$D_MISSING" 2>/dev/null; then printf '{"error":"no issues found"}\n'; exit 0; fi
     p="$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$D_PARENTS")"
+    # <bead>|<value> in D_SETTLED: the disposition a bead already carries, which
+    # a refresh has to clear off it.
+    sd="$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$D_SETTLED" 2>/dev/null || true)"
     blk="$(awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG" | jq -R . | jq -sc .)"
-    jq -n --arg id "$id" --arg p "$p" --argjson blk "$blk" \
+    jq -n --arg id "$id" --arg p "$p" --arg sd "$sd" --argjson blk "$blk" \
       '[{id: $id,
+         metadata: {"gc.takeaway_settled": $sd},
          dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
   "bd list")  cat "$D_LIST" ;;
   "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
-  "bd update") : ;;
+  "bd update")
+    # The multi-pair refresh never lands here, which is the dropped clear this
+    # store models. The lone-pair repair does — unless the bead id says STUCK,
+    # the store that will not take that write either.
+    pairs=0
+    for a in "$@"; do [ "$a" = "--set-metadata" ] && pairs=$((pairs + 1)); done
+    if [ "$pairs" -le 1 ]; then
+      case "$*" in
+        *"gc.takeaway_settled="*)
+          case "$3" in *STUCK*) ;; *) sed -i "/^$3|/d" "$D_SETTLED" 2>/dev/null || true ;; esac ;;
+      esac
+    fi ;;
   "bd dep")
     # NOEDGE in any id of the call stands for an edge that cannot be written:
     # the call fails AND nothing is recorded, so the read-back sees no edge.
@@ -1065,7 +1223,8 @@ GC2
 chmod +x "$TMP/bin2/gc"
 
 export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
-       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing"
+       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled"
+: > "$TMP/dsettled"
 printf 'tk-kid|tk-mum\n' > "$D_PARENTS"   # tk-kid has a parent; tk-solo has none
 printf 'tk-gone\n'        > "$D_MISSING"
 printf '[]\n'             > "$D_LIST"
@@ -1172,6 +1331,34 @@ grep -q 'gc.takeaway_at=' <<< "$(d_update)" \
   && ok "(IDEM) …and a fresh takeaway_at, which is what earns the next visit" \
   || bad "(IDEM) takeaway_at not refreshed: $(d_update)"
 eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-old1" "(IDEM) …and it names the bead that already existed"
+
+# (IDEMSETTLED) a demand IS a wait on a person, so a settled disposition left
+# standing on one is this check's blind spot at its worst. The refresh clears
+# the key; a clear that did not land is read back and repaired.
+printf 'tk-old1|1\n' > "$D_SETTLED"
+demand_run tk-kid "operator: pick the storage backend (again)" --by converse
+eq "$DRC" "0" "(IDEMSETTLED) a refresh whose clear is repaired succeeds"
+eq "$(grep -c -- '--set-metadata gc.takeaway_settled=' <<< "$(d_update)" || true)" "2" \
+   "(IDEMSETTLED) …having re-written the clear that did not land"
+eq "$(cat "$D_SETTLED")" "" "(IDEMSETTLED) …and the demand ends carrying no settled disposition"
+
+# (IDEMSTUCK) the store that will not take the clear at all: the demand is filed
+# and blocks the work, and the one reader that reports unedged waits would skip
+# it, so the verb must not report success.
+printf '[{"id":"tk-STUCK1","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+printf 'tk-STUCK1|1\n' > "$D_SETTLED"
+demand_run tk-kid "operator: pick the storage backend (stuck)" --by converse
+eq "$DRC" "4" "(IDEMSTUCK) a refresh that cannot clear the disposition is a runtime failure"
+grep -q "reads gc.takeaway_settled='1'" <<< "$DERR" \
+  && ok "(IDEMSTUCK) …and the message names the value left standing" \
+  || bad "(IDEMSTUCK) the stale disposition was silent: $DERR"
+grep -q -- 'gc bd update tk-STUCK1 --set-metadata gc.takeaway_settled=' <<< "$DERR" \
+  && ok "(IDEMSTUCK) …and hands over the exact repair" \
+  || bad "(IDEMSTUCK) no repair command offered: $DERR"
+grep -q 'refreshed the open demand' <<< "$DERR" \
+  && bad "(IDEMSTUCK) the verb reported a clean refresh anyway: $DERR" \
+  || ok "(IDEMSTUCK) …and does not report the refresh as done"
+: > "$D_SETTLED"
 printf '[]\n' > "$D_LIST"
 
 # (FAILCLOSED) the edge IS the record here. Unlike takeaway --waiting-on, a

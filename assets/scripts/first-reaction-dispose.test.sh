@@ -117,6 +117,10 @@ eq "$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1)" "$(( $(grep -n -m1 '^HEL
    "(ACTORDER) the record is written before the act, so a run that dies half-way is still auditable"
 has "HELM takeaway tk-sub routed to the polecat pool --by proactive --release --route gc-toolkit/gc-toolkit.polecat" \
     "$LOG" "(ACTROUTE) the release hands the bead to the pool in one call"
+# The headline's own disposition. Work handed to a pool is moving, not waiting,
+# and the sitting says so where it stamps the sentence — nothing downstream can
+# tell a settled headline from a park after the fact.
+has "--no-wait" "$LOG" "(ACTROUTE) …and says nothing is waiting on it"
 LOG_ACT="$LOG"
 
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --waiting-on tk-other
@@ -161,6 +165,7 @@ has "gc.first_reaction=blocked" "$LOG" "(BLK) the choice is recorded"
 has "gc.first_reaction_target=tk-blk1" "$LOG" "(BLK) …naming the bead it waits on"
 has "--release --waiting-on tk-blk1" "$LOG" "(BLK) the wait rides the release as an edge"
 hasnt "--route" "$LOG" "(BLK) …and a held bead is not also routed"
+hasnt "--no-wait" "$LOG" "(BLK) …and the named wait is not also called settled"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on sl-foreign
 eq "$RC" "2" "(BLKCROSS) a blocker in another store is refused"
@@ -237,6 +242,10 @@ has "HELM takeaway tk-sub needs a ruling: which default --by proactive --release
    "(RUL) the bead is released back to the human"
 hasnt "--route" "$LOG" "(RUL) …not routed to a pool"
 hasnt "--waiting-on" "$LOG" "(RUL) …and not held by an edge"
+# A ruling claims no disposition, and that is the true one: the bead waits on a
+# person, the visit is what re-asks, and the headline stays a hold that
+# doctor/check-wait-is-an-edge reports until the question is answered.
+hasnt "--no-wait" "$LOG" "(RUL) …and never claims nothing is waiting"
 
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "2" "(RUL) a ruling with no visit is refused"

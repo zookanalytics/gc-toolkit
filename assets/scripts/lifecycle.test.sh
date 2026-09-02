@@ -310,6 +310,25 @@ case "$(meta a-6 'gc.takeaway_at')" in
   *) bad "the takeaway carries no gc.takeaway_at" ;;
 esac
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "route + clear + reason + takeaway ride in ONE update"
+eq "$(meta a-6 'gc.takeaway_settled')" "" "the park's headline carries its own disposition, not a settled one"
+
+# A transition's takeaway parks a bead or ends it, so its disposition is never
+# "settled" — and a bead can carry that value from the sitting before this one.
+# The clear is the one field of the stamp whose stale value is a wrong answer
+# rather than a missing one: doctor/check-wait-is-an-edge reads it and skips the
+# park it was written to report. A clear that did not land is a failed
+# transition, on the same terms as a dropped timestamp.
+store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway_settled":"1"}}]'
+out="$(STUB_DROP_KEYS="a-7:gc.takeaway_settled" "$SUT" transition a-7 --to abandoned \
+  --takeaway "PR#7 was closed without merging — rework it or close this bead" 2>&1)"; rc=$?
+eq "$rc" 2 "a takeaway that did not clear an inherited settled-key exits 2"
+has "$out" "gc.takeaway_settled" "…and the unverified field is named"
+eq "$(meta a-7 'gc.takeaway_settled')" "1" "…and the stale value is what read back"
+
+store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway_settled":"1"}}]'
+out="$("$SUT" transition a-8 --to abandoned --takeaway "needs a ruling on the base branch" 2>&1)"; rc=$?
+eq "$rc" 0 "…while a clear that lands over an inherited value exits 0"
+eq "$(meta a-8 'gc.takeaway_settled')" "" "…leaving the park's own disposition on the bead"
 
 # --- detached states clear the route in the same atomic call --------------------
 # A detached anchor rests unrouted so that no pool offers it. Any route but the

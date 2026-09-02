@@ -195,8 +195,8 @@ cmd_transition() {
     case "${kv%%=*}" in
       merge_result) echo "$PROG: merge_result is written by --to, never by --set" >&2; exit 1 ;;
       gc.routed_to) echo "$PROG: route via --route, never by --set" >&2; exit 1 ;;
-      gc.takeaway|gc.takeaway_at|gc.takeaway_by)
-        echo "$PROG: the takeaway triple is written by --takeaway, never by --set" >&2; exit 1 ;;
+      gc.takeaway|gc.takeaway_at|gc.takeaway_by|gc.takeaway_settled)
+        echo "$PROG: the takeaway stamp is written by --takeaway, never by --set" >&2; exit 1 ;;
     esac
   done
   # A dated key's ARGUMENT carries the two components its writer decided; this
@@ -385,9 +385,14 @@ cmd_transition() {
   local TAKEAWAY_AT=""
   if [ "$TAKEAWAY_SET" = 1 ]; then
     TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    # gc.takeaway_settled goes empty with every headline this writer stamps.
+    # A transition's takeaway names a park or an end, never a subject that
+    # settled itself while staying live, and the disposition of the sitting
+    # before it must not answer for this one (lifecycle.toml [holds]).
     ARGS+=(--set-metadata "gc.takeaway=$TAKEAWAY"
            --set-metadata "gc.takeaway_at=$TAKEAWAY_AT"
-           --set-metadata "gc.takeaway_by=$PROG")
+           --set-metadata "gc.takeaway_by=$PROG"
+           --set-metadata "gc.takeaway_settled=")
   fi
   [ "$ASSIGNEE_SET" = 1 ] && ARGS+=(--assignee="$ASSIGNEE")
   [ "$CLOSE" = 1 ] && ARGS+=(--status=closed)
@@ -425,13 +430,18 @@ cmd_transition() {
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     [ "$got" = "$ROUTE" ] || BAD="$BAD gc.routed_to='$got'(want '$ROUTE')"
   fi
-  # All three fields of the takeaway triple, not just the text a person reads.
+  # Every field of the takeaway stamp, not just the text a person reads.
   # The timestamp dates the wait: helm orders the operator's queue by it, and
   # attributes a takeaway to the sitting whose span contains it, dropping one it
   # cannot date. The writer is the provenance readers discriminate on to tell a
-  # sitting's decision from a park's own sentence. A triple that lands in part
+  # sitting's decision from a park's own sentence. A stamp that lands in part
   # leaves a headline the board can neither place nor attribute, so it is a
   # failed transition and not a recorded one.
+  #
+  # The settled-key is verified CLEARED rather than merely written: a
+  # transition's takeaway names a park or an end, and a value inherited from an
+  # earlier sitting reads as this headline's own disposition, which is what
+  # doctor/check-wait-is-an-edge answers from.
   if [ "$TAKEAWAY_SET" = 1 ]; then
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
     [ "$got" = "$TAKEAWAY" ] || BAD="$BAD gc.takeaway='$got'(want '$TAKEAWAY')"
@@ -439,6 +449,8 @@ cmd_transition() {
     [ "$got" = "$TAKEAWAY_AT" ] || BAD="$BAD gc.takeaway_at='$got'(want '$TAKEAWAY_AT')"
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway_by"] // "") | tostring')
     [ "$got" = "$PROG" ] || BAD="$BAD gc.takeaway_by='$got'(want '$PROG')"
+    got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway_settled"] // "") | tostring')
+    [ -z "$got" ] || BAD="$BAD gc.takeaway_settled='$got'(want cleared)"
   fi
   if [ "$ASSIGNEE_SET" = 1 ]; then
     got=$(printf '%s' "$bead" | jq -r '(.assignee // "") | tostring')

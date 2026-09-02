@@ -258,9 +258,16 @@ gc_bd update "$BEAD" \
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
 # --route releases the bead to a pool instead of back to the human.
+#
+# Each disposition also answers the headline's own question — is anything still
+# waiting on this bead? An actionable one is not: it is moving, and the pool its
+# route names will claim it, so --no-wait says so. A blocked one names its wait
+# as an edge. A ruling says neither, because it IS a bead waiting on a person
+# with no edge to carry that wait, which is what doctor/check-wait-is-an-edge
+# reports and what the visit is filed to end.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
-    actionable) set -- "$@" --route "$ROUTE" ;;
+    actionable) set -- "$@" --route "$ROUTE" --no-wait ;;
     blocked)    for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."

@@ -132,6 +132,7 @@ park_route = "human"
 
 [holds]
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
+settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 marker_prefixes = ["dispatch_backstop."]
 gate_marker_prefix = "check."
 gate_hold_verb = "exception"
@@ -437,6 +438,65 @@ store '[{"id":"aa-101","status":"open","metadata":{}}]'
 posture_pack 'hold_severity = "error"'
 OUT=$(PACK="$TMP/pack4" run_check); RC=$?
 eq "$RC" "0" "the error posture still passes a store with nothing held"
+
+# --- 22. the settled-key: a marker its own writer answered ----------------
+# The two shapes one ritual produces. A sign-off stamps a headline on the
+# subject it settled and on the one it parked for a person, and the sentence
+# reads the same either way; the settled-key is the writer saying which, and
+# only the parked one is a wait nothing re-asks.
+notheld '{"gc.takeaway":"resolved — no human action was needed","gc.takeaway_settled":"1"}' \
+        "a takeaway its writer settled"
+held    '{"gc.takeaway":"retention policy UNRULED — needs the operator"}' \
+        "a takeaway that parks a bead for a person"
+held    '{"gc.takeaway":"parked","gc.takeaway_settled":""}' \
+        "a takeaway whose settled-key is empty"
+# The key answers its OWN marker and nothing else, so a bead holding two
+# markers is still held by the other one.
+held '{"gc.takeaway":"settled","gc.takeaway_settled":"1","triage.hold":"waiting on the migration"}' \
+     "a settled takeaway beside another marker"
+OUT=$(run_check)
+hasnt "$OUT" "gc.takeaway=settled" "and the settled marker is not listed among what holds it"
+held '{"gc.takeaway":"settled","gc.takeaway_settled":"1","gc.routed_to":"human"}' \
+     "a settled takeaway on a bead parked on the park route"
+# A settled marker is answered, not exempted: the bead is judged on every other
+# marker it carries, and one whose only marker is settled leaves the store clean
+# rather than unscanned.
+store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a store whose only marker is a settled one passes"
+has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
+
+# The pairing is DECLARED, like the markers it governs. A declaration that
+# names markers and no pairing answers no marker with a key: the settled stamp
+# is data nothing has been told to read.
+mkdir -p "$TMP/pack8/lifecycle"
+{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'; } > "$TMP/pack8/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
+OUT=$(PACK="$TMP/pack8" run_check); RC=$?
+eq "$RC" "1" "a declaration with no settled_keys answers no marker with a key"
+# Half a pair is worse than none — a marker answered by a key no writer stamps
+# reads every hold as settled — so a malformed entry is dropped.
+mkdir -p "$TMP/pack9/lifecycle"
+{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'
+  echo 'settled_keys = ["gc.takeaway=", "=gc.takeaway_settled", "gc.takeaway"]'
+  } > "$TMP/pack9/lifecycle/lifecycle.toml"
+OUT=$(PACK="$TMP/pack9" run_check); RC=$?
+eq "$RC" "1" "a settled_keys entry missing either half is dropped"
+# A pairing declared for a marker of the declaration's own choosing.
+mkdir -p "$TMP/pack10/lifecycle"
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'
+  echo 'settled_keys = ["site.hold=site.answered"]'; } > "$TMP/pack10/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"x","site.answered":"1"}}]'
+OUT=$(PACK="$TMP/pack10" run_check); RC=$?
+eq "$RC" "0" "a pairing declared only in lifecycle.toml is honored"
+store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"x"}}]'
+OUT=$(PACK="$TMP/pack10" run_check); RC=$?
+eq "$RC" "1" "...and the same marker without its key still holds"
+# With no lifecycle.toml at all the built-in pairing stands in with the
+# built-in markers, so the standby list is the shipped one.
+store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+eq "$RC" "0" "the built-in list carries the built-in pairing"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -228,9 +228,10 @@ After either route: continue if possible, otherwise leave the bead resumable
 (branch + notes recorded) and drain. If the ruling that comes back is
 stand-down — the premise was falsified, or a live sitting owns the decision —
 the disposal step is the sitting's
-`gc-helm.sh takeaway <anchor> "<ruling>" --release`: it parks the anchor and
-quiesces the molecule's routed steps in one writer, so the chain stops
-re-offering. Your part stays the same: record, escalate, drain.
+`gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`: it parks the
+anchor and quiesces the molecule's routed steps in one writer, so the chain
+stops re-offering, and `--no-wait` records that the ruling ended the wait
+rather than moving it. Your part stays the same: record, escalate, drain.
 
 ## Communication
 

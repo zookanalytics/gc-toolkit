@@ -1317,19 +1317,27 @@ have "gc-helm takeaway accepts --waiting-on" '--waiting-on)' "$HELM"
 have "…and writes it as a depends-on edge" 'bd dep add "$bead" "$_w" -t blocks' "$HELM"
 have "…and documents it in usage" '--waiting-on <bead-id>' "$HELM"
 # The prompt is the half that decides whether the flag is ever passed.
-have "the sign-off block can carry the waits" '--by converse "${WAITING[@]}"' "$PROMPT"
-have "…and accumulates them in an array" 'WAITING=()' "$PROMPT"
+have "the sign-off block can carry the waits" '--by converse "${WAIT[@]}"' "$PROMPT"
+have "…and accumulates them in an array" 'WAIT=()' "$PROMPT"
+# The same array carries the other answer to the same question. A sitting that
+# settled its subject says so with --no-wait, and one that says neither leaves a
+# headline the board and the doctor read as a wait nothing re-asks. Both flags
+# have to be reachable from the block, or the sitting has only one thing it can
+# claim and will claim it.
+have "the sign-off block can also say nothing is waiting" '--no-wait' "$PROMPT"
+have "gc-helm takeaway accepts --no-wait" '--no-wait)' "$HELM"
+have "…and stamps the disposition beside the headline" 'gc.takeaway_settled=$no_wait' "$HELM"
 # THE SHELL, not style. The block was written `WAITING=""` … `--by converse
 # $WAITING`, unquoted, with a comment saying that was deliberate — an idiom that
 # needs word-splitting to become several arguments. This city runs zsh, which
-# does not word-split an unquoted parameter: a populated WAITING arrived as ONE
+# does not word-split an unquoted parameter: a populated array arrived as ONE
 # argument and gc-helm died with `unknown flag '--waiting-on tk-… --waiting-on
 # tk-…'`. The empty case splits to nothing in every shell, so the bug was
 # invisible on sittings that routed nothing and fired reliably on the ones the
 # flag exists for — twice in one day before it was diagnosed (tk-2cy79). It
 # reverts by one pair of quotes coming off, so it is pinned from both sides.
 lacks "…and never as an unquoted string, which zsh does not split" \
-      '--by converse $WAITING' "$PROMPT" \
+      '--by converse $WAIT' "$PROMPT" \
       "an unquoted parameter is ONE argument under zsh — the flags never reach gc-helm and the wait is lost on exactly the sittings that routed work (tk-2cy79)"
 lacks "…nor teaches the broken idiom as deliberate" \
       'Unquoted on purpose' "$PROMPT" \

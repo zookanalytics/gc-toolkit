@@ -16,7 +16,7 @@
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move, tk-lzdty),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
-# a --route that will not stamp).
+# a --route or a takeaway disposition that will not stamp).
 
 set -eu
 
@@ -36,7 +36,7 @@ usage() {
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  <bead-id> [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row
 
@@ -53,7 +53,12 @@ only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
 back to the human, in the same write, and is refused on a closed anchor;
 --waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
-whether it landed.
+whether it landed. --no-wait is the other answer to the same question: this
+sitting settled the subject and nothing is waiting on it. It stamps
+gc.takeaway_settled, which lifecycle.toml [holds] reads to tell a settled
+headline from one parking a bead on prose, and it contradicts --waiting-on.
+Say neither and the headline is a hold that doctor/check-wait-is-an-edge
+reports, which is the honest reading of a park nothing re-asks.
 
 demand files what a person owes as its own bead, a SIBLING of the work, and
 blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
@@ -86,6 +91,16 @@ with_timeout() {
 }
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# meta_now <bead> <key> — one metadata key as the store answers it right now,
+# for reading a write back. A row that will not read answers empty, which every
+# caller here treats the same as a value that did not land. $db is the caller's
+# store pin; the verbs that pin by BEADS_DIR leave it unset.
+meta_now() {
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+        | jq -r --arg k "$2" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
+}
 
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
 # enforce the shared ≤TAKEAWAY_MAX cap; sets HEADLINE. One gate for two verbs:
@@ -362,9 +377,17 @@ quiesce_release_molecule_steps() (
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb.
+#
+# The headline says nothing about whether the subject is still waiting, and
+# every sitting stamps one, so the disposition rides beside it in
+# gc.takeaway_settled: "1" under --no-wait, empty otherwise. It is written with
+# EVERY headline, never left to stand, because a stamp that outlived its
+# sitting would answer for the next one — a settled sign-off would silence the
+# park that followed it. lifecycle/lifecycle.toml [holds] settled_keys is where
+# doctor/check-wait-is-an-edge reads the pairing.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; npos=0
-    waiting_ids=""
+    waiting_ids=""; no_wait=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)    by="${1#--by=}"; shift ;;
@@ -372,6 +395,7 @@ cmd_takeaway() {
             --waiting-on=*) waiting_ids="$waiting_ids ${1#--waiting-on=}"; shift ;;
             --waiting-on)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --waiting-on requires a bead id" >&2; exit 2; }
                             waiting_ids="$waiting_ids $1"; shift ;;
+            --no-wait) no_wait=1; shift ;;
             --release) release=1; shift ;;
             --route=*) route="${1#--route=}"; shift ;;
             --route)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --route requires a <rig>/<agent> target" >&2; exit 2; }; route="$1"; shift ;;
@@ -388,6 +412,14 @@ cmd_takeaway() {
         esac
     done
     [ -n "$bead" ] || { echo "$PROG: takeaway needs <bead-id>" >&2; usage; exit 2; }
+
+    # Two answers to one question, and they contradict: a named wait IS the
+    # subject still waiting. Refused before anything is written, so what gets
+    # repaired is the claim rather than the bead.
+    if [ -n "$no_wait" ] && [ -n "$waiting_ids" ]; then
+        echo "$PROG: takeaway: --no-wait contradicts --waiting-on$waiting_ids — one says nothing is waiting on $bead, the other names what is. Pass whichever is true. Nothing was written." >&2
+        exit 2
+    fi
 
     normalize_headline "$text" takeaway
     text="$HEADLINE"
@@ -454,7 +486,8 @@ cmd_takeaway() {
     set --
     set -- "$@" --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
-               --set-metadata "gc.takeaway_by=$by"
+               --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled=$no_wait"
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
                --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
@@ -470,21 +503,39 @@ cmd_takeaway() {
     # and the message names them, so the miss is repairable by hand.
     route_missed=""
     if [ -n "$route" ] && [ -n "$release_park" ]; then
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-            | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.routed_to"] // "") else "" end' 2>/dev/null || printf '')
+        route_got=$(meta_now "$bead" gc.routed_to)
         if [ "$route_got" != "$route" ]; then
             echo "$PROG: takeaway: gc.routed_to on $bead read back as '$route_got', expected '$route' — repairing" >&2
             # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
             gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.routed_to=$route" >/dev/null 2>&1 || true
-            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-            route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-                | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.routed_to"] // "") else "" end' 2>/dev/null || printf '')
+            route_got=$(meta_now "$bead" gc.routed_to)
             if [ "$route_got" = "$route" ]; then
                 echo "$PROG: takeaway: the route repair landed on $bead" >&2
             else
                 route_missed=1
             fi
+        fi
+    fi
+    # The disposition is read back on the same terms, and for a sharper reason:
+    # it is the one field of the stamp whose STALE value is a wrong answer
+    # rather than a missing one. A park whose clear did not land keeps the
+    # previous sitting's "settled", and doctor/check-wait-is-an-edge then reads
+    # this bead as a wait somebody already discharged — the exact blindness the
+    # pairing exists to remove, on the exact bead a person is owed an answer
+    # about. A repair that also misses is a verb failure: a caller reading a
+    # zero exit as "the disposition landed" would be wrong.
+    settled_missed=""
+    settled_got=$(meta_now "$bead" gc.takeaway_settled)
+    if [ "$settled_got" != "$no_wait" ]; then
+        echo "$PROG: takeaway: gc.takeaway_settled on $bead read back as '$settled_got', expected '$no_wait' — repairing" >&2
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.takeaway_settled=$no_wait" >/dev/null 2>&1 || true
+        settled_got=$(meta_now "$bead" gc.takeaway_settled)
+        if [ "$settled_got" = "$no_wait" ]; then
+            echo "$PROG: takeaway: the disposition repair landed on $bead" >&2
+        else
+            settled_missed=1
+            echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
         fi
     fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
@@ -509,6 +560,11 @@ cmd_takeaway() {
     fi
     if [ -n "$route_missed" ]; then
         echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
+        exit 4
+    fi
+    # Reported at its read-back above; the exit waits until here so the edges
+    # and the quiesce still run, the way the route miss does.
+    if [ -n "$settled_missed" ]; then
         exit 4
     fi
     # A route asked for on a closed anchor is refused the same way a route that
@@ -624,10 +680,26 @@ cmd_demand() {
         set -- --title "$text" \
                --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
-               --set-metadata "gc.takeaway_by=$by"
+               --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled="
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         gc bd update "$demand" "$@" >/dev/null 2>&1 \
             || { echo "$PROG: demand: could not refresh the open demand $demand on $gated" >&2; exit 4; }
+        # A demand IS a wait on a person, so a settled disposition standing on
+        # one is the wait check's blind spot at its worst: the bead nothing
+        # re-asks is the bead this verb exists to file. The refresh clears the
+        # key, and a clear that did not land is read back and repaired here. A
+        # demand filed below carries no prior stamp, so its clear has nothing to
+        # outlive.
+        settled_got=$(meta_now "$demand" gc.takeaway_settled)
+        if [ -n "$settled_got" ]; then
+            gc bd update "$demand" --set-metadata "gc.takeaway_settled=" >/dev/null 2>&1 || true
+            settled_got=$(meta_now "$demand" gc.takeaway_settled)
+        fi
+        if [ -n "$settled_got" ]; then
+            echo "$PROG: demand: $demand reads gc.takeaway_settled='$settled_got' after the refresh — it is filed and it blocks $gated, but doctor/check-wait-is-an-edge reads it as a wait already discharged. Clear it by hand: gc bd update $demand --set-metadata gc.takeaway_settled=" >&2
+            exit 4
+        fi
         echo "$PROG: demand: refreshed the open demand $demand on $gated; no second bead filed" >&2
     else
         set -- -t "$kind" --title "$text" -d "$body"
@@ -645,6 +717,7 @@ cmd_demand() {
         set -- --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
