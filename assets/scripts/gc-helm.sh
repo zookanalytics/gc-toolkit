@@ -343,16 +343,25 @@ quiesce_release_molecule_steps() (
 # <<< quiesce-release-molecule-steps
 
 # ── Verb: takeaway ───────────────────────────────────────────────────
-# Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release
-# folds the proactive reaction-release (reopen, unassign, clear route,
-# gc.proactive_reaction=1) into the same write and quiesces the parked
-# molecule's steps. --route names a pool to release TO, so a reaction that
-# concludes "this is work" hands the bead on in the SAME write that stamps the
-# headline: either the whole disposition lands or none of it does. The target
-# is rig-qualified or refused — gc.routed_to is read by exact string, so a bare
-# agent name routes to nobody and sits forever. --waiting-on records each wait
-# as a `blocks` edge — best-effort: the stamp is what the sitting owes the
-# operator, so a rejected edge only warns and never fails the verb (tk-2plde).
+# Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release adds
+# two acts to that stamp: PARK the anchor, and QUIESCE the molecule beneath it.
+#
+# The park (reopen, unassign, stamp the route, gc.proactive_reaction=1) rides
+# the same write as the headline, so a reaction that concludes "this is work"
+# hands the bead on in the write that records the conclusion: either the whole
+# disposition lands or none of it does. It applies to an anchor still standing.
+# A closed anchor was disposed already, so it keeps that disposition and gets
+# the quiesce alone.
+#
+# The quiesce de-pins every routed bead of the molecule, its graph.v2 workflow
+# root as well as its steps: the root is a pool-routed door into the same work.
+#
+# --route names a pool to release TO. The target is rig-qualified or refused,
+# because gc.routed_to is read by exact string and a bare agent name routes to
+# nobody and sits forever; on a closed anchor the route is refused outright.
+# --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
+# what the sitting owes the operator, so a rejected edge only warns and never
+# fails the verb.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; npos=0
     waiting_ids=""

@@ -3,10 +3,10 @@
 # services/helm; the open verb is covered by gc-helm-open.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
-#   --release molecule quiescing: steps and the workflow root (tk-xypcy, tk-q5r65)
+#   --release molecule quiescing: steps and the workflow root
 #   --release on a CLOSED anchor: the quiesce without the resurrecting park
 #   the split write, so a refused assignee clear cannot void the route pins
-#   --waiting-on edges (tk-2plde)
+#   --waiting-on edges
 #   the ≤140-codepoint length gate, shared by takeaway and demand
 #   the demand verb's sibling shape and fail-closed edge
 #   the retired board verb refuses and names helm-svc board
