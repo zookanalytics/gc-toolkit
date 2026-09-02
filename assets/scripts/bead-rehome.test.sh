@@ -26,7 +26,10 @@
 #   (n) a `blocks` edge naming the SUCCESSOR is dropped, so the wait a converse
 #       sitting wired beside the ruling does not refuse the ruling's own close;
 #   (o) any OTHER blocker is left alone and its refusal still stands;
-#   (p) every repair command the script hands back runs through `gc bd`.
+#   (p) every repair command the script hands back runs through `gc bd`;
+#   (q) the successor is required under EVERY kind, `not-needed` included —
+#       the kind where nothing carries the work forward is where dropping the
+#       pointer looks reasonable, and it is exactly as unreadable there.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -242,13 +245,27 @@ eq "$(field alpha m.gc.superseded_by al-origin5)" bt-other "the prior dispositio
 eq "$(field alpha status al-origin5)" open "the bead is not closed over a conflicting disposition"
 
 # --- (f) each kind renders its own phrasing -------------------------------
-for pair in "folded:folded into" "fixed-upstream:fixed upstream by" "duplicate:duplicate of"; do
+for pair in "folded:folded into" "fixed-upstream:fixed upstream by" "duplicate:duplicate of" "not-needed:not needed, per"; do
   kind="${pair%%:*}"; want="${pair#*:}"
   mkbead alpha open "al-k$kind"; mkbead beta open "bt-k$kind"
   rc=0; run --origin "al-k$kind" --successor "bt-k$kind" --kind "$kind" || rc=$?
   eq "$rc" 0 "kind '$kind' is accepted"
   has "$(field alpha reason "al-k$kind")" "$want" "kind '$kind' renders '$want'"
 done
+
+# --- (q) the pointer is mandatory under every kind ------------------------
+# `not-needed` is the one kind whose successor carries no work, so it is the
+# one where an unpointed close reads as harmless. It is not: a close naming
+# nothing is a careless close from the store the bead lived in, and here the
+# pointer names the evidence that concluded the bead was unnecessary.
+mkbead alpha open al-origin17
+for kind in re-homed folded fixed-upstream duplicate not-needed; do
+  rc=0; run --origin al-origin17 --kind "$kind" || rc=$?
+  eq "$rc" 64 "kind '$kind' still requires a successor"
+  has "$(cat "$TMP/err")" "--successor is required" "kind '$kind' says which pointer is missing"
+done
+eq "$(field alpha status al-origin17)" open "no unpointed close reached the store"
+eq "$(field alpha m.gc.superseded_by al-origin17)" "" "and nothing was stamped"
 
 # --- (g) an unclaimed id prefix is refused, not guessed -------------------
 mkbead alpha open al-origin7

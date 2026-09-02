@@ -169,12 +169,16 @@ carries the outcome.
 
 
 
-### Closing a bead whose work moved: stamp the successor
+### Closing a bead that did not land: stamp the successor
 
 Not every close is a landing. A bead also closes because its work MOVED —
 re-homed to another rig's store, folded into an absorbing bead, fixed
-upstream, a duplicate. Each hands the work to a successor, and a close that
-does not name its successor is indistinguishable from a careless close.
+upstream, a duplicate — or because the work turned out not to be needed at
+all. The first four hand the work to a successor. `not-needed` hands it to
+nobody: there the pointer names the EVIDENCE that concluded the bead was
+unnecessary, typically the visit bead from the sitting that ruled. Either
+way a close that names nothing is indistinguishable from a careless close,
+so the pointer is required under every kind.
 
 **Never write that close by hand.** One writer:
 
@@ -182,8 +186,9 @@ does not name its successor is indistinguishable from a careless close.
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$cand/assets/scripts/bead-rehome.sh" ] && { REHOME="$cand/assets/scripts/bead-rehome.sh"; break; }
 done
-"$REHOME" --origin <bead-being-closed> --successor <bead-that-carries-it-now> \
-  --kind re-homed|folded|fixed-upstream|duplicate --note "<why, one sentence>"
+"$REHOME" --origin <bead-being-closed> --successor <carrier-or-evidence> \
+  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
+  --note "<why, one sentence>"
 ```
 
 It stamps `gc.superseded_by` + `gc.superseded_by_store`, reads them back,

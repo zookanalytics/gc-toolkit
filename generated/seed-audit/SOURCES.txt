@@ -8,7 +8,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 d88f760e736ac80f7e991c5e4d9f69d7207c4a0f9219570f3b6c52724bd609a6
 agents/converse/prompt.template.md
-3229ccfbf36e5611bfbba8d1b418539b820e6c4760404ebd6c5368dff07c143b
+b534964168bf7a3ced6ed0349949b5fc08b582b7a53dcdf45744941ee7db787c
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -92,7 +92,7 @@ packs/gascity-keeper/template-fragments/rebase-conventions.template.md
 packs/gascity-keeper/template-fragments/refinery-rebase-handling.template.md
 37b2673d42f7153cc7c6cccf3f86186cdad7d2c96d9996ca929ff34d6b45b367
 template-fragments/bead-disposition.template.md
-4b18102953f0ef45267d550ec143f45e669849b551647a8d07bf11bf3be232f8
+90aa9989fdcc1e2705b7eaae4fa3f816bdba16bdae4af3cc98b2febfc26a2976
 template-fragments/canonical-self-rename.template.md
 ec1b86f6decc993dee9f71167f67eadf4c262bfa72c22c06d800aec57d88f6f6
 template-fragments/file-feedback-observations.template.md
