@@ -160,20 +160,43 @@ finding to the anchor with `parent-child`, which states decomposition and
 cascades the anchor's blocked state down onto the finding. I1's shape law is
 the general form: a bead that will ever carry a `blocks` edge must have no
 `parent-child` children. An anchor blocking on a must-fix finding strands any
-parent-child child it has, so a fix unit is filed beside the finding and
-blocked on it, never under the anchor. Today's rework child already sits that
-way: `signoff.sh` writes the child a `blocks` edge onto the anchor, and the
-`pr_number` and `existing_pr` it also stamps name which PR to resume rather
-than holding anything. What the child lacks is a finding bead between it and
-the anchor. It blocks the anchor directly and carries the objections as
-`rejection_reason` prose, so the edge it already has is the one this design
-wants and nothing existing moves.
+parent-child child it has, so the work that answers a finding is filed beside
+it and never under the anchor.
 
-A must-fix finding also carries a route. `merge.sh` records the anchor
-`progressing` only when some live blocker names a `gc.routed_to` that is
-neither empty nor `human`, so an undispatched finding reads as a demand nothing
-is acting on. The `fixing` lane state and the dispatch that enters it are what
-keep that from happening.
+### The fix unit
+
+A finding states an objection and holds the merge. It is never dispatched. The
+bead that is dispatched is a separate one, the **fix unit**, and the route
+lives there. `gc.routed_to` is the pool-offer predicate, so a routed bead is by
+construction the thing a worker claims; routing the finding would make every
+finding its own claim and contradict the many-to-one cardinality above.
+
+A fix unit carries two `blocks` edges, and each buys something distinct.
+
+| Edge | What it buys |
+|---|---|
+| fix unit `blocks` every finding it answers | the many-to-one relation, and the ordering: `bd` refuses to close a blocked issue, so no finding closes before the work answering it does |
+| fix unit `blocks` the anchor | the route the merge readers already look for |
+
+The second edge is why the progress and quiescence readers take no change.
+`merge.sh` records the anchor `progressing` only when some live `blocks`
+blocker names a `gc.routed_to` that is neither empty nor `human`, and the fix
+unit is exactly that blocker. A finding names no route, so an anchor whose only
+must-fix blocker has no fix unit yet reads as a demand nothing is acting on,
+which is the true reading. Quiescence asks the same graph one question further
+out: a fix unit in flight is a live bead blocking a finding on this anchor.
+
+Closing runs the edges backwards. When the fix unit closes, the findings it
+blocked become unblocked, and `gate-ensure.sh`, which already owns lane state
+and computes quiescence, closes each finding whose blockers have all closed.
+The lane leaves `fixing` when the anchor carries no open must-fix finding.
+
+Today's rework child is already a fix unit in this shape. `signoff.sh` writes
+it a `blocks` edge onto the anchor and routes it to the fix-target pool, while
+the `pr_number` and `existing_pr` it also stamps name which PR to resume rather
+than holding anything. What it lacks is a finding bead on the other side of it,
+so the edge it already has is the one this design wants and nothing existing
+moves.
 
 The same model absorbs human PR comments. A human comment becomes a finding
 with `finding.source=human:<login>`, which is what closes the gap `tk-zina89`
