@@ -8,7 +8,7 @@
 # it belongs to a bead, so a pass that is skipped or cut short by its budget
 # costs only the reclaim the next pass takes instead.
 [order]
-description = "Reclaim aged Claude Code agent scratch: empty stale session trees, remove long-dead ones, delete stray files"
+description = "Remove the scratch of Claude Code sessions inactive past the retention horizon, and the files left loose above them"
 trigger = "cooldown"
 interval = "1h"
 exec = "$PACK_DIR/assets/scripts/scratch-reap.sh"

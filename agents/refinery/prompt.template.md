@@ -97,6 +97,6 @@ nothing — log the verdict line and move on.
 
 {{ template "operator-profile" . }}
 
-{{ template "scratch-discipline" . }}
+{{ template "scratch-reclaim" . }}
 
 {{ template "operator-next-step-trailing" . }}

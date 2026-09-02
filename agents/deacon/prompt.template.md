@@ -91,6 +91,6 @@ something you ask about.
 
 {{ template "operator-profile" . }}
 
-{{ template "scratch-discipline" . }}
+{{ template "scratch-reclaim" . }}
 
 {{ template "operator-next-step-trailing" . }}

@@ -10,7 +10,7 @@ worktree, pushed branch, refinery handoff), a review bead carries
 
 {{ template "polecat-doctrine" . }}
 
-{{ template "scratch-discipline" . }}
+{{ template "scratch-reclaim" . }}
 
 {{ template "file-feedback-observations" . }}
 

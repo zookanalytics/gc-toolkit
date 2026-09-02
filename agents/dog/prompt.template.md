@@ -70,4 +70,4 @@ close `refused` or escalate; a genuine request survives as a new warrant.
 
 {{ template "operator-profile" . }}
 
-{{ template "scratch-discipline" . }}
+{{ template "scratch-reclaim" . }}

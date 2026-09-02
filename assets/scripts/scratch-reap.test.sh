@@ -2,17 +2,17 @@
 # Tests for scratch-reap.sh against a synthetic scratch root. Real filesystem,
 # no stubs: every property here is a question about what survives on disk.
 #
-# Covers the two horizons and the boundary between them (a tree past the
-# remove horizon goes, one past only the empty horizon keeps its directories,
-# a fresh one is untouched); the age reading, which takes the NEWEST entry in
-# a tree so one stale file cannot condemn an active session; the live-session
-# hold, exercised against a real process carrying CLAUDE_CODE_SESSION_ID; the
+# Covers the horizon and its boundary (a tree past it goes whole, a tree inside
+# it is untouched); the age reading, which takes the NEWEST entry in a tree so
+# one stale file cannot condemn an active session; the live-session hold,
+# exercised against a real process carrying CLAUDE_CODE_SESSION_ID; the
 # read-only tree that refuses deletion until it is chmod-ed; stray files above
 # the session trees, and stray symlinks, which are unlinked without a chmod
-# that would reach their targets; the budget yield, which must report zero for
-# the tier it skipped rather than its plan; --dry-run; and the root rails,
-# which are what keep a recursive delete off any directory that is not a
-# scratch root.
+# that would reach their targets; the large-file report, which must name a
+# stray dump as well as a file inside a tree; the budget yield, which must
+# report zero for the tier it skipped rather than its plan; --dry-run; and the
+# root rails, which are what keep a recursive delete off any directory that is
+# not a scratch root.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,8 +28,7 @@ NOW="$(date +%s)"
 
 HOUR=3600
 export SCRATCH_REAP_ROOT="$ROOT"
-export SCRATCH_REAP_EMPTY_AFTER=$((12 * HOUR))
-export SCRATCH_REAP_REMOVE_AFTER=$((72 * HOUR))
+export SCRATCH_REAP_INACTIVE_AFTER=$((24 * HOUR))
 
 # A session tree: <slug>/<id>/scratchpad/f, aged to <hours> old throughout.
 mk_session() { # <slug> <id> <hours-old> [file-bytes]
@@ -43,18 +42,25 @@ exists() { [ -e "$1" ]; }
 reset_root() { chmod -R u+w "$ROOT" 2>/dev/null; rm -rf "$ROOT"; mkdir -p "$ROOT"; }
 run() { bash "$SUT" "$@" 2>&1; }
 
-# --- the two horizons ------------------------------------------------------
+# --- the horizon and its boundary ------------------------------------------
 reset_root
 mk_session slug-a ancient 100
-mk_session slug-a middling 24
 mk_session slug-a fresh 1
 OUT="$(run)"
 
-if exists "$ROOT/slug-a/ancient"; then bad "past the remove horizon: tree is gone"; else ok "past the remove horizon: tree is gone"; fi
-if exists "$ROOT/slug-a/middling/scratchpad"; then ok "past the empty horizon: directories survive"; else bad "past the empty horizon: directories survive"; fi
-if exists "$ROOT/slug-a/middling/scratchpad/f"; then bad "past the empty horizon: files are gone"; else ok "past the empty horizon: files are gone"; fi
-if exists "$ROOT/slug-a/fresh/scratchpad/f"; then ok "inside both horizons: untouched"; else bad "inside both horizons: untouched"; fi
-has "$OUT" "removed 1 trees, emptied 1" "summary counts each tier"
+if exists "$ROOT/slug-a/ancient"; then bad "past the horizon: the tree is removed whole"; else ok "past the horizon: the tree is removed whole"; fi
+if exists "$ROOT/slug-a/fresh/scratchpad/f"; then ok "inside the horizon: untouched"; else bad "inside the horizon: untouched"; fi
+has "$OUT" "removed 1 session trees" "the summary counts what it removed"
+has "$OUT" "kept 1 trees" "the summary counts what it kept"
+
+# The boundary is the horizon itself, not some larger round number: a tree one
+# hour the safe side of it survives, one hour the other side does not.
+reset_root
+mk_session slug-a just-inside 23
+mk_session slug-a just-outside 25
+run > /dev/null
+if exists "$ROOT/slug-a/just-inside/scratchpad/f"; then ok "an hour inside the horizon survives"; else bad "an hour inside the horizon survives"; fi
+if exists "$ROOT/slug-a/just-outside"; then bad "an hour past the horizon is reaped"; else ok "an hour past the horizon is reaped"; fi
 
 # A tree is aged by its NEWEST entry, so one stale file in an active session
 # does not condemn the session.
@@ -70,15 +76,13 @@ mk_session slug-b mixed 100
 run > /dev/null
 if exists "$ROOT/slug-b/mixed"; then bad "without the recent entry the same tree is reaped"; else ok "without the recent entry the same tree is reaped"; fi
 
-# A tree already down to bare directories has nothing to empty, so it is not
-# re-listed every pass; it waits for the remove horizon.
+# A directory mtime counts too, so a tree whose only recent activity was a
+# mkdir still reads as active.
 reset_root
-mk_session slug-b husk 24
-rm -f "$ROOT/slug-b/husk/scratchpad/f"
-touch -d "@$((NOW - 24 * HOUR))" "$ROOT/slug-b/husk/scratchpad" "$ROOT/slug-b/husk"
-OUT="$(run)"
-has "$OUT" "emptied 0" "a tree with no files left is not counted as emptied"
-if exists "$ROOT/slug-b/husk/scratchpad"; then ok "the husk waits for the remove horizon"; else bad "the husk waits for the remove horizon"; fi
+mk_session slug-b dironly 100
+touch -d "@$NOW" "$ROOT/slug-b/dironly/scratchpad"
+run > /dev/null
+if exists "$ROOT/slug-b/dironly/scratchpad/f"; then ok "a recent directory mtime holds the tree"; else bad "a recent directory mtime holds the tree"; fi
 
 # --- live sessions are held whatever their mtime ---------------------------
 reset_root
@@ -86,10 +90,11 @@ mk_session slug-c live-abc 100
 mk_session slug-c dead-abc 100
 env CLAUDE_CODE_SESSION_ID=live-abc sleep 25 &
 SLEEPER=$!
-run > /dev/null
+OUT="$(run)"
 kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
-if exists "$ROOT/slug-c/live-abc/scratchpad/f"; then ok "a session with a running process is held past both horizons"; else bad "a session with a running process is held past both horizons"; fi
+if exists "$ROOT/slug-c/live-abc/scratchpad/f"; then ok "a session with a running process is held past the horizon"; else bad "a session with a running process is held past the horizon"; fi
 if exists "$ROOT/slug-c/dead-abc"; then bad "its equally stale neighbour is still reaped"; else ok "its equally stale neighbour is still reaped"; fi
+has "$OUT" "held 1 live" "a held session is reported as held, not kept"
 
 # --- read-only trees ------------------------------------------------------
 # A Go module cache copied into scratch is mode 0555/0444: rm refuses it, and
@@ -117,29 +122,48 @@ if exists "$ROOT/fresh.json"; then ok "a fresh stray file at the root survives";
 if exists "$ROOT/slug-e/loose.json"; then bad "a stale loose file beside the session trees is deleted"; else ok "a stale loose file beside the session trees is deleted"; fi
 if exists "$ROOT/slug-e/keeper/scratchpad/f"; then ok "the live session beside it is untouched"; else bad "the live session beside it is untouched"; fi
 
+# --- the large-file report -------------------------------------------------
+# The report is what keeps a recurring writer visible, and a whole-store dump
+# left loose at the root is exactly that writer, so a stray has to reach it
+# the same way a file inside a doomed tree does.
+reset_root
+mk_session slug-l intree 100 $((9 * 1024 * 1024))
+head -c $((10 * 1024 * 1024)) /dev/zero > "$ROOT/dump.json"
+touch -d "@$((NOW - 100 * HOUR))" "$ROOT/dump.json"
+OUT="$(run)"
+has "$OUT" "reaped 10 MiB  $ROOT/dump.json" "a large stray file is named in the report"
+has "$OUT" "reaped 9 MiB  $ROOT/slug-l/intree/scratchpad/f" "a large file inside a doomed tree is named in the report"
+
+# A file the pass did not take is not reported as taken.
+reset_root
+mk_session slug-l kept 1 $((9 * 1024 * 1024))
+OUT="$(run)"
+if grep -q "reaped" <<< "$OUT"; then bad "a kept file is not named in the report"; else ok "a kept file is not named in the report"; fi
+
 # --- empty slug directories, but only at the top ---------------------------
 reset_root
 mk_session slug-f gone 100
-mk_session slug-g emptied 24
+mk_session slug-g here 1
+rm -f "$ROOT/slug-g/here/scratchpad/f"
 run > /dev/null
 if exists "$ROOT/slug-f"; then bad "a slug directory that lost its last session is pruned"; else ok "a slug directory that lost its last session is pruned"; fi
-if exists "$ROOT/slug-g/emptied/scratchpad"; then ok "an emptied scratchpad inside a session is NOT pruned"; else bad "an emptied scratchpad inside a session is NOT pruned"; fi
+if exists "$ROOT/slug-g/here/scratchpad"; then ok "an empty scratchpad in a kept session is NOT pruned"; else bad "an empty scratchpad in a kept session is NOT pruned"; fi
 
-# --- the budget yields the cheaper tiers, and reports zero for them ---------
+# --- the budget yields the stray tier, and reports zero for it -------------
 # A slow `du` on PATH spends the budget inside the pass, which is the only way
 # a fixture this small can reach the guard.
 reset_root
 mk_session slug-k ancient 100
-mk_session slug-k middling 24
+printf 'old\n' > "$ROOT/stray.json"; touch -d "@$((NOW - 100 * HOUR))" "$ROOT/stray.json"
 SLOWBIN="$TMP/slowbin"; mkdir -p "$SLOWBIN"
 REAL_DU="$(command -v du)"
 printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$REAL_DU" > "$SLOWBIN/du"
 chmod +x "$SLOWBIN/du"
 OUT="$(PATH="$SLOWBIN:$PATH" SCRATCH_REAP_BUDGET=1 run)"
-if exists "$ROOT/slug-k/ancient"; then bad "over budget: removal still runs"; else ok "over budget: removal still runs"; fi
-if exists "$ROOT/slug-k/middling/scratchpad/f"; then ok "over budget: the empty tier yields"; else bad "over budget: the empty tier yields"; fi
-has "$OUT" "yielded at the empty batch" "over budget: the yield is reported"
-has "$OUT" "emptied 0" "over budget: a yielded tier reports zero, not its plan"
+if exists "$ROOT/slug-k/ancient"; then bad "over budget: tree removal still runs"; else ok "over budget: tree removal still runs"; fi
+if exists "$ROOT/stray.json"; then ok "over budget: the stray tier yields"; else bad "over budget: the stray tier yields"; fi
+has "$OUT" "yielded at the stray batch" "over budget: the yield is reported"
+has "$OUT" "deleted 0 stray files" "over budget: a yielded tier reports zero, not its plan"
 
 # --- dry run ---------------------------------------------------------------
 reset_root
@@ -160,11 +184,11 @@ has "$OUT" "refusing to reap" "the refusal says so"
 OUT="$(SCRATCH_REAP_ROOT="$TMP/claude-$(id -u)-absent" run)"; RC=$?
 eq "$RC" 0 "an absent root is nothing to do, not an error"
 
-OUT="$(SCRATCH_REAP_REMOVE_AFTER=60 SCRATCH_REAP_EMPTY_AFTER=120 run)"; RC=$?
-eq "$RC" 2 "a remove horizon shorter than the empty horizon is refused"
+OUT="$(SCRATCH_REAP_INACTIVE_AFTER=0 run)"; RC=$?
+eq "$RC" 2 "a zero horizon is refused"
 if exists "$ROOT/slug-i/ancient/scratchpad/f"; then ok "the refused run deleted nothing"; else bad "the refused run deleted nothing"; fi
 
-OUT="$(SCRATCH_REAP_EMPTY_AFTER=notanumber run)"; RC=$?
+OUT="$(SCRATCH_REAP_INACTIVE_AFTER=notanumber run)"; RC=$?
 eq "$RC" 2 "a non-numeric horizon is refused"
 
 # --- symlinks are unlinked, never followed ---------------------------------

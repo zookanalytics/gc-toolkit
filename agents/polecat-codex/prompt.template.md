@@ -10,7 +10,7 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
 
 {{ template "polecat-doctrine" . }}
 
-{{ template "scratch-discipline" . }}
+{{ template "scratch-reclaim" . }}
 
 {{ template "file-feedback-observations" . }}
 
