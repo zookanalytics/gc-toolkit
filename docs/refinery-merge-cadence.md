@@ -106,13 +106,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too.
 4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
-   (same repo, not a fork, head branch matches), re-read the anchor, validate
-   holds/posture/gates/children/approval/base/CLEAN, check that the merge
-   result keeps `generated/seed-audit` current, re-read the full
+   (same repo, not a fork), re-read the anchor and check it still gates this
+   PR — open, still `pull_request`, same number, url and head branch. Then
+   either the record for a PR already merged, or, for an OPEN non-draft one,
+   validate holds/posture/gates/children/approval/base/CLEAN, check that the
+   merge result keeps `generated/seed-audit` current, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
    `lifecycle.sh` call. The posture it validates is the value **pr-facts
    recorded on the anchor**, never a fresh read of GitHub.
+
+   Landing and recording are two writes, and a pass killed between them leaves
+   an anchor saying `pull_request` over a PR already on the target branch.
+   This arm records that PR rather than leaving it to pr-facts: the arms are
+   ordered, so a recovery downstream of the merge is reached least often
+   exactly when it is needed. The record stands on the same live anchor
+   identity the merge does, since it writes merged truth about one PR onto a
+   bead that may have moved to another since the enumeration.
 
    The seed-audit check is the one gate here that is a property of the merge
    rather than of the head. `generated/seed-audit` is rendered from the whole

@@ -5,7 +5,8 @@
 # (merge_hold, duplicate anchor + escalate, retarget, non-green gate, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, approval arms + veto,
 # CLEAN/UNSTABLE handling); the recorded pr_posture hold, read off the anchor;
-# identity refusals (fork, url/branch mismatch);
+# identity refusals (fork, url/branch mismatch); the record for a PR already
+# merged and the live anchor identity both it and the merge stand on;
 # the terminal full-authorization re-read; and the loud non-zero exit when the
 # record half fails after a merge.
 set -uo pipefail
@@ -258,11 +259,9 @@ out=$(STUB_UPDATE_FAIL="S3" "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "a failed recovery exits non-zero"
 has "$out" "is MERGED but the record failed" "…and says the PR did land"
 eq "$(bstatus S3)" "open" "…leaving the anchor for the next pass"
-# An anchor that has moved off pull_request since the enumeration is not ours to
-# close; --expect is what makes the stale row safe. Modelled as the real race:
-# the enumeration reads pull_request, another writer detaches the anchor, and the
-# transition's own read sees the new state. unanchored -> merged is a LEGAL edge,
-# so edge legality does not cover this — only --expect does.
+# The enumerated row is a snapshot, and the record is written from the PR read
+# that followed it. A mid-pass write can detach the anchor between the two:
+# the live re-read is what sees that, before anything is written.
 store "[$(anchor S4 73)]"
 printf '%s' "$(prview 73 MERGED CLEAN)" > "$GH_DIR/pr_view_73.json"
 cat > "$TMP/s4hook.sh" <<HOOK
@@ -275,7 +274,63 @@ chmod +x "$TMP/s4hook.sh"
 out=$(STUB_SHOW_HOOK="$TMP/s4hook.sh" "$SUT" 2>&1)
 eq "$(bstatus S4)" "open" "an anchor detached since the enumeration is not closed"
 eq "$(meta S4 merged_sha)" "<absent>" "…and nothing is recorded on it"
-has "$out" "record failed" "…the refusal is reported, not swallowed"
+has "$out" "changed since enumeration" "…the live re-read is what catches it"
+# The same-state move --expect cannot see: the anchor keeps merge_result and is
+# re-pointed at another PR. Recording from the enumerated PR would stamp its
+# merge commit, number and branch onto an anchor now gating a different one —
+# a merged record that is false on the live bead.
+store "[$(anchor S7 76)]"
+printf '%s' "$(prview 76 MERGED CLEAN)" > "$GH_DIR/pr_view_76.json"
+cat > "$TMP/s7hook.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "S7" ] || exit 0
+tmp=\$(mktemp)
+jq -c 'map(if .id == "S7" then (.metadata.pr_number = "77"
+  | .metadata.pr_url = "https://github.com/zook/gc-toolkit/pull/77"
+  | .metadata.branch = "polecat/x77") else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+HOOK
+chmod +x "$TMP/s7hook.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/s7hook.sh" "$SUT" 2>&1)
+eq "$(bstatus S7)" "open" "an anchor re-pointed at another PR is not closed"
+eq "$(meta S7 merged_sha)" "<absent>" "…and no merge commit is stamped on it"
+eq "$(meta S7 pr_number)" "77" "…the anchor keeps the PR it now gates"
+has "$out" "anchor S7 changed since enumeration" "…and the skip names it"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…nothing was merged either"
+# An anchor whose recorded PR identity disagrees with the PR being recorded is
+# a repair only an operator can make — the record holds on it, as the merge does.
+store "[$(anchor S8 78)]"
+printf '%s' "$(prview 78 MERGED CLEAN)" | jq -c '.headRefName = "other/branch"' > "$GH_DIR/pr_view_78.json"
+out=$("$SUT" 2>&1)
+has "$out" "records branch 'polecat/x78' but PR#78 is opened from 'other/branch'" "a head-branch mismatch holds the record"
+eq "$(bstatus S8)" "open" "…and nothing is recorded on it"
+store "[$(anchor S9 79)]"
+printf '%s' "$(prview 79 MERGED CLEAN)" | jq -c '.url = "https://github.com/zook/gc-toolkit/pull/99"' > "$GH_DIR/pr_view_79.json"
+out=$("$SUT" 2>&1)
+has "$out" "records pr_url 'https://github.com/zook/gc-toolkit/pull/79'" "a pr_url mismatch holds the record"
+eq "$(bstatus S9)" "open" "…and nothing is recorded on it"
+# --expect covers the rest of the window: a detach landing AFTER the re-read is
+# seen only by the transition's own read. unanchored -> merged is a LEGAL edge,
+# so edge legality does not cover this — only --expect does. The hook fires on
+# the second show of SA, which is that read.
+store "[$(anchor SA 90)]"
+printf '%s' "$(prview 90 MERGED CLEAN)" > "$GH_DIR/pr_view_90.json"
+rm -f "$TMP/sa.count"
+cat > "$TMP/sahook.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "SA" ] || exit 0
+n=\$(cat "$TMP/sa.count" 2>/dev/null || echo 0); n=\$((n + 1))
+printf '%s' "\$n" > "$TMP/sa.count"
+[ "\$n" -ge 2 ] || exit 0
+tmp=\$(mktemp)
+jq -c 'map(if .id == "SA" then (.metadata |= del(.merge_result)) else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+HOOK
+chmod +x "$TMP/sahook.sh"
+out=$(STUB_SHOW_HOOK="$TMP/sahook.sh" "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "a detach landing after the re-read exits non-zero"
+eq "$(bstatus SA)" "open" "…the anchor is not closed"
+eq "$(meta SA merged_sha)" "<absent>" "…nothing is recorded on it"
+has "$out" "record failed" "…and the refusal is reported, not swallowed"
 
 echo "# closed-unmerged and draft PRs are pr-facts' business"
 store "[$(anchor S5 74)]"

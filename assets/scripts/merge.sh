@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # merge — arm 3 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
-# repo, not a fork, right head branch), then either the record for a PR already
-# merged — landing and recording are two writes, and a pass killed between them
-# leaves an anchor that says pull_request over a PR that landed — or, for an
-# OPEN non-draft PR, the merge: live anchor re-read,
-# then validate in order: merge_hold; unanswered review comments (pr_posture,
+# repo, not a fork), live anchor re-read (still open, still gating on
+# pull_request, still naming this PR by number, url and head branch), then
+# either the record for a PR already merged — landing and recording are two
+# writes, and a pass killed between them leaves an anchor that says
+# pull_request over a PR that landed — or, for an OPEN non-draft PR, the
+# merge: validate in order: merge_hold; unanswered review comments (pr_posture,
 # read OFF THE ANCHOR, never re-derived from GitHub here); one-anchor-per-PR
 # (hold + escalate once —
 # fail-closed defense; the structural check is doctor's); non-empty check_set
@@ -202,7 +203,44 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num is opened from '$head_repo' (cross=$head_cross), not this repository's own branch; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # --- a PR already merged: the record, not the merge -----------------------
+  # Closed-unmerged and draft PRs are pr-facts.sh's to record; this arm merges
+  # an OPEN non-draft PR and records one already merged.
+  if [ "$state" != "MERGED" ]; then
+    [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
+    [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
+  fi
+
+  # --- live anchor re-read: identity, ahead of either write -------------------
+  # The enumerated row is a snapshot taken before the PR read, and a write
+  # landing in that gap can leave the anchor on a different PR. Both arms below
+  # write merged truth about THIS PR onto this anchor, so both stand on the
+  # same check: still open, still gating on pull_request, and still naming this
+  # PR by number, url and head branch. None of that is covered by --expect,
+  # which sees only the state.
+  fresh=$(anchor_row "$id")
+  if [ -z "$fresh" ]; then
+    echo "$PROG: anchor $id re-read failed; skip (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  fstatus=$(printf '%s' "$fresh" | jq -r '.status | ascii_downcase')
+  fresult=$(printf '%s' "$fresh" | jq -r '.meta.merge_result // ""')
+  fpr=$(printf '%s' "$fresh" | jq -r '(.meta.pr_number // "") | tostring')
+  if [ "$fstatus" != "open" ] || [ "$fresult" != "pull_request" ] || [ "$fpr" != "$num" ]; then
+    echo "$PROG: anchor $id changed since enumeration (status='$fstatus' merge_result='$fresult' pr='$fpr'); skip" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  prurl=$(printf '%s' "$fresh" | jq -r '.meta.pr_url // ""')
+  abranch=$(printf '%s' "$fresh" | jq -r '.meta.branch // ""')
+  if [ -n "$prurl" ] && [ "$(canon_pr_url "$prurl")" != "$live_url" ]; then
+    echo "$PROG: anchor $id records pr_url '$prurl' but PR#$num is '$live_url'; merge held — operator must repair"
+    held=$((held + 1)); continue
+  fi
+  if [ -n "$abranch" ] && [ "$head_ref" != "$abranch" ]; then
+    echo "$PROG: anchor $id records branch '$abranch' but PR#$num is opened from '$head_ref'; merge held — operator must repair"
+    held=$((held + 1)); continue
+  fi
+
+  # --- a PR already merged: the record, not the merge -------------------------
   # Landing and recording are two writes with a gap between them, and a pass
   # killed at its timeout can fall in that gap: the PR is merged, the anchor
   # still says pull_request, and the bead reads as in flight forever. This arm
@@ -212,10 +250,10 @@ while IFS= read -r row; do
   # whenever the merge that strands a record is, and it costs one `gh pr view`
   # on the anchors that need it.
   #
-  # The identity gates above have already certified this PR is ours and not a
-  # fork's. --expect is what makes a stale enumeration safe: the transition
-  # re-reads the anchor and refuses anything that has moved off pull_request.
-  # $base is the branch the PR actually landed on, which is the fact to record.
+  # It stands on the identity gates and the re-read above; --expect closes what
+  # is left of the window, re-reading the anchor and refusing anything that has
+  # moved off pull_request. $base is the branch the PR actually landed on,
+  # which is the fact to record.
   if [ "$state" = "MERGED" ]; then
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
@@ -239,39 +277,15 @@ while IFS= read -r row; do
     fi
     continue
   fi
-  # Closed-unmerged and draft PRs are pr-facts.sh's to record; the skill only merges.
-  [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
-  [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
 
-  # --- live anchor re-read (the enumeration predates the PR read) --------------
-  fresh=$(anchor_row "$id")
-  if [ -z "$fresh" ]; then
-    echo "$PROG: anchor $id re-read failed; skip (retry next pass)" >&2
-    skipped=$((skipped + 1)); continue
-  fi
-  fstatus=$(printf '%s' "$fresh" | jq -r '.status | ascii_downcase')
-  fresult=$(printf '%s' "$fresh" | jq -r '.meta.merge_result // ""')
-  fpr=$(printf '%s' "$fresh" | jq -r '(.meta.pr_number // "") | tostring')
-  if [ "$fstatus" != "open" ] || [ "$fresult" != "pull_request" ] || [ "$fpr" != "$num" ]; then
-    echo "$PROG: anchor $id changed since enumeration (status='$fstatus' merge_result='$fresult' pr='$fpr'); skip" >&2
-    skipped=$((skipped + 1)); continue
-  fi
-  prurl=$(printf '%s' "$fresh" | jq -r '.meta.pr_url // ""')
-  abranch=$(printf '%s' "$fresh" | jq -r '.meta.branch // ""')
+  # --- the rest of the anchor-local authorization set, off the same row -------
+  # Only the merge consults these; the record above needs none of them.
   target=$(printf '%s' "$fresh" | jq -r '.meta.merged_target // ""')
   hold=$(printf '%s' "$fresh" | jq -r '.meta.merge_hold // ""')
   dismissed=$(printf '%s' "$fresh" | jq -r '.meta.signoff_dismissed // ""')
   checkset=$(printf '%s' "$fresh" | jq -r '.meta.check_set // ""')
   posture=$(printf '%s' "$fresh" | jq -r '.meta.pr_posture // ""')
   aroute=$(printf '%s' "$fresh" | jq -r '.meta["gc.routed_to"] // ""')
-  if [ -n "$prurl" ] && [ "$(canon_pr_url "$prurl")" != "$live_url" ]; then
-    echo "$PROG: anchor $id records pr_url '$prurl' but PR#$num is '$live_url'; merge held — operator must repair"
-    held=$((held + 1)); continue
-  fi
-  if [ -n "$abranch" ] && [ "$head_ref" != "$abranch" ]; then
-    echo "$PROG: anchor $id records branch '$abranch' but PR#$num is opened from '$head_ref'; merge held — operator must repair"
-    held=$((held + 1)); continue
-  fi
 
   # --- validate, in order -------------------------------------------------------
   # Empty/absent check_set is NEVER "no gates": the declared gateless opt-out is
