@@ -169,10 +169,15 @@ case "$1 ${2:-}" in
   "bd dep")
     # `dep list` is a READ: it answers from a per-bead fixture and never lands
     # in FAKE_DEPS, which models the graph writes the edge assertions count.
-    # A bead with no fixture has no edges; A-PROBEDEAD is the store that will
-    # not answer at all.
+    # A bead with no fixture has no edges. Two beads model a store the guard
+    # cannot read: A-PROBEDEAD does not answer at all, and A-PROBEJUNK answers
+    # the way the real `dep list` reports a bead it cannot resolve — a JSON
+    # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
-      case "${4:-}" in A-PROBEDEAD*) exit 1 ;; esac
+      case "${4:-}" in
+        A-PROBEDEAD*) exit 1 ;;
+        A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
+      esac
       if [ -f "$FAKE_DEPLISTS/${4:-}.json" ]; then cat "$FAKE_DEPLISTS/${4:-}.json"; else printf '[]\n'; fi
       exit 0
     fi
@@ -197,6 +202,10 @@ mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
 #   A-BLOCKED   an open bead that is not a demand on it -> the work is there
 #   A-DEMANDED  its own demand, open -> answering it makes A-DEMANDED the work
 #   A-DONEBLK   the same delegated child, closed -> the wait is over
+# A-PROBEDEAD and A-PROBEJUNK are answered by the stub's own arms and never
+# reach these files. Each keeps a fixture anyway, carrying a live blocker.
+# Teach the stub to serve it instead of failing and both probe cases go red.
+# That is what proves they pass on the unreadable path and not on an empty one.
 cat > "$TMP/deplists/A-BLOCKED.json" <<'J'
 [{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}},
  {"id":"d-mine","status":"closed","dependency_type":"blocks","metadata":{"gc.demand_for":"A-BLOCKED"}}]
@@ -208,6 +217,9 @@ cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
 [{"id":"w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
+[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
 [{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 export FAKE_SL_PATH="$TMP/signal-loom"
@@ -718,7 +730,7 @@ grep -qE '^bd update UNKNOWN-A( |$)' "$TMP/updates" \
   && ok "(FOLDBLIND) …while a takeaway WITHOUT --release is unchanged by the gate" \
   || bad "(FOLDBLIND) the gate now blocks a plain takeaway: $(cat "$TMP/updates")"
 
-# ── takeaway --route on a DELEGATED subject: refused (tk-4ui8ez) ─────────────
+# ── takeaway --route on a DELEGATED subject: refused ─────────────────────────
 # A pool route says "this bead is the work". A bead blocked by anything but its
 # own demand has its work on the blocker, so the route would only wait for the
 # blocker to close and then offer a bead with no method, forever. Covered:
@@ -727,7 +739,8 @@ grep -qE '^bd update UNKNOWN-A( |$)' "$TMP/updates" \
 #   (DEMAND)     blocked only by its own demand: the route still lands
 #   (DELEGDONE)  a closed blocker is not a wait: the route still lands
 #   (DELEGBARE)  the guard is scoped to --route; --release alone still stamps
-#   (DELEGPROBE) an unreadable probe allows the route rather than blocking a sitting
+#   (DELEGPROBE) a store that will not answer allows the route, and warns
+#   (DELEGJUNK)  a payload that is not an edge array is unreadable the same way
 : > "$TMP/updates"; : > "$TMP/deps"; printf '%s' "$POOL" > "$TMP/routed"
 DRC=0
 sh "$SCRIPT" takeaway A-BLOCKED "routed — the fix is slung" --by converse \
@@ -754,6 +767,9 @@ eq "$MRC" "0" "(DEMAND) a bead blocked only by its own demand still routes"
 grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
   && ok "(DEMAND) …and the route is written" \
   || bad "(DEMAND) the route was lost: $(cat "$TMP/updates")"
+grep -q 'could not read the blockers' "$TMP/derr" \
+  && bad "(DEMAND) a probe that answered still warned it had not (stderr: $(cat "$TMP/derr"))" \
+  || ok "(DEMAND) …and a probe that answered says nothing: the warning stays a signal"
 
 # (DELEGDONE) a closed blocker is history, not a wait.
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
@@ -774,7 +790,8 @@ grep -q -- '--set-metadata gc.takeaway=ruled — the work is on the child' "$TMP
   || bad "(DELEGBARE) the stamp was lost: $(cat "$TMP/updates")"
 
 # (DELEGPROBE) a store that will not answer must not cost a sitting its
-# disposition — the guard degrades to the behaviour it replaced.
+# disposition. The guard degrades to the behaviour it replaced, and says it
+# did: "no blockers" and "never looked" are otherwise the same silence.
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
 PRC=0
 sh "$SCRIPT" takeaway A-PROBEDEAD "actionable — routed" \
@@ -783,6 +800,27 @@ eq "$PRC" "0" "(DELEGPROBE) an unreadable blocker probe allows the route"
 grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
   && ok "(DELEGPROBE) …and the route is written" \
   || bad "(DELEGPROBE) the route was lost: $(cat "$TMP/updates")"
+grep -q 'could not read the blockers on A-PROBEDEAD' "$TMP/derr" \
+  && ok "(DELEGPROBE) …and the caller is told the check did not run" \
+  || bad "(DELEGPROBE) the guard was skipped in silence (stderr: $(cat "$TMP/derr"))"
+grep -q -- '--release alone' "$TMP/derr" \
+  && ok "(DELEGPROBE) …and named the call that needs no probe" \
+  || bad "(DELEGPROBE) the warning offers no move (stderr: $(cat "$TMP/derr"))"
+
+# (DELEGJUNK) `dep list` reports a bead it cannot resolve as a JSON error
+# object on stdout. A pipeline never sees the exit code, so the SHAPE is the
+# only signal, and reading it as "no edges" would silently pass the guard.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+JRC=0
+sh "$SCRIPT" takeaway A-PROBEJUNK "actionable — routed" \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || JRC=$?
+eq "$JRC" "0" "(DELEGJUNK) a non-array payload allows the route too"
+grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
+  && ok "(DELEGJUNK) …and the route is written" \
+  || bad "(DELEGJUNK) the route was lost: $(cat "$TMP/updates")"
+grep -q 'could not read the blockers on A-PROBEJUNK' "$TMP/derr" \
+  && ok "(DELEGJUNK) …and it is reported unreadable, not empty" \
+  || bad "(DELEGJUNK) an error object was read as an edge list (stderr: $(cat "$TMP/derr"))"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the

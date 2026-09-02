@@ -495,18 +495,28 @@ cmd_takeaway() {
     # headline, and the route is all the refusal costs: the board gathers a
     # parked row on gc.takeaway and bands it disposition-due once its waits have
     # all closed, so the operator is asked either way. An unreadable probe
-    # allows the route, because a bd that will not answer must not cost a
-    # sitting its disposition. A cross-store edge is invisible here, as it is to
-    # every other reader of this graph.
+    # allows the route and says so. A bd that will not answer must not cost a
+    # sitting its disposition, but a route stamped over an uninspected bead is
+    # a weaker promise than one the guard cleared, and in silence the two read
+    # alike. Unreadable covers the payload as well as the exit code: `dep list`
+    # reports a bead it cannot resolve as a JSON error OBJECT on stdout, which
+    # a filter that answers "" on anything but an array takes for no edges at
+    # all. A cross-store edge is left out of the array entirely, invisible here
+    # as it is to every other reader of this graph.
     if [ -n "$route" ]; then
+        probe_read=1
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         blocked_by=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
-            | jq -r --arg b "$bead" 'if type == "array" then
+            | jq -er --arg b "$bead" 'if type == "array" then
                    [ .[] | select((.dependency_type // "") == "blocks")
                          | select((.status // "") != "closed")
                          | select(((.metadata // {})["gc.demand_for"] // "") != $b)
                          | .id ] | join(" ")
-                 else "" end' 2>/dev/null || printf '')
+                 else error("not an edge array") end' 2>/dev/null) || probe_read=""
+        if [ -z "$probe_read" ]; then
+            blocked_by=""
+            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so --route '$route' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$route' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+        fi
         if [ -n "$blocked_by" ]; then
             echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
             exit 2
