@@ -233,22 +233,19 @@ eq "$(bead_state "$MAP_STEP" '{"id":"n1","metadata":{"gc.kind":"workflow","gc.ro
    "(V) ownerless bead is dropped by the filter, never classified"
 
 # --- Fail-safe guard: only an unloadable map may skip orphan recovery. -------
-# THE SECOND BUG (tk-fc7h58): the fail safe read "never orphan on an EMPTY map",
-# but it was prose with no predicate and no variable, so the witness applied it
-# by judgment — and applied it to a POPULATED map in which some owners resolved
-# absent. Two escalations in five days under witness-empty-liveness-map, each
-# skipping orphan recovery and spending a converse sitting, both reporting the
-# map as non-empty in their own text (16 and 22 sessions).
+# The fail safe is a predicate, not a judgment call. The liveness-map-guard
+# block computes MAP_COUNT and MAP_TRIP once per cycle, before the first bead is
+# read, and MAP_TRIP alone decides whether recovery is skipped. No bead is in
+# scope where the decision is made, so an individual owner resolving absent
+# cannot reach it.
 #
-# The premise can never clear on its own. Closed sessions are excluded from
+# That separation is load-bearing. Closed sessions are excluded from
 # `gc session list` by design on every path, so a bead naming a session that has
-# since closed ALWAYS resolves absent. Reading that as drift suppresses orphan
-# recovery permanently rather than for one cycle.
+# since closed ALWAYS resolves absent. A fail safe that read one absent owner as
+# an unloadable map would suppress orphan recovery permanently rather than for
+# one cycle, because the premise can never clear on its own.
 #
-# THE FIX: the liveness-map-guard block computes MAP_COUNT and MAP_TRIP once per
-# cycle, before the first bead is read. No bead is in scope where the decision is
-# made, so an individual absent owner cannot reach it. These cases execute the
-# real block over a stub `gc`.
+# These cases execute the real block over a stub `gc`.
 GUARD="$(awk '
   /# >>> liveness-map-guard/ {f=1; next}
   /# <<< liveness-map-guard/ {f=0}
@@ -334,9 +331,8 @@ SESSIONS_LIVE='{"ok":true,"sessions":[
   {"id":"lx-fjnq1","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}'
 NO_BEADS='[]'
 
-# (W) THE REGRESSION. The exact shape both escalations fired on: a populated
-#     map that omits the sessions the stalled beads name. Orphan recovery must
-#     proceed. A trip here is the bug returning.
+# (W) The shape the fail safe must not fire on: a populated map that omits the
+#     sessions the stalled beads name. Orphan recovery must proceed.
 eq "$(guard "$SESSIONS_LIVE" "$NO_BEADS")" "4|" \
    "(W) populated map, owners it does not name -> no trip, recovery proceeds"
 # (W) The two halves must agree: the same map that does not trip still resolves
@@ -404,10 +400,9 @@ eq "$(guard_map '{"ok":true,"sessions":[{"id":"x","state":"closed"}]}' \
      | jq -r '.x + "," + .y')" "closed,active" \
    "(AA) session-list state wins the collision; bead-only keys survive"
 
-# (AB) The structural guarantee, and the only one that keeps the bug from
-#      coming back through prose: the decision is computed where no bead
-#      exists. If the block ever reads per-bead state, an individual absent
-#      owner can reach the fail safe again.
+# (AB) The structural guarantee behind the predicate: the decision is computed
+#      where no bead exists. If the block ever reads per-bead state, an
+#      individual absent owner can reach the fail safe.
 for v in OWNER STATE '$bead' '.owner'; do
   grep -qF -- "$v" "$TMP/guard.sh" \
     && bad "(AB) guard references per-bead state '$v' — the fail safe must not see a bead" \
@@ -422,7 +417,7 @@ LOOKUP_LINE=$(grep -n '# >>> liveness-lookup' "$TOML" | cut -d: -f1)
 
 # (AC) The prose must hand the decision to the variable and must say, in the
 #      formula itself, that an absent owner on a populated map is not drift.
-#      The judgment call is what misfired; naming the predicate removes it.
+#      A named predicate is what leaves no judgment call to make.
 grep -qF 'MAP_TRIP` is the entire test' "$TOML" \
   && ok "(AC) fail-safe prose binds the decision to MAP_TRIP" \
   || bad "(AC) fail-safe prose must bind the decision to MAP_TRIP"
