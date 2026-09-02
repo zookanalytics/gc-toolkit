@@ -284,7 +284,10 @@ a design that fails its own integrity checks on the first pass.
 
 `check_set` itself needs no new structure. It is already a list, `merge.sh`
 already holds until every entry is green, and the reason it is always one
-element is that `gate-ensure.sh` stamps the static default `codex`. Populating
+element is that `gate-ensure.sh` stamps the static default `codex`. Every one
+of the 16 open beads in this rig carrying a `check_set` reads exactly `codex`,
+so the multi-lane machinery below has never had a second lane to exercise it.
+Populating
 it is the triage design in `specs/2026-08-review-gates/scope.md`, which is
 scoped, unimplemented, and compatible with this one: triage is a lane like any
 other, and monotonic widening is orthogonal to how a lane converges.
