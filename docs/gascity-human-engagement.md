@@ -511,9 +511,11 @@ Two endings the idle setting does not own, and both still reach converse:
   health restart can still take a held sitting out from under a reader. The
   trace-before-you-wait discipline holds for exactly this reason.
 
-The cost is real: a held visit nobody answers holds its slot against
-`max_active_sessions = 6` indefinitely, where an idle clock would recycle it.
-`gc-helm dismiss` is the release valve.
+The cost is real: a held visit nobody answers holds a `max_active_sessions`
+slot indefinitely, where an idle clock would recycle it. The bound is the
+pack default in `agents/converse/agent.toml`, and a rig raises it in
+`city.toml`. How many held visits it takes to fill the pool is therefore a
+per-rig number. `gc-helm dismiss` is the release valve.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
