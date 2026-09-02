@@ -462,7 +462,12 @@ sequenceDiagram
   `dispatch_count`.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head; a gate `green@` or `exception@` at a stale head gets one re-review
-  child per head. Idempotent per head — re-runs never duplicate children.
+  child per head. Idempotent per head — re-runs never duplicate children. A
+  hold (`merge_hold`, `rebase_hold`) or a live demand bead
+  (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
+  branch current is routinely one horn of what such a demand asks, so a child
+  filed under one answers the question by performing it. Closing the demand is
+  what releases the dispatch.
 - **Disposal** (`review-sweep.sh`, cadence arm 7): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a marker to bind to, so the arm closes

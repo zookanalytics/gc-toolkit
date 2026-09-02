@@ -10,8 +10,9 @@
 # ONE rework child per head to the fix pool, stamped prepare_mode and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a rework
 # child naming this branch whose rejection_reason names this head; an unstamped
-# orphan is adopted by title and an unrouted one re-routed, never twinned); a
-# gate green@ or exception@ a STALE head -> file one
+# orphan is adopted by title and an unrouted one re-routed, never twinned; a
+# hold or a live demand dispatches nothing, since rebasing is one horn of what
+# a demand asks); a gate green@ or exception@ a STALE head -> file one
 # re-review child per head to the review pool, carrying mol-review via gc
 # sling --on (dedup: a live review naming the anchor, or one with
 # review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
@@ -421,6 +422,19 @@ GATES
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
     if is_held "$hold" || is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
+    # A live demand is the same freeze. `gc-helm.sh demand` files what a person
+    # owes as its own bead gating this anchor, and "rebase it onto the base" is
+    # routinely one horn of the question being asked. A child dispatched under
+    # one performs that horn as routine branch hygiene, which answers the
+    # decision by fait accompli and leaves the person ruling on work already
+    # done. The anchor's own gc.routed_to is not read here: the human route sits
+    # on the demand bead, not on what it gates, and a freeze on the anchor's
+    # route would hold the merge with nothing defined to lift it. Closing the
+    # demand lifts this one, which is what the demand's own text asks for.
+    if takeaway_is_holding "$id"; then
+      echo "$PROG: $id — PR#$num conflicts but an open demand holds it for a person's decision; no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
     fix_branch="${head_ref:-$branch}"
