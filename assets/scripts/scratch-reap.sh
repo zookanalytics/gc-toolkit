@@ -75,9 +75,10 @@ esac
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 LIVE="$WORK/live"; REMOVE_LIST="$WORK/remove"
-STRAY_LIST="$WORK/stray"; STRAY_LINK_LIST="$WORK/stray-links"; BIG_LIST="$WORK/big"
-: > "$LIVE"; : > "$REMOVE_LIST"; : > "$STRAY_LIST"
-: > "$STRAY_LINK_LIST"; : > "$BIG_LIST"
+STRAY_LIST="$WORK/stray"; STRAY_LINK_LIST="$WORK/stray-links"
+BIG_TREE_LIST="$WORK/big-tree"; BIG_STRAY_LIST="$WORK/big-stray"
+: > "$LIVE"; : > "$REMOVE_LIST"; : > "$STRAY_LIST"; : > "$STRAY_LINK_LIST"
+: > "$BIG_TREE_LIST"; : > "$BIG_STRAY_LIST"
 
 # Sessions with a running child. Best-effort and quiet: most of /proc belongs
 # to other uids and is unreadable, which is the expected case, not an error.
@@ -103,7 +104,7 @@ keep_n=0; keep_b=0; live_n=0; live_b=0
   | awk -v root="$ROOT" -v now="$START" -v inactive_after="$INACTIVE_AFTER" \
         -v livefile="$LIVE" -v removefile="$REMOVE_LIST" \
         -v strayfile="$STRAY_LIST" -v straylinkfile="$STRAY_LINK_LIST" \
-        -v bigfile="$BIG_LIST" '
+        -v bigtreefile="$BIG_TREE_LIST" -v bigstrayfile="$BIG_STRAY_LIST" '
 BEGIN {
     FS = "\t"
     while ((getline id < livefile) > 0) if (id != "") live[id] = 1
@@ -128,7 +129,7 @@ $1 != "f" && $1 != "d" && $1 != "l" { next }
             out = (typ == "l") ? straylinkfile : strayfile
             printf "%s\0", path > out
             stray_n++; stray_b += sz
-            if (sz >= big_floor) printf "%d\t%s\n", sz, path > bigfile
+            if (sz >= big_floor) printf "%d\t%s\n", sz, path > bigstrayfile
         }
         next
     }
@@ -148,7 +149,7 @@ END {
         else if (now - newest[k] >= inactive_after) { printf "%s/%s\0", root, k > removefile; rm_n++; rm_b += bytes[k]; doomed[k] = 1 }
         else                                 { keep_n++; keep_b += bytes[k] }
     }
-    for (p in big_sz) if (big_key[p] in doomed) printf "%d\t%s\n", big_sz[p], p > bigfile
+    for (p in big_sz) if (big_key[p] in doomed) printf "%d\t%s\n", big_sz[p], p > bigtreefile
     printf "remove_n=%d\nremove_b=%d\nstray_n=%d\nstray_b=%d\nkeep_n=%d\nkeep_b=%d\nlive_n=%d\nlive_b=%d\n", \
         rm_n, rm_b, stray_n, stray_b, keep_n, keep_b, live_skipped, live_bytes
 }' > "$WORK/plan" || true
@@ -159,10 +160,11 @@ END {
 gib() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1073741824 }'; }
 
 # The largest files this pass is taking, so a recurring writer stays visible in
-# the order log rather than only in the total.
+# the order log rather than only in the total. It reads both tiers, and a tier
+# that yields to the budget clears its own list, so the report never names a
+# file that is still on disk.
 big_report() { # <printf format taking MiB then path>
-    [ -s "$BIG_LIST" ] || return 0
-    sort -rn "$BIG_LIST" 2>/dev/null | head -5 \
+    sort -rn "$BIG_TREE_LIST" "$BIG_STRAY_LIST" 2>/dev/null | head -5 \
         | awk -F'\t' -v fmt="$1\n" '{ printf fmt, $1 / 1048576, $2 }' || true
 }
 
@@ -183,7 +185,8 @@ over_budget() { [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - START)) -ge "$BUDGET" 
 #
 # Session trees run unguarded and the stray files yield to the budget: the
 # trees are where the bytes are, and a pass that spent its budget walking
-# should still take them. A tier that yields reports zero, never its plan.
+# should still take them. A tier that yields reports zero and names no files,
+# never its plan — what it left behind is the next pass's to take and report.
 STOPPED=""
 if [ -s "$REMOVE_LIST" ]; then
     xargs -0 -r chmod -R u+w < "$REMOVE_LIST" 2>/dev/null || true
@@ -194,7 +197,7 @@ if { [ -s "$STRAY_LIST" ] || [ -s "$STRAY_LINK_LIST" ]; } && ! over_budget; then
     xargs -0 -r rm -f     < "$STRAY_LIST" 2>/dev/null || true
     xargs -0 -r rm -f     < "$STRAY_LINK_LIST" 2>/dev/null || true
 elif [ -s "$STRAY_LIST" ] || [ -s "$STRAY_LINK_LIST" ]; then
-    STOPPED="stray"; stray_n=0
+    STOPPED="stray"; stray_n=0; : > "$BIG_STRAY_LIST"
 fi
 
 # Project-slug directories that lost their last session. Depth-pinned: a

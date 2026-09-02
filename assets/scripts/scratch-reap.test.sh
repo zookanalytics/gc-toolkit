@@ -10,9 +10,10 @@
 # the session trees, and stray symlinks, which are unlinked without a chmod
 # that would reach their targets; the large-file report, which must name a
 # stray dump as well as a file inside a tree; the budget yield, which must
-# report zero for the tier it skipped rather than its plan; --dry-run; and the
-# root rails, which are what keep a recursive delete off any directory that is
-# not a scratch root.
+# report zero for the tier it skipped and name none of its files, while still
+# naming the files of the tier that ran; --dry-run; and the root rails, which
+# are what keep a recursive delete off any directory that is not a scratch
+# root.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -151,10 +152,14 @@ if exists "$ROOT/slug-g/here/scratchpad"; then ok "an empty scratchpad in a kept
 
 # --- the budget yields the stray tier, and reports zero for it -------------
 # A slow `du` on PATH spends the budget inside the pass, which is the only way
-# a fixture this small can reach the guard.
+# a fixture this small can reach the guard. Both tiers carry a file over the
+# large-file floor, because the yield has to reach the report as well as the
+# counts: the stray is still on disk and must not be named as taken, while the
+# tree the pass did take must still be named.
 reset_root
-mk_session slug-k ancient 100
-printf 'old\n' > "$ROOT/stray.json"; touch -d "@$((NOW - 100 * HOUR))" "$ROOT/stray.json"
+mk_session slug-k ancient 100 $((9 * 1024 * 1024))
+head -c $((10 * 1024 * 1024)) /dev/zero > "$ROOT/stray.json"
+touch -d "@$((NOW - 100 * HOUR))" "$ROOT/stray.json"
 SLOWBIN="$TMP/slowbin"; mkdir -p "$SLOWBIN"
 REAL_DU="$(command -v du)"
 printf '#!/bin/sh\nsleep 2\nexec %s "$@"\n' "$REAL_DU" > "$SLOWBIN/du"
@@ -164,6 +169,8 @@ if exists "$ROOT/slug-k/ancient"; then bad "over budget: tree removal still runs
 if exists "$ROOT/stray.json"; then ok "over budget: the stray tier yields"; else bad "over budget: the stray tier yields"; fi
 has "$OUT" "yielded at the stray batch" "over budget: the yield is reported"
 has "$OUT" "deleted 0 stray files" "over budget: a yielded tier reports zero, not its plan"
+if grep -q "stray.json" <<< "$OUT"; then bad "over budget: a yielded large stray file is not named as reaped"; else ok "over budget: a yielded large stray file is not named as reaped"; fi
+has "$OUT" "reaped 9 MiB  $ROOT/slug-k/ancient/scratchpad/f" "over budget: the tier that did run still names its files"
 
 # --- dry run ---------------------------------------------------------------
 reset_root
