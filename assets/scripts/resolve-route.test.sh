@@ -107,6 +107,9 @@ echo "# the operator marker is held by its reader, not a name that failed to res
 run "human"
 eq "$RC" 0 "'human' is accepted"
 eq "$OUT" "human" "unchanged"
+run "human" STUB_AGENTS_FAIL=1
+eq "$RC" 0 "no agent carries it, so an unreadable roster cannot unsettle it"
+eq "$OUT" "human" "and it still resolves to itself"
 
 echo "# an unreadable roster is the absence of proof, not proof of an empty city"
 run "gc-toolkit.polecat" STUB_AGENTS_FAIL=1
@@ -122,6 +125,12 @@ run "gc-toolkit.polecat" \
   STUB_AGENTS="$(printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat","note":"a\002b"}]}')"
 eq "$RC" 0 "the roster still parses"
 eq "$OUT" "gc-toolkit/gc-toolkit.polecat" "and the name resolves"
+
+echo "# the capture idiom the usage text prescribes, and the formula blocks use"
+ROUTE=$(env GC_RIG=gc-toolkit STUB_AGENTS_FAIL=1 "$SUT" "gc-toolkit.polecat" 2>/dev/null) || true
+eq "$ROUTE" "gc-toolkit.polecat" "'|| true' keeps the unverified name for the caller to decide on"
+ROUTE=$(env GC_RIG=gc-toolkit "$SUT" "gc-toolkit.gremlin" 2>/dev/null) || true
+eq "$ROUTE" "" "and leaves the variable empty when the name was refused"
 
 echo "# usage"
 OUT=$("$SUT" 2>/dev/null); eq "$?" 2 "no argument is a usage error"

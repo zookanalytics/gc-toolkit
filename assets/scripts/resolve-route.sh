@@ -36,9 +36,13 @@ itself, the rig-unqualified form of one (`gc-toolkit.polecat`), a form
 carrying a qualifier the identity does not (`gc-toolkit/gc-toolkit.dog`), or a
 bare role (`refinery`). `human` is the operator marker and resolves to itself.
 
-Stamp what it prints:
-  ROUTE=$(resolve-route.sh gc-toolkit.dog) || ROUTE=""
-  [ -n "$ROUTE" ] && gc bd create ... --metadata "{\"gc.routed_to\":\"$ROUTE\"}"
+Stamp what it prints, and file nothing when it prints nothing:
+  ROUTE=$(resolve-route.sh gc-toolkit.dog) || true
+  [ -n "$ROUTE" ] && gc bd update <bead> --set-metadata gc.routed_to="$ROUTE"
+
+`|| true`, not `|| ROUTE=""`: only a refusal prints nothing, and an
+unverified name arrives on stdout with a non-zero status that the second
+form would throw away.
 
 Refuses rather than guesses when a name resolves to several live identities;
 name the one you mean. Exit 3 means the roster could not be read: <name> comes
@@ -49,6 +53,13 @@ U
 NAME="${1:-}"
 [ "$#" -eq 1 ] && [ -n "$NAME" ] || { usage; exit 2; }
 case "$NAME" in -*) usage; exit 2 ;; esac
+
+# `human` is the city's durable "the operator owns it; no agent will take it"
+# marker (services/helm/README.md) — already held by its reader, not a name
+# that failed to resolve. No agent carries it, so the roster can neither
+# confirm nor refute it, and it resolves ahead of that read rather than
+# inheriting an unreadable roster's UNVERIFIED status.
+if [ "$NAME" = "human" ]; then printf 'human\n'; exit 0; fi
 
 ROSTER=$(if command -v timeout >/dev/null 2>&1; then timeout 15 gc agent list --json 2>/dev/null
          else gc agent list --json 2>/dev/null; fi | scrub)
@@ -63,11 +74,6 @@ if [ -z "$IDS" ] || [ "$IDS" = "[]" ]; then
   printf '%s\n' "$NAME"
   exit 3
 fi
-
-# `human` is the city's durable "the operator owns it; no agent will take it"
-# marker (services/helm/README.md) — already held by its reader, not a name
-# that failed to resolve.
-if [ "$NAME" = "human" ]; then printf 'human\n'; exit 0; fi
 
 # ok | ambiguous | unknown, then the identity (ok) or the candidate list, then
 # the live identities the name resembles across every rig.
