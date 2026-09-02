@@ -227,7 +227,22 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # gated iff a not-closed child names it (the child holds the edge), and an
 # outgoing tracks edge to a not-closed bead is a named wait. Every `// ""` is
 # load-bearing: most beads carry no metadata key at all, and an empty
-# takeaway/hold is a CLEARED hold, not a hold.
+# hold is a CLEARED hold, not a hold.
+#
+# `gc.takeaway` is not read here. It is one field a sitting stamps when it
+# begins and REPLACES with its outcome when it signs off, and nothing clears
+# it, so its presence dates the last sitting rather than naming a live wait —
+# read as a hold, one conversation exempts a bead from this pass forever. The
+# waits a sitting records are edges instead, and every edge shape already has
+# an arm: a `blocks` blocker (what `takeaway --waiting-on` and `demand` write)
+# takes the bead out of the ready set upstream of here, children reach the
+# `gatedparents` arm, `tracks` targets reach the arm below it. `triage.hold`
+# still mutes on presence alone: no agent writes one any more, and the ones on
+# the board name their wait in prose with no edge to discharge.
+#
+# $demanded is the one non-edge read, and it exists for one case: gc-helm.sh
+# warns on stderr when a demand's `blocks` edge does not land, and nothing
+# repairs it, so that bead reads ready while a person owes an answer on it.
 # >>> classify
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" '
@@ -268,6 +283,8 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata.stall_root // empty) | select(. != "") ]) as $rootvisits
   | ([ ($openprs // [])[] | pr_key ] | map(select(. != ""))) as $openkeys
+  | ([ ($alive[0] // [])[]
+     | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
   | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
   | ([ ($alive[0] // [])[] | .dependencies[]?
        | select((.type // "") == "parent-child") | (.depends_on_id // empty) ] | unique) as $gatedparents
@@ -279,7 +296,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif (($worked | index($b.id)) != null) then "worked"
          elif ((.metadata.task_kind // "") == "visit") then "conversing"
          elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
-         elif ((.metadata["gc.takeaway"] // "") != "") then "held-by-design"
+         elif (($demanded | index($b.id)) != null) then "held-by-design"
          elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
          elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($rootvisits | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"

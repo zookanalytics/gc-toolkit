@@ -65,18 +65,22 @@ bash -n "$SCRIPT" && ok "liveness-recheck.sh: valid bash" \
     || bad "liveness-recheck.sh: valid bash" "bash -n failed"
 
 # --- the gc stub -------------------------------------------------------------
-# Answers the three reads the script performs, each from a file so a case can
-# inject a failure:
-#   gc bd show <visit> --json          <- $STUB_VISIT   ("FAIL" => exit 1)
-#   gc bd list --id ... --all --json   <- $STUB_BEADS   ("FAIL" => exit 1)
-#   gc bd ready --unassigned ...       <- $STUB_READY   ("FAIL" => exit 1)
+# Answers the four reads the script performs, each from a file so a case can
+# inject a failure. Both bead reads are `bd list`; the demand one is the one
+# carrying --has-metadata-key, which is how the stub tells them apart:
+#   gc bd show <visit> --json                    <- $STUB_VISIT   ("FAIL" => exit 1)
+#   gc bd list --id ... --all --json             <- $STUB_BEADS   ("FAIL" => exit 1)
+#   gc bd list --has-metadata-key gc.demand_for  <- $STUB_DEMANDS ("FAIL" => exit 1)
+#   gc bd ready --unassigned ...                 <- $STUB_READY   ("FAIL" => exit 1)
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 [ "$1" = "bd" ] || exit 0
+demandq=""
+for a in "$@"; do case "$a" in --has-metadata-key) demandq=1 ;; esac; done
 case "$2" in
     show)  f="${STUB_VISIT:-}" ;;
-    list)  f="${STUB_BEADS:-}" ;;
+    list)  if [ -n "$demandq" ]; then f="${STUB_DEMANDS:-}"; else f="${STUB_BEADS:-}"; fi ;;
     ready) f="${STUB_READY:-}" ;;
     *)     exit 0 ;;
 esac
@@ -95,9 +99,12 @@ bead() { # bead <id> <status> <metadata-json> [title]
 }
 verdict_of() { printf '%s' "$1" | jq -r --arg id "$2" '[(.new[], .carried[]) | select(.id == $id)] | .[0].verdict // "ABSENT"'; }
 
-STUB_VISIT="$TMP/visit.json";  export STUB_VISIT
-STUB_BEADS="$TMP/beads.json";  export STUB_BEADS
-STUB_READY="$TMP/ready.json";  export STUB_READY
+STUB_VISIT="$TMP/visit.json";     export STUB_VISIT
+STUB_BEADS="$TMP/beads.json";     export STUB_BEADS
+STUB_READY="$TMP/ready.json";     export STUB_READY
+STUB_DEMANDS="$TMP/demands.json"; export STUB_DEMANDS
+# Most cases have nobody owing anything; the ones that do overwrite this.
+printf '[]\n' > "$STUB_DEMANDS"
 
 # --- 1. the verdict classes and their precedence -----------------------------
 echo "── every listed id is re-derived into exactly one verdict ──"
@@ -106,7 +113,8 @@ jq -nc --argjson b "[
  ,$(bead b-closed  closed '{"merge_result":"merged","pr_number":"316"}')
  ,$(bead b-routed  open   '{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}')
  ,$(bead b-held    open   '{"triage.hold":"waiting on the operator"}')
- ,$(bead b-take    open   '{"gc.takeaway":"holding — needs a decision"}')
+ ,$(bead b-take    open   '{"gc.takeaway":"routed — nothing further needed here"}')
+ ,$(bead b-demand  open   '{"gc.takeaway":"holding — needs a decision"}')
  ,$(bead b-stand   open   '{"task_kind":"feedback-pattern"}')
  ,$(bead b-parked  open   '{}')
  ,$(bead b-marker  open   '{"merge_result":"pull_request","pr_number":"349"}')
@@ -114,18 +122,39 @@ jq -nc --argjson b "[
 # b-parked is absent from ready: a park/blocker edge appeared since the pass.
 # b-stand IS ready — a standing record is open, unblocked and unassigned by
 # design, which is exactly why every other test here reads it as idle.
-jq -nc '[{id:"b-idle"},{id:"b-closed"},{id:"b-routed"},{id:"b-held"},{id:"b-take"},{id:"b-stand"},{id:"b-marker"}]' > "$STUB_READY"
-C="$("$SCRIPT" --ids "b-idle,b-closed,b-routed,b-held,b-take,b-stand,b-parked,b-marker,b-gone" --json 2>/dev/null)"
+jq -nc '[{id:"b-idle"},{id:"b-closed"},{id:"b-routed"},{id:"b-held"},{id:"b-take"},{id:"b-demand"},{id:"b-stand"},{id:"b-marker"}]' > "$STUB_READY"
+jq -nc '[{id:"d-1",metadata:{"gc.demand_for":"b-demand"}}]' > "$STUB_DEMANDS"
+IDS="b-idle,b-closed,b-routed,b-held,b-take,b-demand,b-stand,b-parked,b-marker,b-gone"
+C="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
 
 eq "$(verdict_of "$C" b-idle)"   "idle"       "an unchanged bead stays on the agenda"
 eq "$(verdict_of "$C" b-closed)" "resolved"   "a bead closed since the pass is resolved — do NOT route"
 eq "$(verdict_of "$C" b-routed)" "worked"     "a route that appeared since the pass reads as worked"
 eq "$(verdict_of "$C" b-held)"   "held"       "a triage.hold that appeared since the pass reads as held"
-eq "$(verdict_of "$C" b-take)"   "held"       "a gc.takeaway that appeared since the pass reads as held"
+# tk-b6k2pe: a takeaway is stamped at a hold and REPLACED by its outcome at
+# sign-off, and nothing clears it, so on its own it dates a sitting rather than
+# naming a live wait. Flagged so the sitting reads what was concluded, and left
+# on the agenda so nothing has to notice a board row to bring it back.
+eq "$(verdict_of "$C" b-take)"   "recorded"   "a takeaway with no open demand records a sitting that ended"
+eq "$(verdict_of "$C" b-demand)" "held"       "an OPEN demand on the bead is the hold — a person owes that answer"
 eq "$(verdict_of "$C" b-stand)"  "standing"   "a standing record is held-by-design, never an idle bead (tk-rw2ra)"
 eq "$(verdict_of "$C" b-parked)" "not-ready"  "a bead that left the ready set was parked or blocked"
 eq "$(verdict_of "$C" b-marker)" "marker"     "a merge_result marker is FLAGGED, not dropped"
 eq "$(verdict_of "$C" b-gone)"   "unreadable" "an id the read did not return stays visible"
+
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-demand")] | .[0].detail | test("demand d-1 is open")' >/dev/null 2>&1 \
+    && ok "the held detail names the demand bead a person has to answer" \
+    || bad "the held detail names the demand bead" "$(printf '%s' "$C" | jq -r '[(.new[]) | select(.id == "b-demand")] | .[0].detail')"
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-take")] | .[0].detail | test("gc.takeaway=routed")' >/dev/null 2>&1 \
+    && ok "the recorded detail carries the takeaway text itself" \
+    || bad "the recorded detail carries the takeaway" "$(printf '%s' "$C" | jq -r '[(.new[]) | select(.id == "b-take")] | .[0].detail')"
+
+# Mutate the guard: close the demand (it leaves every not-closed listing) and
+# the bead it held comes back onto the agenda under its own takeaway.
+jq -nc '[]' > "$STUB_DEMANDS"
+CX="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
+eq "$(verdict_of "$CX" b-demand)" "recorded" "the demand closes → the bead it held is on the agenda again"
+jq -nc '[{id:"d-1",metadata:{"gc.demand_for":"b-demand"}}]' > "$STUB_DEMANDS"
 
 # The detail is what tells a sitting why it cannot disposition the bead: a
 # standing record has no owner to chase and no close to wait for.
@@ -133,20 +162,26 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[
     && ok "the standing-record detail names the kind" \
     || bad "the standing-record detail names the kind" "detail did not name task_kind"
 
-eq "$(printf '%s' "$C" | jq -r '.summary.new_listed')" "9" "every listed id is accounted for"
-eq "$(printf '%s' "$C" | jq -r '.summary.new_live')"   "3" "live agenda = idle + marker + unreadable (never the resolved/worked/held/standing/parked)"
+eq "$(printf '%s' "$C" | jq -r '.summary.new_listed')" "10" "every listed id is accounted for"
+eq "$(printf '%s' "$C" | jq -r '.summary.new_live')"   "4" "live agenda = idle + marker + recorded + unreadable (never the resolved/worked/held/standing/parked)"
 
 # The text report prints one bucket per verdict and NOTHING else, so a verdict
 # with no bucket line is dropped from it silently while still counted in the
 # JSON — a hidden bead, the one failure this whole script is built to avoid.
 # Assert the rendered report, not just the census.
-T="$("$SCRIPT" --ids "b-idle,b-closed,b-routed,b-held,b-take,b-stand,b-parked,b-marker,b-gone" --all 2>/dev/null)"
+T="$("$SCRIPT" --ids "$IDS" --all 2>/dev/null)"
 printf '%s' "$T" | grep -q "b-stand" \
     && ok "a standing record is PRINTED, not silently dropped from the report" \
     || bad "a standing record is PRINTED, not silently dropped from the report" "b-stand absent from the text report"
 printf '%s' "$T" | grep -q "standing record" \
     && ok "its bucket says what it is, rather than filing it under a human hold" \
     || bad "its bucket says what it is, rather than filing it under a human hold" "no standing-record bucket in the report"
+printf '%s' "$T" | grep -q "b-take" \
+    && ok "a recorded takeaway is PRINTED, not silently dropped from the report" \
+    || bad "a recorded takeaway is PRINTED, not silently dropped from the report" "b-take absent from the text report"
+printf '%s' "$T" | grep -q "a sitting ended here" \
+    && ok "its bucket says the takeaway is a record, not a wait" \
+    || bad "its bucket says the takeaway is a record, not a wait" "no recorded bucket in the report"
 
 echo "── an assignee alone marks a bead worked, and closed beats every other signal ──"
 jq -nc --argjson b "[
@@ -182,6 +217,25 @@ eq "$(printf '%s' "$C" | jq -r '[.new[] | select(.verdict == "not-ready")] | len
 "$SCRIPT" --ids "b-idle" 2>/dev/null | grep -q "WARNING: the ready read failed" \
     && ok "the report says the ready read failed" \
     || bad "the report says the ready read failed" "no WARNING line in the human report"
+
+echo "── the demand read failing holds NOTHING (never hides the agenda) ──"
+# The inverse defect: an unread demand listing that held every bead would empty
+# the agenda outright. pr-facts.sh and signoff.sh answer "held" on the same
+# unreadable probe, because there releasing an anchor hands a person's decision
+# back to a pool. Here the cost runs the other way — a bead nothing reports is a
+# bead nobody comes back to — so an unread probe holds nothing, and says so.
+jq -nc --argjson b "[$(bead b-take open '{"gc.takeaway":"routed — nothing further needed here"}')]" '$b' > "$STUB_BEADS"
+jq -nc '[{id:"b-take"}]' > "$STUB_READY"
+printf 'FAIL\n' > "$STUB_DEMANDS"
+C="$("$SCRIPT" --ids "b-take" --json 2>/dev/null)"
+eq "$(printf '%s' "$C" | jq -r '.demand_state')" "unverified" "a failed demand read is reported as unverified, not as an empty set"
+eq "$(verdict_of "$C" b-take)" "recorded" "with demands unverified, the bead stays on the agenda"
+eq "$(printf '%s' "$C" | jq -r '[.new[] | select(.verdict == "held")] | length')" "0" \
+   "no bead is classified held off an unverified demand read"
+"$SCRIPT" --ids "b-take" 2>/dev/null | grep -q "WARNING: the open-demand read failed" \
+    && ok "the report says the demand read failed" \
+    || bad "the report says the demand read failed" "no WARNING line in the human report"
+printf '[]\n' > "$STUB_DEMANDS"
 
 echo "── PR liveness is never re-checked, and the report says so ──"
 jq -nc --argjson b "[$(bead b-marker open '{"merge_result":"pull_request","pr_number":"349"}')]" '$b' > "$STUB_BEADS"

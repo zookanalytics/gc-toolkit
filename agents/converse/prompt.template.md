@@ -252,28 +252,30 @@ The loop, every visit:
    gc bd show "$SUBJECT" --json | jq -r '.[0].metadata
      | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'
    ```
-   NON-EMPTY is the test — an EMPTY stamp is a CLEARED hold, not a hold
-   (the same tri-state the liveness sweep reads).
+   NON-EMPTY is the test for `triage.hold` — an EMPTY stamp is a CLEARED
+   hold, not a hold. A `gc.takeaway` is weaker than it looks: nothing
+   clears it, so it dates the last sitting rather than naming a live
+   wait. Read what it says, then check whether the wait it describes is
+   still open, which is what the sweep does.
 
    Two readings end the visit here, with no sitting and nothing posted:
 
    - **moot** — the premise no longer holds. The frontier was routed,
      the bead was closed, another visit already settled it.
    - **benign** — the premise holds but needs no human. The wait is
-     already named by a non-empty `triage.hold` or `gc.takeaway`, or the
-     condition is a known acceptable state in its own right. **An open PR
-     awaiting the operator's review is the canonical case**: that is
-     their own review queue, and handing it back to them as a decision to
-     make is the bug this step exists to prevent.
+     already named by a non-empty `triage.hold`, by an open demand bead,
+     or the condition is a known acceptable state in its own right. **An
+     open PR awaiting the operator's review is the canonical case**: that
+     is their own review queue, and handing it back to them as a decision
+     to make is the bug this step exists to prevent.
 
-     **A takeaway is not a benign wait when the wait it named has
-     ENDED.** A disposition visit — filed by the liveness sweep
-     (`assets/scripts/liveness-sweep.sh`), and saying so —
-     exists *because* a parked subject's routed work all landed, so the
-     subject it names necessarily carries a takeaway. Reading that stamp
-     as "the wait is already named" closes the exact signal the stamp
-     made impossible to see. Its premise is the landed ids in
-     the body, not the presence of a takeaway: re-check those (`bd show`
+     **A takeaway is never a benign wait on its own.** Nothing clears it,
+     so a subject whose routed work all landed still carries the sentence
+     the sitting wrote before that work existed — and the sweep
+     (`assets/scripts/liveness-sweep.sh`) lists it for exactly that
+     reason. Reading the stamp as "the wait is already named" closes the
+     signal the visit was filed to raise. The premise is the ids in the
+     body, not the presence of a takeaway: re-check those (`bd show`
      them, and `gc bd list --parent "$SUBJECT" --all`) and treat it as
      moot only if something is open again.
 
@@ -414,14 +416,13 @@ The loop, every visit:
    and these three writes are all that survives it: interrupted, the item
    still says what the sitting was waiting for and when, still reads as
    `held`, and still cannot move until the demand closes. Unstamped, an
-   interrupted hold is indistinguishable from one that never happened —
-   and it is also what BRINGS THE HOLD BACK: the liveness sweep files a
-   fresh visit on a `holding` takeaway that no live visit names, once per
-   hold, keyed on this stamp's `gc.takeaway_at`. Two consequences for
-   you: write the takeaway so it still states the decision needed when
-   read cold by a sitting that was not here, and when you resume a hold
-   and hold again, RE-STAMP it — a fresh `gc.takeaway_at` is what earns
-   the next visit if this session is interrupted too.
+   interrupted hold is indistinguishable from one that never happened.
+   What BRINGS THE HOLD BACK is the demand bead, which outlives this
+   session on the operator's queue and releases `$ITEM` the moment it
+   closes. The takeaway is what makes the return legible: write it so it
+   still states the decision needed when read cold by a sitting that was
+   not here, and RE-STAMP it whenever you resume a hold and hold again,
+   so the headline is the question actually outstanding.
 
    **The takeaway is the sentence; `held` is the state.** A takeaway is
    free text, so no invariant can assert anything about it, and for a
@@ -460,16 +461,20 @@ The loop, every visit:
 
    **The stamp lands on the ITEM, not on the shared bucket.** Siblings of
    a standing scope would otherwise overwrite each other's headline — one
-   field, one bucket, N sittings — and the readers that consume it look
-   at the item: the liveness sweep (`assets/scripts/liveness-sweep.sh`) treats a
-   non-empty `gc.takeaway` on the workflow root (or its anchor) as the
-   named wait that exempts it from being re-reported — until the edges
-   that wait names have all closed, at which point it stops exempting —
-   and never reads the subject at all. Stamped on the bucket,
-   a held sitting leaves the thing it is about looking unattended, and the
-   next pass files another visit on it. Where no target is named `$ITEM`
-   IS the subject, so the ordinary one-topic subject stamps exactly where
-   it always did.
+   field, one bucket, N sittings — and every reader that consumes it looks
+   at the item and never at the subject: the board's parked row, and the
+   sitting that arrives next and reads the item cold. Where no target is
+   named `$ITEM` IS the subject, so the ordinary one-topic subject stamps
+   exactly where it always did.
+
+   **The stamp is a record, not a hold.** Nothing clears it — you stamp it
+   at the hold and REPLACE it with the outcome at sign-off — so the
+   liveness sweep (`assets/scripts/liveness-sweep.sh`) does not read it at
+   all. What holds an item is the wait you recorded as an edge: a
+   `--waiting-on` blocker, an open demand bead, a child. When the last of
+   those closes the item comes back as an unnamed wait, whatever the
+   takeaway still says. So a takeaway you write without an edge parks
+   nothing, and reads to the next sitting as a conversation that ended.
 
    Then post the framing. Every message you post while holding ends with
    the operator's decision — labeled `Next (yours):`, standing alone:
@@ -595,20 +600,20 @@ The loop, every visit:
    takeaway still lands, so this can never cost you the stamp — but a
    wait you did not pass is a wait nothing will ever re-ask.
 
-   **A recorded wait is also the return trip.** On an
-   operator-origin subject (`gc.origin=operator`), once every recorded
-   wait has closed, the liveness sweep (`assets/scripts/liveness-sweep.sh`)
-   files a fresh visit back to this pool — so the
-   conversation resumes without the operator having to notice a board
-   row. It reads two things as the recorded wait: the `--waiting-on`
-   edges above, AND the subject's CHILDREN. Reading the children is what
-   keeps the older child-shaped work visible, and it is not a reason to
-   keep filing that way: a child is covered by the sweep alone, while a
-   sibling with an edge is covered by the sweep AND the board AND
-   `bd ready`. What is covered by nothing is work routed with neither
-   recording — a sibling bead named only in the takeaway prose, which is
-   what passing `--waiting-on` prevents. None of this ever clears the
-   takeaway.
+   **A recorded wait is also the return trip.** Once every recorded wait
+   has closed, the subject comes back through the liveness sweep
+   (`assets/scripts/liveness-sweep.sh`) as an unnamed wait, in its batch
+   triage visit — so the conversation resumes without the operator having
+   to notice a board row. It reads two things as the recorded wait: the
+   `--waiting-on` edges above, which take the subject out of `bd ready`
+   for as long as they are open, AND the subject's CHILDREN. Reading the
+   children is what keeps the older child-shaped work visible, and it is
+   not a reason to keep filing that way: a child is covered by the sweep
+   alone, while a sibling with an edge is covered by the sweep AND the
+   board AND `bd ready`. What is covered by nothing is work routed with
+   neither recording — a sibling bead named only in the takeaway prose,
+   which is what passing `--waiting-on` prevents. None of this ever
+   clears the takeaway, and none of it needs to.
 
    Never close without the stamp verifying — an unstamped closed visit
    is invisible to everything that reads outcomes. Never end a sitting

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # liveness-recheck.sh — re-validate a liveness-sweep visit's census at CLAIM
-# time (bead tk-gvas6: 60% of one body was wrong on arrival). Two batched
+# time (bead tk-gvas6: 60% of one body was wrong on arrival). Three batched
 # bead reads re-derive every listed id's class and print a corrected census.
-# Bead state only — no network: a merge_result marker is FLAGGED for the
-# sitting (never grounds for dropping a bead), and every failure path leaves a bead
-# VISIBLE (a failed batched read prints NO census; a failed ready read skips
-# the not-ready rule and says `unverified`; an unreturned id gets its own
+# Bead state only — no network: a merge_result marker and a recorded takeaway
+# are FLAGGED for the sitting (never grounds for dropping a bead), and every
+# failure path leaves a bead VISIBLE (a failed batched read prints NO census;
+# a failed ready read skips the not-ready rule and says `unverified`; a failed
+# demand read holds nothing and says so; an unreturned id gets its own
 # `unreadable` bucket, counted into the live agenda).
 # Callers: the converse prep step, via the visit.recheck stamp
 # liveness-sweep.sh writes on each batch visit.
@@ -142,6 +143,27 @@ else
     READY_JSON=null
 fi
 
+# --- read 3: the open demands, in one key-existence query ---------------------
+# What a person still owes is its own bead (`gc-helm.sh demand`), stamped
+# gc.demand_for=<gated bead>. That is the hold; `gc.takeaway` is the record of
+# a sitting, which nothing clears, so it cannot say whether anyone is coming
+# back. A demand also blocks its gated bead, which is why the not-ready rule
+# usually catches this first — this read names the person's wait outright, and
+# still sees the demand whose blocks edge did not land.
+# Best-effort like the ready set: unread means no bead is held, which lists
+# beads rather than hiding them.
+DEMAND_STATE=verified
+DEMAND_RAW=$(gc bd list --has-metadata-key gc.demand_for \
+    --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json 2>/dev/null | scrub)
+if printf '%s' "$DEMAND_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    DEMAND_JSON=$(printf '%s' "$DEMAND_RAW" | jq -c '
+      [ .[] | {id, for: ((.metadata["gc.demand_for"] // "") | tostring)} | select(.for != "") ]
+      | group_by(.for) | map({key: .[0].for, value: (map(.id) | join(", "))}) | from_entries')
+else
+    DEMAND_STATE=unverified
+    DEMAND_JSON='{}'
+fi
+
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 AGE=""
 if [ -n "$PASS_AT" ]; then
@@ -154,11 +176,13 @@ fi
 
 # --- classify ------------------------------------------------------------
 # Precedence: resolved > worked > standing > held > not-ready (skipped when
-# the ready read failed) > marker (flagged, never dropped) > idle;
-# unreadable = the batched read did not return it (stays visible).
+# the ready read failed) > marker (flagged, never dropped) > recorded
+# (flagged, never dropped) > idle; unreadable = the batched read did not
+# return it (stays visible).
 CENSUS=$(jq -n \
     --slurpfile beadfile "$BEADFILE" \
     --argjson ready "$READY_JSON" \
+    --argjson demandby "$DEMAND_JSON" \
     --argjson new "$NEW_JSON" \
     --argjson carried "$CARRIED_JSON" \
     --arg visit "$VISIT" \
@@ -166,7 +190,8 @@ CENSUS=$(jq -n \
     --arg pass_at "$PASS_AT" \
     --arg checked_at "$NOW" \
     --arg age "$AGE" \
-    --arg ready_state "$READY_STATE" '
+    --arg ready_state "$READY_STATE" \
+    --arg demand_state "$DEMAND_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
   # Standing-record idioms (never claimable, never close) — the SAME list as
@@ -195,10 +220,12 @@ CENSUS=$(jq -n \
            {verdict: "standing",
             detail: ("task_kind=" + ($b | mv("task_kind"))
                     + " — open, unrouted and unassigned by design; it never closes, and there is no disposition to make")}
-         elif ((($b | mv("gc.takeaway")) != "") or (($b | mv("triage.hold")) != "")) then
+         elif ((($demandby[$id] // "") != "") or (($b | mv("triage.hold")) != "")) then
            {verdict: "held",
             detail: ((if ($b | mv("triage.hold")) != "" then ["triage.hold=" + ($b | mv("triage.hold"))] else [] end)
-                     + (if ($b | mv("gc.takeaway")) != "" then ["gc.takeaway=" + ($b | mv("gc.takeaway"))] else [] end))
+                     + (if ($demandby[$id] // "") != "" then
+                          ["demand " + $demandby[$id] + " is open on it — a person owes this answer"]
+                        else [] end))
                     | join("  ")}
          elif ($readyset != null and (($readyset[$id] // false) == false)) then
            {verdict: "not-ready",
@@ -208,6 +235,10 @@ CENSUS=$(jq -n \
             detail: ((["merge_result=" + ($b | mv("merge_result"))]
                      + (if ($b | mv("pr_number")) != "" then ["pr=" + ($b | mv("pr_number"))] else [] end)
                      | join("  ")) + "  (PR liveness NOT re-checked — verify before routing)")}
+         elif (($b | mv("gc.takeaway")) != "") then
+           {verdict: "recorded",
+            detail: ("gc.takeaway=" + ($b | mv("gc.takeaway"))
+                     + (if ($b | mv("gc.takeaway_at")) != "" then "  (" + ($b | mv("gc.takeaway_at")) + ")" else "" end))}
          else
            {verdict: "idle", detail: ""}
          end)
@@ -218,12 +249,14 @@ CENSUS=$(jq -n \
                  + (if ($b.priority // null) == null then "" else ("/p" + (($b.priority) | tostring)) end))
                 | if . == "" then "?" else . end)}
   ;
-  def live: [.[] | select(.verdict == "idle" or .verdict == "marker" or .verdict == "unreadable")] | length;
+  def live: [.[] | select(.verdict == "idle" or .verdict == "marker"
+                          or .verdict == "recorded" or .verdict == "unreadable")] | length;
   ($new | map(classify(.))) as $newr
   | ($carried | map(classify(.))) as $carr
   | {visit: $visit, subject: $subject,
      pass_at: $pass_at, checked_at: $checked_at, age: $age,
      ready_state: $ready_state,
+     demand_state: $demand_state,
      pr_liveness: "not-rechecked",
      new: $newr, carried: $carr,
      summary: {new_listed: ($newr | length), new_live: ($newr | live),
@@ -261,14 +294,16 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
   def section($rows; $name; $titles):
     if ($rows | length) == 0 then [] else
     ["", $name + " at pass time: " + (($rows | length) | tostring)
-         + " listed -> " + (([$rows[] | select(.verdict == "idle" or .verdict == "marker" or .verdict == "unreadable")] | length) | tostring)
+         + " listed -> " + (([$rows[] | select(.verdict == "idle" or .verdict == "marker"
+                                               or .verdict == "recorded" or .verdict == "unreadable")] | length) | tostring)
          + " still live"]
     + bucket($rows; "idle";       "still idle — the live agenda"; $titles)
     + bucket($rows; "marker";     "carries a merge marker — verify the gate is live before routing"; true)
+    + bucket($rows; "recorded";   "a sitting ended here — its takeaway is the record, not a wait; still on the agenda"; true)
     + bucket($rows; "unreadable"; "unreadable — still listed, nothing is hidden"; true)
     + bucket($rows; "resolved";   "resolved — closed since the pass; do NOT route"; true)
     + bucket($rows; "worked";     "now worked — someone has it"; true)
-    + bucket($rows; "held";       "now held — a human is holding it"; true)
+    + bucket($rows; "held";       "now held — a person owes an answer on it"; true)
     + bucket($rows; "standing";   "not work — a standing record, held by design; it was never dispositionable"; true)
     + bucket($rows; "not-ready";  "no longer ready — a blocker, gate or park appeared"; true)
     end;
@@ -277,12 +312,17 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
      "  pass cut " + (if .pass_at == "" then "(unstamped)" else .pass_at end)
        + " · re-checked " + .checked_at
        + (if .age == "" then "" else " · " + .age + " old" end),
-     "  reads: bead state OK · ready set " + .ready_state
+     "  reads: bead state OK · ready set " + .ready_state + " · open demands " + .demand_state
        + " · PR liveness NOT re-checked (a merge marker is flagged, never dropped)" ]
    + (if .ready_state == "unverified"
       then ["  WARNING: the ready read failed, so the not-ready rule was SKIPPED. A bead that has",
             "  since been parked or blocked still reads as idle here — nothing is hidden, but the",
             "  agenda may be longer than it truly is."]
+      else [] end)
+   + (if .demand_state == "unverified"
+      then ["  WARNING: the open-demand read failed, so no bead reads as held. One a person is",
+            "  answering right now is listed here — nothing is hidden, but check the item before",
+            "  routing it."]
       else [] end)
    + section(.new; "NEW"; true)
    + section(.carried; "CARRIED"; ($all == 1))

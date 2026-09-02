@@ -8,7 +8,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 d88f760e736ac80f7e991c5e4d9f69d7207c4a0f9219570f3b6c52724bd609a6
 agents/converse/prompt.template.md
-b534964168bf7a3ced6ed0349949b5fc08b582b7a53dcdf45744941ee7db787c
+31db452ffa15c41b30c2baf8c4feb1937c9943be45895f874ab774cba5294e8e
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md

@@ -337,7 +337,7 @@ conspired:
 1. it parks the board row (`gather_meta_anchors` emits `kind:"parked"`,
    floored at `LOW`, because a conversation that reached a takeaway wants
    nothing and only has to stay findable); and
-2. it **mutes the stall detector** — the liveness sweep reads a
+2. it **muted the stall detector** — the liveness sweep read a
    takeaway on a root or its anchor as a wait a human named and owns.
 
 So the one automation in the city that files visits was silenced by the exact
@@ -347,24 +347,27 @@ brought back *by* the system — only by the operator noticing a row. Measured:
 at 17:54Z; the operator found it by eye at 22:13Z, **4h19m** later, and the
 audit's headline sat in a merged file, untold.
 
-Two changes close that (tk-2cyxo), and they are deliberately separate:
+**The un-mute.** A takeaway exempts nothing anywhere in the liveness family —
+`liveness-sweep.sh`, its precheck, and `liveness-recheck.sh`. The wait it names
+does, for as long as that wait is live, and no shared predicate expresses that
+because every shape the wait takes is already a rule those scripts apply. A
+`blocks` blocker, which is what both `takeaway --waiting-on` and `demand` write,
+keeps the bead out of `bd ready` — the set the sweep classifies. A child reaches
+the parent-child arm and a `tracks` target reaches its own. The one read added
+for this is an index of open demand beads, which covers the demand whose
+`blocks` edge did not land: `gc-helm.sh` warns on stderr when that happens and
+nothing repairs it, so the bead reads ready while a person owes an answer.
+`triage.hold` still mutes on presence alone, because it names its wait in prose
+with no edge to discharge.
 
-- **The push.** The liveness sweep (`assets/scripts/liveness-sweep.sh`,
-  which absorbed the parked-disposition detector) files one visit back to the
-  converse pool when a **parked, operator-origin** subject's routed work has
-  **all landed**. It goes through
-  `gc-helm.sh open`, so it inherits the canonical `gate-visit` block and the
-  one-open-visit-per-subject gate rather than re-deriving them. It writes
-  exactly one key — `disposition_flagged`, the sorted id set of the work that
-  landed, which is the dedup key for after that visit closes — and it **never
-  clears the takeaway**: that stamp is the record of what the sitting
-  concluded, and the visit is additive.
-- **The un-mute.** A takeaway whose recorded wait has *fully closed* no longer
-  exempts a workflow from the stall detection in `liveness-sweep.sh`. One carve-out, not a
-  removal: `triage.hold` still mutes unconditionally, because it names its wait
-  in prose with no edge to discharge. The predicate lives once, in the sweep
-  (`--wait-spent <bead-id>`), and the detector asks it — a mirrored predicate in
-  two scripts is two things to keep in step.
+A parked subject whose routed work has all landed therefore returns as an
+ordinary unnamed wait in the sweep's batch triage visit, and the takeaway is
+never cleared: that stamp is the record of what the sitting concluded, and the
+visit is additive. What does not exist yet is `tk-2cyxo`'s **push** — a visit
+filed straight back to the converse pool for a `gc.origin=operator` subject,
+carrying the landed id set as its own dedup key. The batch visit is a queue a
+sitting works through; the push would be the subject's own conversation
+resuming.
 
 **"Routed work" is wider than the board's `disposition_due`, and it has to
 be.** The board derives disposition-due from `waiting_on` alone — the `blocks`

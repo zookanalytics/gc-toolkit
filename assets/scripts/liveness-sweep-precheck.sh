@@ -243,8 +243,11 @@ fi
 
 # The local survivor set — every exclusion here is one liveness-sweep.sh also
 # makes. Every `// ""` is load-bearing (most beads carry no metadata key at
-# all); an empty takeaway/hold is a CLEARED hold, not a hold. Class 2(i)(a) is
-# a REVERSE index: the child holds the parent-child edge.
+# all); an empty hold is a CLEARED hold, not a hold. Class 2(i)(a) is a
+# REVERSE index: the child holds the parent-child edge. `gc.takeaway` is not
+# an exclusion, for the reason the sweep's classify block gives; $demanded is
+# the sweep's arm of the same name, and it has to stay in step with it or a
+# bead the sweep would report is dropped here and never reaches a pass.
 SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
@@ -259,11 +262,13 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
            | .dependencies[]?
            | select((.type // "") == "parent-child")
            | (.depends_on_id // empty) ] | unique) as $gatedparents
+      | ([ ($alive[0] // [])[]
+           | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
       | [ ($ready[0] // [])[]
           | select((.metadata["gc.routed_to"] // "") == "")
           | select((.metadata.task_kind // "") != "visit")
           | select((.metadata.task_kind // "") != "triage-subject")
-          | select((.metadata["gc.takeaway"] // "") == "")
+          | select(.id as $id | ($demanded | index($id)) | not)
           | select((.metadata["triage.hold"] // "") == "")
           | select(.id as $id | ($convgroups | index($id)) | not)
           | select(.id as $id | ($gatedparents | index($id)) | not)

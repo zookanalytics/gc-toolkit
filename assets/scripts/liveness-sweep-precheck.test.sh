@@ -133,8 +133,10 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-visit","title":"visit: something","issue_type":"task","metadata":{"task_kind":"visit"}},
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits","sweep.reported":"f-carried"}},
   {"id":"f-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
-  {"id":"f-takeaway","title":"parked by a human","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify"}},
+  {"id":"f-takeaway","title":"a sitting ended here and left its takeaway","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify"}},
   {"id":"f-takeaway-empty","title":"takeaway was cleared — NOT a hold","issue_type":"task","metadata":{"gc.takeaway":""}},
+  {"id":"f-demand-live","title":"a person owes an answer here","issue_type":"task","metadata":{"gc.takeaway":"holding — which of the two?"}},
+  {"id":"f-demand-widen","title":"its demand is deferred, not closed","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
   {"id":"f-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; may take another direction"}},
   {"id":"f-hold-empty","title":"hold was cleared — NOT a hold","issue_type":"task","metadata":{"triage.hold":""}},
   {"id":"f-carried","title":"already reported by an earlier pass","issue_type":"bug","metadata":{}},
@@ -162,6 +164,7 @@ cat > "$FIX/live.json" <<'JSON'
   {"id":"f-root-live","title":"a routed root the spec bead hangs off","metadata":{}},
   {"id":"f-child","title":"a child whose parent is open","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
   {"id":"m-live","title":"a live molecule driving a work bead","metadata":{"gc.input_convoy_id":"conv-live"}},
+  {"id":"d-open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"f-demand-live"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","metadata":{}}
 ]
 JSON
@@ -172,6 +175,7 @@ JSON
 # the parent as unnamed.
 cat > "$FIX/widen.json" <<'JSON'
 [
+  {"id":"d-deferred","title":"Rule: the other one?","status":"deferred","metadata":{"gc.demand_for":"f-demand-widen"}},
   {"id":"f-blocked-child","title":"a BLOCKED child of f-epic-open","status":"blocked","metadata":{},"dependencies":[{"issue_id":"f-blocked-child","depends_on_id":"f-epic-open","type":"parent-child"}]}
 ]
 JSON
@@ -234,7 +238,13 @@ hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)
 # empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
 # runs, and the sweep files a SECOND visit on a subject converse still holds.
 hasnt ",$SURV," ",f-trackedvisit," "a subject whose live visit names it only by the tracks edge is excluded (class 3)"
-hasnt ",$SURV," ",f-takeaway," "gc.takeaway non-empty is excluded (class 4c)"
+# tk-b6k2pe: a takeaway is one field a sitting stamps at the hold and REPLACES
+# with its outcome at sign-off, and nothing clears it, so it dates the last
+# sitting rather than naming a live wait. The wait is the demand bead, and only
+# while that bead is not closed.
+has ",$SURV," ",f-takeaway," "a takeaway with no live demand names no wait — it survives"
+hasnt ",$SURV," ",f-demand-live," "an OPEN demand on a bead excludes it (class 4c)"
+hasnt ",$SURV," ",f-demand-widen," "a DEFERRED demand still excludes — not closed is not answered"
 hasnt ",$SURV," ",f-hold," "triage.hold non-empty is excluded (class 4d)"
 hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not new"
 hasnt ",$SURV," ",f-epic-open," "a parent with a non-closed child is excluded (class 2i-a)"
@@ -262,7 +272,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 # --- 2. the empty path: no agent session at all ------------------------------
 echo "── an empty board ends the pass with no agent session ──"
 # Keep only the beads a local rule excludes. Nothing survives, so nothing is new.
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 run_precheck
 eq "$RC" "1" "exit 1 — no agent session is dispatched at all"
@@ -312,7 +322,7 @@ echo "── an unreadable probe NEVER produces a silent empty pass ──"
 # The board is emptied first, so the ONLY thing that could make these run is the
 # failed read itself. Without this the test would pass on leftover candidates
 # and prove nothing.
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 cp "$TMP/live.bak" "$FIX/live.json"
 run_precheck
@@ -471,7 +481,7 @@ rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 # full classification to re-run on every evaluation of a board that has
 # nothing to say, which is the poll the cadence exists to bound.
 echo "── a proven-quiet SKIP spends the window itself ──"
-jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-takeaway","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
 : > "$FIX/reads"
