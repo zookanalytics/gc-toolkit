@@ -16,6 +16,9 @@
 # a live demand holds the anchor, a takeaway from a sitting that ended does not.
 # Both also take the cap's OWN takeaway with the park, and leave a sitting's,
 # which gc.takeaway_by tells apart.
+# It also covers the triage widening: a monotonic union with read-back, a
+# closed menu, one justification per gate, and a waiver warranted only by the
+# REVIEWED repo's own charter.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1242,6 +1245,140 @@ reset "$ANCHOR_PR"
 STUB_AUTOMERGE_JSON='{"autoMergeRequest":{"enabledAt":"x"}}' "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "armed auto-merge blocks the dismissal"
 unset STUB_PR_HEAD STUB_REVIEWS
+
+# --- triage: the check_set widening ------------------------------------------------
+# The charter is a FIXTURE standing in for the REVIEWED CHECKOUT, reached
+# through GC_RIG_ROOT, so these cases never read the repo's own menu. The pack
+# is not a rung: a pack-supplied charter is proven inert further down.
+mkdir -p "$TMP/reviewed/docs"
+cat > "$TMP/reviewed/docs/review-charter.md" <<'CHARTER'
+# Fixture charter
+
+| Gate | Applies when | Method | Mandatory paths | Waivable |
+|---|---|---|---|---|
+| `codex` | always | `formulas/mol-review.toml` | `-` | no |
+| `triage` | always | `skills/review-triage/SKILL.md` | `-` | no |
+| `arch` | layer changes | `skills/arch-review/SKILL.md` | `lifecycle/**` `assets/scripts/merge.sh` | no |
+| `demo` | operator-visible | `skills/demo-capture/SKILL.md` | `-` | yes |
+CHARTER
+export GC_RIG_ROOT="$TMP/reviewed"
+
+REVIEW_TRIAGE='{"id":"rv-t","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"triage","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat"},"notes":"triage body"}'
+setcs() { jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata.check_set = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+
+echo "# triage widens check_set and records why"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "diff rewrites merge.sh" 2>&1); rc=$?
+eq "$rc" 0 "an approve carrying --add-gates exits 0"
+eq "$(meta tk-anc check_set)" "codex,triage,arch" "the added gate is unioned into check_set"
+eq "$(meta tk-anc check.triage)" "green@$OID_HEAD" "triage's own gate goes green at the reviewed commit"
+has "$(notes tk-anc)" "triage-add: arch @$OID_HEAD — diff rewrites merge.sh" "one justification line per added gate lands on the anchor"
+eq "$(status rv-t)" "closed" "the triage review bead closes"
+has "$out" "check_set now codex,triage,arch" "the summary names the new set"
+
+echo "# widening is a UNION — it can never drop a declared gate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage,demo"
+"$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,demo,arch" "every previously declared gate survives the widen"
+
+echo "# re-running the same widen is a no-op, not a duplicate"
+"$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,demo,arch" "an already-declared gate is not appended twice"
+
+echo "# a whitespace-padded check_set still splits per gate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex, triage"
+"$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,arch" "the split is per gate, not one fused token"
+
+echo "# the menu is CLOSED"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates telepathy --justification "vibes" 2>&1); rc=$?
+eq "$rc" 1 "a gate the charter does not declare is refused"
+eq "$(meta tk-anc check_set)" "codex,triage" "…and check_set is untouched"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and no verdict marker was written"
+eq "$(status rv-t)" "in_progress" "…and the review stays open"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and nothing was posted"
+
+echo "# widening needs a justification, and needs to come from triage"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch 2>&1); rc=$?
+eq "$rc" 1 "--add-gates without --justification is refused"
+has "$out" "not auditable" "…and says why"
+out=$("$SUT" --review-bead rv-1 --verdict approve --add-gates arch --justification "x" 2>&1); rc=$?
+eq "$rc" 1 "a non-triage gate may not widen the check_set"
+out=$("$SUT" --review-bead rv-t --verdict request-changes --add-gates arch --justification "x" 2>&1); rc=$?
+eq "$rc" 1 "--add-gates only rides an approve verdict"
+
+echo "# the none opt-out is human-only: triage records the verdict without widening"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "none"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+eq "$rc" 0 "the verdict is still recorded"
+eq "$(meta tk-anc check_set)" "none" "…and the opt-out is left alone"
+eq "$(meta tk-anc check.triage)" "green@$OID_HEAD" "…and triage's marker still lands"
+
+# --- triage: waivers, the one sanctioned narrowing ----------------------------------
+echo "# a waiver is recorded for a gate the charter marks waivable"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates demo --justification "docs only" 2>&1); rc=$?
+eq "$rc" 0 "a waived gate exits 0"
+has "$(notes tk-anc)" "triage-waive: demo @$OID_HEAD — docs only" "the waiver is recorded on the anchor"
+eq "$(meta tk-anc check_set)" "codex,triage" "a waiver never adds to check_set"
+eq "$(meta tk-anc check.triage)" "green@$OID_HEAD" "the waiver carries the oid triage's own marker records"
+
+echo "# a gate the charter does NOT mark waivable cannot be waived"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates arch --justification "trust me" 2>&1); rc=$?
+eq "$rc" 1 "waiving a non-waivable gate is refused"
+has "$out" "does not mark 'arch' waivable" "…and names the missing warrant"
+eq "$(status rv-t)" "in_progress" "…and the review stays open"
+
+echo "# a waiver cannot remove a gate already declared"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage,demo"
+out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates demo --justification "changed my mind" 2>&1); rc=$?
+eq "$rc" 1 "waiving a declared gate is refused"
+has "$out" "monotonic" "…because widening is monotonic"
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "…and check_set is untouched"
+
+echo "# with no readable charter: widening is accepted, narrowing is not"
+NOC="$TMP/noc/assets/scripts"
+mkdir -p "$NOC"
+cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$NOC/"
+chmod +x "$NOC"/*.sh
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_RIG_ROOT="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+eq "$rc" 0 "an unvalidated widen is accepted"
+eq "$(meta tk-anc check_set)" "codex,triage,arch" "…and lands"
+has "$out" "unvalidated" "…and says the menu could not be checked"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_RIG_ROOT="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --waive-gates demo --justification "why" 2>&1); rc=$?
+eq "$rc" 1 "a waiver with no declared warrant is refused"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and nothing was recorded"
+
+echo "# a charter shipped by the PACK is never borrowed for a repo that has none"
+# The gc-toolkit pack menu declares arch and marks demo waivable. The reviewed
+# checkout declares nothing. Reading the pack's copy here would validate one
+# repo's gates against another's menu — the gap has to stay visible.
+PACKONLY="$TMP/packonly"
+mkdir -p "$PACKONLY/assets/scripts" "$PACKONLY/docs"
+cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$PACKONLY/assets/scripts/"
+chmod +x "$PACKONLY/assets/scripts"/*.sh
+cp "$TMP/reviewed/docs/review-charter.md" "$PACKONLY/docs/"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_PACK_DIR="$PACKONLY" GC_RIG_ROOT="$TMP/noc" "$PACKONLY/assets/scripts/signoff.sh" \
+  --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
+eq "$rc" 0 "the widen still lands — widening is safe with or without a menu"
+has "$out" "unvalidated" "…but it is recorded as unvalidated, not validated against the pack menu"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_PACK_DIR="$PACKONLY" GC_RIG_ROOT="$TMP/noc" "$PACKONLY/assets/scripts/signoff.sh" \
+  --review-bead rv-t --verdict approve --waive-gates demo --justification "why" 2>&1); rc=$?
+eq "$rc" 1 "the pack's waivable row does not warrant a narrowing in a repo that never declared it"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and nothing was recorded"
+
+echo "# an unknown verdict is still refused"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict maybe 2>&1); rc=$?
+eq "$rc" 1 "an undeclared verdict verb is refused"
+unset GC_RIG_ROOT
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then
