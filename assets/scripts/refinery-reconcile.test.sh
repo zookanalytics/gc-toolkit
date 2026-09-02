@@ -361,6 +361,20 @@ elif [ "$LOCK_PROVEN" = 1 ]; then
 else
   bad "timeout $to outruns the ${SWEEP_WINDOW}s tracking-sweep window and the driver has no working lock — a swept tracking bead is a second merge writer"
 fi
+# The other end of the same budget. The runner calls a lock held past
+# LOCK_STALL_SECS a wedge and says nothing is landing — true of an abandoned fd,
+# false of a pass the controller is still running. A timeout at or above that
+# bound makes the two indistinguishable, and the report the operator gets for a
+# merely slow pass is that the cadence has stopped.
+STALL=$(sed -n 's/^LOCK_STALL_SECS=.*:-\([0-9][0-9]*\)}.*/\1/p' "$RUNNER")
+case "$STALL" in
+  ''|*[!0-9]*) bad "LOCK_STALL_SECS default is unreadable — the timeout cannot be bounded against it" ;;
+  *) if [ -n "$to_secs" ] && [ "$to_secs" -lt "$STALL" ]; then
+       ok "timeout $to is inside the runner's ${STALL}s lock-stall bound"
+     else
+       bad "timeout $to is not below the runner's ${STALL}s lock-stall bound — a pass still running reads as a wedged one"
+     fi ;;
+esac
 has "$o" 'scope = "rig"' "order is rig-scoped (single-flight per rig)"
 has "$o" 'refinery-reconcile.sh' "order execs this runner"
 if grep -qE '^[[:space:]]*no_work_gate' "$ORDER"; then

@@ -9,13 +9,18 @@
 # flock that a swept bead cannot reopen. `timeout` now bounds how long a wedged
 # pass can hold that lock, and raising it above the watchdog window is safe only
 # while the lock stands (assets/scripts/refinery-reconcile.test.sh asserts the
-# pair). scope=rig: one registration, store, identity and clock per importing
-# rig; per-rig values are derived inside the runner from GC_RIG.
+# pair). It is bounded from above too: a pass killed part-way loses its later
+# arms, and every arm is a run of store subprocesses whose cost moves with host
+# load rather than with queue size, so the budget has to cover the slow end of
+# that range. Above the runner's own lock-stall bound a legitimately slow pass
+# would be reported as a wedge, so the two move together — the same suite
+# asserts that pair. scope=rig: one registration, store, identity and clock per
+# importing rig; per-rig values are derived inside the runner from GC_RIG.
 # Tune the interval from city.toml [[orders.overrides]], not here.
 [order]
 description = "Refinery merge cadence: ensure gates, open pre-open PRs, land approved PRs, record external PR facts, graduate convoys"
 trigger = "cooldown"
 interval = "60s"
-timeout = "300s"
+timeout = "600s"
 exec = "$PACK_DIR/assets/scripts/refinery-reconcile.sh"
 scope = "rig"

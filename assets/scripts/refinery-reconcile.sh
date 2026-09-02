@@ -84,7 +84,7 @@ NOTED=""
 
 # Two merge.sh writers against one rig's anchors is the failure this cadence
 # must never produce, and the controller's open-tracking gate does not prevent
-# it: the watchdog closes tracking beads at 2m, well inside the 300s timeout,
+# it: the watchdog closes tracking beads at 2m, well inside the order's timeout,
 # and an un-gated tracking bead is a second dispatch. This flock depends on no
 # bead surviving. The arms inherit fd 9, so the lock is held for exactly as
 # long as a writer is live and the kernel releases it on any exit, SIGKILL

@@ -33,7 +33,7 @@ driver, which runs the arms in order and exits.
 | Scope | `scope = "rig"` — one registration per importing rig |
 | Working directory | the rig's own root, so `git remote get-url origin` resolves |
 | Environment | controller-built: `GC_RIG`, `GC_RIG_ROOT`, `BEADS_DIR`, `GC_BEADS_PREFIX`, `PACK_DIR`, `GC_PACK_STATE_DIR`, the Dolt projection, the `gh` token |
-| Timeout | `300s` — it bounds how long a wedged pass holds the per-rig lock; it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
+| Timeout | `timeout = "600s"`, tunable per rig from city.toml `[[orders.overrides]]` — it bounds how long a wedged pass holds the per-rig lock. It must cover a whole pass at the slow end of host load and stay under the driver's `REFINERY_RECONCILE_LOCK_STALL_SECS`, and it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
 
 Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
@@ -106,13 +106,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    it is holding its own merge, and failing the arm over it would hold every
    other anchor's too.
 4. **merge.sh** — `pull_request → merged`. Pinned `gh pr view`, identity gates
-   (same repo, not a fork, head branch matches), re-read the anchor, validate
-   holds/posture/gates/children/approval/base/CLEAN, check that the merge
-   result keeps `generated/seed-audit` current, re-read the full
+   (same repo, not a fork), re-read the anchor and check it still gates this
+   PR — open, still `pull_request`, same number, url and head branch. Then
+   either the record for a PR already merged, or, for an OPEN non-draft one,
+   validate holds/posture/gates/children/approval/base/CLEAN, check that the
+   merge result keeps `generated/seed-audit` current, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record via one
    `lifecycle.sh` call. The posture it validates is the value **pr-facts
    recorded on the anchor**, never a fresh read of GitHub.
+
+   Landing and recording are two writes, and a pass killed between them leaves
+   an anchor saying `pull_request` over a PR already on the target branch.
+   This arm records that PR rather than leaving it to pr-facts: the arms are
+   ordered, so a recovery downstream of the merge is reached least often
+   exactly when it is needed. The record stands on the same live anchor
+   identity the merge does, since it writes merged truth about one PR onto a
+   bead that may have moved to another since the enumeration.
 
    The seed-audit check is the one gate here that is a property of the merge
    rather than of the head. `generated/seed-audit` is rendered from the whole
@@ -254,10 +264,14 @@ Two settings must never change, because each would undo the guarantee:
 - **Never set `no_work_gate` on this order.** It opts the order out of both
   open-work gates, and the first of them is the tracking gate above.
 - **`timeout` bounds how long a wedged pass can hold the lock.** It does not
-  keep the pass inside the watchdog window — at `300s` it cannot — so the lock
-  is what carries single-flight. `refinery-reconcile.test.sh` asserts the pair
-  mechanically: a timeout above the 2m window passes only in a run that also
-  demonstrates one `merge.sh` writer across two overlapping ticks.
+  keep the pass inside the watchdog window, because no budget that covers a real
+  pass fits there, so the lock is what carries single-flight.
+  `refinery-reconcile.test.sh` asserts the pair mechanically: a timeout above the
+  2m window passes only in a run that also demonstrates one `merge.sh` writer
+  across two overlapping ticks. The suite holds the upper bound the same way,
+  reading both numbers from the files that set them: a timeout at or above the
+  driver's `REFINERY_RECONCILE_LOCK_STALL_SECS` would make a pass that is still
+  running read as a wedged one.
 
 Never run a cadence driver out-of-band (by hand, cron, or a daemon). Running
 this script by hand at least serialises against the lock; anything else is a

@@ -169,6 +169,93 @@ out="$("$SUT" transition d-7 --to pull_request --set-dated "gc.routed_to=x@$OID"
 eq "$rc" 1 "--set-dated gc.routed_to is refused (owned by --route)"
 eq "$(meta d-7 pr.machine)" "<absent>" "no refusal wrote anything"
 
+# --- a transition that changes nothing performs no write -----------------------
+# The observer arms re-reach the same verdict on most anchors of every pass, and
+# each re-assertion cost an update plus its read-back — two store subprocesses
+# per anchor, on a cadence whose budget is store subprocesses. What must not
+# change with them gone: the exit code, the report, and the stored value.
+echo "# idle transitions"
+store '[{"id":"n-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"settled@'"$OID"'@2026-08-28T04:05:06Z","gc.routed_to":"rig/pool"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition n-1 --to pull_request --expect pull_request \
+  --route rig/pool --set-dated "pr.machine=settled@$OID" 2>&1)"; rc=$?
+eq "$rc" 0 "a re-assertion of the state already on the bead exits 0"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and issues NO gc bd update"
+has "$out" "n-1 pull_request -> pull_request" "…and still reports the state"
+eq "$(meta n-1 pr.machine)" "settled@$OID@2026-08-28T04:05:06Z" "…leaving the instant it would have preserved"
+eq "$(meta n-1 gc.routed_to)" "rig/pool" "…and the route it carried back"
+out="$("$SUT" transition n-1 --to pull_request --route rig/pool \
+  --set-dated "pr.machine=settled@$OID" --json 2>&1)"
+eq "$(printf '%s' "$out" | jq -r '.ok')" "true" "--json still reports ok"
+eq "$(printf '%s' "$out" | jq -r '.from + ">" + .to')" "pull_request>pull_request" "…with the same from/to"
+
+# Each field the comparison covers, mutated on its own: every one of these must
+# still write. A skip that fires on a real change is the failure this optimization
+# could introduce, and it is silent — the caller is told the transition landed.
+writes_when() { # <label> <bead-json> <args...>
+  local label="$1" bead="$2"; shift 2
+  store "[$bead]"
+  : > "$STUB_GC_LOG"
+  "$SUT" transition "$@" >/dev/null 2>&1
+  eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "$label"
+}
+BASE='"id":"n-2","status":"open","assignee":"rig/refinery","notes":""'
+writes_when "a moved head writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
+  n-2 --to pull_request --set-dated "pr.machine=settled@$OID2"
+writes_when "a changed verdict writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
+  n-2 --to pull_request --set-dated "pr.machine=wedged-exception@$OID"
+writes_when "a changed --set writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"codex\"}}" \
+  n-2 --to pull_request --set check_set=codex,ci
+writes_when "a --set of an absent key writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
+  n-2 --to pull_request --set check_set=codex
+writes_when "a --unset of a present key writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"rejection_reason\":\"old\"}}" \
+  n-2 --to pull_request --unset rejection_reason
+writes_when "a changed --route writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"gc.routed_to\":\"rig/pool\"}}" \
+  n-2 --to pull_request --route rig/other
+writes_when "a moved state writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pre_open_gate\"}}" \
+  n-2 --to pull_request
+# Fields the comparison does NOT cover: each writes unconditionally, because a
+# skip would drop something no comparison against the current bead can see.
+writes_when "--append-notes always writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
+  n-2 --to pull_request --append-notes "another line"
+writes_when "--takeaway always writes (it stamps a fresh instant)" \
+  '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
+  n-2 --to pull_request --route human --takeaway "same text"
+writes_when "--assignee always writes" \
+  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
+  n-2 --to pull_request --assignee rig/refinery
+store '[{"id":"n-3","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"merged","merged_sha":"abc123"}}]'
+: > "$STUB_GC_LOG"
+"$SUT" transition n-3 --to merged --close --set merged_sha=abc123 >/dev/null 2>&1
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "--close always writes"
+
+# The unanchored self-edge: merge_result is already absent, so the --unset the
+# skip stands in for genuinely has nothing to do.
+store '[{"id":"n-4","status":"open","assignee":"","notes":"","metadata":{}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition n-4 --to unanchored 2>&1)"; rc=$?
+eq "$rc" 0 "an unanchored self-edge exits 0"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and writes nothing"
+
+# Validation is not what is skipped: an idle-looking call whose --expect does not
+# hold is still refused, and so is one whose edge is illegal.
+store '[{"id":"n-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition n-5 --to pull_request --expect pre_open_gate 2>&1)"; rc=$?
+eq "$rc" 1 "an --expect mismatch is still refused ahead of the skip"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and wrote nothing"
+store '[{"id":"n-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"merged"}}]'
+out="$("$SUT" transition n-6 --to pull_request 2>&1)"; rc=$?
+eq "$rc" 1 "an illegal edge is still refused"
+
 # --- illegal edge / --expect mismatch / refusal ---------------------------------
 echo "# refusals"
 store '[{"id":"a-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"merged"}}]'

@@ -823,8 +823,14 @@ esac
 
 echo "# …and the clock holds across a second pass at an unchanged head"
 was="$(machine X1)"
+: > "$STUB_GC_LOG"
 run >/dev/null
 eq "$(machine X1)" "$was" "a re-derived verdict at the same head keeps its instant (the reconcile cadence runs every few minutes)"
+# The instant surviving is not enough: this pass must not have paid for it. Every
+# anchor already carrying its verdict costs a `gc bd show` if the writer is asked
+# at all, and that read is the most expensive call the arm makes.
+hasnt "$(cat "$STUB_GC_LOG")" "bd update X1" "…re-recording an unchanged verdict issues no update"
+hasnt "$(cat "$STUB_GC_LOG")" "bd show X1" "…and does not even re-read the anchor to discover that"
 
 echo "# recording a verdict moves no route"
 # The stamp rides a lifecycle self-transition, and a detached state's default is
@@ -842,6 +848,41 @@ store "[$(anchor X5 pull_request codex "green@$(oid x5)" polecat/x5)]"
 out=$(run); rc=$?
 eq "$rc" 0 "the no-head pass exits 0"
 eq "$(machine X5)" "<absent>" "a verdict pinned to no head is never written"
+
+echo "# the skip is the exact verdict at the exact head, and nothing wider"
+# A verdict the head has moved past is a different verdict, and a value not yet
+# in the dated shape still owes the instant lifecycle.sh appends.
+store "[$(anchor X7 pull_request codex "green@$(oid x7)" polecat/x7 ',"pr.machine":"settled@'"$(oid stale7)"'@2026-08-28T04:05:06Z"')]"
+oid x7 > "$GH_DIR/head_polecat_x7"
+: > "$STUB_GC_LOG"
+run >/dev/null
+has "$(cat "$STUB_GC_LOG")" "bd update X7" "a verdict pinned to a head that has moved is rewritten"
+eq "$(pinned X7)" "settled@$(oid x7)" "…at the head the branch now carries"
+store "[$(anchor X8 pull_request codex "green@$(oid x8)" polecat/x8 ',"pr.machine":"settled@'"$(oid x8)"'"')]"
+oid x8 > "$GH_DIR/head_polecat_x8"
+: > "$STUB_GC_LOG"
+run >/dev/null
+has "$(cat "$STUB_GC_LOG")" "bd update X8" "an undated legacy verdict is rewritten, not skipped"
+case "$(machine X8)" in
+  "settled@$(oid x8)@"?*) ok "…and gains its instant" ;;
+  *) bad "the legacy value was left undated: '$(machine X8)'" ;;
+esac
+# Anything short of the full dated shape is one lifecycle.sh restamps, so the
+# skip must not read it as recorded. Left alone it never gets repaired: the board
+# cannot date the row, and every later pass agrees the verdict is already there.
+# An unpinned value is the one shape that carries no head at all, which is what
+# makes it the shape a prefix comparison alone would accept.
+for bad_shape in "settled" "settled@OID@" "settled@OID@2026-08-28T04:05:06Z@x"; do
+  store "[$(anchor X9 pull_request codex "green@$(oid x9)" polecat/x9 ",\"pr.machine\":\"${bad_shape//OID/$(oid x9)}\"")]"
+  oid x9 > "$GH_DIR/head_polecat_x9"
+  : > "$STUB_GC_LOG"
+  run >/dev/null
+  has "$(cat "$STUB_GC_LOG")" "bd update X9" "a verdict whose instant is malformed ('$bad_shape') is rewritten"
+  case "$(machine X9)" in
+    "settled@$(oid x9)@"20[0-9][0-9]-*Z) ok "…and comes back dateable" ;;
+    *) bad "left malformed: '$(machine X9)'" ;;
+  esac
+done
 
 echo
 echo "passed: $PASS  failed: $FAIL"
