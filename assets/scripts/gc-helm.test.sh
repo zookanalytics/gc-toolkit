@@ -202,6 +202,7 @@ mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
 #   A-BLOCKED   an open bead that is not a demand on it -> the work is there
 #   A-DEMANDED  its own demand, open -> answering it makes A-DEMANDED the work
 #   A-DONEBLK   the same delegated child, closed -> the wait is over
+#   CLOSED-A-FOLD  a disposed anchor that is ALSO blocked -> two refusals
 # A-PROBEDEAD and A-PROBEJUNK are answered by the stub's own arms and never
 # reach these files. Each keeps a fixture anyway, carrying a live blocker.
 # Teach the stub to serve it instead of failing and both probe cases go red.
@@ -215,6 +216,9 @@ cat > "$TMP/deplists/A-DEMANDED.json" <<'J'
 J
 cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
 [{"id":"w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/CLOSED-A-FOLD.json" <<'J'
+[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
 [{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
@@ -741,6 +745,7 @@ grep -qE '^bd update UNKNOWN-A( |$)' "$TMP/updates" \
 #   (DELEGBARE)  the guard is scoped to --route; --release alone still stamps
 #   (DELEGPROBE) a store that will not answer allows the route, and warns
 #   (DELEGJUNK)  a payload that is not an edge array is unreadable the same way
+#   (DELEGFOLD)  a closed anchor is refused on its disposition, not on this
 : > "$TMP/updates"; : > "$TMP/deps"; printf '%s' "$POOL" > "$TMP/routed"
 DRC=0
 sh "$SCRIPT" takeaway A-BLOCKED "routed — the fix is slung" --by converse \
@@ -821,6 +826,21 @@ grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
 grep -q 'could not read the blockers on A-PROBEJUNK' "$TMP/derr" \
   && ok "(DELEGJUNK) …and it is reported unreadable, not empty" \
   || bad "(DELEGJUNK) an error object was read as an edge list (stderr: $(cat "$TMP/derr"))"
+
+# (DELEGFOLD) a closed anchor blocked by delegated work meets two refusals.
+# This one yields: refusing here would exit before the headline and the quiesce
+# a folded anchor still needs, and a disposed bead is never routed anyway.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+FRC=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded, and blocked" --by converse \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || FRC=$?
+eq "$FRC" "4" "(DELEGFOLD) a closed anchor is refused on its disposition"
+grep -q 'has no method a pool can perform' "$TMP/derr" \
+  && bad "(DELEGFOLD) the blocker refusal preempted it (stderr: $(cat "$TMP/derr"))" \
+  || ok "(DELEGFOLD) …not on its blockers"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
+  || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the

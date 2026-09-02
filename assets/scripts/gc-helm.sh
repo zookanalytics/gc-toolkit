@@ -502,8 +502,11 @@ cmd_takeaway() {
     # reports a bead it cannot resolve as a JSON error OBJECT on stdout, which
     # a filter that answers "" on anything but an array takes for no edges at
     # all. A cross-store edge is left out of the array entirely, invisible here
-    # as it is to every other reader of this graph.
-    if [ -n "$route" ]; then
+    # as it is to every other reader of this graph. A closed anchor is not this
+    # refusal's case: its route is refused below on the disposition itself,
+    # after the headline and the quiesce a folded anchor still needs have
+    # landed.
+    if [ -n "$route" ] && [ -n "$release_park" ]; then
         probe_read=1
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         blocked_by=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
