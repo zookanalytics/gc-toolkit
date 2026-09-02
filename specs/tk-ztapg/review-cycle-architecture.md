@@ -12,8 +12,8 @@ Convergence is judged, not pinned to a commit and not counted in rounds.
 
 **Mandate.** The state a PR's reviews carry, who may change it, and what has
 to be true before a PR merges. That covers the lane state machine, the
-validator's decisions, the quiescence rule that serialises dispatch, the
-reset triggers, and the change each existing component takes.
+validator's decisions, the quiescence rule that serialises dispatch, what moves
+a lane backwards, and the change each existing component takes.
 
 **Boundaries.** The reviewers' own methods are out: what a reviewer reads,
 how it words a finding, and which severity vocabulary it uses belong to the
@@ -52,17 +52,17 @@ A lane's state is a state of the lane itself, never a claim about a commit:
 
 | State | Means |
 |---|---|
-| `unreviewed` | no full review has run on this lane |
+| `unreviewed` | this lane owes a full review |
 | `reviewing` | a full review is in flight |
-| `validating` | the reviewer returned findings and a validation pass is in flight |
+| `validating` | a finding set is in hand and a validation pass is in flight |
 | `fixing` | must-fix findings from this lane are open and work is out on them |
 | `green` | converged |
 
 **Green survives new commits.** This is the load-bearing rule and the one
 reversal from the current design. A push does not move a lane out of `green`,
-does not stale it, and does not buy a review. The only thing that returns a
-green lane to `unreviewed` is a reset trigger, and there is exactly one of
-those.
+does not stale it, and does not buy a review. A green lane returns to
+`unreviewed` only when the validator rules a fresh whole-diff review warranted,
+which is a judgement rather than a trigger.
 
 The state lives on the anchor under the same key the marker uses today,
 `check.<lane>`, with a new grammar: one bare state word, no `@<oid>` suffix.
@@ -78,7 +78,8 @@ B. **The validator ruled no further full review is needed.** The validator may
    still have created must-fix findings. The lane goes green when those close,
    with no re-review. `unreviewed` to `reviewing` to `validating` to `fixing`
    to `green`, where the `fixing` leg is skipped when the validator's must-fix
-   set is empty.
+   set is empty. A human feedback batch joins this path at `validating`, from
+   `green` as readily as from `reviewing`, and is ruled on the same way.
 
 There is no third path. In particular there is no path where a commit landing
 on the branch changes a lane's state.
@@ -293,11 +294,23 @@ correlation, not a proof of cause, but it is the only structural change to the
 in-flight question in the window, and it points the same way the design does:
 what is missing is the predicate, not fewer dispatchers.
 
-## Reset triggers
+## What moves a lane backwards
 
-**A human feedback batch resets every lane on the anchor to `unreviewed`.**
-That is the complete list. A commit does not reset a lane, a rebase does not,
-a force-push does not, and a sibling lane's finding does not.
+Two things move a lane backwards, and nothing else does. A commit does not, a
+rebase does not, a force-push does not, and a sibling lane's finding does not.
+
+**A human feedback batch moves every lane on the anchor to `validating`.** The
+batch does not itself buy a full re-review. It is a finding set like a
+reviewer's, so it enters the lane where a reviewer's findings enter it, and the
+validator's three decisions apply to it unchanged. A comment reporting a
+misspelling becomes a must-fix finding, the lane goes to `fixing`, and it
+returns to `green` when the fix lands without a whole-diff read being spent on
+it. A comment that overturns an assumption the diff rests on is what decision 3
+answers yes to.
+
+**The validator ruling a fresh whole-diff review warranted returns that lane to
+`unreviewed`.** It is the only path back to `unreviewed`, for human input and
+machine input alike, which is the judged-convergence ruling applied to both.
 
 The signal already exists and is already deduped. `pr-facts.sh` records a
 `commented` posture against `pr_comment_watermark` and `pr_review_watermark`,
@@ -309,11 +322,13 @@ Today that detection resets `signoff.sh`'s review-round cap, by writing
 `signoff_rounds_reset=<max_review>.<max_comment>` and letting the next verdict
 re-baseline `signoff_round_floor`. The detection is right and the thing it
 resets is wrong. **Re-point the same write at the lane states**: set every
-`check.<lane>` on the anchor to `unreviewed`, keyed on the same batch id, in
-the same single `lifecycle.sh transition` call.
+`check.<lane>` on the anchor to `validating`, keyed on the same batch id, in
+the same single `lifecycle.sh transition` call. The comments in the batch
+become findings on the same pass, since a lane sent to `validating` with no
+finding set to rule on would stall there.
 
-Open must-fix findings are unaffected by a reset. They were true before the
-comment batch and they still hold the merge.
+Open must-fix findings are unaffected by a batch. They were true before it
+arrived and they still hold the merge.
 
 ## Merge predicate
 
@@ -339,7 +354,7 @@ Six components carry the design. For each, what it does today and what changes.
 | **Gate authority** — `assets/scripts/gate-ensure.sh` | Canonicalizes `check_set`, classifies each `check.<g>` against the live head, dispatches a review per unsettled gate, and backstops runaway dispatch with `GC_MAX_REVIEW_DISPATCHES`. | Reads lane state instead of comparing markers to a head. Enforces quiescence before any dispatch. Drops `live_head_for` from the gate classification, drops `already_answered` (a prior verdict at a commit is no longer the question), and drops the dispatch ceiling, whose only job was to proxy convergence. |
 | **Verdict writer** — `assets/scripts/signoff.sh` | The single audited writer of `check.<g>=<verb>@<oid>`. Also files the rework child, counts rounds, and stamps `exception@` at the cap. | Stays the single writer, of lane state and validator dispositions. The round cap, `signoff_round_floor`, `signoff_rounds_reset`, `signoff_cap` and the `reset` verb all retire with judged convergence. The oid-length guard and the moved-head refusal retire with the pin. |
 | **Merge predicate** — `assets/scripts/merge.sh` `hold_gate` | First declared gate not `green@<head>`, else merge. | Every lane `green`. The must-fix half takes no change: the existing blocker probe already holds on the finding's `blocks` edge. |
-| **Reset detector** — `assets/scripts/pr-facts.sh` | Detects a human feedback batch by watermark, routes the comments, and resets the round cap once per batch. | Same detection, same watermarks, same once-per-batch dedup. Resets every lane to `unreviewed` instead. |
+| **Feedback detector** — `assets/scripts/pr-facts.sh` | Detects a human feedback batch by watermark, routes the comments, and resets the round cap once per batch. | Same detection, same watermarks, same once-per-batch dedup. Files the batch's comments as findings and moves every lane to `validating` instead. |
 
 ### Beyond the six
 
@@ -465,9 +480,9 @@ how much confidence the design deserves.
   this design adds is that the key survives a rebase, which rules out a commit
   oid and a line number. What remains open is what a locus normalizes to when
   the finding is about a file the rework then renames.
-- **Does a human feedback batch reset a lane whose reviewer the human never
-  read?** The ruling says a batch resets the lane. Whether that means every
-  lane on the anchor or only the lanes whose findings the comment touches is
-  not settled; this spec takes every lane, on the ground that a comment batch is
-  input the branch has never been answered against and the cheap read is the
-  safe one.
+- **Does a human feedback batch move a lane whose reviewer the human never
+  read?** Whether the batch reaches every lane on the anchor or only the lanes
+  whose findings the comment touches is not settled. This spec takes every
+  lane, on the ground that a comment batch is input the branch has never been
+  answered against, and the cost of the wide read is now one validation pass
+  rather than one full review.
