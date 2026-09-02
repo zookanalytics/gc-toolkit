@@ -467,14 +467,21 @@ The loop, every visit:
    named `$ITEM` IS the subject, so the ordinary one-topic subject stamps
    exactly where it always did.
 
-   **The stamp is a record, not a hold.** Nothing clears it — you stamp it
-   at the hold and REPLACE it with the outcome at sign-off — so the
-   liveness sweep (`assets/scripts/liveness-sweep.sh`) does not read it at
-   all. What holds an item is the wait you recorded as an edge: a
-   `--waiting-on` blocker, an open demand bead, a child. When the last of
-   those closes the item comes back as an unnamed wait, whatever the
-   takeaway still says. So a takeaway you write without an edge parks
-   nothing, and reads to the next sitting as a conversation that ended.
+   **The sentence is a record; the flag beside it is the state.** Nothing
+   clears the stamp — you write it at the hold and REPLACE it with the
+   outcome at sign-off — so the liveness sweep
+   (`assets/scripts/liveness-sweep.sh`) does not read it at all, and no
+   reader can recover from the prose whether the sitting settled its
+   subject or parked it. That is the whole reason the disposition is a
+   flag: `--no-wait` where nothing is waiting, `--waiting-on` where
+   something is, and neither where a person is. What actually holds an
+   item is still the wait you recorded as an edge — a `--waiting-on`
+   blocker, an open demand bead, a child — and when the last of those
+   closes the item comes back as an unnamed wait, whatever the takeaway
+   still says. A takeaway written with no edge and no `--no-wait` parks
+   nothing and is reported as a wait nothing re-asks
+   (`doctor/check-wait-is-an-edge`); one written with `--no-wait` says the
+   conversation ended, and had better be true.
 
    Then post the framing. Every message you post while holding ends with
    the operator's decision — labeled `Next (yours):`, standing alone:
@@ -509,15 +516,19 @@ The loop, every visit:
      [ -x "$cand/assets/scripts/gc-helm.sh" ] && { HELM="$cand/assets/scripts/gc-helm.sh"; break; }
    done
    [ -n "$HELM" ] || echo "NO TAKEAWAY WRITER on any candidate root — say so in the sign-off; the item carries no trace of this sitting"
-   # One --waiting-on per bead this sitting ROUTED work into; leave WAITING
-   # empty when it routed nothing. An ARRAY, not a string: this city runs zsh,
-   # which does not word-split an unquoted parameter, so a populated string
-   # arrives as ONE argument and the call dies with `unknown flag` on exactly
-   # the sittings the flag exists for. "${WAITING[@]}" expands to nothing
-   # when empty and to one argument per element otherwise, in both bash
-   # and zsh.
-   WAITING=()   # e.g. WAITING=(--waiting-on tk-hgmob --waiting-on tk-st143)
-   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next, ≤140 chars>" --by converse "${WAITING[@]}" \
+   # What is waiting on $ITEM now that this sitting is over. Three shapes,
+   # exactly one true, and this sitting is the last reader that can tell them
+   # apart: one --waiting-on per bead it ROUTED work into; --no-wait when it
+   # settled the subject and nothing is waiting; EMPTY only where the subject
+   # is parked for a person, which doctor/check-wait-is-an-edge reports as a
+   # wait nothing re-asks, because that is what it is.
+   # An ARRAY, not a string: this city runs zsh, which does not word-split an
+   # unquoted parameter, so a populated string arrives as ONE argument and the
+   # call dies with `unknown flag` on exactly the sittings the flag exists for.
+   # "${WAIT[@]}" expands to nothing when empty and to one argument per element
+   # otherwise, in both bash and zsh.
+   WAIT=()   # e.g. WAIT=(--no-wait) or WAIT=(--waiting-on tk-hgmob --waiting-on tk-st143)
+   "$HELM" takeaway "$ITEM" "<outcome> — <what this sitting settled or needs next, ≤140 chars>" --by converse "${WAIT[@]}" \
      || echo "TAKEAWAY FAILED on $ITEM — re-run it before closing; nothing below records this sitting"
    # Read the takeaway back on the ITEM. The gc.outcome check below proves the
    # VISIT stamp and says nothing about the item, so a takeaway that died still

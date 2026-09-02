@@ -365,6 +365,58 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
 
+# ── takeaway --no-wait: the disposition beside the headline ──────────────────
+# One ritual, two outcomes: a sitting that settled its subject and one that
+# parked it write the same sentence, and only the writer can tell them apart.
+# --no-wait is that answer, and lifecycle.toml [holds] settled_keys is what
+# reads it. Covered:
+#   (SETTLED)   --no-wait stamps gc.takeaway_settled=1 in the headline's write
+#   (UNSETTLED) every other takeaway stamps it EMPTY, so no stamp outlives its
+#               own sitting and answers for the park that follows
+#   (BOTH)      --no-wait and --waiting-on contradict, and nothing is written
+#   (SETTLEDREL) it rides a --release --route write like the rest of the stamp
+: > "$TMP/updates"; : > "$TMP/deps"
+sh "$SCRIPT" takeaway A-PARKED "resolved — the board was right" --by converse --no-wait >/dev/null 2>&1 || true
+U="$(cat "$TMP/updates")"
+grep -q -- '--set-metadata gc.takeaway_settled=1' <<< "$U" \
+  && ok "(SETTLED) --no-wait stamps the settled key" \
+  || bad "(SETTLED) no settled key stamped: $U"
+grep -q -- '--set-metadata gc.takeaway=resolved — the board was right' <<< "$U" \
+  && ok "(SETTLED) …in the same update as the headline" \
+  || bad "(SETTLED) the headline and the disposition did not ride together: $U"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(SETTLED) …and it writes no edge, having none to write"
+
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" --by converse >/dev/null 2>&1 || true
+U="$(cat "$TMP/updates")"
+grep -q -- '--set-metadata gc.takeaway_settled=$' <<< "$U" \
+  && ok "(UNSETTLED) a takeaway with no disposition clears the settled key" \
+  || bad "(UNSETTLED) the key was left standing for the next sitting to inherit: $U"
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --waiting-on tk-blk1 >/dev/null 2>&1 || true
+grep -q -- '--set-metadata gc.takeaway_settled=$' "$TMP/updates" \
+  && ok "(UNSETTLED) …and so does a takeaway whose wait is an edge" \
+  || bad "(UNSETTLED) --waiting-on left a settled key standing: $(cat "$TMP/updates")"
+
+: > "$TMP/updates"; : > "$TMP/deps"
+BRC=0
+sh "$SCRIPT" takeaway A-PARKED "both" --no-wait --waiting-on tk-blk1 >/dev/null 2>"$TMP/berr" || BRC=$?
+eq "$BRC" "2" "(BOTH) --no-wait beside --waiting-on is refused"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(BOTH) …before anything is written"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(BOTH) …and no edge is wired"
+grep -q 'contradicts' "$TMP/berr" \
+  && ok "(BOTH) …and the refusal says why" \
+  || bad "(BOTH) the refusal does not name the contradiction (stderr: $(cat "$TMP/berr"))"
+
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "actionable — slung to the pool" \
+   --release --route "gc-toolkit/gc-toolkit.polecat" --no-wait >/dev/null 2>&1 || true
+U="$(cat "$TMP/updates")"
+case "$U" in
+  *"--set-metadata gc.takeaway_settled=1"*) ok "(SETTLEDREL) the disposition rides the release write" ;;
+  *) bad "(SETTLEDREL) the settled key is missing from the release write: $U" ;;
+esac
+
 # ── takeaway --release --route: release the bead TO a pool ────────────────────
 # A first reaction that concludes "this is work" hands the bead on instead of
 # back. The route rides the release write, so the disposition lands whole or

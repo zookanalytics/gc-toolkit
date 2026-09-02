@@ -36,7 +36,7 @@ usage() {
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
-  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>]... [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
+  gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  <bead-id> [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row
 
@@ -53,7 +53,12 @@ only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
 back to the human, in the same write, and is refused on a closed anchor;
 --waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
-whether it landed.
+whether it landed. --no-wait is the other answer to the same question: this
+sitting settled the subject and nothing is waiting on it. It stamps
+gc.takeaway_settled, which lifecycle.toml [holds] reads to tell a settled
+headline from one parking a bead on prose, and it contradicts --waiting-on.
+Say neither and the headline is a hold that doctor/check-wait-is-an-edge
+reports, which is the honest reading of a park nothing re-asks.
 
 demand files what a person owes as its own bead, a SIBLING of the work, and
 blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
@@ -362,9 +367,17 @@ quiesce_release_molecule_steps() (
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb.
+#
+# The headline says nothing about whether the subject is still waiting, and
+# every sitting stamps one, so the disposition rides beside it in
+# gc.takeaway_settled: "1" under --no-wait, empty otherwise. It is written with
+# EVERY headline, never left to stand, because a stamp that outlived its
+# sitting would answer for the next one — a settled sign-off would silence the
+# park that followed it. lifecycle/lifecycle.toml [holds] settled_keys is where
+# doctor/check-wait-is-an-edge reads the pairing.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; npos=0
-    waiting_ids=""
+    waiting_ids=""; no_wait=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)    by="${1#--by=}"; shift ;;
@@ -372,6 +385,7 @@ cmd_takeaway() {
             --waiting-on=*) waiting_ids="$waiting_ids ${1#--waiting-on=}"; shift ;;
             --waiting-on)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --waiting-on requires a bead id" >&2; exit 2; }
                             waiting_ids="$waiting_ids $1"; shift ;;
+            --no-wait) no_wait=1; shift ;;
             --release) release=1; shift ;;
             --route=*) route="${1#--route=}"; shift ;;
             --route)   shift; [ $# -gt 0 ] || { echo "$PROG: takeaway: --route requires a <rig>/<agent> target" >&2; exit 2; }; route="$1"; shift ;;
@@ -388,6 +402,14 @@ cmd_takeaway() {
         esac
     done
     [ -n "$bead" ] || { echo "$PROG: takeaway needs <bead-id>" >&2; usage; exit 2; }
+
+    # Two answers to one question, and they contradict: a named wait IS the
+    # subject still waiting. Refused before anything is written, so what gets
+    # repaired is the claim rather than the bead.
+    if [ -n "$no_wait" ] && [ -n "$waiting_ids" ]; then
+        echo "$PROG: takeaway: --no-wait contradicts --waiting-on$waiting_ids — one says nothing is waiting on $bead, the other names what is. Pass whichever is true. Nothing was written." >&2
+        exit 2
+    fi
 
     normalize_headline "$text" takeaway
     text="$HEADLINE"
@@ -454,7 +476,8 @@ cmd_takeaway() {
     set --
     set -- "$@" --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
-               --set-metadata "gc.takeaway_by=$by"
+               --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled=$no_wait"
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
                --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
@@ -624,7 +647,8 @@ cmd_demand() {
         set -- --title "$text" \
                --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
-               --set-metadata "gc.takeaway_by=$by"
+               --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled="
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         gc bd update "$demand" "$@" >/dev/null 2>&1 \
             || { echo "$PROG: demand: could not refresh the open demand $demand on $gated" >&2; exit 4; }
@@ -645,6 +669,7 @@ cmd_demand() {
         set -- --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"

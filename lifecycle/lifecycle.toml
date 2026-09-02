@@ -202,6 +202,18 @@ approval_member = "approval"
 [holds]
 # Present with a non-empty value, and the bead is held, whatever it says.
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
+# A marker its own writer can answer, as `<marker>=<settled-key>`: <marker>
+# holds only while <settled-key> is absent or empty on the same bead.
+# gc.takeaway is stamped by every sign-off, the one that settled its subject as
+# much as the one that parked it for a person, and only the writer knows which
+# it was — `gc-helm.sh takeaway --no-wait` says so by stamping
+# gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
+# Nothing here clears a marker: the sentence stands and the second key records
+# the disposition beside it. Every writer of a marker in this list writes its
+# settled-key in the same statement, empty unless it means settled, so a stamp
+# cannot inherit the disposition of the sitting before it
+# (assets/scripts/takeaway-settled-pairing.test.sh).
+settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # One key per gate, so the declaration is a prefix. dispatch_backstop.<g> is
 # written by gate-ensure.sh only where a gate has spent its dispatch ceiling,
 # and its value carries the count and the head it holds, so its presence is
@@ -220,6 +232,12 @@ route_key = "gc.routed_to"
 # edges; "error" once none are left. The posture is declared here rather than
 # compiled into the check, so ending the conversion is this line, and so it is
 # readable beside the markers it governs.
+#
+# A finding converts two ways, and neither blanks a marker: the wait it names
+# becomes a `blocks` edge on the same store, or — where nothing is waiting —
+# its writer re-stamps it with the settled-key. The second is what keeps this
+# posture reachable, because a ritual that stamps a marker on every sign-off
+# regenerates the population faster than closes drain it.
 hold_severity = "warn"
 
 [posture]
@@ -336,7 +354,11 @@ keys = [
   # nothing a sitting does, so only the demand's own liveness answers that
   # question. The one takeaway that is retired is the round cap's own, which
   # describes a park rather than a sitting and goes when the park does.
-  "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.demand_for",
+  # gc.takeaway_settled is the headline's own disposition, "1" where its writer
+  # said nothing is waiting and empty where it did not: [holds] settled_keys
+  # reads it, and it is rewritten with every headline rather than surviving one.
+  "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.takeaway_settled",
+  "gc.demand_for",
   "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",
   "sweep.*", "triage.*", "stall_root",

@@ -603,6 +603,12 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # park, so a presence check passes while this verdict's timestamp is the one
   # field that did not land — a headline helm dates and attributes to whatever
   # sitting the stale timestamp falls in.
+  #
+  # gc.takeaway_settled is cleared in the same write for the same reason from
+  # the other side: an anchor whose last sitting ended settled carries that
+  # disposition, and this park is a person owing an answer. Left standing it
+  # would answer for this headline too, and doctor/check-wait-is-an-edge would
+  # read the cap as a wait somebody already discharged.
   CAP_HEADLINE="signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor"
   CAP_TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   gc bd update "$ANCHOR" \
@@ -612,6 +618,7 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
     --set-metadata "gc.takeaway=$CAP_HEADLINE" \
     --set-metadata "gc.takeaway_at=$CAP_TAKEAWAY_AT" \
     --set-metadata gc.takeaway_by=signoff \
+    --set-metadata gc.takeaway_settled= \
     >/dev/null 2>&1 || true
   CAP_ROW=$(bd_json show "$ANCHOR")
   if [ "$(row_meta "$CAP_ROW" gc.routed_to)" != "human" ] \

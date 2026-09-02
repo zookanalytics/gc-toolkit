@@ -195,8 +195,8 @@ cmd_transition() {
     case "${kv%%=*}" in
       merge_result) echo "$PROG: merge_result is written by --to, never by --set" >&2; exit 1 ;;
       gc.routed_to) echo "$PROG: route via --route, never by --set" >&2; exit 1 ;;
-      gc.takeaway|gc.takeaway_at|gc.takeaway_by)
-        echo "$PROG: the takeaway triple is written by --takeaway, never by --set" >&2; exit 1 ;;
+      gc.takeaway|gc.takeaway_at|gc.takeaway_by|gc.takeaway_settled)
+        echo "$PROG: the takeaway stamp is written by --takeaway, never by --set" >&2; exit 1 ;;
     esac
   done
   # A dated key's ARGUMENT carries the two components its writer decided; this
@@ -385,9 +385,14 @@ cmd_transition() {
   local TAKEAWAY_AT=""
   if [ "$TAKEAWAY_SET" = 1 ]; then
     TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    # gc.takeaway_settled goes empty with every headline this writer stamps.
+    # A transition's takeaway names a park or an end, never a subject that
+    # settled itself while staying live, and the disposition of the sitting
+    # before it must not answer for this one (lifecycle.toml [holds]).
     ARGS+=(--set-metadata "gc.takeaway=$TAKEAWAY"
            --set-metadata "gc.takeaway_at=$TAKEAWAY_AT"
-           --set-metadata "gc.takeaway_by=$PROG")
+           --set-metadata "gc.takeaway_by=$PROG"
+           --set-metadata "gc.takeaway_settled=")
   fi
   [ "$ASSIGNEE_SET" = 1 ] && ARGS+=(--assignee="$ASSIGNEE")
   [ "$CLOSE" = 1 ] && ARGS+=(--status=closed)

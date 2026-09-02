@@ -81,6 +81,7 @@ gc bd update {{issue}} \
     --set-metadata "gc.takeaway=upstream rig '{{upstream_rig}}' is not registered in this city — register it or retarget this bead" \
     --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
+    --set-metadata gc.takeaway_settled= \
     --notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
 gc runtime drain-ack
 exit 1
@@ -134,6 +135,7 @@ if [ ! -x "$SCRIPT" ]; then
         --set-metadata "gc.takeaway=the pack ships no runnable drift detector — install one at the configured sync_script path" \
         --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
+        --set-metadata gc.takeaway_settled= \
         --notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
     gc runtime drain-ack
     exit 1
@@ -171,6 +173,7 @@ else
         --set-metadata "gc.takeaway=drift detector failed on {{upstream_rig}} — read the captured stderr in this bead's notes" \
         --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
+        --set-metadata gc.takeaway_settled= \
         --notes "$(cat <<EOF
 Sync script failed.
 
