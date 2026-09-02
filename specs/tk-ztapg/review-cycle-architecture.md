@@ -122,9 +122,18 @@ duplicate. Idempotency is by key, never by evaluation count.
 
 **The interlock is an edge, and the disposition picks its type.** Invariant I1
 in `docs/component-model.md` requires that much: no wait lives only in prose or
-a metadata string, and only `blocks` counts as a hold, because it is the one
-type that holds a bead out of `bd ready`. A merge held by a metadata query
-alone is a wait the graph cannot see.
+a metadata string. A merge held by a metadata query alone is a wait the graph
+cannot see.
+
+`blocks` is the hold this interlock uses, and not because it is the only edge
+that blocks. Three types hold a bead out of `bd ready` — `blocks`, `waits-for`
+and `conditional-blocks` — and any of the three would hold the anchor's close,
+since `bd` refuses to close a blocked issue. `blocks` is the one that also
+holds the merge, because `merge.sh` reads exactly `blocks` downward: a finding
+attached by either of the other two would leave the PR free to land with the
+finding still open. I1's own detector, `doctor/check-wait-is-an-edge`, counts
+only `blocks` as well, but the contrast it draws there is with `tracks` and
+`parent-child`, which record a relationship and hold nothing.
 
 | Disposition | Edge | Effect |
 |---|---|---|
@@ -132,18 +141,19 @@ alone is a wait the graph cannot see.
 | `deferred` | finding `discovered-from` the anchor | records where it came from, holds nothing |
 | `declined` | none | closed with the validator's reason |
 
-A `must-fix` blocker needs no new merge code. `merge.sh:303-304` already reads
-every live `blocks` blocker of the anchor into its in-flight hold, and its own
-comment gives the rule: a dep-edge holder holds regardless, because the edge is
-the claim. `bd` separately refuses to close a blocked issue. An open must-fix
-finding therefore stops the anchor closing as well as the PR merging, which is
-what makes the merge predicate structural instead of a rule each reader has to
+A `must-fix` blocker needs no new merge code. `merge.sh` already reads every
+live `blocks` blocker of the anchor into its in-flight hold, through a
+`gc bd dep list --direction=down -t blocks` probe, and its own comment gives
+the rule: a dep-edge holder holds regardless, because the edge is the claim.
+`bd` separately refuses to close a blocked issue. An open must-fix finding
+therefore stops the anchor closing as well as the PR merging, which is what
+makes the merge predicate structural instead of a rule each reader has to
 remember.
 
-`deferred` needs an edge outside two sets. The ready-blocking types are
-`blocks`, `waits-for` and `conditional-blocks`, and `merge.sh` reads exactly
-`blocks` downward and `parent-child` upward. `discovered-from` is in neither,
-so a deferred finding stays open across the merge holding nothing.
+`deferred` needs an edge outside both sets. `merge.sh` reads `blocks` downward
+and `parent-child` upward, and `discovered-from` is neither ready-blocking nor
+read by either probe, so a deferred finding stays open across the merge holding
+nothing.
 
 The earlier design's mistake was the shape, not the edge. It attached the
 finding to the anchor with `parent-child`, which states decomposition and
@@ -155,10 +165,11 @@ blocked on it, never under the anchor. Today's rework child already sits that
 way, attached by `pr_number` metadata rather than an edge, so nothing existing
 moves.
 
-A must-fix finding also carries a route. `merge.sh:330-338` records the anchor
-`progressing` only when some blocker names a `gc.routed_to` other than `human`,
-so an undispatched finding reads as a demand nothing is acting on. The `fixing`
-lane state and the dispatch that enters it are what keep that from happening.
+A must-fix finding also carries a route. `merge.sh` records the anchor
+`progressing` only when some live blocker names a `gc.routed_to` that is
+neither empty nor `human`, so an undispatched finding reads as a demand nothing
+is acting on. The `fixing` lane state and the dispatch that enters it are what
+keep that from happening.
 
 The same model absorbs human PR comments. A human comment becomes a finding
 with `finding.source=human:<login>`, which is what closes the gap `tk-zina89`
@@ -322,13 +333,13 @@ a design that fails its own integrity checks on the first pass.
 
 `check_set` itself needs no new structure. It is already a list, `merge.sh`
 already holds until every entry is green, and the reason it is always one
-element is that `gate-ensure.sh` stamps the static default `codex`. Every one
-of the 16 open beads in this rig carrying a `check_set` reads exactly `codex`,
-so the multi-lane machinery below has never had a second lane to exercise it.
-Populating
-it is the triage design in `specs/2026-08-review-gates/scope.md`, which is
-scoped, unimplemented, and compatible with this one: triage is a lane like any
-other, and monotonic widening is orthogonal to how a lane converges.
+element is that `gate-ensure.sh` is the only writer of the field and stamps a
+single declared default, `codex` unless the cadence passes another. No second
+lane has ever been stamped, so the multi-lane machinery below has never had one
+to exercise it. Populating it is the triage design in
+`specs/2026-08-review-gates/scope.md`, which is scoped, unimplemented, and
+compatible with this one: triage is a lane like any other, and monotonic
+widening is orthogonal to how a lane converges.
 
 ## Migration
 
@@ -380,11 +391,12 @@ to signoff.sh — once — then drain", filed across five days — as evidence t
 nothing dedupes bug reports, and calls it "the shape of the problem". They are
 not bug reports. Each carries `gc.step_ref=mol-review.verdict-and-drain`: they
 are **step beads** of three separate `mol-review` pours, and a step bead's title
-is the formula step's title, so identical titles are the expected shape. Two of
-the three roots (`tk-ldjl37`, `tk-rsxnnz`) are closed with their step chains
-still open, which is the husk `tk-1pelsg` already reports and names by id. A
-fourth, `tk-yqfr1c`, exists as of 2026-09-02 and is a **live** review in
-progress under root `tk-1vsoo9`.
+is the formula step's title, so identical titles are the expected shape. A
+fourth bead with the same title, `tk-yqfr1c`, carries the same `gc.step_ref`
+under root `tk-1vsoo9`, which is the shape repeating rather than a filing
+recurring. Measured 2026-09-02: two of the three roots (`tk-ldjl37`,
+`tk-rsxnnz`) were closed with their step chains still open, which is the husk
+`tk-1pelsg` already reports and names by id.
 
 The duplicate-filing symptom the epic is built on is a husk-retirement defect
 with an open bead of its own.
