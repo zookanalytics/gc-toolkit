@@ -26,10 +26,10 @@
 #      A prose summary is reworded every cycle and never matches;
 #   4. a BODY on the bead it files. A title-only P1 cannot be dispositioned by
 #      anyone: nothing in it separates a host-load flake from a real regression.
-#      The body goes in -d, which fills .description, the field pr-open.sh, the
-#      work-context hook, and gc-proactive's scan filter all read; nothing in
-#      this pack reads .design. The raw output is pasted text, so the heredoc
-#      holding it stays quoted or the log's own backticks and $ run.
+#      The body goes in -d, which fills .description. That is the field
+#      pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
+#      Nothing in this pack reads .design. The raw output is pasted text, so
+#      the heredoc holding it stays quoted or the log's own backticks and $ run.
 #
 # This EXECUTES the real snippet extracted verbatim from the formula (between the
 # markers) against a fake `gc`, so the test cannot drift from the shipped

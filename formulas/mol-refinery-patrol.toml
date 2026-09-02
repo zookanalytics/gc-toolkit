@@ -380,10 +380,10 @@ else
   # The SAME token goes in the title, so the NEXT patrol's probe finds it,
   # and nothing else does: a placeholder left in the title ships as literal
   # filler, and the detail belongs in the body anyway.
-  # The evidence goes in -d, which fills .description. Nothing in this pack
-  # reads .design, while pr-open.sh, the work-context hook, and
-  # gc-proactive's scan filter all read .description, so a body filed
-  # anywhere else is a body no reader ever sees.
+  # The evidence goes in -d, which fills .description. That is the field
+  # pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
+  # Nothing in this pack reads .design, so a body filed there is a body no
+  # reader ever sees.
   TARGET=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.target // empty')
   [ -n "$TARGET" ] || TARGET="{{target_branch}}"
   gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN" -d "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
