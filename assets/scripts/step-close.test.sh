@@ -315,11 +315,11 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(STALE-HINT-SESSION) the earlier mole
 hasnt "$OUT" "nothing to do" "(STALE-HINT-SESSION) the false-green line is not emitted"
 has "$OUT" "belongs to molecule root-old" "(STALE-HINT-SESSION) the hint's own molecule is named"
 
-# (g) THE ROUND-3 ANCHOR — a hint may not establish the molecule that is then
-#     used to vouch for it. Our own bead carries neither an assignee nor a
-#     session stamp, so nothing independent names root-mine and the hint is the
-#     only candidate; taking root-old from it scopes verify() straight back onto
-#     the hint, which reports a foreign closed bead as this chain's own.
+# (g) A hint may not establish the molecule that is then used to vouch for it.
+#     Our own bead carries neither an assignee nor a session stamp, so nothing
+#     independent names root-mine and the hint is the only candidate; taking
+#     root-old from it scopes verify() straight back onto the hint, which
+#     reports a foreign closed bead as this chain's own.
 cat > "$FAKE_BEADS" <<B
 tk-mine11||$FSTEP|open|root-mine|
 tk-old111|$MINE|$FSTEP|closed|root-old|
@@ -348,12 +348,13 @@ has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-HINT-ROOT) closed the bead i
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(LIVE-HINT-ROOT) the other molecule's live step was NOT closed"
 has "$OUT" "belongs to molecule root-old" "(LIVE-HINT-ROOT) the hint's own molecule is named"
 
-# (i) THE ROUND-4 ANCHOR — the wrong-close half with nothing independent naming
-#     the molecule. Our own bead carries no assignee and no session stamp, and
-#     an earlier molecule's bead for the same step is live under our assignee:
-#     the derivation reads that one, names its molecule, and the scoped close
-#     then lands there while our own step stays open. The assignee cannot tell
-#     the two apart, so the answer is a guess and the guess is refused.
+# (i) A molecule the assignee alone names authorizes no close while another
+#     live bead for this step could equally be ours. Our own bead carries no
+#     assignee and no session stamp, and an earlier molecule's bead for the
+#     same step is live under our assignee: the derivation reads that one,
+#     names its molecule, and the scoped close then lands there while our own
+#     step stays open. The assignee cannot tell the two apart, so the answer
+#     is a guess and the guess is refused.
 cat > "$FAKE_BEADS" <<B
 tk-mine11||$FSTEP|open|root-mine|
 tk-old222|$MINE|$FSTEP|in_progress|root-old|
