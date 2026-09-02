@@ -25,13 +25,13 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 GC
-# Models the surface the check actually calls: the open-step listing, the
-# id-scoped root listing (which DROPS ids it cannot resolve, exactly as bd
-# does, so the check's own id-set comparison is what has to catch them), the
-# --status pushdown, and `bd count`. Every --id argument is logged so the
-# argv bound can be asserted rather than assumed, and BD_STEPS_BODY substitutes
-# an arbitrary payload for the listing so the shapes a reader must refuse can
-# be handed to it.
+# Models the surface the check actually calls: the step listing, the id-scoped
+# lookup (which DROPS ids it cannot resolve, exactly as bd does, so the check's
+# own id-set comparison is what has to catch them), the --status pushdown, and
+# `bd count`. Every --id argument is logged so the argv bound can be asserted
+# rather than assumed, BD_STATUS_LOG records what the listing asked the store
+# for, and BD_STEPS_BODY substitutes an arbitrary payload for the listing so the
+# shapes a reader must refuse can be handed to it.
 cat > "$TMP/bin/bd" <<'BD'
 #!/usr/bin/env bash
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
@@ -49,6 +49,10 @@ steps_f="$STORES/$name.steps.json"
 empty='{"issues":[],"meta":{"count":0},"schema_version":1}'
 if [ -n "$ids" ]; then
   [ -n "${BD_ROOTS_FAIL:-}" ] && exit 3
+  # The only id lookup carrying no --status is the blocker probe, so long as
+  # every root in the fixture resolves and the short-batch detail read stays
+  # unreached. That is what lets one probe be failed while the others answer.
+  [ -n "${BD_BLOCKER_FAIL:-}" ] && [ "$cmd" = "list" ] && [ -z "$status" ] && exit 3
   [ -n "${BD_ARGV_LOG:-}" ] && printf '%s\n' "${#ids}" >> "$BD_ARGV_LOG"
   if [ "$cmd" = "count" ]; then
     [ -n "${BD_COUNT_FAIL:-}" ] && exit 3
@@ -65,6 +69,7 @@ if [ -n "$ids" ]; then
        | {issues: ., meta: {count: length}, schema_version: 1}' "$roots_f"
   exit 0
 fi
+[ -n "${BD_STATUS_LOG:-}" ] && printf '%s\n' "$status" >> "$BD_STATUS_LOG"
 [ -n "${BD_STEPS_BODY:-}" ] && { cat "$BD_STEPS_BODY"; exit 0; }
 [ -f "$steps_f" ] || { printf '%s' "$empty"; exit 0; }
 # The wrapper is printed around the fixture, not rebuilt from it. A stub that
@@ -77,11 +82,22 @@ chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
 run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 iso_ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
-step() { # id root [extra-metadata-json-fragment] [top-level-fragment]
-    printf '{"id":"%s","status":"open"%s,"metadata":{"gc.root_bead_id":"%s"%s}}' \
-        "$1" "${4:-}" "$2" "${3:-}"
+step() { # id root [extra-metadata-json-fragment] [top-level-fragment] [status]
+    printf '{"id":"%s","status":"%s"%s,"metadata":{"gc.root_bead_id":"%s"%s}}' \
+        "$1" "${5:-open}" "${4:-}" "$2" "${3:-}"
+}
+blocks() { # blocker-id... -> a top-level `dependencies` fragment of blocks edges
+    local out="" id
+    for id in "$@"; do out="$out,{\"type\":\"blocks\",\"depends_on_id\":\"$id\"}"; done
+    printf ',"dependencies":[%s]' "${out#,}"
 }
 steps()  { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.steps.json"; }
+# The listing fixture and the by-id fixture are separate files, and --id resolves
+# against this one alone. That is a harness economy rather than a bd behaviour:
+# the scale cases put tens of thousands of rows in the listing, and a stub that
+# reparsed them on every id lookup would dominate the RSS the check is measured
+# by. Every bead an id lookup must see is declared here — a molecule root, and
+# any bead some step is blocked by.
 roots()  { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.roots.json"; }
 clear_fixtures() { rm -f "$TMP/stores/alpha.steps.json" "$TMP/stores/alpha.roots.json"; }
 
@@ -223,7 +239,7 @@ roots "{\"id\":\"r-closed\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a closed root batched with an absent one is still an ERROR"
 has "$OUT" "yet 1 step(s) never closed — s-11." "the strand keeps its verdict and names only its own step"
-has "$OUT" "open step(s) s-12 name root r-gone" "the absent root beside it is still reported as a note"
+has "$OUT" "non-terminal step(s) s-12 name root r-gone" "the absent root beside it is still reported as a note"
 has "$OUT" "1 molecule(s)" "the absent root did not become a second error"
 clear_fixtures
 
@@ -293,6 +309,107 @@ if command -v /usr/bin/time >/dev/null 2>&1; then
 else
     ok "peak-RSS bound skipped (/usr/bin/time not installed)"
 fi
+clear_fixtures
+
+# --- 18. a chain quiesced at its frontier is inert, not a strand ------------------
+# Quiesce parks the frontier at status=blocked and leaves the steps behind it
+# waiting on it, so nothing offers any of them. The parked frontier is also the
+# evidence: a listing that selects only open drops it, then reports the very
+# steps whose blocker it discarded.
+steps "$(step s-f1 r-q '' "$(blocks)" blocked)" \
+      "$(step s-q1 r-q '' "$(blocks s-f1)")" \
+      "$(step s-q2 r-q '' "$(blocks s-q1)")"
+roots "{\"id\":\"r-q\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"s-f1\",\"status\":\"blocked\"}" \
+      "{\"id\":\"s-q1\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a chain parked at its frontier is not an error"
+has "$OUT" "residue to sweep, not a strand" "the inert chain is reported as a note"
+has "$OUT" "s-f1, s-q1, s-q2" "every step of the parked chain lands on the one note"
+hasnt "$OUT" "can still offer" "nothing claims the pool can offer a parked chain"
+clear_fixtures
+
+# --- 19. an offerable frontier under a closed root is still an ERROR ---------------
+# The containment break this check exists to catch: an open step with every
+# blocker closed, which a sling can hand to a fresh worker on merged work. Only
+# the frontier is offerable, and both verdicts have to survive on one molecule.
+steps "$(step s-f2 r-o '' "$(blocks s-done)")" \
+      "$(step s-o1 r-o '' "$(blocks s-f2)")" \
+      "$(step s-o2 r-o '' "$(blocks s-o1)")"
+roots "{\"id\":\"r-o\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"s-done\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"s-f2\",\"status\":\"open\"}" \
+      "{\"id\":\"s-o1\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an open frontier with every blocker closed is still an ERROR"
+has "$OUT" "yet 1 step(s) never closed — s-f2." "the error names the offerable frontier alone"
+has "$OUT" "s-o1, s-o2" "the steps behind it are the note, not the error"
+has "$OUT" "1 molecule(s)" "the molecule raises one error, not one per step"
+clear_fixtures
+
+# --- 20. a live blocker outside the step listing still holds its step --------------
+# Blockers resolve against the store, not against the window. A step held by an
+# ordinary open bead never appears beside it in a listing of step beads, and
+# reading "absent from the listing" as "closed" would report that step as loose.
+steps "$(step s-h1 r-h '' "$(blocks ord-1)")"
+roots "{\"id\":\"r-h\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"ord-1\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step held by a live non-step bead is inert, not stranded"
+has "$OUT" "s-h1" "the held step is still reported, as a note"
+clear_fixtures
+
+# --- 21. a tracks edge to a live bead is not a blocker -----------------------------
+# Every step tracks its molecule root through an edge of its own. Ignoring edge
+# type would make each one look held by something live and silence the check.
+steps '{"id":"s-t1","status":"open","dependencies":[{"type":"tracks","depends_on_id":"live-1"}],"metadata":{"gc.root_bead_id":"r-t"}}'
+roots "{\"id\":\"r-t\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"live-1\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a step whose only edge is a tracks edge is offerable, so still an ERROR"
+clear_fixtures
+
+# --- 22. a blocker that resolves nowhere holds nothing -----------------------------
+# `bd list --id` drops an id it cannot resolve, so a deleted blocker comes back
+# looking exactly like one that was never asked about. Reading that silence as
+# "still live" would let a vanished edge mute a real strand.
+steps "$(step s-g1 r-g '' "$(blocks gone-1)")"
+roots "{\"id\":\"r-g\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a step whose blocker no longer exists is offerable, so an ERROR"
+clear_fixtures
+
+# --- 23. an unreadable blocker probe warns, never passes ---------------------------
+# Offerability is part of the verdict now, so a blocker lookup that dies has to
+# skip the store like every other failed probe. A partial blocker map would read
+# held steps as loose and escalate them.
+steps "$(step s-x1 r-x '' "$(blocks s-x0)")"
+roots "{\"id\":\"r-x\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"s-x0\",\"status\":\"open\"}"
+OUT=$(BD_BLOCKER_FAIL=1 run_check); RC=$?
+eq "$RC" "1" "a failed blocker lookup warns — an unproven blocker map must not pass"
+has "$OUT" "NOT checked" "the failed blocker probe says the store was skipped"
+clear_fixtures
+
+# --- 24. the listing selector asks for the parked frontier -------------------------
+# Classification cannot judge what the selector never fetched, and the parked
+# frontier is precisely the row a --status open listing leaves behind.
+STATUS_LOG="$TMP/status.log"; : > "$STATUS_LOG"
+steps "$(step s-s1 r-s)"
+roots "{\"id\":\"r-s\",\"status\":\"open\"}"
+OUT=$(BD_STATUS_LOG="$STATUS_LOG" run_check)
+has "$(cat "$STATUS_LOG")" "blocked" "the step listing selects blocked as well as open"
+clear_fixtures
+
+# --- 25. a parked step under an OPEN root is not a stalled frontier -----------------
+# The stall warning names a frontier nobody is advancing. A parked step is not a
+# frontier, and widening the selector must not turn each quiesced molecule into
+# a stall report of its own.
+steps "$(step s-p1 r-p '' ",\"updated_at\":\"$STALE\"" blocked)"
+roots "{\"id\":\"r-p\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a parked step under an open root raises no stall warning"
+hasnt "$OUT" "frontier is stalled" "no stalled-frontier finding is raised for a parked step"
 clear_fixtures
 
 echo
