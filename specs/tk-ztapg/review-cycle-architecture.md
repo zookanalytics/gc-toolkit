@@ -107,7 +107,7 @@ that worker completes, all three are answered.
 | `task_kind` | `finding` |
 | `anchor_bead` | the gating anchor |
 | `finding.lane` | the lane whose review raised it, or `human` |
-| `finding.key` | a stable key over (lane, file, rule or claim), the dedup handle |
+| `finding.key` | the lane's name plus a normalized locus and message; the dedup handle |
 | `finding.disposition` | `unvalidated`, `must-fix`, `deferred`, or `declined` |
 | `finding.source` | `machine:<lane>` or `human:<login>` |
 
@@ -122,9 +122,10 @@ duplicate. Idempotency is by key, never by evaluation count.
 
 **The interlock is the predicate, not an edge.** That earlier design held the
 merge with an open parent-child link from the finding to the anchor. This one
-does not, and the difference matters: `merge.sh` holds a PR on any live
-`blocks` blocker on the anchor, so a finding attached by an edge deadlocks the
-anchor the moment anyone wants the finding tracked past the merge. The merge
+does not, and the difference matters. `merge.sh:303-304` reads both a live
+`blocks` blocker and a live `parent-child` child of the anchor into the same
+in-flight hold, so a finding attached by an edge of either shape deadlocks the
+anchor the moment anyone wants that finding tracked past the merge. The merge
 predicate below queries the findings by `anchor_bead` and disposition instead,
 which lets a `deferred` finding stay open without holding anything.
 
