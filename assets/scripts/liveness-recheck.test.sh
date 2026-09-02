@@ -149,13 +149,6 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-take")] | .[0
     && ok "the recorded detail carries the takeaway text itself" \
     || bad "the recorded detail carries the takeaway" "$(printf '%s' "$C" | jq -r '[(.new[]) | select(.id == "b-take")] | .[0].detail')"
 
-# Mutate the guard: close the demand (it leaves every not-closed listing) and
-# the bead it held comes back onto the agenda under its own takeaway.
-jq -nc '[]' > "$STUB_DEMANDS"
-CX="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
-eq "$(verdict_of "$CX" b-demand)" "recorded" "the demand closes → the bead it held is on the agenda again"
-jq -nc '[{id:"d-1",metadata:{"gc.demand_for":"b-demand"}}]' > "$STUB_DEMANDS"
-
 # The detail is what tells a sitting why it cannot disposition the bead: a
 # standing record has no owner to chase and no close to wait for.
 printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[0].detail | test("task_kind=feedback-pattern")' >/dev/null 2>&1 \
@@ -164,6 +157,14 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[
 
 eq "$(printf '%s' "$C" | jq -r '.summary.new_listed')" "10" "every listed id is accounted for"
 eq "$(printf '%s' "$C" | jq -r '.summary.new_live')"   "4" "live agenda = idle + marker + recorded + unreadable (never the resolved/worked/held/standing/parked)"
+
+# Mutate the guard: close the demand (it leaves every not-closed listing) and
+# the bead it held comes back onto the agenda under its own takeaway. Re-runs
+# the script into $CX; $C above stays the pre-mutation census.
+jq -nc '[]' > "$STUB_DEMANDS"
+CX="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
+eq "$(verdict_of "$CX" b-demand)" "recorded" "the demand closes → the bead it held is on the agenda again"
+jq -nc '[{id:"d-1",metadata:{"gc.demand_for":"b-demand"}}]' > "$STUB_DEMANDS"
 
 # The text report prints one bucket per verdict and NOTHING else, so a verdict
 # with no bucket line is dropped from it silently while still counted in the
