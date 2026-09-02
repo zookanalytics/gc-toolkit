@@ -68,8 +68,11 @@ the current wisp.
 - **Liveness is session-ID liveness**, resolved against a prebuilt
   assignee-to-state map — never template-pattern matching. Exact lookup
   first; one narrow fallback on the last `/`-segment, resolved toward LIFE.
-- **Never orphan on an empty liveness map** while sessions exist — that is
-  schema drift, and acting on it false-orphans live agents.
+- **Never orphan on a liveness map that failed to load.** The formula
+  computes `MAP_TRIP` once per cycle and that is the whole test. An owner
+  that resolves `absent` against a populated map is the orphan signal, not
+  drift: closed sessions are excluded from `gc session list` by design, so a
+  bead naming a session that has since closed always resolves absent.
 - **Salvage before reset**: commit and push unpushed worktree work; all work
   is useful work. Refuse salvage from a husk work_dir (the husk guard) — git
   writes there land in the enclosing repo.

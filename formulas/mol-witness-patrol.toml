@@ -144,12 +144,14 @@ LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" --slurpfile b "$SESSION_BEADS
   # entry win, which keeps the authoritative source authoritative.
   [ (($b[0] // [])[] | kv(.status // "active")) ]
   + [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
-  | add // {} | from_entries' 2>/dev/null)
-MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq 'length' 2>/dev/null)
+  | add // {} | from_entries' 2>/dev/null) || LIVENESS_MAP=""
+MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq 'length' 2>/dev/null) || MAP_COUNT=""
 # Ordered by authority, and total: a count that is not a number means the
 # builder died behind a source that read fine, which is still a map that
 # cannot be trusted. Falling through to an empty MAP_TRIP would skip the
-# fail safe on an unusable map.
+# fail safe on an unusable map, so the two assignments above absorb their own
+# failure: under `set -e` an abort would leave MAP_TRIP unset, and unset reads
+# as no trip.
 MAP_TRIP=""
 if [ "$SESSIONS_OK" != "1" ]; then
   MAP_TRIP="session list unreadable"

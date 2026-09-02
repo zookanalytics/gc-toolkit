@@ -286,28 +286,45 @@ chmod +x "$TMP/bin/gc"
 export STUB_SESSIONS_FILE="$TMP/sessions.json" STUB_BEADS_FILE="$TMP/session-beads.json"
 export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
 
+# Shell mode is part of the contract. Every script in this pack runs under
+# `set -euo pipefail`, where an assignment that does not absorb its own failure
+# aborts the block before MAP_TRIP is set — and an unset MAP_TRIP reads as no
+# trip, which is the fail-OPEN direction. So each case runs the block in BOTH
+# modes and the answers must agree: a mode that aborts where the other trips
+# reports a divergence no expected value can match, instead of passing on the
+# strength of the lax run alone.
+EMIT_TRIP='printf "%s|%s" "$MAP_COUNT" "$MAP_TRIP"'
+EMIT_MAP='printf "%s" "$LIVENESS_MAP"'
+GUARD_PATH_PREFIX=""
+
+# in_both_modes <emit> -> the agreed answer, or a divergence report.
+in_both_modes() {
+  LAX=$(PATH="$GUARD_PATH_PREFIX$TMP/bin:$PATH" bash -c 'set -uo pipefail
+    source "$0"
+    '"$1" "$TMP/guard.sh" 2>/dev/null)
+  STRICT=$(PATH="$GUARD_PATH_PREFIX$TMP/bin:$PATH" bash -c 'set -euo pipefail
+    source "$0"
+    '"$1" "$TMP/guard.sh" 2>/dev/null)
+  if [ "$LAX" = "$STRICT" ]; then
+    printf '%s' "$LAX"
+  else
+    printf 'MODE DIVERGENCE lax=<%s> strict=<%s>' "$LAX" "$STRICT"
+  fi
+}
 # guard <sessions-stdout> <session-beads-stdout> -> "MAP_COUNT|MAP_TRIP"
 # Optional 3rd/4th args are exit codes for the two sources.
 guard() {
   printf '%s' "$1" > "$STUB_SESSIONS_FILE"
   printf '%s' "$2" > "$STUB_BEADS_FILE"
-  STUB_SESSIONS_RC="${3:-}" STUB_BEADS_RC="${4:-}" \
-  PATH="$TMP/bin:$PATH" bash -c '
-    set -uo pipefail
-    source "$0"
-    printf "%s|%s" "$MAP_COUNT" "$MAP_TRIP"
-  ' "$TMP/guard.sh" 2>/dev/null
+  export STUB_SESSIONS_RC="${3:-}" STUB_BEADS_RC="${4:-}"
+  in_both_modes "$EMIT_TRIP"
 }
 # guard_map <sessions-stdout> <session-beads-stdout> -> the built LIVENESS_MAP.
 guard_map() {
   printf '%s' "$1" > "$STUB_SESSIONS_FILE"
   printf '%s' "$2" > "$STUB_BEADS_FILE"
-  STUB_SESSIONS_RC="" STUB_BEADS_RC="" \
-  PATH="$TMP/bin:$PATH" bash -c '
-    set -uo pipefail
-    source "$0"
-    printf "%s" "$LIVENESS_MAP"
-  ' "$TMP/guard.sh" 2>/dev/null
+  export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
+  in_both_modes "$EMIT_MAP"
 }
 
 # The live steady state: sessions exist, the session-bead source is empty
@@ -335,7 +352,7 @@ eq "$(state "$(guard_map "$SESSIONS_LIVE" "$NO_BEADS")" "gc-toolkit.furiosa")" "
 eq "$(guard '{"ok":true,"sessions":[]}' "$NO_BEADS")" "0|liveness map empty" \
    "(X) genuinely empty map -> trip"
 
-# (Y) Unreadable source A, three ways. A read that failed is not a city with no
+# (Y) Unreadable source A, four ways. A read that failed is not a city with no
 #     sessions, and each must trip rather than orphan everything.
 eq "$(guard '' "$NO_BEADS" 1)" "0|session list unreadable" \
    "(Y) session list exits non-zero -> trip"
@@ -370,16 +387,15 @@ done
 exec "$REAL_JQ" "$@"
 JQSHIM
 chmod +x "$TMP/badjq/jq"
+export REAL_JQ
 REAL_JQ="$(command -v jq)"
 printf '%s' "$SESSIONS_LIVE" > "$STUB_SESSIONS_FILE"
 printf '%s' "$NO_BEADS" > "$STUB_BEADS_FILE"
-eq "$(REAL_JQ="$REAL_JQ" STUB_SESSIONS_RC="" STUB_BEADS_RC="" \
-      PATH="$TMP/badjq:$TMP/bin:$PATH" bash -c '
-        set -uo pipefail
-        source "$0"
-        printf "%s|%s" "$MAP_COUNT" "$MAP_TRIP"
-      ' "$TMP/guard.sh" 2>/dev/null)" "|liveness map unreadable" \
+export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
+GUARD_PATH_PREFIX="$TMP/badjq:"
+eq "$(in_both_modes "$EMIT_TRIP")" "|liveness map unreadable" \
    "(Y) map builder fails behind a readable source -> trip, never fall through"
+GUARD_PATH_PREFIX=""
 
 # (AA) Both sources contribute keys; on a collision the session list wins,
 #      because it is the source whose state field is authoritative.
