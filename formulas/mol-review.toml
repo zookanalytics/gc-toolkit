@@ -174,6 +174,17 @@ this branch's defect.
   covered, does a regression pin the bug that was fixed?
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
   was intended, docs the change just made false.
+- **The PR as published** — post-open, the page is what a human reads to
+  decide the merge, so read its title and body against the diff you just
+  read, through the pin load-dispatch resolved rather than a bare number
+  (`gh pr view "$PR" --repo "$PR_REPO_Q" --json title,body`). A `## Summary`
+  that does not state what the diff does is a finding, whether it is a
+  placeholder, a restatement of the dispatch, or an account of other work;
+  so is a title that understates the scope. When the body looks wrong, read
+  `assets/scripts/pr-open.sh` for the shape this pack's opener emits: a page
+  carrying none of it is an observed fact worth recording, and it still does
+  not tell you what opened the PR. Pre-open there is no page — your verdict
+  becomes its opening comment instead.
 - **Operator principles** — resolve the operator profile from the pack
   checkout and hold the diff's output (code, comments, docs) to its "What
   the operator cares about" entries. A violation is a blocking
@@ -192,11 +203,48 @@ fail-closed was intended. P2 — worth fixing, not worth blocking: a narrow
 hazard, a test gap, a clarity problem. Grade honestly: a P2 inflated to P1
 costs a whole rework round; a P1 discounted to P2 merges the bug. When you
 can't tell whether something is reachable, say what you checked and grade on
-what you know. Every finding carries **file:line**, what is wrong, why it
-matters, and what would fix it — a finding without a location isn't
-actionable, and "improve error handling" isn't a finding.
+what you know.
 
-**5. Write the verdict body** to `findings.md` in your working directory so
+Every finding carries a location, what is wrong, why it matters, and what
+would fix it. In the tree the location is **file:line**. On the PR it is the
+page and the part of it that is wrong, as in `PR #<n> title` or
+`PR #<n> body / ## Summary`. A finding with no location isn't actionable,
+and "improve error handling" isn't a finding.
+
+**5. File what is real but not this diff's.** A finding you are confident in
+that this branch neither caused nor was asked to fix has no place on the
+severity ladder: blocking on it bills a rework round to work that did not
+cause it, and dropping it loses the only reader who was looking. File a bug
+and name it in the verdict instead. The verdict itself stays governed by the
+findings in this diff.
+
+Probe before you file. A rework round produces a new commit and a fresh
+review of the same page, so the same out-of-scope finding comes round again;
+with no probe, each round files another bug. `bd` fails open — errors on
+stderr, empty stdout — so an unreadable list reads exactly like "no match"
+until you shape-check it, and that is what files the duplicate:
+```bash
+# A token the NEXT reviewer, looking at the same thing, would build the same
+# way: the PR number and the part for a finding on the page, the file path
+# for one in the tree.
+TOKEN="<stable identifier for this finding>"
+TITLE="<one line: what is wrong> ($TOKEN)"
+BODY="<what is wrong, why it matters, what would fix it>
+
+Found reviewing $BRANCH at $REVIEWED_OID; out of scope for that diff."
+DUP_JSON=$(gc bd list --type=bug --status=open --title-contains "$TOKEN" --json 2>/dev/null)
+if ! printf '%s' "$DUP_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  FILED="unfiled — duplicate probe unreadable"
+else
+  FILED=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
+  [ -n "$FILED" ] || FILED=$(gc bd create --type=bug --priority=2 --title="$TITLE" -d "$BODY" --json | jq -r '.id // .[0].id')
+fi
+echo "$FILED"
+```
+An unreadable probe files nothing. Say so in the verdict rather than filing
+blind, and the next round re-probes.
+
+**6. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step:
 
 ```
@@ -207,7 +255,9 @@ Reviewed commit: <REVIEWED_OID>
 
 Scope checked: <what you actually read>
 
-Findings: <P0/P1/P2 — each with file:line, impact, and the fix>
+Findings: <P0/P1/P2 — each with its location, impact, and the fix>
+
+Filed: <bug ids for findings out of scope for this diff, or "none">
 
 Verification: <suite -> N passed, M failed, run at the reviewed commit>
 ```
@@ -216,7 +266,7 @@ Say what you did **not** check — an honest coverage line is worth more than
 an implied "I read everything". Write it self-contained: pre-open, it is
 replayed verbatim as the opening PR comment.
 
-**6. Close this step bead so the graph advances.** Non-terminal step, no
+**7. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `verdict-and-drain`:
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -225,9 +275,9 @@ done
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --outcome pass
 ```
 
-**Exit criteria:** whole diff read, tests run at the pinned commit, operator
-profile checked, findings.md written in the verdict shape, this step bead
-closed.
+**Exit criteria:** whole diff read, tests run at the pinned commit, published
+page and operator profile checked, out-of-scope findings filed or named
+unfiled, findings.md written in the verdict shape, this step bead closed.
 """
 
 [[steps]]
