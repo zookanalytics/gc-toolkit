@@ -391,9 +391,8 @@ closes its own bead — that is how a graph.v2 step advances, and skipping it
 leaves an open assigned step bead that re-pools a fresh worker every cycle,
 indefinitely. Forward order is mandatory (each step blocks the next); close
 only through step-close.sh, which resolves by (gc.root_bead_id,
-gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead after a claim
-(tk-niu2f). Never
-close `workflow-finalize` (the control-dispatcher's):
+gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead after a claim.
+Never close `workflow-finalize` (the control-dispatcher's):
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }

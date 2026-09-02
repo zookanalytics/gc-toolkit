@@ -12,7 +12,7 @@
 # of every molecule it ran before this one; only (gc.root_bead_id, gc.step_ref)
 # is unique. Resolution is scoped to the molecule and the assignee corroborates
 # it — a finalized chain has no assignees left, and a blank one inside our own
-# molecule is still ours (tk-xgfhj3).
+# molecule is still ours.
 #
 # Deriving that molecule from the assignee borrows the same non-unique pair, so
 # it settles nothing by itself: this chain's own bead may be one the finalizer
@@ -202,7 +202,7 @@ roots_from() { # <bd list args...>
 # (assignee, gc.step_ref) pair one pool assignee shares with every molecule it
 # has ever run; a root taken from a hint that matched on it would scope every
 # resolution below to the wrong chain, and then vouch for that same hint on the
-# way back out (tk-xgfhj3).
+# way back out.
 derive_root() {
   local found ident json this_step="" same_formula=""
   if [ -n "${GC_SESSION_ID:-}" ]; then
@@ -377,7 +377,7 @@ HINT_STATUS=""
 # ran. Both fall through to the store instead, which closes an executable bead
 # on the old pair and refuses a closed one. Only the two acting verdicts are
 # dropped — the reporting arms below do not act, and a parked hint's status is
-# the fact the reader needs (tk-xgfhj3).
+# the fact the reader needs.
 if [ -z "$ROOT" ]; then
   case "$HINT_STATUS" in
     in_progress|open|closed)
@@ -436,7 +436,7 @@ fi
 #    bead in this molecule proves it. Unscoped, this arm answers with whatever
 #    closed bead shares the assignee — one per molecule this agent ran before
 #    this one — and a chain that closed nothing reads, line for line, exactly
-#    like one that worked (tk-xgfhj3).
+#    like one that worked.
 if [ -n "$ROOT" ]; then
   ALREADY=$(molecule_rows closed | awk 'NF {print $1}' | sort -u | head -n 1)
   if [ -n "$ALREADY" ]; then

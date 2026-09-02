@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/step-close.sh (tk-niu2f).
+# Hermetic test for assets/scripts/step-close.sh.
 #
 # THE BUG the script guards: a graph.v2 step closing its own bead on
 # `$GC_TRIGGER_BEAD_ID`. `gc hook --claim` does not refresh that variable, so
@@ -18,18 +18,18 @@
 #   * --bead as a HINT: honoured when it verifies, ignored (with a note) when it
 #     does not, so a caller carrying a stale claim id cannot re-create the bug —
 #     including a hint that carries this session's assignee and this step's ref
-#     but belongs to an earlier molecule, with the molecule supplied and derived,
-#     and a hint offered as the only thing naming the molecule that would then
-#     scope it — which is no scope at all, and is refused;
+#     but belongs to an earlier molecule, with the molecule supplied and
+#     derived, and a hint offered as the only thing naming the molecule that
+#     would then scope it — which is no scope at all, and is refused;
 #   * the SUBSTRING trap — jq's `inside`/`contains` match substrings, so a
 #     session named lx-zzk would "own" lx-zzk9's bead. Exact membership only;
-#   * the OPEN-STATUS anchor (tk-jww3y) — a graph.v2 step is assigned by the
-#     graph, not by the claim, so it executes at status `open` and never reaches
-#     in_progress. Resolution must turn on the (assignee, step_ref) pair, not on
-#     a status the dispatch never sets. With it: that a SIBLING step, open and
-#     pre-assigned to the same session, is still never touched; that in_progress
-#     outranks open rather than merging with it; and that ambiguity inside the
-#     open tier is refused like any other;
+#   * the OPEN-STATUS anchor — a graph.v2 step is assigned by the graph, not by
+#     the claim, so it executes at status `open` and never reaches in_progress.
+#     Resolution must turn on the (assignee, step_ref) pair, not on a status the
+#     dispatch never sets. With it: that a SIBLING step, open and pre-assigned
+#     to the same session, is still never touched; that in_progress outranks
+#     open rather than merging with it; and that ambiguity inside the open tier
+#     is refused like any other;
 #   * ambiguity: two in_progress beads for one step, which is refused rather
 #     than guessed, because guessing is how the original defect writes;
 #   * the refusal DIAGNOSTIC distinguishing "not your bead" from "your bead, in
@@ -171,8 +171,8 @@ MINE="gc-toolkit__polecat-lx-zzk9"
 STEP="mol-feedback-distiller.load-and-gate"
 OTHER_STEP="mol-feedback-miner.load-context"
 
-# The live 2026-08-13 shape: my own step bead, plus the bead the stale env
-# variable actually named — another session, another molecule, in progress.
+# The fixture shape: my own step bead, plus the bead the stale env variable
+# actually named — another session, another molecule, in progress.
 reset_beads() {
   cat > "$FAKE_BEADS" <<B
 tk-9b3d8|$MINE|$STEP|in_progress
@@ -227,7 +227,7 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-step1" "(SELF-STALE) the already-closed step 1
 has "$OUT" "GC_TRIGGER_BEAD_ID=tk-step1 is not this step's bead" \
     "(SELF-STALE) the mismatch is reported even though both beads are ours"
 
-# --- 1c. THE FOREIGN-MOLECULE ANCHOR (tk-xgfhj3) -----------------------------
+# --- 1c. THE FOREIGN-MOLECULE ANCHOR -----------------------------------------
 # The assignee is not a molecule. A pool agent wears the same one on every run
 # it has ever made, so the same gc.step_ref of every earlier molecule matches
 # it — and the earlier ones are all closed. Resolution therefore has to turn on
@@ -479,15 +479,14 @@ eq "$RC" "0" "(NO-ENV) resolves with GC_TRIGGER_BEAD_ID unset"
 has "$(cat "$FAKE_CLOSED")" "tk-9b3d8 pass" "(NO-ENV) closed by (assignee, step_ref)"
 has "$OUT" "resolved by (molecule root-1, step_ref)" "(NO-ENV) reports how it resolved"
 
-# --- 2b. THE OPEN-STATUS REGRESSION ANCHOR (tk-jww3y) ------------------------
+# --- 2b. THE OPEN-STATUS REGRESSION ANCHOR -----------------------------------
 # A graph.v2 step bead is assigned to its session by the GRAPH, not by the
 # claim, so `gc hook --claim` finds the assignee already set and advances
 # nothing: the step is executed at status `open` and never reaches in_progress.
-# Live shape from mol-feedback-distiller run tk-u67el (2026-08-14) — tk-jihd0
-# and tk-xf0ly both went open/unassigned -> open/assigned -> closed, with no
-# in_progress state anywhere in their history. Resolution must not turn on a
-# status the dispatch never sets; the ownership proof is the (assignee,
-# step_ref) pair, and it holds here.
+# The fixture shape: a step bead that goes open/unassigned -> open/assigned ->
+# closed, with no in_progress state anywhere in its history. Resolution must
+# not turn on a status the dispatch never sets; the ownership proof is the
+# (assignee, step_ref) pair, and it holds here.
 cat > "$FAKE_BEADS" <<B
 tk-xf0ly|$MINE|$STEP|open
 B
@@ -561,10 +560,10 @@ eq "$RC" "0" "(OPEN-ENV) the last-resort env path accepts a verified open bead"
 has "$(cat "$FAKE_CLOSED")" "tk-solo2 pass" "(OPEN-ENV) it closed the verified bead"
 
 # --- 2g. "your bead, unexpected status" is not reported as "not your bead" ---
-# The diagnostic that sent a reader hunting the stale-environment defect
-# (tk-niu2f) after what was really a status mismatch. `blocked` is owned by this
-# session for this step and is still not closed — but the refusal must say so,
-# because "not this step's bead" is a different problem with a different fix.
+# The diagnostic that sent a reader hunting a stale-environment defect after
+# what was really a status mismatch. `blocked` is owned by this session for
+# this step and is still not closed — but the refusal must say so, because
+# "not this step's bead" is a different problem with a different fix.
 cat > "$FAKE_BEADS" <<B
 tk-blockd|$MINE|$STEP|blocked
 B
