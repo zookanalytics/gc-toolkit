@@ -26,8 +26,6 @@
 # no report is possible.
 set -uo pipefail
 
-PROG="doctor-sweep.sh"
-
 usage() {
   cat >&2 <<'USAGE'
 usage: doctor-sweep.sh [--status]
@@ -90,9 +88,12 @@ report() { # <state> [key=value]...
   return 0
 }
 
-# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but LF
-# go: raw TAB and CR do not occur in doctor output.
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
 scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
 
 read_file() { [ -f "$1" ] && tr -d '\n' < "$1" || printf ''; }
 
@@ -122,7 +123,7 @@ running_check() { # <root-pid>
 }
 
 kill_tree() { # <root-pid>
-  local root="$1" pids
+  local root="$1" pids p
   pids="$(descendants "$root" | cut -f1)"
   # Children first: a parent that outlives them cannot fork a replacement.
   for p in $pids; do kill -TERM "$p" 2>/dev/null; done
@@ -143,6 +144,10 @@ fi
 
 STARTED_AT="$(read_file "$RUN/started_at")"
 LAST_START="$(read_file "$STAMP")"
+# Both are read straight into arithmetic below, and an unreadable stamp must
+# cost one skipped sweep rather than every future one.
+case "$STARTED_AT" in ''|*[!0-9]*) STARTED_AT="" ;; esac
+case "$LAST_START" in ''|*[!0-9]*) LAST_START="" ;; esac
 COLLECTED=0
 [ -f "$RUN/collected" ] && COLLECTED=1
 IN_FLIGHT=0
@@ -259,9 +264,11 @@ if [ "$MODE" = "status" ]; then
   exit 0
 fi
 
-# A collected run is spent; clearing it is what lets the next `mkdir` be the
-# start guard. Only a collector reaches here, so the clear is not contended.
-[ "$COLLECTED" -eq 1 ] && rm -rf "$RUN"
+# Nothing is in flight, so whatever is here is spent: a collected run, or a
+# dir left by a start that died before recording anything. Clearing it is what
+# lets the next `mkdir` be the start guard. Only a collector reaches here, so
+# the clear is not contended.
+[ -d "$RUN" ] && rm -rf "$RUN"
 if ! mkdir "$RUN" 2>/dev/null; then
   report blocked "reason=run-dir-contended" "run=$RUN"
   exit 2

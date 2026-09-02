@@ -182,6 +182,23 @@ run
 has "$OUT" "state=failed" "a run dir that never recorded a pid is a failed scan"
 eq "$(field "$OUT" reason)" "never-started" "  ... named as the launch"
 
+# --- a half-written run record costs one sweep, not every future one --------
+# The window is a start that dies between making the run dir and stamping it.
+new_state halfborn
+: > "$STUB_LOG"
+mkdir -p "$STATE/current"
+run
+has "$OUT" "state=started" "a run dir with no start stamp is cleared, not treated as in flight"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... and the next sweep actually runs"
+
+new_state corrupt
+: > "$STUB_LOG"
+mkdir -p "$STATE/current"
+printf 'not-a-time' > "$STATE/current/started_at"
+printf 'not-a-time' > "$STATE/last-start"
+run
+has "$OUT" "state=started" "an unreadable stamp costs one sweep, not every future one"
+
 # --- --status is a read ------------------------------------------------------
 new_state status
 : > "$STUB_LOG"
