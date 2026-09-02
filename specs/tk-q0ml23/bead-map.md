@@ -20,7 +20,11 @@ becomes one of the recorded values. `COMMENTED` is GitHub's vocabulary for what
 a reviewer did, and it does not answer whose turn it is. Two `COMMENTED`
 reviews on one pull request, one answered and one not, are the same value. So
 record the conversation position from `state-model.md` as well: `quiet`,
-`outstanding`, `covered`, `asking`, `answered`.
+`outstanding`, `covered`, `asking`, `answered`. Four of those five become
+writable once this bead lands, `asking` from tk-s4fg87's edge and the other
+three from the watermarks. `covered` does not, because it needs a
+comment-to-bead link nobody records. The writer this bead builds leaves that
+one value unwritten, and `surface.md` phases it separately.
 
 Beside it, not in place of it. The posture answers a second question the
 position cannot, which is whether GitHub will let the merge through, and its
@@ -139,12 +143,20 @@ predicting who will clear it, and a released anchor simply stops matching.
 
 **tk-01n5cc** — open, and itself wedged at `exception@<live head>`. GitHub
 write-back: acknowledge a comment, reply when the work lands, resolve the
-thread. Independent in both directions. It changes what GitHub shows and this
-surface reads the bead, so neither waits on the other.
+thread. The write-back itself is independent in both directions. It changes
+what GitHub shows and this surface reads the bead, so neither waits on the
+other.
 
-They meet at one place, and it is worth wiring deliberately when both exist.
-The reaction tk-01n5cc posts when it files a bead from a comment is written at
-the same moment the conversation axis moves to `covered`, from the same fact.
-Whoever builds the second of the two should make one write drive both rather
-than letting the acknowledgement in GitHub and the position on the bead drift
-apart.
+One thing does cross, and it is a gap rather than an overlap. The reaction
+tk-01n5cc posts when it files a bead from a comment is written at the same
+moment the conversation axis would move to `covered`, from the same fact: this
+utterance now has that bead on it. The axis needs that fact recorded on the
+bead, and nothing records it. tk-01n5cc's acceptance covers acknowledging,
+replying and resolving in GitHub, and says nothing about the link, so
+conversation `covered` has no owner in the initiative as it stands.
+`surface.md` holds it back as its own phase for that reason, and whoever scopes
+that phase either extends tk-01n5cc to record the link or files the writer as
+its own bead.
+
+Whoever builds either side should make one write drive both, rather than
+letting the acknowledgement in GitHub and the position on the bead drift apart.

@@ -155,7 +155,10 @@ to begin with. tk-jus6e4 owns two of them, and this design adds the third.
 **`covered`** — outstanding, and an open bead is on it. The link must be
 recorded when the bead is filed, not guessed afterwards. An open review child
 is not evidence on its own: PR #475 has one, and it is a codex gate on the
-branch rather than an answer to anything the operator said.
+branch rather than an answer to anything the operator said. Nothing writes that
+link today, and no bead owns writing it, so this value costs more than the
+other four and `surface.md` sequences it apart from them. Until the link
+exists, an utterance the city is working stops at `outstanding`.
 
 **`asking`** — the city has formed a question and is waiting on the answer.
 This is tk-s4fg87's hold, with no additions: the anchor carries an open
@@ -227,19 +230,25 @@ copies.
 | approval required and absent | GitHub's review decision at the live head | **not derivable** — the decision is fetched and discarded |
 
 One of the nine is asserted today, and it is the one tk-s4fg87 already
-specifies. Four cannot be derived at all: they depend on the watermarks, on a
-comment-to-bead link, and on a recorded review decision, none of which exist
-yet, and all of which are tk-jus6e4's and tk-01n5cc's deliverables.
+specifies. Four cannot be derived at all, and they wait on three different
+things, none of which exist yet. The watermarks are tk-jus6e4's deliverable.
+The review decision is fetched and thrown away every pass, and phase 1 of this
+design records it. The comment-to-bead link behind `covered` is nobody's:
+tk-01n5cc files a bead from a comment and is where that write belongs, but its
+acceptance is the GitHub write-back and never asks for the link. Three
+deliverables and three owners, one of them missing, is why `surface.md` does
+not release the conversation axis as a single phase.
 
 That is the sequencing answer this document owes, and the four undeliverables
 do not all cost the same. The machine axis can be rendered honestly now. So can
 the approval clause, which needs the review decision written down once per pass
 and none of the watermarks, which is why it belongs in the same phase as the
 machine axis rather than behind the conversation axis. The conversation axis
-cannot be rendered at all until the watermarks land, and a surface that guesses
-it will be wrong in the direction that matters: it will report `quiet` for a PR
-the operator commented on, because silence is what every failed derivation
-looks like.
+cannot be rendered at all until the watermarks land, and `covered` not even
+then, because it needs the link as well. A surface that guesses either will be
+wrong in the direction that matters: it will report `quiet` for a PR the
+operator commented on, because silence is what every failed derivation looks
+like.
 
 So the rule, which the board's own model already applies to dependency edges as
 `WaitingUnknown`:
@@ -352,7 +361,7 @@ the instant.
 `lifecycle.sh` writes all three keys, and it reads the anchor before it writes
 and reads it back after, so the comparison adds no round trip to a pass. Only
 `pr.machine` and `pr_posture` need the component in phase 1; `pr.conversation`
-gains it with the rest of the key, in phase 2.
+gains it with the rest of the key, in phase 2a.
 
 One key this design does not add, and requires to survive. tk-jus6e4 records
 `pr_posture=<changes_requested|commented|approved|review_required|none>@<head-oid>`,

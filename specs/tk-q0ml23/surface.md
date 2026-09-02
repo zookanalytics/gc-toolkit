@@ -216,23 +216,26 @@ beads alone did not have.
 
 ## Sequencing
 
-The surface splits at the axis boundary, and the split is forced by what can be
-asserted rather than by convenience.
+The surface splits by what can be asserted rather than by convenience. The
+first cut is the axis boundary, and the conversation axis then splits again,
+because its five values do not all wait on the same deliverable.
 
 **Phase 1, buildable now.** The machine axis and `asking`. Both are derivable
 from beads today: `asking` is tk-s4fg87's edge, which the board's source already
 reads as `WaitingOn`, and the machine axis needs `pr.machine` recorded by
 `gate-ensure.sh` and `merge.sh` at the point each already reaches the verdict.
-The conversation axis renders `unknown` throughout, and the coverage line says
-why. This alone answers two of the operator's three questions.
+The conversation axis renders `asking` where the demand edge is there and
+`unknown` everywhere else, because nothing in phase 1 can tell a quiet pull
+request from one the operator commented on. The coverage line says why. This
+alone answers two of the operator's three questions.
 
 The owed rule's approval clause is phase 1 as well, and it does not wait for
 the conversation axis. It reads `pr_posture=review_required@<live head>`, which
 is one field off the review decision `pr-facts.sh` already fetches for every
-open anchor, and it needs none of the watermarks that block phase 2. Until it
-is recorded, a `settled` row cannot say whether GitHub is holding the merge for
-a human, and the coverage sentence counts it rather than the row reading
-not-owed.
+open anchor, and it needs none of the watermarks that block the conversation
+axis. Until it is recorded, a `settled` row cannot say whether GitHub is
+holding the merge for a human, and the coverage sentence counts it rather than
+the row reading not-owed.
 
 It is also what makes a wedge legible. The board already gathers
 `gc.routed_to=human` beads, so the seven wedged anchors do reach it as
@@ -242,31 +245,54 @@ awaiting a ruling and for one frozen at `exception@<live head>` where the only
 release is a head move nobody is going to make. The machine axis is that
 sentence.
 
-**Phase 2, blocked on tk-jus6e4 across all three id spaces.** The
-conversation axis. `outstanding`, `covered` and `answered` all resolve to the
-watermarks, and none of them can be inferred without them. tk-jus6e4 as written
-covers the two review spaces, so phase 2 also needs `pr_issue_watermark` over
-`issues/N/comments`, specified in `state-model.md` and dispositioned against
-tk-jus6e4 in `bead-map.md`. Shipping on two spaces renders `quiet` for a pull
-request the operator commented on in the conversation tab, which is the one
-mistake this axis exists to prevent. Building any of it before the watermarks
-land means guessing, and every failed guess resolves to `quiet`, which is the
-one answer that tells the operator to stop looking.
+**Phase 2a, blocked on tk-jus6e4 across all three id spaces.** The watermarked
+half of the conversation axis: `quiet`, `outstanding` and `answered`. All three
+resolve to the watermarks, and none of them can be inferred without them.
+tk-jus6e4 as written covers the two review spaces, so this phase also needs
+`pr_issue_watermark` over `issues/N/comments`, specified in `state-model.md`
+and dispositioned against tk-jus6e4 in `bead-map.md`. Shipping on two spaces
+renders `quiet` for a pull request the operator commented on in the
+conversation tab, which is the one mistake this axis exists to prevent.
+Building any of it before the watermarks land means guessing, and every failed
+guess resolves to `quiet`, which is the one answer that tells the operator to
+stop looking.
 
-Do not merge the two phases into one pull request. Phase 1 is honest about what
-it does not know; phase 2 is what removes the not-knowing.
+**Phase 2b, blocked on a recorded comment-to-bead link.** The one value left is
+`covered`, and it does not arrive with the watermarks. `covered` is
+`outstanding` plus an open bead on the utterance, and `state-model.md` marks it
+not derivable for a second reason: the link from the utterance to the bead has
+to be written when the bead is filed, and nothing writes it. tk-01n5cc files a
+bead from a comment and is where that write belongs, but its acceptance is the
+GitHub write-back and does not ask for the link, so this phase cannot assume it
+will inherit one.
+
+Until the link is recorded, `pr.conversation` never takes the value `covered`,
+and an utterance the city is already working reads `outstanding`. That is the
+coarser truth, not the collapse into `quiet` the third-value rule forbids. The
+axis still says a human is waiting, the owed rule's "nothing covering it" test
+subtracts nothing, and the row stays in the operator's queue while the city
+works on it. The machine axis carries the other half in the interval, because a
+bead filed for a comment and routed to a pool reads `progressing`, so a covered
+utterance shows as busy and owed at once. What this phase must not do is
+synthesize the link from an open bead on the anchor. `state-model.md` rules
+that out: a codex review child is an open bead on the anchor and answers
+nothing anyone said.
+
+Do not merge the phases into one pull request. Phase 1 is honest about what it
+does not know. Each phase after it removes one piece of the not-knowing, and
+they are gated on different deliverables.
 
 ## The implementation bead
 
 One bead comes out of this document, tk-nnx2gd, scoped to phase 1 and carrying
-phase 2 as its stated follow-on. It is blocked on tk-lb3u4m by a `blocks` edge
-and armed for the polecat pool through `deferred-dispatch.sh`, so it dispatches
-itself when the partition it renders into lands. Its shape:
+phases 2a and 2b as its stated follow-ons. It is blocked on tk-lb3u4m by a
+`blocks` edge and armed for the polecat pool through `deferred-dispatch.sh`, so
+it dispatches itself when the partition it renders into lands. Its shape:
 
 - Register `pr.machine` in `lifecycle/lifecycle.toml` and write it through
   `lifecycle.sh`, from the points in `gate-ensure.sh` and `merge.sh` that
   already reach the verdict. No new pass, no new GitHub read.
-  `pr.conversation` and `pr_issue_watermark` are registered by phase 2,
+  `pr.conversation` and `pr_issue_watermark` are registered by phase 2a,
   alongside the writer that fills them.
 - Implement compare-and-preserve for the `since` component in `lifecycle.sh`,
   once, for every key that carries it. `lifecycle.sh` already reads the anchor
@@ -283,8 +309,9 @@ itself when the partition it renders into lands. Its shape:
 - Add the seven `Tile` fields, the source gather that fills them from the
   anchor, and the `Owed` contribution. `pr_branch` is read from the anchor's
   `branch` and is empty on a row that is not a merge anchor.
-  `pr_conversation` ships in phase 1 as a field that always reads `unknown`,
-  so the wire contract does not change shape when phase 2 lands.
+  `pr_conversation` ships in phase 1 carrying `asking` and `unknown` and no
+  other value, so the wire contract does not change shape when the later
+  phases fill the rest.
 - Render the row and its link in the owed partition, and extend the coverage
   sentence.
 - Cover the machine derivation with tests built from the live shapes in
