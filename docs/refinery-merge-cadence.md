@@ -166,9 +166,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    pass; when the cap or a failed write leaves one owing, that pass replies to
    and resolves nothing, so no thread is answered over a comment still awaiting
    its acknowledgement. A thread a human answered after the city's own is left
-   open, and a `visit:` disposition earns the reaction but never a reply,
-   because no commit answered it. Idempotence is read back off GitHub, so a
-   repeat pass writes nothing and a failed write is retried by the next one.
+   open, and so is one holding a comment above the mark: no batch covers that
+   comment, so nothing has answered it, and resolving would put the thread past
+   every later pass. A `visit:` disposition earns the reaction but never a
+   reply, because no commit answered it. Idempotence is read back off GitHub,
+   so a repeat pass writes nothing and a failed write is retried by the next
+   one.
 6. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
    onto the integration branch AND no hold/branch veto → assignee=refinery,
    `branch=integration/<id>`, `merge_strategy=mr`.

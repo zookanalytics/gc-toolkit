@@ -35,7 +35,8 @@
 # and the reply and resolve bounded to the batch the disposition names, so a
 # thread an earlier batch left unresolved keeps its reaction and nothing else;
 # and the answers held back whenever a pass cannot finish the batch's pickup
-# reactions, whether the cap or a failed write left them owing.
+# reactions, whether the cap or a failed write left them owing, or a comment in
+# the thread sits above the mark with no batch covering it yet.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -988,6 +989,32 @@ threads 43 "$(printf '%s' "$(one_thread 43)" | jq -c '.threads[0].comments.nodes
 out=$(run)
 eq "$(reacted 43 NC-43)" "false" "an unrouted comment gets no reaction"
 eq "$(tresolved 43 T-43)" "false" "…and its thread is not resolved"
+
+echo "# a thread also holding a comment above the mark is not resolved behind its landed batch"
+# The older batch landed and would answer the thread on its own. Both beads are
+# closed, so what holds the thread is the newer comment: no batch covers it, so
+# nothing has addressed it, and a resolve here would close the thread before it
+# is answered and put it past every later pass.
+store "[$(anchor WQ 73 "$(wb_meta rework:KQ1)"), $(child KQ1 closed), $(child KQ2 closed)]"
+printf '%s' "$(prview 73 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_73.json"
+threads 73 "$(printf '%s' "$(one_thread 73)" | jq -c '.threads[0].comments.nodes += [
+  {"id":"NC-73b","databaseId":200,"author":{"login":"johnzook"},"body":"and this","reactionGroups":[]}]')"
+out=$(run)
+eq "$(reacted 73 NC-73)" "true" "the routed comment still earns its acknowledgement"
+eq "$(reacted 73 NC-73b)" "false" "the comment above the mark earns none"
+eq "$(treply 73 T-73)" "" "the landed batch never answers a thread with a request outstanding"
+eq "$(tresolved 73 T-73)" "false" "…and the thread is left open for it"
+eq "$(meta WQ pr_comment_batch)" "rework:KQ1|0|100" "the batch owing that thread is kept"
+
+echo "# …and the pass that routes and lands it answers the thread for both"
+bmut WQ '.metadata += {"pr_comment_disposition":"rework:KQ2","pr_comment_watermark":"200"}'
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(reacted 73 NC-73b)" "true" "the newly routed comment is acknowledged"
+has "$(treply 73 T-73)" "KQ1" "the reply names the first batch's bead"
+has "$(treply 73 T-73)" "KQ2" "…and the second's"
+eq "$(tresolved 73 T-73)" "true" "…and the thread is resolved behind it"
+eq "$(gh_since "$mark" | grep -c REPLY)" "1" "the thread still gets exactly one reply"
 
 echo "# an operator reply after ours leaves the thread open"
 store "[$(anchor W5 44 "$(wb_meta rework:K5)"), $(child K5 closed)]"

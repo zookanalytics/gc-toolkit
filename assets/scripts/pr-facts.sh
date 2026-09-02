@@ -45,7 +45,8 @@
 # alone. The reactions are written first, and a pass that cannot finish them
 # replies to and resolves nothing, so no thread is answered over a comment still
 # awaiting its acknowledgement. A thread a human answered after the city's reply
-# is left open.
+# is left open, and so is one holding a comment above the mark: no batch covers
+# that comment, so nothing has answered it yet.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
 # Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
@@ -1193,13 +1194,17 @@ WB_LONG_THREADS
   #                                        live (a human answered after us), or
   #                                        norights (cannot resolve).
   # A comment ABOVE the watermark was never routed and earns nothing: reacting to
-  # it would teach the operator that the mark means something it does not. A
-  # thread belongs to every record whose range holds one of its comments and
+  # it would teach the operator that the mark means something it does not. It is
+  # still outstanding in the thread it sits in, so a thread holding one waits.
+  # Answering that thread from an older batch would resolve it over a request
+  # nothing has addressed, and a resolved thread is skipped by every later pass.
+  # A thread belongs to every record whose range holds one of its comments and
   # whose disposition names a bead, and it is answered only once all of them have
   # landed: one reply, naming each, over a thread with nothing left outstanding.
   # A thread already carrying our reply marker stays in scope whatever its ids:
   # we claimed it, and a resolve that failed behind a reply still has to be
-  # retried.
+  # retried. A human who wrote after that marker makes the thread live, which is
+  # the reason reported for leaving it open.
   wplan=$(printf '%s' "$wview" | jq -r \
     --arg self "$SELF_LOGIN" --arg reaction "$WB_REACTION" --arg marker "$WB_MARKER" \
     --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson recs "$wbrecs" '
@@ -1236,13 +1241,17 @@ WB_LONG_THREADS
            else [] end) as $own
         | select(($own | length) > 0)
         | [ $own[] | $recs[.] ] as $orecs
-        | (if ([ $orecs[] | select(.landed == "") ] | length) > 0 then "-"
-           else $orecs[-1].landed end) as $landed
         | (if $mine == null then 1 else 0 end) as $needreply
         | (if $mine == null then 0
            else [ $cs | to_entries[] | select(.key > $mine)
                   | select((.value.author.login // "") != $self) ] | length
            end) as $after
+        | ([ 0, ($recs[] | .hi) ] | max) as $mark
+        | (if $after > 0 then 0
+           else [ $cs[] | select(foreign) | select((.databaseId // 0) > $mark) ]
+                | length end) as $unrouted
+        | (if ([ $orecs[] | select(.landed == "") ] | length) > 0 or $unrouted > 0
+           then "-" else $orecs[-1].landed end) as $landed
         | (if $after > 0 then "live"
            elif (($t.viewerCanResolve // false) != true) then "norights"
            else "ok" end) as $why
