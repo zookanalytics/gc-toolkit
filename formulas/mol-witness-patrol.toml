@@ -19,9 +19,9 @@ executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). Escalations go through
 assets/scripts/escalate.sh — one open visit per situation key.
 
-Marked blocks (host-bead-skip, liveness-lookup, husk-guard, patrol-wisp-pour,
-refinery-queue-nudge) are extracted and executed by their tests; keep markers,
-keep them backslash-free."""
+Marked blocks (host-bead-skip, liveness-map-guard, liveness-lookup, husk-guard,
+patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
+tests; keep markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -109,22 +109,80 @@ exclusions are structural, not kind-based:
 **2. Liveness — session-ID liveness, never template matching.** Pool
 instances get NEW ids on restart, so pattern-matching an assignee against a
 template false-negatives forever. Build the identity->state map ONCE per
-cycle from `gc session list --state=all --json` (an OBJECT — iterate
-`.sessions[]`; fields are lowercase snake_case) plus the session beads
-(`gc bd list --type=session --label=gc:session --include-infra --all
---json --limit=0`), keyed on id / name / session_name / alias / agent_name
-/ configured_named_identity. Stream both blobs through temp files, never
---argjson (ARG_MAX).
+cycle, before the first bead is read, keyed on id / name / session_name /
+alias / agent_name / configured_named_identity. Stream both blobs through
+temp files, never --argjson (ARG_MAX):
+```bash
+# >>> liveness-map-guard
+# Builds the map and answers the ONE question the fail safe asks: did the map
+# itself fail to load. Sets LIVENESS_MAP, MAP_COUNT, and MAP_TRIP. MAP_TRIP is
+# empty when the map is usable and carries the escalation reason otherwise. This
+# runs once per cycle with no bead in scope, so no bead's owner can reach the
+# decision.
+SESSIONS_RAW=$(mktemp)
+SESSION_BEADS=$(mktemp)
+gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
+gc bd list --type=session --label=gc:session --include-infra --all --json --limit=0 > "$SESSION_BEADS" 2>/dev/null || true
+# The session list is the load-bearing source. A non-object, or an object with
+# no .sessions array, is the READ failing, which is a different fact from a
+# city that reports no sessions.
+SESSIONS_OK=0
+if jq -e 'type == "object" and (.sessions | type) == "array"' "$SESSIONS_RAW" >/dev/null 2>&1; then
+  SESSIONS_OK=1
+fi
+# Normalize both sources to a shape the builder cannot fail on, so MAP_COUNT is
+# a number on every path and the trip below is decided by SESSIONS_OK rather
+# than by how the builder happened to die. The session beads contribute keys
+# when they can and are never required: an unusable answer from them
+# contributes nothing rather than failing the cycle.
+[ "$SESSIONS_OK" = "1" ] || printf '{"sessions":[]}' > "$SESSIONS_RAW"
+jq -e 'type == "array"' "$SESSION_BEADS" >/dev/null 2>&1 || printf '[]' > "$SESSION_BEADS"
+LIVENESS_MAP=$(jq -n --slurpfile s "$SESSIONS_RAW" --slurpfile b "$SESSION_BEADS" '
+  def kv($st): [ .id, .name, .session_name, .alias, .agent_name, .configured_named_identity ]
+    | map(select(type == "string" and . != "")) | map({key: ., value: $st});
+  # Bead keys first, session-list keys second: from_entries lets the later
+  # entry win, which keeps the authoritative source authoritative.
+  [ (($b[0] // [])[] | kv(.status // "active")) ]
+  + [ (($s[0].sessions // [])[] | kv(.state // "active")) ]
+  | add // {} | from_entries' 2>/dev/null)
+MAP_COUNT=$(printf '%s' "$LIVENESS_MAP" | jq 'length' 2>/dev/null)
+# Ordered by authority, and total: a count that is not a number means the
+# builder died behind a source that read fine, which is still a map that
+# cannot be trusted. Falling through to an empty MAP_TRIP would skip the
+# fail safe on an unusable map.
+MAP_TRIP=""
+if [ "$SESSIONS_OK" != "1" ]; then
+  MAP_TRIP="session list unreadable"
+else
+  case "$MAP_COUNT" in
+    ''|*[!0-9]*) MAP_TRIP="liveness map unreadable" ;;
+    0)           MAP_TRIP="liveness map empty" ;;
+  esac
+fi
+rm -f "$SESSIONS_RAW" "$SESSION_BEADS"
+# <<< liveness-map-guard
+```
 
-**Fail safe — never orphan on an empty map.** An empty map while sessions
-exist is schema drift; acting on it false-orphans live agents. Skip orphan
-recovery this cycle and escalate
+**Fail safe — never orphan on an empty map, and never on anything else.**
+`MAP_TRIP` is the entire test. A non-empty `MAP_TRIP` means the map failed to
+load, which would false-orphan live agents. Skip orphan recovery this cycle
+and escalate
 (`escalate.sh --subject <the standing subject> --key witness-empty-liveness-map ...`),
 then continue to check-refinery. The subject is never this wisp: next-iteration
 burns it, and the converse sitting writes its takeaway to the subject the visit
 tracks, so a subject that dies each cycle loses its disposition. Use
 this rig's standing subject — the open bead carrying `task_kind=triage-subject`
 and `triage.scope=witness-findings`, created once if no open one exists.
+
+An owner that resolves `absent` against a POPULATED map is never grounds for
+the fail safe. Closed sessions are excluded from `gc session list` on every
+path by design, so a bead naming a session that has since closed always
+resolves absent and `--state=closed` never returns a row. That is permanent,
+not drift, and it is the orphan signal the classification below prescribes.
+The session beads answer with an empty array on a healthy city, because
+`gc bd list` drops `issue_type=session` outright, so an empty second source is
+not an empty map either. A map that omits sessions you can name is the steady
+state this step is built to read.
 
 Resolve the `.owner` the filter stamped on each bead — the loop's `OWNER` —
 exact-first, with exactly ONE narrow fallback: the last `/`-segment, resolved

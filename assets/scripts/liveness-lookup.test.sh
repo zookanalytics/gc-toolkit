@@ -176,7 +176,7 @@ eq "$(state "$MAP_CITYWISP" "city/rig/gc-toolkit.gc-z0vi2")" "active" \
 eq "$(state "$MAP_CITYWISP" "")" "absent" \
    "(K) empty assignee -> absent"
 eq "$(state '{}' "gascity/gc-toolkit.gc-z0vi2")" "absent" \
-   "(K) empty map -> absent (fail-safe abort is handled separately by MAP_COUNT)"
+   "(K) empty map -> absent (the fail-safe abort is the liveness-map-guard block)"
 # (L) A trailing-slash identity must not match the whole map via an empty bare
 #     form; keys are non-empty so this stays absent rather than aliasing.
 eq "$(state "$MAP_CITYWISP" "gascity/")" "absent" \
@@ -231,6 +231,191 @@ eq "$(bead_state '{"gascity/gc-toolkit.gc-z0vi2":"active"}' '{"id":"b2","metadat
 #     resolve, and inventing an owner for it would be the false-orphan path.
 eq "$(bead_state "$MAP_STEP" '{"id":"n1","metadata":{"gc.kind":"workflow","gc.root_bead_id":"tk-root"}}')" "" \
    "(V) ownerless bead is dropped by the filter, never classified"
+
+# --- Fail-safe guard: only an unloadable map may skip orphan recovery. -------
+# THE SECOND BUG (tk-fc7h58): the fail safe read "never orphan on an EMPTY map",
+# but it was prose with no predicate and no variable, so the witness applied it
+# by judgment — and applied it to a POPULATED map in which some owners resolved
+# absent. Two escalations in five days under witness-empty-liveness-map, each
+# skipping orphan recovery and spending a converse sitting, both reporting the
+# map as non-empty in their own text (16 and 22 sessions).
+#
+# The premise can never clear on its own. Closed sessions are excluded from
+# `gc session list` by design on every path, so a bead naming a session that has
+# since closed ALWAYS resolves absent. Reading that as drift suppresses orphan
+# recovery permanently rather than for one cycle.
+#
+# THE FIX: the liveness-map-guard block computes MAP_COUNT and MAP_TRIP once per
+# cycle, before the first bead is read. No bead is in scope where the decision is
+# made, so an individual absent owner cannot reach it. These cases execute the
+# real block over a stub `gc`.
+GUARD="$(awk '
+  /# >>> liveness-map-guard/ {f=1; next}
+  /# <<< liveness-map-guard/ {f=0}
+  f' "$TOML")"
+
+[ -n "$GUARD" ] \
+  && ok "guard extracted between liveness-map-guard markers" \
+  || bad "guard extraction EMPTY — markers missing from $TOML"
+
+printf '%s\n' "$GUARD" > "$TMP/guard.sh"
+bash -n "$TMP/guard.sh" \
+  && ok "extracted guard is syntactically valid bash" \
+  || bad "extracted guard failed bash -n"
+
+# A `gc` that serves canned answers and REFUSES anything the guard is not
+# supposed to call. Both real sources write clean JSON to stdout and their
+# banner to stderr, which is what the guard's 2>/dev/null relies on.
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gc" <<'GCSTUB'
+#!/usr/bin/env bash
+set -u
+echo "gc: banner on stderr, as the real command does" >&2
+case "${1:-} ${2:-}" in
+  "session list")
+    if [ -n "${STUB_SESSIONS_RC:-}" ]; then exit "$STUB_SESSIONS_RC"; fi
+    cat "$STUB_SESSIONS_FILE" ;;
+  "bd list")
+    if [ -n "${STUB_BEADS_RC:-}" ]; then exit "$STUB_BEADS_RC"; fi
+    cat "$STUB_BEADS_FILE" ;;
+  *)
+    echo "gc stub: unmodelled call: $*" >&2; exit 64 ;;
+esac
+GCSTUB
+chmod +x "$TMP/bin/gc"
+export STUB_SESSIONS_FILE="$TMP/sessions.json" STUB_BEADS_FILE="$TMP/session-beads.json"
+export STUB_SESSIONS_RC="" STUB_BEADS_RC=""
+
+# guard <sessions-stdout> <session-beads-stdout> -> "MAP_COUNT|MAP_TRIP"
+# Optional 3rd/4th args are exit codes for the two sources.
+guard() {
+  printf '%s' "$1" > "$STUB_SESSIONS_FILE"
+  printf '%s' "$2" > "$STUB_BEADS_FILE"
+  STUB_SESSIONS_RC="${3:-}" STUB_BEADS_RC="${4:-}" \
+  PATH="$TMP/bin:$PATH" bash -c '
+    set -uo pipefail
+    source "$0"
+    printf "%s|%s" "$MAP_COUNT" "$MAP_TRIP"
+  ' "$TMP/guard.sh" 2>/dev/null
+}
+# guard_map <sessions-stdout> <session-beads-stdout> -> the built LIVENESS_MAP.
+guard_map() {
+  printf '%s' "$1" > "$STUB_SESSIONS_FILE"
+  printf '%s' "$2" > "$STUB_BEADS_FILE"
+  STUB_SESSIONS_RC="" STUB_BEADS_RC="" \
+  PATH="$TMP/bin:$PATH" bash -c '
+    set -uo pipefail
+    source "$0"
+    printf "%s" "$LIVENESS_MAP"
+  ' "$TMP/guard.sh" 2>/dev/null
+}
+
+# The live steady state: sessions exist, the session-bead source is empty
+# because gc bd list drops issue_type=session outright.
+SESSIONS_LIVE='{"ok":true,"sessions":[
+  {"id":"lx-3rk8v","name":"gc-toolkit--gc-toolkit__polecat-1-pool","state":"active"},
+  {"id":"lx-fjnq1","alias":"gc-toolkit/gc-toolkit.furiosa","state":"active"}]}'
+NO_BEADS='[]'
+
+# (W) THE REGRESSION. The exact shape both escalations fired on: a populated
+#     map that omits the sessions the stalled beads name. Orphan recovery must
+#     proceed. A trip here is the bug returning.
+eq "$(guard "$SESSIONS_LIVE" "$NO_BEADS")" "4|" \
+   "(W) populated map, owners it does not name -> no trip, recovery proceeds"
+# (W) The two halves must agree: the same map that does not trip still resolves
+#     the missing owner to 'absent', which is the orphan signal, not drift.
+eq "$(state "$(guard_map "$SESSIONS_LIVE" "$NO_BEADS")" "lx-41aa7")" "absent" \
+   "(W) an owner absent from a non-tripping map still classifies as orphaned"
+# (W) And a named owner in that same map is still live — the map is usable, so
+#     both answers come from it rather than from a blanket skip.
+eq "$(state "$(guard_map "$SESSIONS_LIVE" "$NO_BEADS")" "gc-toolkit.furiosa")" "active" \
+   "(W) a named owner in the same map resolves live"
+
+# (X) The condition the fail safe is actually for: no keys at all.
+eq "$(guard '{"ok":true,"sessions":[]}' "$NO_BEADS")" "0|liveness map empty" \
+   "(X) genuinely empty map -> trip"
+
+# (Y) Unreadable source A, three ways. A read that failed is not a city with no
+#     sessions, and each must trip rather than orphan everything.
+eq "$(guard '' "$NO_BEADS" 1)" "0|session list unreadable" \
+   "(Y) session list exits non-zero -> trip"
+eq "$(guard 'not json at all' "$NO_BEADS")" "0|session list unreadable" \
+   "(Y) session list emits garbage -> trip"
+eq "$(guard '{"ok":true}' "$NO_BEADS")" "0|session list unreadable" \
+   "(Y) session list without a .sessions array (schema drift) -> trip"
+eq "$(guard '[]' "$NO_BEADS")" "0|session list unreadable" \
+   "(Y) session list returning an array instead of an object -> trip"
+
+# (Z) Source B is never required. Its emptiness is the healthy answer, and its
+#     failure must not decide a cycle that source A can answer.
+eq "$(guard "$SESSIONS_LIVE" 'garbage')" "4|" \
+   "(Z) unreadable session beads with a good session list -> no trip"
+eq "$(guard "$SESSIONS_LIVE" '' "" 1)" "4|" \
+   "(Z) session-bead read exits non-zero with a good session list -> no trip"
+# (Z) But B cannot rescue a genuinely empty cycle either.
+eq "$(guard '{"ok":true,"sessions":[]}' 'garbage')" "0|liveness map empty" \
+   "(Z) empty session list plus unreadable beads -> still trips as empty"
+
+# (Y) The builder dying behind a source that read fine. Normalizing the inputs
+#     makes this rare, so it is injected rather than waited for: a jq that
+#     answers the shape probes and fails the build. Without the non-numeric
+#     arm MAP_TRIP stays empty here and the fail safe is skipped on a map that
+#     does not exist — the fail-OPEN direction, the one that false-orphans.
+mkdir -p "$TMP/badjq"
+cat > "$TMP/badjq/jq" <<'JQSHIM'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "-n" ]; then exit 1; fi
+done
+exec "$REAL_JQ" "$@"
+JQSHIM
+chmod +x "$TMP/badjq/jq"
+REAL_JQ="$(command -v jq)"
+printf '%s' "$SESSIONS_LIVE" > "$STUB_SESSIONS_FILE"
+printf '%s' "$NO_BEADS" > "$STUB_BEADS_FILE"
+eq "$(REAL_JQ="$REAL_JQ" STUB_SESSIONS_RC="" STUB_BEADS_RC="" \
+      PATH="$TMP/badjq:$TMP/bin:$PATH" bash -c '
+        set -uo pipefail
+        source "$0"
+        printf "%s|%s" "$MAP_COUNT" "$MAP_TRIP"
+      ' "$TMP/guard.sh" 2>/dev/null)" "|liveness map unreadable" \
+   "(Y) map builder fails behind a readable source -> trip, never fall through"
+
+# (AA) Both sources contribute keys; on a collision the session list wins,
+#      because it is the source whose state field is authoritative.
+eq "$(guard_map '{"ok":true,"sessions":[{"id":"x","state":"closed"}]}' \
+                '[{"id":"x","status":"active"},{"id":"y","status":"active"}]' \
+     | jq -r '.x + "," + .y')" "closed,active" \
+   "(AA) session-list state wins the collision; bead-only keys survive"
+
+# (AB) The structural guarantee, and the only one that keeps the bug from
+#      coming back through prose: the decision is computed where no bead
+#      exists. If the block ever reads per-bead state, an individual absent
+#      owner can reach the fail safe again.
+for v in OWNER STATE '$bead' '.owner'; do
+  grep -qF -- "$v" "$TMP/guard.sh" \
+    && bad "(AB) guard references per-bead state '$v' — the fail safe must not see a bead" \
+    || ok "(AB) guard does not reference per-bead state '$v'"
+done
+# (AB) And it must run BEFORE the per-bead lookup, not beside it.
+GUARD_LINE=$(grep -n '# >>> liveness-map-guard' "$TOML" | cut -d: -f1)
+LOOKUP_LINE=$(grep -n '# >>> liveness-lookup' "$TOML" | cut -d: -f1)
+[ "$GUARD_LINE" -lt "$LOOKUP_LINE" ] \
+  && ok "(AB) the map guard is specified before the per-bead lookup" \
+  || bad "(AB) the map guard must precede the per-bead lookup"
+
+# (AC) The prose must hand the decision to the variable and must say, in the
+#      formula itself, that an absent owner on a populated map is not drift.
+#      The judgment call is what misfired; naming the predicate removes it.
+grep -qF 'MAP_TRIP` is the entire test' "$TOML" \
+  && ok "(AC) fail-safe prose binds the decision to MAP_TRIP" \
+  || bad "(AC) fail-safe prose must bind the decision to MAP_TRIP"
+grep -qF 'resolves `absent` against a POPULATED map is never grounds' "$TOML" \
+  && ok "(AC) prose rules out an absent owner as fail-safe grounds" \
+  || bad "(AC) prose must rule out an absent owner as fail-safe grounds"
+grep -qF 'never returns a row' "$TOML" \
+  && ok "(AC) prose records that closed sessions are excluded by design" \
+  || bad "(AC) prose must record that closed sessions are excluded by design"
 
 # --- Static wiring: no un-normalized lookup may survive elsewhere. ------------
 # The fix only holds if the marked snippet is the ONLY place an assignee is
