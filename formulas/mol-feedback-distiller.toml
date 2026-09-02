@@ -130,12 +130,25 @@ done
 # Rig set: a poured {{rig_list}} wins; else enumerate. `gc rig list --json`
 # returns an OBJECT ({"rigs":[...]}), and the HQ entry is addressable only by
 # PATH (`--rig <city>` fails) — so carry name + path per line.
+# >>> distiller-pending-scratch
 RIGSET=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
-# $PENDING is deliberately absent: later blocks read it, so it outlives this
-# shell and is removed at its last use. An empty $RAW is guarded because
-# `rm -f "$RAW.pending"` would otherwise name `.pending` in the cwd.
+# The later blocks read $PENDING, so the trap keeps it only once this block
+# reaches the handoff at its end. Every earlier exit removes it with the rest.
+# The `.next` merge scratch is never handed on. An unset $RAW or $PENDING is
+# guarded because `rm -f "$RAW.pending"` would otherwise name `.pending` in
+# the cwd.
 RAW=""
-distill_scratch_rm() { rm -f "$RIGSET"; [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"; return 0; }
+PENDING=""
+PENDING_HANDOFF=""
+distill_scratch_rm() {
+  rm -f "$RIGSET"
+  [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"
+  if [ -n "$PENDING" ]; then
+    rm -f "$PENDING.next"
+    [ -n "$PENDING_HANDOFF" ] || rm -f "$PENDING"
+  fi
+  return 0
+}
 trap distill_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 POURED="{{rig_list}}"
 if [ -n "$POURED" ]; then
@@ -177,6 +190,9 @@ while IFS="$TAB" read -r R RPATH; do
       | . + {obs_rig: $rig, obs_rig_path: $rigpath}]' "$RAW" > "$RAW.pending"
   jq -s 'add' "$PENDING" "$RAW.pending" > "$PENDING.next" && mv "$PENDING.next" "$PENDING"
 done < "$RIGSET"
+# The pending set is complete: hand it past the trap to the later blocks.
+PENDING_HANDOFF=1
+# <<< distiller-pending-scratch
 ```
 
 ## 3. The cadence gate (D7)
@@ -536,8 +552,8 @@ if [ -n "$RECUR" ]; then
 else
   echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 fi
-# The pending set is read across every step, so step 1 cannot trap it; this
-# is its last use. Guarded because each block is its own shell.
+# Step 1 hands the pending set past its own trap because every step reads it;
+# this is its last use. Guarded because each block is its own shell.
 [ -n "${PENDING:-}" ] && rm -f "$PENDING"
 "${SC:?step-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
