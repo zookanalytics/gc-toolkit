@@ -202,8 +202,22 @@ the per-rig lock that makes single-flight true.
 The three rival dispatchers `tk-j5wrs` catalogued are gone: `check-set-heal.sh`,
 `reconcile-gate-verdicts.sh` and `reconcile-merged-prs.sh` are absent from the
 checkout. Consolidating dispatchers is not the remaining work, because the
-rewrite already did it and the redundancy rate rose from 1% to 22% afterwards.
-The remaining work is the predicate itself.
+rewrite already did it. The remaining work is the predicate itself, and there
+is a specific reason to believe that: **the city had one, and the rewrite
+deleted it.**
+
+`tk-vie5k` implemented exactly this — one canonical in-flight membership block,
+shared by all five readers, with `anchor_authority()` making `anchor_bead`
+authoritative and a drift test that extracted every copy and diffed it against
+the canonical one. It landed on 2026-08-23. The canonical copy lived in
+`check-set-heal.sh`, and the rewrite deleted that file, its drift test
+`assets/scripts/inflight-membership.test.sh`, and every reader that shared the
+block, on 2026-08-25. Neither name appears anywhere in the checkout now.
+
+The redundancy rate rose from 1% to 22% across that same boundary. That is
+correlation, not a proof of cause, but it is the only structural change to the
+in-flight question in the window, and it points the same way the design does:
+what is missing is the predicate, not fewer dispatchers.
 
 ## Reset triggers
 
@@ -342,6 +356,15 @@ longer exists.
 **3. Nothing writes `fixable@` any more.** The only writer was
 `reconcile-gate-verdicts.sh`. `gate-ensure.sh` reads the verb and treats it as
 a gate needing raising; no arm produces it.
+
+**4. The shared in-flight predicate is not missing by omission; it was
+deleted.** `tk-ztapg`'s own correction reads the post-rewrite rate rise as
+evidence that consolidation was the wrong idea. The stronger reading is in the
+"Quiescence" section above: `tk-vie5k` landed one canonical membership block
+with a drift test on 2026-08-23, and the rewrite deleted it two days later
+along with the file that held it. The rate rose across that boundary. This does
+not change the design, which builds the predicate either way, but it changes
+how much confidence the design deserves.
 
 ## Open questions this design does not answer
 
