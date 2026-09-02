@@ -150,9 +150,13 @@ The loop, every visit:
    demand that was answered. The sign-off is the one thing genuinely
    missing, and it was owed to a thread that went with the session holding
    it. This pane is a different thread, and a sign-off for a conversation
-   it never saw reads as a sitting nobody had. If the close still will not
-   take, say so and escalate: a visit that cannot be closed keeps its
-   subject out of the unnamed-wait census for as long as it stands.
+   it never saw reads as a sitting nobody had.
+
+   Re-claiming only ends the finish when the close took. A visit still open
+   is offered back under the same reason and finishes to the same refusal,
+   so escalate and `gc runtime drain-ack` instead of returning to step 8. A
+   visit that cannot be closed keeps its subject out of the unnamed-wait
+   census for as long as it stands, and clearing it is a person's work.
 
    **`action=hold` — this visit is a sitting already underway.** Do not
    `drain-ack` it and do not work it: either one ends a sitting the

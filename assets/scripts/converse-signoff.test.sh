@@ -1367,6 +1367,13 @@ eq "${CUPD:-<none>}" "<none>" "(FINISH-FOREIGN) …and the release never runs"
 have "the prompt has a branch for a sitting already over" 'action=finish' "$PROMPT"
 have "…and posts nothing into a thread the session took with it" \
      'Post nothing, and run none of' "$PROMPT"
+# A finish returns to step 8, and step 8 re-runs step 1. That terminates on the
+# close: a closed visit is no longer in_progress, so the existing-assignment
+# tier stops matching it. A close that will not take leaves every one of those
+# conditions in place, and the arm would re-derive the same finish for as long
+# as the pane lives. The hold it replaced could not spin — it ends at a human.
+have "…and a close that will not take ends the pane rather than re-deriving" \
+     'escalate and `gc runtime drain-ack` instead of returning to step 8' "$PROMPT"
 # The turn is being disposed of, not entered. Letting its group land in
 # $SUBJECT re-scopes step 8's re-claim onto a subject this thread never had.
 have "…and a finish does not become what the thread is about" \
