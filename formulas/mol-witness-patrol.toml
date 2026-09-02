@@ -287,13 +287,39 @@ work landed: escalate the observation, close the bead, clean the worktree.
 Otherwise reset:
 
 **5. Cleanup + return to pool.** Remove the worktree (from the rig root:
-`git worktree remove <path> --force; git worktree prune`). Then, by kind:
-- **A visit (`metadata.task_kind == "visit"`)**: release the assignee and
-  NOTHING else — `gc bd update <bead> --assignee="" --status=open`. Its
-  metadata (route, continuation group, task_kind) IS its identity; verify
-  the three keys survived.
-- **Everything else**: `gc workflow delete-source <bead> --apply &&
-  gc workflow reopen-source <bead>`.
+`git worktree remove <path> --force; git worktree prune`). Then hand the bead
+to `orphan-dispose.sh`, which picks the disposal from what the bead IS:
+
+```bash
+OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/orphan-dispose.sh" ] && { OD="$c/assets/scripts/orphan-dispose.sh"; break; }
+done
+if [ -z "$OD" ]; then
+  echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
+else
+  "$OD" <bead> --owner "$OWNER" --apply
+fi
+```
+
+Four kinds reach it and only two are returned to the pool. A **visit** gives up
+its assignee and nothing else, because its route, continuation group and
+task_kind are its identity. A **workflow step** gives up the dead session's pin
+and keeps the rest, so the molecule resumes at that same step under whoever
+claims it next. A **workflow root** is skipped: nothing claims a root, it closes
+when its workflow-finalize step closes, and setting it open, unassigned and
+routed is what makes a pool offer the root itself as work. Everything else is a
+**source bead** and goes to `gc workflow delete-source --apply` followed by
+`gc workflow reopen-source`.
+
+Those two commands are the source arm alone. `delete-source` matches workflow
+roots on `gc.source_bead_id`, a root poured from an input convoy carries no such
+key, and so it reports `already_clean` for a graph.v2 chain whichever of its ids
+it is handed. Running the pair on a step or a root therefore performs no close
+and reopens live molecule machinery into a pool.
+
+Exit 3 is a PARTIAL write: some fields landed and some did not, the bead is now
+half-released, and it needs an escalation
+(`escalate.sh --subject <bead> --key witness-partial-release ...`), not a retry.
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work. Mark

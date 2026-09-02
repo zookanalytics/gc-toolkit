@@ -32,6 +32,7 @@ harness_init() {
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
+  export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
   : > "$STUB_SESSION_LOG"
   _write_gc_stub; _write_gh_stub; _write_git_stub
@@ -70,6 +71,30 @@ case "$sub" in
     exit 0 ;;
   session) printf '%s\n' "gc session $*" >> "${STUB_SESSION_LOG:?}"; exit 0 ;;
   mail) exit 0 ;;
+  workflow)
+    # delete-source / reopen-source over the JSON store. delete-source matches
+    # roots on gc.source_bead_id, so its default here is the already_clean a
+    # graph.v2 chain really returns; STUB_DELETE_SOURCE_OUT overrides the line
+    # for a store that does carry the linkage. reopen-source performs the real
+    # mutation: workflow_id and the session-affinity keys cleared, route
+    # preserved, status open, assignee empty.
+    verb="${1:-}"; sid="${2:-}"
+    case "$verb" in
+      delete-source)
+        [ -n "${STUB_DELETE_SOURCE_RC:-}" ] && { echo "gc: simulated delete-source failure" >&2; exit "${STUB_DELETE_SOURCE_RC}"; }
+        echo "${STUB_DELETE_SOURCE_OUT:-result=already_clean source_bead_id=$sid matched_roots=0 matched_beads=0 closed=0 deleted=0 metadata_cleared=false}"
+        exit 0 ;;
+      reopen-source)
+        [ -n "${STUB_REOPEN_SOURCE_RC:-}" ] && { echo "gc: simulated reopen-source failure" >&2; exit "${STUB_REOPEN_SOURCE_RC}"; }
+        tmp="$(mktemp)"
+        jq -c --arg id "$sid" 'map(if .id == $id then
+              (.metadata |= (del(.workflow_id) | del(.["gc.session_affinity"]) | del(.["gc.continuation_group"])))
+              | .status = "open" | .assignee = ""
+            else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
+        echo "result=reopened source_bead_id=$sid"
+        exit 0 ;;
+      *) echo "gc stub: unsupported 'workflow $verb'" >&2; exit 2 ;;
+    esac ;;
   sling)
     # Emulate the graph.v2 pour on the store: retire gc.routed_to and stamp
     # gc.execution_routed_to=<target>. STUB_SLING_FAIL exits 1 with no writes;
