@@ -72,7 +72,11 @@ merge.sh: unchanged — merges when every declared gate is green@live head
   expected to be rare and the distiller watches their rate alongside the
   add-rate. `none` stays a human-only opt-out.
 - **Head-bound triage.** The triage verdict is `green@<oid>` like any gate; a
-  push re-stales it, so a grown diff is re-classified.
+  push re-stales it, so a grown diff is re-classified. The menu is bound the
+  same way: triage and `signoff.sh` both read `docs/review-charter.md` out of
+  the reviewed commit rather than off a working tree, so a branch is
+  classified and warranted against the menu it ships and a reviewer's own
+  checkout supplies no menu at all.
 - **Closed menu, justified adds.** The charter declares the gate menu (name →
   when it applies → method skill). Triage is a classifier over that table and
   appends a one-line justification per added gate to the anchor's notes. The

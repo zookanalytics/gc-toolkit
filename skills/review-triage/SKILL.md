@@ -13,7 +13,7 @@ is none.
 
 ## Inputs — three, in this order
 
-1. **The charter** — `docs/review-charter.md` in the repo under review. It
+1. **The charter** — `docs/review-charter.md` at the commit under review. It
    carries the layer map, the admission test, and the gate menu you classify
    over. Read it first; it is the only place the menu is declared.
 2. **The review bead** — `check_name`, `anchor_bead`, `review_branch` /
@@ -29,23 +29,28 @@ The charter's gate menu is closed. You may add any gate it declares and you
 may not invent one. Parse it rather than eyeballing it. The parser and the
 charter come from different places and must be resolved separately: the parser
 is a pack script, the charter is the reviewed repo's own. A pack rung on the
-charter ladder would classify this rig against gc-toolkit's menu:
+charter ladder would classify this rig against gc-toolkit's menu. The charter
+comes out of the dispatch-pinned commit, `$REVIEWED_OID` from input 2, and not
+off disk. The tree you stand in is your own worktree rather than the commit you
+are classifying, and a branch may change the menu it is judged against:
 
 ```bash
 PARSER=""
 for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}"; do
   [ -n "$c" ] && [ -x "$c/assets/scripts/review-charter.sh" ] && { PARSER="$c/assets/scripts/review-charter.sh"; break; }
 done
-CHARTER=""
+CHARTER=$(mktemp); FOUND=""
 for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] && [ -r "$c/docs/review-charter.md" ] && { CHARTER="$c/docs/review-charter.md"; break; }
+  [ -n "$c" ] || continue
+  git -C "$c" show "$REVIEWED_OID:docs/review-charter.md" >"$CHARTER" 2>/dev/null && { FOUND=1; break; }
 done
-[ -n "$CHARTER" ] && [ -n "$PARSER" ] && "$PARSER" --file "$CHARTER"
+[ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$CHARTER"
 ```
 
-An empty `CHARTER` is the no-charter case below, not a reason to reach for the
-pack's copy. `signoff.sh` resolves it the same way, so a waiver it cannot
-warrant from the reviewed repo's own menu is refused at the verdict.
+A commit that carries no charter is the no-charter case below, not a reason to
+reach for the pack's copy or for the tree you happen to be in. `signoff.sh`
+resolves it the same way, so a waiver it cannot warrant from the reviewed
+commit's own menu is refused at the verdict.
 
 Each row gives you the gate, when it applies, its method, the paths that make
 it mandatory, and whether it may be waived.

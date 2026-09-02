@@ -443,15 +443,37 @@ TRIAGE_GATE=triage
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 CHARTER_PARSER="$SCRIPTS_DIR/review-charter.sh"
 # The parser is a pack artifact, resolved above from $0. The charter is not:
-# it belongs to the REPO UNDER REVIEW, so only the reviewed checkout is a rung.
-# No pack fallback — GC_PACK_DIR or the scripts dir's parent would validate an
-# importing rig's gates against gc-toolkit's menu, silently. A rig that ships
-# no charter must read as no charter (widening unvalidated, narrowing refused),
-# which is what makes the gap visible instead of borrowed.
-CHARTER=""
-for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] && [ -r "$c/docs/review-charter.md" ] && { CHARTER="$c/docs/review-charter.md"; break; }
-done
+# it belongs to the REPO UNDER REVIEW at the COMMIT under review, so the read
+# is pinned to REVIEWED_OID and never taken from a working tree. mol-review
+# removes its detached test worktree before this call, so the tree this process
+# stands in is whatever the reviewer was sitting in. The pin holds a branch to
+# the menu it ships, and stops an unrelated checkout's menu from warranting a
+# waiver.
+# The repos below are rungs to the OBJECT; whichever one carries the commit
+# answers the same bytes. No pack fallback: GC_PACK_DIR or the scripts dir's
+# parent would validate an importing rig's gates against gc-toolkit's menu,
+# silently. A commit that carries no charter must read as no charter (widening
+# unvalidated, narrowing refused), which is what makes the gap visible instead
+# of borrowed.
+CHARTER=""       # how the charter is named in a refusal; empty = none found
+CHARTER_FILE=""  # the blob, materialized for the parser; removed on exit
+CHARTER_READ=""
+resolve_charter() {
+  [ -z "$CHARTER_READ" ] || return 0
+  [ -n "${REVIEWED_OID:-}" ] || return 0
+  CHARTER_READ=1
+  local root blob
+  blob=$(mktemp) || return 0
+  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+    [ -n "$root" ] || continue
+    if git -C "$root" show "$REVIEWED_OID:docs/review-charter.md" >"$blob" 2>/dev/null; then
+      CHARTER_FILE="$blob"
+      CHARTER="docs/review-charter.md @ $REVIEWED_OID"
+      return 0
+    fi
+  done
+  rm -f "$blob"
+}
 
 # A check_set as one lowercase token per line. The comma split comes first and
 # the whitespace strip is a per-line sed: a stream-wide `tr -d` would take the
@@ -462,11 +484,15 @@ gate_tokens() {
     | sed 's/[[:space:]]//g; /^$/d'
 }
 
-# The charter's menu row for one gate, on stdout.
-# rc: 0 declared · 1 charter readable but gate undeclared · 2 no charter here.
+# The charter's menu row for one gate, on stdout. resolve_charter is
+# idempotent and has already run in the parent shell; the call here only keeps
+# a caller added above that point from reading a charter as absent.
+# rc: 0 declared · 1 charter readable but gate undeclared · 2 no charter at
+# the reviewed commit.
 charter_row() { # <gate>
-  [ -n "$CHARTER" ] && [ -x "$CHARTER_PARSER" ] || return 2
-  "$CHARTER_PARSER" --file "$CHARTER" --gate "$1" 2>/dev/null
+  resolve_charter
+  [ -n "$CHARTER_FILE" ] && [ -x "$CHARTER_PARSER" ] || return 2
+  "$CHARTER_PARSER" --file "$CHARTER_FILE" --gate "$1" 2>/dev/null
 }
 
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
@@ -629,7 +655,7 @@ fi
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.
 BODY_FILE=$(mktemp) || { warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE"' EXIT
+trap 'rm -f "$BODY_FILE" ${CHARTER_FILE:+"$CHARTER_FILE"}' EXIT
 if [ -n "$NOTES_FILE" ]; then
   cat "$NOTES_FILE" > "$BODY_FILE"
 else
@@ -732,6 +758,12 @@ dismiss_superseded() {
   done
 }
 
+# Resolved here, in this shell, and not on first use: the waive arm calls
+# charter_row inside a command substitution, and a resolution made in that
+# subshell dies with it, taking the temp file out of the trap's reach and
+# leaving every refusal below claiming there was no charter.
+resolve_charter
+
 # Triage's classification: union the added gates into check_set and record one
 # justification line per gate added or waived, in ONE write with read-back.
 # Runs BEFORE the artifact and the green stamp, so a refused or unpersisted
@@ -758,7 +790,7 @@ apply_triage_decision() {
     if [ "$rc" -eq 1 ]; then
       warn "gate '$tok' is not on the menu declared in $CHARTER; the menu is closed and triage classifies over it — nothing written"; exit 1
     fi
-    [ "$rc" -eq 2 ] && warn "no charter is readable from here; accepting '$tok' unvalidated (widening is always safe; a narrowing is not)"
+    [ "$rc" -eq 2 ] && warn "no charter is readable at $REVIEWED_OID: that commit carries no docs/review-charter.md, or no repo here carries the commit; accepting '$tok' unvalidated (widening is always safe; a narrowing is not)"
     if grep -qx -- "$tok" <<< "$union"; then continue; fi
     union="$union
 $tok"
@@ -770,7 +802,7 @@ $tok"
   for tok in $(gate_tokens "$WAIVE_GATES"); do
     row=$(charter_row "$tok"); rc=$?
     if [ "$rc" -ne 0 ]; then
-      warn "cannot waive '$tok': ${CHARTER:-no charter} declares no such waivable gate. A narrowing warrant is declared or it does not exist — nothing written"; exit 1
+      warn "cannot waive '$tok': ${CHARTER:-no charter at $REVIEWED_OID} declares no such waivable gate. A narrowing warrant is declared or it does not exist — nothing written"; exit 1
     fi
     if [ "$(printf '%s' "$row" | awk -F'\t' 'NR == 1 { print $4 }')" != "yes" ]; then
       warn "the charter does not mark '$tok' waivable; nothing written"; exit 1
