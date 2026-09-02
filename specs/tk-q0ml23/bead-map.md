@@ -57,9 +57,15 @@ operator's queue by how long a row has been owed, and an unmet approval
 requirement is one of the five causes that start that clock. So `pr_posture`
 records a third component, `<value>@<head-oid>@<since>`, under the
 compare-and-preserve rule in that document: keep the existing instant while the
-value and the head oid both hold, stamp a new one when either changes. The
-watermarks keep the `<value>@<oid>` shape. They are inputs to the conversation
-axis rather than causes of an owed row, and nothing orders a queue by them.
+value and the head oid both hold, stamp a new one when either changes.
+
+The amendment reaches `pr_posture` and nothing else. Every watermark stays a
+per-space numeric high-water id, the highest id the city has dispositioned in
+that space. The conversation axis decides an utterance by comparing its id
+against the mark for its space, so the mark has to stay a bare monotonic
+number. The watermarks are inputs to that axis rather than causes of an owed
+row, and nothing orders a queue by them, so no `since` component belongs on
+them.
 
 Every other clause stands unchanged, including the monotonicity requirement on
 each watermark, the routing requirement on an outstanding comment, and both
