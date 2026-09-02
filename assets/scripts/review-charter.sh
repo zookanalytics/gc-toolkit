@@ -2,14 +2,14 @@
 # review-charter — read the gate menu out of a repo's review charter and emit
 # it as TSV, one row per gate: <gate>\t<method>\t<mandatory paths>\t<waivable>.
 # The menu is a declared table (docs/review-charter.md, "## Gate menu"); this
-# is the ONE parser of that grammar, so the doctor clause, signoff.sh and the
+# is the ONE parser of that grammar, so the triage method, signoff.sh and the
 # menu-agreement test all read the same rows.
 #   review-charter.sh --file <charter> [--gate <name>]
 # Mandatory paths come back space-separated, `-` for none; a path pattern is
 # an exact path or a `dir/**` prefix, never a general glob. Waivable is
 # yes|no, and anything unparseable reads `no`: a narrowing warrant must be
 # declared, never inferred.
-# Callers: doctor/check-gate-integrity, signoff.sh, review-dispatch-body.test.sh.
+# Callers: signoff.sh, skills/review-triage, review-dispatch-body.test.sh.
 # Exit: 0 rows emitted · 1 no readable menu (or --gate not in it) · 2 usage.
 set -uo pipefail
 
