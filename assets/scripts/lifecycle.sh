@@ -303,6 +303,49 @@ cmd_transition() {
     SETS+=("$dk=$dwant@$(dated_since "$dhave" "$dwant")")
   done
 
+  # A transition that would change nothing performs no write. The observer arms
+  # re-assert a verdict they already recorded on most anchors of every pass, and
+  # each re-assertion costs an update plus the read-back that verifies it — two
+  # store subprocesses per anchor, on a cadence whose whole budget is store
+  # subprocesses. Skipping is safe because the comparison is made against the
+  # bead this transition already re-read: matching it is the same evidence the
+  # post-write read-back collects, gathered before the write instead of after.
+  #
+  # Only a pure re-assertion qualifies. --append-notes accumulates, --takeaway
+  # stamps a fresh instant, and --close and --assignee move fields this
+  # comparison does not cover, so any of them writes unconditionally. The
+  # validation above — --expect, edge legality, the park guard — has already run
+  # and is not what is being skipped: an illegal edge is still refused, and an
+  # edge that is legal but idle is what returns here.
+  if [ "$NOTES_SET" = 0 ] && [ "$TAKEAWAY_SET" = 0 ] \
+     && [ "$CLOSE" = 0 ] && [ "$ASSIGNEE_SET" = 0 ] && [ "$cur" = "$TO" ]; then
+    local idle=1 sk sv got
+    for kv in ${SETS[@]+"${SETS[@]}"}; do
+      sk="${kv%%=*}"; sv="${kv#*=}"
+      got=$(printf '%s' "$bead" | jq -r --arg k "$sk" '(.metadata[$k] // "") | tostring')
+      [ "$got" = "$sv" ] || { idle=0; break; }
+    done
+    if [ "$idle" = 1 ]; then
+      for sk in ${UNSETS[@]+"${UNSETS[@]}"}; do
+        got=$(printf '%s' "$bead" | jq -r --arg k "$sk" '(.metadata[$k] // "") | tostring')
+        [ -z "$got" ] || { idle=0; break; }
+      done
+    fi
+    if [ "$idle" = 1 ] && [ "$ROUTE_SET" = 1 ]; then
+      got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
+      [ "$got" = "$ROUTE" ] || idle=0
+    fi
+    if [ "$idle" = 1 ]; then
+      if [ "$JSON" = 1 ]; then
+        jq -nc --arg id "$id" --arg from "$cur" --arg to "$TO" \
+          '{id: $id, from: $from, to: $to, ok: true}'
+      else
+        echo "$PROG: $id $cur -> $TO"
+      fi
+      exit 0
+    fi
+  fi
+
   local ARGS=()
   if [ "$TO" = "unanchored" ]; then
     ARGS+=(--unset-metadata merge_result)

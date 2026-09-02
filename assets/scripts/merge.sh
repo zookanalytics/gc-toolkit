@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # merge — arm 3 of the merge cadence: the single writer of merged truth.
 # For each open pull_request anchor: pinned `gh pr view`, identity gates (right
-# repo, not a fork, right head branch, OPEN non-draft), live anchor re-read,
+# repo, not a fork, right head branch), then either the record for a PR already
+# merged — landing and recording are two writes, and a pass killed between them
+# leaves an anchor that says pull_request over a PR that landed — or, for an
+# OPEN non-draft PR, the merge: live anchor re-read,
 # then validate in order: merge_hold; unanswered review comments (pr_posture,
 # read OFF THE ANCHOR, never re-derived from GitHub here); one-anchor-per-PR
 # (hold + escalate once —
@@ -20,8 +23,11 @@
 # anchor-local authorization set is re-read immediately before the merge; any
 # mismatch holds. `gh pr merge --squash --match-head-commit`, then ONE
 # lifecycle.sh transition --to merged --close. A failed record exits non-zero
-# loudly (pr-facts records it next pass). Caller: refinery-reconcile.sh, with
-# BEADS_ACTOR projected to the refinery identity.
+# loudly and the anchor is recovered by the already-merged arm above on a later
+# pass — that arm is here, and not left to pr-facts.sh alone, because the arms
+# are ordered and a killed pass loses the later ones.
+# Caller: refinery-reconcile.sh, with BEADS_ACTOR projected to the refinery
+# identity.
 set -u
 
 PROG="merge"
@@ -155,7 +161,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-merged=0; held=0; skipped=0; record_failed=0
+merged=0; recovered=0; held=0; skipped=0; record_failed=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -196,7 +202,44 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num is opened from '$head_repo' (cross=$head_cross), not this repository's own branch; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # Merged/closed/draft PRs are pr-facts.sh's to record; the skill only merges.
+  # --- a PR already merged: the record, not the merge -----------------------
+  # Landing and recording are two writes with a gap between them, and a pass
+  # killed at its timeout can fall in that gap: the PR is merged, the anchor
+  # still says pull_request, and the bead reads as in flight forever. This arm
+  # carries the repair rather than delegating it, because the arms are ordered
+  # and a killed pass loses the later ones — a recovery downstream of the merge
+  # is reached least often exactly when it is needed most. Here it is reached
+  # whenever the merge that strands a record is, and it costs one `gh pr view`
+  # on the anchors that need it.
+  #
+  # The identity gates above have already certified this PR is ours and not a
+  # fork's. --expect is what makes a stale enumeration safe: the transition
+  # re-reads the anchor and refuses anything that has moved off pull_request.
+  # $base is the branch the PR actually landed on, which is the fact to record.
+  if [ "$state" = "MERGED" ]; then
+    merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
+      | scrub | jq -r '.mergeCommit.oid // ""')
+    if [ -z "$merge_oid" ]; then
+      # Never record an empty merged_sha (I5: closed anchor => merged+merged_sha).
+      echo "$PROG: WARN PR#$num is MERGED but the mergeCommit read came back empty; recording merged_sha=unverified:PR#$num" >&2
+      merge_oid="unverified:PR#$num"
+    fi
+    case "$merge_oid" in
+      unverified:*) short="$merge_oid" ;;
+      *) short=$(printf '%.8s' "$merge_oid") ;;
+    esac
+    if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
+         --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --append-notes "Merged to $base at $short (record recovered by merge)"; then
+      recovered=$((recovered + 1))
+      echo "$PROG: recovered $id — PR#$num was already merged to $base at $short; the record had not landed"
+    else
+      echo "$PROG: PR#$num is MERGED but the record failed for $id; retry next pass" >&2
+      record_failed=$((record_failed + 1))
+    fi
+    continue
+  fi
+  # Closed-unmerged and draft PRs are pr-facts.sh's to record; the skill only merges.
   [ "$state" = "OPEN" ] || { skipped=$((skipped + 1)); continue; }
   [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
 
@@ -602,6 +645,6 @@ done <<ROWS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 ROWS_EOF
 
-echo "$PROG: $merged merged, $held held, $skipped skipped, $record_failed record-failed"
+echo "$PROG: $merged merged, $recovered recovered, $held held, $skipped skipped, $record_failed record-failed"
 [ "$record_failed" -eq 0 ] || exit 1
 exit 0

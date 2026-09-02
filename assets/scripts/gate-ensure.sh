@@ -274,6 +274,15 @@ meta_of() { # <row-json> <key>
   printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
 }
 
+# Does <have> already record <want> in the dated shape <value>@<oid>@<instant>?
+# The instant is lifecycle.sh's to keep or restamp, so any well-formed one
+# answers yes; a value that is not yet dated does not.
+recorded_verdict() { # <have> <want "value@oid">
+  local rest="${1#"$2"@}"
+  [ "$rest" != "${1:-}" ] || return 1
+  case "$rest" in ''|*@*) return 1 ;; *) return 0 ;; esac
+}
+
 # The oid half of the marker grammar <green|fixable|exception>@<40-hex>.
 is_oid() { # <string>
   local v="${1:-}"
@@ -683,7 +692,14 @@ GATES
     # observation, not a routing decision, and an omitted --route would let a
     # detached state's default clear a route this pass never looked at.
     state=$(meta_of "$row" merge_result)
-    if [ -n "$state" ] && ! "$LIFECYCLE" transition "$id" --to "$state" --expect "$state" \
+    # lifecycle.sh declines to write a transition that changes nothing, but it
+    # has to re-read the anchor to find that out, and a per-anchor `gc bd show`
+    # is the most expensive call this arm makes. The enumerated row already
+    # carries the verdict, so the common pass — the same verdict at the same
+    # head — is recognisable here for free. Only the full dated shape counts: a
+    # bare <value>@<oid> still owes its instant, and that is a real write.
+    if [ -n "$state" ] && ! recorded_verdict "$(meta_of "$row" "pr.machine")" "$mach@$head" \
+       && ! "$LIFECYCLE" transition "$id" --to "$state" --expect "$state" \
          --route "$(meta_of "$row" "gc.routed_to")" \
          --set-dated "pr.machine=$mach@$head" >/dev/null; then
       echo "$PROG: WARN $id machine axis '$mach@$head' did not record; the board reads it as unknown until the next pass" >&2
