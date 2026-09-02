@@ -198,42 +198,63 @@ rig_name_for_bead() {
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
 }
 
-# ── Release helper: quiesce a parked molecule's step beads ───────────
-# A parked molecule's STEP beads keep re-attracting pins (gc.routed_to /
-# assignee / session_affinity) that re-spawn a polecat onto the husk
-# (tk-xypcy). Walk live graph.v2 steps in reverse (step -> gc.root_bead_id
-# -> root's gc.input_convoy_id -> the convoy's single tracked member) and
-# clear the pins on exactly the steps whose root resolves to THIS anchor.
-# Guards: fail closed on an unresolved/other anchor; NEVER close a step or
-# rewrite its status; never de-route workflow-finalize; never de-pin a step the
-# RELEASING session holds, which is the live step performing the release and
-# not a husk; all pins in ONE update per step; selected by contract
-# (gc.step_ref), never formula name (tk-q5r65); an absent root is the witness
-# patrol's, not ours. Best-effort subshell. $1 = parked anchor id, $2 = rig
-# .beads path or "".
+# ── Release helper: quiesce a parked molecule ────────────────────────
+# A parked molecule keeps re-attracting the pins (gc.routed_to / assignee /
+# session_affinity) that re-spawn a polecat onto the husk. Both of its doors
+# carry them: the graph.v2 STEP beads, and the gc.kind=workflow ROOT, which is
+# only a tracker but is pool-routed in its own right. Walk both in reverse (a
+# step through gc.root_bead_id, a root through itself, then on through the
+# root's gc.input_convoy_id to the convoy's single tracked member) and clear
+# the pins wherever that resolves to THIS anchor.
+#
+# Guards: fail closed on an unresolved or foreign anchor; NEVER close a bead or
+# rewrite its status; never de-route workflow-finalize or a control-dispatcher
+# route, which is the molecule's only escape path; never de-pin the bead the
+# RELEASING session holds, which is live and not a husk; steps are selected by
+# contract (gc.step_ref) and never by formula name; an absent root is the
+# witness patrol's, not ours.
+#
+# The pins go in TWO updates, route first. beads refuses `--assignee ""` on an
+# in_progress bead another session holds, and refuses the whole update along
+# with it, so folding all three keys into one write loses the route pins on
+# exactly the bead being re-offered. Clearing gc.routed_to alone already lifts
+# a bead out of every pool claim predicate; the assignee is the one key that
+# may legitimately have to wait for its holder. The order is load-bearing —
+# reversed, the gap between the writes would leave the bead routed and
+# unassigned, which is the pool-offer shape a fresh polecat races into.
+#
+# Best-effort subshell. $1 = parked anchor id, $2 = rig .beads path or "".
 # >>> quiesce-release-molecule-steps
 quiesce_release_molecule_steps() (
     set +e
     _anchor="$1"; _db="$2"
 
-    # The spellings a step bead's assignee can carry for THIS session — the
-    # same three step-close.sh resolves by.
+    # The spellings a bead's assignee can carry for THIS session — the same
+    # three step-close.sh resolves by.
     _me=$(printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
 
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
     _steps=$(gc bd list --status=open,in_progress ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
     [ -n "$_steps" ] && [ "$_steps" != "[]" ] || exit 0
 
+    # A root names no gc.root_bead_id and no gc.step_ref; it IS the root, and
+    # its gc.step_id is the formula name, which is what the report says.
     _rows=$(printf '%s' "$_steps" | jq -c '
         .[]
-        | select((.metadata["gc.step_ref"] // "") != "")
-        | select((.metadata["gc.root_bead_id"] // "") != "")
-        | { id,
-            step:     (.metadata["gc.step_ref"] // ""),
-            root:     (.metadata["gc.root_bead_id"] // ""),
-            routed:   (.metadata["gc.routed_to"] // ""),
-            assignee: (.assignee // ""),
-            affinity: (.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
+        | . as $b
+        | (($b.metadata["gc.kind"] // "") == "workflow") as $isroot
+        | select($isroot
+                 or ((($b.metadata["gc.step_ref"]     // "") != "")
+                     and (($b.metadata["gc.root_bead_id"] // "") != "")))
+        | { id:       $b.id,
+            kind:     (if $isroot then "root" else "step" end),
+            step:     (if $isroot then ($b.metadata["gc.step_id"]  // "")
+                                  else ($b.metadata["gc.step_ref"] // "") end),
+            root:     (if $isroot then $b.id
+                                  else ($b.metadata["gc.root_bead_id"] // "") end),
+            routed:   ($b.metadata["gc.routed_to"] // ""),
+            assignee: ($b.assignee // ""),
+            affinity: ($b.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
     [ -n "$_rows" ] || exit 0
 
     _roots=$(printf '%s\n' "$_rows" | jq -r -s 'map(.root) | map(select(. != "")) | unique | .[]' 2>/dev/null || true)
@@ -255,6 +276,7 @@ quiesce_release_molecule_steps() (
         printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null | while IFS= read -r _row; do
             [ -n "$_row" ] || continue
             _sid=$(printf '%s'      "$_row" | jq -r '.id // empty' 2>/dev/null || true)
+            _kind=$(printf '%s'     "$_row" | jq -r '.kind // empty' 2>/dev/null || true)
             _step=$(printf '%s'     "$_row" | jq -r '.step // empty' 2>/dev/null || true)
             _routed=$(printf '%s'   "$_row" | jq -r '.routed // empty' 2>/dev/null || true)
             _who=$(printf '%s'      "$_row" | jq -r '.assignee // empty' 2>/dev/null || true)
@@ -265,31 +287,43 @@ quiesce_release_molecule_steps() (
             case "$_step" in *.workflow-finalize) continue ;; esac
             case "$_routed" in *control-dispatcher*) continue ;; esac
 
-            # Never de-pin the step this release is being performed FROM. The
-            # quiesce exists to stop an ABANDONED molecule's steps re-attracting
-            # spawns; a step the releasing session holds is the live one, and
+            # Never de-pin the bead this release is being performed FROM. The
+            # quiesce exists to stop an ABANDONED molecule re-attracting spawns;
+            # a bead the releasing session holds is the live one, and
             # step-close.sh resolves it by (assignee, gc.step_ref), so clearing
             # that assignee strands the molecule this release is completing.
             # With no identity in the environment step-close.sh refuses to close
             # anything at all, so there is no case where the skip is needed and
             # unavailable.
             if [ -n "$_who" ] && [ -n "$_me" ] && printf '%s\n' "$_me" | grep -qxF -- "$_who"; then
-                echo "$PROG: takeaway: kept live step $_sid ($_step) — this session holds it and still has to close it"
+                echo "$PROG: takeaway: kept live $_kind $_sid ($_step) — this session holds it and still has to close it"
                 continue
             fi
 
             # Idempotent: already quiet -> nothing left to clear.
             [ -n "$_routed" ] || [ -n "$_who" ] || [ -n "$_affinity" ] || continue
 
+            _pins_ok=1
             set --
             [ -n "$_routed" ]   && set -- "$@" --unset-metadata gc.routed_to
-            [ -n "$_who" ]      && set -- "$@" --assignee ""
             [ -n "$_affinity" ] && set -- "$@" --unset-metadata gc.session_affinity
-            # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
-            if gc bd update "$_sid" ${_db:+--db "$_db"} "$@" >/dev/null 2>&1; then
-                echo "$PROG: takeaway: quiesced husk step $_sid ($_step) of parked $_anchor"
+            if [ $# -gt 0 ]; then
+                # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
+                gc bd update "$_sid" ${_db:+--db "$_db"} "$@" >/dev/null 2>&1 || _pins_ok=0
+            fi
+
+            _who_ok=1
+            if [ -n "$_who" ]; then
+                # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
+                gc bd update "$_sid" ${_db:+--db "$_db"} --assignee "" >/dev/null 2>&1 || _who_ok=0
+            fi
+
+            if [ "$_pins_ok" -eq 0 ]; then
+                echo "$PROG: takeaway: could not quiesce $_kind $_sid (retries via witness patrol)" >&2
+            elif [ "$_who_ok" -eq 0 ]; then
+                echo "$PROG: takeaway: de-pinned husk $_kind $_sid ($_step) of parked $_anchor — assignee left to the session still holding it"
             else
-                echo "$PROG: takeaway: could not quiesce step $_sid (retries via witness patrol)" >&2
+                echo "$PROG: takeaway: quiesced husk $_kind $_sid ($_step) of parked $_anchor"
             fi
         done
     done

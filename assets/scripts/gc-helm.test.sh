@@ -3,7 +3,8 @@
 # services/helm; the open verb is covered by gc-helm-open.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
-#   --release molecule-step quiescing (tk-xypcy, tk-q5r65)
+#   --release molecule quiescing: steps and the workflow root (tk-xypcy, tk-q5r65)
+#   the split write, so a refused assignee clear cannot void the route pins
 #   --waiting-on edges (tk-2plde)
 #   the ≤140-codepoint length gate, shared by takeaway and demand
 #   the demand verb's sibling shape and fail-closed edge
@@ -35,6 +36,10 @@ mkdir -p "$TMP/bin"
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
+# and the gc.kind=workflow ROOTS, which carry a pool route of their own:
+#   root-PARKED      : this molecule's root          -> de-routed with its steps
+#   root-OTHER       : another molecule's root       -> untouched
+#   root-ORPHAN      : root with no convoy           -> skipped (fail closed)
 cat > "$TMP/steps.json" <<'JSON'
 [
   {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
@@ -44,7 +49,10 @@ cat > "$TMP/steps.json" <<'JSON'
   {"id":"s-nonmol","assignee":"someone","metadata":{"gc.step_ref":"mol-other-formula.step","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}}
+  {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"root-PARKED","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"root-OTHER","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"root-ORPHAN","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 ]
 JSON
 
@@ -153,9 +161,7 @@ grep -q 'gc.routed_to=' <<< "$A" \
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
-# (AFFINE/ATOMIC) affine step -> all three pins cleared, in ONE update.
-eq "$(grep -c '^bd update s-load' "$UP" || true)" "1" \
-  "(ATOMIC) s-load quiesced in exactly one update (no split-update race)"
+# (AFFINE) affine step -> all three pins cleared.
 SL="$(line_for s-load)"
 if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
    && grep -q -- '--assignee' <<< "$SL" \
@@ -164,6 +170,25 @@ if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
 else
   bad "(AFFINE) affine step must clear all three pins (got: $SL)"
 fi
+
+# (ORDER) …across TWO writes, route first. beads refuses `--assignee ""` on an
+# in_progress bead a live session holds, and refuses the whole update with it,
+# so a single write loses the route pins on exactly the bead being re-offered.
+# Route first and not last: the reverse leaves a routed+unassigned window,
+# which is the pool-offer shape a fresh polecat races into.
+eq "$(grep -cE '^bd update s-load( |$)' "$UP" || true)" "2" \
+  "(ORDER) s-load's pins are written in two updates, not one"
+ROUTE_N="$(grep -nE '^bd update s-load .*--unset-metadata gc.routed_to' "$UP" | head -n1 | cut -d: -f1)"
+WHO_N="$(grep -nE '^bd update s-load .*--assignee' "$UP" | head -n1 | cut -d: -f1)"
+if [ -n "$ROUTE_N" ] && [ -n "$WHO_N" ] && [ "$ROUTE_N" -lt "$WHO_N" ]; then
+  ok "(ORDER) …the route clear goes first, so no window leaves it routed+unassigned"
+else
+  bad "(ORDER) the route clear must precede the assignee clear (route@${ROUTE_N:-none} assignee@${WHO_N:-none})"
+fi
+WHO_LINE="$(grep -E '^bd update s-load .*--assignee' "$UP" | head -n1)"
+grep -q -- '--unset-metadata' <<< "$WHO_LINE" \
+  && bad "(ORDER) the assignee clear still rides with the route pins ($WHO_LINE)" \
+  || ok "(ORDER) …and rides alone, so a refusal of it cannot void them"
 
 # (POOL) unassigned+routed step -> routed_to only.
 SI="$(line_for s-impl)"
@@ -206,6 +231,25 @@ grep -q -- '--assignee' <<< "$SN" \
 # (FAILCLOSE) a root whose anchor cannot be resolved is skipped.
 [ -z "$(line_for s-orphan)" ] \
   && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor quiesced"
+
+# (ROOT) the gc.kind=workflow root is a second pool-routed door into the same
+# molecule. A release that quiets every worker step and leaves the root routed
+# keeps attracting polecat spawns onto the husk.
+RP="$(line_for root-PARKED)"
+grep -q -- '--unset-metadata gc.routed_to' <<< "$RP" \
+  && ok "(ROOT) the workflow root is de-routed alongside its steps" \
+  || bad "(ROOT) the workflow root kept its pool route (got: ${RP:-<none>})"
+grep -q 'quiesced husk root root-PARKED' <<< "$OUT" \
+  && ok "(ROOT) …and the run names it as a root, not a step" \
+  || bad "(ROOT) the root is unreported (out: $OUT)"
+
+# (ROOTSCOPE) the root walk inherits the step walk's scope and fail-closed guard.
+[ -z "$(line_for root-OTHER)" ] \
+  && ok "(ROOTSCOPE) a root whose anchor != the parked bead is untouched" \
+  || bad "(ROOTSCOPE) another molecule's root was de-routed"
+[ -z "$(line_for root-ORPHAN)" ] \
+  && ok "(ROOTSCOPE) a root with no resolvable convoy is skipped (fail closed)" \
+  || bad "(ROOTSCOPE) an unresolvable root was de-routed"
 
 # (NOCLOSE dynamic) no STEP update ever closes a bead or rewrites its status.
 STEP_UPDATES="$(grep -E '^bd update s-' "$UP" || true)"
@@ -687,15 +731,18 @@ export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIV
 SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
 
-# A-LIVE is the anchor; root-LIVE its molecule root. L-live is the terminal step
-# this session is executing the release FROM; L-peer is a sibling step left
-# pinned to a session that is gone, which is what the quiesce exists for.
+# A-LIVE is the anchor; root-LIVE its molecule root, pool-routed in its own
+# right. L-live is the terminal step this session is executing the release
+# FROM; L-peer is a sibling step left pinned to a session that is gone, which
+# is what the quiesce exists for; L-held is the hard case — in_progress under
+# a DIFFERENT live session, so beads refuses to clear its assignee.
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
- {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.input_convoy_id":"convoy-LIVE"}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-first-reaction","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
  {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}}
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}}
 ]
 JSON
 printf 'convoy-LIVE|A-LIVE\n' > "$LIVE_CONVOYS"
@@ -729,6 +776,21 @@ case "$1 ${2:-}" in
   "bd update")
     printf 'update %s\n' "$*" >> "$LIVE_LOG"
     id="$3"; shift 3
+    # beads refuses to clear the assignee of an in_progress bead ANOTHER
+    # session holds, and refuses the whole update along with it. Checked
+    # before anything is applied, so the refusal is atomic here too: a stub
+    # that let the other keys through would hide the loss this split prevents.
+    for a in "$@"; do
+      case "$a" in
+        --assignee|--assignee=*)
+          st=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .status // ""' "$LIVE_STORE")
+          who=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .assignee // ""' "$LIVE_STORE")
+          if [ "$st" = "in_progress" ] && [ -n "$who" ] && [ "$who" != "${GC_SESSION_NAME:-}" ]; then
+            printf 'refused %s (held by %s)\n' "$id" "$who" >> "$LIVE_LOG"
+            exit 1
+          fi ;;
+      esac
+    done
     while [ $# -gt 0 ]; do
       case "$1" in
         --db)             shift 2 ;;
@@ -768,6 +830,24 @@ eq "$(field L-peer assignee)" "" \
    "(LIVESTEP) a peer session's step under the same anchor is still quiesced"
 eq "$(field L-peer gc.routed_to)" "" \
    "(LIVESTEP) …and de-routed"
+
+# The bug the split exists for. The refused `--assignee ""` used to take the
+# route pins down with it, on precisely the bead being re-offered — and the
+# patrol retry cannot succeed either while the holder is alive.
+eq "$(field L-held gc.routed_to)" "" \
+   "(HELDSTEP) a step a live session holds is de-routed even though its assignee clear is refused"
+eq "$(field L-held gc.session_affinity)" "" \
+   "(HELDSTEP) …and loses its session affinity in the same write"
+eq "$(field L-held assignee)" "gc-toolkit__polecat-lx-other" \
+   "(HELDSTEP) …while the assignee stays with the session that holds it"
+grep -q 'de-pinned husk step L-held' <<< "$RELOUT" \
+  && ok "(HELDSTEP) …and the run says the assignee was left behind" \
+  || bad "(HELDSTEP) the partial quiesce is unreported (out: $RELOUT)"
+
+# The root is the other door: a molecule whose worker steps are all quiet still
+# draws spawns while its gc.kind=workflow root keeps a pool route.
+eq "$(field root-LIVE gc.routed_to)" "" \
+   "(LIVEROOT) the workflow root is de-routed too, so no door is left open"
 
 # The disposition itself still lands whole.
 eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
