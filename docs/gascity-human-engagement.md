@@ -363,11 +363,10 @@ with no edge to discharge.
 A parked subject whose routed work has all landed therefore returns as an
 ordinary unnamed wait in the sweep's batch triage visit, and the takeaway is
 never cleared: that stamp is the record of what the sitting concluded, and the
-visit is additive. What does not exist yet is `tk-2cyxo`'s **push** — a visit
-filed straight back to the converse pool for a `gc.origin=operator` subject,
-carrying the landed id set as its own dedup key. The batch visit is a queue a
-sitting works through; the push would be the subject's own conversation
-resuming.
+visit is additive. What does not exist yet is the **push** — a visit filed
+straight back to the converse pool for a `gc.origin=operator` subject, carrying
+the landed id set as its own dedup key. The batch visit is a queue a sitting
+works through; the push would be the subject's own conversation resuming.
 
 **"Routed work" is wider than the board's `disposition_due`, and it has to
 be.** The board derives disposition-due from `waiting_on` alone — the `blocks`

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # liveness-recheck.sh — re-validate a liveness-sweep visit's census at CLAIM
-# time (bead tk-gvas6: 60% of one body was wrong on arrival). Three batched
-# bead reads re-derive every listed id's class and print a corrected census.
+# time. The visit body is a snapshot cut at pass time and a sitting routinely
+# claims it a day or more later. Three batched bead reads re-derive every
+# listed id's class and print a corrected census.
 # Bead state only — no network: a merge_result marker and a recorded takeaway
 # are FLAGGED for the sitting (never grounds for dropping a bead), and every
 # failure path leaves a bead VISIBLE (a failed batched read prints NO census;

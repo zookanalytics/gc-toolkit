@@ -131,10 +131,10 @@ eq "$(verdict_of "$C" b-idle)"   "idle"       "an unchanged bead stays on the ag
 eq "$(verdict_of "$C" b-closed)" "resolved"   "a bead closed since the pass is resolved — do NOT route"
 eq "$(verdict_of "$C" b-routed)" "worked"     "a route that appeared since the pass reads as worked"
 eq "$(verdict_of "$C" b-held)"   "held"       "a triage.hold that appeared since the pass reads as held"
-# tk-b6k2pe: a takeaway is stamped at a hold and REPLACED by its outcome at
-# sign-off, and nothing clears it, so on its own it dates a sitting rather than
-# naming a live wait. Flagged so the sitting reads what was concluded, and left
-# on the agenda so nothing has to notice a board row to bring it back.
+# A takeaway is stamped at a hold and REPLACED by its outcome at sign-off, and
+# nothing clears it, so on its own it dates a sitting rather than naming a live
+# wait. Flagged so the sitting reads what was concluded, and left on the agenda
+# so nothing has to notice a board row to bring it back.
 eq "$(verdict_of "$C" b-take)"   "recorded"   "a takeaway with no open demand records a sitting that ended"
 eq "$(verdict_of "$C" b-demand)" "held"       "an OPEN demand on the bead is the hold — a person owes that answer"
 eq "$(verdict_of "$C" b-stand)"  "standing"   "a standing record is held-by-design, never an idle bead (tk-rw2ra)"

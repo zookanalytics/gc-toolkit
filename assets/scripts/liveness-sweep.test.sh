@@ -245,10 +245,10 @@ for keep in c-pr-merged c-pr-closed c-pr-otherrepo c-pr-nourl c-preopen-fixable 
 done
 
 echo "── the hold is a live demand bead, never the takeaway stamp ──"
-# tk-b6k2pe: read as a hold, `gc.takeaway` exempts a bead from every later pass,
-# because a sitting stamps it at the hold, REPLACES it with its outcome at
-# sign-off, and nothing clears it. c-takeaway is that shape and is a candidate
-# above; these pin what does hold, and that it holds for the demand's sake.
+# Read as a hold, `gc.takeaway` exempts a bead from every later pass, because a
+# sitting stamps it at the hold, REPLACES it with its outcome at sign-off, and
+# nothing clears it. c-takeaway is that shape and is a candidate above; these
+# pin what does hold, and that it holds for the demand's sake.
 run_sweep ABSENT
 if grep -q "c-demand-live" "$ESC_BODIES"; then
     bad "an open demand holds its bead" "c-demand-live was reported"

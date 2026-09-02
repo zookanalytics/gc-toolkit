@@ -238,10 +238,10 @@ hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)
 # empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
 # runs, and the sweep files a SECOND visit on a subject converse still holds.
 hasnt ",$SURV," ",f-trackedvisit," "a subject whose live visit names it only by the tracks edge is excluded (class 3)"
-# tk-b6k2pe: a takeaway is one field a sitting stamps at the hold and REPLACES
-# with its outcome at sign-off, and nothing clears it, so it dates the last
-# sitting rather than naming a live wait. The wait is the demand bead, and only
-# while that bead is not closed.
+# A takeaway is one field a sitting stamps at the hold and REPLACES with its
+# outcome at sign-off, and nothing clears it, so it dates the last sitting
+# rather than naming a live wait. The wait is the demand bead, and only while
+# that bead is not closed.
 has ",$SURV," ",f-takeaway," "a takeaway with no live demand names no wait — it survives"
 hasnt ",$SURV," ",f-demand-live," "an OPEN demand on a bead excludes it (class 4c)"
 hasnt ",$SURV," ",f-demand-widen," "a DEFERRED demand still excludes — not closed is not answered"
