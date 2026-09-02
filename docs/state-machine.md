@@ -307,6 +307,15 @@ the live head and reviews that commit. Clearing that dead pin is the whole of
 the recovery path, so `signoff.sh` reads it back and exits 2 naming the manual
 repair rather than reporting a clear that did not happen.
 
+Whichever source wins, `signoff.sh` writes that commit back to the review bead
+as `reviewed_oid` before it stamps anything, on both verdicts and whether or
+not the PR is open. The city posts no APPROVED GitHub review, so that record is
+the only evidence `doctor/check-gate-marker-provenance` can resolve a
+city-written marker against, and `gate-ensure.sh` reads the same field to tell
+a commit already judged from one nobody has reviewed. A store that will not
+take the record costs a re-run: signoff exits 2 with nothing posted and no
+marker stamped.
+
 `signoff.sh` closes the review bead itself, last. A bead that is already
 closed therefore had its verdict recorded, or was retired unjudged by
 `review-sweep.sh`, and either verdict against it is refused on the same terms:

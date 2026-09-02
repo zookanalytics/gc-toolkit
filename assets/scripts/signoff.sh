@@ -4,6 +4,11 @@
 # mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
 #              [--notes-file <path>] [--reviewed-oid <oid>]
+# Both verdicts first record reviewed_oid on the review bead. The city never
+# posts an APPROVED GitHub review, so that record is the only evidence
+# doctor/check-gate-marker-provenance can resolve a marker written here
+# against, and gate-ensure.sh reads the same field to tell a commit already
+# judged from one nobody has reviewed.
 # approve: post the artifact (gh pr review --comment post-open; review-bead
 # notes pre-open), stamp check.<name>=green@<reviewed-oid> on the anchor, and
 # dismiss the city's own superseded CHANGES_REQUESTED review. request-changes:
@@ -48,7 +53,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
   --reviewed-oid the commit the review pinned; default: the review bead's own
                  reviewed_oid (stamped at dispatch), else the live head of the
                  anchor's branch (git ls-remote origin <branch>). A pin that
-                 has left the branch is refused, not bound.
+                 has left the branch is refused, not bound. Whichever source
+                 wins is written back to the review bead as the commit this
+                 verdict judged.
 
 reset: retire a round cap under a ruling. Advances signoff_round_floor to the
   rounds already spent and retires the park the cap wrote — check.<gate>,
@@ -460,20 +467,31 @@ fi
 [ -s "$BODY_FILE" ] || printf 'Signoff verdict: %s (check %s).\n' "$VERDICT" "$CHECK_NAME" > "$BODY_FILE"
 printf '\nAnchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID" >> "$BODY_FILE"
 
+# The commit a verdict bound to is recorded on the review bead first, and only
+# then does the artifact go where its findings are read. That record is the
+# only evidence a city verdict leaves: nothing here ever posts an APPROVED
+# GitHub review, so doctor/check-gate-marker-provenance can resolve a marker
+# written here only against a review bead carrying anchor_bead, reviewed_oid
+# and check_name. Where the artifact was posted says where the findings are
+# read, never which commit was judged, so the record does not vary with it.
+# request-changes records it too: it leaves no marker, but gate-ensure.sh's
+# already_answered reads this field to refuse a second review of a commit
+# whose rework is still open. Because the record is written first, a store
+# that will not take it costs a re-run instead of a marker nothing accounts for.
 post_artifact() {
+  gc bd update "$REVIEW_BEAD" --set-metadata "reviewed_oid=$REVIEWED_OID" >/dev/null 2>&1 || true
+  local got; got=$(row_meta "$(bd_json show "$REVIEW_BEAD")" reviewed_oid)
+  if [ "$got" != "$REVIEWED_OID" ]; then
+    warn "the reviewed commit did not read back on $REVIEW_BEAD (reviewed_oid='$got', want '$REVIEWED_OID'); nothing posted and no marker stamped, review left open for a retry"
+    exit 2
+  fi
   if [ -n "$POST_OPEN" ]; then
     # COMMENT for both verdicts, NEVER --approve: approval is external/human,
     # and the merge is held by the recorded marker, not by a bot review.
     gh pr review "$PR_NUMBER" --repo "$PR_REPO_Q" --comment --body-file "$BODY_FILE" >/dev/null 2>&1 \
       || warn "could not post the review comment on PR#$PR_NUMBER; the recorded marker still governs"
   else
-    gc bd update "$REVIEW_BEAD" --set-metadata "reviewed_oid=$REVIEWED_OID" \
-      --append-notes "$(cat "$BODY_FILE")" >/dev/null 2>&1 || true
-    local got; got=$(row_meta "$(bd_json show "$REVIEW_BEAD")" reviewed_oid)
-    if [ "$got" != "$REVIEWED_OID" ]; then
-      warn "pre-open verdict did not read back on $REVIEW_BEAD (reviewed_oid='$got'); review left open for a retry"
-      exit 2
-    fi
+    gc bd update "$REVIEW_BEAD" --append-notes "$(cat "$BODY_FILE")" >/dev/null 2>&1 || true
   fi
 }
 

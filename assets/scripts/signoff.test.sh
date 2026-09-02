@@ -323,12 +323,79 @@ printf 'P2: nit at foo.sh:3\n' > "$TMP/notes"
 "$SUT" --review-bead rv-1 --verdict approve --notes-file "$TMP/notes" >/dev/null 2>&1
 has "$(cat "$STUB_GH_BODY")" "P2: nit at foo.sh:3" "--notes-file body reaches the artifact"
 
-# --- the pin must still be on the branch ---------------------------------------
+# --- the bead-side record of what was judged -------------------------------------
+# doctor/check-gate-marker-provenance resolves a green marker either against a
+# review bead carrying anchor_bead + reviewed_oid + check_name, or against an
+# APPROVED GitHub review sitting at the same commit. Nothing here ever approves,
+# so the bead is the only resolver a city verdict can reach: a marker stamped
+# without that record is one merge.sh honours and nothing can account for.
 seed_marker() { # <value>: give the anchor a marker the refusal must not touch
   jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata["check.codex"] = $v else . end)' \
     "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 }
 
+pin() { # <oid>: stand in for the reviewed_oid a dispatch pins on the review bead
+  jq -c --arg o "$1" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' \
+    "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+}
+backed() { # <label>: the marker and the bead name the same commit
+  local m b
+  m=$(meta tk-anc check.codex); b=$(meta rv-1 reviewed_oid)
+  if [ "$b" != "<absent>" ] && [ "$m" = "green@$b" ]; then ok "$1"
+  else bad "$1 (check.codex='$m' reviewed_oid='$b')"; fi
+}
+
+echo "# post-open approve records the commit it judged"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+"$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+eq "$(meta rv-1 reviewed_oid)" "$OID_PIN" "a dispatch-pinned oid stays the judged commit"
+backed "…and the marker resolves against it"
+
+echo "# …and so does the live-head fallback, which no dispatch pinned"
+reset "$ANCHOR_PR"
+"$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "the fallback head is written back, not left implicit"
+backed "…and the marker resolves against it"
+
+echo "# …and so does a --reviewed-oid the caller pinned over the dispatch"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$OID_OVR1" >/dev/null 2>&1
+eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "the override replaces the pin with the commit actually judged"
+backed "…and the marker resolves against it"
+
+echo "# …and so does the re-review that follows a cleared dead pin"
+# The refusal clears the dispatch pin so the next mol-review claim reads the live
+# head. That claim is the third way a verdict reaches this script with nothing
+# pinned to write back.
+reset "$ANCHOR_PR"; pin "$OID_DEAD"
+STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "the dead pin refuses"
+eq "$(meta rv-1 reviewed_oid)" "<absent>" "…leaving nothing pinned for the re-review"
+STUB_PR_HEAD="$OID_LIVE" STUB_LSREMOTE="$OID_LIVE" \
+  "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "the re-review at the live head records a verdict"
+eq "$(meta rv-1 reviewed_oid)" "$OID_LIVE" "…and writes back the head it judged"
+backed "…and the marker resolves against it"
+
+echo "# request-changes records it too, though it leaves no marker"
+reset "$ANCHOR_PR"; seed_marker "green@old000"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "post-open request-changes exits 0"
+eq "$(meta tk-anc check.codex)" "<absent>" "…clearing the marker rather than stamping one"
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "…and recording which commit the round judged, which gate-ensure's already_answered reads"
+
+echo "# a record that will not stick stamps nothing"
+reset "$ANCHOR_PR"
+printf 'rv-1\n' > "$STUB_UPD_FAIL"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 2 "a reviewed_oid that does not read back exits 2"
+eq "$(meta tk-anc check.codex)" "<absent>" "…stamping no marker over the missing record"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and posting nothing to the PR"
+eq "$(status rv-1)" "in_progress" "…and leaving the review bead open for a retry"
+has "$out" "did not read back on rv-1" "…naming the bead the record is owed on"
+
+# --- the pin must still be on the branch ---------------------------------------
 echo "# a pin the branch no longer carries is refused (post-open)"
 reset "$ANCHOR_PR"; seed_marker "green@old000"
 out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
@@ -407,7 +474,6 @@ eq "$(meta rv-1 reviewed_oid)" "$OID_SHORT" "a malformed pin is left for its wri
 # sends every later claim back to the same departed commit. Both arms below leave
 # it in place — one by failing the call, one by returning success and changing
 # nothing — and only a read-back tells either from a clear that worked.
-pin() { jq -c --arg o "$1" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
 
 echo "# a dead pin the clear could not remove is a read-back failure, not a plain refusal"
 reset "$ANCHOR_PR"; seed_marker "green@keepme"; pin "$OID_DEAD"
