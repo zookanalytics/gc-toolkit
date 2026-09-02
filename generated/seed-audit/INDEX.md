@@ -31,13 +31,13 @@ covers that dimension.
 
 | agent | bytes | est. tokens |
 |---|---:|---:|
-| [`claude`](agents/claude.md) | 4,457 | 1,114 |
-| [`codex`](agents/codex.md) | 4,457 | 1,114 |
+| [`claude`](agents/claude.md) | 5,716 | 1,429 |
+| [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
 | [`converse`](agents/converse.md) | 49,694 | 12,423 |
 | [`deacon`](agents/deacon.md) | 9,373 | 2,343 |
-| [`dog`](agents/dog.md) | 905 | 226 |
-| [`gemini`](agents/gemini.md) | 4,457 | 1,114 |
+| [`dog`](agents/dog.md) | 2,359 | 589 |
+| [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 20,622 | 5,155 |
 | [`mechanik`](agents/mechanik.md) | 20,415 | 5,103 |
 | [`polecat`](agents/polecat.md) | 16,294 | 4,073 |

@@ -384,7 +384,22 @@ else
   # pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
   # Nothing in this pack reads .design, so a body filed there is a body no
   # reader ever sees.
-  TARGET=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.target // empty')
+  # The observed-on branch comes off the work bead, so that read is
+  # SHAPE-validated the way the probe above is. `gc bd show` fails open the
+  # same way, and it answers an OBJECT instead of an array when the id
+  # resolves to nothing, both of them at exit 0. An unvalidated read leaves
+  # TARGET empty and takes the formula default silently, which files a P1
+  # naming the default branch for a failure observed on an integration
+  # branch. A readable bead is a NON-EMPTY array. Anything else is UNKNOWN,
+  # and unknown files nothing and merges nothing. The default stands in only
+  # for a bead that was read and genuinely carries no target.
+  WORK_JSON=$(gc bd show "$WORK" --json 2>/dev/null)
+  if ! printf '%s' "$WORK_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    echo "work bead $WORK unreadable — filing nothing and NOT merging $WORK; the next patrol re-reads"
+    gc runtime drain-ack
+    exit 1
+  fi
+  TARGET=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.target // empty')
   [ -n "$TARGET" ] || TARGET="{{target_branch}}"
   gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN" -d "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
 

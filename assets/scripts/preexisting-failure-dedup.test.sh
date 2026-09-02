@@ -14,7 +14,7 @@
 # pre-existing target failure filed a fresh P1, on every refinery, for as long as
 # the failure persisted. The dedup guard had never once run.
 #
-# The fix (the `# >>> preexisting-failure-dedup` … `# <<< …` block) has three
+# The fix (the `# >>> preexisting-failure-dedup` … `# <<< …` block) has five
 # load-bearing parts, and this test pins each of them:
 #   1. the REAL flag, `--title-contains` (a case-insensitive title substring);
 #   2. a SHAPE check on the result, so an unreadable bd — which also produces an
@@ -30,6 +30,14 @@
 #      pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
 #      Nothing in this pack reads .design. The raw output is pasted text, so
 #      the heredoc holding it stays quoted or the log's own backticks and $ run.
+#   5. a SHAPE check on the work-bead read that supplies the observed-on branch.
+#      `gc bd show` fails open the same way the list probe does, and it answers
+#      an OBJECT rather than an array when no requested id resolves, both at
+#      exit 0. Either payload leaves an unchecked read empty, which silently
+#      takes the formula default and files a P1 naming the default branch for a
+#      failure observed on an integration branch. A readable bead is a
+#      NON-EMPTY array, and the default stands in only for a bead that was read
+#      and genuinely carries no target.
 #
 # This EXECUTES the real snippet extracted verbatim from the formula (between the
 # markers) against a fake `gc`, so the test cannot drift from the shipped
@@ -60,9 +68,14 @@ mkdir -p "$TMP/bin"
 #                     Only reachable if someone reintroduces `--search`.
 #     Every list invocation is recorded (with its flags) so the assertions can
 #     prove WHICH flag shipped.
-#   gc bd show ... --json  -> one bead per SHOW_SCENARIO:
-#       target   -> metadata.target set, the branch the body must name
-#       notarget -> metadata absent a target, so the formula default applies
+#   gc bd show ... --json  -> one payload per SHOW_SCENARIO:
+#       target     -> metadata.target set, the branch the body must name
+#       notarget   -> metadata absent a target, so the formula default applies
+#       unreadable -> EMPTY stdout, exit 0 — bd fails open on this read too
+#       noresolve  -> the OBJECT bd answers, still at exit 0, when none of the
+#                     requested ids resolves. Array-shaped jq reads nothing out
+#                     of it, so it is indistinguishable from an absent target
+#                     unless the shape is checked.
 #   gc bd create ...       -> record CREATE_RAN + the --title value, so the
 #     assertions can prove a duplicate was (or was not) filed, and that the
 #     filed title carries the same token the probe searched for. The -d value
@@ -89,8 +102,10 @@ case "$2" in
     esac ;;
   show)
     case "${SHOW_SCENARIO:-target}" in
-      target)   printf '[{"id":"work-1","metadata":{"target":"release/x"}}]\n' ;;
-      notarget) printf '[{"id":"work-1","metadata":{}}]\n' ;;
+      target)     printf '[{"id":"work-1","metadata":{"target":"release/x"}}]\n' ;;
+      notarget)   printf '[{"id":"work-1","metadata":{}}]\n' ;;
+      unreadable) : ;;   # empty stdout — bd errors to stderr and exits 0
+      noresolve)  printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n' ;;
     esac ;;
   create)
     shift 2
@@ -232,13 +247,35 @@ else
   ok "(D) rejected-flag empty stdout -> nothing filed"
 fi
 
-# (E) metadata.target unset -> the formula default stands in. An empty branch
-#     name would read as "Observed on  while merging", which names nothing.
-run nodup notarget >/dev/null
+# (E) metadata.target unset on a READABLE bead -> the formula default stands
+#     in and the arm still files. An empty branch name would read as "Observed
+#     on  while merging", which names nothing. This is also the mirror for (F)
+#     and (G): the shape check must not fail a bead it could read.
+eq "$(run nodup notarget)" "0" "(E) readable bead with no target -> snippet proceeds (exit 0)"
 if grep -Eq 'Observed on [^[:space:]]+ while' "$FAKE_BODY"; then
   ok "(E) unset metadata.target falls back to the formula default"
 else
   bad "(E) unset metadata.target leaves the observed-on branch empty"
+fi
+
+# (F) The work-bead read fails open too. Empty stdout must not be read as "no
+#     target": the filed P1 would name the default branch for a failure the
+#     patrol observed somewhere else, and the merge would proceed on it.
+eq "$(run nodup unreadable)" "1" "(F) unreadable work-bead read -> fail-closed defer (exit 1)"
+if grep -q '^CREATE_RAN$' "$FAKE_META"; then
+  bad "(F) filed a bug on an unreadable work-bead read — the body names a branch nobody read"
+else
+  ok "(F) unreadable work-bead read -> nothing filed"
+fi
+
+# (G) The same read answers an OBJECT, at exit 0, when no id resolves. The
+#     check is on the shape, not the exit code, so this payload is UNKNOWN for
+#     the same reason and defers the same way.
+eq "$(run nodup noresolve)" "1" "(G) unresolved work bead (object payload) -> fail-closed defer (exit 1)"
+if grep -q '^CREATE_RAN$' "$FAKE_META"; then
+  bad "(G) filed a bug on an object payload — an unresolved bead read as 'no target'"
+else
+  ok "(G) unresolved work bead -> nothing filed"
 fi
 
 echo "---"
