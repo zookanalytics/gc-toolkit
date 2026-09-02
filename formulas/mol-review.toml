@@ -121,6 +121,14 @@ done
 guessed main), REVIEWED_OID pinned, intent read, this step bead closed.
 """
 
+# Adopted review-rubric entries — the lifecycle record the retirement pass
+# reads through learning-recurrence.sh --inventory. Anchors live here, not
+# beside the dimension: the step description below renders into a step bead,
+# where an HTML comment is noise in the text the reviewer reads. One line per
+# adopted dimension, naming the "What to check" bullet it amended:
+# <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
+# (none adopted yet)
+
 [[steps]]
 id = "review"
 title = "Read the diff, run the tests, write the verdict body"
@@ -190,12 +198,18 @@ this branch's defect.
 - **Operator principles** — resolve the operator profile from the pack
   checkout and hold the diff's output (code, comments, docs) to its "What
   the operator cares about" entries. A violation is a blocking
-  (request-changes) finding:
+  (request-changes) finding. Read the exemplar corpus in the same pass: it
+  carries the lessons that are a shape rather than a statement, and it is
+  read here because nothing injects it into a prompt.
 ```bash
-OPF=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -r "$c/template-fragments/operator-profile.template.md" ] && { OPF="$c/template-fragments/operator-profile.template.md"; break; }
+PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -r "$c/template-fragments/operator-profile.template.md" ] && { PACK="$c"; break; }
 done
-[ -n "$OPF" ] && cat "$OPF" || echo "operator profile not found in this checkout; note that in the verdict's coverage line"
+if [ -n "$PACK" ]; then cat "$PACK/template-fragments/operator-profile.template.md"; else
+  echo "operator profile not found in this checkout; note that in the verdict's coverage line"
+fi
+# Absent on an older pack pin, and empty until the first exemplar is adopted.
+[ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.template.md" ] && cat "$PACK/template-fragments/learning-exemplars.template.md"
 ```
 
 **4. Calibrate severity.** P0 — broken or unsafe as merged: data loss, a

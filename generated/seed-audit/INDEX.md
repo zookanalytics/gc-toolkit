@@ -34,17 +34,17 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,716 | 1,429 |
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
-| [`converse`](agents/converse.md) | 50,467 | 12,616 |
-| [`deacon`](agents/deacon.md) | 9,373 | 2,343 |
+| [`converse`](agents/converse.md) | 51,721 | 12,930 |
+| [`deacon`](agents/deacon.md) | 10,627 | 2,656 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
-| [`keeper`](agents/keeper.md) | 20,622 | 5,155 |
-| [`mechanik`](agents/mechanik.md) | 20,415 | 5,103 |
-| [`polecat`](agents/polecat.md) | 17,099 | 4,274 |
-| [`polecat-codex`](agents/polecat-codex.md) | 17,129 | 4,282 |
-| [`proactive`](agents/proactive.md) | 10,490 | 2,622 |
-| [`refinery`](agents/refinery.md) | 9,467 | 2,366 |
-| [`witness`](agents/witness.md) | 9,649 | 2,412 |
+| [`keeper`](agents/keeper.md) | 21,876 | 5,469 |
+| [`mechanik`](agents/mechanik.md) | 22,313 | 5,578 |
+| [`polecat`](agents/polecat.md) | 18,997 | 4,749 |
+| [`polecat-codex`](agents/polecat-codex.md) | 19,027 | 4,756 |
+| [`proactive`](agents/proactive.md) | 11,744 | 2,936 |
+| [`refinery`](agents/refinery.md) | 10,721 | 2,680 |
+| [`witness`](agents/witness.md) | 10,903 | 2,725 |
 
 ## Formula recipes
 
@@ -60,7 +60,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 3,622 | 905 |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,262 | 1,065 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,548 | 637 |
 | [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,149 | 537 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 2,661 | 665 |
