@@ -215,6 +215,40 @@ eq "$RC" 1 "a helper named for the command does not stand in for the call inside
 has "$OUT" "named-helper.sh:2:" "the untemplated call in the helper is reported"
 hasnt "$OUT" "named-helper.sh:3:" "and the templated one beside it is not"
 
+echo "── mktemp-untemplated: command starts ──"
+
+# A command word also begins after a compound keyword, after a negation, and
+# inside a case arm. Those are ordinary shell, so a recognizer that only knows
+# the head of a line and a separator leaves the rule fail-open for them.
+mk "$TMP/command-starts.sh" <<'FIX'
+#!/usr/bin/env bash
+if @MKT@; then :; fi
+while @MKT@; do break; done
+until @MKT@; do break; done
+case "$x" in a) @MKT@ ;; esac
+probe() { if :; then :; elif @MKT@; then :; fi; }
+! @MKT@
+{ @MKT@; }
+FIX
+runm "$TMP/command-starts.sh"
+eq "$RC" 1 "a keyword, negation or case-arm command start is still a call"
+for n in 2 3 4 5 6 7 8; do
+    has "$OUT" "command-starts.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 7 "and nothing else is"
+
+# The same starts with a template beside them stay clean, so the wider
+# recognizer buys coverage without flagging a call that named itself.
+mk "$TMP/command-starts-templated.sh" <<'FIX'
+#!/usr/bin/env bash
+if @MKT@ -u "${TMPDIR:-/tmp}/gctk-thing.XXXXXX" >/dev/null; then :; fi
+case "$x" in a) @MKT@ -d "${TMPDIR:-/tmp}/gctk-thing.XXXXXX" ;; esac
+! @MKT@ -u gctk-thing.XXXXXX
+FIX
+runm "$TMP/command-starts-templated.sh"
+eq "$RC" 0 "a chosen name after a keyword or case arm is clean"
+eq "$OUT" "" "a clean file prints nothing"
+
 echo "── mktemp-untemplated: option arity ──"
 
 # An option that takes a directory or a suffix has not named anything: with no

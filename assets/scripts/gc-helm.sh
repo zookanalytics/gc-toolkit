@@ -168,15 +168,19 @@ enumerate_rigs() {
     # Capture status AND stderr — they are the only things separating a
     # timeout kill, a wedged data plane, malformed output, and a rigless city.
     # The stderr capture outlives nothing: it is read and removed a few lines
-    # down. The trap is for the signal that lands while `gc rig list` runs.
+    # down, and the traps that cover the signal landing while `gc rig list`
+    # runs come off with it. A trap is process-global, so a helper that leaves
+    # one installed rewrites how every later line of every caller handles a
+    # signal — this one lives exactly as long as the file it removes.
     _er_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-rig-enum.XXXXXX" 2>/dev/null || printf '')
-    trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
-    trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
     _er_rc=0
     if [ -n "$_er_errf" ]; then
+        trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
+        trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
         rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>"$_er_errf") || _er_rc=$?
         _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
         rm -f "$_er_errf" 2>/dev/null || true
+        trap - EXIT INT TERM HUP
     else
         rigs_raw=$(with_timeout "$_er_secs" gc rig list --json 2>/dev/null) || _er_rc=$?
         _er_why=""

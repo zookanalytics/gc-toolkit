@@ -21,11 +21,13 @@ FIX='fix: mktemp -d "${TMPDIR:-/tmp}/gctk-<producer>.XXXXXX" (learned rule: mkte
 
 found=0
 
-# Where a command may start. The word also appears as data — in a dependency
-# list (`for c in jq mktemp rm`), as a stub path, as `command -v mktemp` — and
-# none of those allocate anything. The trailing class is what keeps a name
-# like `mktemp_tracked` from reading as a call.
-OPEN='(\$\(|`|^[[:space:]]*|[;&|{(][[:space:]]*|(^|[[:space:]])(then|do|else)[[:space:]]+)'
+# Where a command may start: the head of a line, a substitution, a separator,
+# a case arm's `)`, a negation, or a compound keyword the command follows. The
+# word also appears as data — in a dependency list (`for c in jq mktemp rm`),
+# as a stub path, as `command -v mktemp` — and none of those allocate anything.
+# The trailing class is what keeps a name like `mktemp_tracked` from reading as
+# a call.
+OPEN='(\$\(|`|^[[:space:]]*|[;&|{()!][[:space:]]*|(^|[[:space:]])(if|elif|then|else|while|until|do)[[:space:]]+)'
 CALL="${OPEN}mktemp([^A-Za-z0-9_.-]|\$)"
 
 is_comment() { # whole-line comments only; `cmd  # note` is code
