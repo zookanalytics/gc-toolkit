@@ -511,9 +511,11 @@ Two endings the idle setting does not own, and both still reach converse:
   health restart can still take a held sitting out from under a reader. The
   trace-before-you-wait discipline holds for exactly this reason.
 
-The cost is real: a held visit nobody answers holds its slot against
-`max_active_sessions = 6` indefinitely, where an idle clock would recycle it.
-`gc-helm dismiss` is the release valve.
+The cost is real: a held visit nobody answers holds a `max_active_sessions`
+slot indefinitely, where an idle clock would recycle it. The bound is the
+pack default in `agents/converse/agent.toml`, and a rig raises it in
+`city.toml`. How many held visits it takes to fill the pool is therefore a
+per-rig number. `gc-helm dismiss` is the release valve.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
@@ -673,9 +675,16 @@ ends without a ruling and `action=hold` is the whole of that guard;
 re-arming `idle_timeout` adds a clock, not a substitute for it. And a
 wake nudge that names the claimer directly rather than sending the
 session through the prompt's claim block passes no continuation group,
-which silently disables the out-of-group guard above on every wake, so
-`agents/converse/agent.toml` carries that as a third constraint on the
-nudge text.
+which silently disables the out-of-group guard above on every wake.
+
+`agents/converse/agent.toml` holds that field empty, which closes the
+wake path rather than tuning it. All three claim backstops resolve their
+re-delivery text from that field and skip a session whose text is empty
+before reserving an attempt, so no backstop nudge reaches a held sitting
+and the attempt-cap drain behind them is unreachable. The idle-claim
+rescue is silenced with them, which is the cost the file records. The
+second constraint above is what any text re-arming the field has to
+satisfy, and it is recorded there too.
 
 *The core seam, now closed (landed 2026-08-12):* attachment is observable —
 `runtime.Provider.IsAttached` — and the idle ladder now consults it.

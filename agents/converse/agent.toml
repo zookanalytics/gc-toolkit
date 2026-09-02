@@ -9,16 +9,28 @@
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/agents/converse/{{.AgentBase}}"
-# Three constraints on editing the nudge: it must name converse-claim.sh (the
-# claimer — the scoped claim lives there, never the raw `gc hook --claim`); it
-# must never be empty (a CLI agent needs typed text to start a turn); and it
-# must send the session back through the prompt's step-1 block instead of
-# naming the script alone. A bare invocation passes no group, so the
-# out-of-group guard reads "first claim of a session: any group" on every wake
-# — and the action=hold verdict, which is what stops a nudge from ending a
-# live sitting, is read in that block and nowhere else.
-# Keep it at peer length; fixes go in the prompt or a script.
-nudge = "Run step 1's claim block (assets/scripts/converse-claim.sh) with your current subject; follow the action it returns."
+# Empty on purpose. All three claim backstops resolve their re-delivery text
+# from this field, and each skips a session whose text is empty before it
+# reserves an attempt. Neither the re-delivered claim nudge nor the attempt-cap
+# drain behind it can therefore fire against a sitting that is legitimately
+# holding for the operator.
+# Nothing is lost at launch. The launch delivers the rendered prompt, and step 1
+# of that prompt is the claim block, so a fresh slot claims with no keystrokes.
+# A provider that takes no prompt argument gets the prompt prepended to this
+# field, and prepending to an empty field still delivers it, so the precondition
+# is the prompt rather than prompt_mode. A prompt that stops opening with the
+# claim block leaves nothing to start the turn.
+# The known cost: the idle-claim rescue is silenced with the other two. A slot
+# that does fail to claim has nothing left to wake it.
+# Restoring a non-empty nudge re-arms all three. The text must then name
+# converse-claim.sh (the claimer — the scoped claim lives there, never the raw
+# `gc hook --claim`), and it must send the session back through the prompt's
+# step-1 block instead of naming the script alone. A bare invocation passes no
+# group, so the out-of-group guard reads "first claim of a session: any group"
+# on every wake — and the action=hold verdict, which is what stops a nudge from
+# ending a live sitting, is read in that block and nowhere else. Keep it at peer
+# length; fixes go in the prompt or a script.
+nudge = ""
 # 0 disables the idle reap for this role; any positive value re-arms it. A
 # sitting then ends only when its visit closes — the agent's own sign-off, or
 # the operator's `gc-helm dismiss <subject>` — so a held visit holds a
@@ -26,5 +38,9 @@ nudge = "Run step 1's claim block (assets/scripts/converse-claim.sh) with your c
 # does not remove: docs/gascity-human-engagement.md.
 idle_timeout = "0"
 min_active_sessions = 0
-# Bounds concurrently LIVE sittings only; open visits queue at zero cost.
-max_active_sessions = 6
+# Bounds concurrently LIVE sittings only; open visits queue at zero cost. A
+# conservative floor that rigs raise in city.toml when their own queue earns it.
+# Every rig running converse at this default fits inside the city session cap; a
+# pack default sized for one deep queue would starve the polecat pools and the
+# refinery in every other rig.
+max_active_sessions = 2
