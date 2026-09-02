@@ -97,6 +97,11 @@ scrub() { tr -d '\000-\011\013-\037'; }
 
 read_file() { [ -f "$1" ] && tr -d '\n' < "$1" || printf ''; }
 
+# The array is the shape the counts consume, and demanding it is what keeps a
+# drifted payload from reading as a clean sweep: a `results` key holding null
+# satisfies a mere existence check and then counts zero checks, zero findings.
+results_array() { jq -e '.results | type == "array"' "$1" >/dev/null 2>&1; }
+
 # Every process under <root>, as "<pid><TAB><args>". ps output is not ordered
 # parent-before-child, so the marking sweeps until the tree stops growing.
 descendants() { # <root-pid>
@@ -175,12 +180,12 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
       exit 0
     fi
 
-    if ! jq -e 'has("results")' "$PAYLOAD" >/dev/null 2>&1; then
+    if ! results_array "$PAYLOAD"; then
       # One retry through the scrub before calling it a failure: a stray
       # control byte in one message must not read as a drifted schema.
       if [ -f "$PAYLOAD" ] && CLEAN="$(mktemp "$RUN/.payload.XXXXXX" 2>/dev/null)"; then
         scrub < "$PAYLOAD" > "$CLEAN" 2>/dev/null
-        if jq -e 'has("results")' "$CLEAN" >/dev/null 2>&1; then
+        if results_array "$CLEAN"; then
           mv "$CLEAN" "$PAYLOAD"
           NOTE="${NOTE:+$NOTE; }payload carried control characters and was scrubbed"
         else
@@ -188,26 +193,35 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
         fi
       fi
     fi
-    if ! jq -e 'has("results")' "$PAYLOAD" >/dev/null 2>&1; then
+    if ! results_array "$PAYLOAD"; then
       report failed "reason=payload-invalid" "rc=$RC" "elapsed=$ELAPSED" \
         "payload=$PAYLOAD" "stderr=$RUN/stderr.log"
       exit 0
     fi
 
+    # Indexes `.results` as the array the guard proved it is, so an array
+    # holding something other than check results fails the filters rather than
+    # counting nothing. An empty TSV is that failure: a real sweep, even one
+    # with no checks at all, renders four fields.
     COUNTS="$(jq -r '
-      [ .results[]? ] as $r
-      | [ $r | length,
+      .results as $r
+      | [ ($r | length),
           ([ $r[] | select(.status != "ok") ] | length),
           ([ $r[] | select(.timed_out == true) ] | length),
           ([ $r[] | select(.timed_out == true) | .name ] | join(","))
         ] | @tsv' "$PAYLOAD" 2>/dev/null)"
+    if [ -z "$COUNTS" ]; then
+      report failed "reason=payload-invalid" "rc=$RC" "elapsed=$ELAPSED" \
+        "payload=$PAYLOAD" "stderr=$RUN/stderr.log"
+      exit 0
+    fi
     CHECKS="$(printf '%s' "$COUNTS" | cut -f1)"
     FINDINGS="$(printf '%s' "$COUNTS" | cut -f2)"
     ABANDONED="$(printf '%s' "$COUNTS" | cut -f3)"
     ABANDONED_NAMES="$(printf '%s' "$COUNTS" | cut -f4)"
     report complete "rc=$RC" "elapsed=$ELAPSED" "payload=$PAYLOAD" \
-      "checks=${CHECKS:-0}" "findings=${FINDINGS:-0}" \
-      "abandoned=${ABANDONED:-0}" "abandoned_checks=${ABANDONED_NAMES:-}"
+      "checks=$CHECKS" "findings=$FINDINGS" \
+      "abandoned=$ABANDONED" "abandoned_checks=$ABANDONED_NAMES"
     exit 0
   fi
 

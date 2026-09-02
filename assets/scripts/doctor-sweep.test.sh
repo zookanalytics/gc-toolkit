@@ -63,8 +63,24 @@ JSON
 new_state() { STATE="$TMP/state.$1"; mkdir -p "$STATE"; export GC_DOCTOR_SWEEP_STATE_DIR="$STATE"; }
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 field() { sed -n "s/^$2=//p" <<< "$1"; }
+# The sweep is DETACHED, so the script returns state=started before its child
+# has run anything. Every assertion about a launch waits for the child's own
+# evidence rather than for the parent's return, which proves only that a launch
+# was attempted. The predicate is a function so each poll re-reads the state.
+await_until() { # <predicate> [arg]
+  local end=$(( $(date +%s) + 20 ))
+  until "$@" >/dev/null 2>&1 || [ "$(date +%s)" -ge "$end" ]; do sleep 1; done
+}
 # The rc file is written last, by rename, so it is the completion signal.
-await_run() { local end=$(( $(date +%s) + 20 )); until [ -f "$STATE/current/rc" ] || [ "$(date +%s)" -ge "$end" ]; do sleep 1; done; }
+have_rc()     { [ -f "$STATE/current/rc" ]; }
+have_pid()    { [ -s "$STATE/current/pid" ]; }
+swept()       { [ "$(grep -c . "$STUB_LOG")" -ge "$1" ]; }
+check_alive() { pgrep -f "$TMP/rig/doctor/check-fixture-slow/run.sh"; }
+# The bound case runs at GC_DOCTOR_SWEEP_BOUND=0, and elapsed is whole seconds,
+# so the sweep is only past its bound once its start second is behind us.
+past_bound()  { [ "$(date +%s)" -gt "$(cat "$STATE/current/started_at")" ]; }
+await_run()    { await_until have_rc; }
+await_sweeps() { await_until swept "$1"; }
 
 # --- an unusable state dir is loud, never a clean-looking idle ---------------
 mkdir -p "$TMP/nowrite"; chmod 500 "$TMP/nowrite"
@@ -86,6 +102,7 @@ eq "$(cat "$STATE/last-start")" "$(field "$OUT" run | xargs -I{} cat {}/started_
 
 run
 has "$OUT" "state=running" "a second pass while it works reports running"
+await_sweeps 1
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... and does NOT start a second sweep"
 hasnt "$OUT" "state=started" "  ... the run dir is the start guard"
 
@@ -109,6 +126,7 @@ eq "$(grep -c . "$STUB_LOG")" "1" "  ... still exactly one sweep run"
 printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/last-start"
 run
 has "$OUT" "state=started" "once the interval has passed it sweeps again"
+await_sweeps 2
 eq "$(grep -c . "$STUB_LOG")" "2" "  ... a second run, not a re-read of the first"
 
 # --- a non-numeric interval still sweeps hourly -----------------------------
@@ -128,7 +146,9 @@ new_state bound
 : > "$STUB_LOG"
 export STUB_SLEEP=45 STUB_CHECK="$TMP/rig/doctor/check-fixture-slow/run.sh"
 GC_DOCTOR_SWEEP_BOUND=0 "$SUT" >/dev/null
-sleep 3
+await_until have_pid
+await_until check_alive
+await_until past_bound
 PID=$(cat "$STATE/current/pid")
 OUT=$(GC_DOCTOR_SWEEP_BOUND=0 "$SUT")
 has "$OUT" "state=exceeded" "a sweep past its bound reports exceeded"
@@ -153,6 +173,22 @@ printf '%s' '{"checks":[{"name":"x","status":"ok"}]}' > "$TMP/drifted.json"
 export STUB_PAYLOAD="$TMP/drifted.json"
 run; await_run; run
 has "$OUT" "state=failed" "a payload without .results is a failed scan, never clean"
+eq "$(field "$OUT" reason)" "payload-invalid" "  ... named as the payload"
+
+new_state null
+: > "$STUB_LOG"; export STUB_RC=0
+printf '%s' '{"results":null}' > "$TMP/null-results.json"
+export STUB_PAYLOAD="$TMP/null-results.json"
+run; await_run; run
+has "$OUT" "state=failed" "a results key holding null is a failed scan, not a clean sweep of nothing"
+eq "$(field "$OUT" reason)" "payload-invalid" "  ... named as the payload"
+
+new_state notchecks
+: > "$STUB_LOG"
+printf '%s' '{"results":["city-structure","fork-rate"]}' > "$TMP/not-checks.json"
+export STUB_PAYLOAD="$TMP/not-checks.json"
+run; await_run; run
+has "$OUT" "state=failed" "a results array the count filters cannot read is a failed scan too"
 eq "$(field "$OUT" reason)" "payload-invalid" "  ... named as the payload"
 
 new_state ctrl
@@ -189,6 +225,7 @@ new_state halfborn
 mkdir -p "$STATE/current"
 run
 has "$OUT" "state=started" "a run dir with no start stamp is cleared, not treated as in flight"
+await_sweeps 1
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... and the next sweep actually runs"
 
 new_state corrupt

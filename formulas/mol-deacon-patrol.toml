@@ -282,7 +282,7 @@ the untracked remainder, one situation key per finding so repeats dedup:
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-FINDING=$(printf '%s' "$DOCTOR_JSON" | jq -c '.results[] | select(.name=="<check>")')
+FINDING=$(jq -c '.results[] | select(.name=="<check>")' "$PAYLOAD")
 # The subject must OUTLIVE the wisp: next-iteration burns this wisp, and the
 # converse sitting writes its takeaway to the subject the visit tracks. The
 # dedup does not rest on it — escalate.sh identifies a wisp-subject situation
