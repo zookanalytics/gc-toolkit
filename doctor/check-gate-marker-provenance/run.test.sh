@@ -94,11 +94,11 @@ OTHER=fedcba9876543210fedcba9876543210fedcba98
 GATING='"merge_result":"pull_request","check_set":"codex","branch":"b"'
 reviews ""
 
-# --- 1. RESOLVE A clears a green marker ------------------------------------------
-anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+# --- 1. RESOLVE A clears a green lane --------------------------------------------
+anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
 reviews "$(rbead r-1 closed a-1 "$OID" codex)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a green marker bound by a review bead at the same oid passes"
+eq "$RC" "0" "a green lane named by a review bead on that lane passes"
 has "$OUT" "OK:" "the pass message is the OK line"
 eq "$(wc -l < "$GH_LOG")" "0" "RESOLVE A costs no GitHub call"
 
@@ -109,80 +109,90 @@ reviews "$(rbead r-1 open a-1 "$OID" codex)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an open review bead resolves too (the join itself is sound)"
 
-# --- 2b. RESOLVE A binds a verdict to the GATE it was recorded for ------------------
-# merge-skill.sh gates each check_set member separately, so a verdict for one
-# gate is not evidence for another standing at the same commit.
-anchors "$(anchor a-1b "$GATING,\"check_set\":\"codex,ci\",\"pr_number\":\"101\",\"check.codex\":\"green@$OID\",\"check.ci\":\"green@$OID\"")"
+# --- 2b. RESOLVE A binds a verdict to the LANE it was recorded for ------------------
+# merge.sh gates each check_set member separately, so a verdict on one lane is
+# not evidence for another lane on the same anchor.
+anchors "$(anchor a-1b "$GATING,\"check_set\":\"codex,ci\",\"pr_number\":\"101\",\"check.codex\":\"green\",\"check.ci\":\"green\"")"
 reviews "$(rbead r-1 closed a-1b "$OID" codex)"
 approvals 101 '[]'
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a codex verdict does not clear a ci marker standing at the same commit"
+eq "$RC" "2" "a codex verdict does not clear the ci lane on the same anchor"
 has "$OUT" "check.ci=" "the gate nobody reviewed is the one reported"
 hasnt "$OUT" "check.codex=" "the gate that was reviewed is not reported"
 has "$OUT" "check_name=ci" "the finding names the gate the missing verdict was owed for"
 
-anchors "$(anchor a-1c "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-1c "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
 reviews "$(rbead r-1 closed a-1c "$OID" ci)"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a review bead naming a different gate leaves the marker unresolved"
+eq "$RC" "2" "a review bead naming a different gate leaves the lane unresolved"
 
 # signoff.sh defaults an absent check_name to codex and stamps check.codex for
 # that bead, so the resolver reads it back the same way.
 reviews "$(rbead r-1 closed a-1c "$OID")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a review bead with no check_name resolves the codex gate"
-anchors "$(anchor a-1d "$GATING,\"check_set\":\"ci\",\"pr_number\":\"101\",\"check.ci\":\"green@$OID\"")"
+anchors "$(anchor a-1d "$GATING,\"check_set\":\"ci\",\"pr_number\":\"101\",\"check.ci\":\"green\"")"
 reviews "$(rbead r-1 closed a-1d "$OID")"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "that default does not let it clear a gate other than codex"
 
+# --- 2c. RESOLVE A does not compare the review bead's oid to anything ---------------
+# A lane state names no commit, so which commit the recorded verdict read is not
+# part of the key: the verdict is what stands behind the lane.
+anchors "$(anchor a-1e "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
+reviews "$(rbead r-1 closed a-1e "$OTHER" codex)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a verdict recorded at a commit the branch has moved past still backs the lane"
+eq "$(wc -l < "$GH_LOG")" "0" "…and it costs no GitHub call"
+
 # --- 3. no evidence anywhere is an ERROR ---------------------------------------------
-anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
-reviews "$(rbead r-2 closed a-1 "$OTHER" codex)"
+anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
+reviews "$(rbead r-2 closed some-other-anchor "$OID" codex)"
 approvals 101 '[]'
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a green marker no review bead and no approval covers is an ERROR"
+eq "$RC" "2" "a green lane no review bead and no approval covers is an ERROR"
 has "$OUT" "a-1" "the unbacked anchor is named"
 has "$OUT" "nothing reviewed" "the finding says what is missing"
 eq "$(wc -l < "$GH_LOG")" "1" "RESOLVE B is consulted only for what A left over"
 
-# --- 4. RESOLVE B: an approval AT the marker oid clears it ------------------------------
+# --- 4. RESOLVE B: an APPROVED review on the PR clears the lane ------------------------
 approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OID\"}]"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a head-bound GitHub approval at the marker oid clears it"
+eq "$RC" "0" "an APPROVED GitHub review on the anchor's PR clears it"
 
-# --- 5. RESOLVE B compares the APPROVAL'S OWN oid, never \"the PR is approved\" ----------
-# tk-4yl2c: approval here is not head-bound, so an approval at an earlier commit
-# survives later pushes and must not clear the marker at the new head.
-approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OTHER\"},{\"state\":\"CHANGES_REQUESTED\",\"commit_id\":\"$OID\"}]"
+# --- 5. RESOLVE B is not head-bound, and only APPROVED counts -------------------------
+# tk-4yl2c: approval here is not head-bound, and under lane states a green lane
+# names no commit either, so an approval given at an earlier commit is still the
+# operator approving this pull request.
+approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OTHER\"}]"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "an approval at a DIFFERENT commit does not clear the marker"
-has "$OUT" "no approval on PR 101 sits at that commit" "the finding says the approval was not head-bound"
-# and a non-APPROVED review at the right oid is not evidence either
-approvals 101 "[{\"state\":\"COMMENTED\",\"commit_id\":\"$OID\"}]"
+eq "$RC" "0" "an approval given at an earlier commit still clears the lane"
+# a non-APPROVED review is not evidence, whatever commit it sits at
+approvals 101 "[{\"state\":\"COMMENTED\",\"commit_id\":\"$OID\"},{\"state\":\"CHANGES_REQUESTED\",\"commit_id\":\"$OID\"}]"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a COMMENTED review at the marker oid is not an approval"
+eq "$RC" "2" "a PR carrying only COMMENTED and CHANGES_REQUESTED reviews is not approved"
+has "$OUT" "carries no APPROVED review" "the finding says the approval is missing"
 
 # --- 6. FILTER 1: a review bead carrying its own green marker is not an anchor ---------
-anchors "$(anchor a-2 "$GATING,\"task_kind\":\"review\",\"pr_number\":\"102\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-2 "$GATING,\"task_kind\":\"review\",\"pr_number\":\"102\",\"check.codex\":\"green\"")"
 reviews ""
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a task_kind=review bead is skipped, not treated as an unbacked anchor"
 hasnt "$OUT" "a-2" "the review bead is not reported"
 
 # --- 7. undetermined, not cleared and not an error --------------------------------------
-anchors "$(anchor a-3 "$GATING,\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-3 "$GATING,\"check.codex\":\"green\"")"
 reviews ""
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unbacked marker on an anchor with no pr_number is a WARNING"
 has "$OUT" "UNDETERMINED" "the warning says the verdict could not be determined"
 
-anchors "$(anchor a-4 "$GATING,\"pr_number\":\"404\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-4 "$GATING,\"pr_number\":\"404\",\"check.codex\":\"green\"")"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a failed PR review query is a WARNING, never a pass"
 has "$OUT" "could not be read" "the warning names the unread review list"
 
-anchors "$(anchor a-5 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-5 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
 approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OID\"}]"
 OUT=$(GH_ABSENT=1 run_check); RC=$?
 eq "$RC" "1" "an unusable gh is a WARNING, never a pass"
@@ -193,36 +203,38 @@ eq "$RC" "1" "a non-github origin leaves RESOLVE B unavailable — WARNING"
 git -C "$TMP/alpha" remote set-url origin https://github.com/acme/alpha.git
 
 # --- 8. one GitHub call per PR, not one per gate ------------------------------------------
-anchors "$(anchor a-6 "$GATING,\"check_set\":\"codex,other\",\"pr_number\":\"101\",\"check.codex\":\"green@$OID\",\"check.other\":\"green@$OID\"")"
+anchors "$(anchor a-6 "$GATING,\"check_set\":\"codex,other\",\"pr_number\":\"101\",\"check.codex\":\"green\",\"check.other\":\"green\"")"
 reviews ""
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "two gates on one approved head both clear"
 eq "$(sort -u "$GH_LOG" | wc -l)" "1" "the PR review list is fetched once and reused"
 
-# --- 8b. a PAGINATED review list is flattened before the oid is looked for -------------
+# --- 8b. a PAGINATED review list is flattened before it is judged ---------------------
 # gh api --paginate emits one array per page; the approval can land on any page.
-anchors "$(anchor a-6b "$GATING,\"pr_number\":\"103\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-6b "$GATING,\"pr_number\":\"103\",\"check.codex\":\"green\"")"
 reviews ""
-printf '[{"state":"APPROVED","commit_id":"%s"}]\n[{"state":"APPROVED","commit_id":"%s"}]\n' "$OTHER" "$OID" > "$TMP/gh/reviews_103.json"
+printf '[{"state":"COMMENTED","commit_id":"%s"}]\n[{"state":"APPROVED","commit_id":"%s"}]\n' "$OTHER" "$OID" > "$TMP/gh/reviews_103.json"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "an approval on the SECOND page of reviews still clears the marker"
+eq "$RC" "0" "an approval on the SECOND page of reviews still clears the lane"
 
 # --- 9. out of scope -----------------------------------------------------------------------
-anchors "$(anchor a-7 "\"merge_result\":\"abandoned\",\"check.codex\":\"green@$OID\"")" \
-        "$(anchor a-8 "\"merge_result\":\"merged\",\"check.codex\":\"green@$OID\"")" \
-        "$(anchor a-9 "$GATING,\"check.codex\":\"fixable@$OID\"")" \
-        "$(anchor a-10 "$GATING,\"check.codex\":\"exception@$OID\"")"
+anchors "$(anchor a-7 "\"merge_result\":\"abandoned\",\"check.codex\":\"green\"")" \
+        "$(anchor a-8 "\"merge_result\":\"merged\",\"check.codex\":\"green\"")" \
+        "$(anchor a-9 "$GATING,\"check.codex\":\"fixing\"")" \
+        "$(anchor a-10 "$GATING,\"check.codex\":\"unreviewed\"")" \
+        "$(anchor a-10b "$GATING,\"check.codex\":\"validating\"")"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "non-gating states and non-green verdicts carry no provenance obligation"
+eq "$RC" "0" "non-gating states and lanes short of green carry no provenance obligation"
 
-# A malformed marker belongs to check-gate-integrity (I7 surface); this check
-# must not restate it as a provenance finding.
-anchors "$(anchor a-11 '"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"green@abc123"')"
+# A marker outside the lane vocabulary belongs to check-gate-integrity (I7
+# surface); this check must not restate it as a provenance finding. An
+# unmigrated green@<oid> is exactly that shape.
+anchors "$(anchor a-11 "$GATING,\"check.codex\":\"green@$OID\"")"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a malformed marker is left to check-gate-integrity, not double-reported"
+eq "$RC" "0" "an unmigrated green@<oid> is left to check-gate-integrity, not double-reported"
 
 # Sidecar keys are prose about a gate, not markers.
-anchors "$(anchor a-12 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\",\"check.codex.reason\":\"green@$OTHER is prose\"")"
+anchors "$(anchor a-12 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\",\"check.codex.reason\":\"green is prose here\"")"
 approvals 101 "[{\"state\":\"APPROVED\",\"commit_id\":\"$OID\"}]"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "check.<g>.<sidecar> keys are not treated as markers"
@@ -230,14 +242,14 @@ eq "$RC" "0" "check.<g>.<sidecar> keys are not treated as markers"
 # --- 10. fail-CLOSED -------------------------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?
 eq "$RC" "1" "a failed \`gc rig list\` warns, never passes"
-anchors "$(anchor a-13 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-13 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
 OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable store warns"
 has "$OUT" "NOT checked" "the warning says the store was skipped"
 printf 'not json' > "$TMP/stores/alpha.anchors.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable anchor listing warns"
-anchors "$(anchor a-13 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-13 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
 printf 'not json' > "$TMP/stores/alpha.reviews.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable review index warns rather than clearing every marker"
@@ -249,13 +261,13 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "a store with no gating anchors passes silently"
 anchors "$(anchor a-14 '"merge_result":"pull_request","check_set":"none","branch":"b"')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a gating anchor carrying no green marker passes"
+eq "$RC" "0" "a gating anchor carrying no green lane passes"
 
 # --- 12. suspended rigs are skipped, not scanned -------------------------------------------------
 cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha","suspended":true}]}
 EOF
-anchors "$(anchor a-15 "$GATING,\"check.codex\":\"green@$OID\"")"
+anchors "$(anchor a-15 "$GATING,\"check.codex\":\"green\"")"
 reviews ""
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a suspended rig is skipped rather than queried"

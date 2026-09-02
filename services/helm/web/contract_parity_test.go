@@ -609,7 +609,7 @@ func fixtureBoard() board.Board {
 
 				UpdatedAt: time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
 				Frontier:  "polecat/tk-01n5cc · owed 3d",
-				Needs:     "wedged: the review cap's exception stands at the live head — only a new commit clears it",
+				Needs:     "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
 				RankScore: 2003003,
 
 				// No PR number: the branch is pushed and gated, and nothing has

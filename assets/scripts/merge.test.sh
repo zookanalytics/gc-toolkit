@@ -26,8 +26,8 @@ export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 SUT="$SD/merge.sh"
 
 anchor() { # id num extra-json
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"codex","check.codex":"green@sha-%s"%s}}' \
-    "$1" "$2" "$2" "$2" "$2" "${3:-}"
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"codex","check.codex":"green"%s}}' \
+    "$1" "$2" "$2" "$2" "${3:-}"
 }
 prview() { # num state mergeState extra-json
   printf '{"state":"%s","isDraft":false,"baseRefName":"main","headRefName":"polecat/x%s","headRefOid":"sha-%s","headRepository":{"name":"gc-toolkit"},"headRepositoryOwner":{"login":"zook"},"isCrossRepository":false,"mergeStateStatus":"%s","mergeable":"MERGEABLE","reviewDecision":"","url":"https://github.com/zook/gc-toolkit/pull/%s","mergeCommit":{"oid":"merged-sha-%s"}%s}' \
@@ -76,19 +76,19 @@ echo '[]' > "$GH_DIR/reviews_13.json"
 out=$("$SUT" 2>&1)
 has "$out" "base 'release' != merged_target 'main'" "a retargeted PR holds"
 
-echo "# gate not green at the live head holds"
-store "[$(anchor M5 14 ',"check.codex":"green@stale"' )]"
+echo "# a lane short of green holds"
+store "[$(anchor M5 14 ',"check.codex":"unreviewed"' )]"
 printf '%s' "$(prview 14 OPEN CLEAN)" > "$GH_DIR/pr_view_14.json"
 echo '[]' > "$GH_DIR/reviews_14.json"
 out=$("$SUT" 2>&1)
-has "$out" "check 'codex' not green at live head" "a stale marker holds"
+has "$out" "check 'codex' is 'unreviewed', not green" "an unreviewed lane holds"
 
-echo "# fixable and exception hold too"
-store "[$(anchor M5b 15 ',"check.codex":"fixable@sha-15"')]"
+echo "# every other lane state holds too"
+store "[$(anchor M5b 15 ',"check.codex":"fixing"')]"
 printf '%s' "$(prview 15 OPEN CLEAN)" > "$GH_DIR/pr_view_15.json"
 echo '[]' > "$GH_DIR/reviews_15.json"
 out=$("$SUT" 2>&1)
-has "$out" "check 'codex' not green" "fixable@ holds the merge"
+has "$out" "check 'codex' is 'fixing', not green" "a fixing lane holds the merge"
 
 echo "# unclosed children hold: metadata key, dep edge, tracking_only opt-out"
 store "[$(anchor M6 16), {\"id\":\"rw-1\",\"status\":\"blocked\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"16\"}}]"
@@ -128,7 +128,7 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M9b" "closing the visit is the release, and it performs"
 
 echo "# approval arms"
-store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green@sha-20"')]"
+store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green"')]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
 echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
@@ -139,12 +139,12 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded A1" "an external APPROVED at the live head satisfies it"
 
 printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-OLD","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
-store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green@sha-20"')]"
+store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green"')]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review at the live head" "an approval of an OLD head does not count"
 
 printf '[{"user":{"login":"gc-city-bot"},"state":"APPROVED","commit_id":"sha-20","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_20.json"
-store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green@sha-20"')]"
+store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green"')]"
 out=$("$SUT" 2>&1)
 has "$out" "no external APPROVED review" "a self-approval never counts"
 
@@ -605,20 +605,30 @@ out=$("$SUT" 2>&1)
 has "$out" "rework rounds 3/3" "rounds above the floor spend the cap"
 eq "$(pinned V10)" "wedged-veto@sha-89" "…and a veto nothing will answer is the veto wedge"
 
-echo "# a gate the head moved past is progressing; the cap's exception is the wedge"
-store "[$(anchor V3 82 ',"check.codex":"green@sha-STALE"'),
-        $(anchor V4 83 ',"check.codex":"exception@sha-83","gc.routed_to":"human"')]"
+echo "# a lane short of green is progressing; the cap's park is the wedge"
+store "[$(anchor V3 82 ',"check.codex":"unreviewed"'),
+        $(anchor V4 83 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
 printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
 echo '[]' > "$GH_DIR/reviews_82.json"
 echo '[]' > "$GH_DIR/reviews_83.json"
 out=$("$SUT" 2>&1)
-eq "$(pinned V3)" "progressing@sha-82" "a marker the head moved past is a gate a review is due to raise"
-eq "$(pinned V4)" "wedged-exception@sha-83" "exception@<live head> is the convergence cap's wedge"
+eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a gate a review is due to raise"
+eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold with signoff_cap beside it is the convergence cap's wedge"
+
+# An operator's own hold carries no signoff_cap, and the board must not read it
+# as a wedge no automated actor will lift.
+echo "# an operator hold with no cap stamp records no wedge"
+store "[$(anchor V4b 90 ',"merge_hold":"true"')]"
+printf '%s' "$(prview 90 OPEN CLEAN)" > "$GH_DIR/pr_view_90.json"
+echo '[]' > "$GH_DIR/reviews_90.json"
+out=$("$SUT" 2>&1)
+has "$out" "merge_hold set (operator gate)" "the hold holds the merge"
+eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
 
 echo "# gates green and waiting on a person: settled, not wedged"
-store "[$(anchor V5 84 ',"check_set":"codex,approval","check.codex":"green@sha-84"')]"
+store "[$(anchor V5 84 ',"check_set":"codex,approval"')]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
 echo '[]' > "$GH_DIR/reviews_84.json"
 out=$("$SUT" 2>&1)
@@ -626,7 +636,7 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"check.codex":"exception@sha-87","gc.routed_to":"human"')]"
+store "[$(anchor V8 87 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
 echo '[]' > "$GH_DIR/reviews_87.json"

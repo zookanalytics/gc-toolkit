@@ -7,8 +7,8 @@
 # Otherwise: holds gate the create path; refuse a bead-local planning artifact
 # aimed at the default branch with no convoy above it (the shared-input-artifact
 # anti-pattern), naming the integration-branch remedy and escalating it once;
-# require every marker-bearing gate the anchor's check_set declares
-# green@<live head>;
+# require every marker-bearing gate the anchor's check_set declares to read
+# green;
 # `gh pr create` non-draft pinned to origin, body summarizing the polecat's
 # `pr_summary` with the dispatch text demoted (the description only when no
 # summary was carried), read back BY NUMBER, refuse a moved head, replay the
@@ -344,9 +344,10 @@ Branch: $branch"
     fi
   fi
 
-  # The gate: every gate the anchor's own check_set declares, green at the LIVE
-  # head, read pinned to origin. Same predicate merge.sh applies at the merge,
-  # so one anchor is judged by one rule at both transitions.
+  # The gate: every gate the anchor's own check_set declares reads green. Same
+  # predicate merge.sh applies at the merge, so one anchor is judged by one rule
+  # at both transitions. The head below is what the PR is opened at, not what
+  # the gate is measured against — green is a state of the lane.
   HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
   head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
   if [ -z "$head_oid" ]; then
@@ -365,13 +366,13 @@ Branch: $branch"
   while IFS= read -r g; do
     [ -n "${g:-}" ] || continue
     marker=$(printf '%s' "$row" | jq -r --arg k "check.$g" '.metadata[$k] // empty')
-    [ "$marker" = "green@$head_oid" ] && continue
-    UNGREEN="$g"; UNGREEN_HAVE="${marker:-none}"; break
+    [ "$marker" = "green" ] && continue
+    UNGREEN="$g"; UNGREEN_HAVE="${marker:-unreviewed}"; break
   done <<GATES
 $(gates_of "$checkset")
 GATES
   if [ -n "$UNGREEN" ]; then
-    echo "$PROG: $id branch '$branch' check '$UNGREEN' not green at live head (have '$UNGREEN_HAVE', want 'green@$head_oid'); held"
+    echo "$PROG: $id branch '$branch' check '$UNGREEN' is '$UNGREEN_HAVE', not green; held"
     held=$((held + 1)); continue
   fi
 

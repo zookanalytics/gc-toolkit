@@ -4,10 +4,11 @@
 # pre_open_gate|pull_request) must declare a non-empty check_set — the "none"
 # sentinel is the one legal opt-out; merge.sh reads empty as UNGATED, so an
 # empty or absent declaration silently drops the gate (error). Every
-# check.<g> marker (sidecar keys like check.<g>.reason excluded) must match
-# the grammar green|fixable|exception@<40-hex oid> — a malformed marker is
-# evidence bound to nothing (error). A green marker on an anchor with no
-# branch metadata is a warning: the oid cannot be compared to any head.
+# check.<g> marker (sidecar keys like check.<g>.reason excluded) must be one
+# of the lane states unreviewed|reviewing|validating|fixing|green — a word
+# outside that set is a state no reader knows, and gate-ensure dispatches
+# against it forever (error). An absent marker is the unreviewed lane and is
+# not a finding.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE store warns (1), never passes.
 
@@ -55,16 +56,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select($mr == "pre_open_gate" or $mr == "pull_request")
         | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
         | ((($m.check_set // "") | tostring)) as $cs
-        | ((($m.branch // "") | tostring)) as $br
         | ( (if $cs == "" then [["nocs", $id, $mr, ""]] else [] end)
           + [ $m | to_entries[]
               | select(.key | test("^check\\.[^.]+$"))
               | select((.value | type) == "string")
               | (.value | gsub("[[:cntrl:]]"; " ")) as $v
-              | (if ($v | test("^(green|fixable|exception)@[0-9a-f]{40}$")) | not
+              | (if ($v | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not
                  then ["badmark", $id, .key, $v]
-                 elif ($v | startswith("green@")) and $br == ""
-                 then ["greennobranch", $id, .key, $v]
                  else empty end) ] )[]
         | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
@@ -76,8 +74,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$kind" ] || continue
         case "$kind" in
             nocs)          errors+=("$label bead $id: gating anchor (merge_result=$k) declares NO check_set — merge.sh reads empty as ungated, so this PR can land with no review; stamp the declared default (gate-ensure.sh) or the explicit \"none\" opt-out") ;;
-            badmark)       errors+=("$label bead $id: gate marker $k=\"$v\" does not match the grammar <green|fixable|exception>@<40-hex oid> — a marker bound to no commit is not evidence, and merge.sh cannot compare it to the live head") ;;
-            greennobranch) warnings+=("$label bead $id: $k=\"$v\" is green but the anchor records NO branch — nothing can verify the oid against a live head, so the marker's evidence binding is unverifiable") ;;
+            badmark)       errors+=("$label bead $id: gate marker $k=\"$v\" is not one of the lane states unreviewed|reviewing|validating|fixing|green — no reader knows that word, so merge.sh holds on it and gate-ensure dispatches against it every pass") ;;
         esac
     done <<< "$rows"
 done <<< "$scopes"

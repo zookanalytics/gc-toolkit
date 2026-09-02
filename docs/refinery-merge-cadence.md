@@ -43,19 +43,17 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
-   sentinel is respected), and every declared gate is *raisable*: marker green
-   at the live head, or a live routed review bead in flight, else dispatch one
+   sentinel is respected), and every declared gate is *raisable*: the lane
+   reads `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). An `exception@` marker bound to the live head also ends the arm's
-   interest with no dispatch, because it reads as settled. It holds the merge,
-   and it says so on the anchor: `signoff.sh` set `gc.routed_to=human`, a
-   `blocked_reason` naming the cap, and the shorter `gc.takeaway` headline the
-   helm board renders, in the same act that wrote the marker. No
-   visit is filed for it, so the anchor is parked rather than queued. A head
-   move past a recorded `exception@` undoes that. The gate is no longer
-   settled and one dispatch is re-armed. So does new operator feedback, which
-   arm 5 records: the cap counts non-convergence, and a review the branch has
-   never answered is not that
+   back). A lane that reads `green` ends the arm's interest however far the
+   branch has advanced since — nothing here compares a marker to a head. The
+   convergence cap's park also ends it with no dispatch: `signoff.sh` set
+   `merge_hold`, `gc.routed_to=human`, a `blocked_reason` naming the cap, and
+   the shorter `gc.takeaway` headline the helm board renders, in one act. No
+   visit is filed for it, so the anchor is parked rather than queued. What
+   undoes that is new operator feedback, which arm 5 records: the cap counts
+   non-convergence, and a review the branch has never answered is not that
    ([state-machine.md](state-machine.md#the-round-cap-counts-from-the-last-operator-feedback)).
    An anchor capped before its PR was opened can receive neither, and says so
    in its `blocked_reason`; `signoff.sh reset <anchor> --reason <why>` is its
@@ -81,7 +79,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor whose
-   every marker-bearing `check_set` gate reads `green@<live head>` (the same
+   every marker-bearing `check_set` gate reads `green` (the same
    predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
    set is held, never read as ungated): adopt an existing PR for the branch or
    `gh pr create` non-draft, re-read the created PR by number, refuse a moved
@@ -159,9 +157,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    changes to merge them and neighbouring entries in a flat list leave none.
 5. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
-   (→ `retargeted` + visit), CONFLICTING (one rework child per head), a gate
-   `green@` or `exception@` at a stale head (one re-review child per head,
-   carrying `mol-review`), hold-resolved retraction. It also records every open
+   (→ `retargeted` + visit), CONFLICTING (one rework child per head),
+   hold-resolved retraction. It re-reviews no moved head: a lane state is a
+   state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
    any of those arms run, and routes an unanswered review comment to a rework

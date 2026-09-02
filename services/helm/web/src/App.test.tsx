@@ -61,9 +61,9 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
 
 /**
  * A merge anchor row, as the board derives one. The default is the shape that
- * put this surface in the backlog: wedged at the convergence cap's exception,
- * with no pull request open, which is where six of the seven wedged anchors sat
- * when the design measured them.
+ * put this surface in the backlog: wedged at the convergence cap's park, with
+ * no pull request open, which is where six of the seven wedged anchors sat when
+ * the design measured them.
  */
 function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
   return tile({
@@ -76,7 +76,7 @@ function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
     pr_conversation: 'unknown',
     pr_approval: 'unknown',
     pr_owed_since: '2026-08-08T11:02:00Z',
-    needs: 'wedged: the review cap\'s exception stands at the live head — only a new commit clears it',
+    needs: 'wedged: the review cap parked this anchor — a ruling releases it, a new commit does not',
     ...over,
   });
 }
@@ -550,9 +550,8 @@ function serve(tiles: Tile[]) {
 
 // A wedged anchor is routed to a person, so the gather finds it either way. The
 // row has to say WHY nothing is moving: "routed to a person" alone reads
-// identically for an anchor awaiting a ruling and for one frozen at
-// exception@<live head>, where the only release is a head move nobody is going
-// to make.
+// identically for an anchor awaiting a ruling and for one the review cap parked,
+// where the only release is a ruling nobody has given.
 it('names the wedge and links the pull request', async () => {
   serve([
     prTile({

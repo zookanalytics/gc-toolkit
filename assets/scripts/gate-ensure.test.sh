@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/gate-ensure.sh — arm 1 of the merge cadence.
 # Covers: default check_set stamping (and the rc=3 hold when the stamp does not
-# persist or the enumeration is unreadable); the `none` opt-out; marker
-# classification (green@ and exception@ the live head, stale green, stale
-# exception, fixable, absent, unmappable, and a malformed green that an
-# unreadable head must not settle); the live-head read (a deleted ref, a body
-# without .sha, and a failed read are all unanswerable, never "advanced"); the
-# stray-marker sweep (undeclared + malformed is cleared; well-formed,
-# exception@ and declared markers are not; an unpersisted clear is reported);
-# a multi-gate check_set split per gate rather than joined into one name;
-# in-flight dedup (routed, poured, claimed) + stranded repair
-# (convoy probe: re-sling only a review with no LIVE tracking convoy, and
-# converge after a hard sling failure); the dispatch shape
+# persist or the enumeration is unreadable); the `none` opt-out; lane-state
+# classification (green settles; unreviewed, reviewing, validating, fixing, an
+# absent marker and an unknown word each dispatch — and a green lane stays
+# settled at a head no verdict ever named); the live-head read, which now
+# decides only the dispatch pin and the machine axis (a deleted ref, a body
+# without .sha, and a failed read are all unanswerable); the stray-marker sweep
+# (undeclared and outside the lane vocabulary is cleared, the retired
+# green@/exception@ grammar included; a declared or well-formed one is not; an
+# unpersisted clear is reported); a multi-gate check_set split per gate rather
+# than joined into one name; in-flight dedup (routed, poured, claimed) +
+# stranded repair (convoy probe: re-sling only a review with no LIVE tracking
+# convoy, and converge after a hard sling failure); the dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
-# gc.execution_routed_to read-back, never retried in-pass); merge_hold;
-# dispatch_count as a tally the round cap never reads; the refusal to
-# re-review a head a closed request-changes verdict already judged while its
-# rework child is still open; the dispatch backstop (a ceiling on DISPATCHES
-# that refuses loudly -- one deduped visit plus a stamp and a note on the
-# anchor -- restates itself when the head moves, and never preempts the
-# precise refusal); and the review-wedge escalation (exec-stamp-only reach
-# whose poured workflow is spent -> one deduped visit, held one pass first).
+# gc.execution_routed_to read-back, never retried in-pass); merge_hold, and the
+# cap's park under it reading as the wedge; dispatch_count as a tally the round
+# cap never reads; the dispatch backstop (a ceiling on DISPATCHES that refuses
+# loudly -- one deduped visit plus a stamp and a note on the anchor -- and
+# restates itself when the head moves); and the review-wedge escalation
+# (exec-stamp-only reach whose poured workflow is spent -> one deduped visit,
+# held one pass first).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,6 +70,10 @@ anchor() { # id mr checkset marker branch extra-json
 # live_head_for holds the head it reads to that same grammar, so fixture HEADS
 # go through here too; a mnemonic like "sha-b4" now reads as no head at all.
 oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
+# The machine axis (lifecycle/lifecycle.toml [machine_axis]) as the anchor
+# carries it, and with the instant stripped.
+machine() { printf '%s' "$(meta "$1" pr.machine)"; }
+pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 SHORT="8d7f0cf3c"   # the abbreviated-sha shape that wedged gc-na313
 
 echo "# stamping the default"
@@ -106,22 +110,33 @@ echo "# unreadable enumeration holds the merge (rc=3)"
 out=$(STUB_LIST_FAIL=1 run); rc=$?
 eq "$rc" 3 "an unreadable gating enumeration exits rc=3"
 
-echo "# opt-out and settled markers"
+echo "# opt-out and green lanes are settled"
 store "[$(anchor B1 pre_open_gate none "" polecat/b1),
-        $(anchor B2 pre_open_gate codex "green@$(oid b2)" polecat/b2),
-        $(anchor B3 pull_request codex "exception@$(oid b3)" polecat/b3)]"
+        $(anchor B2 pre_open_gate codex green polecat/b2),
+        $(anchor B3 pull_request codex green polecat/b3)]"
 oid b2 > "$GH_DIR/head_polecat_b2"
 oid b3 > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "opt-out/settled pass exits 0"
 eq "$(meta B1 check_set)" "none" "the none sentinel is left alone"
-has "$out" "0 reviews dispatched" "green@ and exception@ the live head, and none, dispatch nothing"
+has "$out" "0 reviews dispatched" "a green lane, and none, dispatch nothing"
+
+# The whole of the 211. Green is a state of the lane, so the head the branch
+# now carries is not the gate's business: no dispatch, at any head, ever.
+echo "# a green lane at a head no verdict ever named is still settled"
+store "[$(anchor B2b pre_open_gate codex green polecat/b2b)]"
+oid moved-on-b2b > "$GH_DIR/head_polecat_b2b"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "0 reviews dispatched" "a branch that grew commits buys no review"
+hasnt "$out" "advanced to" "…and no arm calls the move a reason to re-gate"
+eq "$(meta B2b dispatch_count)" "<absent>" "…and no dispatch is counted"
 
 # check_set is a comma list and each gate is addressed by its own name, so the
 # split has to survive whitespace around the separators.
 echo "# a multi-gate check_set is raised per gate, never as one joined name"
-store "[$(anchor M1 pull_request "codex, triage" "green@$(oid m1)" polecat/m1)]"
+store "[$(anchor M1 pull_request "codex, triage" green polecat/m1)]"
 oid m1 > "$GH_DIR/head_polecat_m1"
 : > "$STUB_GC_LOG"
 out=$(run)
@@ -129,100 +144,85 @@ hasnt "$out" "codextriage" "the comma list is not collapsed into one gate name"
 has "$out" "gate 'triage'" "the second declared gate is raised under its own name"
 mrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
 eq "$(meta "$mrid" check_name)" "triage" "the dispatched review names the real gate"
-eq "$(meta M1 dispatch_count)" "1" "the gate already green at the live head bought no dispatch"
+eq "$(meta M1 dispatch_count)" "1" "the green lane bought no dispatch"
 
-echo "# an exception the head has moved PAST is re-armed, cap or no cap"
-store "[$(anchor B4 pull_request codex "exception@$(oid old)" polecat/b4),
-        $(anchor B5 pull_request codex "exception@$(oid old)" polecat/b5 ',"dispatch_count":"3","gc.routed_to":"human"')]"
+echo "# the cap's park suppresses the dispatch and reads as the wedge"
+store "[$(anchor B4 pull_request codex unreviewed polecat/b4 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"')]"
 oid b4 > "$GH_DIR/head_polecat_b4"
-oid b5 > "$GH_DIR/head_polecat_b5"
+: > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "re-gate pass exits 0"
-has "$out" "2 reviews dispatched" "a branch fixed under an exception gets one look"
-has "$out" "advanced to $(oid b4)" "the dispatch names the head that staled the exception"
-has "$out" "advanced to $(oid b5)" \
-  "…including the anchor whose cap is spent and whose gc.routed_to is human"
-hasnt "$out" "B5 gate 'codex' has spent" \
-  "B5 carries the live shape signoff's cap arm writes, and nothing refuses it"
-eq "$(meta B4 dispatch_count)" "1" "the re-gate consumes a round"
-eq "$(meta B5 dispatch_count)" "4" "…and past the cap it keeps counting, never rewinding the record"
+eq "$rc" 0 "the park pass exits 0"
+has "$out" "0 reviews dispatched" "a parked anchor buys no review"
+has "$out" "1 operator-held" "…and is counted as held"
+eq "$(pinned B4)" "wedged-exception@$(oid b4)" "…and the machine axis is the cap's wedge"
 
-echo "# stale green / fixable / absent / unmappable all dispatch"
-store "[$(anchor C1 pre_open_gate codex "green@old-oid" polecat/c1),
-        $(anchor C2 pull_request codex "fixable@old-oid" polecat/c2),
+echo "# every lane short of green dispatches"
+store "[$(anchor C1 pre_open_gate codex unreviewed polecat/c1),
+        $(anchor C2 pull_request codex fixing polecat/c2),
         $(anchor C3 pull_request codex "" polecat/c3),
+        $(anchor C3b pull_request codex reviewing polecat/c3b),
+        $(anchor C3c pull_request codex validating polecat/c3c),
         $(anchor C4 pull_request codex "red" polecat/c4)]"
-oid c1 > "$GH_DIR/head_polecat_c1"
-oid c2 > "$GH_DIR/head_polecat_c2"
-oid c3 > "$GH_DIR/head_polecat_c3"
-oid c4 > "$GH_DIR/head_polecat_c4"
+for b in c1 c2 c3 c3b c3c c4; do oid "$b" > "$GH_DIR/head_polecat_$b"; done
 out=$(run); rc=$?
 eq "$rc" 0 "dispatch pass exits 0"
-has "$out" "4 reviews dispatched" "stale green, fixable, absent and unmappable each dispatched one review"
+has "$out" "6 reviews dispatched" "unreviewed, fixing, absent, reviewing, validating and an unknown word each dispatched one"
+has "$out" "the lane is unreviewed" "the absent marker names the lane it means"
+has "$out" "names no lane state the contract knows" "an unknown word is named as one"
 
-echo "# unreadable live head fails soft: a WELL-FORMED green marker stays satisfiable"
-# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit — the
-# shape a merge landing mid-pass presents to the anchor it just settled.
-store "[$(anchor C5 pre_open_gate codex "green@$(oid c5)" polecat/c5),
-        $(anchor C5b pull_request codex "exception@$(oid c5b)" polecat/c5b)]"
+echo "# an unreadable live head neither settles a lane nor stops a dispatch"
+# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit. The
+# classification never consulted it, so the only thing the head decides now is
+# the dispatch pin and the machine axis.
+store "[$(anchor C5 pre_open_gate codex green polecat/c5),
+        $(anchor C5b pull_request codex unreviewed polecat/c5b)]"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "no-head pass exits 0"
-has "$out" "0 reviews dispatched" "green@ and exception@ a 40-hex oid with an unreadable head are not re-gated"
-hasnt "$out" "has advanced to" "a head that could not be read is never called a move"
+has "$out" "1 reviews dispatched" "the green lane is settled and the unreviewed one still dispatches"
 hasnt "$out" "No commit found" "the gh error body never becomes a dispatch reason"
-
-echo "# …but a MALFORMED green is not evidence, so the soft pass must not settle it"
-store "[$(anchor C6 pre_open_gate codex "green@$SHORT" polecat/c6)]"
-out=$(run); rc=$?
-eq "$rc" 0 "malformed-green pass exits 0"
-has "$out" "no 40-hex oid" "the un-satisfiable marker is named"
-has "$out" "1 reviews dispatched" "…and a signoff is dispatched to rewrite it"
+eq "$(pinned C5b)" "<absent>" "an unreadable head records no machine axis"
+c5brid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$c5brid" reviewed_oid)" "<absent>" "…and the dispatch carries no pin it could not read"
 
 echo "# a head that is not a SHA is not a head"
 # gh exits 0 and prints 'null' when the body carries no .sha: the exit code
 # alone does not separate a head from a miss.
-store "[$(anchor C7 pre_open_gate codex "green@$(oid c7)" polecat/c7)]"
+store "[$(anchor C7 pre_open_gate codex unreviewed polecat/c7)]"
 echo "null" > "$GH_DIR/head_polecat_c7"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "malformed-head pass exits 0"
-has "$out" "0 reviews dispatched" "a non-SHA answer at rc=0 is unanswerable, not a move"
-hasnt "$out" "advanced to null" "'null' is never reported as the live head"
-
-echo "# a SHA-shaped answer that arrives with a failure is still unanswerable"
-store "[$(anchor C8 pre_open_gate codex "green@$(oid c8old)" polecat/c8)]"
-oid c8 > "$GH_DIR/head_polecat_c8"
-: > "$STUB_GC_LOG"
-out=$(STUB_GH_COMMIT_RC=1 run); rc=$?
-eq "$rc" 0 "failed-read pass exits 0"
-has "$out" "0 reviews dispatched" "a non-zero gh exit means no head, whatever it printed"
+eq "$(pinned C7)" "<absent>" "a non-SHA answer at rc=0 is unanswerable, and records nothing"
 
 echo "# stray markers: a check.<g> outside check_set that no arm could rewrite"
-store "[$(anchor N1 pull_request codex "green@$(oid n1)" polecat/n1 ',"check.refinery":"green@'"$SHORT"'"')]"
+store "[$(anchor N1 pull_request codex green polecat/n1 ',"check.refinery":"green@'"$SHORT"'"')]"
 oid n1 > "$GH_DIR/head_polecat_n1"
 out=$(run); rc=$?
 eq "$rc" 0 "the sweep pass exits 0"
-eq "$(meta N1 check.refinery)" "<absent>" "the undeclared malformed marker is cleared"
-eq "$(meta N1 check.codex)" "green@$(oid n1)" "…and the declared, well-formed marker is untouched"
+eq "$(meta N1 check.refinery)" "<absent>" "the undeclared legacy marker is cleared"
+eq "$(meta N1 check.codex)" "green" "…and the declared lane state is untouched"
 has "$out" "cleared undeclared malformed gate marker check.refinery" "the clear is reported"
 has "$out" "1 stray markers cleared" "…and counted"
 has "$out" "0 reviews dispatched" "…and a marker that governs nothing dispatches nothing"
 has "$(jq -r '.[] | select(.id == "N1") | .notes' "$STUB_STORE")" "does not declare that gate" "the anchor records why it was cleared"
 
-echo "# …a WELL-FORMED undeclared marker is history, not damage"
-store "[$(anchor N2 pull_request codex "green@$(oid n2)" polecat/n2 ',"check.refinery":"green@'"$(oid n2r)"'"')]"
+echo "# …a WELL-FORMED undeclared lane state is history, not damage"
+store "[$(anchor N2 pull_request codex green polecat/n2 ',"check.refinery":"fixing"')]"
 oid n2 > "$GH_DIR/head_polecat_n2"
 out=$(run)
-eq "$(meta N2 check.refinery)" "green@$(oid n2r)" "a narrowed check_set keeps its well-formed history"
+eq "$(meta N2 check.refinery)" "fixing" "a narrowed check_set keeps its well-formed history"
 has "$out" "0 stray markers cleared" "…and nothing was swept"
 
-echo "# …exception@ is the operator's verdict — never swept, malformed or not"
-store "[$(anchor N3 pull_request codex "green@$(oid n3)" polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"')]"
+echo "# …an undeclared legacy exception@ is swept like any other retired grammar"
+# It used to be exempt because it was the operator's verdict to retire. The park
+# is merge_hold now, so the marker is a word no reader knows and nothing else
+# could ever rewrite it.
+store "[$(anchor N3 pull_request codex green polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"')]"
 oid n3 > "$GH_DIR/head_polecat_n3"
 out=$(run)
-eq "$(meta N3 check.refinery)" "exception@$SHORT" "an exception verdict survives the sweep"
-has "$out" "0 stray markers cleared" "…and nothing was swept"
+eq "$(meta N3 check.refinery)" "<absent>" "the retired verdict is cleared"
+has "$out" "1 stray markers cleared" "…and counted"
 
 echo "# …the none opt-out does not exempt an anchor from the sweep"
 store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
@@ -231,7 +231,7 @@ eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray m
 has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
 
 echo "# …a clear that does not persist is reported, not counted"
-store "[$(anchor N5 pull_request codex "green@$(oid n5)" polecat/n5 ',"check.refinery":"green@'"$SHORT"'"')]"
+store "[$(anchor N5 pull_request codex green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"')]"
 oid n5 > "$GH_DIR/head_polecat_n5"
 out=$(STUB_DROP_KEYS="N5:check.refinery" run 2>&1); rc=$?
 eq "$rc" 0 "an unpersisted clear does not hold the merge (the marker gates nothing)"
@@ -325,116 +325,30 @@ has "$out" "1 reviews dispatched" "the third rework's result still gets the revi
 hasnt "$out" "cap of" "…no dispatch-side cap preempts signoff.sh's terminal verdict"
 eq "$(meta F1 dispatch_count)" "4" "…and the tally advances past the cap it is not"
 
-echo "# a head already judged, with its rework still open, is never re-reviewed"
+# A commit no longer bars a dispatch. The refusal that read a closed verdict's
+# oid retired with the pin: a lane short of green is dispatched on, and the
+# in-flight probe above is what keeps one review per gate.
+echo "# a closed verdict at this very head bars nothing"
 store "[$(anchor R1 pull_request codex "" polecat/r1),
         $(judged_review rev-r1 R1 "$(oid r1)"),
         $(rework_kid fix-r1 rev-r1 open)]"
 printf 'fix-r1|blocks|R1\n' >> "$STUB_DEPS"
 oid r1 > "$GH_DIR/head_polecat_r1"
-out=$(run); rc=$?
-eq "$rc" 0 "the refusal exits 0 (gate stays armed, merge held)"
-has "$out" "already judged $(oid r1)" "the refusal names the commit already judged"
-has "$out" "rework fix-r1 is still open" "…and the rework that has to move first"
-has "$out" "0 reviews dispatched" "…and nothing was dispatched"
-eq "$(meta R1 dispatch_count)" "<absent>" "…and no round was consumed on a question already answered"
-
-echo "# …but a head that MOVED past the verdict re-gates"
-store "[$(anchor R2 pull_request codex "" polecat/r2),
-        $(judged_review rev-r2 R2 old-oid),
-        $(rework_kid fix-r2 rev-r2 open)]"
-printf 'fix-r2|blocks|R2\n' >> "$STUB_DEPS"
-oid r2 > "$GH_DIR/head_polecat_r2"
+: > "$STUB_GC_LOG"
 out=$(run)
-has "$out" "1 reviews dispatched" "a commit no verdict has read is reviewed"
+has "$out" "1 reviews dispatched" "the unreviewed lane is dispatched on, whatever a prior verdict read"
+hasnt "$out" "already judged" "…and no arm claims a commit was judged"
 
-echo "# …and a CLOSED rework is an attempt made: the next round dispatches"
-store "[$(anchor R3 pull_request codex "" polecat/r3),
-        $(judged_review rev-r3 R3 "$(oid r3)"),
-        $(rework_kid fix-r3 rev-r3 closed)]"
-printf 'fix-r3|blocks|R3\n' >> "$STUB_DEPS"
-oid r3 > "$GH_DIR/head_polecat_r3"
-out=$(run)
-has "$out" "1 reviews dispatched" "a spent rework re-opens the gate even at an unmoved head"
-
-echo "# a closed review that filed no rework bars nothing"
-store "[$(anchor R4 pull_request codex "" polecat/r4),
-        $(judged_review rev-r4 R4 "$(oid r4)")]"
-oid r4 > "$GH_DIR/head_polecat_r4"
-out=$(run)
-has "$out" "1 reviews dispatched" "only a request-changes verdict (which files a child) bars a re-review"
-
-echo "# a verdict on ANOTHER gate bars nothing"
-store "[$(anchor R6 pull_request codex "" polecat/r6),
-        {\"id\":\"rev-r6\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"other\",\"anchor_bead\":\"R6\",\"reviewed_oid\":\"$(oid r6)\"}},
-        $(rework_kid fix-r6 rev-r6 open)]"
-printf 'fix-r6|blocks|R6\n' >> "$STUB_DEPS"
-oid r6 > "$GH_DIR/head_polecat_r6"
-out=$(run)
-has "$out" "1 reviews dispatched" "the guard is per-gate: another gate's verdict does not answer this one"
-
-echo "# the bar is THIS verdict's own rework, not any open child on the anchor"
-store "[$(anchor R7 pull_request codex "" polecat/r7),
-        $(judged_review rev-r7 R7 "$(oid r7)"),
-        $(rework_kid fix-r7 rev-r7 closed),
-        $(rework_kid fix-r7b rev-old open)]"
-printf 'fix-r7|blocks|R7\nfix-r7b|blocks|R7\n' >> "$STUB_DEPS"
-oid r7 > "$GH_DIR/head_polecat_r7"
-out=$(run)
-has "$out" "1 reviews dispatched" "an open child from another round does not answer this verdict"
-
-echo "# an unreadable child ledger holds the dispatch"
-store "[$(anchor R5 pull_request codex "" polecat/r5),
-        $(judged_review rev-r5 R5 "$(oid r5)"),
-        $(rework_kid fix-r5 rev-r5 open)]"
-printf 'fix-r5|blocks|R5\n' >> "$STUB_DEPS"
-oid r5 > "$GH_DIR/head_polecat_r5"
-out=$(STUB_DEP_GARBAGE=1 run)
-has "$out" "prior-verdict probe unreadable" "an unanswerable probe is reported"
-has "$out" "0 reviews dispatched" "…and dispatches nothing (merge stays held, retry next pass)"
-
-echo "# …but an anchor with no prior verdict never reads that ledger at all"
-store "[$(anchor R8 pull_request codex "" polecat/r8)]"
+echo "# the stranded-review repair is refused nothing either"
+store "[$(anchor R8 pull_request codex "" polecat/r8),
+        {\"id\":\"rev-stray8\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R8\"}},
+        $(judged_review rev-r8old R8 "$(oid r8)"),
+        $(rework_kid fix-r8 rev-r8old open)]"
+printf 'fix-r8|blocks|R8\n' >> "$STUB_DEPS"
 oid r8 > "$GH_DIR/head_polecat_r8"
-out=$(STUB_DEP_GARBAGE=1 run)
-has "$out" "1 reviews dispatched" "a first dispatch is not held by a child-ledger read it does not need"
-
-echo "# the stranded-review repair asks the same question, and is refused too"
-store "[$(anchor R9 pull_request codex "" polecat/r9),
-        $(judged_review rev-r9 R9 "$(oid r9)"),
-        $(rework_kid fix-r9 rev-r9 open),
-        {\"id\":\"rev-stray\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R9\",\"reviewed_oid\":\"$(oid r9)\"}}]"
-printf 'fix-r9|blocks|R9\n' >> "$STUB_DEPS"
-oid r9 > "$GH_DIR/head_polecat_r9"
 : > "$STUB_GC_LOG"
 out=$(run)
-has "$out" "already judged $(oid r9)" "the stranded repair path reaches the same refusal"
-has "$out" "no re-sling of rev-stray" "…and names the review it declines to re-sling"
-hasnt "$(cat "$STUB_GC_LOG")" "sling" "…so the stranded review is not sent back to the pool"
-has "$out" "0 reviews dispatched" "…and the pass dispatches nothing"
-
-echo "# …but a stranded review whose head MOVED past the verdict is still repaired"
-store "[$(anchor R10 pull_request codex "" polecat/r10),
-        $(judged_review rev-r10 R10 old-oid),
-        $(rework_kid fix-r10 rev-r10 open),
-        {\"id\":\"rev-stray2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R10\",\"reviewed_oid\":\"old-oid\"}}]"
-printf 'fix-r10|blocks|R10\n' >> "$STUB_DEPS"
-oid r10 > "$GH_DIR/head_polecat_r10"
-: > "$STUB_GC_LOG"
-out=$(run)
-has "$out" "STRANDED review rev-stray2" "a commit no verdict has read still earns the repair"
-has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-stray2 --on mol-review" "…and it is re-slung"
-
-echo "# an unreadable head names no commit, so no verdict can be tested against it"
-# No head_polecat_r11: live_head_for reads nothing. The closed review carries no
-# reviewed_oid either, so an unguarded probe would match "" against "" and bar a
-# dispatch on a verdict that never named a commit.
-store "[$(anchor R11 pull_request codex "" polecat/r11),
-        {\"id\":\"rev-r11\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"R11\"}},
-        $(rework_kid fix-r11 rev-r11 open)]"
-printf 'fix-r11|blocks|R11\n' >> "$STUB_DEPS"
-out=$(run)
-has "$out" "1 reviews dispatched" "an unreadable head bars nothing, however the ledger reads"
-hasnt "$out" "already judged" "…and no verdict is claimed over a commit nobody named"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-stray8 --on mol-review" "an inert review is re-slung"
 
 # --- dispatch backstop -------------------------------------------------------
 # The ceiling bounds DISPATCHES. already_answered above sees only the rework a
@@ -540,17 +454,14 @@ out=$(GC_MAX_REVIEW_DISPATCHES=abc run)
 has "$out" "1 reviews dispatched" "a non-numeric ceiling still dispatches"
 hasnt "$out" "integer expression" "...because it fell back to the default, not because the comparison errored"
 
-echo "# a head already answered is not a runaway: the precise refusal wins"
-store "[$(anchor S7 pull_request codex "" polecat/s7 ',"dispatch_count":"9"'),
-        $(judged_review rev-s7 S7 "$(oid s7)"),
-        $(rework_kid fix-s7 rev-s7 open)]"
-printf 'fix-s7|blocks|S7\n' >> "$STUB_DEPS"
+echo "# the operator hold outranks the ceiling: a held anchor is never paged"
+store "[$(anchor S7 pull_request codex "" polecat/s7 ',"dispatch_count":"9","merge_hold":"true"')]"
 oid s7 > "$GH_DIR/head_polecat_s7"
 : > "$STUB_ESCALATE_LOG"
 out=$(run)
-has "$out" "already judged $(oid s7)" "an anchor waiting on the rework it filed is refused for that reason"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and is never paged as a runaway, however high the tally"
-eq "$(meta S7 'dispatch_backstop.codex')" "<absent>" "...and carries no backstop hold"
+has "$out" "merge_hold is set (operator gate); no dispatch" "the hold is the reason, and it is reached first"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "...and nothing is paged as a runaway, however high the tally"
+eq "$(meta S7 'dispatch_backstop.codex')" "<absent>" "...and the anchor carries no backstop hold"
 
 echo "# a pour that does not read back burns no count, so the ceiling stays where it is"
 store "[$(anchor S8 pull_request codex "" polecat/s8 ',"dispatch_count":"4"')]"
@@ -793,26 +704,22 @@ hasnt "$out" "WEDGED" "…and it is never called wedged"
 # Recording that answer is what lets the helm board say whether an anchor is
 # moving without re-implementing these predicates, and the value is head-pinned
 # so a stale verdict can never read as current.
-machine() { printf '%s' "$(meta "$1" pr.machine)"; }
-pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
-
 echo "# machine axis: the wedge, the settled gate, and the one being raised"
-store "[$(anchor X1 pull_request codex "exception@$(oid x1)" polecat/x1 ',"dispatch_count":"3","gc.routed_to":"human"'),
-        $(anchor X2 pull_request codex "green@$(oid x2)" polecat/x2),
-        $(anchor X3 pull_request codex "green@$(oid stale)" polecat/x3),
-        $(anchor X4 pre_open_gate codex "exception@$(oid x4)" polecat/x4 ',"gc.routed_to":"human"')]"
+store "[$(anchor X1 pull_request codex unreviewed polecat/x1 ',"dispatch_count":"3","merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"'),
+        $(anchor X2 pull_request codex green polecat/x2),
+        $(anchor X3 pull_request codex fixing polecat/x3),
+        $(anchor X4 pre_open_gate codex unreviewed polecat/x4 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"')]"
 oid x1 > "$GH_DIR/head_polecat_x1"
 oid x2 > "$GH_DIR/head_polecat_x2"
 oid x3 > "$GH_DIR/head_polecat_x3"
 oid x4 > "$GH_DIR/head_polecat_x4"
 out=$(run); rc=$?
 eq "$rc" 0 "the recording pass exits 0"
-# The commonest wedge: the convergence cap stamped the exception at the head the
-# branch still carries and routed the anchor to a person. Only a head move
-# releases it, and no actor is going to make one.
-eq "$(pinned X1)" "wedged-exception@$(oid x1)" "exception@<live head> records the wedge, with its shape named"
-eq "$(pinned X2)" "settled@$(oid x2)" "every gate green at the live head records settled"
-eq "$(pinned X3)" "progressing@$(oid x3)" "a marker the head has moved past records progressing"
+# The commonest wedge: the convergence cap parked the anchor under merge_hold
+# and routed it to a person. No automated actor lifts that, and no commit does.
+eq "$(pinned X1)" "wedged-exception@$(oid x1)" "the cap's park records the wedge, with its shape named"
+eq "$(pinned X2)" "settled@$(oid x2)" "every gate green records settled"
+eq "$(pinned X3)" "progressing@$(oid x3)" "a lane short of green records progressing"
 # Most wedged anchors have no PR at all, so a key written only for open PRs
 # would miss the majority of the condition.
 eq "$(pinned X4)" "wedged-exception@$(oid x4)" "a pre_open_gate anchor is recorded the same way"
@@ -837,14 +744,14 @@ echo "# recording a verdict moves no route"
 # to clear the route. An observation must not retract a routing decision it
 # never looked at, so the anchor's own route rides back with it.
 eq "$(meta X1 'gc.routed_to')" "human" "a parked anchor keeps the route the cap gave it"
-store "[$(anchor X6 pull_request codex "green@$(oid x6)" polecat/x6 ',"gc.routed_to":"rig/gc-toolkit.polecat"')]"
+store "[$(anchor X6 pull_request codex green polecat/x6 ',"gc.routed_to":"rig/gc-toolkit.polecat"')]"
 oid x6 > "$GH_DIR/head_polecat_x6"
 run >/dev/null
 eq "$(pinned X6)" "settled@$(oid x6)" "the verdict is recorded"
 eq "$(meta X6 'gc.routed_to')" "rig/gc-toolkit.polecat" "…and the route is left exactly as it was found"
 
 echo "# an unreadable head is not evidence, so nothing is recorded"
-store "[$(anchor X5 pull_request codex "green@$(oid x5)" polecat/x5)]"
+store "[$(anchor X5 pull_request codex green polecat/x5)]"
 out=$(run); rc=$?
 eq "$rc" 0 "the no-head pass exits 0"
 eq "$(machine X5)" "<absent>" "a verdict pinned to no head is never written"
@@ -852,13 +759,13 @@ eq "$(machine X5)" "<absent>" "a verdict pinned to no head is never written"
 echo "# the skip is the exact verdict at the exact head, and nothing wider"
 # A verdict the head has moved past is a different verdict, and a value not yet
 # in the dated shape still owes the instant lifecycle.sh appends.
-store "[$(anchor X7 pull_request codex "green@$(oid x7)" polecat/x7 ',"pr.machine":"settled@'"$(oid stale7)"'@2026-08-28T04:05:06Z"')]"
+store "[$(anchor X7 pull_request codex green polecat/x7 ',"pr.machine":"settled@'"$(oid stale7)"'@2026-08-28T04:05:06Z"')]"
 oid x7 > "$GH_DIR/head_polecat_x7"
 : > "$STUB_GC_LOG"
 run >/dev/null
 has "$(cat "$STUB_GC_LOG")" "bd update X7" "a verdict pinned to a head that has moved is rewritten"
 eq "$(pinned X7)" "settled@$(oid x7)" "…at the head the branch now carries"
-store "[$(anchor X8 pull_request codex "green@$(oid x8)" polecat/x8 ',"pr.machine":"settled@'"$(oid x8)"'"')]"
+store "[$(anchor X8 pull_request codex green polecat/x8 ',"pr.machine":"settled@'"$(oid x8)"'"')]"
 oid x8 > "$GH_DIR/head_polecat_x8"
 : > "$STUB_GC_LOG"
 run >/dev/null
@@ -873,7 +780,7 @@ esac
 # An unpinned value is the one shape that carries no head at all, which is what
 # makes it the shape a prefix comparison alone would accept.
 for bad_shape in "settled" "settled@OID@" "settled@OID@2026-08-28T04:05:06Z@x"; do
-  store "[$(anchor X9 pull_request codex "green@$(oid x9)" polecat/x9 ",\"pr.machine\":\"${bad_shape//OID/$(oid x9)}\"")]"
+  store "[$(anchor X9 pull_request codex green polecat/x9 ",\"pr.machine\":\"${bad_shape//OID/$(oid x9)}\"")]"
   oid x9 > "$GH_DIR/head_polecat_x9"
   : > "$STUB_GC_LOG"
   run >/dev/null

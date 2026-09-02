@@ -217,8 +217,7 @@ fi
 
 # (4) pr-facts: same actor projection (it records closes too).
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(4) pr-facts" pr-facts.sh \
-    --fix-pool "$FIX_POOL" --review-pool "$REVIEW_POOL" ) \
+  run_pass "(4) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" ) \
   || FAILED="${FAILED}pr-facts rc=$?; "
 
 # (5) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
