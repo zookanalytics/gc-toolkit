@@ -337,10 +337,15 @@ cleanup, `gc doctor --fix`-able); dedup the rest against existing beads
 city-wide (`bd search` per rig store — your rig store is not the city, and
 a name miss is not proof of absence: search the finding's distinctive nouns
 too) — an OPEN match means tracked, note the id and move on. Escalate only
-the untracked remainder, one situation key per finding so repeats dedup:
+the untracked remainder, through `doctor-finding-escalate.sh`: it derives the
+situation key from the finding's own `.name` and the message from its
+`.message`, so one check has one key however many passes report it, and the
+visit reaches its reader as prose rather than as the finding object. Neither
+is composed by hand: a key spelled two ways is two situations, and the
+one-open-visit-per-situation dedup cannot collapse them.
 ```bash
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/doctor-finding-escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 FINDING=$(jq -c '.results[] | select(.name=="<check>")' "$PAYLOAD")
 # The subject must OUTLIVE the wisp: next-iteration burns this wisp, and the
@@ -357,7 +362,7 @@ if [ -z "$SUBJECT" ]; then
   SUBJECT=$(GC_RIG="$ESC_RIG" gc bd create -t task --title "triage: deacon findings (this rig)" -d "Standing subject for deacon patrol escalations: doctor findings and Dolt backup flags. One open visit per situation key hangs here; dispositions are the converse sitting's takeaway." --json | jq -r '.id // .[0].id')
   GC_RIG="$ESC_RIG" gc bd update "$SUBJECT" --set-metadata task_kind=triage-subject --set-metadata triage.scope=deacon-findings
 fi
-GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$SUBJECT" --key "doctor-<check-name>" --message "$FINDING"
+GC_RIG="$ESC_RIG" "$SCRIPTS/doctor-finding-escalate.sh" --subject "$SUBJECT" --finding "$FINDING"
 ```
 State what the dedup found — bead ids on a match, the stores and terms
 searched on a miss.

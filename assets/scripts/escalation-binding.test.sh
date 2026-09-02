@@ -16,6 +16,10 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
+# How many call sites the shipped city-scoped surfaces carry today. A floor,
+# not an equality: new callers are expected, a caller going invisible is not.
+SITE_FLOOR=6
+
 # The owning agent of a surface: an agent prompt owns itself, and a formula
 # named mol-<agent>-* is that agent's recipe. Anything else has no single
 # owner to read a scope from and is left to its own wiring test.
@@ -36,10 +40,15 @@ scope_of() { # agent name -> declared scope, empty when the agent is not shipped
 # Only runnable invocations: a call through $SCRIPTS, or the bare name with
 # its flags. A path test (`[ -x .../escalate.sh ]`) and a prose mention that
 # names no flags are neither.
-invocations() { grep -n -E '\$SCRIPTS/escalate\.sh|(^|[^-/[:alnum:]])escalate\.sh[[:space:]]+--' "$1"; }
+#
+# A wrapper whose name ends in escalate.sh (doctor-finding-escalate.sh) files
+# through escalate.sh, so it carries the same bare default and needs the same
+# binding. The name therefore admits a hyphenated prefix. A full path still
+# matches only through the $SCRIPTS form.
+invocations() { grep -n -E '\$SCRIPTS/[A-Za-z0-9._-]*escalate\.sh|(^|[^/[:alnum:]])[A-Za-z0-9._-]*escalate\.sh[[:space:]]+--' "$1"; }
 bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--pool[[:space:]]+[A-Za-z0-9._-]+/'; }
 
-EXAMINED=0
+EXAMINED=0; SITES=0
 for f in "$ROOT"/agents/*/prompt.template.md "$ROOT"/formulas/mol-*.toml; do
   [ -s "$f" ] || continue
   agent="$(owner_of "$f")"; [ -n "$agent" ] || continue
@@ -48,6 +57,7 @@ for f in "$ROOT"/agents/*/prompt.template.md "$ROOT"/formulas/mol-*.toml; do
   rel="${f#"$ROOT"/}"
   unbound=""
   while IFS= read -r line; do
+    SITES=$((SITES + 1))
     bound "$line" || unbound="${unbound}${line}"$'\n'
   done <<< "$lines"
   EXAMINED=$((EXAMINED + 1))
@@ -64,6 +74,14 @@ done
 [ "$EXAMINED" -ge 2 ] \
   && ok "the scan reached $EXAMINED city-scoped escalating surfaces" \
   || bad "the scan reached only $EXAMINED city-scoped escalating surface(s) — the filter stopped matching, it did not get clean"
+
+# The file floor cannot see one call site drop out of a file that still has
+# others, which is how a renamed caller leaves its recipe unchecked while the
+# suite stays green. Raise this with the population, never lower it to fit a
+# filter that narrowed.
+[ "$SITES" -ge "$SITE_FLOOR" ] \
+  && ok "the scan reached $SITES call sites (floor $SITE_FLOOR)" \
+  || bad "the scan reached only $SITES call site(s), below the floor of $SITE_FLOOR — a caller stopped matching the filter"
 
 echo
 echo "escalation-binding: $PASS passed, $FAIL failed"
