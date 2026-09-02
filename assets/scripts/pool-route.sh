@@ -90,10 +90,11 @@ esac
 [ "$#" -eq 1 ] || { usage; exit 2; }
 
 NAME="$1"
-# Already rig-qualified: the caller named the store as well as the pool.
+# Already rig-qualified: the caller named the store as well as the pool. Which
+# of the two it was decides the repair a refusal can honestly suggest.
 case "$NAME" in
-  */*) ROUTE="$NAME" ;;
-  *)   ROUTE="${GC_RIG:+$GC_RIG/}$NAME" ;;
+  */*) ROUTE="$NAME"; QUALIFIED=1 ;;
+  *)   ROUTE="${GC_RIG:+$GC_RIG/}$NAME"; QUALIFIED=0 ;;
 esac
 
 case "$(route_verdict "$ROUTE")" in
@@ -113,5 +114,9 @@ NEAR=$(agent_ids | jq -r --arg r "$ROUTE" \
   '[.[] | select(endswith("/" + $r))] | join(", ")' 2>/dev/null)
 warn "route '$ROUTE' matches no live agent identity — nothing addressed (a route no pool claims reads back clean forever)."
 [ -n "$NEAR" ] && warn "  live rig-qualified forms of that name: $NEAR"
-warn "  repair: name the pool as <rig>/$NAME, or run with GC_RIG set so the bare name qualifies itself."
+if [ "$QUALIFIED" = 1 ]; then
+  warn "  repair: name a pool that exists — this one was given rig-qualified, so nothing here can supply the missing half."
+else
+  warn "  repair: name the pool as <rig>/$NAME, or run with GC_RIG set so the bare name qualifies itself."
+fi
 exit 1

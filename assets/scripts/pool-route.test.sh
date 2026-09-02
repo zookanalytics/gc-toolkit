@@ -84,6 +84,22 @@ eq "$RC" 1 "exit 1"
 eq "$OUT" "" "stdout is EMPTY"
 has "$ERR" "which that pool never reads" "says the store and the route disagree"
 
+echo "# the refusal suggests a repair that fits the name it was given"
+# The hint is the whole value of refusing here, so it must not tell a caller
+# who already named <rig>/<pool> to prepend another rig, or to set a GC_RIG
+# that would change nothing: that reads as "you did it wrong" about the one
+# half the caller got right, and sends them at the wrong repair.
+GC_RIG=gc-toolkit run gc-toolkit/nope.pool
+eq "$RC" 1 "a qualified name that matches nothing is refused"
+has "$ERR" "nothing here can supply the missing half" "the hint fits a name that is already qualified"
+case "$ERR" in
+    *"name the pool as <rig>/gc-toolkit/nope.pool"*)
+        bad "no double-qualified repair is suggested" "it asked for a second rig segment" ;;
+    *)  ok "no double-qualified repair is suggested" ;;
+esac
+env -u GC_RIG "$SUT" nope.pool >/dev/null 2>"$TMP/err"
+has "$(cat "$TMP/err")" "name the pool as <rig>/nope.pool" "a BARE name still gets the qualify-it repair"
+
 echo "# only PROOF refuses: an unreadable agent set returns the route, loudly"
 STUB_AGENTS_FAIL=1 GC_RIG=gc-toolkit run gc-toolkit.converse
 eq "$RC" 0 "exit 0"
