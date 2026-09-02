@@ -26,7 +26,8 @@ skill — only an operator-merged PR changes agent behavior.
 Every step closes its own bead through `assets/scripts/step-close.sh --step
 <step-id>` (resolved into `$SC` at the top of each shell block) — never any
 other way, and never on an id read from the environment; the helper resolves
-by (assignee, gc.step_ref) and refuses when it cannot prove ownership.
+by (gc.root_bead_id, gc.step_ref) and refuses when it cannot prove which
+molecule it is executing.
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
 drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
