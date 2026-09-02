@@ -61,9 +61,12 @@ proves the deletion happened.
 The script deletes recursively, so it refuses any root that is not a scratch
 root this user owns. The basename must be `claude-<uid>`, symlinks are
 resolved before that check, ownership is asserted, and every walk is `-P` and
-`-xdev`. Both horizons must be whole seconds with remove no shorter than
-empty. Empty directories are pruned only at the top level: an empty directory
-inside a session tree is a scratchpad an idle session still expects to find.
+`-xdev`. A symlink is unlinked as it stands and never chmod-ed, because chmod
+dereferences a symlink argument and would change the mode of a target the
+script has no claim on. Both horizons must be whole seconds with remove no
+shorter than empty. Empty directories are pruned only at the top level: an
+empty directory inside a session tree is a scratchpad an idle session still
+expects to find.
 
 `assets/scripts/scratch-reap.test.sh` is the regression suite, hermetic
 against a synthetic root in a tempdir — no city, no network, no `gc`.

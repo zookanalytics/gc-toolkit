@@ -8,9 +8,11 @@
 # a tree so one stale file cannot condemn an active session; the live-session
 # hold, exercised against a real process carrying CLAUDE_CODE_SESSION_ID; the
 # read-only tree that refuses deletion until it is chmod-ed; stray files above
-# the session trees; the budget yield, which must report zero for the tier it
-# skipped rather than its plan; --dry-run; and the root rails, which are what
-# keep a recursive delete off any directory that is not a scratch root.
+# the session trees, and stray symlinks, which are unlinked without a chmod
+# that would reach their targets; the budget yield, which must report zero for
+# the tier it skipped rather than its plan; --dry-run; and the root rails,
+# which are what keep a recursive delete off any directory that is not a
+# scratch root.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -174,6 +176,18 @@ find "$ROOT/slug-j" -depth -exec touch -h -d "@$((NOW - 100 * HOUR))" {} + 2>/de
 run > /dev/null
 if exists "$OUTSIDE/precious"; then ok "a symlink out of the root is not followed"; else bad "a symlink out of the root is not followed"; fi
 if exists "$ROOT/slug-j"; then bad "the tree holding it is still removed"; else ok "the tree holding it is still removed"; fi
+
+# A stray symlink is unlinked as it stands. chmod dereferences a symlink
+# argument, so putting one through the stray tier's chmod would change the
+# mode of its target, and the target can be any path this uid owns.
+reset_root
+GUARDED="$TMP/guarded"; mkdir -p "$GUARDED"; : > "$GUARDED/f"; chmod 400 "$GUARDED/f"
+ln -s "$GUARDED/f" "$ROOT/stale-link"
+touch -h -d "@$((NOW - 100 * HOUR))" "$ROOT/stale-link"
+run > /dev/null
+if [ -L "$ROOT/stale-link" ]; then bad "a stale loose symlink is unlinked"; else ok "a stale loose symlink is unlinked"; fi
+eq "$(stat -c %a "$GUARDED/f")" 400 "the target of a stray symlink keeps its mode"
+if exists "$GUARDED/f"; then ok "the target of a stray symlink survives"; else bad "the target of a stray symlink survives"; fi
 
 echo
 echo "scratch-reap.test.sh: $PASS passed, $FAIL failed"

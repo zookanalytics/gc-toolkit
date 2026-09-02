@@ -80,8 +80,9 @@ esac
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 LIVE="$WORK/live"; REMOVE_LIST="$WORK/remove"; EMPTY_LIST="$WORK/empty"
-STRAY_LIST="$WORK/stray"; BIG_LIST="$WORK/big"
-: > "$LIVE"; : > "$REMOVE_LIST"; : > "$EMPTY_LIST"; : > "$STRAY_LIST"; : > "$BIG_LIST"
+STRAY_LIST="$WORK/stray"; STRAY_LINK_LIST="$WORK/stray-links"; BIG_LIST="$WORK/big"
+: > "$LIVE"; : > "$REMOVE_LIST"; : > "$EMPTY_LIST"; : > "$STRAY_LIST"
+: > "$STRAY_LINK_LIST"; : > "$BIG_LIST"
 
 # Sessions with a running child. Best-effort and quiet: most of /proc belongs
 # to other uids and is unreadable, which is the expected case, not an error.
@@ -109,7 +110,8 @@ keep_n=0; keep_b=0; live_n=0; live_b=0
   | awk -v root="$ROOT" -v now="$START" \
         -v empty_after="$EMPTY_AFTER" -v remove_after="$REMOVE_AFTER" \
         -v livefile="$LIVE" -v removefile="$REMOVE_LIST" \
-        -v emptyfile="$EMPTY_LIST" -v strayfile="$STRAY_LIST" -v bigfile="$BIG_LIST" '
+        -v emptyfile="$EMPTY_LIST" -v strayfile="$STRAY_LIST" \
+        -v straylinkfile="$STRAY_LINK_LIST" -v bigfile="$BIG_LIST" '
 BEGIN {
     FS = "\t"
     while ((getline id < livefile) > 0) if (id != "") live[id] = 1
@@ -125,10 +127,14 @@ $1 != "f" && $1 != "d" && $1 != "l" { next }
     n = split(rel, c, "/")
 
     # Loose files above a session tree are stray agent output, aging on
-    # their own with no tree to protect them.
+    # their own with no tree to protect them. A stray SYMLINK goes on its own
+    # list, because chmod dereferences a symlink argument: making one writable
+    # would change the mode of the target instead, and a stray link can point
+    # anywhere outside the root.
     if (n < 2 || (n == 2 && typ != "d")) {
         if (typ != "d" && now - mt >= empty_after) {
-            printf "%s\0", path > strayfile
+            out = (typ == "l") ? straylinkfile : strayfile
+            printf "%s\0", path > out
             stray_n++; stray_b += sz
         }
         next
@@ -202,10 +208,11 @@ if [ -s "$EMPTY_LIST" ] && ! over_budget; then
 elif [ -s "$EMPTY_LIST" ]; then
     STOPPED="empty"; empty_n=0
 fi
-if [ -s "$STRAY_LIST" ] && ! over_budget; then
+if { [ -s "$STRAY_LIST" ] || [ -s "$STRAY_LINK_LIST" ]; } && ! over_budget; then
     xargs -0 -r chmod u+w < "$STRAY_LIST" 2>/dev/null || true
     xargs -0 -r rm -f     < "$STRAY_LIST" 2>/dev/null || true
-elif [ -s "$STRAY_LIST" ]; then
+    xargs -0 -r rm -f     < "$STRAY_LINK_LIST" 2>/dev/null || true
+elif [ -s "$STRAY_LIST" ] || [ -s "$STRAY_LINK_LIST" ]; then
     STOPPED="${STOPPED:-stray}"; stray_n=0
 fi
 
