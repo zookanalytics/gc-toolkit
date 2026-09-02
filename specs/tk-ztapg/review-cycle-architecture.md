@@ -120,14 +120,45 @@ holds: the key is the reviewer's name plus a normalized locus and message, and
 re-evaluating a gate that already carries a finding for a key creates no
 duplicate. Idempotency is by key, never by evaluation count.
 
-**The interlock is the predicate, not an edge.** That earlier design held the
-merge with an open parent-child link from the finding to the anchor. This one
-does not, and the difference matters. `merge.sh:303-304` reads both a live
-`blocks` blocker and a live `parent-child` child of the anchor into the same
-in-flight hold, so a finding attached by an edge of either shape deadlocks the
-anchor the moment anyone wants that finding tracked past the merge. The merge
-predicate below queries the findings by `anchor_bead` and disposition instead,
-which lets a `deferred` finding stay open without holding anything.
+**The interlock is an edge, and the disposition picks its type.** Invariant I1
+in `docs/component-model.md` requires that much: no wait lives only in prose or
+a metadata string, and only `blocks` counts as a hold, because it is the one
+type that holds a bead out of `bd ready`. A merge held by a metadata query
+alone is a wait the graph cannot see.
+
+| Disposition | Edge | Effect |
+|---|---|---|
+| `must-fix` | anchor `blocks` on the finding | holds the merge and the anchor's close |
+| `deferred` | finding `discovered-from` the anchor | records where it came from, holds nothing |
+| `declined` | none | closed with the validator's reason |
+
+A `must-fix` blocker needs no new merge code. `merge.sh:303-304` already reads
+every live `blocks` blocker of the anchor into its in-flight hold, and its own
+comment gives the rule: a dep-edge holder holds regardless, because the edge is
+the claim. `bd` separately refuses to close a blocked issue. An open must-fix
+finding therefore stops the anchor closing as well as the PR merging, which is
+what makes the merge predicate structural instead of a rule each reader has to
+remember.
+
+`deferred` needs an edge outside two sets. The ready-blocking types are
+`blocks`, `waits-for` and `conditional-blocks`, and `merge.sh` reads exactly
+`blocks` downward and `parent-child` upward. `discovered-from` is in neither,
+so a deferred finding stays open across the merge holding nothing.
+
+The earlier design's mistake was the shape, not the edge. It attached the
+finding to the anchor with `parent-child`, which states decomposition and
+cascades the anchor's blocked state down onto the finding. I1's shape law is
+the general form: a bead that will ever carry a `blocks` edge must have no
+`parent-child` children. An anchor blocking on a must-fix finding strands any
+parent-child child it has, so a fix unit is filed beside the finding and
+blocked on it, never under the anchor. Today's rework child already sits that
+way, attached by `pr_number` metadata rather than an edge, so nothing existing
+moves.
+
+A must-fix finding also carries a route. `merge.sh:330-338` records the anchor
+`progressing` only when some blocker names a `gc.routed_to` other than `human`,
+so an undispatched finding reads as a demand nothing is acting on. The `fixing`
+lane state and the dispatch that enters it are what keep that from happening.
 
 The same model absorbs human PR comments. A human comment becomes a finding
 with `finding.source=human:<login>`, which is what closes the gap `tk-zina89`
@@ -135,10 +166,8 @@ reports: today only machine findings produce work, so a PR converges to
 codex-green with the operator's objections untouched.
 
 **Merge is blocked while any must-fix finding is open**, in addition to every
-lane being green. A `deferred` finding is a tracked bead that does not block;
-a `declined` finding is closed with the validator's reason. Nothing is left as
-prose asserting a fix should happen someday, which is the rule `tk-6lgxp` and
-`tk-ee7bu` both ask for.
+lane being green. Nothing is left as prose asserting a fix should happen
+someday, which is the rule `tk-6lgxp` and `tk-ee7bu` both ask for.
 
 ## The validator
 
@@ -256,8 +285,10 @@ comment batch and they still hold the merge.
 2. no `must-fix` finding on the anchor is open
 
 Condition 1 loses its head comparison, which is the whole of the 211. Condition
-2 is new, and it is what makes target 4 true: a PR is not mergeable until every
-finding ruled fix-needed has been fixed.
+2 is not new code. A must-fix finding blocks the anchor by a `blocks` edge and
+the in-flight probe already holds the merge on any live blocker, so the graph
+enforces it rather than `hold_gate`. It is what makes target 4 true: a PR is
+not mergeable until every finding ruled fix-needed has been fixed.
 
 ## Component map
 
@@ -269,7 +300,7 @@ Six components carry the design. For each, what it does today and what changes.
 | **Validator** — new | Does not exist. | New formula and new dispatch. One pass per review batch, the three decisions above, writes `finding.disposition` on each finding and the lane's next state on the anchor. |
 | **Gate authority** — `assets/scripts/gate-ensure.sh` | Canonicalizes `check_set`, classifies each `check.<g>` against the live head, dispatches a review per unsettled gate, and backstops runaway dispatch with `GC_MAX_REVIEW_DISPATCHES`. | Reads lane state instead of comparing markers to a head. Enforces quiescence before any dispatch. Drops `live_head_for` from the gate classification, drops `already_answered` (a prior verdict at a commit is no longer the question), and drops the dispatch ceiling, whose only job was to proxy convergence. |
 | **Verdict writer** — `assets/scripts/signoff.sh` | The single audited writer of `check.<g>=<verb>@<oid>`. Also files the rework child, counts rounds, and stamps `exception@` at the cap. | Stays the single writer, of lane state and validator dispositions. The round cap, `signoff_round_floor`, `signoff_rounds_reset`, `signoff_cap` and the `reset` verb all retire with judged convergence. The oid-length guard and the moved-head refusal retire with the pin. |
-| **Merge predicate** — `assets/scripts/merge.sh` `hold_gate` | First declared gate not `green@<head>`, else merge. | Every lane `green`, and no open must-fix finding. |
+| **Merge predicate** — `assets/scripts/merge.sh` `hold_gate` | First declared gate not `green@<head>`, else merge. | Every lane `green`. The must-fix half takes no change: the existing blocker probe already holds on the finding's `blocks` edge. |
 | **Reset detector** — `assets/scripts/pr-facts.sh` | Detects a human feedback batch by watermark, routes the comments, and resets the round cap once per batch. | Same detection, same watermarks, same once-per-batch dedup. Resets every lane to `unreviewed` instead. |
 
 ### Beyond the six
