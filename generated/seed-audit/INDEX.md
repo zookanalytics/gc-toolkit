@@ -56,7 +56,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,195 | 548 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 1,826 | 456 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |

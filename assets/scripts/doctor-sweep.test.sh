@@ -246,6 +246,8 @@ if [ -d "$STATE/current" ]; then bad "  ... and creates no run dir"; else ok "  
 
 run --nonsense
 eq "$RC" "2" "an unknown flag is a usage error"
+has "$ERR" "usage: doctor-sweep.sh" "  ... and says so on stderr"
+hasnt "$OUT" "usage: doctor-sweep.sh" "  ... never on stdout, which the caller parses"
 
 echo
 echo "doctor-sweep: $PASS passed, $FAIL failed"

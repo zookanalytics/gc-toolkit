@@ -35,6 +35,10 @@ leaks a wisp. Reconcile by TITLE, never by assignee, so a wisp orphaned by
 an interrupted pour is still collectable; adopting (claim + in_progress) is
 what puts it back on your hook.
 
+Pass every var the formula declares. A restart runs this pour and a looping
+patrol runs the formula's own next-iteration pour; the two have to seed the
+same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
+
 ```bash
 WISP_IDS=$(
   gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
@@ -43,7 +47,7 @@ WISP_IDS=$(
 WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
 for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id')
+  WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
 ```
