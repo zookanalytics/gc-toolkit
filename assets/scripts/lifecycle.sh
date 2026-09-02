@@ -430,13 +430,18 @@ cmd_transition() {
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     [ "$got" = "$ROUTE" ] || BAD="$BAD gc.routed_to='$got'(want '$ROUTE')"
   fi
-  # All three fields of the takeaway triple, not just the text a person reads.
+  # Every field of the takeaway stamp, not just the text a person reads.
   # The timestamp dates the wait: helm orders the operator's queue by it, and
   # attributes a takeaway to the sitting whose span contains it, dropping one it
   # cannot date. The writer is the provenance readers discriminate on to tell a
-  # sitting's decision from a park's own sentence. A triple that lands in part
+  # sitting's decision from a park's own sentence. A stamp that lands in part
   # leaves a headline the board can neither place nor attribute, so it is a
   # failed transition and not a recorded one.
+  #
+  # The settled-key is verified CLEARED rather than merely written: a
+  # transition's takeaway names a park or an end, and a value inherited from an
+  # earlier sitting reads as this headline's own disposition, which is what
+  # doctor/check-wait-is-an-edge answers from.
   if [ "$TAKEAWAY_SET" = 1 ]; then
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway"] // "") | tostring')
     [ "$got" = "$TAKEAWAY" ] || BAD="$BAD gc.takeaway='$got'(want '$TAKEAWAY')"
@@ -444,6 +449,8 @@ cmd_transition() {
     [ "$got" = "$TAKEAWAY_AT" ] || BAD="$BAD gc.takeaway_at='$got'(want '$TAKEAWAY_AT')"
     got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway_by"] // "") | tostring')
     [ "$got" = "$PROG" ] || BAD="$BAD gc.takeaway_by='$got'(want '$PROG')"
+    got=$(printf '%s' "$bead" | jq -r '(.metadata["gc.takeaway_settled"] // "") | tostring')
+    [ -z "$got" ] || BAD="$BAD gc.takeaway_settled='$got'(want cleared)"
   fi
   if [ "$ASSIGNEE_SET" = 1 ]; then
     got=$(printf '%s' "$bead" | jq -r '(.assignee // "") | tostring')

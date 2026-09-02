@@ -625,6 +625,31 @@ has "$out" "gc.takeaway_at" "the refusal names the timestamp field"
 eq "$(meta tk-anc gc.takeaway_at)" "1999-01-01T00:00:00Z" "…and the stale value is what read back"
 eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
 
+# The cap park is a person owing an answer, and the anchor it lands on may
+# carry the settled disposition of the sitting that ended before it. A clear
+# that does not land leaves that "1" answering for this headline, and
+# doctor/check-wait-is-an-edge — the reader that exists to find parks nothing
+# re-asks — reads the cap as a wait already discharged. Only the CLEARED value
+# proves the park.
+echo "# …and so is a cap park that inherited a SETTLED disposition it did not clear"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+anchor_meta gc.takeaway_settled=1
+out=$(STUB_DROP_KEYS="tk-anc:gc.takeaway_settled" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a cap park left on a stale gc.takeaway_settled exits 2"
+has "$out" "gc.takeaway_settled" "the refusal names the disposition field"
+eq "$(meta tk-anc gc.takeaway_settled)" "1" "…and the stale value is what read back"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
+
+echo "# …while a cap park that clears it over a stale value parks normally"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+anchor_meta gc.takeaway_settled=1
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the cap path exits 0 with the disposition cleared"
+eq "$(meta tk-anc gc.takeaway_settled)" "" "the park's own disposition replaces the sitting's before it"
+eq "$(meta tk-anc gc.routed_to)" "human" "…and the park itself still lands"
+
 echo "# …and so is a cap park with no takeaway at all"
 reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
 seed_cap_deps c1 c2 c3
