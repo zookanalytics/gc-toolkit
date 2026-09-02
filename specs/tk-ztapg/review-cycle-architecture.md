@@ -162,8 +162,12 @@ the general form: a bead that will ever carry a `blocks` edge must have no
 `parent-child` children. An anchor blocking on a must-fix finding strands any
 parent-child child it has, so a fix unit is filed beside the finding and
 blocked on it, never under the anchor. Today's rework child already sits that
-way, attached by `pr_number` metadata rather than an edge, so nothing existing
-moves.
+way: `signoff.sh` writes the child a `blocks` edge onto the anchor, and the
+`pr_number` and `existing_pr` it also stamps name which PR to resume rather
+than holding anything. What the child lacks is a finding bead between it and
+the anchor. It blocks the anchor directly and carries the objections as
+`rejection_reason` prose, so the edge it already has is the one this design
+wants and nothing existing moves.
 
 A must-fix finding also carries a route. `merge.sh` records the anchor
 `progressing` only when some live blocker names a `gc.routed_to` that is
@@ -355,6 +359,13 @@ Existing anchors carry the old grammar. The mapping:
 Nothing writes `fixable@` any more — the only writer was
 `reconcile-gate-verdicts.sh`, and `gate-ensure.sh` merely reads it — so that
 row exists for residue, not for a live path.
+
+Existing rework children stay direct blockers of their anchors. Such a child
+already satisfies the shape law and already holds the merge, and the objections
+it answers were never separated into beads, so back-filling them would invent
+findings carrying no `finding.key` and no validator disposition. The
+finding-plus-fix-unit shape starts with the first round the validator runs, and
+children in flight at the cutover drain as they are.
 
 ## What this retires
 
