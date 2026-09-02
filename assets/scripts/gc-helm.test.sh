@@ -36,6 +36,7 @@ mkdir -p "$TMP/bin"
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
+#   s-NOPIN  refused : the store rejects its pin write -> assignee clear skipped
 # and the gc.kind=workflow ROOTS, which carry a pool route of their own:
 #   root-PARKED      : this molecule's root          -> de-routed with its steps
 #   root-OTHER       : another molecule's root       -> untouched
@@ -50,6 +51,7 @@ cat > "$TMP/steps.json" <<'JSON'
   {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
   {"id":"root-PARKED","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-OTHER","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"root-ORPHAN","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
@@ -121,7 +123,11 @@ case "$1 ${2:-}" in
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
   "bd update")
-    printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
+    printf '%s\n' "$*" >> "$FAKE_UPDATES"
+    # A store that rejects the write. NOPIN stands for every reason the route
+    # pins fail to land; the quiesce must not go on to unassign a bead it has
+    # just failed to de-route.
+    case "$3" in *NOPIN*) exit 1 ;; esac ;;
   "bd dep")
     printf '%s\n' "$*" >> "$FAKE_DEPS"
     # A blocker named NOPE stands for every edge that cannot be written.
@@ -250,6 +256,18 @@ grep -q 'quiesced husk root root-PARKED' <<< "$OUT" \
 [ -z "$(line_for root-ORPHAN)" ] \
   && ok "(ROOTSCOPE) a root with no resolvable convoy is skipped (fail closed)" \
   || bad "(ROOTSCOPE) an unresolvable root was de-routed"
+
+# (PINFAIL) the pin write is what makes the assignee clear safe. If it does not
+# land, unassigning would leave the bead routed AND unassigned — the pool-offer
+# shape the whole order exists to avoid — so the second write is skipped.
+eq "$(grep -cE '^bd update s-NOPIN( |$)' "$UP" || true)" "1" \
+  "(PINFAIL) a rejected pin write is not followed by an assignee clear"
+grep -q -- '--assignee' <<< "$(line_for s-NOPIN)" \
+  && bad "(PINFAIL) the bead was unassigned while still routed" \
+  || ok "(PINFAIL) …so the bead is never left routed+unassigned"
+grep -q 'could not quiesce step s-NOPIN' <<< "$ERR" \
+  && ok "(PINFAIL) …and the failure is reported for the patrol to retry" \
+  || bad "(PINFAIL) the failed quiesce is silent (stderr: $ERR)"
 
 # (NOCLOSE dynamic) no STEP update ever closes a bead or rewrites its status.
 STEP_UPDATES="$(grep -E '^bd update s-' "$UP" || true)"

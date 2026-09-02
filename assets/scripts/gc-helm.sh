@@ -221,7 +221,8 @@ rig_name_for_bead() {
 # a bead out of every pool claim predicate; the assignee is the one key that
 # may legitimately have to wait for its holder. The order is load-bearing —
 # reversed, the gap between the writes would leave the bead routed and
-# unassigned, which is the pool-offer shape a fresh polecat races into.
+# unassigned, which is the pool-offer shape a fresh polecat races into. For the
+# same reason the second write is skipped outright when the first one fails.
 #
 # Best-effort subshell. $1 = parked anchor id, $2 = rig .beads path or "".
 # >>> quiesce-release-molecule-steps
@@ -312,8 +313,13 @@ quiesce_release_molecule_steps() (
                 gc bd update "$_sid" ${_db:+--db "$_db"} "$@" >/dev/null 2>&1 || _pins_ok=0
             fi
 
+            # The assignee clear is attempted only once the route is known to be
+            # gone (landed, or never there). Unassigning a bead that is still
+            # routed is what leaves the pool-offer shape behind, so a failed
+            # pin write takes the second update down with it rather than
+            # producing the state this whole order exists to avoid.
             _who_ok=1
-            if [ -n "$_who" ]; then
+            if [ -n "$_who" ] && [ "$_pins_ok" -eq 1 ]; then
                 # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
                 gc bd update "$_sid" ${_db:+--db "$_db"} --assignee "" >/dev/null 2>&1 || _who_ok=0
             fi
