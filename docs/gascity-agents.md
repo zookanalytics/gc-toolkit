@@ -1397,10 +1397,14 @@ and reads back clean.
 Which form is correct is a property of the target's `scope`, not of its name,
 and both scopes ship in one pack:
 
-| Agent | `scope` | Identity to stamp |
+| Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
-| dog, deacon, mechanik | `city` | `gc-toolkit.dog` — no rig segment |
-| polecat, refinery, witness, converse | `rig` | `gc-toolkit/gc-toolkit.polecat` |
+| dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
+| converse, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+
+Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
+`[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read
+that field for an agent the table does not name.
 
 An author who copies a qualifier from the recipe beside the one being written
 is right only when the two agents happen to share a scope. Over-qualifying a

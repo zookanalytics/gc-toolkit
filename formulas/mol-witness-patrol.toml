@@ -60,8 +60,11 @@ archive. Lifecycle chatter is acknowledged and archived.
 Mail reporting a defect in the pack itself, a formula or script fault the
 sender hit and worked around, is none of those: it needs a polecat rather
 than a human. File it as a bug bead routed at the polecat pool, resolving
-the address rather than writing the qualifier by hand. Set TITLE and BODY
-first:
+the address rather than writing the qualifier by hand. The route rides the
+create rather than a second write: a bug that exists before it is routed is
+an open bead offered to nobody for as long as that second write is
+outstanding, and a second write that fails leaves it that way for good. Set
+TITLE and BODY first:
 ```bash
 # >>> bug-dispatch
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -71,12 +74,11 @@ POOL=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}polecat") || true
 if [ -z "$POOL" ]; then
   echo "no live polecat identity resolves from '{{binding_prefix}}polecat'; a bug filed at a guessed address is offered to nobody, so escalate instead of filing." >&2
 else
-  BUG=$(gc bd create "$TITLE" -t bug -d "$BODY" --json | jq -r '.id // .[0].id')
+  BUG=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata "$(jq -nc --arg p "$POOL" '{"gc.routed_to":$p}')" --json | jq -r '.id // .[0].id')
   if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
-    gc bd update "$BUG" --set-metadata gc.routed_to="$POOL"
     echo "filed + routed bug $BUG to $POOL"
   else
-    echo "gc bd create returned no id; nothing filed." >&2
+    echo "gc bd create reported no id; look for a bug already routed at $POOL before filing this again." >&2
   fi
 fi
 # <<< bug-dispatch

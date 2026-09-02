@@ -66,7 +66,9 @@ case "${1:-} ${2:-}" in
     [ -n "${STUB_AGENTS_FAIL:-}" ] && { echo "gc: agent list unavailable" >&2; exit 1; }
     printf '%s\n' "${STUB_AGENTS:-}" ;;
   "bd list")   printf '%s\n' "${STUB_OPEN:-[]}" ;;
-  "bd create") printf '%s\n' "${STUB_CREATE:-{\"id\":\"tk-new\"}}" ;;
+  "bd create")
+    [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: bd create failed" >&2; exit 1; }
+    printf '%s\n' "${STUB_CREATE:-{\"id\":\"tk-new\"}}" ;;
   "bd update") : ;;
   *) echo "unexpected gc invocation: $*" >&2; exit 99 ;;
 esac
@@ -138,14 +140,21 @@ export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$LOG" 'bd create' "a reported pack defect is filed as a bug"
 has "$LOG" '-t bug' "typed as one"
-has "$LOG" 'bd update tk-new --set-metadata gc.routed_to=gc-toolkit/gc-toolkit.polecat' \
+has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"' \
   "and routed at the rig-qualified pool that is live"
-hasnt "$LOG" 'gc.routed_to=gc-toolkit.polecat' "never the bare form the template rendered"
+hasnt "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "never the bare form the template rendered"
+printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //;s/ --json.*$//' | jq -e . >/dev/null 2>&1 \
+  && ok "the create metadata is parseable JSON" || bad "the metadata payload did not survive"
+
+# The route is a field of the create, not a write that follows it: a bug that
+# exists before it is routed is an open bead offered to nobody, and a route
+# write that fails leaves it that way.
+hasnt "$LOG" 'bd update' "the route is not a second write that can fail behind a success message"
 
 echo "# a city whose polecat pool is city-scoped resolves the other way"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.polecat"}]}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" 'set-metadata gc.routed_to=gc-toolkit.polecat' "the bare identity is stamped when it is the live one"
+has "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "the bare identity is stamped when it is the live one"
 
 echo "# no live polecat pool: file nothing"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"}]}'
@@ -154,13 +163,21 @@ hasnt "$LOG" 'bd create' "an unroutable pool files no bug"
 has "$OUT" "escalate instead of filing" "and says to escalate"
 eq "$RC" 0 "and the step keeps running"
 
-echo "# a create that returns no id never leaves an unrouted bug behind"
+echo "# a create that returns no id is reported, and what it may have filed is routed"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
 export STUB_CREATE='{}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-hasnt "$LOG" 'bd update' "no route is stamped on a bead that may not exist"
-has "$OUT" "returned no id" "and the failure is reported"
+has "$OUT" "reported no id" "the failure is reported"
+has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"' \
+  "and the one call that was made already carried the route"
 unset STUB_CREATE
+
+echo "# a create that fails outright files nothing and says so"
+export STUB_CREATE_FAIL=1
+run "$TMP/bug.sh" "$BUG_PRELUDE"
+has "$OUT" "reported no id" "the failure is reported"
+eq "$RC" 0 "and the step keeps running"
+unset STUB_CREATE_FAIL
 
 echo "# an unreadable roster files the work rather than muting the witness"
 export STUB_AGENTS_FAIL=1
@@ -168,7 +185,7 @@ run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "the warrant goes out on the rendered address"
 has "$OUT" "UNVERIFIED" "marked unproven"
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" 'set-metadata gc.routed_to=gc-toolkit.polecat' "and so does the bug"
+has "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "and so does the bug"
 unset STUB_AGENTS_FAIL
 
 echo
