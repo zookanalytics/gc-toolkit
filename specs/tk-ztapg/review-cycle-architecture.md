@@ -190,9 +190,15 @@ Concretely, a lane may not be dispatched while any of these hold:
 - a validation pass on this anchor is in flight
 - a full review on this lane is in flight
 
-The first three are anchor-wide on purpose. Full reviews must not cycle while
-sub-reviews are still landing, and a lane that re-reads a diff while a sibling
-lane's fix is half-applied is buying the 83.
+The fourth clause is what retires the 83: two actors disagreeing about whether
+a review was already out is exactly how the same head got read twice, and one
+computer of the set cannot disagree with itself.
+
+The first three are anchor-wide for a different reason. They keep a review from
+reading a diff that is mid-change. A lane that re-reads while a sibling lane's
+fix is half-applied produces findings against a state no one intended to ship,
+and the rework that answers them is the no-op kind the declination texts are
+full of.
 
 This is exactly the question `tk-j5wrs` raised as unowned — "what is currently
 acting on this anchor" — now given a purpose and a single owner. It gets one
@@ -334,7 +340,7 @@ acts, how the review agent flags items for possible fix."
 
 ## Corrections to the epic's premises
 
-Three claims in epic `tk-bw184o` do not survive checking, and each one changes
+Four claims in epic `tk-bw184o` do not survive checking, and each one changes
 what gets carved.
 
 **1. The three identically-titled beads are not duplicate filings.** The epic
