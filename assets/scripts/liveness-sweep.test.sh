@@ -110,8 +110,10 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-docupdate","title":"a doc-update bead nobody routed","issue_type":"task","metadata":{"task_kind":"doc-update"}},
   {"id":"c-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
   {"id":"c-trackedvisit","title":"subject of a live visit whose stamp landed EMPTY","issue_type":"task","metadata":{}},
-  {"id":"c-takeaway","title":"parked by a human","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify"}},
+  {"id":"c-takeaway","title":"a sitting ended here and left its takeaway","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify"}},
   {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
+  {"id":"c-demand-live","title":"a person owes an answer here","issue_type":"task","metadata":{"gc.takeaway":"holding — which of the two?"}},
+  {"id":"c-demand-widen","title":"its demand is deferred, not closed","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
   {"id":"c-pr-open","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
   {"id":"c-pr-case","title":"same PR, different case + trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://GitHub.com/zookanalytics/signal-loom/pull/522/files"}},
   {"id":"c-pr-merged","title":"landed — surfaces for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_url":"https://github.com/zookanalytics/signal-loom/pull/520"}},
@@ -150,8 +152,9 @@ cat > "$TMP/ready.json" <<'JSON'
 ]
 JSON
 # LIVE carries: the standing sweep subject, the visits (v-2 is the su-ab9je
-# empty-stamp shape), the stall visit, and the live molecule that names
-# conv-live. blocked-child gates c-parented via the reverse parent-child index.
+# empty-stamp shape), the stall visit, the live molecule that names conv-live,
+# and the open demand on c-demand-live. blocked-child gates c-parented via the
+# reverse parent-child index.
 cat > "$TMP/live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
@@ -159,10 +162,17 @@ cat > "$TMP/live.json" <<'JSON'
   {"id":"v-stall","status":"open","title":"visit: root-underconversation","metadata":{"task_kind":"visit","gc.continuation_group":"subj-stalled","stall_root":"root-underconversation"}},
   {"id":"v-2","status":"open","title":"visit: c-trackedvisit","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-2","depends_on_id":"c-trackedvisit","type":"tracks"}]},
   {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.input_convoy_id":"conv-live"}},
+  {"id":"d-open","status":"open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"c-demand-live"}},
   {"id":"child-open","status":"open","title":"an open child of c-parented","metadata":{},"dependencies":[{"depends_on_id":"c-parented","type":"parent-child"}]}
 ]
 JSON
-printf '[]\n' > "$TMP/widen.json"
+# WIDEN is every not-closed status LIVE omits. The deferred demand proves the
+# demand index reads ALIVE and not LIVE: not closed is not answered.
+cat > "$TMP/widen.json" <<'JSON'
+[
+  {"id":"d-deferred","status":"deferred","title":"Rule: the other one?","metadata":{"gc.demand_for":"c-demand-widen"}}
+]
+JSON
 export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/widen.json"
 
 # bd show fixtures: the worked-via-convoy and landed-husk chains.
@@ -191,7 +201,7 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
 # delta-test survivor assertion, plus the two structural-edge candidates the
 # exec script now folds in: c-parented is gated by its open child, and
 # c-trackslive by its outgoing tracks edge to a live bead).
-EXPECT_SURVIVORS="c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-ordertalk,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway-empty,c-titletalk,c-wisp-other"
+EXPECT_SURVIVORS="c-docupdate,c-hold-empty,c-husk-tracked,c-live-step,c-noconvoy-step,c-ordertalk,c-plain,c-pr-closed,c-pr-merged,c-pr-nourl,c-pr-otherrepo,c-preopen-fixable,c-preopen-nomarker,c-preopen-none,c-preopen-noset,c-preopen-partial,c-realconvoy,c-slingtalk,c-takeaway,c-takeaway-empty,c-titletalk,c-wisp-other"
 
 echo "── first run: absent baseline → full census filed, baseline advanced ──"
 run_sweep ABSENT
@@ -213,7 +223,8 @@ grep -q 'visit.recheck=.*liveness-recheck.sh' "$GC_CALLS" \
 
 echo "── each named class drops, each inverse-defect shape stays visible ──"
 for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \
-            c-takeaway c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
+            c-demand-live c-demand-widen \
+            c-pr-open c-pr-case c-preopen-green c-preopen-multigreen \
             c-preopen-approval c-hold c-hold-bare c-worked c-inputconvoy \
             c-slingconvoy c-synthconvoy c-wisp-order c-husk-step-1 c-husk-step-2 \
             c-rootvisit-step c-parented c-trackslive; do
@@ -226,17 +237,40 @@ for keep in c-pr-merged c-pr-closed c-pr-otherrepo c-pr-nourl c-preopen-fixable 
             c-preopen-partial c-preopen-nomarker c-preopen-noset c-preopen-none \
             c-husk-tracked c-live-step c-noconvoy-step c-titletalk c-slingtalk \
             c-ordertalk c-wisp-other \
-            c-realconvoy c-docupdate c-takeaway-empty c-hold-empty; do
+            c-realconvoy c-docupdate c-takeaway c-takeaway-empty c-hold-empty; do
     case ",$(cat "$BASELINE_FILE")," in
         *",$keep,"*) ok "kept $keep" ;;
         *) bad "kept $keep" "was hidden — the inverse defect" ;;
     esac
 done
 
+echo "── the hold is a live demand bead, never the takeaway stamp ──"
+# Read as a hold, `gc.takeaway` exempts a bead from every later pass, because a
+# sitting stamps it at the hold, REPLACES it with its outcome at sign-off, and
+# nothing clears it. c-takeaway is that shape and is a candidate above; these
+# pin what does hold, and that it holds for the demand's sake.
+run_sweep ABSENT
+if grep -q "c-demand-live" "$ESC_BODIES"; then
+    bad "an open demand holds its bead" "c-demand-live was reported"
+else ok "an open demand holds its bead"; fi
+if grep -q "c-demand-widen" "$ESC_BODIES"; then
+    bad "a deferred demand still holds" "c-demand-widen was reported"
+else ok "a deferred demand still holds (the index reads ALIVE, not LIVE)"; fi
+grep -q "c-takeaway — a sitting ended here" "$ESC_BODIES" \
+    && ok "a takeaway with no demand is reported — the sitting ended" \
+    || bad "takeaway alone no longer exempts" "$(cat "$ESC_BODIES")"
+# Mutate the guard: with the demand closed (gone from every not-closed listing)
+# the same bead, takeaway and all, has to come back.
+jq 'map(select(.id != "d-open"))' "$TMP/live.json" > "$TMP/live-nodemand.json"
+FAKE_LIVE="$TMP/live-nodemand.json" run_sweep ABSENT
+grep -q "c-demand-live" "$ESC_BODIES" \
+    && ok "the demand closes → the bead it held is reported again" \
+    || bad "closed demand releases" "$(cat "$ESC_BODIES")"
+
 echo "── the delta splits new from carried; index 0 is a real hit ──"
 PARTIAL="$(printf '%s' "$EXPECT_SURVIVORS" | cut -d, -f2-)"   # all but the FIRST id
 run_sweep "$PARTIAL"
-grep -q "delta: 1 new, 20 carried" <<< "$OUT" \
+grep -q "delta: 1 new, 21 carried" <<< "$OUT" \
     && ok "baseline missing one id → exactly 1 new (and position 0 counts as carried)" \
     || bad "delta split" "$OUT"
 grep -q "c-docupdate" "$ESC_BODIES" && ok "the new one is enumerated" || bad "new enumeration" "$(cat "$ESC_BODIES")"
