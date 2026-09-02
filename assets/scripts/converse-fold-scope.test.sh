@@ -97,11 +97,16 @@ chmod +x "$BIN/gc"
 # stamp — the visit's SECOND recording of its own subject, and the one that
 # has held where the stamp did not (su-ab9je); it is what the empty-group
 # cases below recover from.
+# A 6th writes escalation_key, the stamp escalate.sh gives every visit it
+# files. Those name no target, so the key is the only thing that tells two
+# situations under one bucket apart.
 visit() {
     jq -nc --arg id "$1" --arg g "$2" --arg i "$3" --arg a "$4" --arg t "${5:-}" \
+        --arg k "${6:-}" \
         '{id:$id, assignee:$a,
           metadata:({"task_kind":"visit","gc.continuation_group":$g}
-                    + (if $i == "" then {} else {"stall_root":$i} end))}
+                    + (if $i == "" then {} else {"stall_root":$i} end)
+                    + (if $k == "" then {} else {"escalation_key":$k} end))}
          + (if $t == "" then {} else {dependencies:[{id:$t, dependency_type:"tracks"}]} end)'
 }
 # fixture <visit-json>... — write list.json plus a show-<id>.json per visit.
@@ -206,6 +211,44 @@ out="$(run_block v-two sub)"
 is "the item falls back to the subject when no target is named" "$(field "$out" ITEM)" "sub"
 is "the higher id still folds into the lower" "$(field "$out" HOLDER)" "v-one"
 is "the lower id still holds" "$(holder v-one sub)" "v-one"
+
+echo "── one bucket, two escalation keys: neither folds ──"
+# escalate.sh files one visit per situation and names no target, so every
+# visit it files under a standing scope carries an absent stall_root and the
+# subject cannot tell them apart. escalation_key can, and it is a stamp the
+# filer already writes on each one.
+fixture "$(visit v-two sub '' sess-2 '' doctor-check-cadence-live)" \
+    "$(visit v-one sub '' sess-1 '' doctor-dolt-noms-size)"
+is "positive control: the old group-only rule saw a sibling for both" \
+    "$(legacy_holds sub)" "2"
+is "positive control: the pre-fix block folded two distinct findings together" \
+    "$(legacy_holder v-two sub)" "v-one"
+out="$(run_block v-two sub)"
+is "the item stays the SUBJECT — a takeaway target has to be a bead" \
+    "$(field "$out" ITEM)" "sub"
+is "v-two holds its own sitting" "$(field "$out" HOLDER)" "v-two"
+is "v-one holds its own sitting" "$(holder v-one sub)" "v-one"
+
+# The converse: one situation, two visits. escalate.sh dedups these before
+# the second exists, and the fold must still collapse them if one ever does.
+fixture "$(visit v-two sub '' sess-2 '' doctor-dolt-noms-size)" \
+    "$(visit v-one sub '' sess-1 '' doctor-dolt-noms-size)"
+is "two visits for the SAME key still fold to the lowest id" \
+    "$(holder v-two sub)" "v-one"
+
+# A named target outranks the key: stall_root is both the item and the topic,
+# so a stall visit's fold does not change because a key rode along.
+fixture "$(visit v-two sub r-alpha sess-2 '' key-beta)" \
+    "$(visit v-one sub r-alpha sess-1 '' key-alpha)"
+is "a shared stall_root folds even when the keys differ" \
+    "$(holder v-two sub)" "v-one"
+
+# The two namespaces never compare equal: a key spelled like a sibling's
+# stall_root is still a different topic.
+fixture "$(visit v-two sub '' sess-2 '' r-alpha)" \
+    "$(visit v-one sub r-alpha sess-1)"
+is "a key equal to a sibling's stall_root is not the same topic" \
+    "$(holder v-two sub)" "v-two"
 
 echo "── only live sittings of THIS group count ──"
 fixture "$(visit v-one sub r-alpha '')" "$(visit v-two sub r-alpha sess-2)"
