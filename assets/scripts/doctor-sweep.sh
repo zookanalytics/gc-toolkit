@@ -49,9 +49,9 @@ esac
 NOTE=""
 
 # A supplied value that is not a plain integer is REPLACED by the default and
-# said out loud. The patrol pours `--root-only`, which substitutes no formula
-# var, so an unsubstituted `{{doctor_interval}}` reaches this script verbatim;
-# it must sweep hourly anyway rather than read as zero and sweep every pass.
+# said out loud. Every pour site passes the interval, and an omitted declared
+# var renders its default, so a number is what normally arrives. A malformed
+# value must still sweep hourly rather than read as zero and sweep every pass.
 # Assigns through the caller's variable rather than stdout: the note is the
 # point, and a command substitution would drop it with the subshell.
 resolve_num() { # <var-name> <supplied> <default> <setting-name>

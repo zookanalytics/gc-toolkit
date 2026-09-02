@@ -129,14 +129,14 @@ has "$OUT" "state=started" "once the interval has passed it sweeps again"
 await_sweeps 2
 eq "$(grep -c . "$STUB_LOG")" "2" "  ... a second run, not a re-read of the first"
 
-# --- a non-numeric interval still sweeps hourly -----------------------------
-# The patrol pours --root-only, which substitutes no var, so the raw
-# `{{doctor_interval}}` can reach the script; it must not read as zero.
+# --- a malformed interval still sweeps hourly -------------------------------
+# Nothing routine delivers one: every pour site passes the interval, and an
+# omitted declared var renders its default. A bad value must not read as zero.
 new_state var
 : > "$STUB_LOG"
 printf '%s' "$(( $(date +%s) - 100 ))" > "$STATE/last-start"
-OUT=$(GC_DOCTOR_SWEEP_INTERVAL='{{doctor_interval}}' "$SUT"); RC=$?
-has "$OUT" "state=idle" "an unsubstituted interval var holds instead of sweeping every pass"
+OUT=$(GC_DOCTOR_SWEEP_INTERVAL='every hour' "$SUT")
+has "$OUT" "state=idle" "a malformed interval holds instead of sweeping every pass"
 eq "$(field "$OUT" interval)" "3600" "  ... falling back to the hourly default"
 has "$OUT" "note=" "  ... and says so"
 eq "$(grep -c . "$STUB_LOG")" "0" "  ... no sweep was started"

@@ -336,7 +336,8 @@ description = """
 
 **2. Pour next iteration BEFORE burning — and GUARD the assign** (a poured
 but unassigned wisp reaches no hook and drops the loop; forward every
-declared var — a --root-only pour materializes no defaults):
+declared var, so a value chosen at the startup pour is not silently replaced
+by the formula default from the next cycle on):
 ```bash
 NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}' --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
