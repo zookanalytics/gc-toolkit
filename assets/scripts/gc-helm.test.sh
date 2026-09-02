@@ -3,8 +3,10 @@
 # services/helm; the open verb is covered by gc-helm-open.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
-#   --release molecule-step quiescing (tk-xypcy, tk-q5r65)
-#   --waiting-on edges (tk-2plde)
+#   --release molecule quiescing: steps and the workflow root
+#   --release on a CLOSED anchor: the quiesce without the resurrecting park
+#   the split write, so a refused assignee clear cannot void the route pins
+#   --waiting-on edges
 #   the ≤140-codepoint length gate, shared by takeaway and demand
 #   the demand verb's sibling shape and fail-closed edge
 #   the retired board verb refuses and names helm-svc board
@@ -35,6 +37,13 @@ mkdir -p "$TMP/bin"
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
+#   s-NOPIN  refused : the store rejects its pin write -> assignee clear skipped
+#   s-fold   folded  : step of a molecule whose anchor is CLOSED -> quiesced
+# and the gc.kind=workflow ROOTS, which carry a pool route of their own:
+#   root-PARKED      : this molecule's root          -> de-routed with its steps
+#   root-OTHER       : another molecule's root       -> untouched
+#   root-ORPHAN      : root with no convoy           -> skipped (fail closed)
+#   root-FOLD        : root of the folded anchor's molecule -> de-routed too
 cat > "$TMP/steps.json" <<'JSON'
 [
   {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
@@ -44,7 +53,13 @@ cat > "$TMP/steps.json" <<'JSON'
   {"id":"s-nonmol","assignee":"someone","metadata":{"gc.step_ref":"mol-other-formula.step","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-noref","assignee":"someone-else","metadata":{"gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
   {"id":"s-other","assignee":"gc-toolkit__polecat-lx-live","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
-  {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}}
+  {"id":"s-orphan","assignee":"gc-toolkit__polecat-lx-x","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-ORPHAN","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"s-NOPIN","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.preflight-tests","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
+  {"id":"root-PARKED","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"root-OTHER","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-OTHER","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"root-ORPHAN","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"s-fold","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"root-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}},
+  {"id":"root-FOLD","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}
 ]
 JSON
 
@@ -52,13 +67,22 @@ JSON
 cat > "$TMP/roots" <<'R'
 root-PARKED|convoy-PARKED
 root-OTHER|convoy-OTHER
+root-FOLD|convoy-FOLD
 R
 
 # Convoys: convoy_id|anchor_id
+# CLOSED-A-FOLD is the folded anchor: closed, superseded, and still the anchor
+# of a molecule the pour left routed.
 cat > "$TMP/convoys" <<'C'
 convoy-PARKED|A-PARKED
 convoy-OTHER|A-OTHER
+convoy-FOLD|CLOSED-A-FOLD
 C
+
+# Fold dispositions: bead_id|superseded_by
+cat > "$TMP/superseded" <<'S'
+CLOSED-A-FOLD|CARRIER-1
+S
 
 : > "$TMP/updates"     # one line per `gc bd update` invocation (the full argv)
 
@@ -97,8 +121,12 @@ case "$1 ${2:-}" in
     # model the route LANDING and the route landing EMPTY (the silent drop a
     # multi-pair --set-metadata update can produce) with the same stub.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt}}]'; fi ;;
+    # A folded anchor names the bead that carried its work on. The release
+    # path reads it to say which disposition it is preserving; an empty
+    # string reads the same as an absent key, which is every other bead.
+    sup="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_SUPERSEDED" 2>/dev/null || true)"
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" --arg sp "$sup" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -113,7 +141,11 @@ case "$1 ${2:-}" in
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
   "bd update")
-    printf '%s\n' "$*" >> "$FAKE_UPDATES" ;;
+    printf '%s\n' "$*" >> "$FAKE_UPDATES"
+    # A store that rejects the write. NOPIN stands for every reason the route
+    # pins fail to land; the quiesce must not go on to unassign a bead it has
+    # just failed to de-route.
+    case "$3" in *NOPIN*) exit 1 ;; esac ;;
   "bd dep")
     printf '%s\n' "$*" >> "$FAKE_DEPS"
     # A blocker named NOPE stands for every edge that cannot be written.
@@ -127,7 +159,7 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
-       FAKE_ROUTED="$TMP/routed"
+       FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded"
 mkdir -p "$TMP/signal-loom/.beads"
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
@@ -141,7 +173,9 @@ UP="$TMP/updates"
 
 line_for() { grep -E "^bd update $1( |\$)" "$UP" || true; }
 
-# (RELEASE) the parked anchor gets the full reopen/unassign/clear-route bundle.
+# (RELEASE) an anchor still standing gets the full reopen/unassign/clear-route
+# bundle. What makes that bundle correct is that A-PARKED is OPEN; the FOLDED
+# section below covers the anchor whose disposition already landed.
 A="$(line_for A-PARKED)"
 [ -n "$A" ] && ok "(RELEASE) anchor A-PARKED was updated" || bad "(RELEASE) anchor never updated"
 grep -q -- '--status=open' <<< "$A" \
@@ -153,9 +187,7 @@ grep -q 'gc.routed_to=' <<< "$A" \
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
-# (AFFINE/ATOMIC) affine step -> all three pins cleared, in ONE update.
-eq "$(grep -c '^bd update s-load' "$UP" || true)" "1" \
-  "(ATOMIC) s-load quiesced in exactly one update (no split-update race)"
+# (AFFINE) affine step -> all three pins cleared.
 SL="$(line_for s-load)"
 if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
    && grep -q -- '--assignee' <<< "$SL" \
@@ -164,6 +196,25 @@ if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
 else
   bad "(AFFINE) affine step must clear all three pins (got: $SL)"
 fi
+
+# (ORDER) …across TWO writes, route first. beads refuses `--assignee ""` on an
+# in_progress bead a live session holds, and refuses the whole update with it,
+# so a single write loses the route pins on exactly the bead being re-offered.
+# Route first and not last: the reverse leaves a routed+unassigned window,
+# which is the pool-offer shape a fresh polecat races into.
+eq "$(grep -cE '^bd update s-load( |$)' "$UP" || true)" "2" \
+  "(ORDER) s-load's pins are written in two updates, not one"
+ROUTE_N="$(grep -nE '^bd update s-load .*--unset-metadata gc.routed_to' "$UP" | head -n1 | cut -d: -f1)"
+WHO_N="$(grep -nE '^bd update s-load .*--assignee' "$UP" | head -n1 | cut -d: -f1)"
+if [ -n "$ROUTE_N" ] && [ -n "$WHO_N" ] && [ "$ROUTE_N" -lt "$WHO_N" ]; then
+  ok "(ORDER) …the route clear goes first, so no window leaves it routed+unassigned"
+else
+  bad "(ORDER) the route clear must precede the assignee clear (route@${ROUTE_N:-none} assignee@${WHO_N:-none})"
+fi
+WHO_LINE="$(grep -E '^bd update s-load .*--assignee' "$UP" | head -n1)"
+grep -q -- '--unset-metadata' <<< "$WHO_LINE" \
+  && bad "(ORDER) the assignee clear still rides with the route pins ($WHO_LINE)" \
+  || ok "(ORDER) …and rides alone, so a refusal of it cannot void them"
 
 # (POOL) unassigned+routed step -> routed_to only.
 SI="$(line_for s-impl)"
@@ -206,6 +257,37 @@ grep -q -- '--assignee' <<< "$SN" \
 # (FAILCLOSE) a root whose anchor cannot be resolved is skipped.
 [ -z "$(line_for s-orphan)" ] \
   && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor quiesced"
+
+# (ROOT) the gc.kind=workflow root is a second pool-routed door into the same
+# molecule. A release that quiets every worker step and leaves the root routed
+# keeps attracting polecat spawns onto the husk.
+RP="$(line_for root-PARKED)"
+grep -q -- '--unset-metadata gc.routed_to' <<< "$RP" \
+  && ok "(ROOT) the workflow root is de-routed alongside its steps" \
+  || bad "(ROOT) the workflow root kept its pool route (got: ${RP:-<none>})"
+grep -q 'quiesced husk root root-PARKED' <<< "$OUT" \
+  && ok "(ROOT) …and the run names it as a root, not a step" \
+  || bad "(ROOT) the root is unreported (out: $OUT)"
+
+# (ROOTSCOPE) the root walk inherits the step walk's scope and fail-closed guard.
+[ -z "$(line_for root-OTHER)" ] \
+  && ok "(ROOTSCOPE) a root whose anchor != the parked bead is untouched" \
+  || bad "(ROOTSCOPE) another molecule's root was de-routed"
+[ -z "$(line_for root-ORPHAN)" ] \
+  && ok "(ROOTSCOPE) a root with no resolvable convoy is skipped (fail closed)" \
+  || bad "(ROOTSCOPE) an unresolvable root was de-routed"
+
+# (PINFAIL) the pin write is what makes the assignee clear safe. If it does not
+# land, unassigning would leave the bead routed AND unassigned — the pool-offer
+# shape the whole order exists to avoid — so the second write is skipped.
+eq "$(grep -cE '^bd update s-NOPIN( |$)' "$UP" || true)" "1" \
+  "(PINFAIL) a rejected pin write is not followed by an assignee clear"
+grep -q -- '--assignee' <<< "$(line_for s-NOPIN)" \
+  && bad "(PINFAIL) the bead was unassigned while still routed" \
+  || ok "(PINFAIL) …so the bead is never left routed+unassigned"
+grep -q 'could not quiesce step s-NOPIN' <<< "$ERR" \
+  && ok "(PINFAIL) …and the failure is reported for the patrol to retry" \
+  || bad "(PINFAIL) the failed quiesce is silent (stderr: $ERR)"
 
 # (NOCLOSE dynamic) no STEP update ever closes a bead or rewrites its status.
 STEP_UPDATES="$(grep -E '^bd update s-' "$UP" || true)"
@@ -384,6 +466,86 @@ eq "$GRC" "0" "(ROUTEDEAD) a route that stamps still exits zero"
 grep -q "released to $POOL" "$TMP/rout" \
   && ok "(ROUTEDEAD) …and says where the bead went" \
   || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
+
+# ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────
+# A fold that lands after the pour leaves a molecule routed under an anchor
+# that is already disposed. --release is the only writer that walks that
+# molecule, and its park half (reopen, unassign, stamp the route) would
+# resurrect the anchor in every reader of open beads — so the walk was
+# unreachable on exactly the shape that needs it most. Covered:
+#   (FOLDED)    a closed anchor keeps its disposition and still gets the walk
+#   (FOLDROUTE) --route there is refused: a pool must not claim disposed work
+#   (FOLDBLIND) a status that will not read refuses the release outright
+: > "$TMP/updates"; : > "$TMP/routed"
+CRC=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded into CARRIER-1" --by proactive --release \
+   >"$TMP/rout" 2>"$TMP/rerr" || CRC=$?
+eq "$CRC" "0" "(FOLDED) a release on a closed anchor still succeeds"
+FA="$(line_for CLOSED-A-FOLD)"
+[ -n "$FA" ] && ok "(FOLDED) the closed anchor is still stamped" || bad "(FOLDED) nothing was written to the anchor"
+grep -q -- '--status=open' <<< "$FA" \
+  && bad "(FOLDED) the closed anchor was REOPENED — disposed work is visible again ($FA)" \
+  || ok "(FOLDED) …and not reopened"
+grep -q -- '--assignee' <<< "$FA" \
+  && bad "(FOLDED) the closed anchor was unassigned ($FA)" || ok "(FOLDED) …not unassigned"
+grep -q 'gc.proactive_reaction' <<< "$FA" \
+  && bad "(FOLDED) a landed disposition was re-marked as a fresh reaction ($FA)" \
+  || ok "(FOLDED) …and not re-marked as a reaction release"
+grep -q 'gc.routed_to' <<< "$FA" \
+  && bad "(FOLDED) the closed anchor's route was rewritten ($FA)" || ok "(FOLDED) …its route left alone"
+grep -q 'gc.takeaway=folded into CARRIER-1' <<< "$FA" \
+  && ok "(FOLDED) …while the headline the sitting owes still lands" \
+  || bad "(FOLDED) the headline was lost with the park write ($FA)"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(FOLDED) the molecule under it is quiesced — the half a fold still needs" \
+  || bad "(FOLDED) the folded anchor's molecule was never walked"
+grep -qE '^bd update root-FOLD( |$)' "$TMP/updates" \
+  && ok "(FOLDED) …its workflow root too, so no door is left open" \
+  || bad "(FOLDED) the folded molecule's root kept its pool route"
+grep -q 'superseded by CARRIER-1' "$TMP/rerr" \
+  && ok "(FOLDED) …and the run names the disposition it preserved" \
+  || bad "(FOLDED) the skipped park is unexplained (stderr: $(cat "$TMP/rerr"))"
+grep -q 'anchor left closed' "$TMP/rout" \
+  && ok "(FOLDED) …and the success line does not claim a release it did not make" \
+  || bad "(FOLDED) the run reported a release (stdout: $(cat "$TMP/rout"))"
+
+# (FOLDROUTE) --route asks a pool to pick the bead up. On a disposed anchor
+# that is the resurrection in its purest form: the pool claims it and cuts a
+# branch for superseded work. The writes that DO land are kept, and the exit
+# is non-zero so no caller reads it as "released to that pool". The stub is set
+# to report the route as LANDED, so nothing but the closed anchor can be what
+# produces the refusal.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+XRC=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "route a disposed bead" --by proactive --release --route "$POOL" \
+   >"$TMP/rout" 2>"$TMP/rerr" || XRC=$?
+eq "$XRC" "4" "(FOLDROUTE) --route on a closed anchor is a verb runtime failure"
+grep -q "gc.routed_to=$POOL" <<< "$(line_for CLOSED-A-FOLD)" \
+  && bad "(FOLDROUTE) a disposed bead was handed to a pool" \
+  || ok "(FOLDROUTE) …and the pool route is never stamped"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(FOLDROUTE) …while the quiesce the operator came for still runs" \
+  || bad "(FOLDROUTE) the refusal took the quiesce with it"
+grep -q 'takeaway set on' "$TMP/rout" \
+  && bad "(FOLDROUTE) the verb reported success on an unrouted bead" \
+  || ok "(FOLDROUTE) …and success is not reported"
+
+# (FOLDBLIND) a status that did not ANSWER is not proof the anchor is open. The
+# reopen is the one write whose cost is unbounded, so an unreadable status
+# refuses the whole verb before anything is written.
+: > "$TMP/updates"
+URC=0
+sh "$SCRIPT" takeaway UNKNOWN-A "unreadable" --by proactive --release >/dev/null 2>"$TMP/rerr" || URC=$?
+eq "$URC" "4" "(FOLDBLIND) an unreadable status refuses the release"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(FOLDBLIND) …and nothing was written"
+grep -q 'could not read the status' "$TMP/rerr" \
+  && ok "(FOLDBLIND) …and the refusal names the cause" \
+  || bad "(FOLDBLIND) the refusal does not explain itself (stderr: $(cat "$TMP/rerr"))"
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway UNKNOWN-A "plain stamp" --by host >/dev/null 2>&1 || true
+grep -qE '^bd update UNKNOWN-A( |$)' "$TMP/updates" \
+  && ok "(FOLDBLIND) …while a takeaway WITHOUT --release is unchanged by the gate" \
+  || bad "(FOLDBLIND) the gate now blocks a plain takeaway: $(cat "$TMP/updates")"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
@@ -687,18 +849,29 @@ export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIV
 SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
 
-# A-LIVE is the anchor; root-LIVE its molecule root. L-live is the terminal step
-# this session is executing the release FROM; L-peer is a sibling step left
-# pinned to a session that is gone, which is what the quiesce exists for.
+# A-LIVE is the anchor; root-LIVE its molecule root, pool-routed in its own
+# right. L-live is the terminal step this session is executing the release
+# FROM; L-peer is a sibling step left pinned to a session that is gone, which
+# is what the quiesce exists for; L-held is the hard case — in_progress under
+# a DIFFERENT live session, so beads refuses to clear its assignee.
+#
+# A-FOLD is a second, independent anchor: CLOSED and superseded, with its own
+# molecule (root-FOLD, F-work) still carrying the pool route the pour left. It
+# is the fold-after-pour race, and the store is what proves the release does
+# not put it back on the board.
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
- {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.input_convoy_id":"convoy-LIVE"}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-first-reaction","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
  {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}}
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
+ {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
+ {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
 ]
 JSON
-printf 'convoy-LIVE|A-LIVE\n' > "$LIVE_CONVOYS"
+printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
 : > "$LIVE_LOG"
 
 cat > "$LIVE/bin/gc" <<'GCL'
@@ -729,6 +902,21 @@ case "$1 ${2:-}" in
   "bd update")
     printf 'update %s\n' "$*" >> "$LIVE_LOG"
     id="$3"; shift 3
+    # beads refuses to clear the assignee of an in_progress bead ANOTHER
+    # session holds, and refuses the whole update along with it. Checked
+    # before anything is applied, so the refusal is atomic here too: a stub
+    # that let the other keys through would hide the loss this split prevents.
+    for a in "$@"; do
+      case "$a" in
+        --assignee|--assignee=*)
+          st=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .status // ""' "$LIVE_STORE")
+          who=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .assignee // ""' "$LIVE_STORE")
+          if [ "$st" = "in_progress" ] && [ -n "$who" ] && [ "$who" != "${GC_SESSION_NAME:-}" ]; then
+            printf 'refused %s (held by %s)\n' "$id" "$who" >> "$LIVE_LOG"
+            exit 1
+          fi ;;
+      esac
+    done
     while [ $# -gt 0 ]; do
       case "$1" in
         --db)             shift 2 ;;
@@ -769,6 +957,24 @@ eq "$(field L-peer assignee)" "" \
 eq "$(field L-peer gc.routed_to)" "" \
    "(LIVESTEP) …and de-routed"
 
+# The bug the split exists for. The refused `--assignee ""` used to take the
+# route pins down with it, on precisely the bead being re-offered — and the
+# patrol retry cannot succeed either while the holder is alive.
+eq "$(field L-held gc.routed_to)" "" \
+   "(HELDSTEP) a step a live session holds is de-routed even though its assignee clear is refused"
+eq "$(field L-held gc.session_affinity)" "" \
+   "(HELDSTEP) …and loses its session affinity in the same write"
+eq "$(field L-held assignee)" "gc-toolkit__polecat-lx-other" \
+   "(HELDSTEP) …while the assignee stays with the session that holds it"
+grep -q 'de-pinned husk step L-held' <<< "$RELOUT" \
+  && ok "(HELDSTEP) …and the run says the assignee was left behind" \
+  || bad "(HELDSTEP) the partial quiesce is unreported (out: $RELOUT)"
+
+# The root is the other door: a molecule whose worker steps are all quiet still
+# draws spawns while its gc.kind=workflow root keeps a pool route.
+eq "$(field root-LIVE gc.routed_to)" "" \
+   "(LIVEROOT) the workflow root is de-routed too, so no door is left open"
+
 # The disposition itself still lands whole.
 eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
 eq "$(field A-LIVE assignee)" ""    "(LIVESTEP) …and unassigned"
@@ -783,6 +989,40 @@ eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step afte
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
 [ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
+
+# ── A FOLDED anchor, against the same mutating store ─────────────────────────
+# The argv assertions in the FOLDED section prove which flags the verb sent.
+# This one proves what the store holds afterwards, which is the thing the bug
+# is about: a bead whose disposition landed must not come back as open work.
+FOLDRC=0
+FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
+  sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
+     --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
+FOLDERR="$(cat "$LIVE/folderr")"
+eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
+eq "$(field A-FOLD status)" "closed" \
+   "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
+eq "$(field A-FOLD assignee)" "gc-toolkit__polecat-lx-old" \
+   "(FOLDSTORE) …still assigned as it was closed"
+eq "$(field A-FOLD gc.routed_to)" "human" \
+   "(FOLDSTORE) …and its route survives the release"
+eq "$(field A-FOLD gc.proactive_reaction)" "" \
+   "(FOLDSTORE) …with no fresh reaction marker over a landed disposition"
+eq "$(field A-FOLD gc.superseded_by)" "A-CARRIER" \
+   "(FOLDSTORE) …and the fold record itself untouched"
+eq "$(field A-FOLD gc.takeaway)" "superseded by A-CARRIER; the pour raced the fold" \
+   "(FOLDSTORE) the sitting's headline still lands on it"
+eq "$(field F-work gc.routed_to)" "" \
+   "(FOLDSTORE) the molecule the fold outran is de-routed — the half that was unreachable"
+eq "$(field F-work assignee)" "" "(FOLDSTORE) …and unpinned from the session that is gone"
+eq "$(field root-FOLD gc.routed_to)" "" \
+   "(FOLDSTORE) …and its workflow root with it"
+grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
+  && ok "(FOLDSTORE) …and the run names the disposition it kept" \
+  || bad "(FOLDSTORE) the skipped park is unexplained (stderr: $FOLDERR)"
+grep -q 'anchor left closed' <<< "$FOLDOUT" \
+  && ok "(FOLDSTORE) …and reports a quiesce, not a release" \
+  || bad "(FOLDSTORE) the run claimed a release (stdout: $FOLDOUT)"
 PATH="$SAVED_PATH"
 
 # ── demand: what a person owes, as a bead the work is blocked by ──────────────
