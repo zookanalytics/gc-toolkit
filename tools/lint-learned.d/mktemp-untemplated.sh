@@ -11,8 +11,8 @@
 # agents and extraction tests run verbatim); `# >>> name`…`# <<< name`
 # marker-fenced snippets in *.md. Prose outside a fence quotes the shape
 # rather than running it. Whole-line comments are skipped for the same reason.
-# No exception list: a template is always available, `-t` counts, and a path
-# built from a variable counts.
+# No exception list: a template is always available, and a path built from a
+# variable counts.
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
 
 set -uo pipefail
@@ -33,11 +33,14 @@ is_comment() { # whole-line comments only; `cmd  # note` is code
     return 1
 }
 
-# A call is templated when an operand survives the option words. `-t` and
-# `--tmpdir` take the template (or a directory) as their own operand, so both
-# forms leave a name the producer chose.
+# A call is templated when a producer-named operand survives the option words,
+# so each option's arity decides what an operand even is. `-p DIR`,
+# `--tmpdir[=DIR]` and `--suffix=SUFF` choose a directory or a suffix and never
+# a basename: with no separate TEMPLATE beside them the name is still the libc
+# `tmp.XXXXXXXXXX`. `-t` takes no argument of its own, so the word after it is
+# the template.
 is_bare() {
-    local rest="$1" word
+    local rest="$1" word short="" after="" skip=0
     # Cut through the mktemp that is in COMMAND position, not the first
     # `mktemp` substring: a helper named mktemp_tracked would otherwise stand
     # in for the untemplated call inside it.
@@ -46,10 +49,18 @@ is_bare() {
     # separator or logical operator ends the argument list.
     rest="$(printf '%s' "$rest" | sed -E 's/[)|;&<>].*//')"
     for word in $rest; do
+        if [ "$skip" = 1 ]; then skip=0; continue; fi   # an option's own argument
         case "$word" in
-            --tmpdir=*|--suffix=*) return 1 ;;   # carries a chosen name
-            -*) continue ;;                      # a plain option flag
-            *) return 1 ;;                       # an operand: templated
+            --suffix) skip=1 ;;   # required argument, taken from the next word
+            --*) ;;               # --suffix=SUFF, --tmpdir[=DIR], and the flags
+            -*)                   # a short cluster; `p` takes DIR, attached or next
+                short="${word#-}"
+                if [ "${short%%p*}" != "$short" ]; then
+                    after="${short#*p}"
+                    [ -n "$after" ] || skip=1
+                fi
+                ;;
+            *) return 1 ;;        # an operand survives: the producer named it
         esac
     done
     return 0

@@ -215,6 +215,43 @@ eq "$RC" 1 "a helper named for the command does not stand in for the call inside
 has "$OUT" "named-helper.sh:2:" "the untemplated call in the helper is reported"
 hasnt "$OUT" "named-helper.sh:3:" "and the templated one beside it is not"
 
+echo "── mktemp-untemplated: option arity ──"
+
+# An option that takes a directory or a suffix has not named anything: with no
+# TEMPLATE beside it the basename is still the libc `tmp.XXXXXXXXXX`, which is
+# the family the rule exists to empty. `mktemp -u` on each of these prints a
+# `tmp.*` name.
+mk "$TMP/option-args.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(@MKT@ --suffix=.json)
+B=$(@MKT@ --suffix .json)
+C=$(@MKT@ --tmpdir=/var/tmp)
+D=$(@MKT@ -p /var/tmp)
+E=$(@MKT@ -dp "$STATE_DIR")
+F=$(@MKT@ -t)
+FIX
+runm "$TMP/option-args.sh"
+eq "$RC" 1 "an option that chooses a directory or a suffix is not a template"
+for n in 2 3 4 5 6 7; do
+    has "$OUT" "option-args.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 6 "and nothing else is"
+
+# The same options with a TEMPLATE beside them: the producer named it, and the
+# option's own argument must not be mistaken for that name.
+mk "$TMP/option-args-templated.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(@MKT@ --suffix=.json "${TMPDIR:-/tmp}/gctk-thing.XXXXXX")
+B=$(@MKT@ --suffix .json gctk-thing.XXXXXX)
+C=$(@MKT@ --tmpdir=/var/tmp gctk-thing.XXXXXX)
+D=$(@MKT@ -p /var/tmp gctk-thing.XXXXXX)
+E=$(@MKT@ -dp /var/tmp gctk-thing.XXXXXX)
+F=$(@MKT@ --tmpdir gctk-thing.XXXXXX)
+FIX
+runm "$TMP/option-args-templated.sh"
+eq "$RC" 0 "a template beside the option argument is still a chosen name"
+eq "$OUT" "" "a clean file prints nothing"
+
 echo "── mktemp-untemplated: scope ──"
 
 mk "$TMP/prose.md" <<'FIX'
