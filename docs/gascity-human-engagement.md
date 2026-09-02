@@ -688,6 +688,29 @@ session respawned onto a hold whose scrollback a restart took, is a
 question about this session's scrollback that no script can read, so the
 claimer states the fact and the prompt makes the choice.
 
+*The one shape that verdict gets wrong, and the fourth that covers it:* a
+sitting does not end in a single write. The prompt stamps `gc.outcome` on
+the visit, reads it back, posts the sign-off, and closes last of all. A
+session that dies between the stamp and the close leaves a visit that is
+`in_progress`, assigned, and carrying a final outcome. It is complete in
+every way except the one that ends it, and the claim result says only
+`existing_assignment`, so the hold answers and the prompt goes back to
+waiting. The close never runs. `assets/scripts/liveness-sweep.sh` reads
+the still-live visit as `conversing`, which keeps its subject out of the
+unnamed-wait census for as long as the strand stands, so nothing else
+raises it either.
+
+`action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
+closes the visit immediately after it, so a `task_kind=visit` still open
+while carrying one is a sitting whose record is already complete. The
+claimer performs that close itself rather than returning an instruction to
+perform it, and escalates to `--force` when bd's close-authority guard
+refuses the two renderings of this session's own identity. The prompt's
+arm re-checks that the close took, which is also what performs it on the
+claimer-less path, and posts nothing. The sign-off was owed to scrollback
+that died with the session, and the pane that finishes the close is a
+different thread.
+
 Two constraints follow for anyone tuning this. With the idle clock off no
 clock ends a held sitting, so the wake path is the only pack-owned way one
 ends without a ruling and `action=hold` is the whole of that guard;
