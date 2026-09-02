@@ -322,10 +322,17 @@ assert_routable "$POOL" || exit 1
 TRIAGE_SCOPE="ephemeral-subject-findings"
 RAISED_BY=""
 if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
+  # The matched row is re-checked field by field, as in the dedup listing
+  # above. A filter the listing ignored would hand back an unrelated open
+  # bead, and the visit would take its title, its group stamp and its tracks
+  # edge from a bead nobody escalated about.
   STANDING=$(bd_json list --status=open,in_progress \
       --metadata-field "task_kind=triage-subject" \
-      --metadata-field "triage.scope=$TRIAGE_SCOPE" --limit=1 \
-    | jq -r 'if type == "array" then (.[0].id // "") else "" end' 2>/dev/null)
+      --metadata-field "triage.scope=$TRIAGE_SCOPE" --limit=20 \
+    | jq -r --arg s "$TRIAGE_SCOPE" 'if type == "array" then
+        ([.[] | select((.metadata.task_kind // "") == "triage-subject"
+                   and (.metadata["triage.scope"] // "") == $s)][0].id // "")
+      else "" end' 2>/dev/null)
   if [ -z "$STANDING" ]; then
     # An unreadable listing arrives here too and mints a second bucket. That
     # is the trade the dedup listing already makes: a duplicate bead is a

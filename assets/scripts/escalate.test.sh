@@ -44,6 +44,9 @@ case "${1:-}" in
     done
     out=$(jq -c --arg st ",$statuses," '
       [ .[] | select(.status as $s | $st | contains("," + $s + ",")) ]' "$STORE")
+    # A bd that silently ignored --metadata-field. Every caller re-checks the
+    # rows it matched; this is what exercises those re-checks.
+    [ -n "${STUB_LIST_IGNORE_FIELDS:-}" ] && fields=()
     for f in ${fields[@]+"${fields[@]}"}; do
       k="${f%%=*}"; v="${f#*=}"
       out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
@@ -106,7 +109,7 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
-      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH 2>/dev/null || true
+      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
@@ -431,6 +434,15 @@ eq "$rc" 0 "the escalation files"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on it — an unmarked bead is still durable"
 has "$out" "markers did not read back" "the lost markers are reported"
 has "$out" "repair:" "with the repair that makes it findable again"
+
+# A listing that ignored its filters answers with an unrelated open bead. The
+# re-check refuses it, so the visit is never wired to a bead nobody escalated
+# about.
+reset '[{"id":"other","status":"open","assignee":"","title":"an unrelated open bead","metadata":{},"notes":""}]'
+STUB_LIST_IGNORE_FIELDS=1 "$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+eq "$(meta vis-1 task_kind)" "triage-subject" "an unfiltered answer is refused and a bucket minted instead"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the minted bucket"
+hasnt "$(cat "$STUB_DEPS")" "|other|" "and no edge reaches the unrelated bead"
 
 # The same fail-open the dedup listing takes: an unreadable lookup mints a
 # second bucket rather than dropping the subject.
