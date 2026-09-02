@@ -27,6 +27,8 @@
 # left — a reviewer that dies after claim, a fix unit filed with its edge
 # reversed — stop the PR moving and are caught by liveness-sweep.sh's stale-gate
 # pass, not by a count on the gate.
+# The declared default is codex,triage: codex is the standing correctness
+# review and triage decides which dedicated gates the change also needs.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -41,13 +43,13 @@ UNSAFE_RC=3
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
-DEFAULT_CHECK_SET="codex"
+DEFAULT_CHECK_SET="codex,triage"
 REVIEW_FORMULA="mol-review"
 REVIEW_POOL=""
 FIX_POOL=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --default)     DEFAULT_CHECK_SET="${2:-codex}"; shift 2 ;;
+    --default)     DEFAULT_CHECK_SET="${2:-codex,triage}"; shift 2 ;;
     --review-pool) REVIEW_POOL="${2:-}"; shift 2 ;;
     --fix-pool)    FIX_POOL="${2:-}"; shift 2 ;;
     *) shift ;;
@@ -57,7 +59,7 @@ done
 # Canonical check_set form: lowercase, whitespace/separators stripped.
 cs_canon() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],'; }
 case "$(cs_canon "$DEFAULT_CHECK_SET")" in
-  '')       DEFAULT_CHECK_SET="codex" ;;
+  '')       DEFAULT_CHECK_SET="codex,triage" ;;
   none|off) DEFAULT_CHECK_SET="none" ;;
 esac
 
@@ -676,7 +678,13 @@ STRAY
     # failed carries the deterministic title but no anchor_bead — invisible to
     # inflight_review, so re-creating would mint a twin every pass. Adopt it
     # instead. An unreadable probe dispatches nothing (retry next pass).
-    RID_TITLE="Review branch $branch -> $target:"
+    #
+    # The title carries the GATE, because the body does: the dispatch note
+    # names the method for the gate it was written for. Keyed on the branch
+    # alone, a multi-gate check_set would let one gate adopt another gate's
+    # orphan and stamp its own check_name over it — a review telling its
+    # reviewer to run one method while satisfying a different gate.
+    RID_TITLE="Review branch $branch -> $target (gate $g):"
     if ! orphans=$(bd_list --status=open --title-contains "$RID_TITLE"); then
       echo "$PROG: $id orphan-review probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
       skipped=$((skipped + 1)); continue
@@ -687,7 +695,7 @@ STRAY
       echo "$PROG: $id adopting unstamped review orphan $RID for gate '$g' (created by a prior pass whose stamp failed)"
     else
       body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$why" 2>/dev/null) || body=""
+      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --check-name "$g" --note "$why" 2>/dev/null) || body=""
       if [ -n "$body" ]; then
         RID=$(printf '%s' "$body" \
           | gc bd create "$RID_TITLE $title" -t task --body-file - --json 2>/dev/null \
