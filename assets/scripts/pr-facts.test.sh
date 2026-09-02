@@ -3,12 +3,12 @@
 # authority. Covers: recording an out-of-band merge (never with an empty
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
 # cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
-# branch+head, holds veto, unstamped orphans adopted), classified rebase or
-# merge by the head branch and stamped prepare_mode, counted as dispatched only
-# once that stamp AND the route read back, with a child stranded by a lost route
-# stamp re-routed rather than buried by the dedup; stale-gate -> one
-# re-review child per head, carrying mol-review via gc sling --on (dedup,
-# pour read-back, fix_target_pool stamped);
+# branch+head, holds and a live demand veto, unstamped orphans adopted),
+# classified rebase or merge by the head branch and stamped prepare_mode,
+# counted as dispatched only once that stamp AND the route read back, with a
+# child stranded by a lost route stamp re-routed rather than buried by the
+# dedup; stale-gate -> one re-review child per head, carrying mol-review via
+# gc sling --on (dedup, pour read-back, fix_target_pool stamped);
 # and dismissing our OWN superseded CHANGES_REQUESTED (marker recorded first;
 # auto-merge armed skips; a human's review is never dismissed).
 # Also covers --posture-only (the pre-merge arm: records posture, dispatches
@@ -173,6 +173,25 @@ store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
 printf '%s' "$(prview 14 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_14.json"
 out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "rebase_hold vetoes the dispatch"
+
+echo "# …and so does a live demand: rebasing is one horn of what it asks"
+# The anchor carries no human route of its own. That route sits on the demand
+# bead, so the demand is the only signal that a person is mid-decision here.
+store "[$(anchor F5b 16),$(demand F5b)]"
+printf '%s' "$(prview 16 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_16.json"
+: > "$STUB_SESSION_LOG"
+out=$(run)
+eq "$(meta F5b 'gc.routed_to')" "" "the anchor itself is not human-routed"
+has "$out" "an open demand holds it for a person's decision; no rework dispatched" "the demand vetoes the dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+eq "$(meta F5b merge_result)" "pull_request" "…while the anchor keeps gating, so the merge still waits"
+
+echo "# …while a CLOSED demand is a decision already made: the rework is dispatched"
+store "[$(anchor F5c 17),$(demand F5c closed)]"
+printf '%s' "$(prview 17 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_17.json"
+out=$(run)
+has "$out" "filed rebase-mode rework new-3 routed to $FIX" "a closed demand holds nothing"
 
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
