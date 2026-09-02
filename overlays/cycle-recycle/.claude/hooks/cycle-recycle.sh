@@ -2,21 +2,62 @@
 # cycle-recycle.sh — deterministic proactive context recycle for patrol agents.
 # Runs as a Claude Code `Stop` hook (every turn boundary), so the recycle is
 # enforced regardless of LLM state. Self-gates to witness | deacon | refinery;
-# no-ops for everyone else. Over an absolute 200K input-token threshold (read
-# from the supervisor API) it writes a durable HANDOFF (`gc handoff`) and
-# triggers a restart (`gc session reset`); the inheriting session re-adopts
-# its wisp via its startup reconcile. Policy: docs/cycle-recycle.md.
+# no-ops for everyone else. Over an absolute 200K context threshold (measured
+# from the session transcript named on hook stdin) it writes a durable HANDOFF
+# (`gc handoff`) and triggers a restart (`gc session reset`); the inheriting
+# session re-adopts its wisp via its startup reconcile. Policy:
+# docs/cycle-recycle.md.
 #
 # Invariants:
 #   * NEVER prompt the operator (heartbeat-no-consent-ui).
-#   * ALWAYS exit 0; stdout stays empty (diagnostics to stderr).
-#   * Under threshold (the common path) stays cheap: one bounded curl.
+#   * ALWAYS exit 0; stdout stays empty (diagnostics to stderr), except under
+#     `--measure`, which prints the measurement and acts on nothing.
+#   * Under threshold (the common path) stays cheap: one bounded transcript
+#     tail, no network.
 #   * Over threshold, DEFER while an operator is attached or the refinery is
 #     mid git-op; uncertain -> skip. PreCompact stays the reactive net, as it
-#     is when the API is unreachable or input_tokens unknown.
+#     is when the transcript is unreadable or carries no usage entry.
 
 set -u
 export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
+
+TAIL_BYTES=2097152   # newest 2MiB of the transcript holds the latest usage entry
+THRESHOLD=200000
+
+# measure_context <transcript-path> — print the session's live context size in
+# tokens, or nothing when no usage entry is readable. The newest usage entry's
+# prompt-side input + cache reads + cache writes IS the current context size;
+# after a compaction the newest entry reads low again. Same quantity gascity
+# injects on UserPromptSubmit (cmd/gc/context_inject.go), so the hook and the
+# rest of the city measure the same thing. The `grep` prefilter keeps the
+# common path off jq for the bulk of a transcript, and a first line the tail
+# cut mid-record simply fails to parse and is skipped.
+measure_context() {
+    tail -c "$TAIL_BYTES" "$1" 2>/dev/null | grep '"usage"' | jq -Rrn '
+        [ inputs
+          | (try fromjson catch empty)
+          | .message.usage // empty
+          | ((.input_tokens // 0) + (.cache_read_input_tokens // 0)
+             + (.cache_creation_input_tokens // 0))
+          | select(. > 0) ]
+        | last // empty' 2>/dev/null
+}
+
+# transcript_from_stdin — the `transcript_path` the provider hands every hook.
+transcript_from_stdin() {
+    [ -t 0 ] && return 0   # no hook payload (invoked by hand) -> measure nothing
+    t=$(cat 2>/dev/null | jq -r '.transcript_path // empty' 2>/dev/null)
+    [ -n "$t" ] && [ -r "$t" ] && printf '%s' "$t"
+}
+
+# `--measure` prints the context size this hook would compare against its
+# threshold and exits, acting on nothing. It is how doctor/check-recycle-capable
+# asserts the measurement against the shipped script rather than a copy of it.
+if [ "${1:-}" = --measure ]; then
+    T=$(transcript_from_stdin)
+    [ -n "$T" ] && measure_context "$T"
+    exit 0
+fi
 
 # --- 1. Self-gate: patrol roles only -------------------------------------
 AGENT="${GC_AGENT:-}"
@@ -28,16 +69,18 @@ case "$role" in
   *) exit 0 ;; # not a patrol agent — no-op, never interrupt focused work
 esac
 
-# --- 2. Measure context: input_tokens from the supervisor API ------------
-API_URL="${GC_API_URL:-http://127.0.0.1:8372}"
-CITY="$(gc cities --json 2>/dev/null | jq -r --arg p "${GC_CITY:-}" '.cities[] | select(.path == $p) | .name' 2>/dev/null)"
-[ -n "$CITY" ] || exit 0 # cannot resolve city name -> skip (PreCompact stays the net)
+# --- 2. Measure context: the transcript named on hook stdin ---------------
+# Reading the session's own transcript keeps the measurement local to the turn
+# that triggered the hook. Nothing outside the session has to publish a context
+# size for the recycle to work.
+TRANSCRIPT="$(transcript_from_stdin)"
+[ -n "$TRANSCRIPT" ] || exit 0 # no readable transcript -> skip (PreCompact stays the net)
 
-TOKENS="$(curl -sf --max-time 3 "$API_URL/v0/city/$CITY/agent/$AGENT" 2>/dev/null | jq -r '.input_tokens // 0' 2>/dev/null || echo 0)"
+TOKENS="$(measure_context "$TRANSCRIPT")"
 case "$TOKENS" in
-  '' | *[!0-9]*) exit 0 ;; # empty / null / non-numeric -> unknown, skip silently
+  '' | *[!0-9]*) exit 0 ;; # no usage entry / unreadable -> unknown, skip silently
 esac
-[ "$TOKENS" -ge 200000 ] || exit 0 # under threshold -> cheap no-op (the common path)
+[ "$TOKENS" -ge "$THRESHOLD" ] || exit 0 # under threshold -> cheap no-op (the common path)
 
 # --- 2.5. Safety guards: defer (don't force) the recycle at a bad moment --
 # `gc session reset` preserves identity/alias/mail/queued work but resets the
@@ -83,13 +126,13 @@ if [ "$role" = refinery ]; then
 fi
 
 # --- 3. Over threshold: recycle (HANDOFF mail + restart) ------------------
-echo "cycle-recycle: $AGENT at input_tokens=$TOKENS (>=200000) — handoff + reset" >&2
+echo "cycle-recycle: $AGENT at context=$TOKENS tokens (>=$THRESHOLD) — handoff + reset" >&2
 
 # `gc handoff` (non-auto) writes the durable HANDOFF mail AND stops the runtime
 # for controller-restartable classes; for on-demand named patrol sessions it
 # only writes mail and returns. Non-auto is required so controller-restartable
 # patrols actually recycle — `--auto` would mail-only and never restart them.
-if ! gc handoff "context cycle: input_tokens reached $TOKENS" >&2; then
+if ! gc handoff "context cycle: context reached $TOKENS tokens" >&2; then
   echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2
 fi
 

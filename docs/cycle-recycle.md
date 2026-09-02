@@ -36,8 +36,14 @@ At the end of every turn the hook, in order:
    `refinery`. Every other agent — ephemeral polecats, converse sessions,
    mechanik — is a no-op, so a focused worker is never recycled
    mid-task.
-2. **Measures context** by reading `input_tokens` for the agent from the
-   supervisor API (`GC_API_URL`, default `http://127.0.0.1:8372`).
+2. **Measures context** from the session's own transcript. Every hook
+   payload carries a `transcript_path`; the newest usage entry in that
+   JSONL — prompt-side input tokens plus cache reads plus cache writes —
+   is the session's live context size. It is the same quantity gascity
+   injects on `UserPromptSubmit`, so the hook and the rest of the city
+   agree on what "context size" means, and the measurement is local to the
+   turn that triggered the hook rather than something another process has
+   to publish.
 3. **Compares against an absolute 200K threshold.** Under it — the common
    path — the hook exits cheaply.
 4. **Over threshold**, writes a durable HANDOFF mail (`gc handoff`) and
@@ -68,8 +74,9 @@ hook defers when:
 The bias is **uncertain → skip**. Deferring only delays the recycle: the
 hook re-checks next turn, and Claude's `PreCompact` hook remains the
 reactive safety net at the model's own compaction edge. The same applies
-when the supervisor API is unreachable or `input_tokens` is unknown — the
-check skips silently rather than guessing. There is no fallback heuristic.
+when no `transcript_path` arrives, the transcript is unreadable, or it
+carries no usage entry — the check skips silently rather than guessing.
+There is no fallback heuristic.
 
 ## Whether it can fire
 
@@ -77,13 +84,14 @@ Every skip is silent, so a mechanism that can never fire looks exactly like
 one that has had nothing to do. `doctor/check-recycle-capable` closes that
 gap. It asserts the capability rather than the installation:
 
-- The city path resolves to a city name in `gc cities`. That name is what
-  the hook builds its API URL from, and an unmatched path is its first
-  silent exit.
-- `$GC_API_URL/v0/city/<city>/agent/<agent>` carries a numeric
-  `input_tokens` for every awake witness, deacon, and refinery. Without
-  that field the hook reads 0 tokens and exits under the threshold on every
-  turn.
+- A `Stop` event in the overlay's `settings.json` invokes the hook, and
+  does not redirect its stdin. The transcript path arrives *on* stdin, so a
+  wiring that starves it leaves a hook that measures nothing.
+- The hook's own measurement reads the context size a transcript carries.
+  The check drives the shipped script through `cycle-recycle.sh --measure`,
+  which prints what the hook would compare against its threshold and acts
+  on nothing, so a passing check is evidence about the hook rather than
+  about a copy of its logic.
 - No refinery's git-op defer guard has been continuously true past a bound
   (24h by default, `GC_DOCTOR_RECYCLE_LATCH_HOURS`). The guard cannot tell
   a rebase in flight from a tracked file nobody has committed, so the check
@@ -91,7 +99,9 @@ gap. It asserts the capability rather than the installation:
 
 The check is silent when the mechanism is healthy and merely idle. It reads
 the rig's canonical checkout. The hook also defers on its own working
-directory, which nothing outside that session can address.
+directory, which nothing outside that session can address. Whether a given
+session's transcript is readable is a per-session fact the check cannot see
+from outside; what it asserts is that the measurement chain works.
 
 ## Invariants
 
@@ -109,7 +119,7 @@ directory, which nothing outside that session can address.
 - **Keep stdout empty** — all diagnostics go to stderr, so Claude never
   parses a stray block decision.
 - **Under threshold must stay cheap.** It is the common path: one bounded
-  `curl`.
+  read of the transcript's newest 2MiB, and no network.
 
 ## Relationship to the handoff skill
 

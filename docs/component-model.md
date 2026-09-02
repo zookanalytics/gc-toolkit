@@ -124,10 +124,10 @@ Three further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent), and
-`doctor/check-recycle-capable` (cycle-recycle can fire at all: the city name
-resolves, the supervisor endpoint carries a numeric `input_tokens` for every
-awake patrol agent, and no refinery's git-op defer guard has been latched past
-a bound). That is the whole set: **14 checks, each asserting a live structural
+`doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
+reaches the hook with its stdin intact, the hook's own measurement reads the
+context size a transcript carries, and no refinery's git-op defer guard has
+been latched past a bound). That is the whole set: **14 checks, each asserting a live structural
 property** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
