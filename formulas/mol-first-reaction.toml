@@ -309,7 +309,16 @@ DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 # >>> gate-visit
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+# The pool has to name a LIVE agent identity: a pool offer matches by exact
+# byte equality, and GC_RIG picks both the store this visit lands in and the
+# rig segment a rig-scoped pool carries, so an address built out of GC_RIG
+# alone renders bare for a rig-less caller — claimed by nobody, and reading
+# back clean forever. pool-route.sh proves the name against the live agent
+# set and refuses rather than let a mute visit be filed.
+POOL_ROUTE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/pool-route.sh" ] && { POOL_ROUTE="$c/assets/scripts/pool-route.sh"; break; }
+done
+POOL=$("${POOL_ROUTE:?pool-route.sh not found in the pack}" gc-toolkit.converse) || exit 1
 VISIT=$(gc bd create -t task --title "visit: $WORK_BEAD_ID — first reaction ready: accept or redirect" \
   -d "First reaction ready on $WORK_BEAD_ID — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \

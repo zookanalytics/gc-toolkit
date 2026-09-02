@@ -98,7 +98,16 @@ exit
    # ruling — only the operator can answer. File the visit, then record it.
    # This is the minority case: if you can name the work, take actionable.
    # >>> gate-visit
-   POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+   # The pool has to name a LIVE agent identity: a pool offer matches by exact
+   # byte equality, and GC_RIG picks both the store this visit lands in and the
+   # rig segment a rig-scoped pool carries, so an address built out of GC_RIG
+   # alone renders bare for a rig-less caller — claimed by nobody, and reading
+   # back clean forever. pool-route.sh proves the name against the live agent
+   # set and refuses rather than let a mute visit be filed.
+   POOL_ROUTE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+     [ -x "$c/assets/scripts/pool-route.sh" ] && { POOL_ROUTE="$c/assets/scripts/pool-route.sh"; break; }
+   done
+   POOL=$("${POOL_ROUTE:?pool-route.sh not found in the pack}" gc-toolkit.converse) || exit 1
    VISIT=$(gc bd create -t task --title "visit: <id> — first reaction ready: accept or redirect" \
      -d "First reaction ready on <id> — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
    [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \

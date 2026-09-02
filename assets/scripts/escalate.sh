@@ -40,11 +40,11 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              the key (`wedged-<target>`)
   --message  what the visit needs from a human; first line becomes the
              visit title's headline (required)
-  --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse.
-             The route must name a live agent identity that reads this rig's
-             store, so a caller with GC_RIG unset must pass this explicitly —
-             the bare default matches no rig-scoped pool. A rig-qualified pool
-             also selects the store, so the two always agree.
+  --pool     converse pool to route to; default gc-toolkit.converse, qualified
+             with GC_RIG. The route must name a live agent identity that reads
+             this rig's store, so a caller with GC_RIG unset must pass this
+             explicitly — the unqualified default matches no rig-scoped pool.
+             A rig-qualified pool also selects the store, so the two agree.
 
 env:
   GC_ESCALATE_VERDICT_WINDOW  seconds a `moot` or `benign` verdict suppresses
@@ -89,72 +89,25 @@ fi
 
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 
-# The live agent identity set, read once. Empty means UNREADABLE, never "no
-# agents" — an empty answer is the absence of proof, not a refusal.
-AGENT_IDS=""; AGENT_IDS_READ=0
-agent_ids() {
-  if [ "$AGENT_IDS_READ" = 0 ]; then
-    AGENT_IDS_READ=1
-    AGENT_IDS=$(if command -v timeout >/dev/null 2>&1; then timeout 15 gc agent list --json 2>/dev/null
-                else gc agent list --json 2>/dev/null; fi \
-      | scrub \
-      | jq -c '[.agents[]? | (.qualified_name // "") | select(. != "")]' 2>/dev/null)
-    [ "$AGENT_IDS" = "[]" ] && AGENT_IDS=""
-  fi
-  printf '%s' "$AGENT_IDS"
-}
-
-# ok | unknown | cross-rig | no-identity. A pool offer matches by exact byte
-# equality (gascity hookClaimMatchesRoute), so a well-formed name no agent
-# carries is never claimed. GC_RIG picks both the store `gc bd create` writes
-# to and the rig segment a rig-scoped pool must carry, so a route naming
-# another rig addresses a pool that never reads the store its visit lands in.
-route_verdict() {
-  local route="$1" rig_seg ids
-  [ -z "$route" ] && { printf 'no-identity'; return 0; }
-  # `human` is the city's durable "the operator owns it; no agent will take
-  # it" marker (services/helm/README.md), so it is already held by the reader
-  # an escalation wants — not a pool name that failed to resolve.
-  [ "$route" = "human" ] && { printf 'ok'; return 0; }
-  rig_seg="${route%%/*}"; [ "$rig_seg" = "$route" ] && rig_seg=""
-  if [ -n "${GC_RIG:-}" ] && [ -n "$rig_seg" ] && [ "$rig_seg" != "$GC_RIG" ]; then
-    printf 'cross-rig'; return 0
-  fi
-  ids=$(agent_ids)
-  [ -z "$ids" ] && { printf 'unknown'; return 0; }
-  printf '%s' "$ids" | jq -e --arg r "$route" 'index($r) != null' >/dev/null 2>&1 \
-    && printf 'ok' || printf 'no-identity'
-}
-
-# Only proof refuses: an unreadable identity set warns and files, because an
-# unverified visit still beats the silent mute this script exists to end.
-assert_routable() {
-  local route="$1" rig_seg near
-  case "$(route_verdict "$route")" in
-    ok) return 0 ;;
-    unknown)
-      warn "could not read the live agent set (\`gc agent list --json\`); filing with route '$route' UNVERIFIED — confirm a pool claims it"
-      return 0 ;;
-    cross-rig)
-      rig_seg="${route%%/*}"
-      warn "route '$route' is scoped to rig '$rig_seg' but this visit lands in the '${GC_RIG:-}' store, which that pool never reads — nothing filed. Use a '${GC_RIG:-}/' pool, or run with GC_RIG=$rig_seg so the store and the route agree."
-      return 1 ;;
-  esac
-  near=$(agent_ids | jq -r --arg r "$route" \
-    '[.[] | select(endswith("/" + $r))] | join(", ")' 2>/dev/null)
-  warn "route '$route' matches no live agent identity — nothing filed (an unroutable visit reports success while no human is ever asked)."
-  [ -n "$near" ] && warn "  live rig-qualified forms of that name: $near"
-  warn "  repair: re-run with --pool <rig>/<pool>, or with GC_RIG set so the default qualifies itself."
-  return 1
-}
+# The route gate is pool-route.sh, shared with every other copy of this
+# block: one implementation decides what "addresses somebody" means, so a
+# caller cannot drift from it by re-deriving the answer in its own copy.
+SELF_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+POOL_ROUTE="$SELF_DIR/pool-route.sh"
+[ -x "$POOL_ROUTE" ] || { warn "pool-route.sh not found beside this script ($POOL_ROUTE); no route can be proved, so nothing is filed"; exit 1; }
+# ok | unknown | cross-rig | no-identity, for a route this script did not write.
+route_verdict() { "$POOL_ROUTE" --verdict "$1"; }
 
 HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
 
 # >>> gate-visit
 # Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
 # checks this copy's invariants. escalation_key rides its own flag beside it.
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
-[ -n "$POOL_ARG" ] && POOL="$POOL_ARG"
+# The pool is resolved at each point that WRITES it, never up here: an
+# escalation whose visit is already open and routable has already asked its
+# human, and a default pool that call never needed must not turn it into a
+# failure.
+POOL_NAME="${POOL_ARG:-gc-toolkit.converse}"
 
 # Idempotence: an open (or claimed) visit for this situation means the human is
 # already asked. What "this situation" is depends on whether the subject
@@ -206,7 +159,7 @@ if [ -n "$OPEN" ]; then
       echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another; its route '$OPEN_ROUTE' is UNVERIFIED"
       exit 0 ;;
   esac
-  assert_routable "$POOL" || exit 1
+  POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
   warn "visit $OPEN is open for $DEDUP_SCOPE but routes to '$OPEN_ROUTE', which no live pool claims — repointing it at '$POOL'."
   gc bd update "$OPEN" --set-metadata "gc.routed_to=$POOL" >/dev/null 2>&1
   OPEN_GOT=$(bd_json show "$OPEN" | jq -r '.[0].metadata["gc.routed_to"] // ""' 2>/dev/null)
@@ -288,7 +241,7 @@ if [ "$VERDICT_WINDOW" -gt 0 ]; then
   fi
 fi
 
-assert_routable "$POOL" || exit 1
+POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 VISIT=$(gc bd create -t task --title "visit: $SUBJECT — $HEADLINE" -d "$MESSAGE" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { echo "escalate: bd create returned no id — nothing filed; re-run rather than improvising another create form" >&2; exit 1; }

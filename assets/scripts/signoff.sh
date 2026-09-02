@@ -49,6 +49,9 @@ set -uo pipefail
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
+# Sibling tools live beside this script in the pack.
+SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+
 usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
@@ -743,8 +746,18 @@ if [ -n "$GOT" ]; then
   exit 2
 fi
 
-FIX_POOL=$(row_meta "$REVIEW_ROW" fix_target_pool)
-[ -n "$FIX_POOL" ] || FIX_POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
+# The child is offered off this route by exact byte equality, and GC_RIG picks
+# both the store it lands in and the rig segment a rig-scoped pool carries, so
+# an address built out of GC_RIG alone renders bare for a rig-less caller: the
+# stamp reads back clean, no polecat is ever offered the rework, and the PR
+# just stops moving. Prove the route BEFORE the child exists — a review left
+# open is retried, a rework child nothing claims is found by a human.
+FIX_POOL_NAME=$(row_meta "$REVIEW_ROW" fix_target_pool)
+[ -n "$FIX_POOL_NAME" ] || FIX_POOL_NAME="gc-toolkit.polecat"
+FIX_POOL=$("$SCRIPT_DIR/pool-route.sh" "$FIX_POOL_NAME") || {
+  warn "the rework child would route to '$FIX_POOL_NAME', which no live pool claims; review left open for a retry"
+  exit 2
+}
 FIX_TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$ANCHOR_ROW" target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$REVIEW_ROW" review_base)
