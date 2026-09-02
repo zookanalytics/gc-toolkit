@@ -12,7 +12,7 @@
 # to — baked in by tmux-bindings.sh at install time so the API URL is
 # deterministic even though the key fires from tmux's bare env.
 # --refresh-cache refetches the role map and exits without rendering. The
-# picker spawns it detached on each keypress; nothing else calls it.
+# picker spawns it detached, for the next keypress; nothing else calls it.
 #
 # Rig + identity derivation, in the order the awk block tries them:
 #   1. GC_AGENT is "<rig>/<pack>.<role>". Both fields come from it.
