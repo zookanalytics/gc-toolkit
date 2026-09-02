@@ -14,7 +14,7 @@
 # pre-existing target failure filed a fresh P1, on every refinery, for as long as
 # the failure persisted. The dedup guard had never once run.
 #
-# The fix (the `# >>> preexisting-failure-dedup` … `# <<< …` block) has three
+# The fix (the `# >>> preexisting-failure-dedup` … `# <<< …` block) has five
 # load-bearing parts, and this test pins each of them:
 #   1. the REAL flag, `--title-contains` (a case-insensitive title substring);
 #   2. a SHAPE check on the result, so an unreadable bd — which also produces an
@@ -23,7 +23,21 @@
 #      and unknown files nothing and merges nothing;
 #   3. ONE FAIL_TOKEN reused for both the probe and the title of any bead filed,
 #      so the NEXT patrol's substring probe actually matches what this one filed.
-#      A prose summary is reworded every cycle and never matches.
+#      A prose summary is reworded every cycle and never matches;
+#   4. a BODY on the bead it files. A title-only P1 cannot be dispositioned by
+#      anyone: nothing in it separates a host-load flake from a real regression.
+#      The body goes in -d, which fills .description. That is the field
+#      pr-open.sh, the work-context hook, and gc-proactive's scan filter read.
+#      Nothing in this pack reads .design. The raw output is pasted text, so
+#      the heredoc holding it stays quoted or the log's own backticks and $ run.
+#   5. a SHAPE check on the work-bead read that supplies the observed-on branch.
+#      `gc bd show` fails open the same way the list probe does, and it answers
+#      an OBJECT rather than an array when no requested id resolves, both at
+#      exit 0. Either payload leaves an unchecked read empty, which silently
+#      takes the formula default and files a P1 naming the default branch for a
+#      failure observed on an integration branch. A readable bead is a
+#      NON-EMPTY array, and the default stands in only for a bead that was read
+#      and genuinely carries no target.
 #
 # This EXECUTES the real snippet extracted verbatim from the formula (between the
 # markers) against a fake `gc`, so the test cannot drift from the shipped
@@ -54,9 +68,20 @@ mkdir -p "$TMP/bin"
 #                     Only reachable if someone reintroduces `--search`.
 #     Every list invocation is recorded (with its flags) so the assertions can
 #     prove WHICH flag shipped.
+#   gc bd show ... --json  -> one payload per SHOW_SCENARIO:
+#       target     -> metadata.target set, the branch the body must name
+#       notarget   -> metadata absent a target, so the formula default applies
+#       unreadable -> EMPTY stdout, exit 0 — bd fails open on this read too
+#       noresolve  -> the OBJECT bd answers, still at exit 0, when none of the
+#                     requested ids resolves. Array-shaped jq reads nothing out
+#                     of it, so it is indistinguishable from an absent target
+#                     unless the shape is checked.
 #   gc bd create ...       -> record CREATE_RAN + the --title value, so the
 #     assertions can prove a duplicate was (or was not) filed, and that the
-#     filed title carries the same token the probe searched for.
+#     filed title carries the same token the probe searched for. The -d value
+#     is written whole to $FAKE_BODY (it is multi-line, so it cannot share the
+#     line-oriented meta file), and a --design is recorded as DESIGN_USED so
+#     the assertions can prove the body landed in the field readers read.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 [ "$1" = "runtime" ] && exit 0
@@ -75,6 +100,13 @@ case "$2" in
       unreadable) : ;;   # empty stdout — bd fails open (error to stderr, nothing on stdout)
       badflag)    : ;;
     esac ;;
+  show)
+    case "${SHOW_SCENARIO:-target}" in
+      target)     printf '[{"id":"work-1","metadata":{"target":"release/x"}}]\n' ;;
+      notarget)   printf '[{"id":"work-1","metadata":{}}]\n' ;;
+      unreadable) : ;;   # empty stdout — bd errors to stderr and exits 0
+      noresolve)  printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n' ;;
+    esac ;;
   create)
     shift 2
     echo "CREATE_RAN" >> "$FAKE_META"
@@ -82,6 +114,10 @@ case "$2" in
       case "$1" in
         --title=*) printf 'title|%s\n' "${1#--title=}" >> "$FAKE_META"; shift ;;
         --title)   printf 'title|%s\n' "$2" >> "$FAKE_META"; shift 2 ;;
+        -d|--description) printf '%s' "$2" > "$FAKE_BODY"; shift 2 ;;
+        --description=*)  printf '%s' "${1#--description=}" > "$FAKE_BODY"; shift ;;
+        --design|--design-file) echo "DESIGN_USED" >> "$FAKE_META"; shift 2 ;;
+        --design=*|--design-file=*) echo "DESIGN_USED" >> "$FAKE_META"; shift ;;
         *) shift ;;
       esac
     done ;;
@@ -92,6 +128,7 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_META="$TMP/meta"
+export FAKE_BODY="$TMP/body"
 
 # --- Extract the real snippet from the formula. -------------------------------
 # Missing or renamed markers => zero blocks => the guard below fails loudly.
@@ -105,14 +142,19 @@ NBLOCKS=$(ls "$TMP"/block*.sh 2>/dev/null | wc -l | tr -d ' ')
 eq "$NBLOCKS" "1" "dedup snippet extracted between preexisting-failure-dedup markers"
 BLK="$TMP/block1.sh"
 
-# The shipped snippet carries a placeholder token; substitute a concrete one so
-# the block is executable, exactly as the refinery would fill it in.
+# The shipped snippet carries two placeholders; substitute concrete values so
+# the block is executable, exactly as the refinery would fill them in. The
+# stand-in log carries a backtick and a $ on purpose: real failure output does,
+# and they must reach the bead as text rather than running.
 sed -i 's/<failing test name or error symbol>/test_widget_rebase/' "$BLK"
+sed -i 's|<the check that failed, the package or target it ran in, and its raw output>|--- FAIL: test_widget_rebase (0.12s) internal/widget: want `ok`, got $STATUS|' "$BLK"
 
-# run <scenario> -> echo the snippet's exit code; leaves $FAKE_META populated.
+# run <list-scenario> [show-scenario] -> echo the snippet's exit code; leaves
+# $FAKE_META and $FAKE_BODY populated.
 run() {
   : > "$FAKE_META"
-  if LIST_SCENARIO="$1" WORK=work-1 bash "$BLK" >/dev/null 2>&1; then
+  : > "$FAKE_BODY"
+  if LIST_SCENARIO="$1" SHOW_SCENARIO="${2:-target}" WORK=work-1 bash "$BLK" >/dev/null 2>&1; then
     echo 0
   else
     echo "$?"
@@ -155,6 +197,34 @@ if grep -q '^title|.*test_widget_rebase' "$FAKE_META"; then
 else
   bad "(B) filed title does not carry the probe token — dedup cannot match next cycle"
 fi
+if grep -q '^title|.*[<>]' "$FAKE_META"; then
+  bad "(B) filed title still carries a <placeholder> — it ships as literal filler in the title"
+else
+  ok "(B) filed title carries no unsubstituted placeholder"
+fi
+
+# (B-body) THE BODY. The bead must carry the evidence, in the field this pack's
+#     readers read, with the raw log intact.
+if [ -s "$FAKE_BODY" ]; then
+  ok "(B) filed bead carries a body"
+else
+  bad "(B) filed bead has an EMPTY body — a title-only P1 nobody can disposition"
+fi
+if grep -q '^DESIGN_USED$' "$FAKE_META"; then
+  bad "(B) evidence filed as --design — nothing in this pack reads .design, so the bead stays unworkable"
+else
+  ok "(B) evidence filed as -d (.description), the field pr-open/work-context/gc-proactive read"
+fi
+if grep -Fq -- '--- FAIL: test_widget_rebase (0.12s) internal/widget: want `ok`, got $STATUS' "$FAKE_BODY"; then
+  ok "(B) body carries the raw failure output verbatim (quoted heredoc: no expansion, no command substitution)"
+else
+  bad "(B) body does not carry the raw failure output verbatim — the log was expanded, mangled, or dropped"
+fi
+if grep -Fq 'release/x' "$FAKE_BODY"; then
+  ok "(B) body names the branch the failure was observed on"
+else
+  bad "(B) body does not name the observed-on branch — the reader cannot tell what it is pre-existing ON"
+fi
 
 # (C) THE FIX: unreadable probe (empty stdout, the same shape a rejected flag
 #     produces) -> FAIL CLOSED. Non-zero exit, and NOTHING filed: an unreadable
@@ -175,6 +245,37 @@ if grep -q '^CREATE_RAN$' "$FAKE_META"; then
   bad "(D) filed a bug on a rejected-flag empty stdout — the original tk-277aj defect"
 else
   ok "(D) rejected-flag empty stdout -> nothing filed"
+fi
+
+# (E) metadata.target unset on a READABLE bead -> the formula default stands
+#     in and the arm still files. An empty branch name would read as "Observed
+#     on  while merging", which names nothing. This is also the mirror for (F)
+#     and (G): the shape check must not fail a bead it could read.
+eq "$(run nodup notarget)" "0" "(E) readable bead with no target -> snippet proceeds (exit 0)"
+if grep -Eq 'Observed on [^[:space:]]+ while' "$FAKE_BODY"; then
+  ok "(E) unset metadata.target falls back to the formula default"
+else
+  bad "(E) unset metadata.target leaves the observed-on branch empty"
+fi
+
+# (F) The work-bead read fails open too. Empty stdout must not be read as "no
+#     target": the filed P1 would name the default branch for a failure the
+#     patrol observed somewhere else, and the merge would proceed on it.
+eq "$(run nodup unreadable)" "1" "(F) unreadable work-bead read -> fail-closed defer (exit 1)"
+if grep -q '^CREATE_RAN$' "$FAKE_META"; then
+  bad "(F) filed a bug on an unreadable work-bead read — the body names a branch nobody read"
+else
+  ok "(F) unreadable work-bead read -> nothing filed"
+fi
+
+# (G) The same read answers an OBJECT, at exit 0, when no id resolves. The
+#     check is on the shape, not the exit code, so this payload is UNKNOWN for
+#     the same reason and defers the same way.
+eq "$(run nodup noresolve)" "1" "(G) unresolved work bead (object payload) -> fail-closed defer (exit 1)"
+if grep -q '^CREATE_RAN$' "$FAKE_META"; then
+  bad "(G) filed a bug on an object payload — an unresolved bead read as 'no target'"
+else
+  ok "(G) unresolved work bead -> nothing filed"
 fi
 
 echo "---"
