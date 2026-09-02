@@ -343,8 +343,20 @@ since_format = "RFC 3339 UTC"
 #   drops the whole atomic update with it.
 #
 # gc.routed_to — the pool offer, which is the question `assignee` does not
-#   answer. Written on an anchor only through `lifecycle.sh --route`, which
-#   refuses `--set gc.routed_to` and re-reads the value to prove it landed.
+#   answer. `lifecycle.sh --route` is the writer that rides a state
+#   transition. It refuses `--set gc.routed_to`, so the route goes through the
+#   arm that re-reads the value and exits non-zero when it did not land. It is
+#   not the only writer of an anchor's route, and judging whether a route
+#   change is valid takes the direct ones too. signoff.sh parks a capped anchor
+#   at `human`, and `signoff.sh reset` retires that park by clearing the route
+#   in the same update as the round floor; both verify their read-back the same
+#   way. `gc-helm.sh takeaway --release` stamps its subject with the `--route`
+#   value, which is the empty clear when no `--route` is given, and it reads
+#   that value back only when a route was named. A molecule that hands a bead
+#   to a named agent clears the route in the handoff update itself, which is
+#   the rule the next definition states. A route on a bead that is not an
+#   anchor, such as a rework child, a review or a visit, is stamped directly by
+#   whatever files it, and none of this speaks for those.
 #   Read by the runtime's claim predicate, again by exact byte equality. The
 #   value is a rig-qualified pool identity or the park_route sentinel above;
 #   the rig-unqualified form matches nothing, and
