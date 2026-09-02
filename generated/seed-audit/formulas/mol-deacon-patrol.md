@@ -2,7 +2,7 @@ Formula: mol-deacon-patrol
 Description: Deacon patrol loop — city infrastructure health. Poured as a root-only wisp
 on startup (the agent prompt's startup reconcile adopts before it pours):
 
-  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}'
+  gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{binding_prefix}}' --var event_timeout='{{event_timeout}}' --var doctor_interval='{{doctor_interval}}'
   gc bd update $WISP --assignee=$GC_AGENT
 
 Each wisp is ONE iteration: mail, orphan-process cleanup, Dolt health,
@@ -19,6 +19,7 @@ keep it backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
+  {{doctor_interval}}: Seconds between doctor sweeps. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep runs hourly. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still sweeps hourly. (default=3600)
   {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep). Ceiling 600: the harness caps one call at 600s. (default=600)
 
 Steps (5):

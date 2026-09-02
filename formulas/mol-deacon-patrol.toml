@@ -245,21 +245,35 @@ it would be killed before it emitted a payload, and this cycle would report
 the result on a later cycle. Run the script once per cycle and let it decide
 whether to start a sweep, wait for one, or collect it:
 ```bash
+# >>> doctor-sweep-run
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/doctor-sweep.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-SWEEP=$(GC_DOCTOR_SWEEP_INTERVAL='{{doctor_interval}}' "$SCRIPTS/doctor-sweep.sh"); echo "$SWEEP"
+# A runner that cannot sweep reports why and exits 2. An uncaptured non-zero
+# aborts the assignment under a strict shell, before the report is echoed.
+RC=0
+SWEEP=$(GC_DOCTOR_SWEEP_INTERVAL='{{doctor_interval}}' "$SCRIPTS/doctor-sweep.sh") || RC=$?
+echo "$SWEEP"
+STATE=$(printf '%s' "$SWEEP" | sed -n 's/^state=//p')
 PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
+# <<< doctor-sweep-run
 ```
-The first line is `state=`, and it says what this cycle owes:
+`STATE` is the first line's value, and it says what this cycle owes:
 
 - `idle`, `started` or `running`: there is no payload to read. Say which one
   and close the step. A sweep started now is collected a cycle or two later.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
-- `failed` or `exceeded`: a FAILED scan. Escalate it with
-  `--key doctor-sweep-failed` and the whole `state=` block as the message. It
-  carries `elapsed=`, and on `exceeded` the check the sweep was inside when
-  its bound stopped it. Do not run the filter.
+- `failed`, `exceeded` or `blocked`: a FAILED scan. Escalate it with
+  `--key doctor-sweep-failed` and the whole `state=` block as the message.
+  `failed` and `exceeded` carry `elapsed=`, and `exceeded` names the check the
+  sweep was inside when its bound stopped it. `blocked` carries `reason=`
+  instead: the runner could not sweep at all, because the state directory is
+  unwritable, the run directory is contended, or `gc` is not on PATH. Nothing
+  was started, and the next cycle meets the same wall. Do not run the filter.
+- Any other state, or a non-zero `RC`: a FAILED scan too, escalated the same
+  way. A state this table does not name is a runner the step no longer
+  understands, and the failure it exists to prevent is a sweep going dark with
+  no visit behind it.
 
 The script validates `.results` before it will say `complete`, so a drifted
 schema arrives as `failed` and can never read as clean. `abandoned=` above zero

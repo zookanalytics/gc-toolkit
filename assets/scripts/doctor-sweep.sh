@@ -17,13 +17,15 @@
 #   finished                             collect it             state=complete
 #   finished badly, or bad payload       a FAILED scan          state=failed
 #   past its bound                       kill it, name the check state=exceeded
+#   cannot sweep at all                  say why, start nothing state=blocked
 #
 # The bound is enforced here rather than by `timeout`, which is what lets it
 # exceed the harness ceiling. A sweep that never finishes still ends in a state
 # the patrol escalates, carrying its elapsed time and the check it died in.
 #
-# Output is `key=value` lines with `state=` first. Exit 0 on any report, 2 when
-# no report is possible.
+# Output is `key=value` lines with `state=` first. Exit 0 carries a report about
+# a sweep; exit 2 means none ran and none can right now — a `blocked` report, or
+# a usage error with no report at all. Both are a failed scan to the caller.
 set -uo pipefail
 
 usage() {

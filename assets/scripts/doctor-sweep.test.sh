@@ -249,6 +249,96 @@ eq "$RC" "2" "an unknown flag is a usage error"
 has "$ERR" "usage: doctor-sweep.sh" "  ... and says so on stderr"
 hasnt "$OUT" "usage: doctor-sweep.sh" "  ... never on stdout, which the caller parses"
 
+# --- the shipped patrol step must handle every state this script reports -----
+# The step is prose plus one snippet, read by an agent, and both halves can go
+# wrong on their own: the snippet has to survive a runner that exits non-zero,
+# and the decision table has to name every state the runner can emit. A state
+# the table omits is a sweep that stops without a visit, which is the failure
+# the whole runner exists to end.
+TOML="$HERE/../../formulas/mol-deacon-patrol.toml"
+# The description is a TOML basic multi-line string, so a literal backslash
+# ships escaped; un-escape to recover the shell text the deacon runs.
+sed -n '/# >>> doctor-sweep-run/,/# <<< doctor-sweep-run/p' "$TOML" \
+    | sed 's/\\\\/\\/g' > "$TMP/step-snippet.sh"
+if [ -s "$TMP/step-snippet.sh" ]; then
+  ok "extracted the doctor-sweep-run snippet from the shipped formula"
+else
+  bad "could not extract the doctor-sweep-run snippet from $TOML (markers gone?)"
+fi
+if bash -n "$TMP/step-snippet.sh" 2>"$TMP/err"; then
+  ok "  ... and it parses as bash"
+else
+  bad "  ... and it parses as bash ($(cat "$TMP/err"))"
+fi
+
+# A rig root holding a scripted runner, so the snippet resolves one the way it
+# does in the city and no real sweep is involved.
+FORMULA_RIG="$TMP/formula-rig"; mkdir -p "$FORMULA_RIG/assets/scripts"
+cat > "$FORMULA_RIG/assets/scripts/doctor-sweep.sh" <<'RUNNER'
+#!/usr/bin/env bash
+cat "${STUB_REPORT:?}"
+exit "${STUB_REPORT_RC:-0}"
+RUNNER
+chmod +x "$FORMULA_RIG/assets/scripts/doctor-sweep.sh"
+
+# Under `set -e` an uncaptured non-zero assignment ends the block before the
+# report is echoed, so the snippet is driven in the strictest shell it can meet.
+snippet_run() { # <report-file> <rc>
+  SNIP_OUT=$(STUB_REPORT="$1" STUB_REPORT_RC="$2" GC_RIG_ROOT="$FORMULA_RIG" \
+    bash -euo pipefail -c '. "$0"; printf "read-state=%s\nread-rc=%s\nread-payload=%s\n" \
+      "${STATE:-}" "${RC:-}" "${PAYLOAD:-}"' "$TMP/step-snippet.sh" 2>"$TMP/snip.err")
+  SNIP_RC=$?
+}
+
+printf 'state=blocked\nreason=state-dir-unwritable\nstate_dir=/dev/null/doctor\n' \
+  > "$TMP/report-blocked"
+snippet_run "$TMP/report-blocked" 2
+eq "$SNIP_RC" "0" "a blocked runner does not abort the step's snippet"
+has "$SNIP_OUT" "state=blocked" "  ... the report still reaches the transcript"
+has "$SNIP_OUT" "reason=state-dir-unwritable" "  ... carrying why it could not sweep"
+has "$SNIP_OUT" "read-state=blocked" "  ... and the state is readable for the table"
+has "$SNIP_OUT" "read-rc=2" "  ... with the runner's exit code kept"
+
+printf 'state=complete\nrc=1\nelapsed=503\npayload=%s\n' "$TMP/payload.json" \
+  > "$TMP/report-complete"
+snippet_run "$TMP/report-complete" 0
+eq "$SNIP_RC" "0" "a completed sweep still reads through the same snippet"
+has "$SNIP_OUT" "read-state=complete" "  ... state=complete is readable"
+has "$SNIP_OUT" "read-payload=$TMP/payload.json" "  ... and the payload path survives"
+has "$SNIP_OUT" "read-rc=0" "  ... with rc 0"
+
+# The decision table is asserted against the states the RUNNER can emit, not a
+# list copied here: a state added to the script fails this until the step says
+# what the deacon owes for it.
+STEP="$(awk '/^id = "system-health"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f {print}' "$TOML")"
+if [ -n "$STEP" ]; then
+  ok "extracted the shipped system-health step"
+else
+  bad "could not extract the system-health step from $TOML"
+fi
+# A call, not the word: the states are the arguments of `report` where it
+# opens a statement, never its mention in the usage text.
+SCRIPT_STATES=$(grep -vE '^[[:space:]]*#' "$SUT" \
+  | grep -oE '^[[:space:]]*report [a-z]+' | awk '{print $NF}' | sort -u)
+for st in $SCRIPT_STATES; do
+  if grep -qF -- "\`$st\`" <<< "$STEP"; then
+    ok "the step's decision table names state=$st"
+  else
+    bad "the step's decision table never names state=$st (the runner emits it)"
+  fi
+done
+# `blocked` is a failed scan, not a quiet nothing: it means no sweep ran at all.
+if grep -qE '^- .*`blocked`.*FAILED scan' <<< "$STEP"; then
+  ok "  ... and routes blocked to the failed-scan arm"
+else
+  bad "  ... but blocked is not routed to the failed-scan arm"
+fi
+if grep -qE '^- Any other state.*FAILED scan' <<< "$STEP"; then
+  ok "  ... with a catch-all for a state it does not name"
+else
+  bad "  ... and has no catch-all, so an unnamed state goes dark"
+fi
+
 echo
 echo "doctor-sweep: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
