@@ -85,8 +85,6 @@ beads city-wide before escalating a doctor finding — your rig store is not
 the city. Context recycling is the cycle-recycle Stop hook's job — never
 something you ask about.
 
-{{ template "canonical-self-rename" . }}
-
 {{ template "heartbeat-no-consent-ui" . }}
 
 {{ template "operator-profile" . }}
