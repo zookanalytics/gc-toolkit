@@ -47,8 +47,11 @@ tail and --body the brief the converse session reads at claim time. react
 slings a proactive first reaction via tools/gc-proactive.sh (its --reason is
 log-only operator intent). takeaway stamps gc.takeaway (+_at/+_by) in one
 update; --release also reopens/unassigns/clears the route and quiesces the
-parked molecule's step beads; --route <rig>/<agent> releases it TO a pool
-instead of back to the human, in the same write; --waiting-on (repeatable)
+released molecule's step beads and workflow root. On an anchor that is already
+CLOSED the reopen would resurrect a landed disposition, so it is skipped and
+only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
+back to the human, in the same write, and is refused on a closed anchor;
+--waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
 whether it landed.
 
@@ -198,9 +201,11 @@ rig_name_for_bead() {
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
 }
 
-# ── Release helper: quiesce a parked molecule ────────────────────────
-# A parked molecule keeps re-attracting the pins (gc.routed_to / assignee /
-# session_affinity) that re-spawn a polecat onto the husk. Both of its doors
+# ── Release helper: quiesce a released molecule ──────────────────────
+# A molecule whose anchor is out of play — parked by a stand-down, or closed by
+# a fold that landed after the pour — keeps re-attracting the pins
+# (gc.routed_to / assignee / session_affinity) that re-spawn a polecat onto the
+# husk. That is why the walk is reachable on a closed anchor too. Both doors
 # carry them: the graph.v2 STEP beads, and the gc.kind=workflow ROOT, which is
 # only a tracker but is pool-routed in its own right. Walk both in reverse (a
 # step through gc.root_bead_id, a root through itself, then on through the
@@ -224,7 +229,7 @@ rig_name_for_bead() {
 # unassigned, which is the pool-offer shape a fresh polecat races into. For the
 # same reason the second write is skipped outright when the first one fails.
 #
-# Best-effort subshell. $1 = parked anchor id, $2 = rig .beads path or "".
+# Best-effort subshell. $1 = released anchor id, $2 = rig .beads path or "".
 # >>> quiesce-release-molecule-steps
 quiesce_release_molecule_steps() (
     set +e
@@ -327,9 +332,9 @@ quiesce_release_molecule_steps() (
             if [ "$_pins_ok" -eq 0 ]; then
                 echo "$PROG: takeaway: could not quiesce $_kind $_sid (retries via witness patrol)" >&2
             elif [ "$_who_ok" -eq 0 ]; then
-                echo "$PROG: takeaway: de-pinned husk $_kind $_sid ($_step) of parked $_anchor — assignee left to the session still holding it"
+                echo "$PROG: takeaway: de-pinned husk $_kind $_sid ($_step) of $_anchor — assignee left to the session still holding it"
             else
-                echo "$PROG: takeaway: quiesced husk $_kind $_sid ($_step) of parked $_anchor"
+                echo "$PROG: takeaway: quiesced husk $_kind $_sid ($_step) of $_anchor"
             fi
         done
     done
@@ -394,13 +399,54 @@ cmd_takeaway() {
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
+    # --release is two acts welded into one flag: PARK the anchor (reopen,
+    # unassign, stamp the route) and QUIESCE the molecule beneath it. The park
+    # is correct for an anchor still standing and destructive for one already
+    # disposed — a bead closed by a fold carries gc.superseded_by and a
+    # close_reason naming its carrier, and `--status=open` there makes work
+    # whose disposition landed visible as open in every reader of open beads.
+    # The quiesce is the half a disposed anchor still needs: a fold that lands
+    # AFTER the pour leaves the molecule routed either way, and welding the two
+    # is what made that chain unreachable. So a closed anchor keeps its
+    # disposition and still gets the walk.
+    #
+    # The status is read before anything is written, and an unreadable one
+    # refuses the verb: a bead whose disposition cannot be proven is the one
+    # case where reopening it costs the most.
+    # >>> takeaway-release-closed-anchor
+    release_park=""
+    if [ -n "$release" ]; then
+        release_park=1
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        anchor_json=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub)
+        anchor_status=$(printf '%s' "$anchor_json" \
+            | jq -r --arg b "$bead" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
+                 else empty end' 2>/dev/null || true)
+        if [ -z "$anchor_status" ]; then
+            echo "$PROG: takeaway: could not read the status of '$bead' (does it exist in rig '${path:-?}'?). Refusing --release rather than reopen a bead whose disposition cannot be read. Nothing was written." >&2
+            exit 4
+        fi
+        if [ "$anchor_status" = "closed" ]; then
+            release_park=""
+            superseded=$(printf '%s' "$anchor_json" \
+                | jq -r --arg b "$bead" \
+                    'if type == "array"
+                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | ((.metadata // {})["gc.superseded_by"] // "")
+                     else empty end' 2>/dev/null || true)
+            echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The molecule is still quiesced." >&2
+        fi
+    fi
+    # <<< takeaway-release-closed-anchor
+
     # Build args with `set --` ($text/$by contain spaces); --release rides the
     # SAME update so stamp + release stay one Dolt write.
     set --
     set -- "$@" --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by"
-    [ -n "$release" ] && set -- "$@" --status=open --assignee= \
+    [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
                --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
@@ -414,7 +460,7 @@ cmd_takeaway() {
     # "released to that pool" would be wrong. The writes that did land stay,
     # and the message names them, so the miss is repairable by hand.
     route_missed=""
-    if [ -n "$route" ]; then
+    if [ -n "$route" ] && [ -n "$release_park" ]; then
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         route_got=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
             | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.routed_to"] // "") else "" end' 2>/dev/null || printf '')
@@ -456,7 +502,21 @@ cmd_takeaway() {
         echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
         exit 4
     fi
-    echo "takeaway set on $bead (by $by)${release:+ [released${route:+ to $route}]}: $text"
+    # A route asked for on a closed anchor is refused the same way a route that
+    # would not stamp is: the useful writes stand, and the exit is non-zero so
+    # no caller reads it as "released to that pool". Routing a disposed bead is
+    # the resurrection in its purest form — the pool claims it and cuts a
+    # branch for superseded work.
+    if [ -n "$route" ] && [ -z "$release_park" ]; then
+        echo "$PROG: takeaway: $bead is closed, so it was NOT routed to '$route' — a pool that claimed it would work a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        exit 4
+    fi
+    rel_note=""
+    if [ -n "$release" ]; then
+        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}]"
+        else rel_note=" [quiesced; anchor left closed]"; fi
+    fi
+    echo "takeaway set on $bead (by $by)$rel_note: $text"
 }
 
 # ── Verb: demand ─────────────────────────────────────────────────────

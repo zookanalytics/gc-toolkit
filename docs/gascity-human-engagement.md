@@ -486,6 +486,14 @@ and both are right:
   dead chain stops re-offering. Those are its step beads and its workflow
   root. An edge would assert a wait that does not exist.
 
+  An anchor CLOSED before the stand-down reaches it — a fold that landed after
+  the pour, leaving the molecule routed behind it — takes the quiesce without
+  the park. Reopening it would make work whose disposition already landed
+  visible as open again, so the verb keeps the disposition, skips the reopen,
+  the unassign and the route stamp, and walks the molecule anyway. `--route`
+  is refused there and exits non-zero: a pool that claimed a disposed bead
+  would cut a branch for superseded work.
+
 Everywhere else the takeaway carries its wait as an edge —
 `--waiting-on` for work a pool owes, a demand bead for what a person owes.
 No agent in this pack writes a `triage.hold` any more; the sweep's
