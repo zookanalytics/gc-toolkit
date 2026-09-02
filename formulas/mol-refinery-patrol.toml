@@ -347,6 +347,15 @@ into the filing arm reads as "no duplicate":
 # patrol files another P1 for the same failure. Use the failing test name,
 # the failing target, or an error symbol.
 FAIL_TOKEN="<failing test name or error symbol>"
+# The evidence that makes the bead workable. A title-only P1 cannot be
+# dispositioned by anyone: nothing in it separates a host-load flake from a
+# real regression, which is the judgment the bead exists to enable. Keep the
+# heredoc QUOTED. Pasted failure output carries backticks and $, and an
+# unquoted heredoc runs them.
+FAIL_LOG=$(cat <<'FAILLOG'
+<the check that failed, the package or target it ran in, and its raw output>
+FAILLOG
+)
 # --title-contains is the real flag (case-insensitive title substring).
 # NOT --search: bd has no such flag, and rejects it with "unknown flag" on
 # stderr while leaving stdout EMPTY — which reads as "no duplicate found".
@@ -368,8 +377,20 @@ DUP_ID=$(printf '%s' "$DUP_JSON" | jq -r '.[0].id // empty')
 if [ -n "$DUP_ID" ]; then
   echo "pre-existing failure already filed as $DUP_ID — proceeding with merge, filing nothing"
 else
-  # The SAME token goes in the title, so the NEXT patrol's probe finds it.
-  gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN (<one-line detail>)"
+  # The SAME token goes in the title, so the NEXT patrol's probe finds it,
+  # and nothing else does: a placeholder left in the title ships as literal
+  # filler, and the detail belongs in the body anyway.
+  # The evidence goes in -d, which fills .description. Nothing in this pack
+  # reads .design, while pr-open.sh, the work-context hook, and
+  # gc-proactive's scan filter all read .description, so a body filed
+  # anywhere else is a body no reader ever sees.
+  TARGET=$(gc bd show $WORK --json 2>/dev/null | jq -r '.[0].metadata.target // empty')
+  [ -n "$TARGET" ] || TARGET="{{target_branch}}"
+  gc bd create --type=bug --priority=1 --title="Pre-existing failure: $FAIL_TOKEN" -d "Observed on $TARGET while merging $WORK, and classified as pre-existing on $TARGET rather than a regression from that branch.
+
+## Failure
+
+$FAIL_LOG"
 fi
 # <<< preexisting-failure-dedup
 ```
