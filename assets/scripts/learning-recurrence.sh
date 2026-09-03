@@ -69,11 +69,12 @@ REPO="$REPO_ARG"
 inventory_files() {
   if [ -n "$REF" ]; then
     git -C "$REPO" ls-tree -r --name-only "$REF" 2>/dev/null \
-      | grep -E '^(template-fragments/(learned-conventions-|operator-profile|learning-exemplars)|formulas/mol-review\.toml$)'
+      | grep -E '^(template-fragments/(learned-conventions-|operator-profile|work-quality|learning-exemplars)|formulas/mol-review\.toml$)'
   else
     local f
     for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
              "$REPO"/template-fragments/operator-profile.template.md \
+             "$REPO"/template-fragments/work-quality.template.md \
              "$REPO"/template-fragments/learning-exemplars.template.md \
              "$REPO"/formulas/mol-review.toml; do
       [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"

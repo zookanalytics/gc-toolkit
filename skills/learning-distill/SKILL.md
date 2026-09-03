@@ -68,9 +68,9 @@ audited or challenged.
 ### 3. Pick the carrier, then adjudicate against what exists
 
 Two decisions, in that order. **Which carrier** the learning belongs in is
-[the carrier table below](#carriers--the-four-shapes-a-promotion-can-take);
+[the carrier table below](#carriers--the-five-shapes-a-promotion-can-take);
 different shapes of learning need different carriers, and a prose bullet is
-one of four, not the default.
+one of five, not the default.
 
 Then adjudicate the edit within that carrier. The two promotion gates decide
 whether it may be adopted at all. Read the target surface's current entries
@@ -110,7 +110,7 @@ A proposed bullet:
   that fires only on a re-run of its own evidence is scoped too narrowly,
   and the incident belongs in the evidence section.
 
-## Carriers — the four shapes a promotion can take
+## Carriers — the five shapes a promotion can take
 
 A promotion names a carrier before it names a shape. The carrier decides the
 target file, the budget, and what the adoption costs to keep.
@@ -119,6 +119,7 @@ target file, the budget, and what the adoption costs to keep.
 |---|---|---|---|
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
+| `work-quality` | `template-fragments/work-quality.template.md` | `work_quality_entry_cap` entries | every turn of every role that renders it |
 | `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
 | `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | per review, resolved on demand |
 
@@ -129,6 +130,13 @@ Choose by what the learning *is*:
   already settled. The profile states operator taste, so a cluster with no
   `obs.source=operator` observation cannot claim it, whatever its
   recurrence.
+- **`work-quality`** when the lesson is a standard the produced artifact
+  must meet — the evidence a claim rests on, whether a fix reaches the
+  cause, how prose and documentation read. It fires while something is
+  being written rather than while a person is being addressed, so it
+  reaches roles that never talk to the operator. Prefer `review-rubric`
+  when a reader catches the failure in the diff; use this carrier when the
+  author must hold the standard as they write.
 - **`review-rubric`** when the failure is **visible in a diff**. Prefer this
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a
@@ -174,13 +182,13 @@ role.
 
 The five judgments decide whether feedback is a standing rule. These two
 gates decide whether that rule may be **auto-adopted into content every
-future agent pays for** — a `convention` bullet, a `profile` entry, or a
-`review-rubric` dimension. Check both **before** any ADD / UPDATE /
-SUPERSEDE in those three carriers. **A gate failure never discards the
-pattern — it redirects it** (gate 1 surfaces it to the operator; gate 2
-files an engineering bead, or routes to `exemplar`). The gates do not apply
-to `learning-rubric` proposals against this skill, to retirements, or to
-hardens — those remove weight, not add it.
+future agent pays for** — a `convention` bullet, a `profile` entry, a
+`work-quality` entry, or a `review-rubric` dimension. Check both **before**
+any ADD / UPDATE / SUPERSEDE in those four carriers. **A gate failure never
+discards the pattern — it redirects it** (gate 1 surfaces it to the
+operator; gate 2 files an engineering bead, or routes to `exemplar`). The
+gates do not apply to `learning-rubric` proposals against this skill, to
+retirements, or to hardens — those remove weight, not add it.
 
 ### Gate 1 — external check: one voice does not bind everyone
 
@@ -259,9 +267,9 @@ verification gap, so the exemplar route is not open to it either.
 
 Promotion without pruning is how prompts rot. Walk the adopted entries in
 **every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
-one row per anchored entry across all four — the conventions fragments, the
-profile, the exemplar corpus, and the `review-rubric` ledger in
-`formulas/mol-review.toml`. Of each entry, ask:
+one row per anchored entry across all five — the conventions fragments, the
+profile, the work-quality fragment, the exemplar corpus, and the
+`review-rubric` ledger in `formulas/mol-review.toml`. Of each entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose
   the lint or doctor check and **retire the prose bullet in the same

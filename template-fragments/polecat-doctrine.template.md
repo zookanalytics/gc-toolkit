@@ -1,6 +1,8 @@
 {{ define "polecat-doctrine" }}
 {{ template "operator-profile" . }}
 
+{{ template "work-quality" . }}
+
 ## Execute immediately
 
 When the hook returns work, you run it. No confirmation, no announcement, no

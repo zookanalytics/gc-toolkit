@@ -1,8 +1,10 @@
 # lint-learned.d — pack hygiene, not the learning system
 
 These detectors are ordinary pack hygiene: a hardened rule has graduated OUT
-of prompts INTO tooling. The learning system's ceiling-raising surface is the
-operator profile + conventions pipeline (docs/feedback-learning.md).
+of prompts INTO tooling. The learning system's prose surfaces are the two
+shared fragments — the operator profile, for how a role addresses a person,
+and work-quality, for the artifacts a role produces — plus the per-role
+conventions fragments (docs/feedback-learning.md).
 
 One detector per hardened rule. Each executable here is the executable form
 of a single learned convention that graduated out of prose — run by
@@ -30,8 +32,9 @@ detector ignores its own directory and the specs describing the bug it hunts,
 because that text states the rule rather than breaks it.
 
 Guidance that fails the test is still real guidance. It belongs in the prose
-that instructs agents — the operator profile and the learned-conventions
-fragments — where an author reads it with the case in front of them.
+that instructs agents — the operator profile, the work-quality fragment, and
+the learned-conventions fragments — where an author reads it with the case in
+front of them.
 
 The test is also why the runner reads the whole tree rather than a diff.
 Scoping to changed files cannot make the codebase satisfy an invariant; it
@@ -41,9 +44,9 @@ not hold into a backlog item. A finding anywhere is a finding.
 ## Landing and retiring
 
 A detector lands via a `prompt-update: harden` PR that deletes the
-corresponding prose bullet AND its anchor from the learned-conventions
-fragment **in the same diff** — the rule is never stated twice and the
-fragment shrinks as rules harden. The pattern bead records the detector as
+corresponding prose bullet AND its anchor from the fragment that carries it
+**in the same diff** — the rule is never stated twice and the fragment
+shrinks as rules harden. The pattern bead records the detector as
 its successor (metadata, e.g. `superseded_by` on the bead), so provenance
 lives on the bead and the harden PR, not in the fragment.
 
