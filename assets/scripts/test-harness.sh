@@ -468,6 +468,17 @@ case "$sub" in
           if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
           exit "$STUB_GH_COMMIT_RC"
         fi ;;
+      */compare/*)
+        # basehead is `<base>...<head>`; the fixture is named for it with the
+        # branch slashes flattened. No fixture = a compare that does not read,
+        # which the real endpoint also answers with a body and a non-zero exit.
+        bh="${path##*/compare/}"
+        f="$G/compare_$(san "$bh").json"
+        if [ ! -s "$f" ]; then
+          printf '{"message":"Not Found","status":"404"}'
+          exit 1
+        fi
+        out="$(cat "$f")" ;;
       */pulls/*/reviews/*/dismissals)
         printf 'DISMISS %s\n' "$path" >> "${STUB_GH_LOG:?}"
         exit "${STUB_DISMISS_RC:-0}" ;;
