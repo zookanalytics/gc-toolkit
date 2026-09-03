@@ -150,7 +150,7 @@ sentence. **Residue**: no writer, or no registry.
 | A8 `hold:mayor` / `hold:external` | **Not this pack's mechanism** | Gascity-binary claim-predicate terms (`beadmeta.DispatchHoldLabels`). No mayor agent exists here, this install's `gc` predates their arrival in the predicate, and one closed bead city-wide has ever carried either. See §6 |
 | A9 `triage.hold` | **Prose.** The clearest case in the city | 30 live beads, zero with an edge. Its own disposition list at `liveness-sweep.sh:371` offers "park (the edge IS the park; prose parks nothing)" one item above it |
 | A10 `gc.takeaway` | **Legitimate as a conclusion, prose when used as a hold** | The 140-character authored headline is the right primitive and should be kept. `--waiting-on` is the half that converges, and it is optional |
-| A11 `gc.dispatch_when_ready` | **Legitimate** | The one mechanism built specifically to converge. Zero live uses |
+| A11 `gc.dispatch_when_ready` | **Legitimate** | The one mechanism built specifically to converge, and in live use. See specs/tk-gtgn0/verification.md |
 | A12 `gc.session_affinity` | **Legitimate**, runtime-owned | Not a wait about the work |
 | B1 `green@` stale | **Legitimate** | Head-bound by construction: a head move stales every verb at once, so a fixed branch re-evaluates fresh |
 | B2 `fixable@` | **Legitimate** | Same head-binding, plus a child in flight, which is B9 |
