@@ -284,6 +284,11 @@ hasnt "$(cat "$STUB_GC_LOG")" "DELETE FROM" "a float-rendered count issued no DE
 unset STUB_FLOAT_ORPHANS
 
 # --- usage -------------------------------------------------------------------
+help="$("$SUT" --help 2>&1)"; eq "$?" "0" "--help exits 0"
+has "$help" "--batch-size <n>" "--help lists the flags"
+has "$help" "wisp_dependencies" "--help carries the header description"
+hasnt "$help" "set -uo pipefail" "--help stops at the header, not the shell directive"
+
 reset_state 100 90  0 0  0 0  0 0
 out="$("$SUT" --db 'lx; DROP DATABASE x' 2>&1)"; eq "$?" "2" "a non-identifier --db is rejected"
 out="$("$SUT" --db lx --batch-size 0 2>&1)"; eq "$?" "2" "--batch-size 0 is rejected"

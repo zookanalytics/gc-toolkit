@@ -34,7 +34,21 @@ BATCH="${WISP_PURGE_BATCH:-50000}"
 DRY_RUN=0
 RECLAIM=1
 
-usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() {
+    cat <<'U'
+Usage:
+  wisp-orphan-purge.sh [--db <name>] [--batch-size <n>] [--dry-run] [--no-reclaim]
+
+  --db <name>       database to purge (default: lx, or $WISP_PURGE_DB)
+  --batch-size <n>  rows per DELETE transaction (default: 50000)
+  --dry-run         census and guards only: deletes nothing, commits nothing,
+                    runs no reclaim
+  --no-reclaim      delete and commit, but skip the reclaim
+
+U
+    # The header comment, without the line range drifting when it is edited.
+    sed -n '2,/^set /p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
 die() { echo "$PROG: $1" >&2; exit "${2:-1}"; }
 
 while [ $# -gt 0 ]; do
@@ -218,10 +232,14 @@ done
 # deleted rows in history until a full GC rewrites oldgen.
 RECLAIM_RC=0
 if [ "$RECLAIM" -eq 1 ] && [ "$DELETED_TOTAL" -gt 0 ]; then
+    # Price the rewrite against the store as it stands now, not as it stood
+    # before the deletes: DELETE grows it, so the pre-delete size understates
+    # what a full GC has to rewrite.
+    SIZE_NOW="$(size_bytes)"
     FREE_KB="$(df -Pk "$DB_PATH" 2>/dev/null | awk 'NR == 2 {print $4}')"
-    NEED_KB=$(( ${SIZE_BEFORE:-0} / 1024 ))
+    NEED_KB=$(( ${SIZE_NOW:-${SIZE_BEFORE:-0}} / 1024 ))
     if [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt "$NEED_KB" ]; then
-        echo "$PROG: skipping reclaim — $(human "$((FREE_KB * 1024))") free is under the $(human "${SIZE_BEFORE:-0}") the rewrite may transiently need." >&2
+        echo "$PROG: skipping reclaim — $(human "$((FREE_KB * 1024))") free is under the $(human "${SIZE_NOW:-0}") the rewrite may transiently need." >&2
         echo "$PROG: rows are deleted and committed; run '$GC dolt compact --gc-only --only-db $DB' once there is room." >&2
         RECLAIM_RC=1
     else
