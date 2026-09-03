@@ -152,6 +152,17 @@ only when you cannot name the work without an answer first. "The operator
 would probably want to see this" is not a ruling; a ruling is a question whose
 answer changes what gets built.
 
+**Propose only acts the role you route to can perform.** The proposal on an
+actionable card is the dispatch note the routed worker executes, and no pool
+role closes the work bead. A bead leaves the open class when its work lands:
+the refinery closes the anchor on a verified merge (`mol-polecat-work`). So a
+reaction that finds the bead already satisfied (verified, nothing to fix,
+nothing to merge) does not propose "close it". A no-code verification is still
+an artifact: record it as a committed `specs/<work-bead-id>/<slug>.md`
+(docs/file-structure.md), and propose the refinery handoff whose merge closes
+the anchor. The disposition stays **actionable**, with a done condition the
+routed role can reach.
+
 Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
 on a snapshot that may have moved by the time the human reads it (design Risk
 "stale proactive worldview"). The `## Found` timestamp is that stamp.
