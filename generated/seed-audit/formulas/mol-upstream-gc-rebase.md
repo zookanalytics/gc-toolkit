@@ -86,6 +86,7 @@ Variables:
   {{origin_remote}}: Git remote name pointing at the city's fork (default=origin)
   {{requesting_keeper}}: Keeper agent address (e.g., gascity/gascity-keeper.keeper) for abort handbacks. Optional; falls back to notify_recipient, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch. (default=)
   {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip. (default=)
+  {{tagged_check_command}}: Compile-only gate for build-tagged code, run alongside check_command. gascity's `make check` chain is untagged from end to end, so a break behind a `//go:build` constraint compiles clean under the main gate and only surfaces as red CI after the force-push. Compile-only on purpose: the tagged suites are long, and what this catches is a build failure. Empty skips it. (default=go vet -tags integration ./...)
   {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip. (default=)
   {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip. (default=)
   {{upstream_branch}}: Branch to rebase onto and push back to (default=main)
