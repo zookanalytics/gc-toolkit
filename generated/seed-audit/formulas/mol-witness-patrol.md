@@ -20,8 +20,8 @@ liveness-sweep exec order owns that surface). Escalations go through
 assets/scripts/escalate.sh — one open visit per situation key.
 
 Marked blocks (host-bead-skip, liveness-map-guard, liveness-lookup, husk-guard,
-patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
-tests; keep markers, keep them backslash-free.
+crash-loop-window, patrol-wisp-pour, refinery-queue-nudge) are extracted and
+executed by their tests; keep markers, keep them backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
