@@ -279,5 +279,5 @@ mechanism exists and is proven, the demand-bead primitive exists and is filed
 What is missing is that nothing requires the edge. Every path that files a
 demand offers the edge as an option and defaults to prose:
 `gc-helm.sh takeaway --waiting-on` is a flag, `mol-visit.toml`'s blocking edge
-is a comment, `deferred-dispatch.sh arm` is a script nobody calls. Optional
+is a comment, `deferred-dispatch.sh arm` is opt-in at every call site. Optional
 convergence is what 87 prose holds and 54 gateless demands measure.
