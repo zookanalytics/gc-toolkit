@@ -56,7 +56,7 @@ next cadence pass: gate-ensure dispatches the added gates
 arch session: charter + bead + diff
         → approve            → check.arch=green@<oid>
         → request-changes    → rework child, marker cleared
-        → escalate           → check.arch=exception@<oid> + visit
+          (a design question → escalate.sh visit, then one of the two above)
 merge.sh: unchanged — merges when every declared gate is green@live head
 ```
 
@@ -81,38 +81,50 @@ merge.sh: unchanged — merges when every declared gate is green@live head
   when it applies → method skill). Triage is a classifier over that table and
   appends a one-line justification per added gate to the anchor's notes. The
   feedback distiller watches the add-rate for gate inflation.
-- **Mechanical backstop for misses.** The charter may declare mandatory rows
-  ("diff touches `services/helm/**` ⇒ `arch`"). One clause in
-  `doctor/check-gate-integrity` asserts open anchors honor them.
-- **Design questions escalate, defects loop.** An architectural objection is
-  usually a decision, not a defect: `--verdict escalate` writes
-  `exception@<head>` and files a visit framing the choice (G2), instead of
-  ping-ponging rework children (the reviewer-fatigue anti-pattern
-  foundation.md forbids).
-- **`codex` is not waivable before the PR exists.** `pr-open.sh` requires
-  `check.codex=green@<live head>` by literal name and never reads `check_set`,
-  so a set that drops `codex` while the anchor is still at `pre_open_gate`
-  strands it with nothing able to raise the marker pr-open waits on. The flow
-  above runs triage at exactly that state, so codex staying always-on is what
-  makes it safe there, not a preference about how much review is enough.
+- **A mandatory row is a rule, not a backstop.** The charter may declare
+  mandatory paths ("diff touches `services/helm/**` ⇒ `arch`"), and triage
+  adds the gate whatever the applies-when column would have argued. Nothing
+  re-derives the branch diff behind triage, so a miss is a gate the anchor
+  never gets. That is why the declared list is short and holds only the paths
+  where a wrong change is expensive.
+- **Design questions go to a person, defects loop.** An architectural
+  objection is usually a decision, not a defect. The reviewer files a visit
+  with `escalate.sh --key arch-decision` framing the choice, then gives the
+  verdict the diff itself earns and names the visit in the body:
+  `request-changes` when the diff needs work whichever way the decision goes,
+  `approve` when the change stands on its own. That keeps the question off
+  the rework loop (the reviewer-fatigue anti-pattern foundation.md forbids)
+  without a verdict that parks the gate. `exception@<oid>` belongs to the
+  round cap alone: `signoff.sh` writes it when a gate exhausts
+  `GC_MAX_REVIEW_ROUNDS`, and routes the anchor to a human in the same act.
+  `skills/arch-review/SKILL.md` carries the shape.
+- **`codex` is never waivable.** The charter's menu marks it so, and the
+  waiver verb could not reach it in any case: `--waive-gates` records a
+  non-add, and `signoff.sh` refuses it outright for a gate `check_set`
+  already declares. Both transitions judge an anchor by that set alone —
+  `pr-open.sh` publishes once every marker-bearing gate the set declares is
+  `green@<live head>`, and `merge.sh` applies the same predicate — so a set
+  that could drop `codex` would publish and merge with the correctness review
+  never run. The flow above runs triage at `pre_open_gate`, which is exactly
+  where that would happen, so codex staying always-on is what makes the
+  publishing gate mean anything.
 
 ## Hand calibration
 
 Before triage, `check_set` was calibrated by hand on the anchors that needed
-it, and that act is granted and bounded in
-[docs/authority-map.md](../../docs/authority-map.md): a human, on a named
-anchor, reason recorded in the anchor's notes, narrowing only once the PR is
-open. That described the interim. Triage inherited the power when it landed,
-and the rules above are now the contract: triage is the sole narrower, its
-waiver reaches only the gates the charter marks waivable, and `none` stays the
-human-only opt-out.
+it. [docs/authority-map.md](../../docs/authority-map.md) now carries the power
+as two rows, widen and narrow, and triage holds the machine half of each: it
+is the sole narrower, its waiver reaches only the gates the charter marks
+waivable, and `none` stays the human-only opt-out, still on a named anchor,
+still with the reason in that anchor's notes, still only once the PR is open.
 
 Two cases could look like a standing human narrowing path, and neither is
-one. A missing charter leaves triage unable to widen the set, and a
-human may still widen it by hand, because the rules reserve only narrowing to
-triage. A narrowing the charter does not mark waivable is available to nobody.
-The one move left to a human there is `none`, which the authority-map row
-already grants.
+one. A missing charter leaves a widening unvalidated rather than blocked:
+`signoff.sh` warns and accepts `--add-gates`, because adding a gate is always
+safe, and a human may widen by hand for the same reason. A narrowing the
+charter does not mark waivable is available to nobody, and no charter at all
+refuses every waiver outright. The one move left to a human there is `none`,
+which the narrowing row grants.
 
 ## Implementation inventory (follow-up work)
 

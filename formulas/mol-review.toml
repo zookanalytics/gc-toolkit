@@ -331,10 +331,12 @@ done
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.review --outcome pass
 ```
 
-**Exit criteria:** whole diff read, tests run at the pinned commit, published
-page and work-quality standards checked, every blocking finding enumerated,
-out-of-scope findings filed or named unfiled, findings.md written in the
-verdict shape, this step bead closed.
+**Exit criteria**, every gate: the pins re-derived, the dispatch note's gate
+method read and its reading and judgment carried out, findings.md written in
+the verdict shape, this step bead closed. For `codex` that method is steps
+1-5 entire: the whole diff read, the tests run at the pinned commit, the
+published page and the work-quality standards checked, every blocking finding
+enumerated, and out-of-scope findings filed or named unfiled.
 """
 
 [[steps]]
