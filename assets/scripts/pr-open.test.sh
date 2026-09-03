@@ -79,9 +79,13 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR published past the hold"
 echo "# a declared gate short of green holds"
 store "[$(pre B2 polecat/b2 ',"check.codex":"fixing"')]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
+: > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "check 'codex' is 'fixing', not green" "a lane short of green holds the open"
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
+# The gate check is row-only (green is a state of the lane, not the head), so
+# it is judged before the head fetch: a held anchor pays no network call.
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an ungreen gate holds before the head is ever fetched"
 
 # The whole of the 211: a green lane is green however far the branch has moved
 # since the verdict, so the head the PR opens at is not the gate's business.
@@ -106,6 +110,7 @@ out=$("$SUT" 2>&1)
 has "$out" "check 'triage' is 'unreviewed', not green" "the unmarked second gate holds"
 eq "$(meta B3 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered gate"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "…and the head was never fetched to decide it"
 
 echo "# an empty check_set is never the gateless opt-out"
 store "[$(pre B4 polecat/b4 '' '')]"
@@ -114,6 +119,7 @@ echo "sha-b4" > "$GH_DIR/head_polecat_b4"
 out=$("$SUT" 2>&1)
 has "$out" "no normalized check_set" "an unnormalized anchor is held, not published"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and nothing is opened under it"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an unnormalized check_set holds before the head is ever fetched"
 
 echo "# check_set=none publishes: gateless BY CHOICE is not a missing marker"
 store "[$(pre B5 polecat/b5 '' 'none')]"

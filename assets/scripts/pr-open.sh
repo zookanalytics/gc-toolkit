@@ -344,16 +344,10 @@ Branch: $branch"
     fi
   fi
 
-  # The gate: every gate the anchor's own check_set declares reads green. Same
-  # predicate merge.sh applies at the merge, so one anchor is judged by one rule
-  # at both transitions. The head below is what the PR is opened at, not what
-  # the gate is measured against — green is a state of the lane.
-  HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
-  head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
-  if [ -z "$head_oid" ]; then
-    echo "$PROG: $id branch '$branch' head unresolved; skip (retry next pass)" >&2
-    skipped=$((skipped + 1)); continue
-  fi
+  # The gate: every gate the anchor's own check_set declares reads green. This
+  # is a row-only check — green is a state of the lane, not a claim about a
+  # commit — so it is judged before the head fetch below: a held anchor pays
+  # no network call.
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   # Empty is never the gateless opt-out: that is the 'none' sentinel. Empty
   # means never normalized, and gate-ensure — arm 1 of this same pass — stamps
@@ -374,6 +368,16 @@ GATES
   if [ -n "$UNGREEN" ]; then
     echo "$PROG: $id branch '$branch' check '$UNGREEN' is '$UNGREEN_HAVE', not green; held"
     held=$((held + 1)); continue
+  fi
+
+  # Every check_set gate reads green — the only cases left need the live head:
+  # what the PR is opened at, and (below) whether a dead PR was closed at
+  # exactly this commit.
+  HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
+  head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
+  if [ -z "$head_oid" ]; then
+    echo "$PROG: $id branch '$branch' head unresolved; skip (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
   fi
 
   # A dead PR closed at EXACTLY this head was a decision about this commit;

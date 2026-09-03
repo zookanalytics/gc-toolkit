@@ -333,8 +333,12 @@ beads, and never run `gh pr review --approve`.
 **2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
 is the dispatch pin and the posted artifact's audit label, never a marker, and
 nothing in the cadence compares a marker to a head. A rebase or a new commit
-that lands while you read does not stale your findings, and signoff does not
-refuse a moved or grown head — call it once with the OID the dispatch named.
+that lands on top of the pin while you read does not stale your findings —
+call it once with the OID the dispatch named. Only a rewrite that drops the
+pin from the branch (a rebase, amend or force-push) is different: signoff
+refuses the verdict, but closes the review bead itself `gc.outcome=superseded`
+and exits 0 — there is nothing here to append and nothing to restore,
+gate-ensure pours a fresh review at the live head next pass.
 "already closed" is not a failure either and has nothing to
 re-pin: this dispatch was recorded or retired before you judged it, so drop the
 verdict, close the chain and drain. Any other failure, in this order: append your findings to

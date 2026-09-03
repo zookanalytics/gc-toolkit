@@ -14,6 +14,15 @@
 #     the anchor, including gates nobody ran. A review bead carrying no
 #     check_name resolves gate codex, mirroring signoff.sh, which defaults an
 #     absent check_name to codex and stamps check.codex for that same bead.
+#     "Carrying a reviewed_oid" is necessary but not sufficient: gate-ensure
+#     stamps reviewed_oid at DISPATCH, before any verdict exists, so an open
+#     bead or one that ended request-changes also carries it. The bead only
+#     backs the lane once it is CLOSED and its metadata signoff_verdict reads
+#     approve. A closed bead with no signoff_verdict at all is legacy — it
+#     predates the stamp — and still counts when gc.outcome=recorded is the
+#     only sign left that it closed on a verdict rather than being retired
+#     unjudged (moot) or refused for a rewritten pin (superseded). An open
+#     bead, and a closed bead whose verdict was request-changes, never count.
 #   B (network, residue only) — an APPROVED GitHub review on the anchor's
 #     pr_number. B exists because the operator approves directly on GitHub,
 #     which files no review bead. It is not compared to a commit: per tk-4yl2c
@@ -96,8 +105,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
     [ "$(printf '%s' "$cands" | jq -r 'length' 2>/dev/null)" != "0" ] || continue
 
-    # RESOLVE A. Read ALL statuses: signoff.sh closes a review bead when it
-    # records its verdict, so the evidence for a live anchor is usually closed.
+    # RESOLVE A. Read ALL statuses: an open bead (dispatched, no verdict yet)
+    # and a closed request-changes bead must be SEEN so they can be excluded,
+    # not merely absent because a status filter never fetched them.
     idx_raw=$(run_bounded gc bd list --db "$rig_path/.beads" --all \
         --has-metadata-key reviewed_oid --json --limit 0 2>/dev/null); irc=$?
     if [ "$irc" -ne 0 ] || [ -z "$idx_raw" ]; then
@@ -110,7 +120,16 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | ((($m.anchor_bead // "") | tostring)) as $a
         | ((($m.reviewed_oid // "") | tostring)) as $o
         | (((($m.check_name // "") | tostring)) | if . == "" then "codex" else . end) as $g
-        | select($a != "" and $o != "")
+        | (((.status // "") | tostring | ascii_downcase)) as $st
+        | (($m.signoff_verdict // "") | tostring) as $sv
+        | ((($m["gc.outcome"] // "") | tostring)) as $oc
+        # A verdict backs a lane only once it is judged AND closed: an open
+        # bead never counts. A closed bead counts when signoff_verdict reads
+        # approve, or, for a legacy bead written before that stamp existed,
+        # when it carries no signoff_verdict at all and gc.outcome=recorded
+        # is the only sign left that it closed on a verdict.
+        | select($a != "" and $o != "" and $st == "closed")
+        | select($sv == "approve" or ($sv == "" and $oc == "recorded"))
         | {key: ($a + "\u001f" + $g), value: ((.id // "?") | tostring)} ] | from_entries' 2>/dev/null); jrc=$?
     if [ "$jrc" -ne 0 ] || [ -z "$idx" ]; then
         warnings+=("$label: review-bead index from $rig_path/.beads could not be parsed — this store was NOT checked")
@@ -142,11 +161,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         processed=$((processed + 1))
         gname="${gate#check.}"
         if [ -z "$pr" ]; then
-            warnings+=("$label bead $id: $gate=\"green\" is backed by no review bead naming gate $gname, and the anchor records no pr_number — no GitHub approval could be looked for, so this lane is UNDETERMINED, not cleared")
+            warnings+=("$label bead $id: $gate=\"green\" is backed by no closed, approve-verdict review bead naming gate $gname, and the anchor records no pr_number — no GitHub approval could be looked for, so this lane is UNDETERMINED, not cleared")
             continue
         fi
         if [ -z "$slug" ] || ! command -v gh >/dev/null 2>&1; then
-            warnings+=("$label bead $id: $gate=\"green\" is backed by no review bead naming gate $gname, and PR $pr could not be consulted (gh unavailable, or origin is not a github.com remote) — UNDETERMINED, not cleared")
+            warnings+=("$label bead $id: $gate=\"green\" is backed by no closed, approve-verdict review bead naming gate $gname, and PR $pr could not be consulted (gh unavailable, or origin is not a github.com remote) — UNDETERMINED, not cleared")
             continue
         fi
         key="$slug#$pr"
@@ -165,11 +184,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
         approvals="${REVIEWS_CACHE[$key]}"
         if [ -z "$approvals" ]; then
-            warnings+=("$label bead $id: $gate=\"green\" is backed by no review bead naming gate $gname, and the review list for PR $pr could not be read — UNDETERMINED, not cleared")
+            warnings+=("$label bead $id: $gate=\"green\" is backed by no closed, approve-verdict review bead naming gate $gname, and the review list for PR $pr could not be read — UNDETERMINED, not cleared")
             continue
         fi
         [ "$(printf '%s' "$approvals" | jq -r 'length > 0' 2>/dev/null)" = "true" ] && continue
-        errors+=("$label bead $id: $gate=\"green\" records a passed gate nothing reviewed — no review bead carries anchor_bead=$id with a reviewed_oid and check_name=$gname, and PR $pr carries no APPROVED review; merge.sh will land this branch on the strength of that lane")
+        errors+=("$label bead $id: $gate=\"green\" records a passed gate nothing reviewed — no closed review bead carries anchor_bead=$id with check_name=$gname and a recorded approve verdict, and PR $pr carries no APPROVED review; merge.sh will land this branch on the strength of that lane")
     done <<< "$residue"
     if [ "$processed" -ne "$expected" ]; then
         warnings+=("$label: enumerated $processed of $expected unresolved marker(s) in $rig_path/.beads — the rest were NOT checked")

@@ -138,6 +138,26 @@ inflight_review() { # <anchor-id> <gate>
        else .id end)' 2>/dev/null
 }
 
+# An open rework child already filed under <anchor>? Echoes its id. A rework
+# child is a blocks-dep bead whose metadata carries a non-empty
+# source_review_bead — exactly what signoff.sh's count_rework_children walks —
+# and request-changes clears check.<g> and files exactly one such child, so a
+# lane back to unreviewed with one of these still open is owed the rework
+# landing, not a fresh review. Non-zero rc = the ledger could not answer; the
+# caller holds the dispatch, the same as an unreadable in-flight-review lookup.
+open_rework_child() { # <anchor-id>
+  local raw
+  raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$raw" | jq -r --arg ls "$LIVE_STATUSES" '
+    ($ls | split(",")) as $live
+    | [ .[]
+        | select(((.status // "open") | ascii_downcase) as $st | ($live | index($st)) != null)
+        | select(((.metadata.source_review_bead // "") | tostring) != "")
+        | .id ] | (.[0] // empty)' 2>/dev/null
+}
+
 # The roots of every workflow poured over <review-bead>, one per line, via the
 # tracking convoy each pour mints. A re-pour mints a SECOND root, so all of
 # them must be judged — one spent root proves nothing while a sibling runs.
@@ -288,12 +308,17 @@ while IFS= read -r row; do
   # it. Clear it when it also fails the marker grammar: a word no lane state
   # names is not a state, and check-gate-integrity errors on it forever.
   # A well-formed marker survives — a narrowed check_set keeps its history.
+  # A legacy exception@<oid> park is exempt from the sweep: until
+  # migrate-lane-states.sh runs it is still an operator's park to retire, not
+  # damage to clear, and clearing it silently would leave the migration
+  # nothing to find.
   declared=",$(printf '%s' "$checkset" | tr -d '[:space:]'),"
   stray=$(printf '%s' "$row" | jq -r --arg d "$declared" '
     (.metadata // {}) | to_entries[]
     | select(.key | test("^check\\.[^.]+$"))
     | select((.value | type) == "string")
     | select((.value | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not)
+    | select((.value | test("^exception@")) | not)
     | (.key | sub("^check\\."; "")) as $g
     | select(($d | contains("," + $g + ",")) | not)
     | .key' 2>/dev/null)
@@ -325,8 +350,25 @@ STRAY
   # The machine axis this pass reaches for the anchor as a whole. The gate loop
   # already classifies every marker into settled or needs-raising; these two
   # flags keep that answer instead of discarding it at the end of the iteration.
+  #
+  # The cap's wedge — shared with merge.sh's is_held arm — is evaluated once
+  # HERE, per anchor, not inside the per-gate loop: the park sits on the
+  # anchor's own merge_hold, not on any one lane, so a fully green capped
+  # anchor (one gate hand-greened, or all of them) must still record the
+  # wedge even though the loop below never reaches a hold check for it.
+  # merge_hold's value must be the literal string "signoff_cap" — an
+  # operator's own hold (merge_hold=true) beside a stale orphan signoff_cap
+  # is not the cap's park.
   mach_wedge=0
   mach_progress=0
+  if [ "$hold" = "signoff_cap" ] && [ -n "$(meta_of "$row" signoff_cap)" ]; then
+    mach_wedge=1
+  fi
+  # The anchor's open rework children, read at most once per anchor and only
+  # when a gate actually needs the answer (finding 1's REWORK probe, below).
+  rework_computed=0
+  rework_id=""
+  rework_unreadable=0
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue
@@ -340,6 +382,16 @@ STRAY
     # dispatch or the review already running.
     case "$marker" in
       green) continue ;;
+      exception@*)
+        # Pre-migration window: signoff.sh on main still wrote this legacy cap
+        # park (merge_hold unset), and nothing here knows what to do with it
+        # until migrate-lane-states.sh rewrites it to merge_hold=signoff_cap.
+        # Pouring a review against a parked anchor would be wasted reach, so
+        # this reads as wedged and held, never as a dispatch.
+        mach_progress=1
+        mach_wedge=1
+        echo "$PROG: $id gate '$g' carries a legacy park (check.$g=$marker); awaits migrate-lane-states.sh — no dispatch"
+        held=$((held + 1)); continue ;;
       "")           why="check.$g is absent, so the lane is unreviewed (never reviewed, or cleared by a REQUEST_CHANGES signoff)" ;;
       unreviewed)   why="check.$g is unreviewed; this lane owes a full review" ;;
       reviewing)    why="check.$g is reviewing; re-dispatching unless a review still is in flight" ;;
@@ -356,14 +408,12 @@ STRAY
     mach_progress=1
 
     # Operator hold gates a re-dispatch (pipeline work toward landing); the
-    # armed gate already holds the merge, so held-and-gated is safe. Under
-    # signoff.sh's cap the hold IS the park, and nothing automated will lift it:
-    # signoff_cap is the stamp that says so, and it makes the anchor wedged
-    # rather than progressing.
+    # armed gate already holds the merge, so held-and-gated is safe. Whether
+    # this particular hold IS the cap's park (wedged, not merely progressing)
+    # was already decided once for the whole anchor, above.
     case "$hold" in
       ""|false|False|FALSE|0|null) : ;;
-      *) [ -z "$(meta_of "$row" signoff_cap)" ] || mach_wedge=1
-         echo "$PROG: $id gate '$g' needs raising ($why) but merge_hold is set (operator gate); no dispatch"
+      *) echo "$PROG: $id gate '$g' needs raising ($why) but merge_hold is set (operator gate); no dispatch"
          held=$((held + 1)); continue ;;
     esac
 
@@ -450,6 +500,31 @@ Two repairs, either of which clears the hold:
           esac ;;
         *) : ;;  # live review in flight — it will raise the gate
       esac
+      continue
+    fi
+
+    # In-flight REWORK probe: request-changes clears check.$g and files
+    # exactly one rework child, returning the lane to unreviewed — but no
+    # LIVE REVIEW bead exists yet to trip the in-flight check above, so
+    # without this the lane reads as owed a fresh review every pass while the
+    # rework child that would actually settle it is still open. Read at most
+    # once per anchor, and only once a fresh dispatch is actually in reach
+    # (a stray review the block above is repairing takes priority: that is
+    # not a NEW review, and does not need to wait on the rework it is itself
+    # part of answering).
+    if [ "$rework_computed" = 0 ]; then
+      rework_computed=1
+      if ! rework_id=$(open_rework_child "$id"); then
+        rework_unreadable=1
+        rework_id=""
+      fi
+    fi
+    if [ "$rework_unreadable" = 1 ]; then
+      echo "$PROG: $id rework-child ledger unreadable; dispatching nothing for gate '$g' (merge stays held, retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    if [ -n "$rework_id" ]; then
+      echo "$PROG: $id gate '$g' is waiting on rework child $rework_id; no dispatch"
       continue
     fi
 

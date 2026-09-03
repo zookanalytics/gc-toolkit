@@ -23,10 +23,18 @@
 # is one bare word, a verdict binds to no oid, and a commit landing on the
 # branch neither stales a verdict nor buys a review. The reviewed oid survives
 # as the artifact's audit trail and as the dispatch pin mol-review reads.
+# The pin still names real content, though: commits added on top of it leave it
+# reachable and change nothing here, but a rewrite that drops it from the
+# branch (rebase, amend, force-push) means mol-review read and tested a commit
+# nobody can merge. Both verdicts are refused on a gone pin — no marker, no
+# rework, no round spent — and the review bead is closed gc.outcome=superseded
+# instead of recorded, so gate-ensure's in-flight probe stops seeing it and
+# pours a fresh review at the live head next pass.
 # Both are refused on an already-closed review bead: signoff closes the bead
 # itself, last, so a closed one was recorded or retired before it was judged.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
-# Exit: 0 recorded · 1 refused, no verdict written · 2 a write did not read back
+# Exit: 0 recorded, or refused-as-superseded with the review closed for a fresh
+#       dispatch · 1 refused, no verdict written · 2 a write did not read back
 #       (the review bead is left open so the gate stays owed).
 set -uo pipefail
 
@@ -50,7 +58,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
   --reviewed-oid the commit the review read; default: the review bead's own
                  reviewed_oid (stamped at dispatch), else the live head of the
                  anchor's branch (git ls-remote origin <branch>). It names the
-                 commit in the posted artifact; it does not bind the verdict.
+                 commit in the posted artifact; it does not bind the verdict —
+                 except that a pin the branch no longer carries (rewritten out
+                 from under it) is refused, not recorded.
 
 reset: retire a round cap under a ruling. Advances signoff_round_floor to the
   rounds already spent and retires the park the cap wrote — merge_hold,
@@ -121,7 +131,6 @@ bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
-is_held()   { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -242,14 +251,22 @@ if [ "$MODE" = reset ]; then
 
   # Retire the cap's own park with the counter: the hold keeps every dispatch
   # arm off the anchor and a human route keeps it queued, so a reset leaving
-  # either standing would not be one. signoff_cap is the stamp this cap writes
-  # with the hold, and both must still stand — a merge_hold a person set, or one
-  # already lifted by hand, is not this cap's to clear.
+  # either standing would not be one. The cap's own park is recognised by ONE
+  # pairing, everywhere in the cadence: merge_hold reads the literal string
+  # "signoff_cap" AND signoff_cap itself is non-empty. Anything else — a
+  # person's merge_hold=true, an orphaned signoff_cap beside no hold at all, or
+  # beside a person's true — is not this cap's to clear. An operator who lifts
+  # merge_hold by hand leaves signoff_cap standing on purpose; if that operator
+  # later sets merge_hold=true for a freeze, the exact-pairing test is what
+  # keeps the next reset from reading that freeze as this cap's park and
+  # silently lifting it.
   # The dispatch tally goes with it: released rounds nobody may dispatch are no
   # release.
   CAP_STAMP=$(row_meta "$ANCHOR_ROW" signoff_cap)
-  PARK_GATE="$CAP_STAMP"; RETIRED=""; RETIRED_TAKEAWAY=""; TALLY_KEYS=()
-  if [ -n "$PARK_GATE" ] && is_held "$(row_meta "$ANCHOR_ROW" merge_hold)"; then
+  MERGE_HOLD_VAL=$(row_meta "$ANCHOR_ROW" merge_hold)
+  PARK_GATE=""; RETIRED=""; RETIRED_TAKEAWAY=""; TALLY_KEYS=()
+  if [ -n "$CAP_STAMP" ] && [ "$MERGE_HOLD_VAL" = "signoff_cap" ]; then
+    PARK_GATE="$CAP_STAMP"
     WRITES+=(--unset-metadata merge_hold --unset-metadata blocked_reason \
              --unset-metadata signoff_cap --set-metadata "gc.routed_to=")
     RETIRED="the merge_hold park on gate $PARK_GATE, blocked_reason, signoff_cap and the human route"
@@ -274,6 +291,8 @@ TALLY
   NOTE="signoff: round cap retired by ruling — $RESET_REASON. The floor is set to the $TOTAL rework round(s) already filed under this anchor, pinned to batch $BATCH, so the next verdict counts from 0 of $CAP"
   if [ -n "$RETIRED" ]; then
     NOTE="$NOTE, and the park the cap wrote is retired with it ($RETIRED)."
+  elif [ -n "$CAP_STAMP" ]; then
+    NOTE="$NOTE. No park was retired: signoff_cap names $CAP_STAMP but merge_hold reads '${MERGE_HOLD_VAL:-<absent>}', not this cap's own signoff_cap pairing — a person's hold stays."
   else
     NOTE="$NOTE. No park was retired: signoff_cap claims no standing hold here, so a merge_hold on this anchor is a person's and stays."
   fi
@@ -285,7 +304,7 @@ TALLY
   [ "$(row_meta "$AFTER" signoff_round_floor)" = "$WANT_FLOOR" ] || BAD="$BAD signoff_round_floor"
   [ "$(row_meta "$AFTER" signoff_rounds_reset)" = "$BATCH" ]     || BAD="$BAD signoff_rounds_reset"
   if [ -n "$RETIRED" ]; then
-    is_held "$(row_meta "$AFTER" merge_hold)" && BAD="$BAD merge_hold"
+    [ -z "$(row_meta "$AFTER" merge_hold)" ]         || BAD="$BAD merge_hold"
     [ -z "$(row_meta "$AFTER" signoff_cap)" ]        || BAD="$BAD signoff_cap"
     [ -z "$(row_meta "$AFTER" blocked_reason)" ]     || BAD="$BAD blocked_reason"
     [ -z "$(row_meta "$AFTER" gc.routed_to)" ]       || BAD="$BAD gc.routed_to"
@@ -392,6 +411,78 @@ case "$REVIEWED_OID" in
   ''|*[!0-9a-f]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
 esac
 
+# Answers on | gone | unknown for whether <oid> is still in the branch's
+# history. Commits added on top keep it 'on' — the pin still names real
+# content, and no marker compares to a head, so a grown branch is not this
+# check's business. Only a rewrite makes it 'gone'. Unknown proceeds: a probe
+# that cannot reach the remote must not discard a review round that happened.
+oid_on_branch() { # <oid> <live-head>
+  local oid="$1" live="${2:-}" base rc
+  [ -n "$live" ] || { printf 'unknown'; return 0; }
+  [ "$oid" != "$live" ] || { printf 'on'; return 0; }
+  if [ -n "$PR_REPO" ]; then
+    base=$(gh api --hostname "$PR_HOST" "repos/$PR_REPO/compare/$oid...$live" \
+      --jq '.merge_base_commit.sha // empty' 2>/dev/null)
+    if [ "$base" = "$oid" ]; then printf 'on'; return 0
+    elif [ -n "$base" ]; then printf 'gone'; return 0
+    fi
+  fi
+  [ -n "$BRANCH" ] && git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+  git merge-base --is-ancestor "$oid" "$live" >/dev/null 2>&1; rc=$?
+  case "$rc" in
+    0) printf 'on' ;;
+    1) printf 'gone' ;;
+    *) printf 'unknown' ;;   # git could not resolve one of the commits
+  esac
+}
+
+LIVE_HEAD=$(live_head)
+if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
+  # A dispatch pin that no longer names real content: gate-ensure/pr-facts
+  # stamped it at a head the branch has since been rewritten out from under
+  # (rebase, amend, force-push), so what mol-review read and tested is not
+  # mergeable content. This is not "moved" — commits added on top stay 'on'
+  # and are not this check's business — and it is not a failure to retry: the
+  # review bead is closed superseded so gate-ensure's in-flight probe stops
+  # seeing it and pours a fresh review at the live head next pass. Neither
+  # verdict is recorded, no marker is touched, no round is spent.
+  #
+  # mol-review re-reads the dispatch pin on the next claim, so a dead one left
+  # in place would re-review the same departed commit — clear only the bead's
+  # own pin: a caller who overrode a live one has not staled the dispatch.
+  # Best-effort — the refusal proceeds either way.
+  if [ "$(row_meta "$REVIEW_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
+    gc bd update "$REVIEW_BEAD" --unset-metadata reviewed_oid >/dev/null 2>&1 || true
+    # A denied or raced delete does not always fail the call, and the note and
+    # warning below both state the pin as cleared. Read it back. row_meta
+    # answers '' for a key that is gone and for a row it could not read, so
+    # absence is proof only from a row that resolved.
+    AFTER_ROW=$(bd_json show "$REVIEW_BEAD")
+    if ! is_rows "$AFTER_ROW"; then
+      warn "head moved to ${LIVE_HEAD:-unknown}, but $REVIEW_BEAD would not resolve on the read-back after clearing the dead dispatch pin, so whether reviewed_oid=$REVIEWED_OID is gone is unproven. Nothing was written, no round was spent, and the review bead is left OPEN rather than closed superseded on an unproven clear. If the pin survived, the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Check it by hand: gc bd show $REVIEW_BEAD --json, then gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
+      exit 2
+    fi
+    if [ "$(row_meta "$AFTER_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
+      warn "head moved to ${LIVE_HEAD:-unknown}, but clearing the dead dispatch pin did not read back on $REVIEW_BEAD: reviewed_oid is still $REVIEWED_OID. Nothing was written, no round was spent, and the review bead is left OPEN rather than closed superseded while the pin still stands. Clear it by hand: gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
+      exit 2
+    fi
+  fi
+  gc bd update "$REVIEW_BEAD" --append-notes \
+    "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No marker written, no round spent; closing this review as superseded so gate-ensure pours a fresh one at the live head." \
+    >/dev/null 2>&1 || true
+  gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=superseded --status=closed >/dev/null 2>&1 || true
+  SUPERSEDED_ROW=$(bd_json show "$REVIEW_BEAD")
+  SUPERSEDED_ST=$(printf '%s' "$SUPERSEDED_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
+  SUPERSEDED_OC=$(row_meta "$SUPERSEDED_ROW" gc.outcome)
+  if [ "$SUPERSEDED_ST" != "closed" ] || [ "$SUPERSEDED_OC" != "superseded" ]; then
+    warn "head moved to ${LIVE_HEAD:-unknown} and the pin was cleared, but closing $REVIEW_BEAD as superseded did not read back (status='$SUPERSEDED_ST' gc.outcome='$SUPERSEDED_OC'); review left open for a retry"
+    exit 2
+  fi
+  warn "head moved: reviewed oid $REVIEWED_OID has left branch '${BRANCH:-?}', now at $LIVE_HEAD. No verdict written — review $REVIEW_BEAD closed as superseded; gate-ensure pours a fresh review at the live head."
+  echo "signoff: $REVIEW_BEAD superseded — $REVIEWED_OID left branch '${BRANCH:-?}' (now at ${LIVE_HEAD:-unknown}); no marker written, no round spent"
+  exit 0
+fi
+
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.
 BODY_FILE=$(mktemp) || { warn "mktemp failed"; exit 1; }
@@ -422,13 +513,19 @@ post_artifact() {
 }
 
 close_review() {
-  gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=recorded --status=closed >/dev/null 2>&1 || true
-  local row st oc
+  # signoff_verdict rides in the same write as the close: doctor's
+  # check-gate-marker-provenance reads it to tell an approving review bead from
+  # one that recorded request-changes, now that (anchor, lane) alone no longer
+  # carries an oid to key on.
+  gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=recorded \
+    --set-metadata "signoff_verdict=$VERDICT" --status=closed >/dev/null 2>&1 || true
+  local row st oc sv
   row=$(bd_json show "$REVIEW_BEAD")
   st=$(printf '%s' "$row" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
   oc=$(row_meta "$row" gc.outcome)
-  if [ "$st" != "closed" ] || [ "$oc" != "recorded" ]; then
-    warn "review bead $REVIEW_BEAD close did not read back (status='$st' gc.outcome='$oc')"
+  sv=$(row_meta "$row" signoff_verdict)
+  if [ "$st" != "closed" ] || [ "$oc" != "recorded" ] || [ "$sv" != "$VERDICT" ]; then
+    warn "review bead $REVIEW_BEAD close did not read back (status='$st' gc.outcome='$oc' signoff_verdict='$sv')"
     exit 2
   fi
 }
@@ -468,6 +565,20 @@ dismiss_superseded() {
 }
 
 if [ "$VERDICT" = "approve" ]; then
+  # A legacy `exception@<oid>` marker predates this cadence's merge_hold+
+  # signoff_cap park and is only rewritten by migrate-lane-states.sh, which
+  # runs once, after this cadence lands. Until that migration runs, the marker
+  # is not lane vocabulary this verdict may read or overwrite: stamping green
+  # over it would silently release a cap park a human is relying on, on an
+  # anchor no reader here has re-classified. Refuse instead of guessing —
+  # nothing is written, the review is left open, and the migration is named.
+  CURRENT_MARKER=$(row_meta "$(bd_json show "$ANCHOR")" "check.$CHECK_NAME")
+  case "$CURRENT_MARKER" in
+    exception@*)
+      warn "check.$CHECK_NAME on $ANCHOR is '$CURRENT_MARKER', a legacy cap park awaiting migrate-lane-states.sh; refusing to stamp green over it. Nothing written — run migrate-lane-states.sh to rewrite this marker to merge_hold+signoff_cap, then re-submit this verdict. Review bead $REVIEW_BEAD left open."
+      exit 2
+      ;;
+  esac
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
@@ -558,8 +669,13 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # miss a presence check cannot see, so the read-back requires it CLEARED.
   CAP_HEADLINE="signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor"
   CAP_TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # merge_hold carries the literal string "signoff_cap", not "true": the cap's
+  # own park is recognised by that exact pairing with signoff_cap everywhere in
+  # the cadence (reset here, pr-facts.sh's operator-feedback reset), so a
+  # person's later merge_hold=true for an unrelated freeze is never mistaken
+  # for this park and silently lifted by the next release.
   gc bd update "$ANCHOR" \
-    --set-metadata merge_hold=true \
+    --set-metadata merge_hold=signoff_cap \
     --set-metadata gc.routed_to=human \
     --set-metadata "signoff_cap=$CHECK_NAME" \
     --set-metadata "blocked_reason=signoff did not converge after $ROUNDS rework rounds (cap $CAP); $CAP_WHY" \
@@ -569,7 +685,7 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
     --set-metadata gc.takeaway_settled= \
     >/dev/null 2>&1 || true
   CAP_ROW=$(bd_json show "$ANCHOR")
-  if ! is_held "$(row_meta "$CAP_ROW" merge_hold)" \
+  if [ "$(row_meta "$CAP_ROW" merge_hold)" != "signoff_cap" ] \
      || [ "$(row_meta "$CAP_ROW" gc.routed_to)" != "human" ] \
      || [ "$(row_meta "$CAP_ROW" signoff_cap)" != "$CHECK_NAME" ] \
      || [ "$(row_meta "$CAP_ROW" gc.takeaway)" != "$CAP_HEADLINE" ] \

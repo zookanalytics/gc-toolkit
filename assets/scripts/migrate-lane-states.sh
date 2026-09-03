@@ -8,9 +8,13 @@
 #   green@<oid>     -> green
 #   fixable@<oid>   -> fixing
 #   exception@<oid> -> the marker is cleared and the anchor is parked under
-#                      merge_hold, which is where the convergence cap's park
-#                      lives now, plus one visit carrying the park's reason —
-#                      closing a park silently removes a row from the board.
+#                      merge_hold=signoff_cap (+ signoff_cap=<gate>), which is
+#                      where the convergence cap's park lives now, plus one
+#                      visit carrying the park's reason — closing a park
+#                      silently removes a row from the board.
+# Only check.<g> keys named in the anchor's own check_set are touched — a
+# marker outside it governs nothing and nothing (not even this migration)
+# rewrites it; it is reported and left for gate-ensure's stray-marker sweep.
 # Absent stays absent: that is the unreviewed lane, and it needs no write.
 # RUN IT AFTER the code lands, never before: the old readers compare a marker
 # to a head, so a bare `green` written under them settles nothing and the next
@@ -75,18 +79,23 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
   raw=$(run_bounded gc bd list --db "$RIG_DB" --status open \
     --has-metadata-key merge_result --json --limit 0 2>/dev/null); rc=$?
-  if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
-    echo "$label: could not list open anchors (rc=$rc) — this store was NOT migrated" >&2
+  raw=$(printf '%s' "$raw" | scrub)
+  if [ "$rc" -ne 0 ] || [ -z "$raw" ] || ! printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "$label: listing unparseable — this store was NOT migrated" >&2
     total_attention=$((total_attention + 1)); continue
   fi
-  # One row per legacy marker: <id> <key> <old value> <new state> <blocked_reason>.
+  # One row per legacy marker: <id> <key> <old value> <new state> <blocked_reason> <declared>.
   # An `exception@` carries the empty new state; the park arm below recognises it.
-  rows=$(printf '%s' "$raw" | scrub | jq -r '
+  # <declared> is "1" when the key names a gate in the anchor's own check_set,
+  # "0" otherwise — an undeclared key is reported, never rewritten or parked.
+  rows=$(printf '%s' "$raw" | jq -r '
       .[]? | (.metadata // {}) as $m
       | ((($m.merge_result // "") | tostring)) as $mr
       | select($mr == "pre_open_gate" or $mr == "pull_request")
       | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
       | ((($m.blocked_reason // "") | tostring | gsub("[[:cntrl:]]"; " "))) as $why
+      | ((($m.check_set // "") | tostring | gsub("[[:space:]]"; ""))) as $csflat
+      | (",\($csflat),") as $declared
       | $m | to_entries[]
       | select(.key | test("^check\\.[^.]+$"))
       | select((.value | type) == "string")
@@ -96,15 +105,28 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
          elif ($v | startswith("exception@")) then ""
          else null end) as $to
       | select($to != null)
-      | [$id, .key, $v, $to, $why] | join("\u001f")' 2>/dev/null)
+      | (.key | sub("^check\\."; "")) as $g
+      | (if ($declared | contains(",\($g),")) then "1" else "0" end) as $decl
+      | [$id, .key, $v, $to, $why, $decl] | join("\u001f")' 2>/dev/null)
   if [ -z "$rows" ]; then
     echo "$label: no legacy gate markers; nothing to migrate"
     continue
   fi
 
-  migrated=0; parked=0; attention=0
-  while IFS=$'\037' read -r id key was to why; do
+  migrated=0; parked=0; undeclared=0; attention=0
+  while IFS=$'\037' read -r id key was to why decl; do
     [ -n "$id" ] || continue
+    gate="${key#check.}"
+
+    if [ "$decl" != "1" ]; then
+      # check_set does not name this gate: no reader dispatches or merges
+      # against it, and nothing here may rewrite it either. gate-ensure's
+      # stray-marker sweep (or a hand unset) retires it; this is not our call.
+      undeclared=$((undeclared + 1))
+      echo "$label $id: $key=\"$was\" names a gate outside check_set; left as an undeclared legacy marker for gate-ensure's sweep (or a hand unset)"
+      continue
+    fi
+
     if [ -n "$to" ]; then
       # --- a verdict that survives, as a lane state ---------------------------
       if [ "$APPLY" -eq 0 ]; then
@@ -122,55 +144,76 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
       continue
     fi
 
-    # --- a park: the marker goes, merge_hold and a visit carry it -------------
-    # Cleared and held in ONE write. Between a cleared marker and an unset hold
-    # the anchor is an ordinary unreviewed lane, and one reconcile pass through
-    # that gap buys the review this park exists to refuse.
+    # --- a park: the marker goes, merge_hold=signoff_cap and a visit carry it -
+    # The visit is filed FIRST, before the marker is touched: escalate.sh
+    # dedups on --subject/--key, so a retried call after a partial failure
+    # files nothing twice, and a park write that then fails (or is never
+    # reached) leaves the legacy marker standing for the next run to pick
+    # this row up again from here — never a hold with nothing on the board,
+    # and never a re-run that duplicates the visit once the park has landed.
     PARK_WHY="$why"
     [ -n "$PARK_WHY" ] || PARK_WHY="the review cap parked this anchor ($key was \"$was\")"
     if [ "$APPLY" -eq 0 ]; then
-      echo "$label $id: would clear $key=\"$was\", set merge_hold, and file one visit [$VISIT_KEY]"
+      if [ -z "$rig_name" ]; then
+        echo "$label $id: would need an operator to file the visit by hand (city scope has no rig-qualified converse pool); would NOT clear $key or park automatically" >&2
+        attention=$((attention + 1)); continue
+      fi
+      echo "$label $id: would file visit [$VISIT_KEY], then clear $key=\"$was\" and set merge_hold=signoff_cap signoff_cap=$gate"
       parked=$((parked + 1)); continue
     fi
-    run_bounded gc bd update "$id" --db "$RIG_DB" \
-      --unset-metadata "$key" --set-metadata merge_hold=true \
-      --append-notes "$PROG: $key=\"$was\" retired. The convergence cap's park is merge_hold now, and this anchor keeps it: $PARK_WHY" >/dev/null 2>&1
-    got=$(meta_of "$id" "$key")
-    hold=$(meta_of "$id" merge_hold)
-    case "$hold" in ""|false|False|FALSE|0|null) hold="" ;; esac
-    if [ -n "$got" ] || [ -z "$hold" ]; then
-      attention=$((attention + 1))
-      echo "$label $id: the park did not read back ($key='${got:-<cleared>}', merge_hold='${hold:-<unset>}'); the anchor is NOT parked, retry" >&2
-      continue
-    fi
-    parked=$((parked + 1))
     if [ ! -x "$ESCALATOR" ]; then
       attention=$((attention + 1))
-      echo "$label $id: parked under merge_hold but $ESCALATOR is missing; NO visit filed — file one by hand" >&2
+      echo "$label $id: $ESCALATOR is missing; NOT parked, no visit filed — file one by hand and retry" >&2
       continue
     fi
-    if "$ESCALATOR" --subject "$id" --key "$VISIT_KEY" \
-         ${rig_name:+--pool "$rig_name/gc-toolkit.converse"} --message \
+    if [ -z "$rig_name" ]; then
+      # No rig-qualified pool exists at city scope, and GC_RIG has nothing to
+      # be set to here. Rather than guess a store, leave the legacy marker
+      # standing and ask a person to file the visit and park by hand.
+      attention=$((attention + 1))
+      echo "$label $id: city-scope park needs an operator — no rig to route the visit through ($PARK_WHY); NOT parked, legacy marker left in place — file by hand" >&2
+      continue
+    fi
+    # GC_RIG picked explicitly, not inherited: GC_RIG outranks --pool inside
+    # escalate.sh, so an exported GC_RIG from the caller's shell (gc-helm
+    # shells and agent sessions export it) would otherwise steer the visit
+    # into the wrong rig's store, or refuse it as cross-rig, regardless of
+    # --pool. Pinning it to the rig this iteration is walking keeps the two
+    # in agreement, the same way a rig-qualified --pool alone cannot.
+    if ! GC_RIG="$rig_name" "$ESCALATOR" --subject "$id" --key "$VISIT_KEY" \
+         --pool "$rig_name/gc-toolkit.converse" --message \
 "The review cap's park on $id was carried across the lane-state migration and needs a person.
 
 $PARK_WHY
 
 The park used to be check.<gate>=exception@<head>, which a new commit cleared.
-It is merge_hold now, which no commit clears: a lane state is a state of the
-lane. Retire it with a ruling, which lifts the hold and re-baselines the round
-floor in one write:
+It is merge_hold=signoff_cap now, which no commit clears: a lane state is a
+state of the lane. Retire it with a ruling, which lifts the hold and
+re-baselines the round floor in one write:
   assets/scripts/signoff.sh reset $id --reason '<ruling>'
 Or reject the branch and let the anchor close the way any rejected work does." >/dev/null; then
-      echo "$label $id: $key=\"$was\" -> merge_hold + visit [$VISIT_KEY]"
-    else
       attention=$((attention + 1))
-      echo "$label $id: parked under merge_hold but the visit did not file; the park stands with nothing on the board saying so — file one by hand" >&2
+      echo "$label $id: visit [$VISIT_KEY] did not file; NOT parked, legacy marker left in place for the next run" >&2
+      continue
     fi
+    run_bounded gc bd update "$id" --db "$RIG_DB" \
+      --unset-metadata "$key" --set-metadata merge_hold=signoff_cap --set-metadata "signoff_cap=$gate" \
+      --append-notes "$PROG: $key=\"$was\" retired. The convergence cap's park is merge_hold=signoff_cap now, and this anchor keeps it: $PARK_WHY" >/dev/null 2>&1
+    got=$(meta_of "$id" "$key")
+    hold=$(meta_of "$id" merge_hold)
+    cap=$(meta_of "$id" signoff_cap)
+    if [ -n "$got" ] || [ "$hold" != "signoff_cap" ] || [ -z "$cap" ]; then
+      attention=$((attention + 1))
+      echo "$label $id: visit [$VISIT_KEY] is filed but the park did not read back ($key='${got:-<cleared>}', merge_hold='${hold:-<unset>}', signoff_cap='${cap:-<empty>}'); legacy marker left in place — the next run retries the write, and the visit will not duplicate" >&2
+      continue
+    fi
+    parked=$((parked + 1))
+    echo "$label $id: $key=\"$was\" -> merge_hold=signoff_cap signoff_cap=$gate + visit [$VISIT_KEY]"
   done <<ROWS
 $rows
 ROWS
 
-  echo "$label: $migrated lane state(s) migrated, $parked park(s) carried, $attention needing an operator"
+  echo "$label: $migrated lane state(s) migrated, $parked park(s) carried, $undeclared undeclared marker(s) left for gate-ensure, $attention needing an operator"
   total_attention=$((total_attention + attention))
 done <<SCOPES
 $scopes

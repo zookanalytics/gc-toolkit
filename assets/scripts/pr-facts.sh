@@ -10,9 +10,13 @@
 # ONE rework child per head to the fix pool, stamped prepare_mode and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a rework
 # child naming this branch whose rejection_reason names this head; an unstamped
-# orphan is adopted by title and an unrouted one re-routed, never twinned; a
-# hold or a live demand dispatches nothing, since rebasing is one horn of what
-# a demand asks); dismissal of our OWN superseded CHANGES_REQUESTED (never a
+# orphan is adopted by title and an unrouted one re-routed, never twinned; an
+# operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
+# since rebasing is one horn of what a demand asks — except the round cap's own
+# park (merge_hold=signoff_cap paired with signoff_cap), which is not an
+# operator's hold to begin with: it falls through instead of blocking outright,
+# so operator feedback below can still retire it even on a conflicting PR);
+# dismissal of our OWN superseded CHANGES_REQUESTED (never a
 # human's; signoff_dismissed read back FIRST; skipped under native auto-merge).
 # No arm here re-reviews a moved head: a lane state is a state of the lane, and
 # gate-ensure dispatches on the lane, not on the commit under it. A merged record never carries an
@@ -98,6 +102,16 @@ canon_pr_url() {
   printf '%s' "${1:-}" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
+# The round cap's own park pairs merge_hold=signoff_cap (the literal string,
+# never `true`) with a non-empty signoff_cap naming the gate. That ONE pairing
+# is the cap's park — is_held(merge_hold) alone is not enough, since an
+# operator can set merge_hold=true for an unrelated freeze (a release hold,
+# say) while an orphaned signoff_cap stamp still sits on the anchor from an
+# earlier park the operator already lifted by hand (signoff.sh leaves
+# signoff_cap in place on purpose; see signoff.test.sh's "a signoff_cap
+# standing beside no hold retires nothing"). Both the CONFLICTING arm and the
+# operator-feedback reset arm below key on this same predicate.
+is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -216,6 +230,10 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
+  # Read once, off this same row, for is_cap_park below: the CONFLICTING arm's
+  # cap-park carve-out and the operator-feedback reset arm's park retirement
+  # both turn on the identical pairing.
+  cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
   # A graduation is the integration-to-main case whatever its branch is named, so
   # the CONFLICTING arm classifies on this as well as on the branch.
   grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
@@ -415,10 +433,35 @@ GATES
 
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
-    if is_held "$hold" || is_held "$rhold"; then
+    if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
+    if is_held "$hold" && ! is_cap_park "$hold" "$cap"; then
+      echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
+    if is_cap_park "$hold" "$cap"; then
+      # The cap's own park is not an operator's hold: signoff.sh's CAP_WHY
+      # tells the operator that "new operator feedback on PR#N retires this
+      # cap and its park", and a conflicting PR must not make that a lie by
+      # wedging the park forever. `continue`ing here the way a person's hold
+      # does would end this anchor's iteration before the posture=commented
+      # arm below ever runs, so a capped anchor whose PR conflicts could never
+      # be released by the very feedback the cap advertises — every pass
+      # would print this line and stop, forever.
+      #
+      # So a cap park alone dispatches no rework THIS pass (merge_hold still
+      # reads as the park at the top of this iteration, and the branch is
+      # still conflicted), but falls through instead of `continue`ing: if
+      # there is new operator feedback, the reset arm below retires the park
+      # in this same pass, and the CONFLICTING check runs clean on the NEXT
+      # pass — merge_hold actually empty by then — to file the rework.
+      # Without feedback, nothing below fires and the anchor stays parked
+      # exactly as it does today.
+      echo "$PROG: $id — PR#$num conflicts but merge_hold parks the review-round cap (gate $cap); no rework dispatched this pass — operator feedback below can retire the park, and the rework files once merge_hold actually clears on a later pass"
+      skipped=$((skipped + 1))
+    else
     # A live demand is the same freeze. `gc-helm.sh demand` files what a person
     # owes as its own bead gating this anchor, and "rebase it onto the base" is
     # routinely one horn of the question being asked. A child dispatched under
@@ -574,6 +617,7 @@ GATES
     reworked=$((reworked + 1))
     echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
     continue
+    fi
   fi
 
   # --- an unanswered review comment routes to something -------------------------
@@ -604,7 +648,7 @@ GATES
     reset_key="$max_r.$max_c"
     if [ "$(printf '%s' "$row" | jq -r '(.metadata.signoff_rounds_reset // "") | tostring')" != "$reset_key" ]; then
       RSET=(--set "signoff_rounds_reset=$reset_key")
-      undo=""; unparked=0
+      undo=""; unparked=0; park_note=""
       # The dispatch tally bounds a runaway: reviews that dispatch and leave no
       # verdict. New operator feedback is the evidence this anchor is not that,
       # and the released rounds cannot be dispatched at all while the tally
@@ -627,18 +671,32 @@ TALLY
       # sentence the board renders for this park — so it retires with the park,
       # and gc.takeaway_by is what tells it from a sitting's, which is left
       # alone.
-      cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
-      if [ -n "$cap" ] && [ -z "$holding" ] && is_held "$hold"; then
-        RSET+=(--unset merge_hold --unset blocked_reason --unset signoff_cap --route "")
-        undo="${undo:+$undo, }the merge_hold park on gate $cap, blocked_reason and the human route"
-        if [ "$takeaway_by" = signoff ]; then
-          RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
-          undo="${undo:+$undo, }the cap's takeaway"
+      #
+      # "theirs and stays" above is the shared predicate, not a bare
+      # is_held(merge_hold): the cap's own park is the ONE pairing
+      # merge_hold==signoff_cap (the literal string) beside a non-empty
+      # signoff_cap (`cap`, read at the top of this iteration off the same
+      # row). Any OTHER merge_hold value standing beside signoff_cap — set by
+      # hand over an orphaned cap stamp, or a fresh freeze like a release hold
+      # — is a person's, and this reset must not retire it, or say in its own
+      # note that it did.
+      if is_cap_park "$hold" "$cap"; then
+        if [ -z "$holding" ]; then
+          RSET+=(--unset merge_hold --unset blocked_reason --unset signoff_cap --route "")
+          undo="${undo:+$undo, }the merge_hold park on gate $cap, blocked_reason and the human route"
+          if [ "$takeaway_by" = signoff ]; then
+            RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
+            undo="${undo:+$undo, }the cap's takeaway"
+          fi
+          unparked=1
         fi
-        unparked=1
+        # else: a sitting still holding the anchor for a ruling outranks the
+        # reset, same as above — nothing further to say here.
+      elif [ -n "$cap" ] && is_held "$hold"; then
+        park_note=" No park was retired: merge_hold does not carry the cap's own park value, so it is a person's and stays (signoff_cap=$cap stands beside it, unclaimed by this reset)."
       fi
       if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence." >/dev/null; then
+           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence.${park_note}" >/dev/null; then
         # The row was read before this write, and the routing choice below
         # reads both fields: a park retired here must not still hold as one.
         [ "$unparked" = 1 ] && { routed=""; hold=""; }

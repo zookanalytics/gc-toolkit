@@ -184,10 +184,12 @@ writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
 check_set_default = "codex"
 check_set_sentinel = "none"
-# check.<g> = <verb>, one bare state word never bound to a commit. green
+# check.<g> = <state>, one bare lane-state word never bound to a commit. green
 # written only by signoff.sh; cleared/re-armed only by the merge cadence. Merge
-# requires every declared gate to read green.
-marker_verbs = ["green", "fixable", "exception"]
+# requires every declared gate to read green. No reader parses this list back
+# out (docs/state-machine.md is the vocabulary's normative source); it is kept
+# here as the declaration the state-space invariant (I2/I6) describes.
+marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # `approval` as a check_set member is satisfied only by an external APPROVED
 # review at the live head, never by a check.approval marker.
 approval_member = "approval"

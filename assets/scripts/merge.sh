@@ -124,16 +124,26 @@ anchor_row() { # live {status, meta}; empty = unreadable, never an all-default r
              | {status: (.status // ""), meta: .metadata}' 2>/dev/null
 }
 
-# First declared gate NOT green (none/off/approval dropped); non-zero = markers
-# unreadable, which the caller must hold on, never read as all-green. The lane
-# is compared to no head: green is a state of the lane, and a commit landing on
-# the branch neither clears it nor buys a review.
-hold_gate() { # <check_set> <row>
-  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" '
-    (.meta // {}) as $m
-    | (($cs // "") | split(",") | map(gsub("[[:space:]]"; "")) | map(select(length > 0))
+# The "first declared gate not green" predicate (none/off/approval dropped),
+# shared between hold_gate() and the terminal re-read below so the two jq
+# filters can never drift on which gate is red. Takes check_set as $cs and a
+# metadata object as $m.
+FIRST_RED_GATE_DEF='
+  def first_red_gate($cs; $m):
+    (($cs // "") | split(",") | map(gsub("[[:space:]]"; "")) | map(select(length > 0))
        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
-    | (first($gates[] | select((($m["check." + .]) // "") != "green"))) // ""' 2>/dev/null
+    | (first($gates[] | select((($m["check." + .]) // "") != "green"))) // "";
+'
+
+# First declared gate NOT green; non-zero = markers unreadable, which the
+# caller must hold on, never read as all-green. The lane is compared to no
+# head: green is a state of the lane, and a commit landing on the branch
+# neither clears it nor buys a review.
+hold_gate() { # <check_set> <row>
+  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" \
+    "$FIRST_RED_GATE_DEF"'
+    (.meta // {}) as $m
+    | first_red_gate($cs; $m)' 2>/dev/null
 }
 
 # Which status checks actually gate <branch>: rulesets + classic protection via
@@ -298,11 +308,13 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   if is_held "$hold"; then
-    # signoff.sh's cap parks an anchor under this hold and stamps signoff_cap
-    # beside it. That park is ungreenable by anything the cadence will do — the
-    # release is a person's — so it is the wedge, and an operator's own hold,
-    # which carries no such stamp, is not.
-    if [ -n "$(printf '%s' "$fresh" | jq -r '.meta.signoff_cap // ""')" ]; then
+    # signoff.sh's cap parks an anchor with merge_hold=signoff_cap (the
+    # literal string) and stamps signoff_cap beside it. That pairing —
+    # shared with gate-ensure.sh's identical predicate — is ungreenable by
+    # anything the cadence will do — the release is a person's — so it alone
+    # is the wedge. An operator's own hold (merge_hold=true) is not, even
+    # beside a stale orphan signoff_cap left over from an earlier park.
+    if [ "$hold" = "signoff_cap" ] && [ -n "$(printf '%s' "$fresh" | jq -r '.meta.signoff_cap // ""')" ]; then
       record_machine "$id" "wedged-exception" "$head_oid" "$aroute"
     fi
     echo "$PROG: PR#$num merge_hold set (operator gate); merge held (anchor $id)"
@@ -593,7 +605,8 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" --arg cs "$checkset" '
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" \
+    "$FIRST_RED_GATE_DEF"'
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
@@ -604,9 +617,7 @@ $sa_out" >/dev/null 2>&1 || true
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
     | ((($m.check_set // "") | tostring)) as $fcs
-    | (($fcs | split(",") | map(gsub("[[:space:]]";"")) | map(select(length > 0))
-        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval")))) as $gates
-    | ((first($gates[] | select((($m["check." + .]) // "") != "green"))) // "") as $red
+    | first_red_gate($fcs; $m) as $red
     | if $st != "open" then "status is now \($st)"
       elif $mr != "pull_request" then "merge_result is now \($mr)"
       elif $pn != $num then "anchor now claims PR#\($pn)"

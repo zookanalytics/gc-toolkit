@@ -81,11 +81,23 @@ anchors() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.anchors.json"; 
 reviews() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.reviews.json"; }
 # anchor <id> <extra-metadata-json-body>
 anchor() { printf '{"id":"%s","status":"open","metadata":{%s}}' "$1" "$2"; }
-# rbead <id> <status> <anchor> <oid> [check_name]  (omitted = no check_name key)
+# rbead <id> <status> <anchor> <oid> [check_name] [verdict]
+# A closed bead defaults to the LEGACY shape (gc.outcome=recorded, no
+# signoff_verdict at all — a bead closed before that stamp existed). Pass
+# verdict ("approve" or "request-changes") to model a bead closed under the
+# current signoff.sh, which stamps both gc.outcome=recorded and
+# signoff_verdict on every close, whichever way the verdict went.
 rbead() {
-  local cn=""
+  local cn="" extra=""
   [ -z "${5:-}" ] || cn=$(printf ',"check_name":"%s"' "$5")
-  printf '{"id":"%s","status":"%s","metadata":{"task_kind":"review","anchor_bead":"%s","reviewed_oid":"%s"%s}}' "$1" "$2" "$3" "$4" "$cn"
+  if [ "$2" = "closed" ]; then
+    if [ -n "${6:-}" ]; then
+      extra=$(printf ',"gc.outcome":"recorded","signoff_verdict":"%s"' "$6")
+    else
+      extra=',"gc.outcome":"recorded"'
+    fi
+  fi
+  printf '{"id":"%s","status":"%s","metadata":{"task_kind":"review","anchor_bead":"%s","reviewed_oid":"%s"%s%s}}' "$1" "$2" "$3" "$4" "$cn" "$extra"
 }
 approvals() { printf '%s' "$2" > "$TMP/gh/reviews_$1.json"; }
 
@@ -94,20 +106,38 @@ OTHER=fedcba9876543210fedcba9876543210fedcba98
 GATING='"merge_result":"pull_request","check_set":"codex","branch":"b"'
 reviews ""
 
-# --- 1. RESOLVE A clears a green lane --------------------------------------------
+# --- 1. RESOLVE A clears a green lane (legacy-closed-backs) ------------------------
+# A closed bead with gc.outcome=recorded and no signoff_verdict at all predates
+# the verdict stamp; it still counts as evidence.
 anchors "$(anchor a-1 "$GATING,\"pr_number\":\"101\",\"check.codex\":\"green\"")"
 reviews "$(rbead r-1 closed a-1 "$OID" codex)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a green lane named by a review bead on that lane passes"
+eq "$RC" "0" "a legacy closed review bead (gc.outcome=recorded, no signoff_verdict) backs the lane"
 has "$OUT" "OK:" "the pass message is the OK line"
 eq "$(wc -l < "$GH_LOG")" "0" "RESOLVE A costs no GitHub call"
 
-# --- 2. the review bead must be found even though it is CLOSED ----------------------
-# Guard mutation: the same fixture with the bead OPEN must also pass, so the
-# closed case above is proving --all and not merely proving the join.
-reviews "$(rbead r-1 open a-1 "$OID" codex)"
+# --- 1b. a closed bead with an explicit approve verdict also backs the lane --------
+reviews "$(rbead r-1 closed a-1 "$OID" codex approve)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "an open review bead resolves too (the join itself is sound)"
+eq "$RC" "0" "a closed review bead carrying signoff_verdict=approve backs the lane"
+
+# --- 2. an OPEN review bead does not back the lane (open-bead-does-not-back) -------
+# gate-ensure stamps reviewed_oid at DISPATCH, before any verdict exists, so an
+# open bead carrying reviewed_oid is not yet a verdict. --all must still be used
+# to SEE it (and exclude it), rather than never fetching it at all.
+reviews "$(rbead r-1 open a-1 "$OID" codex)"
+approvals 101 '[]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an open review bead (dispatched, no verdict yet) does not back a green lane"
+has "$OUT" "a-1" "the unbacked anchor is named"
+
+# --- 2z. a closed request-changes verdict does not back the lane -------------------
+# (request-changes-does-not-back)
+reviews "$(rbead r-1 closed a-1 "$OID" codex request-changes)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a closed review bead whose signoff_verdict is request-changes does not back a green lane"
+
+reviews "$(rbead r-1 closed a-1 "$OID" codex)"
 
 # --- 2b. RESOLVE A binds a verdict to the LANE it was recorded for ------------------
 # merge.sh gates each check_set member separately, so a verdict on one lane is

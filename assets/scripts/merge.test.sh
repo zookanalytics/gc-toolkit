@@ -450,6 +450,30 @@ has "$out" "merge_hold was set after validation; merge held" "the terminal re-re
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge 51" "…and the merge was withheld"
 eq "$(bstatus T2)" "open" "the anchor was not closed"
 
+echo "# terminal re-read HOLDS when a gate reds out mid-pass — the shared first-red-gate filter"
+# hold_gate() cleared this anchor at validation (check.codex was green); the
+# terminal re-read has to catch the SAME gate going red between validation and
+# the merge, off the shared FIRST_RED_GATE_DEF filter hold_gate() itself uses.
+store "[$(anchor T3 52)]"
+printf '%s' "$(prview 52 OPEN CLEAN)" > "$GH_DIR/pr_view_52.json"
+echo '[]' > "$GH_DIR/reviews_52.json"
+: > "$HOOK_COUNT"
+cat > "$TMP/hook3.sh" <<HOOK
+#!/usr/bin/env bash
+[ "\${1:-}" = "T3" ] || exit 0
+n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
+if [ "\$n" = 2 ]; then
+  tmp=\$(mktemp)
+  jq -c 'map(if .id == "T3" then .metadata["check.codex"] = "fixing" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
+fi
+HOOK
+chmod +x "$TMP/hook3.sh"
+: > "$STUB_GH_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/hook3.sh" "$SUT" 2>&1)
+has "$out" "check codex is no longer green; merge held" "the terminal re-read catches the gate turning red mid-pass"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 52" "…and the merge was withheld"
+eq "$(bstatus T3)" "open" "the anchor was not closed"
+
 echo "# generated-artifact freshness at the merge result"
 # The arm exists because generated/seed-audit is rendered from the whole source
 # tree and committed per branch: a PR carrying a render made at an older base
@@ -606,8 +630,11 @@ has "$out" "rework rounds 3/3" "rounds above the floor spend the cap"
 eq "$(pinned V10)" "wedged-veto@sha-89" "…and a veto nothing will answer is the veto wedge"
 
 echo "# a lane short of green is progressing; the cap's park is the wedge"
+# The shared predicate (also gate-ensure.sh's): merge_hold is the literal
+# string "signoff_cap" AND signoff_cap is non-empty. signoff.sh writes that
+# literal for its round-cap park; an operator's own hold writes merge_hold=true.
 store "[$(anchor V3 82 ',"check.codex":"unreviewed"'),
-        $(anchor V4 83 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"')]"
+        $(anchor V4 83 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
 printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
@@ -615,7 +642,7 @@ echo '[]' > "$GH_DIR/reviews_82.json"
 echo '[]' > "$GH_DIR/reviews_83.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a gate a review is due to raise"
-eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold with signoff_cap beside it is the convergence cap's wedge"
+eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold=signoff_cap with signoff_cap beside it is the convergence cap's wedge"
 
 # An operator's own hold carries no signoff_cap, and the board must not read it
 # as a wedge no automated actor will lift.
@@ -627,6 +654,17 @@ out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate)" "the hold holds the merge"
 eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
 
+# An operator's own hold (merge_hold=true, not the literal "signoff_cap") is
+# not the cap's wedge, even beside a signoff_cap value orphaned by an earlier
+# park the operator has since taken over.
+echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
+store "[$(anchor V4c 91 ',"merge_hold":"true","signoff_cap":"codex"')]"
+printf '%s' "$(prview 91 OPEN CLEAN)" > "$GH_DIR/pr_view_91.json"
+echo '[]' > "$GH_DIR/reviews_91.json"
+out=$("$SUT" 2>&1)
+has "$out" "merge_hold set (operator gate)" "the hold still holds the merge"
+eq "$(pinned V4c)" "<absent>" "…but the orphaned signoff_cap does not make it the cap's wedge"
+
 echo "# gates green and waiting on a person: settled, not wedged"
 store "[$(anchor V5 84 ',"check_set":"codex,approval"')]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
@@ -636,7 +674,7 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human"')]"
+store "[$(anchor V8 87 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"')]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
 echo '[]' > "$GH_DIR/reviews_87.json"

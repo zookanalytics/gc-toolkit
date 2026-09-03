@@ -49,7 +49,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    back). A lane that reads `green` ends the arm's interest however far the
    branch has advanced since — nothing here compares a marker to a head. The
    convergence cap's park also ends it with no dispatch: `signoff.sh` set
-   `merge_hold`, `gc.routed_to=human`, a `blocked_reason` naming the cap, and
+   `merge_hold=signoff_cap` (the literal string, distinct from an operator's
+   own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
+   `gc.routed_to=human`, a `blocked_reason` naming the cap, and
    the shorter `gc.takeaway` headline the helm board renders, in one act. No
    visit is filed for it, so the anchor is parked rather than queued. What
    undoes that is new operator feedback, which arm 5 records: the cap counts
@@ -135,10 +137,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an
    older base overwrites prompt inputs it never saw, and two PRs that touch no
-   common file still clobber each other. Every `check.<gate>` marker is keyed
-   to a head oid and stays green while the base moves underneath, the
-   pre-commit hook is branch-local, a rebase replays commits without running
-   it, and `-diff` in `.gitattributes` keeps the clobber out of the PR diff.
+   common file still clobber each other. Every `check.<gate>` marker is a
+   bare lane state bound to no commit and settles at any head once green, so
+   it stays green while the base moves underneath, the pre-commit hook is
+   branch-local, a rebase replays commits without running it, and `-diff` in
+   `.gitattributes` keeps the clobber out of the PR diff.
    So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
    `render-seed-audit.sh --check-merge` re-hashes the merged tree's inputs and
    compares them against `generated/seed-audit/SOURCES.txt` in that same tree.
@@ -167,7 +170,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    after arm 3 costs nothing when nothing changed. Routing lives only in this
    arm: arm 3 records, this one decides what answers the comment. Each batch it
    routes also resets `signoff.sh`'s round cap, once per batch, retiring the
-   cap's own park with it when `signoff_cap` still claims that park.
+   cap's own park with it — but only while `merge_hold` still reads the
+   literal `signoff_cap` with a non-empty `signoff_cap=<gate>` beside it; an
+   operator's own `merge_hold=true` is never that pairing and is never lifted
+   by this reset, even past an orphan `signoff_cap`.
    A write-back sweep then answers the operator in the PR itself. On an anchor
    carrying `pr_comment_disposition`, every comment at or below the recorded
    watermark gets an EYES reaction, and once the bead that disposition names
