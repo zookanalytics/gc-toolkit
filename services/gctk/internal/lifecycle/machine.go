@@ -26,12 +26,13 @@ var (
 		"retargeted",
 		"blocked",
 		"refused_false_completion",
+		"held",
 	}
 
 	// HumanStates also route the bead to a human: a transition into one stamps
 	// gc.routed_to=human in the same atomic update unless the caller named a
 	// route of its own.
-	HumanStates = []string{"abandoned", "retargeted", "blocked", "refused_false_completion"}
+	HumanStates = []string{"abandoned", "retargeted", "blocked", "refused_false_completion", "held"}
 
 	// DetachedStates are driven by the merge cadence and offered by no queue: a
 	// transition into one clears gc.routed_to in the same atomic update. A pool
@@ -57,6 +58,11 @@ var (
 		{"unanchored", "merged"},
 		{"unanchored", "blocked"},
 		{"unanchored", "refused_false_completion"},
+		// `held` is entered only from `unanchored`. merge.sh, gate-ensure.sh and
+		// pr-facts.sh each enumerate anchors by their gating state, so moving one
+		// here to record a conversation would drop it from all three for the
+		// hold's length.
+		{"unanchored", "held"},
 		{"pre_open_gate", "pull_request"},
 		{"pre_open_gate", "unanchored"},
 		{"pull_request", "merged"},
@@ -68,8 +74,17 @@ var (
 		{"retargeted", "unanchored"},
 		{"blocked", "unanchored"},
 		{"refused_false_completion", "unanchored"},
+		{"held", "unanchored"},
 	}
 )
+
+// TakeawayMax caps a takeaway in CODEPOINTS. The board spends gc.takeaway as a
+// row's NEEDS cell — one line, read at a glance — so the two writers of that
+// cell cap it identically: assets/scripts/gc-helm.sh carries TAKEAWAY_MAX and
+// assets/scripts/lifecycle.sh carries LIFECYCLE_TAKEAWAY_MAX, and
+// `gctk lifecycle --dump-machine` prints this one for lifecycle.test.sh to hold
+// against them.
+const TakeawayMax = 140
 
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {

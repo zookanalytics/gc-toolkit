@@ -85,6 +85,12 @@ drift_gctk() {
   eq "$(printf '%s\n' "$DUMP" | sed -n 's/^park_route //p')" "$(toml_park)" "park route matches lifecycle.toml"
   eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
   eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
+  # The cap is not in lifecycle.toml: it is a rendering bound the two takeaway
+  # writers share, and the shell arm holds lifecycle.sh's copy against
+  # gc-helm.sh. Chaining the port to lifecycle.sh completes that line.
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
+     "$(sed -n 's/^LIFECYCLE_TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$SUT" | head -1)" \
+     "takeaway cap matches lifecycle.sh"
 }
 
 suite() {
@@ -730,6 +736,29 @@ elif [ "$GO_PRESENT" -eq 0 ]; then
     bad "no Go toolchain: the gctk lifecycle port was NOT exercised, and this suite is its acceptance bar"
 else
     bad "gctk did not build; the port was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+fi
+
+echo
+echo "## arm: the city chain, with no GCTK_BIN to shortcut it"
+# GC_CITY_PATH is the city root a supervisor puts in an agent session; GC_CITY
+# and GC_CITY_ROOT are absent there. A resolver blind to it leaves every agent
+# on the fallback, so the port ships and never runs in the shape most callers
+# have. Reached with GCTK_BIN unset, which is how a real caller reaches it.
+if [ -n "$GCTK_BUILT" ]; then
+    CITY="$TMP/city"
+    mkdir -p "$CITY/.gc/services/gctk/bin"
+    cp "$GCTK_BUILT" "$CITY/.gc/services/gctk/bin/gctk"
+    # gctk's usage names itself; the fallback's does not. Same discriminator the
+    # gctk arm uses for the handoff.
+    for VAR in GC_CITY_PATH GC_CITY GC_CITY_ROOT; do
+        out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$VAR=$CITY" "$SUT" 2>&1)
+        has "$out" "gctk lifecycle" "$VAR alone resolves the deployed binary"
+    done
+    # The control: the same binary on disk, named by nothing.
+    out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" 2>&1)
+    hasnt "$out" "gctk lifecycle" "no city named: the shell fallback answers"
+else
+    bad "gctk did not build; the city resolution chain was NOT exercised"
 fi
 
 echo

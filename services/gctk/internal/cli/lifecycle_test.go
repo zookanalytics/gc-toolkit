@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
@@ -132,6 +133,17 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"closed state without --close", []string{"b-1", "--to", "merged"}, "requires --close"},
 		{"--set merge_result", []string{"b-1", "--to", "pull_request", "--set", "merge_result=x"}, "written by --to"},
 		{"--set gc.routed_to", []string{"b-1", "--to", "pull_request", "--set", "gc.routed_to=x"}, "route via --route"},
+		{"--set gc.takeaway", []string{"b-1", "--to", "abandoned", "--set", "gc.takeaway=x"}, "written by --takeaway"},
+		{"--set-dated merge_result", []string{"b-1", "--to", "pull_request", "--set-dated", "merge_result=x@oid"}, "written by --to"},
+		{"--set-dated with no oid", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled"}, "<value>@<oid>"},
+		{"--set-dated carrying its own instant", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled@oid@2026-01-01T00:00:00Z"}, "<value>@<oid>"},
+		{"--set-dated with no '='", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine"}, "is not k=<value>@<oid>"},
+		// A human state names the person it waits on. The refusal is decided on
+		// arguments alone, so it happens before any bead is read.
+		{"empty --route into a human state", []string{"b-1", "--to", "abandoned", "--route", ""}, "waiting on nobody"},
+		{"empty --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", ""}, "no question recorded"},
+		{"whitespace-only --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", " \t\n "}, "no question recorded"},
+		{"--takeaway over the cap", []string{"b-1", "--to", "abandoned", "--takeaway", strings.Repeat("x", lifecycle.TakeawayMax+1)}, "the cap is 140"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
@@ -165,5 +177,69 @@ func TestUnknownVerbPrintsUsage(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "gctk lifecycle transition") {
 		t.Errorf("stderr = %q, want the usage block", errOut.String())
+	}
+}
+
+func TestDatedSincePreservesWhileValueAndOIDHold(t *testing.T) {
+	// The reconcile cadence re-reaches the same verdict at the same head every
+	// few minutes. A clock that restarted there would report a three-day wait as
+	// new and sort the most neglected row last, with nothing in either key saying
+	// so — the failure is invisible on the rendered board.
+	const oid = "1111111111111111111111111111111111111111"
+	const oid2 = "2222222222222222222222222222222222222222"
+	pinned := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	restore := now
+	now = func() time.Time { return pinned }
+	defer func() { now = restore }()
+	fresh := pinned.Format("2006-01-02T15:04:05Z")
+
+	for _, tc := range []struct{ name, have, want, expect string }{
+		{"first write", "", "settled@" + oid, fresh},
+		{"unchanged value at an unchanged head", "settled@" + oid + "@2026-08-28T04:05:06Z", "settled@" + oid, "2026-08-28T04:05:06Z"},
+		{"a changed verdict is a new turn", "progressing@" + oid + "@2026-08-28T04:05:06Z", "settled@" + oid, fresh},
+		{"a moved head is a new turn", "settled@" + oid + "@2026-08-28T04:05:06Z", "settled@" + oid2, fresh},
+		{"an undated legacy value has no instant to keep", "settled@" + oid, "settled@" + oid, fresh},
+		// A stored value carrying a fourth component is not the shape this rule
+		// reads, so it cannot yield an instant to preserve.
+		{"a malformed stored value", "settled@" + oid + "@a@b", "settled@" + oid, fresh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := datedSince(tc.have, tc.want); got != tc.expect {
+				t.Errorf("datedSince(%q, %q) = %q, want %q", tc.have, tc.want, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestSqueezeSpaceMatchesTheShellNormalization(t *testing.T) {
+	// `tr -s '[:space:]' ' '` plus the shell's one-space trims. It runs before
+	// the empty check, which is what makes a whitespace-only takeaway an empty
+	// one rather than a stored blank the board renders as a question nobody asked.
+	for _, tc := range []struct{ in, want string }{
+		{"already tight", "already tight"},
+		{"  leading and trailing  ", "leading and trailing"},
+		{"runs\t\tof\n\nwhitespace", "runs of whitespace"},
+		{"   ", ""},
+		{"", ""},
+		{"\t\n\v\f\r", ""},
+	} {
+		if got := squeezeSpace(tc.in); got != tc.want {
+			t.Errorf("squeezeSpace(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestTakeawayCapIsMeasuredInCodepoints(t *testing.T) {
+	// The board renders one line of text, so the cap counts what a reader sees.
+	// A byte count would refuse a takeaway well inside the cap the moment it
+	// carried an em dash — which is most of them.
+	wide := strings.Repeat("é", lifecycle.TakeawayMax)
+	if got, refusal := normalizeTakeaway(wide); refusal != nil || got != wide {
+		t.Errorf("%d codepoints was refused by a byte-counting cap: %v", lifecycle.TakeawayMax, refusal)
+	}
+	if _, refusal := normalizeTakeaway(wide + "é"); refusal == nil {
+		t.Errorf("%d codepoints was accepted over the cap", lifecycle.TakeawayMax+1)
+	} else if !strings.Contains(refusal[0], "141 chars") {
+		t.Errorf("the refusal does not report the measured length: %q", refusal[0])
 	}
 }
