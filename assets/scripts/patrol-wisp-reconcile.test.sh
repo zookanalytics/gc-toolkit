@@ -281,6 +281,10 @@ run_curwisp() {
   ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" \
            GC_AGENT="refinery-1" GC_BEAD_ID="$2"
+    # An agent runs this block in a plain shell, so drop this suite's -e and
+    # pipefail: under them a refused query would abort the subshell, and the
+    # controls below would pass by aborting rather than by resolving nothing.
+    set +e +o pipefail
     # shellcheck disable=SC1091
     . "${3:-$TMP/curwisp.sh}" 2>/dev/null
     printf '%s' "${CURRENT_WISP:-}" )
