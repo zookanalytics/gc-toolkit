@@ -132,6 +132,29 @@ itself, with no convoy above it. Catching this shape is a dispatch judgment
 here, not a downstream gate, so seed the artifact on the convoy's integration
 branch as above.
 
+## Scope-miss recovery: amend the open PR
+
+Scope you discover while a PR is open belongs on that PR. File a supplement
+bead carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
+its URL, `target` = its `baseRefName` — write that metadata before you sling,
+and route the bead to `<rig>/{{ .BindingPrefix }}polecat`. `gc sling` has no
+flag for any of this, so the metadata write comes first: a polecat that claims
+the bead before `branch` is set cuts a fresh branch.
+
+The polecat commits onto the PR's head branch and the refinery pushes it
+back, so the open PR gains the commits; the one-anchor-per-PR guard closes
+the supplement landed-on-branch and leaves gating with the original anchor.
+
+Close-and-replace is for an implementation that is **wrong**, not one that is
+incomplete: the commits are not something to build on. Missing docs, a test a
+reviewer asked for, an edge case the diff exposed — all supplements.
+
+`target` is the PR's base, not always `main`: a PR under an owned convoy is
+based on `integration/<convoy-id>`, and a supplement that names `main` fails
+the refinery's `base == target` check and blocks. Serialize supplements: the
+polecat pushes with a plain `git push`, so a second one in flight on the same
+branch is rejected non-fast-forward and stays with its polecat.
+
 {{ template "watch-dispatched-work" . }}
 
 {{ template "bead-disposition" . }}
