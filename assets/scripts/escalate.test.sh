@@ -392,6 +392,21 @@ eq "$(visits)" "1" "only the visit is created"
 eq "$(meta vis-1 gc.continuation_group)" "sub-0" "it hangs on the standing subject already there"
 eq "$(meta vis-1 escalation_raised_by)" "lx-wisp-bbbbb" "with this cycle's wisp recorded"
 
+echo "# two findings share the bucket but keep their own escalation_key"
+# The subject no longer tells them apart, so the key is the only thing that
+# does. The converse fold check resolves a visit's topic as stall_root, else
+# the key, else the subject, and a redirected visit names no stall_root
+# (agents/converse/prompt.template.md). A visit that reached the bucket
+# without its own key would fold into its sibling and close unread.
+reset "[$STANDING]"
+"$SUT" --subject lx-wisp-aaaaa --key doctor-dolt-noms-size --message m >/dev/null 2>&1
+"$SUT" --subject lx-wisp-bbbbb --key doctor-check-cadence-live --message m >/dev/null 2>&1
+eq "$(visits)" "2" "each situation files its own visit"
+eq "$(meta vis-1 gc.continuation_group)" "sub-0" "both hang on the one standing subject"
+eq "$(meta vis-2 gc.continuation_group)" "sub-0" "sharing the bucket"
+eq "$(meta vis-1 escalation_key)" "doctor-dolt-noms-size" "the first carries its own key"
+eq "$(meta vis-2 escalation_key)" "doctor-check-cadence-live" "and the second a different one"
+
 # A closed subject cannot receive an append or a takeaway either.
 reset "[$(printf '%s' "$STANDING" | sed 's/"status":"open"/"status":"closed"/')]"
 "$SUT" --subject lx-wisp-ccccc --key k1 --message m >/dev/null 2>&1

@@ -319,6 +319,16 @@ assert_routable "$POOL" || exit 1
 # situation by its key alone, which is what matches the visits already open
 # under a burned wisp's group; narrowing those to the bucket would match none
 # of them and re-file every one.
+#
+# A shared subject makes the group a bucket rather than a topic, so what keeps
+# two findings in it apart is the escalation_key stamped on each visit below.
+# The converse fold check reads exactly that: its visit-fold-check block
+# resolves a topic of stall_root, else the key under a `key:` prefix, else the
+# subject, and folds a sitting only into a sibling of the same topic
+# (agents/converse/prompt.template.md). A redirected visit names no stall_root,
+# so the key is the only discriminator it has; dropping it, or scoping it to
+# the bucket, would make every finding here look like one situation and fold
+# all but the lowest id away unread.
 TRIAGE_SCOPE="ephemeral-subject-findings"
 RAISED_BY=""
 if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
