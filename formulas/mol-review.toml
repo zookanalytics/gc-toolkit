@@ -195,18 +195,20 @@ this branch's defect.
   carrying none of it is an observed fact worth recording, and it still does
   not tell you what opened the PR. Pre-open there is no page — your verdict
   becomes its opening comment instead.
-- **Operator principles** — resolve the operator profile from the pack
-  checkout and hold the diff's output (code, comments, docs) to its "What
-  the operator cares about" entries. A violation is a blocking
-  (request-changes) finding. Read the exemplar corpus in the same pass: it
-  carries the lessons that are a shape rather than a statement, and it is
-  read here because nothing injects it into a prompt.
+- **Work-quality standards** — resolve the work-quality fragment from the
+  pack checkout and hold the diff's output (code, comments, docs) to its
+  "Standards for what you produce" entries. A violation is a blocking
+  (request-changes) finding. The operator profile is not read here: its
+  entries govern how a role addresses the operator at runtime, which is a
+  property of an agent and not of a diff. Read the exemplar corpus in the
+  same pass: it carries the lessons that are a shape rather than a
+  statement, and it is read here because nothing injects it into a prompt.
 ```bash
 PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -r "$c/template-fragments/operator-profile.template.md" ] && { PACK="$c"; break; }
+  [ -r "$c/template-fragments/work-quality.template.md" ] && { PACK="$c"; break; }
 done
-if [ -n "$PACK" ]; then cat "$PACK/template-fragments/operator-profile.template.md"; else
-  echo "operator profile not found in this checkout; note that in the verdict's coverage line"
+if [ -n "$PACK" ]; then cat "$PACK/template-fragments/work-quality.template.md"; else
+  echo "work-quality fragment not found in this checkout; note that in the verdict's coverage line"
 fi
 # Absent on an older pack pin, and empty until the first exemplar is adopted.
 [ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.template.md" ] && cat "$PACK/template-fragments/learning-exemplars.template.md"
@@ -296,7 +298,7 @@ done
 ```
 
 **Exit criteria:** whole diff read, tests run at the pinned commit, published
-page and operator profile checked, out-of-scope findings filed or named
+page and work-quality standards checked, out-of-scope findings filed or named
 unfiled, findings.md written in the verdict shape, this step bead closed.
 """
 

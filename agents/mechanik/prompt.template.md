@@ -185,6 +185,8 @@ mechanik in a non-gascity rig does not receive it.
 
 {{ template "operator-profile" . }}
 
+{{ template "work-quality" . }}
+
 {{ template "scratch-reclaim" . }}
 
 {{ template "file-feedback-observations" . }}

@@ -1,6 +1,6 @@
 ---
 name: Feedback-Learning Loop
-description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads, how observations become operator-reviewed rule changes, the four carriers adopted rules land in, and the recurrence metric that says whether the loop works.
+description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads, how observations become operator-reviewed rule changes, the five carriers adopted rules land in, and the recurrence metric that says whether the loop works.
 ---
 
 # Feedback-Learning Loop
@@ -106,8 +106,8 @@ fragment, or skill, and neither does any capturing agent.
 
 Not every earned pattern may be auto-adopted into content every future agent
 pays for. Two gates — defined in full in the `learning-distill` rubric,
-`skills/learning-distill/SKILL.md` — guard the `convention`, `profile`, and
-`review-rubric` carriers:
+`skills/learning-distill/SKILL.md` — guard the `convention`, `profile`,
+`work-quality`, and `review-rubric` carriers:
 
 - **External check (Gate 1).** A cluster that is entirely
   `obs.source=self` cannot auto-promote into a paid carrier without an
@@ -135,25 +135,37 @@ beyond the engineering bead: a remedy that reads as an exhortation only
 because the right behavior resists compression becomes an `exemplar`, if a
 real before/after pair exists.
 
-## The rule surface: four carriers
+## The rule surface: five carriers
 
-An adopted rule lands in one of four carriers. The carrier is chosen at
+An adopted rule lands in one of five carriers. The carrier is chosen at
 promotion, and it decides the target, the budget, and what the adoption
 costs to keep. Different shapes of learning need different carriers; a prose
-bullet is one of four, not the default. The selection rule lives in the
+bullet is one of five, not the default. The selection rule lives in the
 `learning-distill` rubric.
 
 **`profile` — the operator profile.**
 `template-fragments/operator-profile.template.md`
 (`{{ define "operator-profile" }}`), a "What the operator cares about"
-section. It is the most widely injected surface in the pack: every
-coordinating agent renders it, and so does the polecat doctrine fragment.
-This is the loop's ceiling-raising surface — entries state what the operator
-values and responds to, the taste that makes agents present better options
+section. Its entries fire while a person is being addressed: what earns the
+operator's attention, how a decision reaches them, how a standing ruling is
+read. It is elected by the roles that decide what claims that attention and
+compose it, a test stated in the fragment itself. This is the loop's
+ceiling-raising surface — the taste that makes agents present better options
 and escalations, not just mistakes to avoid. Because it states operator
 taste, a cluster with no `obs.source=operator` observation cannot claim it.
 Hard cap **12 entries**. `specs/tk-awa7hv/operator-profile-audit.md` records
 the audit that populated it.
+
+**`work-quality` — standards for what you produce.**
+`template-fragments/work-quality.template.md`
+(`{{ define "work-quality" }}`), a "Standards for what you produce" section.
+Its entries fire while an artifact is being written: the evidence a
+load-bearing claim rests on, whether a fix reaches the cause, how prose and
+documentation read. It is elected by the roles that author durable output,
+which is a wider set than the profile's — a role that never addresses the
+operator still writes code, docs, and bead bodies someone else reads.
+`formulas/mol-review.toml` resolves this fragment during a review and holds
+the diff's output to it. Hard cap **12 entries**.
 
 **`convention` — learned conventions, per role.**
 `template-fragments/learned-conventions-<role>` fragments — one per role,

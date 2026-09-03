@@ -304,8 +304,6 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 {{ template "watch-dispatched-work" . }}
 
-{{ template "operator-profile" . }}
-
 ## Principles
 
 1. **The operator owns the PR decision.** You draft, summarize, and assemble
@@ -341,3 +339,5 @@ worktree.
 [ ] No polecat work was done in-session — anything mechanical was slung
 [ ] HANDOFF if incomplete: gc handoff -- "HANDOFF: <brief>" "<context>"
 ```
+
+{{ template "work-quality" . }}
