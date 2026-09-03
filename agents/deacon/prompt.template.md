@@ -40,12 +40,14 @@ patrol runs the formula's own next-iteration pour; the two have to seed the
 same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 
 ```bash
+# >>> patrol-wisp-reconcile
 WISP_IDS=$(
   gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
   gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
 )
 WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
 for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
+# <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
 fi
