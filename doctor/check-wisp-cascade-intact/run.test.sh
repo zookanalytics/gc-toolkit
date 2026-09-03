@@ -13,6 +13,22 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
 ALL="fk_wisp_labels_issue fk_wisp_events_issue fk_wisp_comments_issue fk_wisp_child_counters_parent"
 
+# Canonical tuple per constraint, matching the four constrained city stores. A
+# store lists a constraint by name (correct tuple) or name:field=value to seed a
+# single wrong field for the full-tuple check.
+declare -A C_TBL=(
+    [fk_wisp_labels_issue]=wisp_labels
+    [fk_wisp_events_issue]=wisp_events
+    [fk_wisp_comments_issue]=wisp_comments
+    [fk_wisp_child_counters_parent]=wisp_child_counters
+)
+declare -A C_COL=(
+    [fk_wisp_labels_issue]=issue_id
+    [fk_wisp_events_issue]=issue_id
+    [fk_wisp_comments_issue]=issue_id
+    [fk_wisp_child_counters_parent]=parent_id
+)
+
 mkdir -p "$TMP/bin" "$TMP/stores"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
@@ -33,13 +49,16 @@ name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
 # The check issues exactly two queries; tell them apart by the table each reads.
 case "$query" in
-  *TABLE_CONSTRAINTS*)
+  *REFERENTIAL_CONSTRAINTS*)
+      # $name.fks holds one TAB-separated tuple per constraint:
+      # name<TAB>tbl<TAB>col<TAB>ref_tbl<TAB>ref_col<TAB>del_rule<TAB>upd_rule
       f="$STORES/$name.fks"
       printf '['; sep=""
       if [ -f "$f" ]; then
-          while IFS= read -r c; do
-              [ -n "$c" ] || continue
-              printf '%s{"CONSTRAINT_NAME":"%s"}' "$sep" "$c"; sep=","
+          while IFS=$'\t' read -r cn ctbl ccol crtbl crcol cdel cupd; do
+              [ -n "$cn" ] || continue
+              printf '%s{"name":"%s","tbl":"%s","col":"%s","ref_tbl":"%s","ref_col":"%s","del_rule":"%s","upd_rule":"%s"}' \
+                  "$sep" "$cn" "$ctbl" "$ccol" "$crtbl" "$crcol" "$cdel" "$cupd"; sep=","
           done < "$f"
       fi
       printf ']'
@@ -67,9 +86,30 @@ rigs() {
     done
     printf '{"rigs":[%s]}' "$out" > "$TMP/rigs.json"
 }
-# store <name> <constraint>... — the constraints that store reports. A store
-# named here always has a wisps table unless plane_off is called for it.
-store() { local n="$1"; shift; : > "$STORES/$n.fks"; printf '%s\n' "$@" >> "$STORES/$n.fks"; : > "$STORES/$n.plane"; }
+# store <name> <entry>... — the constraints that store reports. Each entry is a
+# constraint name (canonical tuple) or name:field=value overriding one field of
+# it (field in tbl,col,ref_tbl,ref_col,del,upd). A store named here always has a
+# wisps table unless plane_off is called for it.
+store() {
+    local n="$1"; shift
+    : > "$STORES/$n.fks"; : > "$STORES/$n.plane"
+    local entry name over key val tbl col rtbl rcol del upd
+    for entry in "$@"; do
+        name="${entry%%:*}"; over=""
+        [ "$entry" != "$name" ] && over="${entry#*:}"
+        tbl="${C_TBL[$name]}"; col="${C_COL[$name]}"; rtbl=wisps; rcol=id; del=CASCADE; upd=CASCADE
+        if [ -n "$over" ]; then
+            key="${over%%=*}"; val="${over#*=}"
+            case "$key" in
+                tbl) tbl="$val" ;; col) col="$val" ;;
+                ref_tbl) rtbl="$val" ;; ref_col) rcol="$val" ;;
+                del) del="$val" ;; upd) upd="$val" ;;
+                *) echo "store: unknown override '$key'" >&2; return 2 ;;
+            esac
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$tbl" "$col" "$rtbl" "$rcol" "$del" "$upd" >> "$STORES/$n.fks"
+    done
+}
 plane_off() { rm -f "$STORES/$1.plane"; }
 
 # --- 1. every store fully constrained passes ----------------------------------
@@ -95,7 +135,7 @@ rigs alpha
 store alpha
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a store with a wisp plane and no constraints is a finding"
-has "$OUT" "missing 4" "the finding counts every missing constraint"
+has "$OUT" "4 of 4" "the finding counts every missing constraint"
 has "$OUT" "ADD CONSTRAINT" "the finding carries the repair"
 has "$OUT" "purge" "the finding says the repair follows a purge of the orphan rows"
 
@@ -144,7 +184,29 @@ store alpha
 OUT=$(GC_DOCTOR_WISP_CASCADE_SEVERITY=err run_check); RC=$?
 eq "$RC" "1" "an unrecognised severity refuses instead of guessing"
 has "$OUT" "neither warn nor error" "the refusal names the bad value"
-hasnt "$OUT" "missing 4" "the refusal happens before any store is read"
+hasnt "$OUT" "ADD CONSTRAINT" "the refusal happens before any store is read"
+
+# --- 10. a present constraint whose tuple is wrong is a finding ----------------
+# Every name is present in each case, so a names-only check would pass them all;
+# asserting the full tuple is what catches a foreign key that exists but does
+# not cascade. One field wrong at a time, so each field's comparison is proven
+# load-bearing — drop any one and the matching case stops reporting.
+for bad in \
+    "del=RESTRICT|ON DELETE=RESTRICT" \
+    "upd=RESTRICT|ON UPDATE=RESTRICT" \
+    "col=wisp_id|column=wisp_id" \
+    "tbl=wisp_event|table=wisp_event" \
+    "ref_tbl=issues|references=issues" \
+    "ref_col=uuid|referenced column=uuid"; do
+    override="${bad%%|*}"; needle="${bad##*|}"
+    rigs alpha
+    store alpha fk_wisp_labels_issue fk_wisp_comments_issue fk_wisp_child_counters_parent "fk_wisp_events_issue:$override"
+    OUT=$(run_check); RC=$?
+    eq    "$RC" "1"                     "a present constraint with $override warns (its name alone would pass)"
+    has   "$OUT" "fk_wisp_events_issue" "the finding names the non-cascading constraint ($override)"
+    has   "$OUT" "$needle"             "the finding names the field that diverges ($override)"
+    hasnt "$OUT" "no wisp plane"       "a present-but-wrong constraint is not read as a missing plane ($override)"
+done
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

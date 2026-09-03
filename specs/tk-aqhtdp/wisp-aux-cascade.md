@@ -133,8 +133,14 @@ knowing before writing a rollback.
 
 This branch ships `doctor/check-wisp-cascade-intact`, which asserts the four
 constraints on every store the city lists, one bounded `INFORMATION_SCHEMA`
-query each. It reports lx and passes the four rigs, so it starts as a live
-finding and becomes a regression gate once lx is repaired.
+query each. The query joins `REFERENTIAL_CONSTRAINTS` to `KEY_COLUMN_USAGE` and
+checks each constraint's whole tuple — source table and column, referenced
+`wisps(id)`, and `ON DELETE` / `ON UPDATE CASCADE` — not merely that the
+canonical name is present. A same-named foreign key that does not cascade, or
+names the wrong column, would leave the delete gap open while reading as intact
+— the exact regression the check has to hold against once it becomes a gate. It
+reports lx and passes the four rigs, so it starts as a live finding and becomes
+a regression gate once lx is repaired.
 
 The check reports at warning while a store carries a standing backlog it
 cannot take the constraint back over. `GC_DOCTOR_WISP_CASCADE_SEVERITY=error`
