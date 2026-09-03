@@ -7,8 +7,9 @@
 # CLEAN/UNSTABLE handling); the recorded pr_posture hold, read off the anchor;
 # identity refusals (fork, url/branch mismatch); the record for a PR already
 # merged and the live anchor identity both it and the merge stand on;
-# the terminal full-authorization re-read; and the loud non-zero exit when the
-# record half fails after a merge.
+# the terminal full-authorization re-read; the loud non-zero exit when the
+# record half fails after a merge; and the cap that turns a record failing
+# every pass into one visit a person can claim.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +20,7 @@ trap 'rm -rf "$TMP"' EXIT
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh"
+mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
@@ -259,6 +260,75 @@ out=$(STUB_UPDATE_FAIL="S3" "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "a failed recovery exits non-zero"
 has "$out" "is MERGED but the record failed" "…and says the PR did land"
 eq "$(bstatus S3)" "open" "…leaving the anchor for the next pass"
+
+# --- the record retry is bounded -----------------------------------------------
+# Both record arms retry every pass with no memory of the last one. That is right
+# for a store busy for a tick and useless for a cause the next pass meets
+# unchanged, and the difference between the two is only visible in a count.
+# record-failure-cap.sh keeps it on the anchor; escalate.sh spends it on one
+# visit. STUB_CLOSE_FAIL is what makes this the real shape rather than a total
+# outage: the close is refused, and the counter beside it still writes — which is
+# bd's own asymmetry, its ownership check being a property of the close.
+echo "# the record retry is bounded"
+store "[$(anchor C1 80)]"
+printf '%s' "$(prview 80 MERGED CLEAN)" > "$GH_DIR/pr_view_80.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "a refused close still fails the pass loudly"
+eq "$(bstatus C1)" "open" "…and leaves the anchor open"
+eq "$(meta C1 merge_record_failures)" "1" "the first failure is counted on the anchor"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and one failure escalates nothing — the retry is still the answer"
+
+# Under the cap, the count climbs and nothing is filed. The mirror below is what
+# makes this assertion mean something: an escalation that never fires would
+# satisfy it just as well.
+out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1)
+eq "$(meta C1 merge_record_failures)" "2" "a second failure counts again"
+eq "$(cat "$STUB_ESC_LOG")" "" "…still under the cap, still nothing filed"
+
+out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1)
+eq "$(meta C1 merge_record_failures)" "3" "the third failure reaches the cap"
+has "$out" "failed to record merged PR#80 3 times" "…the pass says the retry is not converging"
+esc=$(cat "$STUB_ESC_LOG")
+has "$esc" "--subject C1" "…and the anchor is escalated as the subject"
+has "$esc" "--key merge-record-failed.80" "…keyed on the PR, so one visit covers every pass"
+has "$esc" "still records merge_result=pull_request" "…naming the false-durable record a person has to repair"
+
+# Past the cap the call stays unconditional: escalate.sh holds it to one open
+# visit, and a visit closed without repairing the anchor is re-filed rather than
+# lost to a crossing that already happened.
+: > "$STUB_ESC_LOG"
+out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1)
+eq "$(meta C1 merge_record_failures)" "4" "the count keeps climbing past the cap"
+has "$(cat "$STUB_ESC_LOG")" "--key merge-record-failed.80" "…and every later failure re-files rather than going quiet"
+
+# The record that lands clears the count, so "consecutive" is what the anchor
+# actually holds — a later unrelated failure starts its own budget.
+: > "$STUB_ESC_LOG"
+out=$("$SUT" 2>&1); rc=$?
+eq "$rc" 0 "the pass that finally records exits 0"
+eq "$(bstatus C1)" "closed" "…the anchor closes"
+eq "$(meta C1 merge_record_failures)" "<absent>" "…and the landed record clears the count"
+eq "$(cat "$STUB_ESC_LOG")" "" "…filing nothing on the way out"
+
+# The counter is not what closes the anchor: a cap that cannot count must not be
+# what fails a pass, and must not stop the retry that is still the repair.
+store "[$(anchor C2 81)]"
+printf '%s' "$(prview 81 MERGED CLEAN)" > "$GH_DIR/pr_view_81.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_UPDATE_FAIL="C2" "$SUT" 2>&1); rc=$?
+eq "$rc" 1 "a store refusing every write on the anchor still fails the pass"
+has "$out" "could not count the record failure" "…and says the cap could not arm from it"
+eq "$(bstatus C2)" "open" "…leaving the anchor for the next pass"
+
+# Merged truth is recorded by `bd update --status=closed`, never by `bd close`.
+# bd's ownership check is a property of the close verb and refuses a bead
+# assigned to another principal, which every anchor here is ("rig/refinery").
+# The harness models no acting identity, so no stub can answer this in either
+# direction — the emitted command is what pins it, and the --status=closed
+# assertion on the happy path above is its mirror.
+hasnt "$(cat "$STUB_GC_LOG")" "bd close" "the record never uses the \`bd close\` verb, whose ownership check refuses a bead assigned to another principal"
+
 # The enumerated row is a snapshot, and the record is written from the PR read
 # that followed it. A mid-pass write can detach the anchor between the two:
 # the live re-read is what sees that, before anything is written.

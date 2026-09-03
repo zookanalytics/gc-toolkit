@@ -26,7 +26,10 @@
 # lifecycle.sh transition --to merged --close. A failed record exits non-zero
 # loudly and the anchor is recovered by the already-merged arm above on a later
 # pass — that arm is here, and not left to pr-facts.sh alone, because the arms
-# are ordered and a killed pass loses the later ones.
+# are ordered and a killed pass loses the later ones. A record that keeps
+# failing is bounded rather than retried forever: record-failure-cap.sh counts
+# the failures on the anchor and escalates past the cap, so a cause no later
+# pass can clear reaches a person instead of one stderr line per pass.
 # Caller: refinery-reconcile.sh, with BEADS_ACTOR projected to the refinery
 # identity.
 set -u
@@ -46,6 +49,11 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 MAX_REVIEW_ROUNDS="${GC_MAX_REVIEW_ROUNDS:-3}"
 case "$MAX_REVIEW_ROUNDS" in ''|*[!0-9]*) MAX_REVIEW_ROUNDS=3 ;; esac
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+# The merged-record retry cap. Both record arms below retry every pass with no
+# memory of the last one, so a cause the retry cannot clear needs a writer that
+# remembers; this is that writer, shared with pr-facts.sh so the two arms of the
+# same repair count against one budget.
+RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
 # The repository this pass merges into, resolved through git so a run with no
 # checkout under it simply has no committed artifact to keep current.
@@ -280,12 +288,14 @@ while IFS= read -r row; do
     esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
          --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --unset merge_record_failures \
          --append-notes "Merged to $base at $short (record recovered by merge)"; then
       recovered=$((recovered + 1))
       echo "$PROG: recovered $id — PR#$num was already merged to $base at $short; the record had not landed"
     else
       echo "$PROG: PR#$num is MERGED but the record failed for $id; retry next pass" >&2
       record_failed=$((record_failed + 1))
+      [ -x "$RECORD_CAP" ] && "$RECORD_CAP" "$id" "$num" "$merge_oid" "$base" || true
     fi
     continue
   fi
@@ -660,14 +670,17 @@ $sa_out" >/dev/null 2>&1 || true
   esac
   if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
        --set "merged_sha=$merge_oid" --unset rejection_reason \
+       --unset merge_record_failures \
        --append-notes "Merged to ${target:-$base} at ${short:-merge}"; then
     merged=$((merged + 1))
     echo "$PROG: merged + recorded $id — PR#$num squashed to ${target:-$base} at ${short:-?}"
   else
     # The PR HAS landed; a silent record failure is the false-durable-record
-    # class. Exit non-zero at the end; pr-facts records it next pass.
+    # class. Exit non-zero at the end; pr-facts records it next pass, and
+    # record-failure-cap.sh escalates the anchor the retries never reach.
     echo "$PROG: PR#$num MERGED but the lifecycle record FAILED for $id; pr-facts records it next pass" >&2
     record_failed=$((record_failed + 1))
+    [ -x "$RECORD_CAP" ] && "$RECORD_CAP" "$id" "$num" "$merge_oid" "${target:-$base}" || true
   fi
 done <<ROWS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)

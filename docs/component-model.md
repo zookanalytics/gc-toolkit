@@ -286,6 +286,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 1a: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 2: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
+| `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 6: closes a dispatched review with no reviewable surface left. No merge authority. |

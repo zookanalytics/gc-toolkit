@@ -2,7 +2,9 @@
 # pr-facts — arm 4 of the merge cadence: record EXTERNAL facts about each open
 # pull_request anchor. No merge authority. Same enumeration and pinned identity
 # read as merge.sh; per anchor, in order: PR MERGED (out-of-band, or a record
-# that died after merge.sh landed it) -> lifecycle transition to merged;
+# that died after merge.sh landed it) -> lifecycle transition to merged, with
+# a failure counted against the same record-failure-cap.sh budget merge.sh
+# spends, since both are attempts at the one repair;
 # CLOSED-unmerged -> abandoned + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING -> classify the head branch
@@ -65,6 +67,10 @@ scrub() { tr -d '\000-\011\013-\037'; }
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
+# The merged-record retry cap, shared with merge.sh: this arm and merge.sh's two
+# record arms perform the same repair on the same anchor, so their failures
+# count against one budget rather than each keeping a private tally.
+RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 
 FIX_POOL=""; POSTURE_ONLY=0
 while [ $# -gt 0 ]; do
@@ -285,12 +291,14 @@ while IFS= read -r row; do
     esac
     if "$LIFECYCLE" transition "$id" --to merged --expect pull_request --close \
          --set "merged_sha=$merge_oid" --unset rejection_reason \
+         --unset merge_record_failures \
          --append-notes "Merged to $target at $short_oid (recorded by pr-facts)"; then
       recorded=$((recorded + 1))
       echo "$PROG: recorded $id — PR#$num is MERGED ($short_oid)"
     else
       echo "$PROG: PR#$num is MERGED but the record failed for $id; retry next pass" >&2
       skipped=$((skipped + 1))
+      [ -x "$RECORD_CAP" ] && "$RECORD_CAP" "$id" "$num" "$merge_oid" "$target" || true
     fi
     continue
   fi

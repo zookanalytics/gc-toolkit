@@ -630,6 +630,19 @@ lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
 declared edge out of every gating state. A child closed still carrying one is
 an I5 error (`doctor/check-closed-implies-landed`), so a refused transition
 leaves it open for the next pass instead.
+
+The close itself is `gc bd update --status=closed`, never `gc bd close`. bd's
+ownership check is a property of the `close` verb: it compares the actor
+against the assignee and refuses a bead held by another principal, pointing at
+`--force`. Everything the refinery closes is a bead someone handed it, so the
+verb that carries that check is the one verb it cannot use — and the refusal is
+per-anchor and permanent, so a retry meets it unchanged every pass. The
+`update` form reaches the same status with no such check, which is why every
+other close in the pack goes through `lifecycle.sh`'s single atomic update.
+`unanchored` is an open state, so `--close` is not available here and this arm
+writes the status itself; its result is checked, because a close that reports
+nothing leaves a bead that is unanchored, open, and assigned, which reads like
+work still in flight.
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
@@ -648,7 +661,9 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   REWORK_SHA=$(git rev-parse --short temp 2>/dev/null || echo "")
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
-    gc bd close "$WORK" --reason "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"
+    if ! gc bd update "$WORK" --status=closed --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
+      echo "merge-push: $WORK left the anchor class but the close was refused; it stays unanchored and open, and the next pass retries both idempotently" >&2
+    fi
   else
     echo "merge-push: $WORK could not be moved off its anchor state; left OPEN for the next pass rather than closed still carrying one (doctor/check-closed-implies-landed)" >&2
   fi
