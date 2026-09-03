@@ -171,10 +171,13 @@ can be built on evidence.
 
 ## What this does not address
 
-The `(no key)` column — 100 closed visits filed by paths that never call
-`escalate.sh` — is outside both mechanisms and was not investigated.
+Two findings are carved out rather than fixed here, each with its own bead.
 
-Whether a bead whose work already reached an open PR should be recovered as an
-orphan at all is a question about recovery, not about filing. `tk-n85511` is
-the live instance: a bead on an approved, clean PR was recovered and escalated,
-and closed moot. It is not touched here.
+**tk-2jdh9l** — 100 closed visits carry no `escalation_key` at all. They were
+filed by paths that never call `escalate.sh`, so neither the open-visit dedup
+nor the verdict window reaches them, and every rate above is blind to them.
+
+**tk-ge15u5** — whether a bead whose work already reached an open PR should be
+recovered as an orphan at all. That is a question about recovery, not about
+filing. `tk-n85511` is the live instance: a bead on an approved, clean PR was
+recovered and escalated as a crash loop, and the sitting closed it moot.
