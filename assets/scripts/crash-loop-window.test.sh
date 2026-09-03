@@ -111,10 +111,12 @@ eq "$(decide "$(ago 600)" '7' 'true')" "8 1" "an existing count increments"
 eq "$(decide "$(ago 90000)" '7' 'true')" "8 0" "and increments outside the window too"
 
 echo "# the block survives set -e, which the sibling guards in this step run under"
-# bash exempts a non-final element of an && list from set -e, so
-# `[ ... ] && CRASH_LOOP=1` does not abort when the test is false. That is load
-# bearing rather than incidental: an abort here would leave CRASH_LOOP unset in
-# the recovery loop, and unset reads as no loop only by luck.
+# The last command of a sourced file sets its exit status, and `source` hands
+# that status to the caller. So the window has to end in a construct that
+# succeeds on BOTH verdicts: an `if` does, while `[ ... ] && CRASH_LOOP=1`
+# returns 1 whenever the test is false — the ordinary not-a-loop path, taken on
+# almost every recovery. These cases source the block as the whole unit, because
+# any command after the window supplies its own status and hides the difference.
 sete() {
   PREV_AT="$1" PREV_COUNT="$2" PREV_FLAG="$3" \
   bash -eu -c 'source "$0"; printf "%s %s" "$COUNT" "$CRASH_LOOP"' "$TMP/block.sh" 2>/dev/null
