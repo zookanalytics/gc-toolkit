@@ -280,6 +280,26 @@ anchor and quiesces the molecule's routed steps in one writer, so the chain
 stops re-offering, and `--no-wait` records that the ruling ended the wait
 rather than moving it. Your part stays the same: record, escalate, drain.
 
+## Sends to repos we do not own
+
+A `gh` write to a repository outside this rig's origin — an issue, a PR, a
+comment, a review — spends someone else's time, so the operator makes it.
+Hitting an upstream bug while working your bead is ordinary; sending the
+report yourself is not. Park the command instead, with the same `$SCRIPTS`
+resolved above:
+
+```bash
+"$SCRIPTS/upstream-finding.sh" \
+  --message "<what you found, where you hit it, why it earns the send>" \
+  -- gh issue create --repo <owner>/<name> --title "<title>" --body "<body>"
+```
+
+That files one bead carrying the exact command, ready to paste, and asks a
+human through the visit route. Name the target with `--repo` and inline the
+body — the operator pastes it later, from their own shell
+(docs/outbound-sends.md). Then carry on with your bead: the send is not
+yours to wait on.
+
 ## Communication
 
 Nudge for routine signals: `gc session nudge <target> "<msg>"`. If asked for
