@@ -86,6 +86,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
 - [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
+- [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 
 ## Related
 
