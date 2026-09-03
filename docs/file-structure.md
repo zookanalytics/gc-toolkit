@@ -19,9 +19,11 @@ define the approach:
 document belongs and what its location must keep true.
 
 **Boundaries.** This covers documentation gc-toolkit writes, wherever it lands
-— not customer-facing documentation. It governs where a document goes and how
-it is framed, never what it must *say*; that is held by the document's own
-[`## Scope`](#the-scope-section).
+— not customer-facing documentation, and not a document another pack's skill
+files into a path that pack hard-codes as its own
+([pack-owned trees](#not-a-tier-pack-owned-trees)). It governs where a document
+goes and how it is framed, never what it must *say*; that is held by the
+document's own [`## Scope`](#the-scope-section).
 
 ## Use Cases
 
@@ -59,6 +61,28 @@ hand-edited. Neither filing rule reaches it: a generated file is neither kept
 true nor preserved — it is re-emitted, and the way to change one is to change
 its source. Filing a document there is always wrong.
 
+### Not a tier: pack-owned trees
+
+Skills from another pack write documents into paths the pack hard-codes.
+`ce-plan` counts `docs/plans/` to derive a plan's sequence number and reads
+`docs/brainstorms/` for the plan's origin, and `ce-compound` searches
+`docs/solutions/<category>/` for prior work: for those three, moving a document
+would break the skill that reads it back. `ce-work` writes accepted residual
+findings to `docs/residual-review-findings/` on its no-PR path and never reads
+them back, so a move breaks no reader — but the write path is hard-coded in the
+pack all the same, and the pack is an external cached dependency this repo
+cannot edit, so refiling the document elsewhere would split one document across
+two authorities. The layout is the pack's to set either way.
+
+Neither filing rule reaches a pack-owned tree. The pack that writes a document
+owns where it goes, and the two tiers govern everything else. The
+compound-engineering pack owns `docs/brainstorms/`, `docs/plans/`,
+`docs/solutions/` and `docs/residual-review-findings/`.
+
+Ownership follows the writer, not the repository. A repo can carry a pack-owned
+tree and `specs/<bead-id>/` side by side, each holding what its own writer
+filed.
+
 ## Directory Structure
 
 Both tiers at the repo root. **Not** `docs/specs/`.
@@ -66,6 +90,7 @@ Both tiers at the repo root. **Not** `docs/specs/`.
 ```
 <repo-root>/
 ├── docs/                  central, refreshed-in-place, authoritative
+│   └── plans/             pack-owned tree, neither tier
 ├── specs/                 local, bead-keyed, historical
 │   ├── tk-yiwfz/
 │   └── 2026-08-rewrite/   (topic accommodation, dated)
