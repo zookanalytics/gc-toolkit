@@ -37,6 +37,8 @@ usage: doctor-sweep.sh [--status]
 env:   GC_DOCTOR_SWEEP_INTERVAL   seconds between sweeps (default 3600)
        GC_DOCTOR_SWEEP_BOUND      seconds a sweep may run (default 1800)
        GC_DOCTOR_SWEEP_STATE_DIR  where the run record lives
+       GC_DOCTOR_SWEEP_NO_SYSTEMD set to skip the transient user service and
+                                  launch with setsid/nohup instead
 USAGE
 }
 
@@ -299,20 +301,61 @@ fi
 
 printf '%s' "$NOW" > "$RUN/started_at"
 
-# Detached so the harness ceiling cannot reach it: a new session where setsid
-# exists, otherwise nohup, which is enough to survive the caller. The wrapper
-# records its own pid before the sweep and writes `rc` LAST, by rename, so a
-# reader never sees a half-written payload behind a finished marker.
-LAUNCH=(setsid)
-command -v setsid >/dev/null 2>&1 || LAUNCH=(nohup)
-"${LAUNCH[@]}" sh -c '
-  printf %s "$$" > "$4"
-  "$0" doctor --json > "$1" 2> "$2"
-  rc=$?
-  date +%s > "$5"
-  printf %s "$rc" > "$3.tmp" && mv "$3.tmp" "$3"
-' "$GC_BIN" "$RUN/payload.json" "$RUN/stderr.log" "$RUN/rc" "$RUN/pid" \
-  "$RUN/finished_at" </dev/null >/dev/null 2>&1 &
+# The sweep has to outlive the session that starts it. The deacon runs this on
+# a patrol cycle whose session is torn down and replaced each cycle, and that
+# teardown SIGKILLs the pane's whole process tree, walking descendants and
+# process-group members to catch children that called setsid(). setsid alone
+# does not help: the detached child reparents to the session harness, a
+# child-subreaper, and so stays inside that tree.
+#
+# On a systemd host the sweep runs as a transient user service instead, so the
+# user manager owns it, outside the session's process tree, process group, and
+# cgroup. The teardown cannot reach it there. A service starts with a clean
+# environment, so the caller's is forwarded: gc doctor needs the city context
+# the caller holds. With no reachable user manager, or with
+# GC_DOCTOR_SWEEP_NO_SYSTEMD set, it falls back to setsid then nohup, which is
+# enough to outlive the harness ceiling on a host with no per-session teardown.
+#
+# The body is a file, not an inline `sh -c` string, because systemd expands $$
+# and $VAR in a unit's argv and would corrupt the recorded pid; read from a
+# file, sh sees the body unexpanded. The wrapper records its own pid before the
+# sweep and writes `rc` LAST, by rename, so a reader never sees a half-written
+# payload behind a finished marker.
+SWEEP_BODY="$RUN/sweep.sh"
+cat > "$SWEEP_BODY" <<'BODY'
+printf %s "$$" > "$5"
+"$1" doctor --json > "$2" 2> "$3"
+rc=$?
+date +%s > "$6"
+printf %s "$rc" > "$4.tmp" && mv "$4.tmp" "$4"
+BODY
+SWEEP_ARGV=(sh "$SWEEP_BODY" "$GC_BIN" "$RUN/payload.json" "$RUN/stderr.log" \
+  "$RUN/rc" "$RUN/pid" "$RUN/finished_at")
+
+launched=0
+if [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] \
+   && command -v systemd-run >/dev/null 2>&1 \
+   && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+  # Forward the caller's environment faithfully: env -0 keeps values that hold
+  # spaces or newlines whole, and only POSIX-named vars pass so a shell-function
+  # export cannot make systemd reject the whole launch.
+  SETENV=()
+  while IFS= read -r -d '' kv; do
+    case ${kv%%=*} in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+    SETENV+=(--setenv="$kv")
+  done < <(env -0 2>/dev/null)
+  if [ "${#SETENV[@]}" -gt 0 ] \
+     && systemd-run --user --collect --quiet \
+          --description="gc doctor sweep (survives session teardown)" \
+          "${SETENV[@]}" "${SWEEP_ARGV[@]}" >/dev/null 2>&1; then
+    launched=1
+  fi
+fi
+if [ "$launched" -eq 0 ]; then
+  LAUNCH=(setsid)
+  command -v setsid >/dev/null 2>&1 || LAUNCH=(nohup)
+  "${LAUNCH[@]}" "${SWEEP_ARGV[@]}" </dev/null >/dev/null 2>&1 &
+fi
 
 printf '%s' "$NOW" > "$STAMP"
 report started "bound=$BOUND" "interval=$INTERVAL" "run=$RUN"
