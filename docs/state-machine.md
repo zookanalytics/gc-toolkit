@@ -498,6 +498,15 @@ sequenceDiagram
 
 ## Rejection and rework loops
 
+A rework child is discriminable by metadata alone. It carries
+`task_kind=rework` and `anchor_bead=<anchor>`, stamped by whichever component
+files it, and it resumes the anchor's own branch. Without those two keys its
+metadata is the anchor's, and the title prefix is the only thing telling them
+apart. A review bead carries `task_kind=review`. An anchor carries
+`merge_result` and neither key. Every consumer that selects on `anchor_bead`
+also narrows by `task_kind=review` or by title, so a marked child joins no
+review's result set.
+
 - **Rejection** (refinery judgment): the anchor's branch is not accepted —
   `mol-refinery-patrol` writes `rejection_reason` and re-routes the bead to
   the polecat pool. Back to `routed`; the next claimant starts from the

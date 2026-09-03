@@ -606,6 +606,8 @@ eq "$(meta tk-anc check.codex)" "<absent>" "the green marker is cleared"
 has "$(cat "$STUB_GH_LOG")" "--comment" "the changes artifact is a comment"
 hasnt "$(cat "$STUB_GH_LOG")" "--request-changes" "never a blocking GitHub review"
 eq "$(cat "$STUB_CREATED")" "Rework PR#42: address signoff findings" "exactly one rework child, PR-titled"
+eq "$(meta fix-1 task_kind)" "rework" "child carries the rework role marker"
+eq "$(meta fix-1 anchor_bead)" "tk-anc" "child names the anchor it belongs to"
 eq "$(meta fix-1 branch)" "polecat/tk-1" "child resumes the anchor's branch"
 eq "$(meta fix-1 target)" "main" "child carries the landing target"
 eq "$(meta fix-1 source_review_bead)" "rv-1" "child names the source review"
@@ -647,6 +649,14 @@ reset "$ANCHOR_PR"
 printf 'fix-1\n' > "$STUB_UPD_FAIL"
 out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 2 "an unstamped child work order exits 2"
+eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
+
+echo "# …and a role marker that half-lands is caught by the same read-back"
+reset "$ANCHOR_PR"
+out=$(STUB_DROP_KEYS="fix-1:task_kind,anchor_bead" "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "a child with no role marker exits 2"
+has "$out" "task_kind" "the refusal names the missing marker"
+has "$out" "anchor_bead" "…and its other half"
 eq "$(status rv-1)" "in_progress" "the review bead stays open for a retry"
 
 echo "# a child whose blocks edge did not land is caught, not shipped"

@@ -676,8 +676,12 @@ GATES
     # The route is stamped separately, after prepare_mode reads back. A dropped
     # branch or pr_url leaves a child nothing can act on, which is the safe side;
     # a dropped prepare_mode leaves one that is routable AND rewriting, because
-    # the resume path treats an absent mode as rebase.
+    # the resume path treats an absent mode as rebase. task_kind and anchor_bead
+    # are the role marker: the child resumes the ANCHOR's own branch, so with no
+    # marker a metadata read cannot tell the child from the anchor.
     gc bd update "$FIX" \
+      --set-metadata task_kind=rework \
+      --set-metadata anchor_bead="$id" \
       --set-metadata branch="$fix_branch" \
       --set-metadata target="$base" \
       --set-metadata rejection_reason="stale base at head $head_oid: PR#$num conflicts with '$base'. $fix_instruction Do NOT open a new PR — this reworks PR#$num." \
@@ -872,6 +876,7 @@ $CBODY"
         fi
         CSRCSET=(); [ -z "$CSRC" ] || CSRCSET=(--set-metadata "source_review=$CSRC")
         gc bd update "$CFIX" \
+          --set-metadata task_kind=rework \
           --set-metadata anchor_bead="$id" \
           --set-metadata branch="$fix_branch" \
           --set-metadata target="$base" \

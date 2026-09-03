@@ -766,8 +766,13 @@ fi
 
 # The stamped fields ARE the work order: branch/target say what to resume and
 # where it lands, existing_pr keeps the rework on THIS PR, source_review_bead
-# names the findings it answers.
+# names the findings it answers. task_kind and anchor_bead are the role marker:
+# the child resumes the ANCHOR's own branch, so with no marker a metadata read
+# cannot tell the child from the anchor, and the title prefix is the only signal
+# left.
 META=(
+  --set-metadata "task_kind=rework"
+  --set-metadata "anchor_bead=$ANCHOR"
   --set-metadata "branch=$BRANCH"
   --set-metadata "target=$FIX_TARGET"
   --set-metadata "rejection_reason=signoff requested changes (round $((ROUNDS + 1))): $REASON_HEAD"
@@ -789,8 +794,11 @@ gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
 # fields.
 FIX_ROW=$(bd_json show "$FIX_BEAD")
 MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
-  --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg pr "${POST_OPEN:+$PR_URL}" '
+  --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg pr "${POST_OPEN:+$PR_URL}" \
+  --arg a "$ANCHOR" '
   (.[0] // {}) as $x | ($x.metadata // {}) as $m | [
+    (if ($m.task_kind // "") == "rework" then empty else "task_kind" end),
+    (if ($m.anchor_bead // "") == $a then empty else "anchor_bead" end),
     (if ($m.branch // "") == $b then empty else "branch" end),
     (if ($m.target // "") == $t then empty else "target" end),
     (if ($m.source_review_bead // "") != "" then empty else "source_review_bead" end),
