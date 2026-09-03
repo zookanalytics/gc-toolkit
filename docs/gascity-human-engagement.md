@@ -628,7 +628,12 @@ unaskable: tk-yps55 sat parked for 29 hours after its fix merged and
 cost a whole sitting to rediscover that it was finished, on a parked
 budget where roughly 40% of the reserved rows were already terminal.
 Pass `--waiting-on` for every bead a sitting routes work into; a wait
-recorded only in prose is a wait nothing will ever re-ask.
+recorded only in prose is a wait nothing will ever re-ask. A bead whose
+work rode the subject's own branch is the one the verb folds for you: its
+work lands when the subject does, so `takeaway` writes no edge there — an
+edge would gate the subject's own merge on work that merges with it, which
+`merge.sh` holds on with no release — and a sitting whose every wait is such
+a rider is stamped settled, the same shape `--no-wait` writes.
 
 *Where that edge cannot be written, and what re-asks the wait instead
 (2026-08-22, `tk-a9k0l`):* the canonical converse shape files the routed

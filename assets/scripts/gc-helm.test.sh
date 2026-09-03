@@ -129,8 +129,12 @@ case "$1 ${2:-}" in
     # path reads it to say which disposition it is preserving; an empty
     # string reads the same as an absent key, which is every other bead.
     sup="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_SUPERSEDED" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd}}]'; fi ;;
+    # metadata.branch is what the refinery records when work rides another bead's
+    # branch; --waiting-on reads it to tell a same-branch rider from a separate
+    # deliverable. Absent id -> empty, which reads the same as an absent key.
+    br="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_BRANCHES" 2>/dev/null || true)"
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -194,7 +198,8 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists"
+       FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
+       FAKE_BRANCHES="$TMP/branches"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -229,6 +234,14 @@ J
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"
+# metadata.branch per bead, for the --waiting-on same-branch skip. Only the
+# RIDER-* ids carry one; A-PARKED/tk-blk* stay branchless so the edge tests
+# above them keep writing edges. w-diff rides its own branch; w-nobr has none.
+cat > "$TMP/branches" <<'BR'
+A-ONBR|polecat/A-ONBR
+w-same|polecat/A-ONBR
+w-diff|polecat/w-diff
+BR
 unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
 
@@ -430,6 +443,65 @@ eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(EDGENONE) no --waiting-on, n
 grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
+
+# ── takeaway --waiting-on: a wait that rode the SUBJECT's own branch (tk-4banho)
+# X.branch == A.branch is the signature the refinery records when X's work rode
+# A's branch, so A's merge is what lands X. An edge there gates A's merge on work
+# that merges WITH A, which merge.sh's dep-edge lane holds on with no release —
+# the PR wedges forever. Such a wait is written as NO edge; when every wait is
+# such a rider the sitting is stamped settled (I1: no held marker without an
+# edge); a wait on its own branch still records one, and the fail-closed rule
+# keeps the edge whenever the same-branch test cannot be made. Covered:
+#   (EDGERIDE)   a same-branch rider writes no edge, and says why
+#   (EDGERIDE)   …and the takeaway stamp still lands (subsumed, not dropped)
+#   (EDGERIDE)   …and the all-rider sitting is stamped settled (keeps I1 clean)
+#   (EDGESEP)    a wait on its OWN branch still records its edge
+#   (EDGENOBR)   a wait with no branch still records its edge (fail toward keeping)
+#   (EDGENOSUBJ) a branchless subject never skips — the guard needs A's branch
+#   (EDGEMIX)    one rider + one separate: only the separate lands, unsettled
+: > "$TMP/updates"; : > "$TMP/deps"
+sh "$SCRIPT" takeaway A-ONBR "routed — folded onto this branch" --by converse \
+   --waiting-on w-same >/dev/null 2>"$TMP/werr" || true
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
+  "(EDGERIDE) a wait that rode the subject's own branch writes no edge"
+grep -q "rode A-ONBR's own branch" "$TMP/werr" \
+  && ok "(EDGERIDE) …and the skip names why (the subject's merge lands it)" \
+  || bad "(EDGERIDE) the skip was silent or misworded (stderr: $(cat "$TMP/werr"))"
+grep -q -- '--set-metadata gc.takeaway=routed — folded onto this branch' "$TMP/updates" \
+  && ok "(EDGERIDE) …and the takeaway stamp still lands (the wait is subsumed, not lost)" \
+  || bad "(EDGERIDE) the stamp was lost: $(cat "$TMP/updates")"
+grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
+  && ok "(EDGERIDE) …and the all-rider sitting is stamped settled (I1: no held marker without an edge)" \
+  || bad "(EDGERIDE) all-rider takeaway left unsettled — I1 would flag it: $(cat "$TMP/updates")"
+
+: > "$TMP/deps"
+sh "$SCRIPT" takeaway A-ONBR "waiting on a separate PR" --waiting-on w-diff >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR w-diff -t blocks' "$TMP/deps" \
+  && ok "(EDGESEP) a wait on its OWN branch still records its edge" \
+  || bad "(EDGESEP) the separate-deliverable edge was dropped (got: $(cat "$TMP/deps"))"
+
+: > "$TMP/deps"
+sh "$SCRIPT" takeaway A-ONBR "waiting on a branchless bead" --waiting-on w-nobr >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR w-nobr -t blocks' "$TMP/deps" \
+  && ok "(EDGENOBR) a wait with no branch still records its edge (fail toward keeping)" \
+  || bad "(EDGENOBR) a branchless wait was dropped (got: $(cat "$TMP/deps"))"
+
+: > "$TMP/deps"
+sh "$SCRIPT" takeaway A-PARKED "branchless subject" --waiting-on w-same >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-PARKED w-same -t blocks' "$TMP/deps" \
+  && ok "(EDGENOSUBJ) a branchless subject never skips — the guard needs the subject's own branch" \
+  || bad "(EDGENOSUBJ) a branchless subject wrongly skipped an edge (got: $(cat "$TMP/deps"))"
+
+: > "$TMP/deps"; : > "$TMP/updates"
+sh "$SCRIPT" takeaway A-ONBR "one rides, one is separate" \
+   --waiting-on w-same --waiting-on w-diff >/dev/null 2>&1 || true
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "1" "(EDGEMIX) exactly one edge from a rider+separate pair"
+grep -qE '^bd dep add A-ONBR w-diff -t blocks' "$TMP/deps" \
+  && ok "(EDGEMIX) …and it is the separate deliverable, not the rider" \
+  || bad "(EDGEMIX) the wrong edge survived (got: $(cat "$TMP/deps"))"
+grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
+  && bad "(EDGEMIX) a mix with a real wait must NOT settle (the real edge is the hold)" \
+  || ok "(EDGEMIX) …and a surviving real wait keeps the sitting unsettled"
 
 # ── takeaway --no-wait: the disposition beside the headline ──────────────────
 # One ritual, two outcomes: a sitting that settled its subject and one that
