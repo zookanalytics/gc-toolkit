@@ -249,6 +249,12 @@ Build a verdict table for every commit on `{{origin_remote}}/{{upstream_branch}}
 that is not on `{{upstream_remote}}/{{upstream_branch}}`. The verdicts feed
 the rebase step.
 
+A wrong `keep` is not free: the rebase loop meets that commit as a conflict,
+spends an iteration reading upstream, and classifies it `dropped-absorbed`
+anyway. The probe in step 2 does that reading up front. A wrong `drop` is the
+expensive direction — it discards local work silently — so the probe reports
+overlap and never a verdict, and the verdict below stays yours.
+
 **Skip on resume** if `metadata.commit_verdicts` is already set — verdicts
 don't change mid-rebase:
 
@@ -267,7 +273,33 @@ git log --oneline {{upstream_remote}}/{{upstream_branch}}..{{origin_remote}}/{{u
 `range-diff` shows patch-id matches (`=`), fuzzy matches (`~`), and no match
 (`>`). Input to the verdicts, not a substitute for reading each commit.
 
-**2. Classify each origin commit** (oldest → newest), exactly one verdict:
+**2. Probe the divergent set for upstream overlap.** For every commit, this
+reports how many of its added lines upstream's copy of the same file already
+carries, the line span where that overlap sits, and the added lines upstream
+does NOT have:
+
+```bash
+PROBE=""
+for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit/packs/gascity-keeper" \
+         "${GC_RIG_ROOT:-}/packs/gascity-keeper"; do
+    [ -x "$c/assets/scripts/survey-absorption-probe.sh" ] && \
+        { PROBE="$c/assets/scripts/survey-absorption-probe.sh"; break; }
+done
+if [ -n "$PROBE" ]; then
+    "$PROBE" --repo "$(pwd)" --upstream {{upstream_remote}}/{{upstream_branch}} \
+        --range {{upstream_remote}}/{{upstream_branch}}..{{origin_remote}}/{{upstream_branch}} \
+        > /tmp/absorption-{{issue}}.json
+else
+    echo "survey-absorption-probe.sh not found"
+fi
+jq -r '.[] | "\\(.overlap)\\t\\(.containment)%\\t\\(.sha) \\(.subject)"' /tmp/absorption-{{issue}}.json
+```
+
+Budget roughly two seconds per commit. If the probe is missing or errors, say
+so in the notes and read each commit against upstream yourself. A missing
+probe is never evidence that a commit has no upstream overlap.
+
+**3. Classify each origin commit** (oldest → newest), exactly one verdict:
 
 - **drop-merged-upstream** — patch-id-equal (or trivially-equal) to an
   upstream commit; the rebase drops it automatically.
@@ -276,12 +308,38 @@ git log --oneline {{upstream_remote}}/{{upstream_branch}}..{{origin_remote}}/{{u
   the sequence editor in the next step.
 - **keep** — local-only patch with no upstream equivalent; carried forward.
 
-**3. Persist the verdicts** — markdown table to notes, JSON to metadata:
+**Any commit the probe marks `must_read` must be read before you write its
+verdict.** Open upstream's copy at the reported span and answer two questions
+in the rationale: what upstream's code there DOES, and what the reported
+`unmatched_lines` add on top of it.
+
+```bash
+jq -r '.[] | select(.must_read) | "=== \\(.sha) \\(.subject)",
+  (.files[] | select(.upstream_span) | "  read \\(.path):\\(.upstream_span)"),
+  (.unmatched_lines[] | "  local-only: \\(.)")' /tmp/absorption-{{issue}}.json
+git show {{upstream_remote}}/{{upstream_branch}}:<path> | sed -n '<span>p'
+```
+
+Both endings are common, so neither is the default:
+
+- Upstream's span does the same job, and the unmatched lines are scaffolding
+  around it — guards, renames, a comment. Upstream absorbed it:
+  `drop-merged-upstream`, citing the span.
+- Upstream's span is the same IDIOM serving a different purpose, and an
+  unmatched line is the commit's whole point. That is a `keep`, and its
+  rationale must name the line upstream lacks.
+
+High overlap is never on its own a reason to drop. `overlap: none` is the one
+answer that needs no further reading.
+
+**4. Persist the verdicts** — markdown table to notes, JSON to metadata. A
+`keep` on a `must_read` commit states what upstream's span holds; a rationale
+that only says "no upstream equivalent" is the one this step exists to stop:
 
 ```
 | sha | subject | verdict | rationale |
 |-----|---------|---------|-----------|
-| abc1234 | <subject> | drop-merged-upstream | matches upstream <sha> by patch-id |
+| abc1234 | <subject> | drop-merged-upstream | upstream <path>:<span> already defines <what>; unmatched lines are <what> |
 ```
 
 ```json
@@ -292,10 +350,21 @@ git log --oneline {{upstream_remote}}/{{upstream_branch}}..{{origin_remote}}/{{u
 ]
 ```
 
+`--append-notes`, never `--notes`: the dispatch note on this bead carries the
+keeper's routing and any operator instruction, and `--notes` replaces it.
+
 ```bash
-gc bd update {{issue}} --notes "<markdown table here>"
+gc bd update {{issue}} --append-notes "<markdown table here>"
 gc bd update {{issue}} --set-metadata commit_verdicts='<json string>'
 fi  # end of resume-skip guard
+```
+
+Once the rebase loop has run, the two records price this step against itself —
+every commit surveyed `keep` that the loop then classified `dropped-absorbed`
+is a miss this step could have caught:
+
+```bash
+gc bd show {{issue}} --json | "$PROBE" --audit
 ```
 
 **Exit criteria:** every divergent commit has a verdict on the bead;
@@ -716,6 +785,25 @@ close their own work bead).
   else
       RES_HEADLINE=""
       RES_DETAIL=""
+  fi
+  ```
+- **Survey accuracy** — a commit the survey called `keep` that the loop then
+  classified `dropped-absorbed` is an absorption the survey missed, and the
+  cost of each is one iteration. Omit the section when the count is zero:
+  ```bash
+  PROBE=""
+  for c in "${GC_PACK_DIR:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit/packs/gascity-keeper" \
+           "${GC_RIG_ROOT:-}/packs/gascity-keeper"; do
+      [ -x "$c/assets/scripts/survey-absorption-probe.sh" ] && \
+          { PROBE="$c/assets/scripts/survey-absorption-probe.sh"; break; }
+  done
+  SURVEY_LINE=""
+  if [ -n "$PROBE" ]; then
+      AUDIT=$(gc bd show {{issue}} --json | "$PROBE" --audit 2>/dev/null)
+      MISSES=$(printf '%s' "$AUDIT" | jq -r '.survey_misses // 0')
+      [ "${MISSES:-0}" -gt 0 ] && SURVEY_LINE=$(printf '%s' "$AUDIT" | jq -r \
+          '"survey missed \\(.survey_misses) of \\(.kept) kept commit(s) (\\(.miss_rate_pct)%): " +
+           (.missed_commits | map("\\(.sha) — surveyed as \\"\\(.survey_rationale)\\"") | join("; "))')
   fi
   ```
 - **Upstream commits absorbed** — `git log --oneline <pre-rebase-tip>..{{upstream_remote}}/{{upstream_branch}}`.
