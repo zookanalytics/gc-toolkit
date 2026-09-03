@@ -61,17 +61,23 @@ git's own check cannot tell a deletion from an edit.
 A branch checked out in a worktree is never touched — the worktree holding it
 either survived a gate above or was never a candidate.
 
-Every other local branch whose tip is an ancestor of the default branch goes
-first. That is git's own definition of merged, it needs no bead, and deleting
-the ref discards no commit. Agent session branches (`gc-<agent>-<hash>`, cut
-from the remote default tip by `assets/scripts/worktree-setup.sh` and never
-committed to) clear here, and so does anything else already folded in.
+The branch pass owns one family: `polecat/<bead-id>`. A branch that names no
+bead — an agent session branch (`gc-<agent>-<hash>`), a long-lived
+`claude/research-*` or `roadmap` branch, a design-doc trio — is left alone
+whatever its merge state.
 
-A `polecat/<bead-id>` branch that survives that test goes only when its bead is
-closed **and** the bead id appears in a commit message on the default branch.
+A `polecat/<bead-id>` branch is held while its bead is `open`, `in_progress` or
+`blocked`. A tip already an ancestor of the default branch does not override a
+live bead: a resumable work item's local ref is not disposable because its
+content happens to have reached `main`.
+
+Once the bead is no longer live the branch goes — when its tip is an ancestor
+of the default branch (git's own definition of merged, which discards no
+commit), or when the bead id appears in a commit message on the default branch.
 That squash commit is what "the content landed" looks like once the tip test
-has stopped working. A closed bead with no such commit — folded into a
-sibling's PR, closed as a duplicate, closed by hand — keeps its branch.
+has stopped working, since the branch's own commits never become ancestors. A
+closed bead with no such commit — folded into a sibling's PR, closed as a
+duplicate, closed by hand — keeps its branch.
 
 ## Scope
 
@@ -79,7 +85,8 @@ The worktree pass takes exactly the shape `mol-polecat-work` pours: a directory
 whose name parses as a bead id, directly inside a directory named `worktrees`.
 An agent's own session worktree, a review worktree under `/tmp`, and the rig
 checkout all fail that test and are never candidates. The branch pass takes
-merged branches and `polecat/*`; a branch that names no bead is left alone.
+only `polecat/<bead-id>` branches — held while their bead is live, taken once
+it is not; a branch that names no bead is left alone.
 
 Origin-side cleanup is not the reaper's. `delete_branch_on_merge` covers the PR
 path, and a pushed branch that never became a PR stays for a human.

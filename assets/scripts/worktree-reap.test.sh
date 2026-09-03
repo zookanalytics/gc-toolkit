@@ -102,8 +102,9 @@ if exists "$B"; then ok "open bead: the worktree is held"; else bad "open bead: 
 if has_branch polecat/tk-keep1; then ok "open bead: its branch is held"; else bad "open bead: its branch is held"; fi
 has "$OUT" "held 1 worktrees" "the summary counts what it held"
 
-# A branch whose tip is an ancestor of the default branch needs no bead: git's
-# own merged test carries it, which is what clears the agent session branches.
+# A polecat branch of a bead no longer live, whose tip is an ancestor of the
+# default branch, is taken by git's own merged test — here freed by the
+# worktree pass, then deleted.
 if has_branch polecat/tk-aaa1; then bad "merged branch: freed by the worktree pass, then deleted"; else ok "merged branch: freed by the worktree pass, then deleted"; fi
 
 # --- squash-merge: the tip test fails, the bead and the commit carry it ------
@@ -130,6 +131,28 @@ mk_wt tk-keep1 --commit > /dev/null
 land_squash tk-keep1
 run > /dev/null
 if has_branch polecat/tk-keep1; then ok "open bead: the branch is held despite a commit naming it"; else bad "open bead: the branch is held despite a commit naming it"; fi
+
+# A live bead outranks a merged tip. A polecat/<bead> branch can be an ancestor
+# of the default branch — a fast-forward land, or content that reached main
+# another way — while its bead is still open. The open-bead guard has to run
+# before the merged arm, or an hourly pass erases the local ref a resumable
+# work item names. Its dead-bead sibling, merged the same way, proves the guard
+# is narrow: it is still taken.
+build_city
+gitr branch polecat/tk-live1 origin/main >/dev/null 2>&1
+gitr branch polecat/tk-gone1 origin/main >/dev/null 2>&1
+open_beads '[{"id":"tk-keep1"},{"id":"tk-live1"}]'
+run > /dev/null
+if has_branch polecat/tk-live1; then ok "merged tip, live bead: the branch is held"; else bad "merged tip, live bead: the branch is held"; fi
+if has_branch polecat/tk-gone1; then bad "merged tip, dead bead: the branch is still taken"; else ok "merged tip, dead bead: the branch is still taken"; fi
+
+# A branch that names no bead is outside the owned family and left alone even
+# when its tip is an ancestor of the default branch — only polecat/<bead> refs
+# are the reaper's to take.
+build_city
+gitr branch roadmap origin/main >/dev/null 2>&1
+run > /dev/null
+if has_branch roadmap; then ok "a merged branch that names no bead is left alone"; else bad "a merged branch that names no bead is left alone"; fi
 
 # --- what holds a worktree --------------------------------------------------
 build_city

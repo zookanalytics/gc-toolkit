@@ -29,15 +29,19 @@
 # cut before that commit permanently dirty. `git worktree remove` refuses a
 # dirty tree, which is why the removal below passes --force.
 #
-# Branch deletion is gated separately, because a branch outlives its worktree.
-# Every branch whose tip is an ancestor of the default branch goes first, which
-# is git's own definition of merged and carries no risk. A polecat/<bead-id>
-# branch that survives that test goes only when its bead is closed AND the bead
-# id appears in a commit message on the default branch — the squash commit,
-# which is what "the content landed" looks like after a squash-merge.
+# Branch deletion is gated separately, because a branch outlives its worktree,
+# and it owns one family: polecat/<bead-id>. A branch that names no bead is
+# left alone whatever its merge state. A polecat/<bead-id> branch is held while
+# its bead is open, in_progress or blocked — a tip already merged into the
+# default branch does not make a live work item's local ref disposable. Once
+# the bead is no longer live the branch goes: when its tip is an ancestor of
+# the default branch (git's own definition of merged), or when the bead id
+# appears in a commit message there — the squash commit, which is what "the
+# content landed" looks like after a squash-merge, since the branch's own
+# commits never become ancestors.
 #
-# Scope is the per-bead worktree shape and the branches named above. An agent's
-# own session worktree, a review worktree under /tmp, the rig checkout, and any
+# Scope is the per-bead worktree shape and that branch family. An agent's own
+# session worktree, a review worktree under /tmp, the rig checkout, and any
 # branch that names no bead are left alone.
 #
 # Usage:
@@ -217,26 +221,34 @@ reap_rig() { # <rig-name> <rig-path>
     : > "$WORK/landed"
     local landed_built=0
 
+    # This reaper owns one branch family: polecat/<bead-id>. Any other ref — an
+    # agent session branch, a long-lived claude/research-* or roadmap branch, a
+    # design-doc trio — names no bead this pass may reason about and is left
+    # alone whatever its merge state. Within the family the order is the point:
+    # a live bead (open, in_progress or blocked) holds its branch BEFORE the
+    # merged test, because a tip already an ancestor of the default branch (a
+    # fast-forward land, or content that reached main another way) does not make
+    # a resumable work item's local ref disposable. Only once the bead is no
+    # longer live does merge state decide it.
     git -C "$repo" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null > "$WORK/branches" || : > "$WORK/branches"
     while IFS= read -r branch; do
         [ -n "$branch" ] || continue
         if [ "$branch" = "$bare_default" ]; then continue; fi
         if grep -qxF "$branch" "$WORK/checkedout"; then continue; fi
 
-        if grep -qxF "$branch" "$WORK/merged"; then
-            if drop_branch "$repo" "$branch"; then br_removed=$((br_removed + 1)); fi
-            continue
-        fi
-
-        # Unmerged. Only a polecat branch whose bead is closed qualifies, and
-        # only once the squash commit that carries its content is on the
-        # default branch.
         case "$branch" in polecat/*) ;; *) continue ;; esac
         bead="${branch#polecat/}"
         bead="$(grep -oE "^$BEAD_RE" <<< "$bead")" || continue
         [ -n "$bead" ] || continue
         if grep -qxF "$bead" "$WORK/open"; then continue; fi
 
+        if grep -qxF "$branch" "$WORK/merged"; then
+            if drop_branch "$repo" "$branch"; then br_removed=$((br_removed + 1)); fi
+            continue
+        fi
+
+        # Unmerged: goes only once the squash commit that carries its content is
+        # on the default branch.
         if [ "$landed_built" -eq 0 ]; then
             git -C "$repo" log "$default_ref" --format='%s%n%b' 2>/dev/null \
                 | grep -oE "\($BEAD_RE\)" | tr -d '()' | sort -u > "$WORK/landed" || : > "$WORK/landed"
