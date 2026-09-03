@@ -38,7 +38,7 @@ covers that dimension.
 | [`converse-codex`](agents/converse-codex.md) | 53,183 | 13,295 |
 | [`converse-fable`](agents/converse-fable.md) | 53,183 | 13,295 |
 | [`converse-opus`](agents/converse-opus.md) | 53,183 | 13,295 |
-| [`deacon`](agents/deacon.md) | 10,001 | 2,500 |
+| [`deacon`](agents/deacon.md) | 10,057 | 2,514 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
@@ -46,7 +46,7 @@ covers that dimension.
 | [`polecat`](agents/polecat.md) | 22,098 | 5,524 |
 | [`polecat-codex`](agents/polecat-codex.md) | 22,128 | 5,532 |
 | [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
-| [`refinery`](agents/refinery.md) | 8,626 | 2,156 |
+| [`refinery`](agents/refinery.md) | 8,682 | 2,170 |
 | [`witness`](agents/witness.md) | 12,186 | 3,046 |
 
 ## Formula recipes
@@ -71,7 +71,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 2,632 | 658 |
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,012 | 1,003 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,400 | 600 |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,779 | 1,194 |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,781 | 1,195 |
 | [`mol-review`](formulas/mol-review.md) | `city` | 2,627 | 656 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |

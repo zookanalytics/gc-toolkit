@@ -18,7 +18,7 @@ a054f3b390b3018370593ab0e165ca939fa2c95d9617949703641557b482d2dd
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
-025a990b1848da4e7abcf189179674f2dc9983ecbcc348ac710d53c7ca439950
+7067582eef289c47aa230041885073be4fe994178d6c41cfbdb037aac4215c58
 agents/dog/agent.toml
 461bf99dede1bb2bd93362209c27f2a214ea081faf2e5a886ec2d2284cb95c7f
 agents/dog/prompt.template.md
@@ -46,7 +46,7 @@ a187e0362f3d1c62aefaa8db74176545ee3626213f135ffe147e77ba7fbcf0cf
 agents/refinery/agent.toml
 ccf0fa8747e70a0e268b6041cd5d883cb858295fff27918e85ab64b503aea324
 agents/refinery/prompt.template.md
-6fffc0b9fa7e2bb07279b798fe3177520fa53ee5329d68f82e76bb15ddebc1e1
+87512568d8a4cff4b355be9abdfda8858b3e67111c4b0d43ccc858121cb2f71e
 agents/witness/agent.toml
 2ac4c3a4b8a391b8910cc14c17e0952b17dc310bfd5fec852527e54a5779b848
 agents/witness/prompt.template.md
@@ -54,7 +54,7 @@ agents/witness/prompt.template.md
 assets/scripts/render-seed-audit.sh
 99f5a92829f6f1be88157112b99f81a96d7b1b3dd43fd4833ada7e08e21f3633
 formulas/mol-deacon-patrol.toml
-4ff98955311e2917d614e2c57ad77923035067df6e7dc97da9c0f3b8ca8e59b0
+5cc34c569b08bf4ca852b39dd65e5a9851b68f73372cb4c54b1213e785e68deb
 formulas/mol-dog-shutdown-dance.toml
 3a218bfe03da4422efe21d706bb884818dd65a1c7ad4694fd7f7c9f90bb5dec1
 formulas/mol-feedback-distiller.toml
@@ -66,7 +66,7 @@ formulas/mol-first-reaction.toml
 formulas/mol-polecat-work.toml
 2da8123fbf0123a11c8b395ab9c9b4541f9c6e7926feab5d5bda03bea45b5472
 formulas/mol-refinery-patrol.toml
-5bdf7c23dd6c46b3e4af888b0f8412cb3fb8f3df5dd2382b2de50c37d6da0d0b
+3fe53f4fe7b4f5ba464741a20a8a3920c9edfddc1d2dea47ff366bb06e1697a2
 formulas/mol-review.toml
 bbac5d42ce2814d3c7d4117ae9e4bac857964ff7e43539b49eac2034ff42c6d8
 formulas/mol-visit.toml

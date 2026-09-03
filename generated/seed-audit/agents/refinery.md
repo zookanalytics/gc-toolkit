@@ -43,12 +43,14 @@ collect.
 
 ```bash
 # One patrol wisp: adopt in-progress first, then open; burn any surplus.
+# >>> patrol-wisp-reconcile
 WISP_IDS=$(
   gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-refinery-patrol") | .id'
   gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-refinery-patrol") | .id'
 )
 WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
 for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
+# <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch=main --var rig_name=gc-toolkit --var binding_prefix='gc-toolkit.' --json | jq -r '.new_epic_id')
 fi
