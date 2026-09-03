@@ -28,7 +28,7 @@ description = "Seconds to wait before the next cycle. Spent as a bounded until-l
 default = "600"
 
 [vars.doctor_interval]
-description = "Seconds between doctor sweeps. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep runs hourly. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still sweeps hourly."
+description = "Length of the per-interval doctor-sweep window, in seconds. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep opens at most one window per interval. A window normally holds one start; a run that ends failed or exceeded earns one retry inside it (capped by GC_DOCTOR_SWEEP_MAX_ATTEMPTS, default 2), so on the failure path the sweep can run twice in one interval, while a completed run arms no retry. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still opens one window per hour."
 default = "3600"
 
 [[steps]]
@@ -242,8 +242,12 @@ A full sweep costs about ten minutes at this city's ordinary load, and the
 harness kills any one call at 600s. So the sweep never runs in the foreground:
 it would be killed before it emitted a payload, and this cycle would report
 "not clean" with nothing read. `doctor-sweep.sh` starts it detached and reads
-the result on a later cycle. Run the script once per cycle and let it decide
-whether to start a sweep, wait for one, or collect it:
+the result on a later cycle. It opens one sweep window per `doctor_interval`; a
+run that ends failed or exceeded earns one capped retry inside that window
+(`GC_DOCTOR_SWEEP_MAX_ATTEMPTS`, default 2), so on the failure path a second
+sweep can start within the same interval, while a completed run arms no retry.
+Run the script once per cycle and let it decide whether to start a sweep, wait
+for one, or collect it:
 ```bash
 # >>> doctor-sweep-run
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do

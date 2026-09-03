@@ -11,8 +11,8 @@
 # The sweep therefore runs DETACHED and is read on a later pass. One call does
 # one thing and returns at once:
 #
-#   nothing in flight, interval elapsed  start one detached     state=started
-#   nothing in flight, interval not up   nothing                state=idle
+#   nothing live, sweep or retry due     start one detached     state=started
+#   nothing live, none due yet           nothing                state=idle
 #   in flight                            report progress        state=running
 #   finished                             collect it             state=complete
 #   finished badly, or bad payload       a FAILED scan          state=failed
@@ -22,6 +22,11 @@
 # The bound is enforced here rather than by `timeout`, which is what lets it
 # exceed the harness ceiling. A sweep that never finishes still ends in a state
 # the patrol escalates, carrying its elapsed time and the check it died in.
+#
+# Starts are capped per interval. An ordinary sweep opens a window; a run that
+# ends failed or exceeded earns one retry on the next pass (up to
+# GC_DOCTOR_SWEEP_MAX_ATTEMPTS starts), so a sweep that dies early no longer
+# burns the whole interval, while a completed run arms no retry.
 #
 # Output is `key=value` lines with `state=` first. Exit 0 carries a report about
 # a sweep; exit 2 means none ran and none can right now — a `blocked` report, or
@@ -34,11 +39,12 @@ usage: doctor-sweep.sh [--status]
        (default)   advance the sweep: collect a finished run, or start one
                    once the interval has passed
        --status    report the current state; never starts, kills, or collects
-env:   GC_DOCTOR_SWEEP_INTERVAL   seconds between sweeps (default 3600)
-       GC_DOCTOR_SWEEP_BOUND      seconds a sweep may run (default 1800)
-       GC_DOCTOR_SWEEP_STATE_DIR  where the run record lives
-       GC_DOCTOR_SWEEP_NO_SYSTEMD set to skip the transient user service and
-                                  launch with setsid/nohup instead
+env:   GC_DOCTOR_SWEEP_INTERVAL      seconds between sweeps (default 3600)
+       GC_DOCTOR_SWEEP_MAX_ATTEMPTS  sweep starts per interval (default 2, min 1)
+       GC_DOCTOR_SWEEP_BOUND         seconds a sweep may run (default 1800)
+       GC_DOCTOR_SWEEP_STATE_DIR     where the run record lives
+       GC_DOCTOR_SWEEP_NO_SYSTEMD    set to skip the transient user service and
+                                     launch with setsid/nohup instead
 USAGE
 }
 
@@ -73,6 +79,12 @@ INTERVAL=""; BOUND=""
 resolve_num INTERVAL "${GC_DOCTOR_SWEEP_INTERVAL:-}" 3600 GC_DOCTOR_SWEEP_INTERVAL
 # ~3x the observed mean, so the check count can grow without re-arguing it.
 resolve_num BOUND "${GC_DOCTOR_SWEEP_BOUND:-}" 1800 GC_DOCTOR_SWEEP_BOUND
+# At most this many sweep starts per interval; the one over the ordinary hourly
+# start is the retry a failed run earns. Clamped to 1 so a zero or low value
+# cannot disable sweeping.
+MAX_ATTEMPTS=""
+resolve_num MAX_ATTEMPTS "${GC_DOCTOR_SWEEP_MAX_ATTEMPTS:-}" 2 GC_DOCTOR_SWEEP_MAX_ATTEMPTS
+[ "$MAX_ATTEMPTS" -lt 1 ] && MAX_ATTEMPTS=1
 
 CITY="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 DEFAULT_STATE_DIR="${CITY:+$CITY/.gc/runtime}"
@@ -81,6 +93,7 @@ STATE_DIR="${GC_DOCTOR_SWEEP_STATE_DIR:-$DEFAULT_STATE_DIR}"
 
 RUN="$STATE_DIR/current"
 STAMP="$STATE_DIR/last-start"
+OUTCOME="$STATE_DIR/last-outcome"
 
 NOW="$(date +%s)"
 
@@ -100,6 +113,17 @@ scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
 read_file() { [ -f "$1" ] && tr -d '\n' < "$1" || printf ''; }
+
+# A collected run records its outcome so the next window's gate can arm one
+# retry after a failure. Advance mode only — --status must not write it. A
+# collection records `failed`, and only the complete path upgrades it to
+# `complete`, so every abnormal end (bad rc, invalid payload, a vanished
+# wrapper, an exceeded bound) is the failure that earns the retry.
+collect() { # <complete|failed>
+  [ "$MODE" = "status" ] && return 0
+  : > "$RUN/collected"
+  printf '%s' "$1" > "$OUTCOME"
+}
 
 # The array is the shape the counts consume, and demanding it is what keeps a
 # drifted payload from reading as a clean sweep: a `results` key holding null
@@ -175,7 +199,7 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
   if [ -n "$RC" ]; then
     FINISHED="$(read_file "$RUN/finished_at")"
     [ -n "$FINISHED" ] && ELAPSED=$(( FINISHED - STARTED_AT ))
-    [ "$MODE" = "status" ] || : > "$RUN/collected"
+    collect failed
 
     if [ "$RC" != "0" ] && [ "$RC" != "1" ]; then
       # rc 1 is doctor's normal "findings exist"; anything else is a failure.
@@ -223,6 +247,7 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
     FINDINGS="$(printf '%s' "$COUNTS" | cut -f2)"
     ABANDONED="$(printf '%s' "$COUNTS" | cut -f3)"
     ABANDONED_NAMES="$(printf '%s' "$COUNTS" | cut -f4)"
+    collect complete
     report complete "rc=$RC" "elapsed=$ELAPSED" "payload=$PAYLOAD" \
       "checks=$CHECKS" "findings=$FINDINGS" \
       "abandoned=$ABANDONED" "abandoned_checks=$ABANDONED_NAMES"
@@ -235,13 +260,13 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
       report running "elapsed=$ELAPSED" "bound=$BOUND" "current_check=starting"
       exit 0
     fi
-    [ "$MODE" = "status" ] || : > "$RUN/collected"
+    collect failed
     report failed "reason=never-started" "elapsed=$ELAPSED"
     exit 0
   fi
 
   if ! kill -0 "$PID" 2>/dev/null; then
-    [ "$MODE" = "status" ] || : > "$RUN/collected"
+    collect failed
     report failed "reason=sweep-vanished" "elapsed=$ELAPSED" "pid=$PID" \
       "stderr=$RUN/stderr.log"
     exit 0
@@ -255,7 +280,7 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
       exit 0
     fi
     kill_tree "$PID"
-    : > "$RUN/collected"
+    collect failed
     report exceeded "elapsed=$ELAPSED" "bound=$BOUND" "pid=$PID" \
       "last_check=${CHECK:-unknown}" "stderr=$RUN/stderr.log"
     exit 0
@@ -268,12 +293,49 @@ fi
 
 # ------------------------------------------------------------ nothing live --
 
+WINDOW="$STATE_DIR/window-start"
+ATTEMPTS_FILE="$STATE_DIR/attempts"
+WINDOW_START="$(read_file "$WINDOW")"
+ATTEMPTS="$(read_file "$ATTEMPTS_FILE")"
+LAST_OUTCOME="$(read_file "$OUTCOME")"
+# Both feed the arithmetic below; a non-numeric value falls back to the
+# last-start gate rather than reading as zero and starting every pass.
+case "$WINDOW_START" in ''|*[!0-9]*) WINDOW_START="" ;; esac
+case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS="" ;; esac
+
 SINCE=""
 [ -n "$LAST_START" ] && SINCE=$(( NOW - LAST_START ))
 
-if [ -n "$SINCE" ] && [ "$SINCE" -lt "$INTERVAL" ]; then
-  report idle "next_in=$(( INTERVAL - SINCE ))" "interval=$INTERVAL" \
-    "since_last=$SINCE"
+# window-start + attempts cap starts to MAX_ATTEMPTS per INTERVAL and let one
+# of them follow a failed run, so a sweep that dies early no longer burns the
+# whole interval. last-start is the fallback when that pair is missing or
+# corrupt: it holds the hourly ceiling by itself, so a lost pair costs the
+# retry, never a hot loop.
+DO_START=0
+NEW_WINDOW=""     # window-start to stamp on a start; empty leaves it in place
+NEW_ATTEMPTS=""   # attempts to stamp on a start
+NEXT_IN=""        # seconds until the window reopens, for the idle report
+if [ -z "$WINDOW_START" ] || [ -z "$ATTEMPTS" ]; then
+  # Missing or corrupt pair: degrade to one start per interval on last-start.
+  if [ -n "$SINCE" ] && [ "$SINCE" -lt "$INTERVAL" ]; then
+    NEXT_IN=$(( INTERVAL - SINCE ))
+  else
+    DO_START=1; NEW_WINDOW="$NOW"; NEW_ATTEMPTS=1
+  fi
+elif [ "$(( NOW - WINDOW_START ))" -ge "$INTERVAL" ]; then
+  # The window has elapsed: the ordinary start opens a fresh one.
+  DO_START=1; NEW_WINDOW="$NOW"; NEW_ATTEMPTS=1
+elif [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ] && [ "$LAST_OUTCOME" = "failed" ]; then
+  # One retry inside the open window after a failed run. Leaving window-start
+  # in place is what makes the per-interval ceiling hold however runs fail.
+  DO_START=1; NEW_ATTEMPTS=$(( ATTEMPTS + 1 ))
+else
+  # Window still open and either the cap is spent or the last run completed.
+  NEXT_IN=$(( INTERVAL - ( NOW - WINDOW_START ) ))
+fi
+
+if [ "$DO_START" -eq 0 ]; then
+  report idle "next_in=$NEXT_IN" "interval=$INTERVAL" "since_last=${SINCE:-never}"
   exit 0
 fi
 
@@ -358,5 +420,7 @@ if [ "$launched" -eq 0 ]; then
 fi
 
 printf '%s' "$NOW" > "$STAMP"
+[ -n "$NEW_WINDOW" ] && printf '%s' "$NEW_WINDOW" > "$WINDOW"
+printf '%s' "$NEW_ATTEMPTS" > "$ATTEMPTS_FILE"
 report started "bound=$BOUND" "interval=$INTERVAL" "run=$RUN"
 exit 0

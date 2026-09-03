@@ -19,7 +19,7 @@ keep it backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
-  {{doctor_interval}}: Seconds between doctor sweeps. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep runs hourly. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still sweeps hourly. (default=3600)
+  {{doctor_interval}}: Length of the per-interval doctor-sweep window, in seconds. The sweep step gates itself on this, so the patrol keeps its faster cadence for mail and Dolt while the sweep opens at most one window per interval. A window normally holds one start; a run that ends failed or exceeded earns one retry inside it (capped by GC_DOCTOR_SWEEP_MAX_ATTEMPTS, default 2), so on the failure path the sweep can run twice in one interval, while a completed run arms no retry. 1800 is the shortest the operator asked for. doctor-sweep.sh owns the default, so a value that never reaches it still opens one window per hour. (default=3600)
   {{event_timeout}}: Seconds to wait before the next cycle. Spent as a bounded until-loop (the harness blocks a standalone sleep). Ceiling 600: the harness caps one call at 600s. (default=600)
 
 Steps (5):

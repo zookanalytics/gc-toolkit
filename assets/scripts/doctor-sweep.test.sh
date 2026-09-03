@@ -123,6 +123,8 @@ if [ "$NEXT" -gt 3400 ] && [ "$NEXT" -le 3600 ]; then ok "  ... and the wait is 
 else bad "  ... and the wait is the hour, not the patrol cycle (got '$NEXT')"; fi
 eq "$(grep -c . "$STUB_LOG")" "1" "  ... still exactly one sweep run"
 
+# An elapsed interval is an aged window-start now; last-start ages with it.
+printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/window-start"
 printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/last-start"
 run
 has "$OUT" "state=started" "once the interval has passed it sweeps again"
@@ -183,6 +185,7 @@ eq "$(field "$OUT" last_check)" "check-fixture-slow" "  ... and the check it was
 sleep 1
 if kill -0 "$PID" 2>/dev/null; then bad "  ... and the sweep is killed, not left running"
 else ok "  ... and the sweep is killed, not left running"; fi
+eq "$(cat "$STATE/last-outcome")" "failed" "  ... and records the exceeded run failed, so it can retry"
 export STUB_SLEEP=0 STUB_CHECK=""
 
 # --- a bad exit and a bad payload are both FAILED scans ---------------------
@@ -261,19 +264,157 @@ printf 'not-a-time' > "$STATE/current/started_at"
 printf 'not-a-time' > "$STATE/last-start"
 run
 has "$OUT" "state=started" "an unreadable stamp costs one sweep, not every future one"
+# Drain this detached sweep before the next case resets STUB_LOG: its gc call
+# logs asynchronously, and a late write would land in the --status count below.
+await_sweeps 1
 
 # --- --status is a read ------------------------------------------------------
 new_state status
 : > "$STUB_LOG"
+# Seed a window where a retry is due, so a write would be visible: a start
+# would bump attempts, a collection would set last-outcome.
+SEED_W=$(( $(date +%s) - 100 ))
+printf '%s' "$SEED_W" > "$STATE/window-start"
+printf '1'      > "$STATE/attempts"
+printf 'failed' > "$STATE/last-outcome"
 run --status
 has "$OUT" "state=idle" "--status reports without acting"
 eq "$(grep -c . "$STUB_LOG")" "0" "  ... it starts nothing"
 if [ -d "$STATE/current" ]; then bad "  ... and creates no run dir"; else ok "  ... and creates no run dir"; fi
+eq "$(cat "$STATE/window-start")" "$SEED_W" "  ... and leaves window-start untouched"
+eq "$(cat "$STATE/attempts")" "1" "  ... and leaves attempts untouched"
+eq "$(cat "$STATE/last-outcome")" "failed" "  ... and leaves last-outcome untouched"
 
 run --nonsense
 eq "$RC" "2" "an unknown flag is a usage error"
 has "$ERR" "usage: doctor-sweep.sh" "  ... and says so on stderr"
 hasnt "$OUT" "usage: doctor-sweep.sh" "  ... never on stdout, which the caller parses"
+
+# --- the per-interval start cap: retry a failed sweep, never a completed one,
+#     and fall back to hourly when the window state is lost -------------------
+# window-start + attempts cap starts to MAX_ATTEMPTS per interval and let one
+# follow a failure; last-start is the fallback the pair degrades to. A sweep
+# started here is DETACHED, so each case awaits the child's rc before the next
+# pass reads it, exactly as the happy path does.
+export STUB_PAYLOAD="$TMP/payload.json" STUB_SLEEP=0
+
+new_state cap_complete
+: > "$STUB_LOG"; export STUB_RC=1
+run
+has "$OUT" "state=started" "cap: the window's first sweep starts"
+await_run
+run
+has "$OUT" "state=complete" "cap: it completes"
+eq "$(cat "$STATE/last-outcome")" "complete" "  ... recording last-outcome=complete"
+run
+has "$OUT" "state=idle" "cap: a completed run arms no retry inside the window"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... so no second sweep runs"
+
+new_state cap_failed
+: > "$STUB_LOG"; export STUB_RC=2
+run
+has "$OUT" "state=started" "cap: the window's first sweep starts"
+WIN=$(cat "$STATE/window-start")
+eq "$(cat "$STATE/attempts")" "1" "  ... as attempt 1 of the window"
+await_run
+run
+has "$OUT" "state=failed" "cap: it fails"
+eq "$(cat "$STATE/last-outcome")" "failed" "  ... recording last-outcome=failed"
+run
+has "$OUT" "state=started" "cap: a failed run earns one retry on the next pass"
+eq "$(cat "$STATE/attempts")" "2" "  ... counted as attempt 2 of the same window"
+eq "$(cat "$STATE/window-start")" "$WIN" "  ... whose window-start is left in place"
+await_run
+run
+has "$OUT" "state=failed" "cap: the retry fails too"
+run
+has "$OUT" "state=idle" "cap: a second failure starts no third inside the window"
+eq "$(grep -c . "$STUB_LOG")" "2" "  ... only the two starts the cap allows"
+NEXT=$(field "$OUT" next_in)
+if [ "$NEXT" -gt 0 ] && [ "$NEXT" -le 3600 ]; then ok "  ... and next_in counts down the window"
+else bad "  ... and next_in counts down the window (got '$NEXT')"; fi
+
+new_state cap_expiry
+: > "$STUB_LOG"; export STUB_RC=1
+OLD=$(( $(date +%s) - 3601 ))
+printf '%s' "$OLD" > "$STATE/window-start"
+printf '%s' "$OLD" > "$STATE/last-start"
+printf '2'         > "$STATE/attempts"
+printf 'failed'    > "$STATE/last-outcome"
+run
+has "$OUT" "state=started" "cap: a window older than the interval sweeps again"
+eq "$(cat "$STATE/attempts")" "1" "  ... resetting attempts to 1 for the new window"
+if [ "$(cat "$STATE/window-start")" -gt "$OLD" ]; then ok "  ... and moving window-start forward"
+else bad "  ... and moving window-start forward (still $OLD)"; fi
+await_run
+
+new_state cap_corrupt_attempts
+: > "$STUB_LOG"; export STUB_RC=1
+RECENT=$(( $(date +%s) - 100 ))
+printf '%s' "$RECENT" > "$STATE/window-start"
+printf 'NaN'          > "$STATE/attempts"
+printf 'failed'       > "$STATE/last-outcome"
+printf '%s' "$RECENT" > "$STATE/last-start"
+run
+has "$OUT" "state=idle" "cap: corrupt attempts holds on a recent last-start"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... no hot loop, though last-outcome=failed"
+printf '%s' "$(( $(date +%s) - 3601 ))" > "$STATE/last-start"
+run
+has "$OUT" "state=started" "  ... and sweeps once the interval since last-start passes"
+eq "$(cat "$STATE/attempts")" "1" "  ... self-healing attempts to 1"
+await_run
+
+new_state cap_corrupt_window
+: > "$STUB_LOG"; export STUB_RC=1
+printf 'not-a-time' > "$STATE/window-start"
+printf '1'          > "$STATE/attempts"
+printf 'failed'     > "$STATE/last-outcome"
+printf '%s' "$(( $(date +%s) - 100 ))" > "$STATE/last-start"
+run
+has "$OUT" "state=idle" "cap: corrupt window-start holds on a recent last-start too"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... a lost window costs the retry, not the hourly ceiling"
+
+# --- the MAX_ATTEMPTS knob, and its floor of 1 -------------------------------
+# The default window earns one retry after a failed run (proven above); the knob
+# tunes that, and a value below 1 is clamped so it can never disable sweeping.
+# At GC_DOCTOR_SWEEP_MAX_ATTEMPTS=1 that retry is refused: seed the state a failed
+# run leaves, where the default-2 window would start a retry, and prove the knob
+# holds it at idle instead.
+new_state cap_knob_one
+export GC_DOCTOR_SWEEP_MAX_ATTEMPTS=1
+: > "$STUB_LOG"
+RECENT=$(( $(date +%s) - 100 ))
+printf '%s' "$RECENT" > "$STATE/window-start"
+printf '1'            > "$STATE/attempts"
+printf 'failed'       > "$STATE/last-outcome"
+printf '%s' "$RECENT" > "$STATE/last-start"
+run
+has "$OUT" "state=idle" "knob: MAX_ATTEMPTS=1 arms no retry the default-2 window would"
+eq "$(cat "$STATE/attempts")" "1" "  ... leaving attempts at 1"
+eq "$(grep -c . "$STUB_LOG")" "0" "  ... and starting no sweep"
+unset GC_DOCTOR_SWEEP_MAX_ATTEMPTS
+
+# Zero is too low: it clamps to 1, which still sweeps a due window (never
+# disabling the patrol) but arms no retry, exactly as MAX_ATTEMPTS=1 does.
+new_state cap_knob_zero
+export GC_DOCTOR_SWEEP_MAX_ATTEMPTS=0
+: > "$STUB_LOG"; export STUB_RC=2
+OLD=$(( $(date +%s) - 3601 ))
+printf '%s' "$OLD" > "$STATE/window-start"
+printf '%s' "$OLD" > "$STATE/last-start"
+printf '2'         > "$STATE/attempts"
+printf 'failed'    > "$STATE/last-outcome"
+run
+has "$OUT" "state=started" "knob: MAX_ATTEMPTS=0 is clamped to 1, so a due window still sweeps"
+eq "$(cat "$STATE/attempts")" "1" "  ... as attempt 1 of the fresh window"
+await_run
+run
+has "$OUT" "state=failed" "  ... the clamped run fails"
+eq "$(cat "$STATE/last-outcome")" "failed" "  ... recording last-outcome=failed"
+run
+has "$OUT" "state=idle" "  ... and the floor of 1 arms no retry, never a hot loop"
+eq "$(grep -c . "$STUB_LOG")" "1" "  ... only the single start the clamped minimum allows"
+unset GC_DOCTOR_SWEEP_MAX_ATTEMPTS
 
 # --- the shipped patrol step must handle every state this script reports -----
 # The step is prose plus one snippet, read by an agent, and both halves can go
