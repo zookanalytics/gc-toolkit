@@ -87,6 +87,41 @@
 # that already carries `aborted_at` is left alone). Every write is best-effort:
 # a handback that fails must not change this script's verdict, and the verdict
 # is a FAIL either way.
+#
+# ## Why this script also records per-iteration timing
+#
+# What a cycle of this loop costs is otherwise unmeasured. The ralph path builds
+# the condition env with BeadID, Iteration, CityPath, StorePath, WorkDir,
+# MoleculeDir and ArtifactDir and nothing else (internal/dispatch/ralph.go), so
+# `GC_ITERATION_DURATION_MS` and `GC_CUMULATIVE_DURATION_MS` arrive at their zero
+# value and the env cannot say how long an iteration took. This script is the one
+# thing that runs exactly once per iteration and can name the bead that iteration
+# ran on, so it appends one entry per attempt to `metadata.iteration_timings` on
+# the work bead — the record that outlives the loop and that the keeper reads:
+#
+#   appended_at  the iteration bead's created_at: the runtime minted the attempt
+#   started_at   a session picked the attempt up
+#   closed_at    the iteration's own work ended
+#   checked_at   this script ran
+#   session      the pool slot, and session_id the session inside it —
+#                consecutive attempts sharing a session_id were recycled, not
+#                respawned, so no spawn cost was paid between them
+#
+# `appended_at` to `started_at` is spawn, session boot and work discovery;
+# `started_at` to `closed_at` is the iteration's own work; `closed_at` to
+# `checked_at` is control-dispatcher lag. Differences between successive
+# `checked_at` values give whole-cycle wall time. A field whose source is absent
+# is omitted rather than defaulted, so an unobserved span reads differently from
+# a zero-length one, and the recorded verdict separates a loop making progress
+# (`incomplete`) from one wedged on the same internal error every attempt.
+#
+# The append is keyed on the attempt number, so a retried exec of one attempt
+# records once, and it refuses to write at all when the existing array does not
+# read back as an array: an audit array grows without bound exactly when
+# something appends to it blind, and measurement must not be what damages the
+# bead it measures. The added cost is two bead reads and one write per iteration
+# against a 2m timeout. Like the handback, every write is best-effort and cannot
+# change the verdict.
 
 set -uo pipefail
 
@@ -97,6 +132,7 @@ ISSUE=""
 
 fail() {
 	printf 'rebase-check: FAIL: %s\n' "$1" >&2
+	record_iteration_timing error "$1"
 	handback_if_budget_exhausted "$1"
 	exit 1
 }
@@ -107,8 +143,26 @@ note() { printf 'rebase-check: %s\n' "$1" >&2; }
 # was the last one — in which case the handback below is the durable signal.
 incomplete() {
 	note "$1"
+	record_iteration_timing incomplete "$1"
 	handback_if_budget_exhausted "$1"
 	exit 1
+}
+
+# The bead this attempt ran on, read at most once: the budget lookup and the
+# timing record both want it, and neither is worth a second round trip.
+# Memoized to "" when GC_BEAD_ID is unset or the read fails — both callers treat
+# an empty read as "nothing to say" rather than as an error.
+ITERATION_JSON=""
+ITERATION_JSON_READ=0
+iteration_json() {
+	if [ "$ITERATION_JSON_READ" = "0" ]; then
+		ITERATION_JSON_READ=1
+		if [ -n "${GC_BEAD_ID:-}" ]; then
+			# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
+			ITERATION_JSON=$(bd show "$GC_BEAD_ID" --json 2>/dev/null) || ITERATION_JSON=""
+		fi
+	fi
+	printf '%s' "$ITERATION_JSON"
 }
 
 # The loop's budget, from the ralph control bead's gc.max_attempts. The ralph
@@ -117,14 +171,13 @@ incomplete() {
 # budget has to come from the beads. Echoes nothing when it cannot be resolved —
 # an unknown budget means no handback, never a guessed one.
 #
-# Cost: one bead read per failing iteration, plus a root-scoped list when the
-# subject bead does not carry the budget itself — a couple of seconds against a
-# 2m gate timeout, on a path that already only runs once per iteration.
+# Cost: the shared iteration-bead read, plus a root-scoped list when the subject
+# bead does not carry the budget itself — a couple of seconds against a 2m gate
+# timeout, on a path that already only runs once per iteration.
 resolve_budget() {
 	local subject_json step
-	[ -n "${GC_BEAD_ID:-}" ] || return 0
-	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
-	subject_json=$(bd show "$GC_BEAD_ID" --json 2>/dev/null) || return 0
+	subject_json=$(iteration_json)
+	[ -n "$subject_json" ] || return 0
 
 	# GC_BEAD_ID is normally the iteration bead, but the runtime falls back to
 	# the control bead itself when there is no subject — then the budget is
@@ -148,6 +201,75 @@ resolve_budget() {
 		jq -r --arg step "$step" '
 			[ .[] | select($step == "" or (.metadata."gc.step_id" // "") == $step) ]
 			| .[0].metadata."gc.max_attempts" // empty'
+}
+
+# One entry per attempt on metadata.iteration_timings — see "Why this script
+# also records per-iteration timing". Verdict is pass, incomplete (the loop
+# should run again) or error (this script could not decide).
+record_iteration_timing() {
+	local verdict="$1" reason="$2"
+	[ -n "$ISSUE" ] || return 0
+
+	local attempt="${GC_ITERATION:-}"
+	case "$attempt" in
+	'' | *[!0-9]*) return 0 ;;
+	esac
+
+	local iter_json entry log updated
+	iter_json=$(iteration_json)
+	[ -n "$iter_json" ] || iter_json='[{}]'
+
+	# Absent sources stay absent: with_entries drops every empty field so an
+	# unobserved span is visibly missing rather than reported as zero-length.
+	entry=$(printf '%s' "$iter_json" | jq -c \
+		--argjson attempt "$attempt" \
+		--arg bead "${GC_BEAD_ID:-}" \
+		--arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
+		--arg verdict "$verdict" \
+		--arg reason "$reason" '
+		(.[0] // {}) as $b
+		| {
+			attempt: $attempt,
+			iteration_bead: $bead,
+			appended_at: ($b.created_at // ""),
+			started_at: ($b.started_at // $b.metadata."gc.claimed_at" // ""),
+			closed_at: ($b.closed_at // ""),
+			checked_at: $checked_at,
+			session: ($b.metadata."gc.session_name" // ""),
+			session_id: ($b.metadata."gc.session_id" // ""),
+			verdict: $verdict,
+			reason: $reason
+		  }
+		| with_entries(select(.value != null and .value != ""))' 2>/dev/null) || return 0
+	[ -n "$entry" ] || return 0
+
+	local issue_json
+	# The record has to survive the same env the verdict does: a gc that dies on a
+	# cold import closure would lose the measurement on the very iterations a
+	# struggling city makes expensive.
+	# raw-bd: gc bd cannot be relied on in the minimal condition env
+	issue_json=$(bd show "$ISSUE" --json 2>/dev/null) || return 0
+
+	# Refuse to append to something that does not read back as an array — see
+	# the header on why a blind append is the failure mode that matters here.
+	# The store may hand the field back already parsed; tolerate both shapes.
+	log=$(printf '%s' "$issue_json" | jq -c '
+		(.[0].metadata.iteration_timings // "[]")
+		| (if type == "string" then (fromjson? // null) else . end)
+		| if type == "array" then . else null end' 2>/dev/null)
+	if [ -z "$log" ] || [ "$log" = "null" ]; then
+		note "WARN: metadata.iteration_timings on $ISSUE is unreadable; not recording attempt $attempt"
+		return 0
+	fi
+
+	# Keyed on the attempt: a retried exec of this same attempt records once.
+	updated=$(printf '%s' "$log" | jq -c --argjson entry "$entry" '
+		if any(.[]; .attempt == $entry.attempt) then empty else . + [$entry] end' 2>/dev/null) || return 0
+	[ -n "$updated" ] || return 0
+
+	# raw-bd: paired with the read above, in the same minimal condition env
+	bd update "$ISSUE" --set-metadata "iteration_timings=$updated" >/dev/null 2>&1 ||
+		note "WARN: could not record timing for attempt $attempt on $ISSUE"
 }
 
 handback_if_budget_exhausted() {
@@ -216,6 +338,10 @@ Recorded conflict questions: $questions
 Next: read metadata.conflict_questions and metadata.conflict_resolutions, then
 either drive the rebase to green by hand from the worktree, or unwind it:
   git -C $worktree reset --hard $backup
+
+metadata.iteration_timings carries one entry per attempt. Attempts that all
+failed for the same reason with little time between started_at and closed_at
+are a wedged loop, not $attempt attempts of real work.
 EOF
 	)" >/dev/null 2>&1; then
 		note "WARN: exhaustion handback write failed for $ISSUE (loop still reports FAIL)"
@@ -370,5 +496,6 @@ if [ "$GATE_SHA" != "$HEAD_SHA" ]; then
 	incomplete "gate stamp is stale (passed at $GATE_SHA, HEAD is $HEAD_SHA); another iteration is needed"
 fi
 
+record_iteration_timing pass "rebase complete and gate green at $HEAD_SHA"
 note "PASS: rebase complete and gate green at $HEAD_SHA"
 exit 0

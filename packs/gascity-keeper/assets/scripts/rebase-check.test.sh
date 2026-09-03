@@ -20,6 +20,11 @@
 # early tells the operator a healthy loop failed, and a missing one strands the
 # rebase with no pending item anywhere.
 #
+# The last section pins the per-iteration timing record, the only measurement of
+# what a cycle of this loop costs: it must land on every attempt, key on the
+# attempt so a retried exec records once, refuse an array it cannot read back,
+# and never move the verdict.
+#
 # EXECUTES the real shipped script against stub `bd` / `gc` binaries and a real
 # temporary git repo. No live city, Dolt, network, or worktrees.
 set -uo pipefail
@@ -84,6 +89,22 @@ show)
     [ -n "$MD_NOTIFY" ]     && { printf '%s"notify_recipient":"%s"' "$sep" "$MD_NOTIFY"; sep=","; }
     [ -n "$MD_ABORTED_AT" ] && { printf '%s"aborted_at":"%s"' "$sep" "$MD_ABORTED_AT"; sep=","; }
     [ -n "$MD_BACKUP" ]     && { printf '%s"backup_ref":"%s"' "$sep" "$MD_BACKUP"; sep=","; }
+    # iteration_timings as the checker writes it: a JSON array inside a string.
+    # MD_TIMINGS is a count of already-recorded attempts (1..N), built here so
+    # the escaping survives the state file. MD_TIMINGS_RAW overrides it with a
+    # literal, which is how the "unreadable array" case is set up.
+    if [ -n "$MD_TIMINGS_RAW" ]; then
+      printf '%s"iteration_timings":"%s"' "$sep" "$MD_TIMINGS_RAW"; sep=","
+    elif [ -n "$MD_TIMINGS" ]; then
+      printf '%s"iteration_timings":"[' "$sep"; sep=","
+      i=1
+      while [ "$i" -le "$MD_TIMINGS" ]; do
+        [ "$i" -gt 1 ] && printf ','
+        printf '{\\"attempt\\":%s,\\"verdict\\":\\"incomplete\\"}' "$i"
+        i=$((i + 1))
+      done
+      printf ']"'
+    fi
     # conflict_questions as the formula writes it: a JSON array inside a string.
     # MD_QUESTIONS is a count; the entries are built here so the escaping
     # survives the state file instead of being mangled on the way in.
@@ -100,10 +121,18 @@ show)
     printf '}}]'
     ;;
   *)
-    # An iteration bead: the root pointer for the GC_WISP_ID fallback, and the
-    # gc.control_for lineage the budget lookup joins the control bead on.
-    printf '[{"id":"%s","metadata":{"gc.root_bead_id":"%s","gc.control_for":"rebase"' "$2" "$ROOT_ID"
+    # An iteration bead: the root pointer for the GC_WISP_ID fallback, the
+    # gc.control_for lineage the budget lookup joins the control bead on, and
+    # the lifecycle timestamps the timing record decomposes a cycle from.
+    printf '[{"id":"%s"' "$2"
+    [ -n "$IT_CREATED" ] && printf ',"created_at":"%s"' "$IT_CREATED"
+    [ -n "$IT_STARTED" ] && printf ',"started_at":"%s"' "$IT_STARTED"
+    [ -n "$IT_CLOSED" ]  && printf ',"closed_at":"%s"' "$IT_CLOSED"
+    printf ',"metadata":{"gc.root_bead_id":"%s","gc.control_for":"rebase"' "$ROOT_ID"
     [ -n "$MD_SUBJECT_MAX" ] && printf ',"gc.max_attempts":"%s"' "$MD_SUBJECT_MAX"
+    [ -n "$IT_CLAIMED" ]    && printf ',"gc.claimed_at":"%s"' "$IT_CLAIMED"
+    [ -n "$IT_SESSION" ]    && printf ',"gc.session_name":"%s"' "$IT_SESSION"
+    [ -n "$IT_SESSION_ID" ] && printf ',"gc.session_id":"%s"' "$IT_SESSION_ID"
     printf '}}]'
     ;;
   esac
@@ -197,8 +226,16 @@ MD_NOTIFY="${MD_NOTIFY-human}"
 MD_ABORTED_AT="${MD_ABORTED_AT-}"
 MD_BACKUP="${MD_BACKUP-refs/backup/pre-rebase-gc-issue}"
 MD_QUESTIONS="${MD_QUESTIONS-}"
+MD_TIMINGS="${MD_TIMINGS-}"
+MD_TIMINGS_RAW="${MD_TIMINGS_RAW-}"
 MD_MAX_ATTEMPTS="${MD_MAX_ATTEMPTS-25}"
 MD_SUBJECT_MAX="${MD_SUBJECT_MAX-}"
+IT_CREATED="${IT_CREATED-2026-07-22T19:00:00Z}"
+IT_STARTED="${IT_STARTED-2026-07-22T19:03:00Z}"
+IT_CLAIMED="${IT_CLAIMED-}"
+IT_CLOSED="${IT_CLOSED-2026-07-22T19:11:00Z}"
+IT_SESSION="${IT_SESSION-gascity--gascity__polecat-1-pool}"
+IT_SESSION_ID="${IT_SESSION_ID-lx-iter1}"
 UPDATE_FAILS="${UPDATE_FAILS-0}"
 EOF
 }
@@ -233,9 +270,17 @@ refute_call() {
   else ok "$1"; fi
 }
 
+# Assertions over what the last run_case said on stderr.
+assert_out() {
+  if grep -qF -- "$2" "$TMP/out" 2>/dev/null; then ok "$1"; else
+    bad "$1"; sed 's/^/       /' "$TMP/out" 2>/dev/null
+  fi
+}
+
 reset_env() {
   unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_WORK_DIR MD_ONTO MD_GATE
   unset MD_KEEPER MD_NOTIFY MD_ABORTED_AT MD_BACKUP MD_MAX_ATTEMPTS MD_SUBJECT_MAX MD_QUESTIONS
+  unset MD_TIMINGS MD_TIMINGS_RAW IT_CREATED IT_STARTED IT_CLAIMED IT_CLOSED IT_SESSION IT_SESSION_ID
   unset UPDATE_FAILS ITERATION MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
 }
 
@@ -321,16 +366,18 @@ reset_env; MD_GATE=""; ITERATION=24; write_state
 run_case "FAIL with budget left (attempt 24 of 25)" 1
 refute_call "no handback while the loop still has attempts" "aborted_at="
 
-# A green gate on the last attempt is a pass, not an exhaustion.
+# A green gate on the last attempt is a pass, not an exhaustion. The timing
+# record is the only write a passing attempt makes.
 reset_env; ITERATION=25; write_state
 run_case "PASS on the last attempt when the gate is green" 0
-refute_call "a passing last attempt writes nothing to the work bead" "bd update"
+refute_call "a passing last attempt hands nothing back" "aborted_at="
+refute_call "a passing last attempt reassigns nobody" "--assignee"
 
 # Idempotent: a retried exec of the same attempt (or an earlier abort path) must
 # not append a second handback or overwrite the first reason.
 reset_env; MD_GATE=""; MD_ABORTED_AT="install"; ITERATION=25; write_state
 run_case "FAIL on the last attempt when aborted_at is already set" 1
-refute_call "an existing aborted_at is left alone" "bd update"
+refute_call "an existing aborted_at is left alone" "aborted_at="
 
 # No keeper stamped at dispatch: fall back to notify_recipient, the same
 # fallback the install/push aborts use.
@@ -348,7 +395,7 @@ refute_call "handback nudges nobody when no route is known" "session nudge"
 # An unresolvable budget must not be guessed: no control bead, no handback.
 reset_env; MD_GATE=""; MD_MAX_ATTEMPTS=""; ITERATION=25; write_state
 run_case "FAIL when the budget cannot be resolved" 1
-refute_call "an unknown budget never triggers a handback" "bd update"
+refute_call "an unknown budget never triggers a handback" "aborted_at="
 
 # GC_BEAD_ID can be the control bead itself (no subject); the budget is then
 # already on the bead the script was handed.
@@ -417,6 +464,90 @@ run_case "FAIL when the root's gc.var.issue disagrees with convoy membership" 1
 # membership alone.
 reset_env; MD_ROOT_ISSUE=""; write_state
 run_case "PASS from convoy membership alone when the root has no gc.var.issue" 0
+
+# --- 11. per-iteration timing (tk-mt20vx) ------------------------------------
+# What one cycle of this loop costs cannot be read from the condition env: the
+# ralph path leaves GC_ITERATION_DURATION_MS at its zero value, so this script
+# is the only place a cycle can be timed. Both directions matter — an unrecorded
+# rebase is one nobody can cost, and an array that grows on every exec is the
+# shape that made an earlier audit field unreadable.
+
+reset_env; ITERATION=3; write_state
+run_case "PASS records the iteration timing" 0
+assert_call "the entry carries the attempt"          '"attempt":3'
+assert_call "the entry names the iteration bead"     '"iteration_bead":"iter-1"'
+assert_call "the entry carries when it was minted"   '"appended_at":"2026-07-22T19:00:00Z"'
+assert_call "the entry carries when work began"      '"started_at":"2026-07-22T19:03:00Z"'
+assert_call "the entry carries when work ended"      '"closed_at":"2026-07-22T19:11:00Z"'
+assert_call "the entry carries when the check ran"   '"checked_at":"20'
+assert_call "the entry names the session"            '"session":"gascity--gascity__polecat-1-pool"'
+assert_call "the entry names the session id"         '"session_id":"lx-iter1"'
+assert_call "a green gate records verdict=pass"      '"verdict":"pass"'
+
+# Repeated "error" is a wedged loop; repeated "incomplete" is a loop making
+# progress. Collapsing the two would hide the difference the timings exist to
+# show, so each exit path records its own verdict and its reason.
+reset_env; ITERATION=3; MD_GATE=""; write_state
+run_case "FAIL records the iteration timing" 1
+assert_call "an unfinished iteration records verdict=incomplete" '"verdict":"incomplete"'
+assert_call "the entry carries the verdict's reason" 'no metadata.check_passed_sha recorded'
+
+reset_env; ITERATION=3; MD_ONTO=""; write_state
+run_case "an internal failure still records the timing" 1
+assert_call "a checker that could not decide records verdict=error" '"verdict":"error"'
+
+# Append, not replace: without the earlier attempts the array cannot say what a
+# cycle cost, which is the only reason to keep it.
+reset_env; ITERATION=3; MD_TIMINGS=2; write_state
+run_case "PASS with two attempts already recorded" 0
+assert_call "the earlier attempts survive" '{"attempt":1,"verdict":"incomplete"}'
+assert_call "the new attempt is appended"  '"attempt":3'
+
+# Keyed on the attempt: a retried exec of one attempt records once.
+reset_env; ITERATION=2; MD_TIMINGS=2; write_state
+run_case "PASS on an attempt that is already recorded" 0
+refute_call "a retried exec of the same attempt records once" "iteration_timings="
+
+# A field that does not read back as an array is not appended to blind — a
+# measurement must not be what corrupts the bead it measures.
+reset_env; ITERATION=3; MD_TIMINGS_RAW="not-an-array"; write_state
+run_case "PASS with an unreadable timings array" 0
+refute_call "an unreadable array is left alone" "iteration_timings="
+assert_out "an unreadable array is reported out loud" "metadata.iteration_timings on gc-issue is unreadable"
+
+# The verdict is the product; the measurement is a side effect. A refused write
+# must move neither direction.
+reset_env; ITERATION=3; UPDATE_FAILS=1; write_state
+run_case "PASS is preserved when the timing write is refused" 0
+
+reset_env; ITERATION=3; MD_GATE=""; UPDATE_FAILS=1; write_state
+run_case "FAIL is preserved when the timing write is refused" 1
+
+# An unobserved span must not read as a zero-length one: a field whose source is
+# absent is omitted rather than defaulted.
+reset_env; ITERATION=3; IT_CREATED=""; IT_STARTED=""; IT_CLOSED=""; IT_SESSION=""; IT_SESSION_ID=""
+write_state
+run_case "PASS with an iteration bead carrying no timestamps" 0
+refute_call "an unobserved start is omitted, not zeroed" '"started_at"'
+refute_call "an unobserved close is omitted, not zeroed" '"closed_at"'
+assert_call "the attempt is still recorded" '"attempt":3'
+
+# A bead that never went through the in_progress transition still carries the
+# claim stamp, which is the same moment.
+reset_env; ITERATION=3; IT_STARTED=""; IT_CLAIMED="2026-07-22T19:04:00Z"; write_state
+run_case "PASS with the claim stamp standing in for started_at" 0
+assert_call "started_at falls back to gc.claimed_at" '"started_at":"2026-07-22T19:04:00Z"'
+
+# The measurement has to survive the same minimal env the verdict does; the
+# iterations most worth costing are the ones where the city is least healthy.
+reset_env; ITERATION=3; GC_COLD=1; write_state
+run_case "PASS records the timing with a cold import cache" 0
+assert_call "timing is recorded when gc is unusable" '"attempt":3'
+
+# Nothing to attach the measurement to: no work bead, no record, no error.
+reset_env; ITERATION=3; CONVOY_MEMBERS=0; write_state
+run_case "FAIL before the work bead resolves" 1
+refute_call "no timing without a resolved work bead" "iteration_timings="
 
 echo
 echo "passed: $PASS  failed: $FAIL"

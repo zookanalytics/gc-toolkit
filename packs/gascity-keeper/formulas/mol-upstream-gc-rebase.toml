@@ -41,6 +41,14 @@ handback itself on the last failing attempt: stamps
 iterations remain as durable history; `metadata.conflict_resolutions`
 accumulates one audit entry per resolved conflict.
 
+The exit condition also appends one `metadata.iteration_timings` entry per
+attempt: when the runtime minted the attempt, when a session picked it up,
+when the iteration's own work ended, when the check ran, the session that ran
+it, and the verdict with its reason. That is the loop's only cost measurement,
+because the ralph condition env carries no duration of its own, and it is what
+separates a loop resolving conflicts from one wedged on the same error every
+attempt.
+
 **Iterations must be pool-routed.** The runtime recycles the previous
 iteration's worker session only when the attempt target is a pool. Sling this
 formula at a pool, never at a named agent — a named target skips the recycle
@@ -503,9 +511,10 @@ max_attempts = 25
 mode = "exec"
 path = "../assets/scripts/rebase-check.sh"
 # The script reads bead metadata and git state — it verifies the gate, it
-# does not run it (see rebase-check.sh's header for why). Its one write is
-# the exhaustion handback on the final failing attempt. 2m is slack for a
-# loaded Dolt, not a budget for `make check`.
+# does not run it (see rebase-check.sh's header for why). It writes twice:
+# one `metadata.iteration_timings` entry per attempt, and the exhaustion
+# handback on the final failing attempt. 2m is slack for a loaded Dolt and
+# those two writes, not a budget for `make check`.
 timeout = "2m"
 
 [[steps]]
@@ -686,6 +695,16 @@ close their own work bead).
   fi
   ```
 - **Upstream commits absorbed** — `git log --oneline <pre-rebase-tip>..{{upstream_remote}}/{{upstream_branch}}`.
+- **Loop cost** — one row per attempt from `metadata.iteration_timings`, so
+  the run reports what it cost without anyone querying metadata for it:
+  ```bash
+  TIMINGS=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.iteration_timings // "[]"')
+  COST=$(printf '%s' "$TIMINGS" | jq -r '.[] |
+    "  attempt \\(.attempt) \\(.verdict) session=\\(.session_id // "?") minted=\\(.appended_at // "?") started=\\(.started_at // "?") closed=\\(.closed_at // "?")"')
+  ```
+  `minted` to `started` is spawn, session boot and work discovery; `started`
+  to `closed` is the attempt's own work. Report both spans rather than the
+  total: which one dominates is the question this record exists to answer.
 - **Check / install / push outcomes** and the **backup ref** (name +
   pre-rebase tip sha, so the operator can roll back without paging this mol
   back in).
