@@ -29,6 +29,7 @@ printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 shift
 case "${1:-}" in
   list)
+    [ -n "${STUB_LIST_GARBAGE:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
     shift
     statuses=""; fields=()
     while [ $# -gt 0 ]; do
@@ -48,6 +49,7 @@ case "${1:-}" in
     done
     printf '%s\n' "$out" ;;
   show)
+    [ -n "${STUB_SHOW_GARBAGE:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
     jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE" ;;
   create)
     shift
@@ -274,9 +276,26 @@ eq "$(< "$STUB_ESC_LOG" wc -l)" "0" "no human is asked to paste a command that i
 unset STUB_DROP_KEYS
 
 reset_state
-GC_ESCALATE_TOOL="$TMP/nope.sh" OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
+OUT=$(GC_ESCALATE_TOOL="$TMP/nope.sh" "$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
 eq "$?" "1" "a missing escalate.sh fails the run"
 has "$OUT" "NO ONE HAS BEEN ASKED" "a missing escalate.sh says the ask never reached a human"
+
+# ── an unreadable store is not an empty one ───────────────────────────────
+reset_state
+"$SUT" --message "why" -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
+OUT=$(STUB_LIST_GARBAGE=1 "$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
+eq "$?" "0" "a store that cannot be read does not lose the finding"
+has "$OUT" "could not read the store" "an unreadable listing is reported, not read as empty"
+eq "$(count)" "2" "it files rather than dropping the finding, as the warning says"
+
+# ── a bead that did not read back is not a divergence ─────────────────────
+reset_state
+"$SUT" --message "why" --key samekey -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
+OUT=$(STUB_SHOW_GARBAGE=1 "$SUT" --message "why" --key samekey -- gh issue create --repo a/b --title T --body B 2>&1)
+eq "$?" "1" "a bead whose parked command cannot be read fails the run"
+has "$OUT" "not a divergence" "the failure separates a failed read from a changed command"
+hasnt "$OUT" "DIFFERENT command" "a failed read is not reported as a changed command"
+eq "$(count)" "1" "the unreadable bead is not duplicated under its own key"
 
 # ── against the real escalate.sh ──────────────────────────────────────────
 # The stub above proves this script's own behaviour; it cannot catch the two

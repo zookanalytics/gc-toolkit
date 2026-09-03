@@ -185,7 +185,14 @@ bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 # One bead per situation, whatever its status. An open one is the same ask
 # still waiting; a closed one is an ask a human already answered, and re-filing
 # it re-asks a question that was settled.
-EXISTING_ROW=$(bd_json list --status=open,in_progress,closed --metadata-field "upstream_send_key=$KEY" --limit=20 \
+EXISTING_LIST=$(bd_json list --status=open,in_progress,closed --metadata-field "upstream_send_key=$KEY" --limit=20)
+# An unreadable listing is not an empty one. Say so and file: a duplicate ask
+# is a bounded nuisance, a finding dropped because the store blinked is not.
+case "$EXISTING_LIST" in
+  \[*) : ;;
+  *) warn "could not read the store to look for an existing ask — filing anyway, which may duplicate an open one" ;;
+esac
+EXISTING_ROW=$(printf '%s' "$EXISTING_LIST" \
   | jq -r --arg k "$KEY" \
       'if type == "array" then (.[] | select((.metadata.upstream_send_key // "") == $k) | [.id, (.status // "open")] | @tsv) else empty end' 2>/dev/null \
   | head -n 1)
@@ -200,7 +207,15 @@ fi
 # is a divergence, not a refresh: the bead a human is reading would keep the
 # command they were shown while the caller believes the new one is parked.
 if [ -n "$EXISTING" ]; then
-  EXISTING_CMD=$(bd_json show "$EXISTING" | jq -r '.[0].metadata.gh_command // ""' 2>/dev/null)
+  EXISTING_SHOW=$(bd_json show "$EXISTING")
+  # Only a bead that was actually read can be called divergent. A failed read
+  # presents as an empty parked command, which reads as a divergence and sends
+  # the caller to the one repair that defeats the key: re-filing under another.
+  if [ "$(printf '%s' "$EXISTING_SHOW" | jq -r 'if type == "array" then (.[0].id // "") else "" end' 2>/dev/null)" != "$EXISTING" ]; then
+    warn "$EXISTING carries key '$KEY' but did not read back, so what is parked there is unknown — nothing parked. Re-run: this is a failed read, not a divergence."
+    exit 1
+  fi
+  EXISTING_CMD=$(printf '%s' "$EXISTING_SHOW" | jq -r '.[0].metadata.gh_command // ""' 2>/dev/null)
   if [ "$EXISTING_CMD" != "$PASTE" ]; then
     warn "$EXISTING already carries key '$KEY' with a DIFFERENT command, and a human may already be reading it — nothing parked."
     warn "  parked there: $EXISTING_CMD"
@@ -270,8 +285,9 @@ if [ ! -x "$ESCALATE" ]; then
   warn "no escalate.sh at $ESCALATE — bead $BEAD carries the command but NO ONE HAS BEEN ASKED. File the visit by hand, or set GC_ESCALATE_TOOL."
   exit 1
 fi
-if ! ESC_OUT=$("$ESCALATE" --subject "$BEAD" --key "upstream-send-$KEY" \
-    ${POOL_ARG:+--pool "$POOL_ARG"} --message "$ESC_MESSAGE"); then
+ESC_ARGS=(--subject "$BEAD" --key "upstream-send-$KEY" --message "$ESC_MESSAGE")
+[ -n "$POOL_ARG" ] && ESC_ARGS+=(--pool "$POOL_ARG")
+if ! ESC_OUT=$("$ESCALATE" "${ESC_ARGS[@]}"); then
   warn "bead $BEAD carries the command but escalate.sh did not file a visit — NO ONE HAS BEEN ASKED. Re-run this command; it will reuse $BEAD."
   exit 1
 fi
