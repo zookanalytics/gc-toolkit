@@ -13,8 +13,9 @@
 # — find -newer is blind to an input a commit deleted.
 # Exit: 0 current (or built) · 1 build failed (the previous binary is left
 # exactly as it was) · 2 usage.
-# Env: GC_SERVICE_STATE_ROOT / GC_CITY_ROOT / GC_CITY (state root), GC_GO_BIN,
-# GC_GCTK_GOTMP. Caller: orders/gctk-build.
+# Env: GC_SERVICE_STATE_ROOT / GC_CITY_PATH / GC_CITY / GC_CITY_ROOT (state
+# root), else `gc service list --json`'s city_path; GC_GO_BIN, GC_GCTK_GOTMP,
+# GC_GCTK_GC_BIN. Caller: orders/gctk-build.
 #
 # There is no restart step and no service: gctk is a command the cadence
 # invokes, so a published binary is serving the moment it lands. restart_pending
@@ -34,17 +35,28 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOD="$(cd "$HERE/../../services/gctk" && pwd)"
 COMPONENT="gctk"
 
-# State root: the override wins, else the city runtime dir. There is no service
-# listing to consult — gctk is not a service — so the city path is the only
-# question, and a run that cannot answer it refuses rather than guessing.
+# State root: the override wins, else the city runtime dir. gctk is not a
+# service, so there is no service entry to read a state_root from — the city
+# path is the whole question, and a run that cannot answer it refuses rather
+# than guessing.
+#
+# The env chain is tried first, so a hand run publishes into the city its
+# operator meant. It is not enough on its own: `gc supervisor run`, which
+# spawns this order, carries no GC_CITY, GC_CITY_PATH or GC_CITY_ROOT at all,
+# so a scheduled tick reaches the listing and nothing else. Answering that tick
+# with "cannot locate the city" would leave the binary unpublished forever
+# while every order arm reported the cadence healthy.
+CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+if [ -z "$CITY_PATH" ]; then
+    CITY_PATH="$("${GC_GCTK_GC_BIN:-gc}" service list --json 2>/dev/null \
+        | jq -r '.city_path // empty' 2>/dev/null || true)"
+fi
 if [ -n "${GC_SERVICE_STATE_ROOT:-}" ]; then
     STATE_ROOT="$GC_SERVICE_STATE_ROOT"
-elif [ -n "${GC_CITY_ROOT:-}" ]; then
-    STATE_ROOT="$GC_CITY_ROOT/.gc/services/$COMPONENT"
-elif [ -n "${GC_CITY:-}" ]; then
-    STATE_ROOT="$GC_CITY/.gc/services/$COMPONENT"
+elif [ -n "$CITY_PATH" ]; then
+    STATE_ROOT="$CITY_PATH/.gc/services/$COMPONENT"
 else
-    echo "gc-gctk-build: cannot locate the city runtime dir; set GC_SERVICE_STATE_ROOT or GC_CITY_ROOT" >&2
+    echo "gc-gctk-build: cannot locate the city runtime dir; set GC_SERVICE_STATE_ROOT or GC_CITY_PATH, or run where \`gc service list --json\` reports a city_path" >&2
     exit 1
 fi
 

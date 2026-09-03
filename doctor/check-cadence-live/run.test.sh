@@ -167,6 +167,29 @@ printf '#!/bin/sh\nexit 1\n' > "$TMP/bin/gctk-stub"; chmod +x "$TMP/bin/gctk-stu
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
 eq "$RC" "1" "a binary that will not answer warns, never passes"
 
+# The city chain, with no GCTK_BIN to shortcut it. GC_CITY_PATH is the city root
+# an agent session carries — GC_CITY and GC_CITY_ROOT are absent there — so a
+# resolver blind to it reports "no binary deployed" against a city that has one.
+CITY="$TMP/city"
+mkdir -p "$CITY/.gc/services/gctk/bin"
+gctk_stub "$PACK_REV"
+cp "$TMP/bin/gctk-stub" "$CITY/.gc/services/gctk/bin/gctk"
+check_by_city() { # <env assignments...> — run the check with no GCTK_BIN pin
+    : > "$HIST_ARGS"
+    env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT -u GC_CITY_PATH "$@" \
+        ORDERS_JSON="$TMP/orders.json" RIGS_JSON="$TMP/rigs.json" \
+        GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
+}
+OUT=$(check_by_city GC_CITY_PATH="$CITY"); RC=$?
+eq "$RC" "0" "GC_CITY_PATH alone resolves the deployed binary"
+has "$OUT" "matches this checkout" "and the arm compared it, rather than reporting no deploy"
+
+# The control. Same city on disk, named by nothing: without it the case above
+# would also pass on a resolver that found the binary by some other route.
+OUT=$(check_by_city); RC=$?
+eq "$RC" "0" "no city named at all is still the supported migration state"
+has "$OUT" "shell fallbacks" "and the arm says the fallback is what answers there"
+
 # --- 9. no orders/ at all is vacuously OK ---------------------------------------------
 mkdir -p "$TMP/empty-pack"
 OUT=$(GC_PACK_DIR="$TMP/empty-pack" bash "$CHECK" 2>&1); RC=$?

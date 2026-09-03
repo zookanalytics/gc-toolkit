@@ -179,7 +179,10 @@ done <<< "$order_rows"
 # see it, and the board's PACK row is where a persistent one shows up.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
-    gctk_city="${GC_CITY_ROOT:-${GC_CITY:-}}"
+    # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
+    # what an agent session carries, so a chain without it reads "no binary
+    # deployed" on a city that has one.
+    gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
     [ -n "$gctk_city" ] && gctk_bin="$gctk_city/.gc/services/gctk/bin/gctk"
 fi
 tree_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
