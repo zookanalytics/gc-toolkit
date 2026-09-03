@@ -68,9 +68,9 @@ audited or challenged.
 ### 3. Pick the carrier, then adjudicate against what exists
 
 Two decisions, in that order. **Which carrier** the learning belongs in is
-[the carrier table below](#carriers--the-four-shapes-a-promotion-can-take);
+[the carrier table below](#carriers--the-five-shapes-a-promotion-can-take);
 different shapes of learning need different carriers, and a prose bullet is
-one of four, not the default.
+one of five, not the default.
 
 Then adjudicate the edit within that carrier. The two promotion gates decide
 whether it may be adopted at all. Read the target surface's current entries
