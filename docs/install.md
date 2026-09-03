@@ -170,6 +170,22 @@ The pack's checks, and what a failure means:
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.
 
+Each check holds one deadline for its whole run and gives every probe only
+the time left before it, so a slow or wedged data plane costs findings
+rather than the whole check: a probe that no longer fits is refused, the
+store behind it is reported as NOT checked, and the check says the budget
+ended the run. Read that as partial — an arm skipped for time is not an arm
+that passed.
+
+That deadline is 60s, matching `--check-timeout`'s default. The flag sizes
+the doctor's own abandon timer and is not passed to the checks, so raising
+it on a loaded host means exporting the same number of whole seconds as
+`GC_DOCTOR_CHECK_TIMEOUT` too:
+
+```bash
+GC_DOCTOR_CHECK_TIMEOUT=120 gc doctor --check-timeout 120s
+```
+
 ### `gc config show`
 
 ```bash
