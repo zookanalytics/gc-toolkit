@@ -1,0 +1,18 @@
+# worktree-reap — take back the per-bead worktrees and local branches that
+# finished work leaves in a rig checkout. Nothing else reclaims them: GitHub's
+# delete_branch_on_merge clears the remote branch and the refinery closes the
+# bead, so the local clone is where a finished item's scaffolding stays, and a
+# rig accumulates one worktree per work item forever.
+#
+# City scope: every non-HQ rig, one pass each. A closed bead is the gate and a
+# squash commit on the default branch is the confirmation, so a pass that is
+# skipped or cut short by its budget costs only the reclaim the next pass
+# takes instead.
+[order]
+description = "Remove the per-bead worktrees of closed beads and the local branches whose content has landed"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/worktree-reap.sh"
+timeout = "600s"
+scope = "city"
+idempotent = true
