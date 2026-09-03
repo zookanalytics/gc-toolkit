@@ -34,6 +34,9 @@
 #     same silence this pass exists to remove;
 #   * the QUIET PATH — an empty store still passes, so the guard above did not
 #     strand the ordinary no-holds case;
+#   * WHAT ONE PASS COSTS — the merge probe read once for the pass rather than
+#     once per hold, and the scratch file removed. Both regress with every
+#     answer still correct, and this pass runs hourly in every importing rig;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
 #     mean the cadence that evaluates these conditions was quietly un-shipped.
 #
@@ -438,6 +441,28 @@ hasnt "$(cat "$STUB_BD_LOG")" "--db" "with no GC_RIG_ROOT and no --db, nothing i
 (GC_RIG_ROOT="$TMP/rigroot" "$SUT" reconcile --db "$TMP/explicit/.beads" >/dev/null 2>&1)
 has "$(cat "$STUB_BD_LOG")" "--db $TMP/explicit/.beads" "an explicit --db overrides GC_RIG_ROOT"
 hasnt "$(cat "$STUB_BD_LOG")" "--db $TMP/rigroot/.beads" "and the rig-root default is not also passed"
+unset STUB_BD_LOG
+
+# --- what one pass costs -----------------------------------------------------
+# The merge probe is a whole-store listing and every merged-within hold asks it
+# the same question — the sweep that prompted this work put one 48h window on
+# 17 beads at once. And the pass runs hourly in every importing rig, so a
+# scratch file it fails to remove is one file per rig per hour, forever. Both
+# regress silently: the answers stay correct while the cost per pass climbs.
+echo "# what one pass costs"
+export STUB_BD_LOG="$TMP/bd.log"
+store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""},
+        {"id":"b-2","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""},
+        {"id":"b-3","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""},
+        {"id":"m-1","status":"closed","closed_at":"'"$MERGE_200H"'","metadata":{"merge_result":"merged"},"notes":""}]'
+: > "$STUB_BD_LOG"
+SCRATCH="$TMP/scratch"; rm -rf "$SCRATCH"; mkdir -p "$SCRATCH"
+out="$(TMPDIR="$SCRATCH" "$SUT" reconcile 2>&1)"
+has "$out" "3 waiting" "every merged-within hold is still evaluated"
+eq "$(grep -c 'has-metadata-key merge_result' "$STUB_BD_LOG")" "1" \
+   "and the merge probe is read once for the pass, not once per hold"
+eq "$(find "$SCRATCH" -type f | wc -l | tr -d ' ')" "0" \
+   "the pass removes the scratch file it enumerated into"
 unset STUB_BD_LOG
 
 # --- positive control over the shipped cadence -------------------------------

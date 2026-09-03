@@ -66,10 +66,19 @@ DRY_RUN=0
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
 trap cleanup EXIT
-mktemp_tracked() { local f; f="$(mktemp)" || return 1; TMPFILES+=("$f"); printf '%s' "$f"; }
+# Assigns the path to the named variable instead of printing it. A `$(...)`
+# capture runs in a subshell, and the registration below would be discarded
+# with it — leaving the file behind on every pass.
+mktemp_tracked() { # <varname> -> rc
+    local f; f="$(mktemp)" || return 1
+    TMPFILES+=("$f")
+    printf -v "$1" '%s' "$f"
+}
 
+# stdin is /dev/null: the reconcile loop reads its rows from stdin, and a child
+# that consumed it there would eat the rows still to be swept.
 bd_() {
-    if [ -n "$BD_DB" ]; then gc bd --db "$BD_DB" "$@"; else gc bd "$@"; fi
+    if [ -n "$BD_DB" ]; then gc bd --db "$BD_DB" "$@" </dev/null; else gc bd "$@" </dev/null; fi
 }
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -146,30 +155,31 @@ condition_wellformed() { # condition -> rc
     return 0
 }
 
-# The newest merge in this store, as epoch seconds. Computed at most once per
-# pass and cached, because every merged-within hold asks the same question.
+# The newest merge in this store, as epoch seconds in $MERGE_EPOCH. Every
+# merged-within hold asks the same question and the probe is a whole-store
+# listing — the sweep that prompted this pass put one 48h window on 17 beads —
+# so the answer is memoised for the pass. Assigned rather than printed: a
+# `$(...)` capture would run it in a subshell and the memo would die there,
+# putting the listing back on every hold.
 # A merged anchor is `merge_result=merged` with the close that recorded it, so
 # `closed_at` IS the merge time — merge-push closes the anchor on a verified
 # merge and nothing else writes that pair.
-MERGE_EPOCH_CACHE=""
-newest_merge_epoch() { # -> epoch on stdout, rc 1 if the probe could not be read
-    if [ -n "$MERGE_EPOCH_CACHE" ]; then
-        [ "$MERGE_EPOCH_CACHE" = "none" ] && return 1
-        printf '%s' "$MERGE_EPOCH_CACHE"; return 0
-    fi
-    local raw newest
-    raw="$(bd_ list --has-metadata-key merge_result --all --json --limit 0 2>/dev/null)" || { MERGE_EPOCH_CACHE=none; return 1; }
-    [ -n "$raw" ] || { MERGE_EPOCH_CACHE=none; return 1; }
+MERGE_EPOCH=""   # epoch seconds, or "none" once the probe has been read and failed
+newest_merge_epoch() { # -> rc 0 with $MERGE_EPOCH set, rc 1 if it could not be read
+    [ "$MERGE_EPOCH" = "none" ] && return 1
+    [ -n "$MERGE_EPOCH" ] && return 0
+    local raw newest e
+    raw="$(bd_ list --has-metadata-key merge_result --all --json --limit 0 2>/dev/null)" || { MERGE_EPOCH=none; return 1; }
+    [ -n "$raw" ] || { MERGE_EPOCH=none; return 1; }
     newest="$(printf '%s' "$raw" | scrub | jq -r '
         if type != "array" then empty
         else [ .[]
                | select((.metadata.merge_result // "") == "merged")
                | (.closed_at // "") | select(. != "") ] | max // ""
-        end' 2>/dev/null)" || { MERGE_EPOCH_CACHE=none; return 1; }
-    [ -n "$newest" ] || { MERGE_EPOCH_CACHE=none; return 1; }
-    local e; e="$(epoch_of "$newest")" || { MERGE_EPOCH_CACHE=none; return 1; }
-    MERGE_EPOCH_CACHE="$e"
-    printf '%s' "$e"
+        end' 2>/dev/null)" || { MERGE_EPOCH=none; return 1; }
+    [ -n "$newest" ] || { MERGE_EPOCH=none; return 1; }
+    e="$(epoch_of "$newest")" || { MERGE_EPOCH=none; return 1; }
+    MERGE_EPOCH="$e"
 }
 
 # `bd show --json` answers an array on a hit and an {"error":...} object on a
@@ -187,32 +197,40 @@ meta_of() { # bead-json key -> value or empty
     printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
 }
 
-# The one evaluator. Prints "<verdict>\t<why>", where verdict is one of:
+# The one evaluator. Sets EV_VERDICT and EV_WHY rather than printing them for
+# the caller to split: a two-field return read through `$(...)` puts every
+# evaluation in a subshell, where the merge memo above dies. EV_VERDICT is one
+# of:
 #   fired          the condition is true now — release
 #   waiting        the condition is well-formed and not yet true
 #   unconditioned  no condition recorded; nothing can ever end this hold
 #   unreadable     a condition that cannot be evaluated — never releases
-evaluate() { # condition -> "<verdict>\t<why>"
+EV_VERDICT=""
+EV_WHY=""
+evaluate() { # condition -> sets EV_VERDICT / EV_WHY
     local c="$1"
     if [ -z "$c" ]; then
-        printf 'unconditioned\tno %s recorded — nothing evaluates this hold\n' "$K_UNTIL"; return 0
+        EV_VERDICT="unconditioned"; EV_WHY="no $K_UNTIL recorded — nothing evaluates this hold"; return 0
     fi
     if ! condition_wellformed "$c"; then
-        printf 'unreadable\tcondition "%s" is not one this pass can evaluate\n' "$c"; return 0
+        EV_VERDICT="unreadable"; EV_WHY="condition \"$c\" is not one this pass can evaluate"; return 0
     fi
     case "$c" in
         merged-within:*h)
-            local n secs merged now age
+            local n secs now age
             n="${c#merged-within:}"; n="${n%h}"; secs=$((n * 3600))
-            merged="$(newest_merge_epoch)" || {
-                printf 'unreadable\tthe merge probe could not be read — not releasing on an unreadable probe\n'; return 0; }
+            newest_merge_epoch || {
+                EV_VERDICT="unreadable"
+                EV_WHY="the merge probe could not be read — not releasing on an unreadable probe"; return 0; }
             now="$(now_epoch)"
-            [ "$now" -gt 0 ] || { printf 'unreadable\tdate(1) produced no epoch\n'; return 0; }
-            age=$((now - merged))
+            [ "$now" -gt 0 ] || { EV_VERDICT="unreadable"; EV_WHY="date(1) produced no epoch"; return 0; }
+            age=$((now - MERGE_EPOCH))
             if [ "$age" -le "$secs" ]; then
-                printf 'fired\ta merge landed in this rig %dh ago, within the %dh window\n' "$((age / 3600))" "$n"
+                EV_VERDICT="fired"
+                EV_WHY="a merge landed in this rig $((age / 3600))h ago, within the ${n}h window"
             else
-                printf 'waiting\tthe newest merge in this rig is %dh old, outside the %dh window\n' "$((age / 3600))" "$n"
+                EV_VERDICT="waiting"
+                EV_WHY="the newest merge in this rig is $((age / 3600))h old, outside the ${n}h window"
             fi
             ;;
         bead-closed:*)
@@ -227,23 +245,25 @@ evaluate() { # condition -> "<verdict>\t<why>"
                 [ "$status" = "closed" ] || open_ids="$open_ids $id"
             done
             if [ -n "$missing" ]; then
-                printf 'unreadable\tnamed bead(s)%s do not resolve in this store — not releasing on a bead this pass cannot see\n' "$missing"
+                EV_VERDICT="unreadable"
+                EV_WHY="named bead(s)$missing do not resolve in this store — not releasing on a bead this pass cannot see"
             elif [ -n "$open_ids" ]; then
-                printf 'waiting\tstill open:%s\n' "$open_ids"
+                EV_VERDICT="waiting"; EV_WHY="still open:$open_ids"
             else
-                printf 'fired\tevery named bead has closed: %s\n' "${c#bead-closed:}"
+                EV_VERDICT="fired"; EV_WHY="every named bead has closed: ${c#bead-closed:}"
             fi
             ;;
         date:*)
             local d due now
             d="${c#date:}"
-            due="$(epoch_of "${d}T00:00:00Z")" || { printf 'unreadable\treview-by date "%s" could not be read\n' "$d"; return 0; }
+            due="$(epoch_of "${d}T00:00:00Z")" || {
+                EV_VERDICT="unreadable"; EV_WHY="review-by date \"$d\" could not be read"; return 0; }
             now="$(now_epoch)"
-            [ "$now" -gt 0 ] || { printf 'unreadable\tdate(1) produced no epoch\n'; return 0; }
+            [ "$now" -gt 0 ] || { EV_VERDICT="unreadable"; EV_WHY="date(1) produced no epoch"; return 0; }
             if [ "$now" -ge "$due" ]; then
-                printf 'fired\tthe review-by date %s has arrived\n' "$d"
+                EV_VERDICT="fired"; EV_WHY="the review-by date $d has arrived"
             else
-                printf 'waiting\tthe review-by date is %s, %dd away\n' "$d" "$(((due - now) / 86400))"
+                EV_VERDICT="waiting"; EV_WHY="the review-by date is $d, $(((due - now) / 86400))d away"
             fi
             ;;
     esac
@@ -306,8 +326,8 @@ cmd_hold() {
 
     # Say now whether the hold is already spent, rather than letting the next
     # pass release something the caller believed it had just parked.
-    local verdict; verdict="$(evaluate "$until_c" | cut -f1)"
-    [ "$verdict" = "fired" ] && echo "$PROG: note: that condition is ALREADY true — the next reconcile pass will release $bead" >&2
+    evaluate "$until_c"
+    [ "$EV_VERDICT" = "fired" ] && echo "$PROG: note: that condition is ALREADY true — the next reconcile pass will release $bead" >&2
     return 0
 }
 
@@ -396,18 +416,16 @@ cmd_list() {
         return 0
     fi
 
-    local rows; rows="$(mktemp_tracked)" || { echo "$PROG: list: mktemp failed" >&2; return 1; }
+    local rows=""; mktemp_tracked rows || { echo "$PROG: list: mktemp failed" >&2; return 1; }
     held_rows "$rows" || { echo "$PROG: list: could not enumerate holds" >&2; return 1; }
 
-    local n=0 id text until_c verdict why v
+    local n=0 id text until_c
     while IFS=$'\t' read -r id text until_c; do
         [ -n "${id:-}" ] || continue
         n=$((n + 1))
-        v="$(evaluate "$until_c")"
-        verdict="$(printf '%s' "$v" | cut -f1)"
-        why="$(printf '%s' "$v" | cut -f2)"
+        evaluate "$until_c"
         printf '%s [%s] until=%s\n    %s\n    hold: %s\n' \
-            "$id" "$(printf '%s' "$verdict" | tr '[:lower:]' '[:upper:]')" "${until_c:-<none>}" "$why" "$text"
+            "$id" "$(printf '%s' "$EV_VERDICT" | tr '[:lower:]' '[:upper:]')" "${until_c:-<none>}" "$EV_WHY" "$text"
     done < "$rows"
     [ "$n" -gt 0 ] || echo "$PROG: no live holds in this store"
     return 0
@@ -424,7 +442,7 @@ cmd_reconcile() {
         shift || true
     done
 
-    local rows; rows="$(mktemp_tracked)" || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }
+    local rows=""; mktemp_tracked rows || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }
     held_rows "$rows" || {
         echo "$PROG: reconcile: could not enumerate holds — NOT treating this as an empty board" >&2
         return 1; }
@@ -432,20 +450,18 @@ cmd_reconcile() {
     local expected processed=0 released=0 waiting=0 unconditioned=0 unreadable=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
-    local id text until_c v verdict why
+    local id text until_c
     while IFS=$'\t' read -r id text until_c; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
-        v="$(evaluate "$until_c")"
-        verdict="$(printf '%s' "$v" | cut -f1)"
-        why="$(printf '%s' "$v" | cut -f2)"
+        evaluate "$until_c"
 
-        case "$verdict" in
+        case "$EV_VERDICT" in
             fired)
                 if [ "$DRY_RUN" = 1 ]; then
-                    echo "$PROG: DRY-RUN would release $id ($until_c: $why)"
-                elif release_bead "$id" "the recorded condition $until_c fired — $why"; then
-                    echo "$PROG: released $id ($until_c: $why)"
+                    echo "$PROG: DRY-RUN would release $id ($until_c: $EV_WHY)"
+                elif release_bead "$id" "the recorded condition $until_c fired — $EV_WHY"; then
+                    echo "$PROG: released $id ($until_c: $EV_WHY)"
                 else
                     echo "$PROG: WARN could not release $id — leaving the hold, retrying next pass" >&2
                     failed=$((failed + 1)); continue
@@ -464,7 +480,7 @@ cmd_reconcile() {
                 unconditioned=$((unconditioned + 1))
                 ;;
             unreadable)
-                echo "$PROG: UNREADABLE $id until='$until_c' — $why" >&2
+                echo "$PROG: UNREADABLE $id until='$until_c' — $EV_WHY" >&2
                 unreadable=$((unreadable + 1))
                 ;;
         esac
