@@ -63,6 +63,37 @@ Dropping these is as much the design as keeping the list above.
 | the healer passes, **as a category** | each repaired a writer that did not always run; atomic transitions remove the need |
 | prose-carried design | a rule a reader must extract from a paragraph is not enforced |
 
+### What kind of bead this is
+
+A bead's kind is `metadata.task_kind`. Every reader that branches on kind
+reads that key and nothing else — `visit`, `review`, `triage-subject`,
+`observation` and the standing kinds are all resolved this way, in the
+liveness sweeps, the gate scripts, the doctor checks, and `helm`'s visit
+filter.
+
+A label naming the same word is **not** the kind. It is a listing narrowing:
+`gc bd list -l observation` is cheaper than reading every bead's metadata, and
+that is the whole of its job. Two rules follow, and together they are the
+labels-vs-metadata stance:
+
+- **A label may narrow a query; it may never decide one.** A reader that
+  narrows with `-l <kind>` re-filters the result on `task_kind`, because the
+  label is free text and any bead may carry it. The narrowing decides what the
+  reader *sees*; `task_kind` decides what it *counts*.
+- **Which kinds carry a label is per-kind, not uniform.** It is a property of
+  that kind's writers, and a kind earns a `-l` narrowing only once every writer
+  of it sets the label. Kinds written by the learning loop carry one; `review`,
+  `visit` and `triage-subject` do not, and no reader wants one there —
+  back-filling labels nothing reads would buy a migration and no property.
+
+The second rule is what makes the first one safe, and it is the half a reader
+can get wrong silently: narrow on a label some writer of the kind omits and
+the query is quietly short, with no error to report. I12 is that proposition.
+
+The `task_kind` **key** is registered in `lifecycle/lifecycle.toml`; its
+**values** are not a closed enum, and the live store carries kinds no pack code
+writes.
+
 ---
 
 ## 2. The lifecycle, as counts
@@ -119,6 +150,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Held on purpose: a non-empty `gc.takeaway` or `hold_reason`, on the step or on the root `gc.root_bead_id` names, takes a step out of both arms as a note whose remedy is `status=blocked` — releasing a held step to `open` hands it to the pool its route still names, which is what the hold exists to prevent. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
+| **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; it is clean at filing across all three such kinds, so it would ship as a forward regression detector. |
 
 Four further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names

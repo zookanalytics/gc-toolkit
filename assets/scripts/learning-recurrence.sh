@@ -134,7 +134,13 @@ while IFS="$TAB" read -r R RPATH; do
     warn "observation listing for store '$R' unreadable — refusing to report on a partial city"
     exit 1
   fi
-  jq --arg rig "$R" '[.[] | {
+  # `-l observation` narrows the listing; `task_kind` decides what an
+  # observation is (docs/component-model.md I12). A bead the label brought in
+  # without the metadata is some other kind of bead and does not enter the
+  # corpus — counting it would inflate the denominator of both metrics.
+  jq --arg rig "$R" '[.[]
+      | select((((.metadata // {}).task_kind // "") | tostring) == "observation")
+      | {
         id, created_at,
         rig: $rig,
         provenance: (.metadata["obs.provenance"] // ""),
