@@ -57,7 +57,8 @@ has "$out" "A PR#10 body now names 2 beads on 'polecat/A'" "the edit is reported
 b=$(body 10)
 has "$b" '## Beads on this branch' "the section was appended"
 has "$b" '- `A` — Investigate V2 patch timing _(opener)_' "the opener leads, marked as such"
-has "$b" '- `B` — Lane-B migration impl' "the stacked bead is named"
+has "$b" '- `B` — Lane-B migration impl _(merged in from `polecat/B`)_' \
+    "the stacked bead is named, and says its work arrived by a merge"
 has "$b" '## Summary' "the composed summary survives"
 has "$b" '- Issue: `A`' "…and so does the refinery handoff block"
 eq "$(title 10)" "PR 10" "the title is untouched"
@@ -102,7 +103,11 @@ store "[$(anchor D polecat/D 20 'Converse sittings need a demand bead'),
 pr 20 OPEN polecat/D "## Summary"
 out=$("$SUT" 2>&1)
 has "$out" "names 3 beads" "both hand-backs join the ledger"
+# A hand-back committed onto this same branch, so it is a fix to the PR rather
+# than a separate work item that merged in. Marking it would say the opposite.
 has "$(body 20)" '- `D1` — Rework PR#20: address signoff findings' "the rework is named"
+hasnt "$(body 20)" 'D1` — Rework PR#20: address signoff findings _(merged in' \
+    "…and is NOT marked as merged in — its commits are on this branch"
 
 echo "# an ordinary one-bead PR is left exactly as pr-open.sh composed it"
 store "[$(anchor E polecat/E 30)]"

@@ -86,10 +86,14 @@ ledger_of() { # <branch>
 # The section the PR body should carry. The anchor leads as the bead the PR was
 # opened for; the rest follow oldest-first, which is the order their commits
 # reached the branch.
+# A row whose own metadata.branch is some OTHER branch got here by a merge, so
+# it is a separate work item riding this PR rather than a fix to it — the
+# distinction the reviewer needs, and it costs a field already in hand.
 render_section() { # <branch> <anchor-id> <ledger-json>
   printf '%s' "$3" | jq -r --arg br "$1" --arg anchor "$2" '
     def clean: (. // "") | tostring | gsub("[\r\n\t]+"; " ")
                  | gsub("<!--"; "") | gsub("-->"; "") | .[0:160];
+    def own: ((.metadata // {}).branch // "") | tostring;
     ( [ .[] | select(.id == $anchor) ]
       + ( [ .[] | select(.id != $anchor) ]
           | sort_by((.created_at // .created // ""), .id) ) ) as $rows
@@ -99,7 +103,9 @@ render_section() { # <branch> <anchor-id> <ledger-json>
       "",
       ( $rows[]
         | "- `\(.id)` — \(.title | clean)"
-          + (if .id == $anchor then " _(opener)_" else "" end) )
+          + (if .id == $anchor then " _(opener)_"
+             elif (own != "" and own != $br) then " _(merged in from `\(own)`)_"
+             else "" end) )
   ' 2>/dev/null
 }
 
