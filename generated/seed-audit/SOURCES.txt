@@ -8,7 +8,7 @@ agents/converse/PROVENANCE.md
 agents/converse/agent.toml
 d88f760e736ac80f7e991c5e4d9f69d7207c4a0f9219570f3b6c52724bd609a6
 agents/converse/prompt.template.md
-74a91499d3df9539110065e97148c46b588aa3e6903b0b67fbcea5d1b70f3df6
+cdb7057cbe30ecb982a09e53c3f161ce416367682141b142504ce282fb17c36e
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
@@ -22,7 +22,7 @@ agents/mechanik/PROVENANCE.md
 agents/mechanik/agent.toml
 dfc288929ab8afc50b01275a7b7a9b1a2f00804043fbdab010cb7f841bb54901
 agents/mechanik/prompt.template.md
-34e2d4845d6bdc79cc7e3e18ccfc8c90572e521ad3ebce1055b8521a31f1003a
+5ce79acf1a97e0f283e5d06f86bd64e4658a3fb2bc974675c58366d638544aa5
 agents/polecat-codex/agent.toml
 232a9b3bd2c4322bfcfcf3b562608354a4b0049c6bde2d0d635a256ba4bf9933
 agents/polecat-codex/prompt.template.md

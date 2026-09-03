@@ -118,7 +118,7 @@ reaches such a bead in any case, because every anchor enumeration is
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` is `green@<live head>` |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` is `green@<live head>`, and the diff is not a bead-local planning artifact aimed at the default branch |
 | pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
@@ -169,6 +169,15 @@ GitHub review, which cannot exist before the PR does and which `merge.sh`
 enforces at the merge. An empty `check_set` is not the opt-out at either
 transition: it means never normalized, and gate-ensure stamps the default
 earlier in the same pass.
+
+A green gate set is necessary, not sufficient. `pr-open.sh` also refuses to
+publish a diff that lies entirely under the planning-artifact prefixes
+(`specs/` by default, `PR_OPEN_PLANNING_PATHS`) onto the rig's default branch
+when no convoy stands above the anchor: the dispatch doctrine's shared input
+artifact belongs on an owned convoy's integration branch, and the refusal
+carries that remedy plus one deduped visit. `graduation=true`, an anchor of
+type `convoy`, and `planning_artifact_ok=true` are exempt, and an unreadable
+compare leaves the create to proceed.
 
 Each gate's verdict is a head-bound marker:
 

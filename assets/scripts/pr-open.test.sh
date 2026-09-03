@@ -19,6 +19,17 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh"
 SUT="$SD/pr-open.sh"
 
+# escalate.sh resolves as a sibling of the SUT, so a recorder in the SUT dir is
+# what the guard reaches — the real one proves its own routing in escalate.test.sh,
+# and here the assertion is on the situation key pr-open hands it.
+export STUB_ESCALATE_LOG="$TMP/escalate.log"
+: > "$STUB_ESCALATE_LOG"
+cat > "$SD/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_ESCALATE_LOG:?}"
+ESC
+chmod +x "$SD/escalate.sh"
+
 pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
   local cs="${4-codex}"
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"%s","merged_target":"main"%s%s}}' \
@@ -198,6 +209,135 @@ echo "sha-d2" > "$GH_DIR/head_polecat_d2"
 out=$("$SUT" 2>&1)
 has "$out" "not reopening a human's decision" "same-head close is respected"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no replacement PR is opened"
+
+# --- the shared-input-artifact guard -------------------------------------------
+# A bead-local planning document must not land on the default branch by itself.
+# Each case below is one of the three conditions, because each one exempts a
+# population that has to keep publishing.
+
+cmpfx() { # <base> <head> <changed-path>...
+  local base="$1" head="$2" names="" p
+  shift 2
+  for p in "$@"; do names="$names${names:+,}$(printf '{"filename":"%s"}' "$p")"; done
+  printf '{"files":[%s]}' "$names" \
+    > "$GH_DIR/compare_$(printf '%s' "$base...$head" | tr '/' '_').json"
+}
+guard_ready() { # <id> <branch> <pr-number> — head fixture + create/read-back pair
+  echo "sha-$1" > "$GH_DIR/head_$(printf '%s' "$2" | tr '/' '_')"
+  export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/$3"
+  printf '%s' "$(prrow "$3" OPEN "$2" "sha-$1" main)" > "$GH_DIR/pr_view_$3.json"
+  : > "$STUB_GH_LOG"; : > "$STUB_ESCALATE_LOG"; : > "$STUB_DEPS"
+}
+
+echo "# a spec-only diff onto the default branch with no convoy above it is refused"
+store "[$(pre G1 polecat/g1 ',"check.codex":"green@sha-G1"')]"
+guard_ready G1 polecat/g1 90
+cmpfx main polecat/g1 specs/G1/carve.md
+out=$("$SUT" 2>&1)
+has "$out" "is a planning artifact aimed at 'main'" "the anti-pattern is named"
+has "$out" "no convoy stands above the anchor" "…and both conditions are stated"
+has "$out" "seed the artifact on an owned convoy's integration branch" "the remedy is in the refusal"
+has "$out" "--set-metadata planning_artifact_ok=true" "…and so is the deliberate override"
+eq "$(meta G1 merge_result)" "pre_open_gate" "the anchor stays pre_open_gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR was opened"
+has "$(cat "$STUB_ESCALATE_LOG")" "--key planning-artifact-to-default-branch" \
+    "one deduped visit carries it to a person"
+
+echo "# a doc riding with code is a normal PR"
+store "[$(pre G2 polecat/g2 ',"check.codex":"green@sha-G2"')]"
+guard_ready G2 polecat/g2 91
+cmpfx main polecat/g2 specs/G2/notes.md assets/scripts/thing.sh
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#91" "a mixed diff publishes"
+hasnt "$out" "planning artifact" "…and the guard says nothing about it"
+eq "$(meta G2 merge_result)" "pull_request" "anchor flipped"
+
+echo "# a docs/ refresh is the central tier doing its job, not a planning artifact"
+# The doc-keeper's whole output is single-file docs/*.md onto the default
+# branch; docs/file-structure.md makes that tier authoritative-about-now, so it
+# is not bead-local content and the guard must not touch it.
+store "[$(pre G3 polecat/g3 ',"check.codex":"green@sha-G3"')]"
+guard_ready G3 polecat/g3 92
+cmpfx main polecat/g3 docs/gascity-reference.md
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#92" "a docs-only PR publishes"
+hasnt "$(cat "$STUB_ESCALATE_LOG")" "planning-artifact" "…and nothing is escalated"
+
+echo "# a convoy above the anchor is the exemption the remedy produces"
+store "[$(pre G4 polecat/g4 ',"check.codex":"green@sha-G4"'),
+        {\"id\":\"cv-G4\",\"status\":\"open\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
+guard_ready G4 polecat/g4 93
+cmpfx main polecat/g4 specs/G4/carve.md
+printf 'G4|parent-child|cv-G4\n' >> "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#93" "work under a convoy publishes"
+eq "$(meta G4 merge_result)" "pull_request" "anchor flipped"
+
+echo "# a convoy two levels up still exempts"
+store "[$(pre G5 polecat/g5 ',"check.codex":"green@sha-G5"'),
+        {\"id\":\"ep-G5\",\"status\":\"open\",\"issue_type\":\"epic\",\"metadata\":{}},
+        {\"id\":\"cv-G5\",\"status\":\"open\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
+guard_ready G5 polecat/g5 94
+cmpfx main polecat/g5 specs/G5/carve.md
+printf 'G5|parent-child|ep-G5\nep-G5|parent-child|cv-G5\n' >> "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#94" "the walk climbs past a non-convoy parent"
+
+echo "# a non-convoy parent is not a convoy ancestor"
+# The shape of the second cited violation: the bead had a parent, and the
+# parent was a plain task, so no integration branch existed anywhere above it.
+store "[$(pre G6 polecat/g6 ',"check.codex":"green@sha-G6"'),
+        {\"id\":\"tk-G6\",\"status\":\"open\",\"issue_type\":\"task\",\"metadata\":{}}]"
+guard_ready G6 polecat/g6 95
+cmpfx main polecat/g6 specs/G6/state-model.md specs/G6/surface.md
+printf 'G6|parent-child|tk-G6\n' >> "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "is a planning artifact" "a task parent does not exempt"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR was opened"
+
+echo "# a convoy graduation PR is spec-only onto the default branch BY DESIGN"
+store "[$(pre G7 integration/cv-G7 ',"check.codex":"green@sha-G7","graduation":"true"')]"
+guard_ready G7 integration/cv-G7 96
+cmpfx main integration/cv-G7 specs/G7/carve.md
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#96" "the graduation anchor publishes"
+hasnt "$out" "planning artifact" "…and the guard never looks at it"
+
+echo "# the waiver publishes, and files nothing"
+store "[$(pre G8 polecat/g8 ',"check.codex":"green@sha-G8","planning_artifact_ok":"true"')]"
+guard_ready G8 polecat/g8 97
+cmpfx main polecat/g8 specs/G8/carve.md
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#97" "an operator who meant it gets the PR"
+hasnt "$(cat "$STUB_ESCALATE_LOG")" "planning-artifact" "…and no visit is filed against their decision"
+
+echo "# a target that is not the default branch is never even compared"
+store "[{\"id\":\"G9\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"t G9\",\"description\":\"d G9\",\"metadata\":{\"merge_result\":\"pre_open_gate\",\"branch\":\"polecat/g9\",\"merged_target\":\"integration/cv-G9\",\"check_set\":\"codex\",\"check.codex\":\"green@sha-G9\"}}]"
+echo "sha-G9" > "$GH_DIR/head_polecat_g9"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/98"
+printf '%s' "$(prrow 98 OPEN polecat/g9 sha-G9 integration/cv-G9)" > "$GH_DIR/pr_view_98.json"
+: > "$STUB_GH_LOG"; : > "$STUB_ESCALATE_LOG"; : > "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#98" "an integration-branch PR publishes"
+hasnt "$(cat "$STUB_GH_LOG")" "/compare/" "the compare read is skipped entirely"
+
+echo "# an unreadable compare does not stall the queue"
+# A guard that cannot read the diff has no evidence of the anti-pattern, and
+# the compare is re-read every pass — so refusing here would strand a
+# legitimate PR for as long as the endpoint stays unhappy.
+store "[$(pre GA polecat/ga ',"check.codex":"green@sha-GA"')]"
+guard_ready GA polecat/ga 99
+out=$("$SUT" 2>&1)
+has "$out" "planning-artifact guard did not evaluate" "the unevaluated guard says so"
+has "$out" "opened PR#99" "…and the create proceeds"
+
+echo "# an empty prefix list turns the guard off"
+store "[$(pre GB polecat/gb ',"check.codex":"green@sha-GB"')]"
+guard_ready GB polecat/gb 100
+cmpfx main polecat/gb specs/GB/carve.md
+out=$(PR_OPEN_PLANNING_PATHS="" "$SUT" 2>&1)
+has "$out" "opened PR#100" "a rig that files its local tier elsewhere can opt out"
+hasnt "$out" "planning artifact" "…and hears nothing from the guard"
 
 echo "# unreadable enumeration fails loudly"
 out=$(STUB_LIST_FAIL=1 "$SUT" 2>&1); rc=$?

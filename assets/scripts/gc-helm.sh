@@ -50,8 +50,9 @@ update; --release also reopens/unassigns/clears the route and quiesces the
 released molecule's step beads and workflow root. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
 only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
-back to the human, in the same write, and is refused on a closed anchor;
---waiting-on (repeatable)
+back to the human, in the same write, and is refused on a closed anchor and on
+a bead blocked by anything but its own demand, since the work is then on the
+blocker and a pool has nothing to perform here; --waiting-on (repeatable)
 records the wait as a `blocks` edge beside the prose so the board can re-ask
 whether it landed. --no-wait is the other answer to the same question: this
 sitting settled the subject and nothing is waiting on it. It stamps
@@ -373,7 +374,9 @@ quiesce_release_molecule_steps() (
 #
 # --route names a pool to release TO. The target is rig-qualified or refused,
 # because gc.routed_to is read by exact string and a bare agent name routes to
-# nobody and sits forever; on a closed anchor the route is refused outright.
+# nobody and sits forever; on a closed anchor the route is refused outright. It
+# also names a bead that is itself the work, so a bead blocked by anything but
+# its own demand is refused.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb.
@@ -480,6 +483,48 @@ cmd_takeaway() {
         fi
     fi
     # <<< takeaway-release-closed-anchor
+
+    # A pool route promises a claim some session can perform. A bead blocked by
+    # anything other than its own demand has its method somewhere else: no pool
+    # can see it until the blocker closes, and by then it is a record of work
+    # that already happened, so each session that claims it re-derives that and
+    # drains. A demand is the one blocker that leaves the route honest, because
+    # answering it is what makes this bead the work — the demand verb stamps
+    # gc.demand_for, so the two are told apart by that stamp and not by shape.
+    # Refused before the write, so a re-run without --route still lands the
+    # headline, and the route is all the refusal costs: the board gathers a
+    # parked row on gc.takeaway and bands it disposition-due once its waits have
+    # all closed, so the operator is asked either way. An unreadable probe
+    # allows the route and says so. A bd that will not answer must not cost a
+    # sitting its disposition, but a route stamped over an uninspected bead is
+    # a weaker promise than one the guard cleared, and in silence the two read
+    # alike. Unreadable covers the payload as well as the exit code: `dep list`
+    # reports a bead it cannot resolve as a JSON error OBJECT on stdout, which
+    # a filter that answers "" on anything but an array takes for no edges at
+    # all. A cross-store edge is left out of the array entirely, invisible here
+    # as it is to every other reader of this graph. A closed anchor is not this
+    # refusal's case: its route is refused below on the disposition itself,
+    # after the headline and the quiesce a folded anchor still needs have
+    # landed.
+    if [ -n "$route" ] && [ -n "$release_park" ]; then
+        probe_read=1
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        blocked_by=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
+            | jq -er --arg b "$bead" 'if type == "array" then
+                   [ .[] | select((.dependency_type // "") == "blocks")
+                         | select((.status // "") != "closed")
+                         | select(((.metadata // {})["gc.demand_for"] // "") != $b)
+                         | .id ] | join(" ")
+                 else error("not an edge array") end' 2>/dev/null) || probe_read=""
+        if [ -z "$probe_read" ]; then
+            blocked_by=""
+            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so --route '$route' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$route' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+        fi
+        if [ -n "$blocked_by" ]; then
+            echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a demand on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            exit 2
+        fi
+    fi
 
     # Build args with `set --` ($text/$by contain spaces); --release rides the
     # SAME update so stamp + release stay one Dolt write.

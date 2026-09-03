@@ -91,6 +91,15 @@ the cadence — the arms run whether or not any refinery session is awake.
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
    summary only when the handoff carried none.
+   One shape is refused rather than published: a diff confined entirely to
+   `specs/` (the `PR_OPEN_PLANNING_PATHS` prefixes), aimed at the rig's
+   default branch, on an anchor with no convoy anywhere above it. That is a
+   bead-local planning artifact landing on its own, and the refusal names the
+   remedy — seed it on an owned convoy's integration branch and land the
+   children onto that branch — and files one deduped visit. A graduation
+   anchor, a convoy bead, and `planning_artifact_ok=true` are exempt; so is a
+   diff the compare cannot be read for, which leaves the create to proceed
+   rather than stalling the queue on an unreadable endpoint.
 3. **pr-facts.sh --posture-only** — the posture record, and nothing else.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. This arm
