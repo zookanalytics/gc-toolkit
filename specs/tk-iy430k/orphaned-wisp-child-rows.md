@@ -63,6 +63,10 @@ exercised for real when the first live run was stopped after 250,024 rows.
 unreadable, because that state satisfies the orphan predicate for *every* child
 row and nothing downstream distinguishes it from a correct purge. A missing
 table refuses. A batch that removes nothing ends the table rather than spinning.
+A mutating statement that *fails* is not that empty batch: the DELETE and each
+commit take the server's exit status, not only its error text, so a nonzero
+failure whose text carries neither `error on line` nor `Error ` fails the run
+instead of falling through as a clean pass with the orphans intact.
 
 ## Two defects that only live data produced
 

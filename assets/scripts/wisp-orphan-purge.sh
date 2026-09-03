@@ -91,6 +91,20 @@ sql_row() { # <sql> <jq-expression over .rows[0]>
         | tail -1
 }
 
+# Runs a statement for effect. run_sql folds stderr into its output and returns
+# the server's exit status; both are load-bearing. A mutating statement that
+# fails with a nonzero exit whose text carries neither "error on line" nor
+# "Error " must still fail here, or a DELETE that removed nothing reads as an
+# empty batch and the purge reports success with the orphans intact. Prints the
+# output and returns nonzero on either an error status or error text — the same
+# two-part check sql_row makes.
+sql_exec() { # <sql>
+    local out
+    out="$(run_sql "$1")" || { printf '%s\n' "$out"; return 1; }
+    if sql_failed "$out"; then printf '%s\n' "$out"; return 1; fi
+    printf '%s\n' "$out"
+}
+
 numeric() { # <value> <what>
     case "$1" in ''|*[!0-9]*) die "unreadable $2: '$1'" ;; esac
 }
@@ -180,12 +194,11 @@ for t in $CHILD_TABLES; do
     deleted=0
     if [ "$want" -gt 0 ]; then
         while :; do
-            out="$(run_sql "USE $DB; DELETE FROM $t WHERE NOT EXISTS (SELECT 1 FROM wisps w WHERE w.id = $t.issue_id) LIMIT $BATCH;")"
-            sql_failed "$out" && { printf '%s\n' "$out" >&2; die "delete failed on $DB.$t after $deleted rows"; }
+            out="$(sql_exec "USE $DB; DELETE FROM $t WHERE NOT EXISTS (SELECT 1 FROM wisps w WHERE w.id = $t.issue_id) LIMIT $BATCH;")" \
+                || { printf '%s\n' "$out" >&2; die "delete failed on $DB.$t after $deleted rows"; }
             # Stage only this table: `-A` would sweep in a concurrent writer's
             # in-flight change. A writer that already swept ours leaves nothing.
-            out="$(run_sql "USE $DB; CALL DOLT_ADD('$t'); CALL DOLT_COMMIT('-m', '$PROG: purge orphaned $t rows from $DB');")"
-            if sql_failed "$out"; then
+            if ! out="$(sql_exec "USE $DB; CALL DOLT_ADD('$t'); CALL DOLT_COMMIT('-m', '$PROG: purge orphaned $t rows from $DB');")"; then
                 case "$out" in
                     *"nothing to commit"*) : ;;
                     *) printf '%s\n' "$out" >&2; die "commit failed on $DB.$t after $deleted rows" ;;

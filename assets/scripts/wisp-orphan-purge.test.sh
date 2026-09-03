@@ -98,6 +98,13 @@ case "$Q" in
     emit "{\"n\":\"${1:-0}\"}"; exit 0 ;;
   *DELETE\ FROM*)
     t="$(tbl_of "$Q")" || { echo "stub: no table in delete" >&2; exit 1; }
+    # STUB_DELETE_FAIL models a DELETE that fails at the server: it removes no
+    # rows and exits nonzero with text outside sql_failed's patterns, the shape a
+    # text-only check reads as an empty batch.
+    if [ "${STUB_DELETE_FAIL:-}" = "$t" ]; then
+      echo "${STUB_SQL_FAIL_MSG:-transient write failure}" >&2
+      exit "${STUB_SQL_FAIL_RC:-7}"
+    fi
     lim="${Q##*LIMIT }"; lim="${lim%%;*}"; lim="${lim// /}"
     set -- $(read_state "$t"); total="${1:-0}"; orph="${2:-0}"
     n="$orph"; [ "$n" -gt "$lim" ] && n="$lim"
@@ -121,6 +128,12 @@ case "$Q" in
       echo "error on line 1 for query CALL DOLT_COMMIT('-m', 'x'): $STUB_COMMIT_ERR" >&2
       printf '{}\n'; exit 0
     fi
+    # STUB_COMMIT_FAIL models a commit that fails at the server with a nonzero
+    # exit and text outside sql_failed's patterns.
+    if [ -n "${STUB_COMMIT_FAIL:-}" ]; then
+      echo "${STUB_SQL_FAIL_MSG:-transient write failure}" >&2
+      exit "${STUB_SQL_FAIL_RC:-7}"
+    fi
     printf '{}\n'; exit 0 ;;
 esac
 printf '{}\n'
@@ -137,6 +150,7 @@ reset_state() { # <events> <events_orph> <labels> <labels_orph> <comments> <comm
     : > "$STUB_GC_LOG"
     unset STUB_EAT_LIVE STUB_EAT_LIVE_N STUB_NOTHING_TO_COMMIT STUB_COMMIT_ERR STUB_WISPS_DROP
     unset STUB_NO_WISPS_TABLE STUB_COMPACT_RC
+    unset STUB_DELETE_FAIL STUB_COMMIT_FAIL STUB_SQL_FAIL_MSG STUB_SQL_FAIL_RC
     export STUB_WISPS=5
 }
 orphans_of() { awk '{print $2}' "$STUB_STATE/$1"; }
@@ -207,6 +221,32 @@ eq "$rc" "1" "a real commit error aborts"
 has "$out" "commit failed" "commit failure is named"
 hasnt "$(cat "$STUB_GC_LOG")" "compact" "commit failure runs no reclaim"
 unset STUB_COMMIT_ERR
+
+# --- a mutating statement fails on status, not text --------------------------
+# run_sql returns the server's exit code and folds its stderr into the output.
+# A DELETE that exits nonzero with text outside sql_failed's patterns leaves the
+# table unchanged; a text-only check reads that as an empty batch, ends the loop,
+# and reports a clean pass with the orphans intact.
+reset_state 100 90  0 0  0 0  0 0
+export STUB_DELETE_FAIL=wisp_events STUB_SQL_FAIL_MSG="transient write failure" STUB_SQL_FAIL_RC=7
+out="$("$SUT" --db lx 2>&1)"; rc=$?
+eq "$rc" "1" "a DELETE that fails on status alone aborts"
+has "$out" "delete failed" "the delete failure is named"
+has "$out" "transient write failure" "the delete failure surfaces the server text"
+eq "$(orphans_of wisp_events)" "90" "a failed DELETE deleted nothing"
+hasnt "$out" "orphans remaining: 90" "a failed DELETE does not report a clean pass"
+hasnt "$(cat "$STUB_GC_LOG")" "compact" "a failed DELETE runs no reclaim"
+unset STUB_DELETE_FAIL STUB_SQL_FAIL_MSG STUB_SQL_FAIL_RC
+
+# Mirror: a commit that exits nonzero with unmatched text must abort too, not
+# fall through as a durable batch.
+reset_state 100 90  0 0  0 0  0 0
+export STUB_COMMIT_FAIL=1 STUB_SQL_FAIL_MSG="transient write failure" STUB_SQL_FAIL_RC=7
+out="$("$SUT" --db lx 2>&1)"; rc=$?
+eq "$rc" "1" "a commit that fails on status alone aborts"
+has "$out" "commit failed" "the commit failure is named"
+hasnt "$(cat "$STUB_GC_LOG")" "compact" "a status-only commit failure runs no reclaim"
+unset STUB_COMMIT_FAIL STUB_SQL_FAIL_MSG STUB_SQL_FAIL_RC
 
 # --- live rows lost mid-purge aborts before the reclaim ----------------------
 reset_state 100 90  50 40  0 0  0 0
