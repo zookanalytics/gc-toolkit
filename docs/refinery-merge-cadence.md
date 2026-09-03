@@ -80,6 +80,29 @@ the cadence — the arms run whether or not any refinery session is awake.
    key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
+
+   **1a. pre-open-rebase.sh** — the conflict observer for anchors that have no
+   PR yet. Every other arm reads whether a branch still merges off the PR
+   (`mergeable`, `mergeStateStatus`), and `pr-facts.sh` skips any anchor whose
+   `pr_number` is absent before it reads anything else. That is not a narrow
+   enumeration one could widen: the facts those arms dispatch on are PR facts,
+   so a pre-open anchor has none of them and a widened net routes nothing. This
+   arm asks git instead. One fetch per pass mirrors every branch on origin into
+   `refs/gc-toolkit/pre-open-rebase/heads/*` — one round trip costs the same as
+   38, and this arm holds the pass lock while it runs — pruned, so a branch
+   deleted on origin does not linger as a ref the probe would believe. Per
+   anchor it then requires both sides to resolve there and probes
+   `git merge-tree --write-tree`; a conflict files the same rebase child arm 5
+   files for a PR anchor, classified by the same branch allowlist and stamped
+   `prepare_mode`. It runs before `pr-open.sh` because that arm ends its
+   domain: once an anchor carries a PR, `mergeable` answers the question and
+   arm 5 owns the dispatch. Both arms probe children on `metadata.branch` and
+   write the same `head <oid>` phrasing, so whichever sees a branch first
+   files and the other stands down. The vetoes are arm 5's: `merge_hold`,
+   `rebase_hold` on the anchor or on any bead naming the branch, and a live
+   demand. A failure here is not a merge hold — an anchor it could not observe
+   is left exactly as the pass found it.
+
 2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor whose
    every marker-bearing `check_set` gate reads `green@<live head>` (the same
    predicate `merge.sh` applies, `none`/`off` and `approval` dropped; an empty
