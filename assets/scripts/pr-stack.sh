@@ -10,9 +10,11 @@
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
 # rebase hand-back), metadata.fold_target (folded onto it by a polecat), and
 # metadata.merged_target with merge_result=merged (landed its own PR into it) —
-# then splice the list into a delimited section at the end of the body. The
-# title is never touched: it names the anchor, and the body is where a reviewer
-# reads scope.
+# then splice the list into a delimited section at the end of the body. A row
+# whose own branch is some other one got here by a merge, so it names that
+# branch: a separate work item riding the PR reads differently from a fix to
+# it. The title is never touched: it names the anchor, and the body is where a
+# reviewer reads scope.
 # One bead is the ordinary case and says nothing pr-open.sh has not already
 # written, so nothing is published under it.
 # Read-modify-write, pinned to origin and certified by number before any write
