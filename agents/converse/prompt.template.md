@@ -25,11 +25,17 @@ Definitions:
   `parent-child`: a parent-child edge transmits the subject's blocked
   state to the visit, making it unclaimable on the beads that most need
   conversation (`formulas/mol-visit.toml`).
-- **Item** — what THIS visit is about, which is not always the subject.
-  A visit that names its own target carries it as `stall_root`; a
-  subject that is a standing scope (`task_kind=triage-subject`) carries
-  one visit per distinct item, so its group is a bucket rather than a
-  topic. With no target named, the item is the subject. `$ITEM` below.
+- **Item** — the BEAD this visit is about, which is not always the
+  subject. A visit that names its own target carries it as `stall_root`;
+  with no target named, the item is the subject. A subject that is a
+  standing scope (`task_kind=triage-subject`) carries one visit per
+  distinct item, so its group is a bucket rather than a topic. `$ITEM`
+  below, and step 5 stamps the takeaway and files the demand on it.
+- **Topic** — what makes two visits the same sitting, which is not
+  always a bead. It is `stall_root` when the visit names a target,
+  `escalation_key` when `escalate.sh` filed it for one situation, and
+  the subject when it carries neither. `$TOPIC` below; the fold check
+  keys on it.
 - **Demand** — what a person owes, as its own bead. A ruling is
   `issue_type=decision`; a task only a person can perform is a bead
   assigned to that person. Whatever waits on it carries a `blocks` edge
@@ -160,7 +166,7 @@ The loop, every visit:
    # The claim reports the gc.continuation_group STAMP, and the stamp lands
    # empty on a minority of visits while the `tracks` edge filed alongside
    # it still carries the subject. Recover it from the edge before using it
-   # as a filter — both predicates below key on it.
+   # as a filter — every predicate below keys on it.
    if [ -z "$SUBJECT" ]; then
      SUBJECT=$(printf '%s' "$V" | jq -r '
        [ ((.[0].dependencies // [])[]?
@@ -169,17 +175,32 @@ The loop, every visit:
        | map(select(. != "")) | .[0] // ""')
    fi
    ITEM="${ITEM:-$SUBJECT}"
+   # The item is a bead, because step 5 writes to it. The TOPIC is what
+   # decides sameness, and it is not always a bead: an escalate.sh visit
+   # names no target and carries its situation in escalation_key, which is
+   # the only stamp that tells two findings of one bucket apart. The `key:`
+   # prefix keeps a key and a bead id from ever comparing equal.
+   TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata
+     | (.stall_root // "") as $r | (.escalation_key // "") as $k
+     | if $r != "" then $r elif $k != "" then "key:" + $k else "" end')
+   TOPIC="${TOPIC:-$SUBJECT}"
    if [ -z "$SUBJECT" ]; then
-     # Neither recording resolved. With an empty $s both predicates below
-     # degenerate to matching every empty-group visit — stall_root is empty
-     # on those too, so it falls back to $s and matches as well — and the
-     # lowest-id tiebreak would fold this sitting into one about an
-     # unrelated subject. You are the holder.
+     # Neither recording resolved. With an empty $s every predicate below
+     # degenerates to matching every empty-group visit — an unstamped visit's
+     # topic falls back to $s and matches as well — and the lowest-id
+     # tiebreak would fold this sitting into one about an unrelated subject.
+     # You are the holder.
      HOLDER="$VISIT"
    else
      HOLDER=$(gc bd list --status=in_progress --json --limit=0 \
        | tr -d '[:cntrl:]' \
-       | jq -r --arg s "$SUBJECT" --arg i "$ITEM" --arg v "$VISIT" '
+       | jq -r --arg s "$SUBJECT" --arg t "$TOPIC" --arg v "$VISIT" '
+           def topic($fallback):
+             (.metadata.stall_root // "") as $r
+             | (.metadata.escalation_key // "") as $k
+             | if $r != "" then $r
+               elif $k != "" then "key:" + $k
+               else $fallback end;
            [ .[]
              | select((.metadata.task_kind // "")=="visit")
              | . as $c
@@ -191,7 +212,7 @@ The loop, every visit:
                         | ((.depends_on_id // .id // "") | tostring) ]
                       | map(select(. != "")) | .[0] // "") end) as $cg
              | select($cg==$s)
-             | select(((.metadata.stall_root // "") | if . == "" then $s else . end)==$i)
+             | select(topic($s)==$t)
              | select((.assignee // "")!="")
              | .id ]
            + [$v] | unique | .[0]')
@@ -209,8 +230,13 @@ The loop, every visit:
    failure. Matching on the continuation group ALONE folds a sitting
    about workflow A into a live one about workflow B, because a standing
    scope's group says only that two visits share a bucket — so the
-   per-visit `stall_root` is what decides sameness, and the subject is
-   the fallback for the ordinary case where one subject is one topic.
+   per-visit topic is what decides sameness. A visit that names its own
+   target carries it in `stall_root`. A visit `escalate.sh` filed names
+   no target and carries `escalation_key` instead, one key per situation,
+   which is what tells two findings under one bucket apart. The subject
+   is the last fallback, for the ordinary case where one subject is one
+   topic. A topic drawn from a key is prefixed `key:`, so a key and a
+   bead id that read the same are still two topics.
    Matching without the lowest-id tiebreak leaves the symmetric race:
    two live sittings each see the other, both fold, and the subject ends
    with ZERO sittings. Lowest id holds, so the outcome is one sitting
@@ -219,11 +245,12 @@ The loop, every visit:
    Both halves rest on `$SUBJECT` being known, which is why the block
    refuses to fold when it is not. The claim reports the
    `gc.continuation_group` STAMP, and that stamp lands empty on a
-   minority of visits. With an empty subject the two filters stop
-   discriminating and the tiebreak becomes a coin-toss across unrelated
-   topics — the ZERO-SITTINGS outcome by the other door. The `tracks`
-   edge is the visit's second recording of its own subject and carries it
-   where the stamp does not; when even that is missing, you hold.
+   minority of visits. With an empty subject, a visit carrying neither
+   `stall_root` nor `escalation_key` matches every other such visit, and
+   the tiebreak becomes a coin-toss across unrelated topics — the
+   ZERO-SITTINGS outcome by the other door. The `tracks` edge is the
+   visit's second recording of its own subject and carries it where the
+   stamp does not; when even that is missing, you hold.
 
    Recovering only YOUR OWN subject is not enough. A sibling visit wears
    the same flaky stamp, so a scan matching siblings by stamp alone
