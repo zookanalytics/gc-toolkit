@@ -491,7 +491,21 @@ post_artifact() {
     gh pr review "$PR_NUMBER" --repo "$PR_REPO_Q" --comment --body-file "$BODY_FILE" >/dev/null 2>&1 \
       || warn "could not post the review comment on PR#$PR_NUMBER; the recorded marker still governs"
   else
+    # Pre-open, the bead's notes are the only copy of the body. pr-open.sh
+    # replays them into the PR it opens, and on request-changes they are the
+    # findings the rework child is pointed at. So this append is verified on
+    # the same terms as the record above: the trailer line names this anchor,
+    # check and commit, and nothing but this function writes it. Absent, the
+    # append did not land, and exiting here leaves no marker stamped and no
+    # rework filed against findings nobody can read.
     gc bd update "$REVIEW_BEAD" --append-notes "$(cat "$BODY_FILE")" >/dev/null 2>&1 || true
+    local trailer landed
+    trailer="Anchor: $ANCHOR — check.$CHECK_NAME @ $REVIEWED_OID"
+    landed=$(row_field "$(bd_json show "$REVIEW_BEAD")" notes)
+    if ! grep -qF -- "$trailer" <<< "$landed"; then
+      warn "the verdict body did not read back on $REVIEW_BEAD (its notes carry no '$trailer'); no marker stamped and no rework filed, review left open for a retry"
+      exit 2
+    fi
   fi
 }
 

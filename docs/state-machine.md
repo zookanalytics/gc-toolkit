@@ -316,6 +316,13 @@ a commit already judged from one nobody has reviewed. A store that will not
 take the record costs a re-run: signoff exits 2 with nothing posted and no
 marker stamped.
 
+Pre-open, the verdict body is read back off the same bead on the same terms.
+Its notes are the only copy: `pr-open.sh` replays them as the PR's first
+comment when it opens one, and a request-changes child names the bead it came
+from in `source_review_bead` and has nowhere else to read its findings. So an
+append that did not land also costs a re-run, rather than a marker or a rework
+child standing on findings nobody can read.
+
 `signoff.sh` closes the review bead itself, last. A bead that is already
 closed therefore had its verdict recorded, or was retired unjudged by
 `review-sweep.sh`, and either verdict against it is refused on the same terms:
