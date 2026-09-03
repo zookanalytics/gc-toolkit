@@ -359,15 +359,23 @@ else
 fi
 ```
 
-Four kinds reach it and only two are returned to the pool. A **visit** gives up
+Six kinds reach it and only two are returned to the pool. A **visit** gives up
 its assignee and nothing else, because its route, continuation group and
-task_kind are its identity. A **workflow step** gives up the dead session's pin
-and keeps the rest, so the molecule resumes at that same step under whoever
-claims it next. A **workflow root** is skipped: nothing claims a root, it closes
-when its workflow-finalize step closes, and setting it open, unassigned and
-routed is what makes a pool offer the root itself as work. Everything else is a
-**source bead** and goes to `gc workflow delete-source --apply` followed by
-`gc workflow reopen-source`.
+task_kind are its identity. A **workflow step under a live root** gives up the
+dead session's pin and keeps the rest, so the molecule resumes at that same step
+under whoever claims it next. A **workflow root** is skipped: nothing claims a
+root, it closes when its workflow-finalize step closes, and setting it open,
+unassigned and routed is what makes a pool offer the root itself as work.
+Everything else is a **source bead** and goes to
+`gc workflow delete-source --apply` followed by `gc workflow reopen-source`.
+
+The other two kinds turn on the step's root, which the disposal reads before it
+releases anything. A step whose **root has CLOSED** has no molecule left to
+resume — releasing it would hand a finished chain to a pool as fresh work — so
+it goes to `dead-molecule-dispose.sh`, which de-routes every member of the chain
+before it closes any of them. A step whose **root will not read** is left
+untouched: an unreadable root is not a live one, and the step stays owned and
+comes back next cycle rather than being released on a failed probe.
 
 Those two commands are the source arm alone. `delete-source` matches workflow
 roots on `gc.source_bead_id`, a root poured from an input convoy carries no such

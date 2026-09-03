@@ -62,10 +62,18 @@ deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
 
 `arm` is fail-closed. It refuses a bead that is closed, one that is
 already dispatched (`in_progress`, or carrying `gc.routed_to` /
-`gc.execution_routed_to`), and one with no `--target`. Arming a bead that
-has *no* open blocker is legal and says so — the next pass dispatches it,
-which is what makes `arm` a safe universal substitute for a hand-held
-sling.
+`gc.execution_routed_to`), one with no `--target`, and one held at any
+status other than `open`. Arming a bead that has *no* open blocker is
+legal and says so — the next pass dispatches it, which is what makes
+`arm` a safe universal substitute for a hand-held sling.
+
+The status refusal is the one that is not about double-dispatch.
+`bd list --ready` excludes on status before it looks at dependencies at
+all, so a `blocked`, `deferred`, `hooked` or `pinned` bead is as unready
+as a gated one and stays that way however many blockers close. Nothing
+re-derives status from the dependency graph — whoever set the hold
+clears it. An arm recorded on such a bead can therefore never fire, so
+`arm` refuses it rather than writing a record that waits forever.
 
 To see what is owed, in this rig's store:
 
@@ -88,7 +96,15 @@ single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
   slinging;
 - **withholds** — leaving the record armed and saying so — when the bead
   is still blocked, when someone holds it by `assignee`, when the sling
-  fails, or when the recorded arguments are malformed.
+  fails, or when the recorded arguments are malformed;
+- **names as STRANDED**, every pass and on stderr, an armed bead sitting
+  at a non-`open` live status. The record is kept, because the hold may
+  yet clear, but it is counted apart from `waiting` and reported rather
+  than left in a silent count. `list` marks the same beads
+  `STRANDED — status=<s> is never --ready`. A held bead and a gated bead
+  are both "not ready", and conflating them is what hides a dead arm: the
+  gated one dispatches when its blocker closes, the held one never
+  dispatches at all.
 
 Dispatchability is not re-implemented here. `bd list --ready` applies
 beads' own predicate — open, no active blocker of a blocking type

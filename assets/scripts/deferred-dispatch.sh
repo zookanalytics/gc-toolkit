@@ -62,7 +62,9 @@ Usage:
 Verbs:
   arm        Record a pending dispatch on <bead>. The sling happens later, from
              reconcile, once bd reports the bead ready. Use this instead of
-             holding the dispatch in your context.
+             holding the dispatch in your context. The bead must be open —
+             reconcile dispatches from the --ready listing, which excludes
+             every other status, so an arm on a held bead could never fire.
   disarm     Remove a pending dispatch. The bead is left otherwise untouched.
   list       Show every armed bead in this store and whether it is waiting,
              dispatchable now, or closed with a dispatch still owed.
@@ -122,6 +124,16 @@ cmd_arm() {
     fi
     if [ "$status" = "in_progress" ] || [ -n "$routed" ] || [ -n "$exec_routed" ]; then
         echo "$PROG: arm: $bead is already dispatched (status=$status routed_to='$routed' execution_routed_to='$exec_routed') — disarm-then-rearm only if you mean to re-dispatch it" >&2
+        return 1
+    fi
+    # `bd list --ready` answers OPEN beads only: it excludes by status before it
+    # ever looks at deps, so a depless `blocked` bead is as unready as a gated
+    # one. An arm recorded on any other live status can therefore never fire,
+    # and nothing re-derives status from the dep graph — the hold is cleared by
+    # whoever set it. Refusing here is the difference between a caller learning
+    # that now and an arm that reads as "waiting on a blocker" forever.
+    if [ "$status" != "open" ]; then
+        echo "$PROG: arm: $bead is status=$status, and reconcile dispatches from 'bd list --ready', which answers open beads only — this arm could never fire. Clear the hold, then arm it." >&2
         return 1
     fi
 
@@ -235,8 +247,13 @@ cmd_list() {
             target="$(meta_of "$json" "$K_TARGET")"
             reason="$(meta_of "$json" "$K_REASON")"
         fi
+        # Not-ready splits in two, and conflating them is what hides a dead
+        # arm: an OPEN bead is waiting on a blocker that can clear, while any
+        # other live status is excluded by `--ready` on the status itself, so
+        # no blocker closing will ever make it dispatchable.
         if [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
+        elif [ "$status" != "open" ]; then state="STRANDED — status=$status is never --ready"
         else state="waiting on a blocker"; fi
         printf '%s -> %s [%s]%s\n' "$id" "${target:-?}" "$state" "${reason:+ — $reason}"
     done < "$rows"
@@ -280,7 +297,7 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }
 
-    local expected processed=0 dispatched=0 retired=0 waiting=0 held=0 failed=0
+    local expected processed=0 dispatched=0 retired=0 waiting=0 stranded=0 held=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
     local id status ready json target args_json assignee routed exec_routed rc
@@ -300,7 +317,20 @@ cmd_reconcile() {
             retired=$((retired + 1)); continue
         fi
 
-        if [ "$ready" != "1" ]; then waiting=$((waiting + 1)); continue; fi
+        # Not ready. An open bead is waiting on a blocker and the next pass
+        # re-asks; any other live status is excluded by `--ready` on the status
+        # itself, so waiting for it is waiting for something no blocker closing
+        # can deliver. Say so every pass — the arm outlives every session that
+        # could remember it, and a silent `waiting` count is how it stays lost.
+        if [ "$ready" != "1" ]; then
+            if [ "$status" != "open" ]; then
+                echo "$PROG: STRANDED $id is armed at status=$status, which 'bd list --ready' never answers — clear the hold or disarm; no blocker closing will dispatch it" >&2
+                stranded=$((stranded + 1))
+            else
+                waiting=$((waiting + 1))
+            fi
+            continue
+        fi
 
         json="$(show_bead "$id")" || json=""
         if [ -z "$json" ]; then
@@ -365,7 +395,7 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected armed bead(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
-    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $held held, $failed failed (of $expected armed)"
+    echo "$PROG: $dispatched dispatched, $retired retired, $waiting waiting, $stranded stranded, $held held, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]
 }
 

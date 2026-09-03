@@ -108,7 +108,8 @@ eq "$rc" "0" "preview exits 0"
 has "$OUT" "result=preview" "preview says so"
 eq "$(bstatus tk-step)" "in_progress" "preview left the status alone"
 eq "$(meta tk-step gc.session_id)" "lx-dead" "preview left the session pin alone"
-eq "$(wc -l < "$STUB_GC_LOG")" "1" "preview issued exactly one read and no write"
+eq "$(wc -l < "$STUB_GC_LOG")" "2" "preview reads the step and its root, nothing more"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview issued no write at all"
 
 echo "--- root arm: never returns a root to a pool ---"
 fixture
@@ -163,7 +164,9 @@ echo "--- the owner is not the assignee guard ---"
 # clear on --owner would mismatch and refuse every release of this shape.
 store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}},
+        {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
+         "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
 OUT=$("$SCRIPT" tk-slot --owner lx-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a step whose owner differs from its assignee still releases"
@@ -176,11 +179,75 @@ hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "the owner is never used a
 echo "--- step arm: a step with no route says so ---"
 store '[{"id":"tk-unrouted","status":"in_progress","assignee":"lx-dead","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.session_id":"lx-dead"}}]'
+                     "gc.session_id":"lx-dead"}},
+        {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
+         "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
 OUT=$("$SCRIPT" tk-unrouted --owner lx-dead --apply 2>&1)
 has "$OUT" "detail=routed=absent" "an unrouted step is released and flagged"
 eq "$(bstatus tk-unrouted)" "open" "unrouted step still released"
+
+echo "--- step arm: a root that CLOSED means there is no molecule to resume ---"
+# Releasing here would set the step open+unassigned+routed — a pool's offer
+# predicate exactly — for a molecule that is over. The chain, not this bead, is
+# the disposal unit, so the arm delegates. A stub stands in for the disposer:
+# what this suite owns is the DELEGATION, not the teardown.
+cat > "$TMP/bin/dead-dispose-stub" <<'STUB'
+#!/usr/bin/env bash
+printf 'dead-molecule-dispose %s\n' "$*" >> "${STUB_GC_LOG:?}"
+exit "${STUB_DEAD_RC:-0}"
+STUB
+chmod +x "$TMP/bin/dead-dispose-stub"
+export GC_DEAD_MOLECULE_TOOL="$TMP/bin/dead-dispose-stub"
+
+dead_fixture() {
+  store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
+           "metadata":{"gc.step_ref":"mol-review.load-dispatch","gc.root_bead_id":"tk-root",
+                       "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}},
+          {"id":"tk-root","status":"closed","assignee":"","title":"mol-review",
+           "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.outcome":"moot"}}]'
+  : > "$STUB_GC_LOG"
+}
+
+dead_fixture
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "a step under a closed root exits 0"
+has "$OUT" "class=workflow-step-dead" "it is classified dead, not releasable"
+has "$OUT" "root_status=closed" "the report carries the root status it judged on"
+has "$OUT" "action=dispose-dead-chain" "the arm disposes rather than releases"
+has "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose tk-step --apply" "the chain disposer is invoked with --apply"
+hasnt "$(cat "$STUB_GC_LOG")" "--status=open" "the dead step is never reopened"
+hasnt "$(cat "$STUB_GC_LOG")" "--assignee" "the dead step is never returned to a pool"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "the dead arm never calls reopen-source"
+
+dead_fixture
+OUT=$("$SCRIPT" tk-step 2>&1)
+has "$OUT" "result=preview" "preview of a dead step says preview"
+hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose" "preview does not invoke the disposer"
+
+dead_fixture
+export STUB_DEAD_RC=1
+OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
+export STUB_DEAD_RC=0
+eq "$rc" "1" "a failed chain disposal exits non-zero"
+has "$OUT" "failed=dead-chain" "the failure is named, not swallowed"
+
+echo "--- step arm: an unreadable root withholds the release ---"
+# An unreadable root is not a live one. Releasing on a failed probe is how a
+# finished molecule gets handed back to a pool; the step stays owned and
+# returns next cycle instead.
+store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
+         "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-gone",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
+eq "$rc" "0" "an unresolved root exits 0"
+has "$OUT" "class=workflow-step-unresolved" "it is classified unresolved"
+has "$OUT" "detail=root_unreadable" "the skip states why"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "nothing is written"
+hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose" "and nothing is torn down on a failed probe"
+eq "$(bstatus tk-step)" "in_progress" "the step stays owned for the next cycle"
+unset GC_DEAD_MOLECULE_TOOL
 
 echo "--- half-landed write is not a clean release ---"
 fixture

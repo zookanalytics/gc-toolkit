@@ -211,6 +211,18 @@ store '[{"id":"b-3","status":"closed","assignee":"","metadata":{},"notes":"","_r
 out="$("$SUT" arm b-3 --target rig/pool 2>&1)"; rc=$?
 eq "$rc" 1 "arm refuses a closed bead"
 
+# `bd list --ready` answers OPEN beads only — it excludes on status before it
+# looks at deps at all. So a hold recorded on any other live status can never
+# fire, and nothing re-derives status from the dep graph: the arm would sit in
+# the queue reading as "waiting on a blocker" for as long as the hold stands.
+for HELD in blocked deferred hooked pinned; do
+  store '[{"id":"b-h","status":"'"$HELD"'","assignee":"","metadata":{},"notes":"","_ready":false}]'
+  out="$("$SUT" arm b-h --target rig/pool 2>&1)"; rc=$?
+  eq "$rc" 1 "arm refuses a $HELD bead"
+  eq "$(meta b-h gc.dispatch_when_ready)" "<absent>" "a refused $HELD arm writes nothing"
+  has "$out" "answers open beads only" "the $HELD refusal names the ready predicate"
+done
+
 store '[{"id":"b-4","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
 out="$("$SUT" arm b-4 2>&1)"; rc=$?
 eq "$rc" 2 "arm without --target is a usage error"
@@ -325,6 +337,33 @@ has "$out" "b-1 -> rig/pool [waiting on a blocker] — needs b-0" "list shows a 
 has "$out" "b-2 -> rig/other [DISPATCHABLE NOW]" "list shows a dispatchable arm"
 has "$out" "b-3 -> rig/pool [CLOSED" "list shows a closed arm"
 hasnt "$out" "b-4" "list shows only armed beads"
+
+# A held bead and a gated bead are both "not ready", and conflating them is
+# what hides a dead arm: the gated one dispatches when its blocker closes, the
+# held one never dispatches at all.
+store '[
+ {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false},
+ {"id":"b-5","status":"blocked","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false}]'
+out="$("$SUT" list 2>&1)"
+has "$out" "b-5 -> rig/pool [STRANDED — status=blocked is never --ready]" "list names a stranded arm"
+has "$out" "b-1 -> rig/pool [waiting on a blocker]" "an open arm is still just waiting"
+
+echo "# reconcile names a stranded arm every pass"
+# The arm outlives every session that could remember it, so a silent `waiting`
+# count is how it stays lost. Reported on stderr and counted in the summary.
+store '[{"id":"b-5","status":"blocked","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "reconcile exits 0 with a stranded arm (nothing failed)"
+eq "$(slings)" "0" "a stranded arm is never slung"
+has "$out" "STRANDED b-5" "reconcile names the stranded bead"
+has "$out" "status=blocked" "and the status that strands it"
+has "$out" "1 stranded" "the summary counts it apart from waiting"
+eq "$(meta b-5 gc.dispatch_when_ready)" "rig/pool" "the record is kept, not retired — the hold may clear"
+
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
+out="$("$SUT" reconcile 2>&1)"
+has "$out" "1 waiting, 0 stranded" "an open gated arm counts as waiting, not stranded"
+hasnt "$out" "STRANDED" "and is not reported as stranded"
 
 # --- disarm ------------------------------------------------------------------
 echo "# disarm"
