@@ -231,14 +231,11 @@ echo "── a routed workflow ROOT is topology, never routed-and-claimable ─�
 # pool demand that nothing could serve. c-routed is the discriminator: an
 # ordinary routed bead keeps the claimable class.
 FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
-case "$FUNNEL" in
-    *"topology 2"*) ok "both routed roots classify as topology" ;;
-    *) bad "routed roots classify as topology" "funnel: ${FUNNEL:-<absent>}" ;;
-esac
-case "$FUNNEL" in
-    *"routed-and-claimable 1"*) ok "the ordinary routed bead still reads claimable" ;;
-    *) bad "routed-and-claimable holds only c-routed" "funnel: ${FUNNEL:-<absent>}" ;;
-esac
+# Exact count per class: a substring match would accept "topology 20" too.
+funnel_count() { printf '%s' "$FUNNEL" | sed 's/.*funnel: //; s/ \xc2\xb7 /\n/g' \
+    | awk -v c="$1" '$1 == c { print $2; found = 1 } END { if (!found) print "<absent>" }'; }
+eq "$(funnel_count topology)" "2" "both routed roots classify as topology"
+eq "$(funnel_count routed-and-claimable)" "1" "routed-and-claimable holds only c-routed"
 for r in root-landed root-live; do
     case ",$(cat "$BASELINE_FILE")," in
         *",$r,"*) bad "dropped $r" "a topology root reached the unnamed set" ;;
