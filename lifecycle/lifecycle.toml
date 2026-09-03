@@ -218,7 +218,12 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # written by gate-ensure.sh only where a gate has spent its dispatch ceiling,
 # and its value carries the count and the head it holds, so its presence is
 # "dispatch_count at the ceiling" as the writer itself recorded it.
-marker_prefixes = ["dispatch_backstop."]
+# answered_hold.<g> is the same arm's other hold, written where the gate is
+# owed a verdict its own live head already carries and no rework round is open
+# to move that head. Its value IS that head, and gate-ensure.sh clears the key
+# on the pass that dispatches again, so its presence is the hold standing now
+# rather than a hold that once stood.
+marker_prefixes = ["dispatch_backstop.", "answered_hold."]
 # check.<g> holds the merge when its verb is `exception`; the other verbs in
 # marker_verbs above are verdicts, and a verdict moves the anchor on.
 gate_marker_prefix = "check."
@@ -290,7 +295,11 @@ machine_key = "pr.machine"
 #                     actor that could move the head has been told not to
 #   wedged-veto       a non-city CHANGES_REQUESTED stands with the signoff round
 #                     cap spent, so nothing will file further rework
-machines = ["progressing", "settled", "wedged-exception", "wedged-veto"]
+#   wedged-answered   a gate is owed a verdict its own live head already carries,
+#                     with no rework round open to move that head; re-reviewing
+#                     an unchanged commit only re-derives the verdict, so the
+#                     cadence declines to and the anchor waits on a commit
+machines = ["progressing", "settled", "wedged-exception", "wedged-veto", "wedged-answered"]
 # Written from pre_open_gate onward, before a PR number exists: a pre-open
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
@@ -324,7 +333,7 @@ keys = [
   "check_set", "check.<g>", "signoff_dismissed", "check_name", "anchor_bead",
   "review_branch", "review_base", "reviewed_oid", "review_pool",
   "source_review_bead", "task_kind", "dispatch_count", "dispatch_backstop.<g>",
-  "fix_target_pool",
+  "answered_hold.<g>", "fix_target_pool",
   # The review-round cap. signoff_cap = <gate>@<oid> names the exception the
   # cap's human park belongs to, so operator feedback can tell that park from
   # one a person made. pr-facts.sh records each batch of such feedback in

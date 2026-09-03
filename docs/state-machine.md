@@ -410,8 +410,9 @@ so a key written only for open pull requests would miss the majority of them.
 | `settled` | every declared gate reads `green@<live head>`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `wedged-exception` | a gate reads `exception@<live head>`: the convergence cap stamped it and routed the anchor to a person, and every actor that could move the head has been told not to |
 | `wedged-veto` | a non-city `CHANGES_REQUESTED` stands with the signoff round cap spent, so nothing will file further rework |
+| `wedged-answered` | a gate is owed a verdict its own live head already carries, with no rework round open to move that head; re-reviewing an unchanged commit only re-derives the verdict, so the cadence declines to |
 
-The two wedge shapes are separate values because they are released by different
+The wedge shapes are separate values because they are released by different
 things, and a reader that has to act on one must not re-derive which it is.
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,
@@ -474,12 +475,13 @@ sequenceDiagram
 - **Dispatch backstop** (`gate-ensure.sh`): `dispatch_count` bounds
   DISPATCHES at `GC_MAX_REVIEW_DISPATCHES` (default 5). It is not the round
   cap and counts a different thing; it exists for the reviews the round cap
-  never sees. A review that ends writing no marker and leaving no open rework
-  child returns the anchor to exactly the state that triggered the dispatch,
-  so the next reconcile pass dispatches again at the same head, without end —
-  a polecat standing down without a verdict, a rework child filed with its
-  dependency edge reversed and so invisible to the walk, or a death after
-  claim. At the ceiling the gate holds, the anchor is stamped
+  never sees, and for the ones the answered hold cannot speak for either. A
+  review that closes recording NO verdict leaves nothing to re-derive and
+  nothing to name, so it returns the anchor to exactly the state that
+  triggered the dispatch and the next reconcile pass dispatches again at the
+  same head, without end — a polecat standing down without a verdict, a rework
+  child filed with its dependency edge reversed and so invisible to the walk,
+  or a death after claim. At the ceiling the gate holds, the anchor is stamped
   `dispatch_backstop.<g>=<count>@<head>` with a note, and one visit is filed
   under the `dispatch-runaway` key; a moved head restates the situation and
   files again. Only an operator clears it, by fixing the cause and clearing
@@ -509,11 +511,15 @@ sequenceDiagram
   gate-ensure sees a declared gate that is neither settled at the live head
   (`green@` or `exception@` at that head) nor in flight and dispatches one
   review bead (stamp first, then attach `mol-review` via `gc sling --on`,
-  read the pour back). A head a closed request-changes verdict already judged
-  is not re-gated while the rework it filed is still open: the same commit
-  returns the same findings. This binds the stranded-review repair too —
-  re-slinging an inert review buys the same answer a fresh dispatch is
-  refused for.
+  read the pour back). A head a prior verdict already judged is not re-gated:
+  the same commit returns the same findings. `gc.outcome=recorded` on the
+  closed review is what makes it a verdict — a review swept moot or dead after
+  claim answered nothing and bars nothing. While the rework child that verdict
+  filed is still open the refusal is quiet; with no round pending the anchor
+  records `wedged-answered` and files one `review-answered-hold` visit, since
+  nothing in the cadence moves a branch. Either way the hold clears when the
+  head moves. This binds the stranded-review repair too — re-slinging an inert
+  review buys the same answer a fresh dispatch is refused for.
 
 ## Disposition
 

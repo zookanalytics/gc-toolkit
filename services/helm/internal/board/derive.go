@@ -759,6 +759,7 @@ const (
 	MachineSettled         = "settled"
 	MachineWedgedException = "wedged-exception"
 	MachineWedgedVeto      = "wedged-veto"
+	MachineWedgedAnswered  = "wedged-answered"
 
 	// AxisUnknown is a RENDERED value on both axes, never a fallback to the
 	// quiet end. An unreadable axis and a clear one are not interchangeable,
@@ -818,7 +819,8 @@ func splitDated(v string) (value, oid string, since time.Time, ok bool) {
 }
 
 func isWedge(v string) bool {
-	return v == MachineWedgedException || v == MachineWedgedVeto
+	return v == MachineWedgedException || v == MachineWedgedVeto ||
+		v == MachineWedgedAnswered
 }
 
 func knownMachine(v string) bool {
@@ -1164,6 +1166,8 @@ func prNeeds(machine, approval string, ask *Blocker) string {
 		return "wedged: the review cap's exception stands at the live head — only a new commit clears it"
 	case machine == MachineWedgedVeto:
 		return "wedged: a standing CHANGES_REQUESTED with the rework rounds spent"
+	case machine == MachineWedgedAnswered:
+		return "wedged: the gate's own verdict already read this head and no rework is open — only a new commit clears it"
 	case ask != nil:
 		if t := collapseWS(ask.Title); t != "" {
 			return "asking: " + t

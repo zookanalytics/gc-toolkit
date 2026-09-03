@@ -445,7 +445,7 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, `wedged-answered`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `unknown` (see below) | — |
 | `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |

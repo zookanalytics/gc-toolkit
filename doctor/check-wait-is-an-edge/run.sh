@@ -66,7 +66,8 @@ gc.takeaway'
 # <marker>=<settled-key>: the marker holds only while the settled-key is absent
 # or empty. Same list as the declaration, same standby role.
 BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
-BUILTIN_MARKER_PREFIXES='dispatch_backstop.'
+BUILTIN_MARKER_PREFIXES='dispatch_backstop.
+answered_hold.'
 BUILTIN_GATE_PREFIX='check.'
 BUILTIN_GATE_VERB='exception'
 BUILTIN_ROUTE_KEY='gc.routed_to'

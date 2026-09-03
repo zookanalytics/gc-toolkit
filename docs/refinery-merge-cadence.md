@@ -67,17 +67,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    `review-wedge` key rather than holding the anchor in silence. It escalates
    on the second consecutive sighting, because `mol-review`'s failure arm
    closes its chain before it restores the bead's route. One dispatch is
-   refused outright: a head that a closed request-changes verdict already
-   judged, whose rework child is still open, can only be answered the same
-   way, so the gate stays armed and the merge held until that rework moves the
-   head. Behind that sits a ceiling on DISPATCHES —
+   refused outright: a head a prior verdict already judged can only be
+   answered the same way, because the commit has not changed, so the gate
+   stays armed and the merge held until the head moves. That refusal reads
+   two states apart. With the rework child that verdict filed still open it is
+   quiet, since the branch is what moves next. With the round spent, never
+   filed, or the verdict an approve whose marker was lost, nothing in the
+   cadence will move the head, so the anchor records `wedged-answered`, takes
+   an `answered_hold.<gate>=<head>` stamp, and costs one `review-answered-hold`
+   visit. That stamp is retired by the pass that dispatches again, so it never
+   outlives the hold. Behind both sits a ceiling on DISPATCHES —
    `GC_MAX_REVIEW_DISPATCHES`, default 5, and not `signoff.sh`'s round cap —
-   for the reviews neither refusal can see: one that ends writing no marker
-   and leaving no open rework child returns the anchor to the state that
-   triggered the dispatch, so the next pass repeats it at the same head. At
-   the ceiling the gate holds, the anchor carries `dispatch_backstop.<gate>`
-   and a note saying why, and one visit is filed under the `dispatch-runaway`
-   key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
+   for the reviews neither refusal can see: one that closes recording no
+   verdict leaves nothing to re-derive and nothing to name, so it returns the
+   anchor to the state that triggered the dispatch and the next pass repeats it
+   at the same head. At the ceiling the gate holds, the anchor carries
+   `dispatch_backstop.<gate>` and a note saying why, and one visit is filed
+   under the `dispatch-runaway` key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 2. **pr-open.sh** — `pre_open_gate → pull_request`. For each anchor whose

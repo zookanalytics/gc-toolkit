@@ -17,13 +17,17 @@
 # whose workflow is spent (every step closed but the finalizer) can never
 # produce a verdict, so it is escalated through escalate.sh under one deduped
 # situation key rather than holding the anchor in silence. A dispatch that
-# cannot produce a new answer is refused before it is made: a head a closed
-# request-changes verdict already judged, whose rework child is still open,
-# only re-derives that verdict. Behind that sits a backstop on the DISPATCH
-# count (GC_MAX_REVIEW_DISPATCHES) for the reviews that end leaving no verdict
-# and no visible rework child: at the ceiling the gate holds and escalates
-# under the dispatch-runaway key. It is not the convergence cap, which counts
-# attempted rework and is signoff.sh's.
+# cannot produce a new answer is refused before it is made: a head a prior
+# verdict already judged only re-derives that verdict, because the commit is
+# byte-identical to the one it read. With a rework round still open the refusal
+# is quiet — the branch moves next and the next pass dispatches. With the round
+# spent or never filed nothing moves the head, so that refusal costs one
+# deduped visit under the answered-hold key, pinned to the head it is held at.
+# Behind that sits a backstop on the DISPATCH count
+# (GC_MAX_REVIEW_DISPATCHES) for the reviews that end leaving no verdict and no
+# visible rework child: at the ceiling the gate holds and escalates under the
+# dispatch-runaway key. It is not the convergence cap, which counts attempted
+# rework and is signoff.sh's.
 # Args: --default <check_set> --review-pool <pool> [--fix-pool <pool>].
 # Exits: 0 (a dispatch failure leaves the gate armed, merge HELD); 3 = an
 # anchor not made safe (unreadable enumeration/unpersisted stamp): merge held.
@@ -64,6 +68,7 @@ ESCALATOR="$SCRIPTS_DIR/escalate.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 WEDGE_KEY="review-wedge"
 RUNAWAY_KEY="dispatch-runaway"
+ANSWERED_KEY="review-answered-hold"
 # Ceiling on review DISPATCHES per anchor. The legitimate spend is one dispatch
 # per rework round plus the review that records signoff.sh's cap verdict, and
 # each re-gate after a staled green@/exception@ adds a dispatch without a round,
@@ -142,15 +147,28 @@ inflight_review() { # <anchor-id> <gate>
        else .id end)' 2>/dev/null
 }
 
-# Has this exact head already been judged on this gate, with the rework it
-# asked for still unattempted? Each request-changes signoff files one child
-# stamped source_review_bead, so an open such child is proof that the round it
-# opened has not been tried — and a second review of a commit no rework has
-# touched can only re-derive the findings that filed it. Echoes
-# "<review-bead> <rework-child>". rc: 0 already answered · 2 nothing bars a
-# dispatch · 1 the ledger could not answer.
+# Has this exact head already been judged on this gate? Two grounds, and the
+# order matters because only the second one is a hold nothing will lift.
+#
+# A pending round: each request-changes signoff files one child stamped
+# source_review_bead, so an open such child is proof that the round it opened
+# has not been tried. The rework is what moves next, so the refusal is quiet.
+#
+# A spent one: a verdict signoff.sh RECORDED (gc.outcome=recorded, its own
+# read-back-verified stamp) against this exact commit, with no round pending.
+# The commit is byte-identical to the one that verdict read, so a second review
+# can only re-derive it — and the head cannot move on its own, so this state
+# does not resolve itself. That is what the caller escalates.
+#
+# A review closed WITHOUT that stamp — swept moot, a death after claim, a
+# stand-down — recorded no verdict, so it bars nothing on its own; only an open
+# child speaks for it.
+#
+# Echoes "<review-bead> <rework-child>", the child being "-" on the spent
+# ground. rc: 0 already answered · 2 nothing bars a dispatch · 1 the ledger
+# could not answer.
 already_answered() { # <anchor-id> <gate> <head>
-  local raw judged kids pair
+  local raw judged kids pair recorded
   raw=$(bd_list --metadata-field anchor_bead="$1" --status=closed) || return 1
   judged=$(printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
     .[]
@@ -170,8 +188,16 @@ already_answered() { # <anchor-id> <gate> <head>
         | select($src != "" and (($reviews | index($src)) != null))
         | ($src + " " + .id) ]
     | (.[0] // empty)' 2>/dev/null)
-  [ -n "$pair" ] || return 2
-  printf '%s' "$pair"
+  if [ -n "$pair" ]; then printf '%s' "$pair"; return 0; fi
+  recorded=$(printf '%s' "$raw" | jq -r --arg g "$2" --arg h "$3" '
+    [ .[]
+      | select(((.metadata.task_kind // "") | tostring) == "review")
+      | select(((.metadata.check_name // "") | tostring) == $g)
+      | select(((.metadata.reviewed_oid // "") | tostring) == $h)
+      | select(((.metadata["gc.outcome"] // "") | tostring) == "recorded")
+      | .id ] | (.[0] // empty)' 2>/dev/null)
+  [ -n "$recorded" ] || return 2
+  printf '%s -' "$recorded"
 }
 
 # The refusal a prior verdict earns, for both places that would otherwise buy a
@@ -179,13 +205,27 @@ already_answered() { # <anchor-id> <gate> <head>
 # dispatch. <action> completes both sentences, because the two arms differ only
 # in what they decline to do. rc: 0 refuse (the reason is printed) · 2 nothing
 # bars it.
+#
+#
+# ANSWERED_STALLED is left holding the review the refusal rests on, but only on
+# the spent ground — the one the head cannot leave without a person, and so the
+# one a caller escalates. It is cleared on every call: a value left from an
+# earlier anchor would escalate this one.
+ANSWERED_STALLED=""
 answered_bars() { # <anchor-id> <gate> <head> <action>
-  local answered rc=0
+  local answered rid rc=0
+  ANSWERED_STALLED=""
   # An unreadable head names no commit to test a prior verdict against.
   [ -n "$3" ] || return 2
   answered=$(already_answered "$1" "$2" "$3") || rc=$?
   case "$rc" in
-    0) echo "$PROG: $1 gate '$2' — review ${answered%% *} already judged $3 and its rework ${answered##* } is still open; $4 (a re-review of an untouched commit re-derives the same findings)" ;;
+    0) rid="${answered%% *}"
+       if [ "${answered##* }" = "-" ]; then
+         ANSWERED_STALLED="$rid"
+         echo "$PROG: $1 gate '$2' — review $rid already recorded a verdict on $3 and no rework round is pending; $4 (the commit has not changed, so a second review re-derives that verdict)"
+       else
+         echo "$PROG: $1 gate '$2' — review $rid already judged $3 and its rework ${answered##* } is still open; $4 (a re-review of an untouched commit re-derives the same findings)"
+       fi ;;
     1) echo "$PROG: $1 gate '$2' prior-verdict probe unreadable; $4 (merge stays held, retry next pass)" >&2 ;;
     *) return 2 ;;
   esac
@@ -304,7 +344,7 @@ for MR in pre_open_gate pull_request; do
 done
 [ -n "$ROWS" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; capped=0
+stamped=0; dispatched=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; capped=0; stalled=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
   id=$(printf '%s' "$row" | jq -r '.id // empty')
@@ -380,6 +420,7 @@ STRAY
   # flags keep that answer instead of discarding it at the end of the iteration.
   mach_wedge=0
   mach_progress=0
+  mach_answered=0
   gates=$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
   while IFS= read -r g; do
     [ -n "$g" ] || continue
@@ -458,6 +499,11 @@ STRAY
           # closed verdict already judged, and its findings would file a
           # duplicate of the rework child still waiting.
           if answered_bars "$id" "$g" "$head" "no re-sling of $rid"; then
+            # On the spent ground this stranded review can never move either,
+            # so the axis says wedged. No visit: $rid is an open bead naming
+            # this anchor, which is the artifact the fresh-dispatch arm has to
+            # file one to get.
+            [ -z "$ANSWERED_STALLED" ] || mach_answered=1
             skipped=$((skipped + 1)); continue
           fi
           gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" >/dev/null 2>&1
@@ -540,15 +586,81 @@ Two repairs, either of which clears the hold:
     case "$dcount" in ''|*[!0-9]*) dcount=0 ;; esac
 
     if answered_bars "$id" "$g" "$head" "no dispatch"; then
-      skipped=$((skipped + 1)); continue
+      skipped=$((skipped + 1))
+      # A pending rework round needs nobody: the branch moves and the next pass
+      # dispatches. A SPENT one is the other reading — the gate is owed a
+      # verdict this head already has, no round is open to change the head, and
+      # nothing in the cadence moves a branch. Held quietly that is an anchor
+      # stranded with nothing on it saying why, so it costs the same visit the
+      # dispatch backstop files, deduped on the head it is pinned to: a moved
+      # head is a new situation and says so again.
+      if [ -n "$ANSWERED_STALLED" ]; then
+        mach_answered=1
+        if [ "$(meta_of "$row" "answered_hold.$g")" = "$head" ]; then
+          echo "$PROG: $id gate '$g' is held at the recorded verdict of $ANSWERED_STALLED on $head; already escalated [$ANSWERED_KEY]"
+          stalled=$((stalled + 1)); continue
+        fi
+        filed="escalated [$ANSWERED_KEY]"
+        if [ ! -x "$ESCALATOR" ]; then
+          filed="NOT escalated: $ESCALATOR is missing"
+          echo "$PROG: $id gate '$g' is held at a spent verdict but $ESCALATOR is missing; stamping the anchor, no visit filed" >&2
+        elif ! "$ESCALATOR" --subject "$id" --key "$ANSWERED_KEY" --message \
+"Gate '$g' on $id is held at a commit its own verdict already judged, and nothing in the cadence can move it.
+
+Anchor:   $id — $title
+Gate:     check.$g is ${marker:-absent} ($why)
+Branch:   $branch -> $target
+Head:     $head
+Verdict:  review $ANSWERED_STALLED recorded a verdict on this exact commit
+
+No rework child of this anchor is open against that review, so the round it
+opened is spent or was never filed. The head cannot move on its own, and a
+second review of a byte-identical commit only re-derives the verdict already
+recorded, so no dispatch is bought and the merge stays HELD.
+
+Three shapes reach this state: a rework child closed without pushing a commit,
+a request-changes signoff whose child did not file, and an approve whose
+check.$g never landed on the anchor. The findings are in $ANSWERED_STALLED.
+
+The hold clears by itself once the branch head moves. To act on it now:
+  land the rework by hand on $branch, or
+  re-open the round by filing a rework child against $ANSWERED_STALLED, or
+  if $ANSWERED_STALLED records an approve, its green marker was lost on the
+  write and restoring it persists a verdict signoff.sh already reached —
+    gc bd update $id --set-metadata check.$g=green@$head" >/dev/null; then
+          echo "$PROG: $id gate '$g' is held at a spent verdict but the escalation did not file; anchor not stamped, retry next pass" >&2
+          continue
+        fi
+        # Read the stamp back, or an anchor whose write keeps dropping collects
+        # one note per reconcile pass.
+        gc bd update "$id" --set-metadata "answered_hold.$g=$head" >/dev/null 2>&1
+        got=$(gc bd show "$id" --json 2>/dev/null | scrub \
+          | jq -r --arg k "answered_hold.$g" '.[0].metadata[$k] // empty' 2>/dev/null)
+        if [ "$got" = "$head" ]; then
+          gc bd update "$id" --append-notes "gate-ensure: gate '$g' is held at $head, the commit review $ANSWERED_STALLED already recorded a verdict on, with no rework round open against it. No further review is dispatched — a second review of an unchanged commit re-derives that verdict — and the merge stays HELD until the branch head moves. Visit: $filed." >/dev/null 2>&1
+        else
+          echo "$PROG: $id gate '$g' is held at a spent verdict but the hold stamp did not persist; the visit stands, the anchor does not show it" >&2
+        fi
+        echo "$PROG: $id gate '$g' is held at the recorded verdict of $ANSWERED_STALLED on $head; no dispatch, merge HELD ($filed)"
+        stalled=$((stalled + 1))
+      fi
+      continue
+    fi
+    # Past the refusal, so the hold does not stand: retire its marker before
+    # anything else can hold this gate. A key left behind outlives the state it
+    # records, and doctor/check-wait-is-an-edge reads its presence as a bead
+    # waiting on something.
+    if [ -n "$(meta_of "$row" "answered_hold.$g")" ]; then
+      gc bd update "$id" --unset-metadata "answered_hold.$g" >/dev/null 2>&1 </dev/null
+      echo "$PROG: $id gate '$g' left the answered hold (head is ${head:-unreadable}); marker retired"
     fi
 
-    # Backstop. already_answered() refuses the dispatch a closed verdict has
-    # already made pointless, but it can only see a rework child the dep walk
-    # returns. A reviewer that stands down without a verdict, a child filed with
-    # its edge reversed, a death after claim: each leaves the anchor in exactly
-    # the state that triggered the dispatch, so the next pass dispatches again
-    # at the same head, without end. Nothing else in the cadence catches that.
+    # Backstop. already_answered() refuses the dispatch a recorded verdict has
+    # already made pointless, and names it. What it cannot speak for is a review
+    # that closed recording NO verdict: a reviewer standing down, a death after
+    # claim. Those leave the anchor in exactly the state that triggered the
+    # dispatch, with nothing to re-derive and nothing to name, so the next pass
+    # dispatches again at the same head, without end. Nothing else catches it.
     # The refusal is as loud as the loop it stops — silence here is what leaves
     # an anchor stranded with nothing on it saying why — so the ceiling holds
     # the merge for an operator, stamps the reason on the anchor, and files one
@@ -570,10 +682,10 @@ Spend:    dispatch_count=$dcount against a ceiling of $DISPATCH_CEILING
 This is NOT the convergence cap. GC_MAX_REVIEW_ROUNDS counts ATTEMPTED REWORK
 in signoff.sh and ends in its own exception@ verdict; this ceiling bounds
 DISPATCHES. Every dispatch behind it was poured and read back, so the reviews
-were reachable and still left no verdict and no open rework child on the live
-head. That points at one of: a reviewer standing down without a verdict, a
-rework child filed with its dependency edge reversed and so invisible to the
-walk, or a death after claim.
+were reachable and still recorded no verdict at all on the live head — a
+verdict that HAD been recorded would hold this gate at the answered-hold key
+instead. That points at a reviewer standing down without giving one, or a death
+after claim.
 
 The merge stays held until a human acts. Once the cause is understood:
   re-arm the cadence by clearing the tally —
@@ -681,9 +793,12 @@ GATES
   # A wedged gate outranks a progressing one. The two can co-occur only on a
   # multi-gate check_set, and there the anchor still cannot land: nothing will
   # raise the exception, so no amount of progress on the other gates moves it,
-  # and the operator's move is the same one either way.
+  # and the operator's move is the same one either way. The answered hold is a
+  # wedge for the same reason and ranks under the exception, which is the one
+  # the operator was already routed to.
   if [ -n "$head" ]; then
     if [ "$mach_wedge" = 1 ]; then mach="wedged-exception"
+    elif [ "$mach_answered" = 1 ]; then mach="wedged-answered"
     elif [ "$mach_progress" = 1 ]; then mach="progressing"
     else mach="settled"
     fi
@@ -709,7 +824,7 @@ done <<ROWS_EOF
 $ROWS
 ROWS_EOF
 
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $capped at the dispatch backstop, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $held operator-held, $skipped held-for-retry, $capped at the dispatch backstop, $stalled held at a spent verdict, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh and still ungated; exiting rc=$UNSAFE_RC so the driver holds merge.sh this pass" >&2
   exit "$UNSAFE_RC"

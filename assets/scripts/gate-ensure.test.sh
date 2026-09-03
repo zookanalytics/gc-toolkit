@@ -15,8 +15,10 @@
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold;
 # dispatch_count as a tally the round cap never reads; the refusal to
-# re-review a head a closed request-changes verdict already judged while its
-# rework child is still open; the dispatch backstop (a ceiling on DISPATCHES
+# re-review a head a prior verdict already judged — quiet while its rework
+# child is open, and one deduped visit plus a head-pinned stamp once that round
+# is spent or was never filed, with a review that recorded no verdict barring
+# nothing either way; the dispatch backstop (a ceiling on DISPATCHES
 # that refuses loudly -- one deduped visit plus a stamp and a note on the
 # anchor -- restates itself when the head moves, and never preempts the
 # precise refusal); and the review-wedge escalation (exec-stamp-only reach
@@ -347,21 +349,21 @@ oid r2 > "$GH_DIR/head_polecat_r2"
 out=$(run)
 has "$out" "1 reviews dispatched" "a commit no verdict has read is reviewed"
 
-echo "# …and a CLOSED rework is an attempt made: the next round dispatches"
+echo "# …and a review that recorded no verdict bars nothing once its rework is spent"
 store "[$(anchor R3 pull_request codex "" polecat/r3),
         $(judged_review rev-r3 R3 "$(oid r3)"),
         $(rework_kid fix-r3 rev-r3 closed)]"
 printf 'fix-r3|blocks|R3\n' >> "$STUB_DEPS"
 oid r3 > "$GH_DIR/head_polecat_r3"
 out=$(run)
-has "$out" "1 reviews dispatched" "a spent rework re-opens the gate even at an unmoved head"
+has "$out" "1 reviews dispatched" "a review that left no answer is re-asked once nothing is pending"
 
-echo "# a closed review that filed no rework bars nothing"
+echo "# a closed review with neither a recorded verdict nor a child bars nothing"
 store "[$(anchor R4 pull_request codex "" polecat/r4),
         $(judged_review rev-r4 R4 "$(oid r4)")]"
 oid r4 > "$GH_DIR/head_polecat_r4"
 out=$(run)
-has "$out" "1 reviews dispatched" "only a request-changes verdict (which files a child) bars a re-review"
+has "$out" "1 reviews dispatched" "a review swept moot, or dead after claim, answered nothing to re-derive"
 
 echo "# a verdict on ANOTHER gate bars nothing"
 store "[$(anchor R6 pull_request codex "" polecat/r6),
@@ -436,12 +438,107 @@ out=$(run)
 has "$out" "1 reviews dispatched" "an unreadable head bars nothing, however the ledger reads"
 hasnt "$out" "already judged" "…and no verdict is claimed over a commit nobody named"
 
+# --- a RECORDED verdict at an unmoved head -------------------------------------
+# gc.outcome=recorded is signoff.sh's own read-back-verified stamp, so it
+# separates a review that answered from one that merely closed. Against the same
+# commit that answer still stands: nothing rewrote the tree, so a second review
+# re-derives it. The rework child only says whether anything is due to move next,
+# and with none open nothing is — which is why that arm escalates and the open-
+# child arm does not.
+recorded_review() { # <id> <anchor> <oid>
+  printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"%s","reviewed_oid":"%s","gc.outcome":"recorded"}}' \
+    "$1" "$2" "$3"
+}
+
+echo "# a recorded verdict whose rework round is SPENT holds the gate, loudly"
+store "[$(anchor V1 pull_request codex "" polecat/v1),
+        $(recorded_review rev-v1 V1 "$(oid v1)"),
+        $(rework_kid fix-v1 rev-v1 closed)]"
+printf 'fix-v1|blocks|V1\n' >> "$STUB_DEPS"
+oid v1 > "$GH_DIR/head_polecat_v1"
+: > "$STUB_ESCALATE_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "the hold exits 0 (gate stays armed, merge held)"
+has "$out" "already recorded a verdict on $(oid v1)" "the refusal names the commit the verdict read"
+has "$out" "0 reviews dispatched" "…and buys no review of a commit nothing has touched"
+eq "$(meta V1 dispatch_count)" "<absent>" "…spending no dispatch on a question already answered"
+eq "$(meta V1 answered_hold.codex)" "$(oid v1)" "…the hold is stamped, pinned to the head it is held at"
+has "$(cat "$STUB_ESCALATE_LOG")" "--key review-answered-hold" "…and one visit says so, rather than holding in silence"
+has "$(cat "$STUB_ESCALATE_LOG")" "--subject V1" "…filed against the anchor that is held"
+has "$(meta V1 pr.machine)" "wedged-answered@$(oid v1)@" "…and the board reads the hold as a wedge, not as an anchor in the cadence"
+
+echo "# …and the visit is filed once per head, not once per pass"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "already escalated [review-answered-hold]" "the stamp is what a second pass reads"
+hasnt "$(cat "$STUB_ESCALATE_LOG")" "CALL" "…so no second visit is filed"
+has "$out" "0 reviews dispatched" "…and still nothing is dispatched"
+
+echo "# …and the pass that dispatches again retires the marker first"
+# V1 carries the stamp from the case above. A moved head is what releases the
+# hold, and a key left behind would read to doctor/check-wait-is-an-edge as a
+# bead still waiting.
+oid v1-moved > "$GH_DIR/head_polecat_v1"
+out=$(run)
+has "$out" "left the answered hold" "the retirement is reported"
+eq "$(meta V1 answered_hold.codex)" "<absent>" "…and the marker does not outlive the hold it recorded"
+has "$out" "1 reviews dispatched" "…and the commit no verdict has read gets its review"
+
+echo "# …but a head MOVED past the recorded verdict is a question nobody has answered"
+store "[$(anchor V2 pull_request codex "" polecat/v2),
+        $(recorded_review rev-v2 V2 old-oid)]"
+oid v2 > "$GH_DIR/head_polecat_v2"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "1 reviews dispatched" "a commit no verdict has read is reviewed"
+hasnt "$(cat "$STUB_ESCALATE_LOG")" "CALL" "…and the moved head files no visit"
+
+echo "# a recorded verdict that filed no child at all holds the gate the same way"
+store "[$(anchor V3 pull_request codex "" polecat/v3),
+        $(recorded_review rev-v3 V3 "$(oid v3)")]"
+oid v3 > "$GH_DIR/head_polecat_v3"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "already recorded a verdict on $(oid v3)" "an approve whose marker never landed is not re-rolled"
+has "$out" "0 reviews dispatched" "…and nothing is dispatched"
+has "$(cat "$STUB_ESCALATE_LOG")" "--key review-answered-hold" "…one visit carries it to a person"
+
+echo "# …but a PENDING rework round is refused quietly: the branch moves next"
+store "[$(anchor V4 pull_request codex "" polecat/v4),
+        $(recorded_review rev-v4 V4 "$(oid v4)"),
+        $(rework_kid fix-v4 rev-v4 open)]"
+printf 'fix-v4|blocks|V4\n' >> "$STUB_DEPS"
+oid v4 > "$GH_DIR/head_polecat_v4"
+: > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "rework fix-v4 is still open" "the open round is named as the thing due to move"
+has "$out" "0 reviews dispatched" "…nothing is dispatched"
+hasnt "$(cat "$STUB_ESCALATE_LOG")" "CALL" "…and a converging anchor costs no visit"
+eq "$(meta V4 answered_hold.codex)" "<absent>" "…nor a hold stamp"
+has "$(meta V4 pr.machine)" "progressing@" "…and the board still reads it as moving, because the rework is"
+
+echo "# a visit that does not file leaves nothing stamped, and still buys no review"
+store "[$(anchor V5 pull_request codex "" polecat/v5),
+        $(recorded_review rev-v5 V5 "$(oid v5)")]"
+oid v5 > "$GH_DIR/head_polecat_v5"
+out=$(STUB_ESCALATE_FAIL=1 run)
+has "$out" "escalation did not file" "a visit that did not file is reported"
+has "$out" "0 reviews dispatched" "…the refusal still holds the dispatch"
+eq "$(meta V5 answered_hold.codex)" "<absent>" "…and nothing is stamped, so the next pass retries the visit"
+
+echo "# the recorded verdict is read per gate, like every other ground"
+store "[$(anchor V6 pull_request codex "" polecat/v6),
+        {\"id\":\"rev-v6\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"other\",\"anchor_bead\":\"V6\",\"reviewed_oid\":\"$(oid v6)\",\"gc.outcome\":\"recorded\"}}]"
+oid v6 > "$GH_DIR/head_polecat_v6"
+out=$(run)
+has "$out" "1 reviews dispatched" "another gate's recorded verdict does not answer this one"
+
 # --- dispatch backstop -------------------------------------------------------
-# The ceiling bounds DISPATCHES. already_answered above sees only the rework a
-# verdict actually filed, so a review that ends writing no marker and leaving
-# no visible child returns the anchor to the state that triggered the dispatch
-# and the next pass repeats it. These fixtures pin where the refusal starts,
-# that it is never silent, and that it defers to the precise refusal.
+# The ceiling bounds DISPATCHES. already_answered above speaks only for a
+# verdict that was RECORDED, so a review closing without one returns the anchor
+# to the state that triggered the dispatch and the next pass repeats it. These
+# fixtures pin where the refusal starts, that it is never silent, and that it
+# defers to the precise refusal.
 echo "# under the ceiling nothing is refused"
 store "[$(anchor S1 pull_request codex "" polecat/s1 ',"dispatch_count":"4"')]"
 oid s1 > "$GH_DIR/head_polecat_s1"
@@ -883,6 +980,20 @@ for bad_shape in "settled" "settled@OID@" "settled@OID@2026-08-28T04:05:06Z@x"; 
     *) bad "left malformed: '$(machine X9)'" ;;
   esac
 done
+
+# The other wedge this arm can reach: a gate owed a verdict its own head already
+# carries, with no round open to move that head. It ranks under the exception,
+# which is the wedge the operator was already routed to.
+echo "# …and the answered hold is the arm's other wedge, ranked under the exception"
+store "[$(anchor X5 pull_request codex "" polecat/x5),
+        $(recorded_review rev-x5 X5 "$(oid x5)"),
+        $(anchor X6 pull_request "codex,other" "exception@$(oid x6)" polecat/x6 ',"gc.routed_to":"human"'),
+        {\"id\":\"rev-x6\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"other\",\"anchor_bead\":\"X6\",\"reviewed_oid\":\"$(oid x6)\",\"gc.outcome\":\"recorded\"}}]"
+oid x5 > "$GH_DIR/head_polecat_x5"
+oid x6 > "$GH_DIR/head_polecat_x6"
+run >/dev/null
+eq "$(pinned X5)" "wedged-answered@$(oid x5)" "a gate held at its own recorded verdict is a wedge, not progress"
+eq "$(pinned X6)" "wedged-exception@$(oid x6)" "…and where both stand, the exception is the one reported"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

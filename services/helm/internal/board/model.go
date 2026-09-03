@@ -345,7 +345,8 @@ type Tile struct {
 	PRBranch string `json:"pr_branch"`
 
 	// PRMachine is what the merge cadence can do with this anchor on its next
-	// pass: progressing, settled, wedged-exception, wedged-veto, or unknown.
+	// pass: progressing, settled, wedged-exception, wedged-veto,
+	// wedged-answered, or unknown.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An
