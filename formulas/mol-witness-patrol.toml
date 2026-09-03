@@ -365,9 +365,12 @@ case "${PREV_AT:-}" in
   *)  PREV_EPOCH=$(date -u -d "$PREV_AT" +%s 2>/dev/null || printf '') ;;
 esac
 NOW_EPOCH=$(date -u +%s)
+# `if`, not `[ ... ] && CRASH_LOOP=1`: a false test makes that AND-list the
+# block's last command and its exit status 1, so under `set -e` the caller dies
+# on the ordinary not-a-loop path, which is the one taken almost every cycle.
 case "$PREV_EPOCH" in
   ''|*[!0-9]*) : ;;
-  *) [ "$((NOW_EPOCH - PREV_EPOCH))" -lt "$CRASH_LOOP_WINDOW" ] && CRASH_LOOP=1 ;;
+  *) if [ "$((NOW_EPOCH - PREV_EPOCH))" -lt "$CRASH_LOOP_WINDOW" ]; then CRASH_LOOP=1; fi ;;
 esac
 # <<< crash-loop-window
 ```

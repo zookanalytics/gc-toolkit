@@ -110,6 +110,19 @@ echo "# the count is the history, and it keeps counting"
 eq "$(decide "$(ago 600)" '7' 'true')" "8 1" "an existing count increments"
 eq "$(decide "$(ago 90000)" '7' 'true')" "8 0" "and increments outside the window too"
 
+echo "# the block survives set -e, which the sibling guards in this step run under"
+# bash exempts a non-final element of an && list from set -e, so
+# `[ ... ] && CRASH_LOOP=1` does not abort when the test is false. That is load
+# bearing rather than incidental: an abort here would leave CRASH_LOOP unset in
+# the recovery loop, and unset reads as no loop only by luck.
+sete() {
+  PREV_AT="$1" PREV_COUNT="$2" PREV_FLAG="$3" \
+  bash -eu -c 'source "$0"; printf "%s %s" "$COUNT" "$CRASH_LOOP"' "$TMP/block.sh" 2>/dev/null
+}
+eq "$(sete "$(ago 90000)" '1' 'true')" "2 0" "the not-a-loop path completes under set -e"
+eq "$(sete "$(ago 600)" '1' 'true')" "2 1" "the loop path completes under set -e"
+eq "$(sete '' '' '')" "1 0" "and so does the no-history path"
+
 echo "# the window is tunable"
 eq "$(decide "$(ago 3600)" '1' 'true' 600)" "2 0" "a narrower window reads the same pair as two incidents"
 eq "$(decide "$(ago 90000)" '1' 'true' 172800)" "2 1" "a wider one reads them as a loop"
