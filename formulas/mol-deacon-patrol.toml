@@ -374,7 +374,7 @@ A sweep whose findings were all already tracked, and a `state=complete` with
 nothing but `ok`, append nothing. So does a sweep that only `started` — the
 ledger records what happened, not what is pending.
 
-Two adjacent duties, run every cycle whatever the sweep is doing:
+Three adjacent duties, run every cycle whatever the sweep is doing:
 - Closing a bead that names a doctor finding? Close it through
   `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
   ledger cannot say "fixed" while the check still fires.
@@ -406,6 +406,25 @@ Two adjacent duties, run every cycle whatever the sweep is doing:
   quota-park surface, so a race with a fresh park still cannot execute a
   parked session. The outcome comes back as a `DOG_DONE:` notice, which
   check-inbox ledgers next cycle.
+- Runaway polecats — the inverse of every stale check above: a session
+  ACTIVE and still moving, its last claim CLOSED, and no queued demand for
+  its pool. That is an agent with nothing left to run, and it burns tokens
+  at a rate the not-moving scans never see. Run
+  `$SCRIPTS/runaway-precondition.sh`. It classifies every active polecat
+  session and nudges its own first findings, so what this step owes it is
+  the warrant. Read its lines:
+  - `verdict=warrant` — already nudged, still in the state a pass later.
+    File ONE warrant with the block above, substituting the line's
+    `session=` for `<session>`, `--title="Runaway precondition: <rig>/<role>"`,
+    and the whole line as `warrant.reason`.
+  - `verdict=flag` — nudged this pass; nothing owed until it repeats.
+  - `verdict=grace` — its claim closed inside the drain window, which is
+    what a clean exit looks like. Not a finding.
+  - `verdict=unknown` — the probe could not classify it. Report it and say
+    which field was unreadable; never warrant an unproven session.
+  Say what the run reported even when every line is `clean`, and say so
+  again when `state_dir=unavailable`: with no memory of its nudges the
+  script can never reach `warrant`, so the ladder is stalled at the nudge.
 
 Close this step after the script has been run and its state acted on."""
 
