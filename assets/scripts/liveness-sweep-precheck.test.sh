@@ -654,13 +654,18 @@ PROG=liveness-sweep
 # set below the precheck's.
 # These are JSON payloads the extracted block reads through `--argjson`, never
 # command strings to be word-split — hence the disables.
+# An OPEN_PRS row carries the PR's last-update time beside its url, and the
+# clock the block ages it against is PASS_EPOCH. Both are given here so this
+# runs the same arithmetic the pass does; a PR touched now is not stale, so the
+# bead classifies `gated` and stays out of the candidate set either way.
 # shellcheck disable=SC2089
-OPEN_PRS='["https://github.com/zookanalytics/signal-loom/pull/521"]'
+OPEN_PRS="[{\"url\":\"https://github.com/zookanalytics/signal-loom/pull/521\",\"updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]"
+PASS_EPOCH="$(date -u +%s)"
 # shellcheck disable=SC2089
 WORKED='["f-worked"]'
 HUSK_STEPS='[]'
 # shellcheck disable=SC2090
-export OPEN_PRS WORKED HUSK_STEPS
+export OPEN_PRS WORKED HUSK_STEPS PASS_EPOCH
 # shellcheck disable=SC1090
 . "$TMP/classify.sh"
 CLASSIFY_IDS="$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")')"
