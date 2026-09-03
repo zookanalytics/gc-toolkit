@@ -13,12 +13,21 @@
 # path to the core pack (specs/2026-08-rewrite/plan.md:62).
 #
 # OVERLAY WIRING. Claude-hook overlays (overlays/cycle-recycle,
-# overlays/work-context) are staged into an agent's work dir via
-# `overlay_dir`, which the pack format carries only on [[patches.agent]] —
-# agent.toml has no overlay key. A patch modifies an EXISTING agent, and a
-# pack may patch its own, so each stanza below targets one of our native
-# agents and carries nothing but the overlay. Both hooks self-gate by role
-# and are safe no-ops elsewhere.
+# overlays/work-context, overlays/gh-origin-guard) are staged into an agent's
+# work dir via `overlay_dir`, which the pack format carries only on
+# [[patches.agent]] — agent.toml has no overlay key. A patch modifies an
+# EXISTING agent, and a pack may patch its own, so each stanza below targets one
+# of our native agents and carries nothing but the overlay.
+#
+# An agent takes exactly ONE overlay_dir, so an agent that needs both its own
+# hook and the shared gh guard gets the guard registered inside its own
+# overlay's settings.json rather than a second stanza. Every claude-provider
+# agent must end up with the guard: assets/scripts/gh-origin-guard-wiring.test.sh
+# enumerates agents/ and fails when one is left uncovered. The codex agents (dog,
+# polecat-codex) never read .claude/settings.json and are uncovered by design.
+#
+# cycle-recycle and work-context self-gate by role and are safe no-ops
+# elsewhere; the gh guard applies to every role, so it does not.
 
 [pack]
 name = "gc-toolkit"
@@ -55,6 +64,22 @@ overlay_dir = "overlays/cycle-recycle"
 [[patches.agent]]
 name = "deacon"
 overlay_dir = "overlays/cycle-recycle"
+
+# One bot account backs every agent's gh token, so an agent can write to any
+# repository that token reaches. A PreToolUse hook refuses the gh write verbs
+# aimed outside the origin of a rig we own (docs/gh-origin-guard.md). These three
+# carry no hook of their own; for the rest the same hook rides their overlay.
+[[patches.agent]]
+name = "converse"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
+name = "mechanik"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
+name = "proactive"
+overlay_dir = "overlays/gh-origin-guard"
 
 # Named singletons. The pool templates (polecat, polecat-codex, converse,
 # proactive) need no stanza — instance expansion is their lifecycle.
