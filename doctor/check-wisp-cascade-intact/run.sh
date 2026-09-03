@@ -34,18 +34,31 @@ BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 # standing backlog, which is the point at which every finding is a fresh
 # divergence repairable immediately.
 SEVERITY="${GC_DOCTOR_WISP_CASCADE_SEVERITY:-warn}"
+case "$SEVERITY" in
+    warn|error) ;;
+    # A check about a constraint that went missing without a word does not get
+    # to downgrade itself on a typo.
+    *) echo "cannot determine wisp cascade integrity"
+       printf '  - %s\n' "GC_DOCTOR_WISP_CASCADE_SEVERITY=\"$SEVERITY\" is neither warn nor error; refusing to guess a severity."
+       exit 1 ;;
+esac
 
 # issue_id on the three row tables, parent_id on the counter table. Names, not
 # shapes: a constraint under a different name enforcing the same edge reads as
 # missing here, and renaming one is a schema migration that has to reach every
 # store anyway.
-EXPECTED="fk_wisp_labels_issue fk_wisp_events_issue fk_wisp_comments_issue fk_wisp_child_counters_parent"
-EXPECTED_COUNT=4
+EXPECTED=(fk_wisp_labels_issue fk_wisp_events_issue fk_wisp_comments_issue fk_wisp_child_counters_parent)
+
+# The IN-clause is built from EXPECTED so the query and the comparison cannot
+# name different sets: a constraint listed in one and not the other would read
+# as permanently missing, or never be asked about at all.
+in_clause=""
+for want in "${EXPECTED[@]}"; do in_clause="${in_clause:+$in_clause,}'$want'"; done
 
 FK_QUERY="SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
  WHERE CONSTRAINT_SCHEMA = DATABASE()
    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
-   AND CONSTRAINT_NAME IN ('fk_wisp_labels_issue','fk_wisp_events_issue','fk_wisp_comments_issue','fk_wisp_child_counters_parent')"
+   AND CONSTRAINT_NAME IN ($in_clause)"
 
 # Zero constraints is ambiguous on its own: a store with no wisp plane at all
 # answers exactly as one that lost the cascade. Only that case pays for the
@@ -86,7 +99,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
 
     missing=()
-    for want in $EXPECTED; do
+    for want in "${EXPECTED[@]}"; do
         found=no
         while IFS= read -r have; do
             [ "$have" = "$want" ] && { found=yes; break; }
@@ -96,7 +109,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
 
     [ "${#missing[@]}" -ne 0 ] || continue
 
-    if [ "${#missing[@]}" -eq "$EXPECTED_COUNT" ]; then
+    if [ "${#missing[@]}" -eq "${#EXPECTED[@]}" ]; then
         plane=$(run_bounded gc bd sql --db "$rig_path/.beads" --json "$PLANE_QUERY" 2>/dev/null)
         if [ "$(printf '%s' "$plane" | jq -r '.[0].n // 0' 2>/dev/null)" = "0" ]; then
             notes+=("$label: no wisps table — this store carries no wisp plane, so the cascade does not apply")

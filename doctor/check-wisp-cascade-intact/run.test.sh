@@ -138,5 +138,13 @@ OUT=$(RIGS_RC=1 run_check); RC=$?
 eq "$RC" "1" "a failed rig enumeration warns rather than passing"
 has "$OUT" "cannot determine" "the message says the store set is unknown"
 
+# --- 9. a misspelled severity refuses rather than silently warning -------------
+rigs alpha
+store alpha
+OUT=$(GC_DOCTOR_WISP_CASCADE_SEVERITY=err run_check); RC=$?
+eq "$RC" "1" "an unrecognised severity refuses instead of guessing"
+has "$OUT" "neither warn nor error" "the refusal names the bad value"
+hasnt "$OUT" "missing 4" "the refusal happens before any store is read"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
