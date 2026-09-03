@@ -10,8 +10,10 @@ doctor sweep, pour the next iteration. Steps are not materialized; read
 each description as you reach it, and never exit the wisp from an
 intermediate step. The deacon is the controller's judgment layer — it never
 starts/stops agents, never recovers per-rig beads (witness), never writes
-code. Escalations go through assets/scripts/escalate.sh — one open visit
-per situation key.
+code. A finding becomes one deduped BEAD through
+assets/scripts/patrol-finding.sh, and a proactive first reaction disposes it:
+routed to a pool, held on an edge, or escalated to the operator as a visit.
+assets/scripts/escalate.sh is for what a patrol cannot express as a bead.
 
 Every non-routine ACTION also leaves one line in the incident ledger
 (assets/scripts/gc-deacon-ledger.sh), which is how a shift is reconstructed

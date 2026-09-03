@@ -17,8 +17,11 @@ polecat pool when mail reports a defect in the pack, and watches the refinery
 queue. It does NOT manage processes (controller), write code
 (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
-liveness-sweep exec order owns that surface). Escalations go through
-assets/scripts/escalate.sh — one open visit per situation key.
+liveness-sweep exec order owns that surface). A finding becomes one deduped
+BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
+disposes it: routed to a pool, held on an edge, or escalated to the operator
+as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
+a bead — an emergency that needs a human now.
 
 Every address this formula stamps comes from assets/scripts/resolve-route.sh.
 The agents it files to do not share a scope: the dog is city-scoped and its
