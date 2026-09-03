@@ -58,14 +58,12 @@ branch_name() {
     printf 'gc-%s-%s' "$AGENT" "$HASH"
 }
 
-# Idempotent: an existing worktree is only synced.
-if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
-    sync_worktree
-    exit 0
-fi
-
 mkdir -p "$(dirname "$WT")"
 
+# Stage dirs carry their target's name so a later run can tell its own orphaned
+# stage (safe to reclaim) from another target's — the parent directory is
+# shared by every agent in the rig, so the name is the only attribution.
+STAGE_SLUG=$(printf '%s' "$(basename "$WT")" | tr -c 'A-Za-z0-9_-' '_')
 STAGE=""
 
 merge_stage_entry() (
@@ -82,7 +80,11 @@ merge_stage_entry() (
         exit 0
     fi
 
+    # Existing destination wins; drop the losing source. Leaving it would keep
+    # the stage/orphan dir non-empty, so the rmdir that reclaims it (here and in
+    # restore_stage / adopt_orphan_stages) silently fails and the dir leaks.
     if [ -e "$DST" ]; then
+        rm -f "$SRC"
         exit 0
     fi
     mv "$SRC" "$DST"
@@ -99,10 +101,46 @@ restore_stage() {
     STAGE=""
 }
 
+# Reclaim a stage dir a force-killed run left behind: its EXIT trap never ran,
+# so nothing else merges it back and the staged contents are lost forever.
+# Adopt any orphan for THIS target before touching the worktree — including on
+# the already-a-worktree sync path below, which is where surviving orphans
+# actually accumulate. Merge back with the same "existing files win" rule
+# restore_stage uses. A stage named for a DIFFERENT target is left untouched:
+# it may be a concurrent run's live stage, and its contents are not ours. This
+# is best-effort self-heal and must never block worktree creation.
+adopt_orphan_stages() {
+    PARENT=$(dirname "$WT")
+    [ -d "$PARENT" ] || return 0
+    for ORPHAN in "$PARENT"/.gascity-worktree-stage.*; do
+        [ -d "$ORPHAN" ] || continue
+        REST=${ORPHAN##*/}
+        REST=${REST#.gascity-worktree-stage.}
+        case "$REST" in
+            "$STAGE_SLUG".*) ;;   # this target's own orphan
+            *.*) continue ;;      # another target's stage — may be live, leave it
+            *) ;;                 # legacy un-scoped orphan (pre-dates scoping)
+        esac
+        mkdir -p "$WT"
+        for ENTRY in "$ORPHAN"/.[!.]* "$ORPHAN"/..?* "$ORPHAN"/*; do
+            [ -e "$ENTRY" ] || continue
+            merge_stage_entry "$ENTRY" "$WT/$(basename "$ENTRY")"
+        done
+        rmdir "$ORPHAN" 2>/dev/null || true
+    done
+}
+adopt_orphan_stages || true
+
+# Idempotent: an existing worktree is only synced.
+if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
+    sync_worktree
+    exit 0
+fi
+
 # A non-empty target that is not yet a worktree: stage its contents aside,
 # create the worktree, then merge them back (existing files win).
 if [ -d "$WT" ] && [ "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
-    STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.XXXXXX")
+    STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.$STAGE_SLUG.XXXXXX")
     find "$WT" -mindepth 1 -maxdepth 1 -exec mv {} "$STAGE"/ \;
     trap 'restore_stage' EXIT HUP INT TERM
 fi
