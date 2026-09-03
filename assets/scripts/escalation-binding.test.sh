@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Every shipped escalate.sh call site owned by a CITY-scoped agent must name
-# the rig it files into. escalate.sh's default converse pool is
-# ${GC_RIG:+$GC_RIG/}gc-toolkit.converse: a rig-scoped agent renders that
-# qualified and routable, but a city-scoped one runs with GC_RIG unset and
-# renders it bare, an address no live pool holds. The route gate then refuses
-# before filing, so an unbound call site is a recipe that promises a
-# human-visible visit and produces none.
+# Every shipped escalate.sh or patrol-finding.sh call site owned by a
+# CITY-scoped agent must name the rig it files into. Both writers read GC_RIG,
+# and a city-scoped agent runs with it unset:
+#
+#   escalate.sh's default converse pool is ${GC_RIG:+$GC_RIG/}gc-toolkit.converse.
+#   A rig-scoped agent renders that qualified and routable; unbound it renders
+#   bare, an address no live pool holds, and the route gate refuses before
+#   filing. The call site promises a human-visible visit and produces none.
+#
+#   patrol-finding.sh files into the store GC_RIG selects and rig-qualifies the
+#   proactive pool from it. Unbound it falls back to the gc-toolkit store, so a
+#   finding about another rig lands where nobody working that rig will read it,
+#   and its dedup key never meets the earlier occurrences.
 #
 # A prompt is a durable control channel, so a runnable recipe in one counts
 # exactly as much as a formula step.
@@ -36,8 +42,11 @@ scope_of() { # agent name -> declared scope, empty when the agent is not shipped
 # Only runnable invocations: a call through $SCRIPTS, or the bare name with
 # its flags. A path test (`[ -x .../escalate.sh ]`) and a prose mention that
 # names no flags are neither.
-invocations() { grep -n -E '\$SCRIPTS/escalate\.sh|(^|[^-/[:alnum:]])escalate\.sh[[:space:]]+--' "$1"; }
-bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--pool[[:space:]]+[A-Za-z0-9._-]+/'; }
+WRITERS='escalate|patrol-finding'
+invocations() { grep -n -E "\\\$SCRIPTS/($WRITERS)\\.sh|(^|[^-/[:alnum:]])($WRITERS)\\.sh[[:space:]]+--" "$1"; }
+# GC_RIG= binds either writer; --pool <rig>/… binds escalate.sh, and --rig
+# binds patrol-finding.sh.
+bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--pool[[:space:]]+[A-Za-z0-9._-]+/|--rig[[:space:]]+[A-Za-z0-9._-]'; }
 
 EXAMINED=0
 for f in "$ROOT"/agents/*/prompt.template.md "$ROOT"/formulas/mol-*.toml; do
@@ -52,18 +61,18 @@ for f in "$ROOT"/agents/*/prompt.template.md "$ROOT"/formulas/mol-*.toml; do
   done <<< "$lines"
   EXAMINED=$((EXAMINED + 1))
   if [ -n "$unbound" ]; then
-    bad "$rel ($agent is city-scoped) has escalate.sh call sites with no rig binding:"
+    bad "$rel ($agent is city-scoped) has filing call sites with no rig binding:"
     printf '%s' "$unbound" | sed 's/^/       /'
   else
-    ok "$rel: every escalate.sh call site names its rig ($agent is city-scoped)"
+    ok "$rel: every filing call site names its rig ($agent is city-scoped)"
   fi
 done
 
 # A scan that examined nothing passes for the wrong reason. The city-scoped
-# escalating surfaces are the population this file exists to cover.
+# filing surfaces are the population this file exists to cover.
 [ "$EXAMINED" -ge 2 ] \
-  && ok "the scan reached $EXAMINED city-scoped escalating surfaces" \
-  || bad "the scan reached only $EXAMINED city-scoped escalating surface(s) — the filter stopped matching, it did not get clean"
+  && ok "the scan reached $EXAMINED city-scoped filing surfaces" \
+  || bad "the scan reached only $EXAMINED city-scoped filing surface(s) — the filter stopped matching, it did not get clean"
 
 echo
 echo "escalation-binding: $PASS passed, $FAIL failed"

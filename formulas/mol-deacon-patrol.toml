@@ -10,8 +10,10 @@ doctor sweep, pour the next iteration. Steps are not materialized; read
 each description as you reach it, and never exit the wisp from an
 intermediate step. The deacon is the controller's judgment layer — it never
 starts/stops agents, never recovers per-rig beads (witness), never writes
-code. Escalations go through assets/scripts/escalate.sh — one open visit
-per situation key.
+code. A finding becomes one deduped BEAD through
+assets/scripts/patrol-finding.sh, and a proactive first reaction disposes it:
+routed to a pool, held on an edge, or escalated to the operator as a visit.
+assets/scripts/escalate.sh is for what a patrol cannot express as a bead.
 
 Every non-routine ACTION also leaves one line in the incident ledger
 (assets/scripts/gc-deacon-ledger.sh), which is how a shift is reconstructed
@@ -224,35 +226,30 @@ no FLAG, no FLAG-ROOT, no outstanding RECHECK (re-run the block; a RECHECK
 whose cause is an unreadable directory never clears by waiting — fix the
 read or treat as FLAG).
 
-**3. React.** Escalate each finding through the one writer, carrying the
+**3. React.** File each finding through the one writer, carrying the
 verdict line VERBATIM (each is a complete one-line reason; do not
 re-template it):
 ```bash
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-# The subject must OUTLIVE the wisp: next-iteration burns this wisp, and the
-# converse sitting writes its takeaway to the subject the visit tracks.
-# escalate.sh redirects a wisp subject onto a generic standing subject rather
-# than lose that write, so naming one here is what keeps deacon findings in a
-# scope of their own instead of the shared fallback bucket.
-# GC_RIG is bound because the deacon is city-scoped: it selects both the store
-# the visit lands in and the rig segment its converse pool must carry, and
-# escalate.sh refuses the two when they disagree.
+# GC_RIG is bound because the deacon is city-scoped: it selects the store the
+# finding bead lands in, and it rig-qualifies the proactive pool whose worker
+# reacts to it.
 ESC_RIG="${GC_RIG:-gc-toolkit}"
-SUBJECT=$(GC_RIG="$ESC_RIG" gc bd list --status=open,in_progress --metadata-field task_kind=triage-subject --metadata-field triage.scope=deacon-findings --limit=1 --json 2>/dev/null | jq -r 'if type=="array" then (.[0].id // "") else "" end')
-if [ -z "$SUBJECT" ]; then
-  SUBJECT=$(GC_RIG="$ESC_RIG" gc bd create -t task --title "triage: deacon findings (this rig)" -d "Standing subject for deacon patrol escalations: doctor findings and Dolt backup flags. One open visit per situation key hangs here; dispositions are the converse sitting's takeaway." --json | jq -r '.id // .[0].id')
-  GC_RIG="$ESC_RIG" gc bd update "$SUBJECT" --set-metadata task_kind=triage-subject --set-metadata triage.scope=deacon-findings
-fi
-GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$SUBJECT" --key dolt-backup-<db> --message "<the Step 2 FLAG line, verbatim>"
-# server unreachable: --key dolt-server-unreachable (CRITICAL)
+GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key dolt-backup-<db> --title "Dolt backup: <db> is not restorable" --message "<the Step 2 FLAG line, verbatim>"
+# server unreachable: --key dolt-server-unreachable --priority 0 (CRITICAL)
 # FLAG-ROOT:          --key dolt-backup-root (names every affected database)
 # commit bloat:       --key dolt-commit-bloat-<db> (commits > 50000; compaction
 #                     is a manual operator action until an actuator exists)
 # orphan databases:   --key dolt-orphan-dbs (advisory orphans[] non-empty;
 #                     removal is a manual operator action — never --force here)
 ```
+The key is the identity of the situation, so a flag that is still true next
+cycle lands on the bead it already has as another occurrence, and files
+nothing. Give two databases two keys; a shared key would make them one
+finding.
+
 Before restarting anything, collect non-fatal diagnostics first
 (`SHOW FULL PROCESSLIST`, `gc dolt logs`, bounded `gc dolt health --json`,
 `gc dolt status`) — a blind restart destroys the evidence.
@@ -309,17 +306,33 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 - `idle`, `started` or `running`: there is no payload to read. Say which one
   and close the step. A sweep started now is collected a cycle or two later.
 - `complete`: the payload is the file named by `payload=`. Filter it below.
-- `failed`, `exceeded` or `blocked`: a FAILED scan. Escalate it with
-  `--key doctor-sweep-failed` and the whole `state=` block as the message.
-  `failed` and `exceeded` carry `elapsed=`, and `exceeded` names the check the
-  sweep was inside when its bound stopped it. `blocked` carries `reason=`
-  instead: the runner could not sweep at all, because the state directory is
-  unwritable, the run directory is contended, or `gc` is not on PATH. Nothing
-  was started, and the next cycle meets the same wall. Do not run the filter.
-- Any other state, or a non-zero `RC`: a FAILED scan too, escalated the same
-  way. A state this table does not name is a runner the step no longer
-  understands, and the failure it exists to prevent is a sweep going dark with
-  no visit behind it.
+- `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
+  the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
+  the message. `failed` and `exceeded` carry `elapsed=`, and `exceeded` names
+  the check the sweep was inside when its bound stopped it. `blocked` carries
+  `reason=` instead: the runner could not sweep at all, because the state
+  directory is unwritable, the run directory is contended, or `gc` is not on
+  PATH. Nothing was started, and the next cycle meets the same wall. Do not run
+  the actionable-subset filter — there is no payload.
+- Any other state, or a non-zero `RC`: a FAILED scan too, filed the same way. A
+  state this table does not name is a runner the step no longer understands,
+  and the failure it exists to prevent is a sweep going dark with no finding
+  behind it.
+
+A FAILED scan carries no payload to filter, so it files one finding under the
+shared key and the step is done:
+```bash
+SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+# GC_RIG is bound because the deacon is city-scoped: it selects the store the
+# finding bead lands in, and it rig-qualifies the proactive pool whose worker
+# reacts to it.
+ESC_RIG="${GC_RIG:-gc-toolkit}"
+GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key doctor-sweep-failed --title "doctor sweep did not complete: state=${STATE:-unknown} rc=$RC" --message "$SWEEP"
+```
+One key spans every failed cycle, so a sweep that keeps failing updates the one
+bead the first reaction disposes instead of filing another.
 
 The script validates `.results` before it will say `complete`, so a drifted
 schema arrives as `failed` and can never read as clean. `abandoned=` above zero
@@ -333,34 +346,25 @@ The actionable subset:
 jq -c '.results[] | select(.status != "ok")' "$PAYLOAD"
 ```
 For each finding: act directly on the simple ones (stale locks, temp
-cleanup, `gc doctor --fix`-able); dedup the rest against existing beads
-city-wide (`bd search` per rig store — your rig store is not the city, and
-a name miss is not proof of absence: search the finding's distinctive nouns
-too) — an OPEN match means tracked, note the id and move on. Escalate only
-the untracked remainder, one situation key per finding so repeats dedup:
+cleanup, `gc doctor --fix`-able); file the rest, one situation key per
+check so repeats land on one bead:
 ```bash
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 FINDING=$(jq -c '.results[] | select(.name=="<check>")' "$PAYLOAD")
-# The subject must OUTLIVE the wisp: next-iteration burns this wisp, and the
-# converse sitting writes its takeaway to the subject the visit tracks.
-# escalate.sh redirects a wisp subject onto a generic standing subject rather
-# than lose that write, so naming one here is what keeps deacon findings in a
-# scope of their own instead of the shared fallback bucket.
-# GC_RIG is bound because the deacon is city-scoped: it selects both the store
-# the visit lands in and the rig segment its converse pool must carry, and
-# escalate.sh refuses the two when they disagree.
+# GC_RIG is bound because the deacon is city-scoped: it selects the store the
+# finding bead lands in, and it rig-qualifies the proactive pool whose worker
+# reacts to it.
 ESC_RIG="${GC_RIG:-gc-toolkit}"
-SUBJECT=$(GC_RIG="$ESC_RIG" gc bd list --status=open,in_progress --metadata-field task_kind=triage-subject --metadata-field triage.scope=deacon-findings --limit=1 --json 2>/dev/null | jq -r 'if type=="array" then (.[0].id // "") else "" end')
-if [ -z "$SUBJECT" ]; then
-  SUBJECT=$(GC_RIG="$ESC_RIG" gc bd create -t task --title "triage: deacon findings (this rig)" -d "Standing subject for deacon patrol escalations: doctor findings and Dolt backup flags. One open visit per situation key hangs here; dispositions are the converse sitting's takeaway." --json | jq -r '.id // .[0].id')
-  GC_RIG="$ESC_RIG" gc bd update "$SUBJECT" --set-metadata task_kind=triage-subject --set-metadata triage.scope=deacon-findings
-fi
-GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$SUBJECT" --key "doctor-<check-name>" --message "$FINDING"
+GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key "doctor-<check-name>" --title "doctor <check-name>: <the one-line verdict>" --message "$FINDING"
 ```
-State what the dedup found — bead ids on a match, the stores and terms
-searched on a miss.
+Do not hand-search for an existing bead first. The key is what decides
+whether this finding already has one, and a bead filed elsewhere for the
+same cause is the reaction's judgment to make: it reads the bead's
+neighborhood and can hold this one on that bead as its `blocked` exit.
+Report the bead id the writer names, and say whether it filed or counted an
+occurrence.
 
 A finding you FIXED yourself leaves no visit behind it, so it leaves no
 record unless you write one:

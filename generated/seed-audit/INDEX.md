@@ -35,7 +35,7 @@ covers that dimension.
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
 | [`converse`](agents/converse.md) | 45,658 | 11,414 |
-| [`deacon`](agents/deacon.md) | 10,001 | 2,500 |
+| [`deacon`](agents/deacon.md) | 10,737 | 2,684 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
@@ -44,7 +44,7 @@ covers that dimension.
 | [`polecat-codex`](agents/polecat-codex.md) | 20,347 | 5,086 |
 | [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
 | [`refinery`](agents/refinery.md) | 8,626 | 2,156 |
-| [`witness`](agents/witness.md) | 12,186 | 3,046 |
+| [`witness`](agents/witness.md) | 12,807 | 3,201 |
 
 ## Formula recipes
 
@@ -56,7 +56,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,921 | 730 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,104 | 776 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
@@ -77,7 +77,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 3,494 | 873 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,639 | 659 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,862 | 715 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not

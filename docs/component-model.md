@@ -335,7 +335,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
-| `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key. Every workflow's door to a human. |
+| `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key — the door to a human, for what only a human can answer. The window is one OPEN visit, so a recurring observation belongs in `patrol-finding.sh` instead. |
+| `assets/scripts/patrol-finding.sh` | shared primitive | One durable bead per patrol finding, deduped on `finding.key`. A proactive first reaction disposes it: routed to a pool, held on an edge, or put to the operator as a visit. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. `doctor/check-seed-audit-current` reports its freshness in a checkout; its `--check-merge` mode is what `merge.sh` gates a landing on. |
@@ -359,8 +360,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
   ([authority-map.md](authority-map.md)).
 - **`liveness-sweep` is patrol, not visit.** It replaced two patrol detectors,
   `detect-stalled-workflows.sh` and `detect-parked-dispositions.sh`, and it
-  files its finding through `escalate.sh` the way every patrol does. Producing
-  a visit does not put a component in the visit workflow.
+  files a batch's unnamed waits as one `escalate.sh` visit. Producing a visit
+  does not put a component in the visit workflow. The deacon and witness
+  patrols reach a human by a longer road: `patrol-finding.sh` files the bead,
+  and the first reaction on it decides whether a human is owed anything at
+  all.
 
 ---
 

@@ -138,7 +138,7 @@ ALERT_LINES="$(grep -E 'FLAG line, verbatim' <<< "$STEP" || true)"
 if [ -z "$ALERT_LINES" ]; then
     bad "could not find the Step 3 backup alert template in the dolt-health step"
 else
-    ok "found the Step 3 backup alert template (escalate.sh, verdict verbatim)"
+    ok "found the Step 3 backup alert template (patrol-finding.sh, verdict verbatim)"
 
     if grep -qE 'newer file <' <<< "$ALERT_LINES"; then
         bad "Step 3 backup alert demands a 'newer file' most FLAG classes lack: $ALERT_LINES"

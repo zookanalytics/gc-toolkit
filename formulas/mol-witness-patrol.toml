@@ -17,8 +17,11 @@ polecat pool when mail reports a defect in the pack, and watches the refinery
 queue. It does NOT manage processes (controller), write code
 (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
-liveness-sweep exec order owns that surface). Escalations go through
-assets/scripts/escalate.sh — one open visit per situation key.
+liveness-sweep exec order owns that surface). A finding becomes one deduped
+BEAD through assets/scripts/patrol-finding.sh, and a proactive first reaction
+disposes it: routed to a pool, held on an edge, or escalated to the operator
+as a visit. assets/scripts/escalate.sh is for what a patrol cannot express as
+a bead — an emergency that needs a human now.
 
 Every address this formula stamps comes from assets/scripts/resolve-route.sh.
 The agents it files to do not share a scope: the dog is city-scoped and its
@@ -50,9 +53,12 @@ description = """
 gc mail inbox
 ```
 Triage HELP/blocked mail from polecats: unblock what you can (point at
-docs, suggest an approach); a blocker that needs a human becomes a visit
-via escalate.sh (`--subject <the polecat's bead> --key polecat-help`).
-Emergencies (crash, data loss, corruption, security) escalate immediately.
+docs, suggest an approach); a blocker you cannot becomes a finding bead
+(`patrol-finding.sh --scope witness-findings --key polecat-help --about <the
+polecat's bead> ...`), and the reaction decides whether it is work, a wait, or
+a question for the operator. `--about` is what keeps two blocked polecats two
+findings. Emergencies (crash, data loss, corruption, security) go straight to
+escalate.sh — they need a human now, not a disposition.
 A `DOG_DONE:` notice is a completed shutdown dance on a warrant this rig
 filed — note the outcome (the closed warrant carries the evidence) and
 archive. Lifecycle chatter is acknowledged and archived.
@@ -209,15 +215,12 @@ rm -f "$SESSIONS_RAW" "$SESSION_BEADS"
 **Fail safe — never orphan on an empty map, and never on anything else.**
 `MAP_TRIP` is the entire test. A non-empty `MAP_TRIP` means the map failed to
 load, which would false-orphan live agents. Skip orphan recovery this cycle
-and escalate
-(`escalate.sh --subject <the standing subject> --key witness-empty-liveness-map ...`),
-then continue to check-refinery. The subject is never this wisp: next-iteration
-burns it, and the converse sitting writes its takeaway to the subject the visit
-tracks. escalate.sh redirects a wisp subject onto a generic standing subject
-rather than lose that write, so naming one here is what keeps witness findings
-in a scope of their own. Use this rig's standing subject — the open bead
-carrying `task_kind=triage-subject` and `triage.scope=witness-findings`,
-created once if no open one exists.
+and file it
+(`patrol-finding.sh --scope witness-findings --key witness-empty-liveness-map
+--title "witness liveness map failed to load" --message "$MAP_TRIP ..."`),
+then continue to check-refinery. The finding bead is its own durable subject,
+so it outlives this wisp, which next-iteration burns; a cycle that trips the
+same way lands on that bead as another occurrence.
 
 An owner that resolves `absent` against a POPULATED map is never grounds for
 the fail safe. Closed sessions are excluded from `gc session list` on every
@@ -335,9 +338,10 @@ else
 fi
 ```
 When nothing is salvageable (no worktree and no branch on origin, or the
-guard refused), escalate the refusal best-effort
-(`escalate.sh --subject <bead> --key witness-salvage-refused ...`) and fall
-through — recovery is load-bearing, the notice advisory.
+guard refused), file the refusal best-effort
+(`patrol-finding.sh --scope witness-findings --key witness-salvage-refused
+--about <bead> ...`) and fall through — recovery is load-bearing, the notice
+advisory.
 
 **4. Verify before reset.** If the branch is already reachable from the
 target (`git merge-base --is-ancestor origin/$BRANCH origin/main`), the
@@ -376,8 +380,9 @@ it is handed. Running the pair on a step or a root therefore performs no close
 and reopens live molecule machinery into a pool.
 
 Exit 3 is a PARTIAL write: some fields landed and some did not, the bead is now
-half-released, and it needs an escalation
-(`escalate.sh --subject <bead> --key witness-partial-release ...`), not a retry.
+half-released, and it needs a finding
+(`patrol-finding.sh --scope witness-findings --key witness-partial-release
+--about <bead> ...`), not a retry.
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
@@ -435,9 +440,9 @@ esac
 ```bash
 gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
 ```
-Escalate `--key witness-crash-loop` only when `CRASH_LOOP=1`, and say which
-two recoveries were close together — a visit that reports only "recovered
-before" asks a human to re-derive the interval. `recovered_count` outside the
+File a finding `--key witness-crash-loop --about <bead>` only when `CRASH_LOOP=1`, and say which
+two recoveries were close together — a finding that reports only "recovered
+before" makes whoever handles it re-derive the interval. `recovered_count` outside the
 window is a bead that keeps coming back rather than one that is looping; it is
 recorded here so that signal can be built from evidence, and it is not this
 key.
@@ -485,12 +490,14 @@ approval-gated one (a PR awaiting the operator is a resting state worth
 zero escalations):
 ```bash
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"$SCRIPTS/escalate.sh" --subject <bead> --key witness-refinery-queue --message "Observation: <what is stuck and since when>. Recommendation: <what should happen>."
+"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue --about <bead> --title "refinery queue: <bead> stuck since <when>" --message "Observation: <what is stuck and since when>. Recommendation: <what should happen>."
 ```
-One escalation per stuck bead, never a queue-wide roundup. Close this step
-and continue to next-iteration."""
+One finding per stuck bead, never a queue-wide roundup: `--about` is what
+keeps them apart under the shared key, and a bead still stuck next cycle
+lands on the finding it already has. Close this step and continue to
+next-iteration."""
 
 [[steps]]
 id = "next-iteration"

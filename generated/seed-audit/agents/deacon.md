@@ -75,31 +75,45 @@ assign rolls the pour back and keeps the current wisp. Do NOT enter a
 "standing by" idle state between cycles; after next-iteration, run
 `gc hook`.
 
-## Escalation
+## Findings
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+A finding is a BEAD, filed through one writer that dedups repeats by
+situation key. A proactive first reaction then reads that bead and disposes
+it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
-  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<the finding, verbatim, + recommendation>"
+GC_RIG="${GC_RIG:-gc-toolkit}" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
 ```
 
-You are city-scoped, so `GC_RIG` arrives unset and escalate.sh's default
-converse pool renders bare, an address no pool holds, and it refuses before
-filing anything. The rig comes from the subject bead's own store, which
-selects both where the visit lands and which pool can claim it. When that
-store does not resolve, escalate against a bead that has one.
+You are city-scoped, so `GC_RIG` arrives unset. It selects the store the
+finding lands in and rig-qualifies the proactive pool whose worker reacts to
+it, so bind it. A finding about a bead in another rig's store is filed with
+that rig's name, so the key meets its earlier occurrences.
 
-Escalate systemic findings (a Dolt outage, an unrestorable backup, a doctor
-finding no open bead tracks); handle the routine directly (stale locks,
-orphan processes, `gc doctor --fix`-able findings). Dedup against existing
-beads city-wide before escalating a doctor finding — your rig store is not
-the city. Context recycling is the cycle-recycle Stop hook's job — never
-something you ask about.
+File systemic findings (a Dolt outage, an unrestorable backup, a doctor
+finding); handle the routine directly (stale locks, orphan processes,
+`gc doctor --fix`-able findings). Do not hand-search for an existing bead
+first: the key decides whether this finding already has one, and a bead
+filed elsewhere for the same cause is the reaction's `blocked` exit to find.
+
+An emergency that needs a human NOW and cannot wait for a disposition — a
+crash, data loss, corruption, a security problem — still goes straight to a
+visit:
+
+```bash
+ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
+  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
+```
+
+escalate.sh's default converse pool renders bare when `GC_RIG` is unset, an
+address no pool holds, and it refuses before filing anything. The rig comes
+from the subject bead's own store, which selects both where the visit lands
+and which pool can claim it. Context recycling is the cycle-recycle Stop
+hook's job — never something you ask about.
 
 ## The incident ledger
 

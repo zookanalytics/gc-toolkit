@@ -2,14 +2,24 @@
 # escalate.sh — one open visit per situation. Files a board-visible visit on
 # the subject bead (the canonical gate-visit shape from formulas/mol-visit.toml)
 # stamped with an escalation_key; a later call naming the same situation finds
-# the open visit and files nothing. Replaces escalation-gate.sh and every
-# patrol `gc mail send` — escalations are visits a human can claim and close.
+# the open visit and files nothing. A visit is a conversation held for a human,
+# so this is for what only a human can answer.
 #   escalate.sh --subject <bead-id> --key <situation-key> --message <text>
 #               [--pool <rig-qualified converse pool>]
-# Callers: patrol formulas (refinery/witness/deacon), signoff.sh peers, and any
-# script that would otherwise mail. A changed situation gets a NEW key.
+# Callers: formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
+# the refinery's merge path (pr-open.sh, pr-facts.sh, merge.sh, gate-ensure.sh),
+# a blocked polecat, and a patrol emergency that needs a human now.
+# A changed situation gets a NEW key.
 # A visit filed by the deacon also lands one entry in its incident ledger
 # (gc-deacon-ledger.sh); see the marked block at the foot of this file.
+#
+# What this dedup does NOT span: a situation that RECURS. The window is one
+# OPEN visit, and a converse sitting closes each visit, so a condition that
+# fires again after the sitting files another. A recurring observation belongs
+# in a durable bead instead — assets/scripts/patrol-finding.sh, which the
+# deacon and witness patrols file their findings through; the first reaction
+# on that bead decides whether it is work, a wait, or a question, and only the
+# question becomes a visit.
 # The route is proved against the live agent set before anything is created,
 # and an already-open visit carrying an unroutable route is repointed rather
 # than counted as a satisfied escalation. A rig-qualified --pool also selects
