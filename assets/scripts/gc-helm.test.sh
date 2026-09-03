@@ -167,6 +167,20 @@ case "$1 ${2:-}" in
       esac
     done ;;
   "bd dep")
+    # `dep list` is a READ: it answers from a per-bead fixture and never lands
+    # in FAKE_DEPS, which models the graph writes the edge assertions count.
+    # A bead with no fixture has no edges. Two beads model a store the guard
+    # cannot read: A-PROBEDEAD does not answer at all, and A-PROBEJUNK answers
+    # the way the real `dep list` reports a bead it cannot resolve — a JSON
+    # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
+    if [ "${3:-}" = "list" ]; then
+      case "${4:-}" in
+        A-PROBEDEAD*) exit 1 ;;
+        A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
+      esac
+      if [ -f "$FAKE_DEPLISTS/${4:-}.json" ]; then cat "$FAKE_DEPLISTS/${4:-}.json"; else printf '[]\n'; fi
+      exit 0
+    fi
     printf '%s\n' "$*" >> "$FAKE_DEPS"
     # A blocker named NOPE stands for every edge that cannot be written.
     case "$*" in *NOPE*) exit 1 ;; esac ;;
@@ -180,8 +194,38 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled"
-mkdir -p "$TMP/signal-loom/.beads"
+       FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists"
+mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
+
+# Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
+# returns: one full bead row per edge, keyed .dependency_type.
+#   A-BLOCKED   an open bead that is not a demand on it -> the work is there
+#   A-DEMANDED  its own demand, open -> answering it makes A-DEMANDED the work
+#   A-DONEBLK   the same delegated child, closed -> the wait is over
+#   CLOSED-A-FOLD  a disposed anchor that is ALSO blocked -> two refusals
+# A-PROBEDEAD and A-PROBEJUNK are answered by the stub's own arms and never
+# reach these files. Each keeps a fixture anyway, carrying a live blocker.
+# Teach the stub to serve it instead of failing and both probe cases go red.
+# That is what proves they pass on the unreadable path and not on an empty one.
+cat > "$TMP/deplists/A-BLOCKED.json" <<'J'
+[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}},
+ {"id":"d-mine","status":"closed","dependency_type":"blocks","metadata":{"gc.demand_for":"A-BLOCKED"}}]
+J
+cat > "$TMP/deplists/A-DEMANDED.json" <<'J'
+[{"id":"d-mine","status":"open","dependency_type":"blocks","metadata":{"gc.demand_for":"A-DEMANDED"}}]
+J
+cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
+[{"id":"w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/CLOSED-A-FOLD.json" <<'J'
+[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
+[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
+[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+J
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"
@@ -689,6 +733,114 @@ sh "$SCRIPT" takeaway UNKNOWN-A "plain stamp" --by host >/dev/null 2>&1 || true
 grep -qE '^bd update UNKNOWN-A( |$)' "$TMP/updates" \
   && ok "(FOLDBLIND) …while a takeaway WITHOUT --release is unchanged by the gate" \
   || bad "(FOLDBLIND) the gate now blocks a plain takeaway: $(cat "$TMP/updates")"
+
+# ── takeaway --route on a DELEGATED subject: refused ─────────────────────────
+# A pool route says "this bead is the work". A bead blocked by anything but its
+# own demand has its work on the blocker, so the route would only wait for the
+# blocker to close and then offer a bead with no method, forever. Covered:
+#   (DELEG)      an open non-demand blocker refuses the route, before any write
+#   (DELEGWHY)   …and the message names the blocker and the re-run
+#   (DEMAND)     blocked only by its own demand: the route still lands
+#   (DELEGDONE)  a closed blocker is not a wait: the route still lands
+#   (DELEGBARE)  the guard is scoped to --route; --release alone still stamps
+#   (DELEGPROBE) a store that will not answer allows the route, and warns
+#   (DELEGJUNK)  a payload that is not an edge array is unreadable the same way
+#   (DELEGFOLD)  a closed anchor is refused on its disposition, not on this
+: > "$TMP/updates"; : > "$TMP/deps"; printf '%s' "$POOL" > "$TMP/routed"
+DRC=0
+sh "$SCRIPT" takeaway A-BLOCKED "routed — the fix is slung" --by converse \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || DRC=$?
+eq "$DRC" "2" "(DELEG) an open non-demand blocker makes --route a usage error"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(DELEG) …refused before any write: the bead is untouched"
+grep -q 'w-child' "$TMP/derr" \
+  && ok "(DELEGWHY) the refusal names the blocker the work is on" \
+  || bad "(DELEGWHY) the blocker is unnamed (stderr: $(cat "$TMP/derr"))"
+grep -q 'd-mine' "$TMP/derr" \
+  && bad "(DELEGWHY) the bead's own demand was counted as delegated work" \
+  || ok "(DELEGWHY) …and a demand on this bead is not one of them"
+grep -q -- '--release alone' "$TMP/derr" \
+  && ok "(DELEGWHY) …and it names the call that does land" \
+  || bad "(DELEGWHY) no re-run spelled out (stderr: $(cat "$TMP/derr"))"
+
+# (DEMAND) the flow the demand verb builds: closing the demand is what makes
+# the subject ready, and then the subject IS the work.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+MRC=0
+sh "$SCRIPT" takeaway A-DEMANDED "actionable — the pool takes it once ruled" \
+   --by converse --release --route "$POOL" >/dev/null 2>"$TMP/derr" || MRC=$?
+eq "$MRC" "0" "(DEMAND) a bead blocked only by its own demand still routes"
+grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
+  && ok "(DEMAND) …and the route is written" \
+  || bad "(DEMAND) the route was lost: $(cat "$TMP/updates")"
+grep -q 'could not read the blockers' "$TMP/derr" \
+  && bad "(DEMAND) a probe that answered still warned it had not (stderr: $(cat "$TMP/derr"))" \
+  || ok "(DEMAND) …and a probe that answered says nothing: the warning stays a signal"
+
+# (DELEGDONE) a closed blocker is history, not a wait.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+CRC2=0
+sh "$SCRIPT" takeaway A-DONEBLK "actionable — nothing outstanding" \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || CRC2=$?
+eq "$CRC2" "0" "(DELEGDONE) a closed blocker does not refuse the route"
+
+# (DELEGBARE) the release without a route is the disposition this guard sends
+# callers back to, so it has to keep working on the very bead it refuses.
+: > "$TMP/updates"
+BRC=0
+sh "$SCRIPT" takeaway A-BLOCKED "ruled — the work is on the child" \
+   --by converse --release >/dev/null 2>"$TMP/derr" || BRC=$?
+eq "$BRC" "0" "(DELEGBARE) --release alone on the same bead is not refused"
+grep -q -- '--set-metadata gc.takeaway=ruled — the work is on the child' "$TMP/updates" \
+  && ok "(DELEGBARE) …and the headline lands" \
+  || bad "(DELEGBARE) the stamp was lost: $(cat "$TMP/updates")"
+
+# (DELEGPROBE) a store that will not answer must not cost a sitting its
+# disposition. The guard degrades to the behaviour it replaced, and says it
+# did: "no blockers" and "never looked" are otherwise the same silence.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+PRC=0
+sh "$SCRIPT" takeaway A-PROBEDEAD "actionable — routed" \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || PRC=$?
+eq "$PRC" "0" "(DELEGPROBE) an unreadable blocker probe allows the route"
+grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
+  && ok "(DELEGPROBE) …and the route is written" \
+  || bad "(DELEGPROBE) the route was lost: $(cat "$TMP/updates")"
+grep -q 'could not read the blockers on A-PROBEDEAD' "$TMP/derr" \
+  && ok "(DELEGPROBE) …and the caller is told the check did not run" \
+  || bad "(DELEGPROBE) the guard was skipped in silence (stderr: $(cat "$TMP/derr"))"
+grep -q -- '--release alone' "$TMP/derr" \
+  && ok "(DELEGPROBE) …and named the call that needs no probe" \
+  || bad "(DELEGPROBE) the warning offers no move (stderr: $(cat "$TMP/derr"))"
+
+# (DELEGJUNK) `dep list` reports a bead it cannot resolve as a JSON error
+# object on stdout. A pipeline never sees the exit code, so the SHAPE is the
+# only signal, and reading it as "no edges" would silently pass the guard.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+JRC=0
+sh "$SCRIPT" takeaway A-PROBEJUNK "actionable — routed" \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || JRC=$?
+eq "$JRC" "0" "(DELEGJUNK) a non-array payload allows the route too"
+grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
+  && ok "(DELEGJUNK) …and the route is written" \
+  || bad "(DELEGJUNK) the route was lost: $(cat "$TMP/updates")"
+grep -q 'could not read the blockers on A-PROBEJUNK' "$TMP/derr" \
+  && ok "(DELEGJUNK) …and it is reported unreadable, not empty" \
+  || bad "(DELEGJUNK) an error object was read as an edge list (stderr: $(cat "$TMP/derr"))"
+
+# (DELEGFOLD) a closed anchor blocked by delegated work meets two refusals.
+# This one yields: refusing here would exit before the headline and the quiesce
+# a folded anchor still needs, and a disposed bead is never routed anyway.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+FRC=0
+sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded, and blocked" --by converse \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || FRC=$?
+eq "$FRC" "4" "(DELEGFOLD) a closed anchor is refused on its disposition"
+grep -q 'has no method a pool can perform' "$TMP/derr" \
+  && bad "(DELEGFOLD) the blocker refusal preempted it (stderr: $(cat "$TMP/derr"))" \
+  || ok "(DELEGFOLD) …not on its blockers"
+grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
+  && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
+  || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
 
 # ── takeaway length: the ≤140 cap, ENFORCED (tk-9tbbk.1) ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
