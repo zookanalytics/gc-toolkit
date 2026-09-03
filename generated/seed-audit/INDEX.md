@@ -35,7 +35,7 @@ covers that dimension.
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
 | [`converse`](agents/converse.md) | 53,635 | 13,408 |
-| [`deacon`](agents/deacon.md) | 11,298 | 2,824 |
+| [`deacon`](agents/deacon.md) | 10,770 | 2,692 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 21,876 | 5,469 |
@@ -43,7 +43,7 @@ covers that dimension.
 | [`polecat`](agents/polecat.md) | 19,387 | 4,846 |
 | [`polecat-codex`](agents/polecat-codex.md) | 19,417 | 4,854 |
 | [`proactive`](agents/proactive.md) | 12,134 | 3,033 |
-| [`refinery`](agents/refinery.md) | 11,111 | 2,777 |
+| [`refinery`](agents/refinery.md) | 9,416 | 2,354 |
 | [`witness`](agents/witness.md) | 11,293 | 2,823 |
 
 ## Formula recipes
