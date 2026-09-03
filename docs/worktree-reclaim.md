@@ -40,7 +40,8 @@ should take.
 
 - The bead named by its directory is `open`, `in_progress` or `blocked`.
 - It holds content that exists nowhere else — a modification, an addition, an
-  untracked file.
+  untracked file, or an ignored file the working tree is the only copy of. git
+  omits ignored files from status by default, so the check asks for them.
 - A running process has its cwd inside it. `/proc` is read once per pass; the
   signal is one-directional, since a worktree nobody stands in owns no entry,
   so it only ever protects.

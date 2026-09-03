@@ -159,9 +159,18 @@ build_city
 M="$(mk_wt tk-ccc3)"; echo edited > "$M/file.txt"
 U="$(mk_wt tk-ddd4)"; echo new > "$U/untracked.txt"
 D="$(mk_wt tk-eee5)"; rm -f "$D/file.txt"
+# An ignored file is content that exists nowhere else too. git status omits it
+# by default, so a tracked .gitignore plus a local-only ignored file leaves the
+# porcelain output empty — the shape the --force removal cannot afford to read
+# as "nothing here". The .gitignore is committed so the only untracked content
+# is the ignored file itself, or an untracked .gitignore would hold on its own.
+G="$(mk_wt tk-iii8)"
+printf 'secret.local\n' > "$G/.gitignore"; git -C "$G" add .gitignore; git -C "$G" commit -qm "ignore secret.local"
+printf 'token\n' > "$G/secret.local"
 run > /dev/null
 if exists "$M"; then ok "a modification holds the worktree"; else bad "a modification holds the worktree"; fi
 if exists "$U"; then ok "an untracked file holds the worktree"; else bad "an untracked file holds the worktree"; fi
+if exists "$G"; then ok "an ignored file holds the worktree"; else bad "an ignored file holds the worktree"; fi
 if exists "$D"; then bad "a pure deletion does NOT hold the worktree"; else ok "a pure deletion does NOT hold the worktree"; fi
 
 # The deletion case is the one that matters at scale, so prove the reason it is

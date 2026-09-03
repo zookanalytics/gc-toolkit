@@ -18,7 +18,7 @@
 # What holds a worktree:
 #   - the bead named by its directory is open, in_progress or blocked
 #   - it holds content that exists nowhere else: a modification, an addition,
-#     an untracked file
+#     an untracked file, or an ignored file the working tree is the only copy of
 #   - a running process has its cwd inside it
 #   - the rig's ledger did not answer (an empty open-bead list is the
 #     signature of a store that is down, not of a rig with no work)
@@ -105,13 +105,16 @@ occupied() { # <path>
     return 1
 }
 
-# True when the worktree holds content that exists nowhere else. Every status
-# line must be a deletion — ' D' unstaged, 'D ' staged; anything else is
-# content this directory is the only copy of. A status that cannot be read
+# True when the worktree holds content that exists nowhere else. --ignored is
+# load-bearing: git omits ignored files from status by default, yet a local-only
+# ignored file exists nowhere else and the --force removal would take the only
+# copy of it. Every reported line must be a deletion — ' D' unstaged, 'D '
+# staged; anything else — a modification, an addition, an untracked or ignored
+# file — is content this directory alone holds. A status that cannot be read
 # holds the worktree too.
 holds_unique_content() { # <worktree-path>
     local out line
-    out="$(git -C "$1" status --porcelain 2>/dev/null)" || return 0
+    out="$(git -C "$1" status --porcelain --ignored 2>/dev/null)" || return 0
     [ -n "$out" ] || return 1
     while IFS= read -r line; do
         [ -n "$line" ] || continue
