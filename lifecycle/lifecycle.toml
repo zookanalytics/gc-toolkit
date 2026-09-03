@@ -214,6 +214,26 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # cannot inherit the disposition of the sitting before it
 # (assets/scripts/takeaway-settled-pairing.test.sh).
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
+# What would END a hold, recorded as metadata beside the prose that explains
+# it. A marker alone states that a bead is not moving and names no event that
+# would change that, so nothing can ever act on it and the bead stays hidden
+# for as long as the marker stands. assets/scripts/hold-sweep.sh writes this
+# key, and its reconcile pass (orders/hold-sweep.toml) releases a hold whose
+# condition has fired; docs/hold-sweep.md is the surface. Declared here so it
+# is readable beside the marker it qualifies, and so the writer reads the key
+# name from the declaration.
+# Scoped to triage.hold: blocked_reason is the refinery cap's own conclusion
+# and gc.takeaway answers itself through settled_keys above.
+release_condition_key = "triage.hold_until"
+# The condition vocabulary the pass can evaluate. A hold no condition
+# expresses still carries a review-by date, so no hold is silent forever:
+#   merged-within:<N>h            a merge landed in this rig within N hours
+#   bead-closed:<id>[,<id>...]    every named bead has reached a terminal state
+#   date:<YYYY-MM-DD>             the review-by date has arrived, UTC
+# A condition outside this list, or one naming a bead the store cannot read,
+# never releases: an unreadable condition is not evidence that a wait ended.
+release_conditions = ["merged-within", "bead-closed", "date"]
+
 # One key per gate, so the declaration is a prefix. dispatch_backstop.<g> is
 # written by gate-ensure.sh only where a gate has spent its dispatch ceiling,
 # and its value carries the count and the head it holds, so its presence is
