@@ -138,9 +138,14 @@ has already cost the sitting the operator sees.
 moot or benign is not re-filed for `GC_ESCALATE_VERDICT_WINDOW` seconds
 (default 86400). 24 hours sits inside the 52-hour empty band above, so it
 suppresses 23 of the 29 observed re-files and lets every gap of 74 hours or
-more through. Only those two verdicts suppress; every other outcome means the
-sitting acted, so the next occurrence stands on different ground. A situation
-that has genuinely changed takes a new `--key`, which is already the rule at
+more through. The newest closed visit for the situation decides, taken by
+timestamp across the whole closed set rather than a page of it — the busiest
+(key, subject) already carries 19 closed visits, enough that a truncated
+listing could return an older verdict as the latest. Only when that newest
+visit is moot or benign does the window suppress; every other outcome means
+the sitting acted, so the next occurrence stands on different ground and an
+older moot behind a newer ruling cannot mute it. A situation that has
+genuinely changed takes a new `--key`, which is already the rule at
 the top of that script, so the window cannot trap a new signal behind an old
 answer. Suppressed repeats are tallied on the visit that earned the verdict
 (`escalation.recurrences`) rather than dropped, which is both the audit trail

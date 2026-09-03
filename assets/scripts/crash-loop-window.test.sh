@@ -1,24 +1,14 @@
 #!/usr/bin/env bash
-# Hermetic test for the witness-patrol CRASH-LOOP WINDOW (tk-x3elmf).
+# Hermetic test for the witness-patrol CRASH-LOOP WINDOW.
 #
-# THE BUG: mol-witness-patrol's recover-orphaned-beads marked every recovered
-# bead `recovered=true` and read a repeat recovery of a bead already carrying
-# it as a crash loop. Nothing ever clears that flag and it carries neither a
-# time nor a count, so the escalation population was "every bead this rig has
-# ever recovered" — 109 of them when this was written, the oldest from
-# 2026-05-07 — and it only grows. Any later recovery of any of them, for any
-# reason including ordinary pool recycling, filed a witness-crash-loop visit.
-# Measured over 2026-09-01..02: 12 of the witness's 18 visits carried that key
-# and 6 closed moot, their bodies reading "already carries
-# metadata.recovered=true" and asking a human to check whether the pool was
-# "crash-looping ... not just recycling normally" — the question the detector
-# was supposed to have answered before spending the sitting.
-#
-# THE FIX: record when and how many, and decide on a RATE. Two recoveries
-# inside CRASH_LOOP_WINDOW are a loop; two a week apart are two incidents.
-# A bead carrying only the legacy flag has no recurrence evidence at all, so it
-# stamps a first timestamp and escalates nothing, draining that population in
-# one pass rather than escalating all of it.
+# mol-witness-patrol's recover-orphaned-beads decides a crash loop from a RATE.
+# It reads recovered_at and recovered_count before its own stamp overwrites
+# them, and escalates only when the previous recovery falls inside
+# CRASH_LOOP_WINDOW: two recoveries close together are a loop, two far apart are
+# two incidents. A bead carrying only the legacy `recovered=true` flag, with no
+# timestamp or count, holds no recurrence evidence, so it stamps a first
+# timestamp and escalates nothing. An unusable recovered_at is unknown, and
+# unknown never escalates.
 #
 # This test EXECUTES the real block extracted verbatim from the formula
 # (between the `crash-loop-window` markers), so it cannot drift from the
@@ -80,8 +70,9 @@ eq "$(decide '' '' '')" "1 0" "a first recovery counts 1 and escalates nothing"
 eq "$(cat "$TMP/err")" "" "and runs clean under set -u"
 
 echo "# the legacy population drains instead of escalating itself"
-# The whole defect in one case: 109 beads carry a bare recovered=true with no
-# timestamp. Reading that as a repeat is what filed the visits.
+# A bead carrying a bare recovered=true with no timestamp holds no recurrence
+# evidence, so it seeds a first count and escalates nothing rather than reading
+# the mark as a repeat.
 eq "$(decide '' '' 'true')" "2 0" "a bare legacy flag escalates nothing and seeds the count at 2"
 eq "$(decide '' 'notanumber' 'true')" "2 0" "an unparseable count falls back to the flag"
 eq "$(decide '' 'notanumber' '')" "1 0" "with no flag either, it starts over at 1"

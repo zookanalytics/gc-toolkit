@@ -226,16 +226,16 @@ fi
 # sitting re-filed the identical situation on its next cycle and spent another
 # one. This window is where that verdict is honored.
 #
-# Only those two suppress. Every other outcome means the sitting acted, so the
-# next occurrence stands on different ground. A situation that has CHANGED
-# takes a new key by the rule at the top of this file, so the window cannot
-# trap a new signal behind an old answer.
+# The newest closed visit for the situation decides, across every outcome. Only
+# moot and benign suppress; any other outcome means the sitting acted, so the
+# next occurrence stands on different ground and an older moot behind a newer
+# ruling cannot mute it. A situation that has CHANGED takes a new key by the
+# rule at the top of this file, so the window cannot trap a new signal behind an
+# old answer.
 #
-# The window is read from the whole closed set, not a page of it: one subject
-# already carries 19 closed visits under a single key, and a truncated listing
-# would miss the newest verdict and re-file exactly where suppression is owed.
-# The newest is taken by comparing timestamps rather than by trusting row
-# order.
+# The newest is chosen by timestamp across the whole closed set, not a page of
+# it, because a truncated listing could return an older verdict as though it
+# were the latest.
 #
 # Suppression is COUNTED, never silent — this script exists to end silent
 # mutes. The tally rides the visit that earned the verdict, so a recurrence
@@ -259,7 +259,6 @@ if [ "$VERDICT_WINDOW" -gt 0 ]; then
       [ .[]
         | select((.metadata.escalation_key // "") == $k)
         | select($s == "" or (.metadata["gc.continuation_group"] // "") == $s)
-        | select((.metadata["gc.outcome"] // "") as $o | $o == "moot" or $o == "benign")
         | { id: .id,
             outcome: (.metadata["gc.outcome"] // ""),
             n: (((.metadata["escalation.recurrences"] // "0") | tonumber?) // 0),
@@ -268,7 +267,9 @@ if [ "$VERDICT_WINDOW" -gt 0 ]; then
       | sort_by(.at)
       | last
       | if . == null then empty
-        else [ .id, .outcome, ((now - .at) | floor | tostring), (.n | tostring) ] | @tsv end
+        elif (.outcome == "moot" or .outcome == "benign")
+        then [ .id, .outcome, ((now - .at) | floor | tostring), (.n | tostring) ] | @tsv
+        else empty end
     end' 2>/dev/null)
   if [ -n "$VERDICT_ROW" ]; then
     V_ID="${VERDICT_ROW%%	*}";   V_REST="${VERDICT_ROW#*	}"

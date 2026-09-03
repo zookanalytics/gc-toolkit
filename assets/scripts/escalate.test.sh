@@ -374,11 +374,10 @@ out=$("$SUT" --subject tk-a --key k1 --message m --nonsense 2>&1); rc=$?
 eq "$rc" 2 "an unknown argument is rejected"
 
 echo "# a moot or benign verdict suppresses a re-file inside the window"
-# THE BUG this closes: the dedup above sees only OPEN visits, so the moment a
-# sitting closed a visit the same detector re-filed the identical situation on
-# its next cycle. Measured on this city: 44 visits were re-filed after a prior
-# visit for the same (key, subject) had closed, 29 of them behind a moot or
-# benign verdict — the two outcomes that mean no human was needed.
+# The open-visit dedup above sees only OPEN visits, so without this window a
+# detector whose condition outlives the sitting re-files the identical
+# situation on its next cycle. moot and benign are the two verdicts that mean
+# no human was needed, so only they suppress.
 ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
 closed_visit() {  # id key subject outcome age_seconds [recurrences]
   printf '{"id":"%s","status":"closed","title":"t","description":"d","notes":"","closed_at":"%s","metadata":{"task_kind":"visit","escalation_key":"%s","gc.continuation_group":"%s","gc.outcome":"%s"%s}}' \
@@ -426,17 +425,17 @@ reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
 "$SUT" --subject tk-b --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a different subject under the same key is unaffected"
 
-echo "# the NEWEST verdict decides, not the row the listing happened to return first"
-# A situation visited repeatedly accumulates closed visits — one subject in
-# this city carries 19 under a single key. Trusting row order would let a stale
-# moot suppress a situation a later sitting actually ruled on.
-reset "[$(closed_visit v-recent k1 tk-a ruled 3600),$(closed_visit v-stale k1 tk-a moot 200000)]"
+echo "# the NEWEST verdict decides, across every outcome, not the moot the filter reached first"
+# The lookup takes the newest closed visit and suppresses only when THAT one is
+# moot or benign. An older moot still inside the window must not mute a
+# situation a later sitting has since ruled on; both orderings are checked.
+reset "[$(closed_visit v-ruled k1 tk-a ruled 600),$(closed_visit v-moot k1 tk-a moot 3600)]"
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(visits)" "1" "an older moot behind a newer ruling does not suppress"
-reset "[$(closed_visit v-stale k1 tk-a ruled 200000),$(closed_visit v-recent k1 tk-a moot 3600)]"
+eq "$(visits)" "1" "an older moot INSIDE the window behind a newer ruling does not suppress"
+reset "[$(closed_visit v-ruled k1 tk-a ruled 200000),$(closed_visit v-moot k1 tk-a moot 3600)]"
 out=$("$SUT" --subject tk-a --key k1 --message m 2>&1)
 eq "$(visits)" "0" "a newer moot behind an older ruling does suppress"
-has "$out" "v-recent" "and it is the newest verdict that is named"
+has "$out" "v-moot" "and it is the newest verdict that is named"
 
 echo "# an ephemeral subject matches on the key alone, as its open dedup does"
 # A patrol wisp is burned and re-poured every cycle, so its id cannot identify
