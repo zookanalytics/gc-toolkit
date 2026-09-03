@@ -85,6 +85,10 @@ case "$Q" in
   *"COALESCE(SUM(CASE WHEN NOT EXISTS"*)
     t="$(tbl_of "$Q")" || { echo "stub: no table in census" >&2; exit 1; }
     set -- $(read_state "$t")
+    # Dolt renders an uncast SUM() over a million rows in scientific notation.
+    if [ -n "${STUB_FLOAT_ORPHANS:-}" ]; then
+      emit "{\"total\":\"${1:-0}\",\"orphans\":\"2.094721e+06\"}"; exit 0
+    fi
     emit "{\"total\":\"${1:-0}\",\"orphans\":\"${2:-0}\"}"; exit 0 ;;
   *"COUNT(*) AS n FROM"*)
     t="$(tbl_of "$Q")" || { echo "stub: no table in count" >&2; exit 1; }
@@ -244,6 +248,22 @@ export STUB_NO_WISPS_TABLE=1
 out="$("$SUT" --db lx 2>&1)"; rc=$?
 eq "$rc" "1" "a missing wisps table refuses the run"
 unset STUB_NO_WISPS_TABLE
+
+# --- a census count too large to render as an integer ------------------------
+# Dolt returns SUM() as a float, so past a million rows an uncast count arrives
+# as `2.094721e+06`. The SQL casts it back; if that cast is ever dropped, the
+# numeric guard has to refuse rather than treat the string as a row count.
+reset_state 2117303 2094721  0 0  0 0  0 0
+"$SUT" --db lx --dry-run >/dev/null 2>&1
+has "$(cat "$STUB_GC_LOG")" "AS SIGNED) AS orphans" "census casts the orphan count back to an integer"
+
+reset_state 2117303 2094721  0 0  0 0  0 0
+export STUB_FLOAT_ORPHANS=1
+out="$("$SUT" --db lx 2>&1)"; rc=$?
+eq "$rc" "1" "a float-rendered orphan count refuses rather than deleting"
+has "$out" "unreadable orphan count" "the refusal names the unreadable count"
+hasnt "$(cat "$STUB_GC_LOG")" "DELETE FROM" "a float-rendered count issued no DELETE"
+unset STUB_FLOAT_ORPHANS
 
 # --- usage -------------------------------------------------------------------
 reset_state 100 90  0 0  0 0  0 0

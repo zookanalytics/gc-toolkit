@@ -89,9 +89,12 @@ table_exists() { # <table>
 
 row_count() { sql_row "SELECT COUNT(*) AS n FROM $DB.$1" '"\(.n)"'; }
 
-# Total rows, and how many of them no wisp claims.
+# Total rows, and how many of them no wisp claims. SUM() comes back as a float
+# and renders in scientific notation past a million rows -- `2.094721e+06`, which
+# is neither an integer nor the right value -- so the count is cast back to an
+# integer in SQL. Only a table large enough to reach that threshold shows it.
 census() { # <table> -> "<total> <orphans>"
-    sql_row "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM $DB.wisps w WHERE w.id = $DB.$1.issue_id) THEN 1 ELSE 0 END), 0) AS orphans FROM $DB.$1" '"\(.total) \(.orphans)"'
+    sql_row "SELECT COUNT(*) AS total, CAST(COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM $DB.wisps w WHERE w.id = $DB.$1.issue_id) THEN 1 ELSE 0 END), 0) AS SIGNED) AS orphans FROM $DB.$1" '"\(.total) \(.orphans)"'
 }
 
 human() { # <bytes>
