@@ -118,12 +118,12 @@ fi
 # this session decided to work it, so the guard has had its say.
 #
 # A hold is wrong for one shape of that claim, and it is the shape a sitting
-# ends in. A visit records its ending twice and the two writes are not atomic:
-# the prompt stamps gc.outcome, reads it back, posts the sign-off, and only
-# then closes. Every path that stamps the field closes immediately after it
-# (the fold in step 1, the moot/benign exit in step 2, the sign-off in step 7),
-# so a visit still open while carrying one is a sitting whose record is
-# complete and whose close did not run. Held, it is offered back to its own
+# ends in. A visit records its ending in writes that are not atomic: the
+# prompt posts the sign-off, then stamps gc.outcome, reads it back, and
+# closes. Every path that stamps the field closes immediately after it
+# (the fold in step 1, the moot/benign exit in step 2, the sign-off path in
+# step 7), so a visit still open while carrying one is a sitting whose record
+# is complete and whose close did not run. Held, it is offered back to its own
 # session for as long as the pool has demand, and the close never runs. The
 # item keeps whatever headline it has: the hold stamped one when the sitting
 # began, and a closing takeaway that failed on the way out is not recovered

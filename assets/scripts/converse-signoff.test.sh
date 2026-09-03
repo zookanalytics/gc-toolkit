@@ -301,12 +301,26 @@ else
     # A close that is missing entirely reports close@none and fails here too:
     # deleting the close is not a way to satisfy an ordering check.
     s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF 'Ended (<one-word-outcome>):' | head -1 | cut -d: -f1)
+    s7_stamp=$(printf '%s\n' "$STEP7" | grep -nF 'gc.outcome=<one-word-outcome>' | head -1 | cut -d: -f1)
     s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'gc bd close "$VISIT"' | head -1 | cut -d: -f1)
     if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
         ok "the sign-off is posted BEFORE the visit is closed"
     else
         bad "the sign-off is posted BEFORE the visit is closed" \
             "sign-off@${s7_signoff:-none} close@${s7_close:-none} — a sign-off written after the close lands in a pane the drain is already taking (tk-747cl)"
+    fi
+    # The outcome stamp is the marker converse-claim.sh reads to finish a
+    # stranded visit without posting anything, so it must land AFTER the
+    # sign-off and immediately before the close. A stamp ahead of the sign-off
+    # reopens the original bug: a death between the stamp and the sign-off
+    # strands a visit that then finishes silently, dropping the sign-off it
+    # still owed (tk-ayd4c0).
+    if [ -n "$s7_signoff" ] && [ -n "$s7_stamp" ] && [ -n "$s7_close" ] \
+       && [ "$s7_signoff" -lt "$s7_stamp" ] && [ "$s7_stamp" -lt "$s7_close" ]; then
+        ok "the outcome stamp lands after the sign-off and before the close"
+    else
+        bad "the outcome stamp lands after the sign-off and before the close" \
+            "sign-off@${s7_signoff:-none} stamp@${s7_stamp:-none} close@${s7_close:-none} — a stamp ahead of the sign-off lets converse-claim.sh finish a visit whose sign-off never posted (tk-ayd4c0)"
     fi
 fi
 # The heading and the procedure disagreed for as long as the bug existed, and
@@ -338,27 +352,21 @@ fi
 # exit, so a release keyed to the item's current state finds "held" on an item
 # nobody has ruled on, and drops the declared wait the hold was written to
 # record.
-signoff_block=$(awk '
+release_block=$(awk '
     /^[[:space:]]*```/ {
         if (infence) { if (hit) { printf "%s", buf; exit } infence = 0 }
         else { infence = 1; buf = ""; hit = 0 }
         next
     }
     !infence { next }
-    { buf = buf $0 "\n"; if (index($0, "gc.outcome=<one-word-outcome>") > 0) hit = 1 }
+    { buf = buf $0 "\n"; if (index($0, "--to unanchored") > 0) hit = 1 }
 ' "$PROMPT")
-if [ -z "$signoff_block" ]; then
-    bad "step 7's writes are a runnable block" \
-        "no fenced block performs the sign-off writes — prose alone leaves the role to improvise them"
+if [ -z "$release_block" ]; then
+    bad "step 7 releases a ruled hold in a runnable block" \
+        "no fenced block runs the --to unanchored release — without it an item stays in held after the decision lands, and the state stops meaning waiting"
 else
-    ok "step 7's writes are a runnable block"
-    if printf '%s' "$signoff_block" | grep -qF -- '--to unanchored'; then
-        ok "step 7 still releases a hold whose ruling landed"
-    else
-        bad "step 7 still releases a hold whose ruling landed" \
-            "without the release an item stays in held after the decision lands, and the state stops meaning waiting"
-    fi
-    rel_guard=$(printf '%s' "$signoff_block" | grep -F 'state "$ITEM"' | grep -F '"held"' | head -1)
+    ok "step 7 releases a ruled hold in a runnable block"
+    rel_guard=$(printf '%s' "$release_block" | grep -F 'state "$ITEM"' | grep -F '"held"' | head -1)
     if [ -z "$rel_guard" ]; then
         bad "the release from held is guarded at all" \
             "no conditional in step 7 reads the item's state before transitioning it"
@@ -370,7 +378,7 @@ else
     fi
     # The gate has to fail CLOSED. An absent or affirmative default releases
     # every hold that passes through step 7, which is the defect itself.
-    rel_default=$(printf '%s' "$signoff_block" | grep -E '^[[:space:]]*RULED=' | head -1)
+    rel_default=$(printf '%s' "$release_block" | grep -E '^[[:space:]]*RULED=' | head -1)
     if printf '%s' "$rel_default" | grep -qE '^[[:space:]]*RULED=no([[:space:]]|$)'; then
         ok "the ruling gate defaults to leaving the hold in place"
     else
@@ -1238,14 +1246,17 @@ eq "$COUT" "action=drain reason=out-of-group bead=tk-new group=tk-other" \
 
 echo "── a sitting stranded between its outcome stamp and its close is finished ──"
 
-# A sitting does not end in one write. Step 7 stamps gc.outcome on the visit,
-# reads it back, posts the sign-off, and closes last of all. A session that dies
-# in that window leaves a visit that is in_progress, assigned, and carrying a
-# final outcome, and every re-claim reports it as `existing_assignment`. The
-# hold answered, the prompt read that as a sitting still underway and went back
-# to waiting, and the close never ran. A finished sitting was indistinguishable
-# from a held one, and liveness-sweep.sh classifies the live visit's subject as
-# `conversing`, so nothing else raised it either.
+# A sitting does not end in one write. Step 7 posts the sign-off, then stamps
+# gc.outcome on the visit, reads it back, and closes last of all. A session that
+# dies between the stamp and the close leaves a visit that is in_progress,
+# assigned, and carrying a final outcome, and every re-claim reports it as
+# `existing_assignment`. The hold answered, the prompt read that as a sitting
+# still underway and went back to waiting, and the close never ran. A finished
+# sitting was indistinguishable from a held one, and liveness-sweep.sh classifies
+# the live visit's subject as `conversing`, so nothing else raised it either.
+# The stamp lands after the sign-off, so a visit carrying the outcome has already
+# had its last word: finishing it closes a sitting that is over, not one whose
+# sign-off is still owed.
 STRANDED='[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"task_kind":"visit","gc.outcome":"settled"}}]'
 LIVE_VISIT='[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"task_kind":"visit"}}]'
 

@@ -147,10 +147,10 @@ The loop, every visit:
    Then go to step 8 and claim again. **Post nothing, and run none of
    steps 2 through 7.** Their writes all landed once already, so re-running
    them stamps a second takeaway over the sitting's own and re-states a
-   demand that was answered. The sign-off is the one thing genuinely
-   missing, and it was owed to a thread that went with the session holding
-   it. This pane is a different thread, and a sign-off for a conversation
-   it never saw reads as a sitting nobody had.
+   demand that was answered. Step 7 posts the sign-off before it stamps
+   `gc.outcome`, so a visit carrying the stamp already had its last word;
+   this pane is a different thread, and repeating a sign-off for a
+   conversation it never saw reads as a sitting nobody had.
 
    Re-claiming only ends the finish when the close took. A visit still open
    is offered back under the same reason and finishes to the same refusal,
@@ -468,8 +468,6 @@ The loop, every visit:
      "$LC" transition "$ITEM" --to unanchored --route "<the pool that owns it now, or human>" \
        || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
    fi
-   gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
-   gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    ```
    **Set `RULED` from what this sitting actually settled.** The gate
    starts shut, so a sitting that ends without setting it re-states the
@@ -481,8 +479,15 @@ The loop, every visit:
    Ended (<one-word-outcome>): <what this sitting settled, in one line>
    Look at: <subject-id> — <the one thing to read or do next>
    ```
-   Only then close the visit, with nothing said after it:
+   Only then stamp the outcome and close the visit — the sitting's last
+   actions, with nothing said after them. The stamp is the last write
+   before the close on purpose. An open visit carrying `gc.outcome` is then
+   a sitting whose sign-off already posted and whose only missing write is
+   the close. That is the one shape `converse-claim.sh` finishes without
+   posting anything.
    ```bash
+   gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
+   gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"
    ```
    **If this sitting ROUTED work, file that work as a SIBLING of the
