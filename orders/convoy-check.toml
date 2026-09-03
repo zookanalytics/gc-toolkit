@@ -1,0 +1,31 @@
+# convoy-check — the sweep behind the event-driven convoy closer. Closing the
+# last member of a convoy fires the controller's bead-close autoclose, which
+# closes the convoy then and there. A convoy the event misses has nothing left
+# to fire it, so it stays open forever, and the residue is not inert:
+# `gc convoy list`, the stranded scan and every deacon's completion check all
+# read open convoys, so the board reads busier than the work is.
+#
+# `gc convoy check` is the whole implementation, and it applies the same
+# predicate as the event-driven arm rather than a wider one — an open convoy
+# whose tracked members have all reached a terminal status, closed or
+# tombstone. So the sweep closes only what the bead-close hook would already
+# have closed had it fired. Two classes both arms leave alone: a convoy
+# labelled `owned`, which terminates through `gc convoy land` against a
+# recorded merge, and a convoy with no tracked members at all, so "all members
+# finished" is never vacuously true.
+#
+# City scope is forced, not preferred: the verb opens every store named in
+# city.toml and takes no rig argument. Registered per rig, each importing rig
+# would run that same city-wide sweep, and single-flight is keyed per rig — so
+# the rigs would race one another to close the same convoys.
+#
+# No `idempotent` key, because the sweep writes. Idempotence lets the
+# dispatcher fire past an open-work gate that timed out, which is the moment a
+# second sweep is most likely to collide with the first.
+[order]
+description = "Close open convoys whose tracked members have all reached a terminal status"
+trigger = "cooldown"
+interval = "1h"
+exec = "gc convoy check"
+timeout = "300s"
+scope = "city"
