@@ -12,8 +12,8 @@
 # Guards, all fail-closed: an empty or unreadable `wisps` makes every child row
 # look orphaned, so a zero count refuses the run; a missing table refuses it; a
 # batch that removes nothing ends the table rather than spinning; and a table
-# whose live-linked rows dropped over its own purge aborts the pass before the
-# next table and before the reclaim.
+# whose live-linked rows dropped over its own purge, with no wisp expiry to
+# account for it, aborts the pass before the next table and before the reclaim.
 # Batched because one transaction over millions of rows reaps the connection.
 # Each batch commits its own tables, so an interrupted run leaves durable work
 # and a clean working set, and re-running resumes. A concurrent writer
@@ -194,14 +194,21 @@ for t in $CHILD_TABLES; do
     DELETED_TOTAL=$((DELETED_TOTAL + deleted))
 
     # Abort before the next table and before the reclaim if this one lost rows a
-    # wisp still points at. Live-linked rows may GROW during a run; only a drop
-    # means the predicate reached something it must not.
+    # wisp still points at. A drop is not proof on its own: a wisp expiring
+    # mid-run moves its own children into the orphan class, and `wisp-compact`
+    # expires wisps hourly against a run that takes tens of minutes. So a drop
+    # accuses the delete only when the wisp population did not itself shrink.
     row="$(census "$t")" || die "cannot re-census $DB.$t"
     now_total="${row%% *}"; now_orph="${row##* }"
     numeric "$now_total" "row total for $DB.$t"; numeric "$now_orph" "orphan count for $DB.$t"
     was_total="${BEFORE_TOTAL[$t]}"; was_orph="${BEFORE_ORPH[$t]}"
     if [ "$((now_total - now_orph))" -lt "$((was_total - was_orph))" ]; then
-        die "$DB.$t live-linked rows fell from $((was_total - was_orph)) to $((now_total - now_orph)) — the purge reached a live wisp; aborting before reclaim"
+        wisps_now="$(sql_row "SELECT COUNT(*) AS n FROM $DB.wisps" '"\(.n)"')" || die "cannot re-count $DB.wisps"
+        numeric "$wisps_now" "wisp count"
+        if [ "$wisps_now" -ge "$LIVE_WISPS" ]; then
+            die "$DB.$t live-linked rows fell from $((was_total - was_orph)) to $((now_total - now_orph)) and no wisp expired to explain it — the purge reached a live wisp; aborting before reclaim"
+        fi
+        echo "  note: $t live-linked $((was_total - was_orph)) -> $((now_total - now_orph)), with $((LIVE_WISPS - wisps_now)) wisps expired during the run"
     fi
     AFTER_TOTAL[$t]="$now_total"; AFTER_ORPH[$t]="$now_orph"
 done

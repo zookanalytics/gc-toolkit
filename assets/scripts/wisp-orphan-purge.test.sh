@@ -81,7 +81,9 @@ case "$Q" in
     fi
     exit 0 ;;
   *"COUNT(*) AS n FROM"*.wisps)
-    emit "{\"n\":\"${STUB_WISPS:-5}\"}"; exit 0 ;;
+    if [ -s "$STUB_STATE/.wisps" ]; then emit "{\"n\":\"$(cat "$STUB_STATE/.wisps")\"}"
+    else emit "{\"n\":\"${STUB_WISPS:-5}\"}"; fi
+    exit 0 ;;
   *"COALESCE(SUM(CASE WHEN NOT EXISTS"*)
     t="$(tbl_of "$Q")" || { echo "stub: no table in census" >&2; exit 1; }
     set -- $(read_state "$t")
@@ -103,6 +105,10 @@ case "$Q" in
     extra=0
     if [ "${STUB_EAT_LIVE:-}" = "$t" ] && [ ! -e "$STUB_STATE/.ate-$t" ]; then
       extra="${STUB_EAT_LIVE_N:-1}"; : > "$STUB_STATE/.ate-$t"
+      # STUB_WISPS_DROP models wisp-compact expiring wisps during the run, which
+      # legitimately moves their children into the orphan class.
+      [ -n "${STUB_WISPS_DROP:-}" ] && \
+        printf '%s\n' "$(( ${STUB_WISPS:-5} - STUB_WISPS_DROP ))" > "$STUB_STATE/.wisps"
     fi
     printf '%s %s\n' "$((total - n - extra))" "$((orph - n))" > "$STUB_STATE/$t"
     printf '{}\n'; exit 0 ;;
@@ -129,7 +135,7 @@ reset_state() { # <events> <events_orph> <labels> <labels_orph> <comments> <comm
     printf '%s %s\n' "$5" "$6" > "$STUB_STATE/wisp_comments"
     printf '%s %s\n' "$7" "$8" > "$STUB_STATE/wisp_dependencies"
     : > "$STUB_GC_LOG"
-    unset STUB_EAT_LIVE STUB_EAT_LIVE_N STUB_NOTHING_TO_COMMIT STUB_COMMIT_ERR
+    unset STUB_EAT_LIVE STUB_EAT_LIVE_N STUB_NOTHING_TO_COMMIT STUB_COMMIT_ERR STUB_WISPS_DROP
     unset STUB_NO_WISPS_TABLE STUB_COMPACT_RC
     export STUB_WISPS=5
 }
@@ -211,6 +217,18 @@ has "$out" "reached a live wisp" "the abort names the cause"
 hasnt "$(cat "$STUB_GC_LOG")" "compact" "no reclaim after a live-row loss"
 hasnt "$(cat "$STUB_GC_LOG")" "DELETE FROM wisp_labels" "abort stops before the next table"
 unset STUB_EAT_LIVE STUB_EAT_LIVE_N
+
+# Mirror: the same drop, with wisps expiring during the run, is the ordinary
+# case. `wisp-compact` expires wisps hourly and a purge takes tens of minutes,
+# so a guard that fired here would abort nearly every real run.
+reset_state 100 90  50 40  0 0  0 0
+export STUB_EAT_LIVE=wisp_events STUB_EAT_LIVE_N=3 STUB_WISPS_DROP=2
+out="$("$SUT" --db lx 2>&1)"; rc=$?
+eq "$rc" "0" "a live-linked drop explained by wisp expiry does not abort"
+has "$out" "2 wisps expired during the run" "the run says what accounted for the drop"
+has "$(cat "$STUB_GC_LOG")" "DELETE FROM wisp_labels" "the pass continues to the next table"
+has "$(cat "$STUB_GC_LOG")" "compact --gc-only" "the pass still reclaims"
+unset STUB_EAT_LIVE STUB_EAT_LIVE_N STUB_WISPS_DROP
 
 # --- reclaim wiring ----------------------------------------------------------
 reset_state 100 90  0 0  0 0  0 0
