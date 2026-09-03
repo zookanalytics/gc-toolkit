@@ -46,9 +46,14 @@ against each implementation, and why the port needs no test suite of its own.
 ## The fallback, and when it goes away
 
 Until a subcommand's binary is deployed, its script answers. `lifecycle.sh`
-resolves the binary explicitly — `$GCTK_BIN`, else
-`$GC_CITY_ROOT`/`$GC_CITY`'s `.gc/services/gctk/bin/gctk` — and `exec`s it when
-one is there. `GCTK_BIN=none` forces the shell implementation.
+resolves the binary explicitly — `$GCTK_BIN`, else the
+`.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`, `$GC_CITY` or
+`$GC_CITY_ROOT` — and `exec`s it when one is there. `GCTK_BIN=none` forces the
+shell implementation. That precedence is the one the rest of the pack reads,
+and `GC_CITY_PATH` leads it because that is the variable a supervisor puts in
+an agent session: a chain without it answers from the fallback in the shape
+most callers run in. `doctor/check-cadence-live` resolves the same way, for the
+same reason.
 
 Resolution is never a walk up from the script's own path. The hermetic suites
 run from a tree that lives inside a live city, and a filesystem hunt would find
@@ -61,7 +66,10 @@ The scripts are deleted when the last port lands and the fallback drops.
 `orders/gctk-build.toml` runs `assets/scripts/gc-gctk-build.sh --deploy` on a
 5-minute cooldown: build if a source is newer than the binary or the last
 record shows the binary was built from another revision, publish by atomic
-rename, write a build-status record. Both tests are needed — `find -newer`
+rename, write a build-status record. It finds the city by the env chain above
+and, failing that, by `gc service list --json`'s `city_path` — the order runner
+carries no city variables at all, so the listing is the only route a scheduled
+tick has. Both tests are needed — `find -newer`
 cannot see an input a commit deleted. Nothing builds in a caller's path — a build inside the cadence would put a Go toolchain
 between a merge and its ledger write.
 

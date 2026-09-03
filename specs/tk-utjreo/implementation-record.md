@@ -42,16 +42,26 @@ which is the comparison the spec asks for in place of the shell-constant
 mirror.
 
 **The fallback.** `lifecycle.sh` keeps its shell implementation and `exec`s the
-binary when one resolves. Resolution is explicit — `$GCTK_BIN`, else
-`$GC_CITY_ROOT`/`$GC_CITY` — and never a walk up from the script's own path,
-because the hermetic suites run from a tree inside a live city and a filesystem
-hunt would find that city's binary and silently stop testing the script.
-`GCTK_BIN=none` forces the shell.
+binary when one resolves. Resolution is explicit — `$GCTK_BIN`, else the city
+named by `$GC_CITY_PATH`, `$GC_CITY` or `$GC_CITY_ROOT` — and never a walk up
+from the script's own path, because the hermetic suites run from a tree inside
+a live city and a filesystem hunt would find that city's binary and silently
+stop testing the script. `GCTK_BIN=none` forces the shell.
+
+`GC_CITY_PATH` leads because it is the variable a supervisor puts in an agent
+session, where the other two are absent: a chain without it leaves every agent
+on the fallback, which is the shape most callers run in.
+`doctor/check-cadence-live` resolves the same way and reports the same binary.
 
 **Build and deploy.** `orders/gctk-build.toml` +
 `assets/scripts/gc-gctk-build.sh`, on the helm-build pattern: cooldown,
 staleness by `find -newer` **and** by the recorded `binary_rev`, atomic publish
-by rename, never a build in a caller's path. The second test is not redundant:
+by rename, never a build in a caller's path. The city comes from the env chain
+first, so a hand run publishes where its operator meant, and from
+`gc service list --json`'s `city_path` otherwise — `gc supervisor run`, which
+spawns the cooldown order, carries no city variable at all, so a scheduled tick
+has no other route and would refuse on every pass while the order arms above
+reported the cadence healthy. The second test is not redundant:
 `find -newer` can only compare files that still exist, so a deletion-only
 commit leaves nothing newer than the binary and the mtime test alone would
 record the new revision for a binary built from the old one. No restart step — gctk is a command, not a service.
@@ -101,6 +111,42 @@ and starts reading the operator's deployed binary; the suspended-rig case did,
 and failed against a city carrying a deployed gctk while passing everywhere
 else. Vary an input through the helper instead.
 
+## The port tracks a moving script
+
+`lifecycle.sh` is not frozen while it is being replaced. Between the port's
+first cut and its landing, the script grew a `held` state with transitions in
+both directions, `LIFECYCLE_HUMAN_STATES` with the refusal of an EMPTY route
+into a human state, the park sentinel's refusal without a takeaway,
+`--takeaway` writing the text/at/by triple capped at 140 codepoints with the
+settled-key cleared beside it, `--set-dated` with the compare-and-preserve rule
+for the `@<since>` component, and the detached-state clear of the assignee on a
+bead still at `status=open`. The port carries all of them.
+
+The two-arm suite is what makes that a bounded job rather than a reading
+exercise: every case the script gained ran against the port and failed, so the
+work was enumerated by the suite rather than by inspection. It is also why the
+port reproduces the idle-transition write elision in the same position and
+under the same conditions the script applies it. A caller cannot tell which
+implementation answered, so eliding on one side and writing on the other is a
+divergence in what a cadence pass costs, whichever side is "better".
+
+The cap on `--takeaway` is a rendering bound rather than machine state, so it
+is not in `lifecycle.toml` and the drift assertion cannot reach it there.
+`--dump-machine` prints it, the gctk arm holds it against
+`LIFECYCLE_TAKEAWAY_MAX`, and the shell arm already holds that against
+`gc-helm.sh`'s `TAKEAWAY_MAX` — the two writers of the board's NEEDS cell are
+chained rather than independently correct.
+
+**One assertion is red in both arms.** `lifecycle.test.sh` ends 420 passed, 2
+failed, and both failures are the same case — the idle re-assertion that issues
+one `bd update` where the block's contract is zero. It reproduces on
+`origin/main` in a detached control worktree (207 passed, 1 failed), so the
+port did not cause it; it appears twice here only because the suite runs its
+body once per arm. It is filed as tk-oxsct1 (tk-ivums8 duplicates it), with the
+cause recorded there: the elision requires `ASSIGNEE_SET=0`, and the
+detached-state assignee clear sets that flag on exactly the fixture the case
+uses.
+
 ## Two artifacts named build-status
 
 `gc-helm-build.sh` writes both, and they answer different questions.
@@ -127,12 +173,6 @@ remove the shell mirror from the drift test.
 
 `liveness-sweep` stays shell; the spec lists it as "later, if warranted" and
 nothing has warranted it.
-
-`tools/lint-learned.sh` reports five `stale-reference` findings in files this
-diff touches. All five predate this bead — verified against the `origin/main`
-blobs, not the working tree — and are tracked as tk-7zlg3w. The preflight
-doctrine is to report pre-existing failures rather than fix them, and rewriting
-five accepted comments would mix prose churn into a port diff.
 
 ## One divergence from the script, stated
 
