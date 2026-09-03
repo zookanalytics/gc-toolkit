@@ -125,8 +125,30 @@ eq "$(verdict '')" "no-identity" "an empty route reads no-identity"
 # reading it as dead is how an operator-owned item gets handed back to a pool.
 eq "$(verdict human)" "ok" "the human sentinel reads ok"
 eq "$(STUB_AGENTS_FAIL=1 verdict gc-toolkit/gc-toolkit.converse)" "unknown" "an unreadable set reads unknown"
+# A route the caller did not write is only reconcilable against a store the
+# caller can name. GC_RIG names it, so without one a rig-qualified route reads
+# as live while nothing says its pool lists the store the row came from.
+eq "$(verdict gc-toolkit/gc-toolkit.converse '')" "unbound-store" \
+    "a rig-less caller cannot reconcile a qualified route with its store"
+eq "$(env -u GC_RIG "$SUT" --verdict gc-toolkit/gc-toolkit.converse 2>/dev/null)" "unbound-store" \
+    "…unset reads the same as empty"
+eq "$(verdict gc-toolkit.deacon '')" "ok" "a bare city identity is still read on identity alone"
+eq "$(verdict gc-toolkit.converse '')" "no-identity" "…and an unheld bare name still reads no-identity"
+eq "$(verdict human '')" "ok" "the human sentinel carries no rig to reconcile"
+eq "$(verdict '' '')" "no-identity" "an empty route is still no-identity"
+env -u GC_RIG "$SUT" --verdict gc-toolkit/gc-toolkit.converse >/dev/null 2>&1
+eq "$?" 0 "unbound-store exits 0 too — still a reading"
 GC_RIG=gc-toolkit "$SUT" --verdict gc-toolkit.converse >/dev/null 2>&1
 eq "$?" 0 "--verdict exits 0 even for a dead route — it reads, it does not judge"
+
+echo "# a name the CALLER passes is taken as given, rig-less or not"
+# The asymmetry with --verdict above is the point: a caller naming
+# <rig>/<pool> is choosing the route, and this is the path signoff.sh resolves
+# the review bead's fix_target_pool through — a key gate-ensure.sh stamps from
+# its own --fix-pool argument. --verdict reads a route nobody here chose.
+env -u GC_RIG "$SUT" gc-toolkit/gc-toolkit.polecat >"$TMP/out" 2>"$TMP/err"; RC=$?
+eq "$RC" 0 "exit 0"
+eq "$(cat "$TMP/out")" "gc-toolkit/gc-toolkit.polecat" "the route the caller named is returned"
 
 echo "# usage"
 "$SUT" >/dev/null 2>&1; eq "$?" 2 "no argument is a usage error"

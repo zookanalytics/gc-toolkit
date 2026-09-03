@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pool-route.sh — name the route a pool offer is actually claimed on.
 #   pool-route.sh <pool-name>        prints the validated route
-#   pool-route.sh --verdict <route>  prints ok|unknown|cross-rig|no-identity
+#   pool-route.sh --verdict <route>  prints ok|unknown|cross-rig|no-identity|
+#                                    unbound-store
 # A pool offer matches by exact byte equality (gascity hookClaimMatchesRoute),
 # so a well-formed name no agent carries is claimed by nobody while every stamp
 # of it still reads back clean. GC_RIG picks BOTH the store `gc bd` writes to
@@ -36,8 +37,9 @@ usage: pool-route.sh <pool-name>
   --verdict    classify a route that already exists, for a caller deciding
                whether a stamp it did not write still addresses someone.
                Prints one of ok, unknown (agent set unreadable), cross-rig,
-               no-identity — and exits 0 for all four: this is a reading, not
-               a judgment
+               no-identity, unbound-store (no GC_RIG, so a rig-qualified route
+               has no store to be reconciled with) — and exits 0 for all five:
+               this is a reading, not a judgment
 U
 }
 
@@ -78,10 +80,28 @@ route_verdict() {
     && printf 'ok' || printf 'no-identity'
 }
 
+# The reading for a route the caller did NOT write, which asks a second
+# question: does that route address somebody who reads the store the row was
+# read from. GC_RIG names that store, so with GC_RIG unset a rig-qualified
+# route has nothing to be reconciled against — the row came from whatever
+# store the ambient environment picked, and a rig-scoped pool never lists
+# another one. Calling it ok there buys the same silence the bare name does:
+# the caller concludes somebody was asked, and nobody was. Only the caller can
+# name its store, so this refuses the reading rather than picking a rig.
+existing_route_verdict() {
+  local route="$1" rig_seg
+  rig_seg="${route%%/*}"; [ "$rig_seg" = "$route" ] && rig_seg=""
+  if [ -z "${GC_RIG:-}" ] && [ -n "$rig_seg" ]; then
+    printf 'unbound-store'
+    return 0
+  fi
+  route_verdict "$route"
+}
+
 case "${1:-}" in
   --verdict)
     [ "$#" -eq 2 ] || { usage; exit 2; }
-    route_verdict "$2"; echo
+    existing_route_verdict "$2"; echo
     exit 0 ;;
   -h|--help) usage; exit 2 ;;
   -*) warn "unknown argument '$1'"; usage; exit 2 ;;

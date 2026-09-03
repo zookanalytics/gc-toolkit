@@ -11,7 +11,9 @@
 # The route is proved against the live agent set before anything is created,
 # and an already-open visit carrying an unroutable route is repointed rather
 # than counted as a satisfied escalation. A rig-qualified --pool also selects
-# the store the visit lands in, so route and store cannot disagree.
+# the store the visit lands in, so route and store cannot disagree; without
+# one, a rig-less caller has no store to reconcile an already-open visit's
+# rig-qualified route against, and refuses rather than guess.
 # A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
 # is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
 # disables), and each suppressed repeat is tallied on that visit.
@@ -95,7 +97,8 @@ bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 SELF_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 POOL_ROUTE="$SELF_DIR/pool-route.sh"
 [ -x "$POOL_ROUTE" ] || { warn "pool-route.sh not found beside this script ($POOL_ROUTE); no route can be proved, so nothing is filed"; exit 1; }
-# ok | unknown | cross-rig | no-identity, for a route this script did not write.
+# ok | unknown | cross-rig | no-identity | unbound-store, for a route this
+# script did not write.
 route_verdict() { "$POOL_ROUTE" --verdict "$1"; }
 
 HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
@@ -158,6 +161,15 @@ if [ -n "$OPEN" ]; then
     unknown)
       echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — not filing another; its route '$OPEN_ROUTE' is UNVERIFIED"
       exit 0 ;;
+    unbound-store)
+      # The row was matched in whatever store the ambient environment picked,
+      # and its route names a rig. Which store that pool reads is exactly what
+      # GC_RIG would have said, so neither answer is available here: counting
+      # the visit is the mute this script exists to end, and repointing would
+      # rewrite a route that is very likely sound. The caller names its store.
+      warn "visit $OPEN is open for $DEDUP_SCOPE and routes to '$OPEN_ROUTE', but GC_RIG is unset, so nothing here can tell whether that pool reads the store this row came from — a visit in a store it never lists has asked nobody."
+      warn "  repair: re-run with --pool '$OPEN_ROUTE' (or GC_RIG=${OPEN_ROUTE%%/*}) so the store and the route agree."
+      exit 1 ;;
   esac
   POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
   warn "visit $OPEN is open for $DEDUP_SCOPE but routes to '$OPEN_ROUTE', which no live pool claims — repointing it at '$POOL'."
