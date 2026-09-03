@@ -24,8 +24,10 @@
 # "No work" cannot be tested as "metadata.branch is absent": on a rebase or
 # rework dispatch that field names the TWIN's branch, so most verified no-op
 # duplicates carry one. The no-op stamp is what says nothing was pushed.
-# A successor in another store is skipped, not guessed at: `gc bd` reads this
-# rig only, so its status is unestablished here.
+# A successor whose stamped store is not this rig is skipped, not guessed at.
+# The skip is keyed on that stamp rather than on the read failing: `gc bd show`
+# resolves a foreign id by searching every store, so a hit answers from
+# whichever store holds it while a miss answers from the ambient one.
 # A bead carrying a hold_reason is disposable — the hold parks a BRANCH, and
 # nothing here moves one — but the close reason says a hold was standing, so a
 # deliberate park is never retired silently.
