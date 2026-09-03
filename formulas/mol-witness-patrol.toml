@@ -20,8 +20,8 @@ liveness-sweep exec order owns that surface). Escalations go through
 assets/scripts/escalate.sh — one open visit per situation key.
 
 Marked blocks (host-bead-skip, liveness-map-guard, liveness-lookup, husk-guard,
-patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
-tests; keep markers, keep them backslash-free."""
+crash-loop-window, patrol-wisp-pour, refinery-queue-nudge) are extracted and
+executed by their tests; keep markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -322,9 +322,67 @@ half-released, and it needs an escalation
 (`escalate.sh --subject <bead> --key witness-partial-release ...`), not a retry.
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
-polecat resumes from; a recovery that strips it re-does the work. Mark
-`recovered=true` so a repeat recovery of the same bead reads as a crash
-loop (escalate that: `--key witness-crash-loop`).
+polecat resumes from; a recovery that strips it re-does the work.
+
+**6. Record the recovery. A crash loop is a RATE, not a mark.** A bare
+`recovered=true` is a flag nothing clears, so reading a repeat recovery off
+its presence makes every bead ever recovered a permanent escalation
+candidate, and that population only grows. Two recoveries three days apart
+are two incidents; a loop is recurrence faster than the work can progress
+between them. Read the history the bead already carries BEFORE the stamp below
+overwrites it, decide against a window, then stamp it forward:
+```bash
+PREV=$(gc bd show <bead> --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata // {} | [(.recovered_at // ""), (.recovered_count // ""), (.recovered // "")] | @tsv')
+PREV_AT=$(printf '%s' "$PREV" | cut -f1)
+PREV_COUNT=$(printf '%s' "$PREV" | cut -f2)
+PREV_FLAG=$(printf '%s' "$PREV" | cut -f3)
+```
+```bash
+# >>> crash-loop-window
+# Inputs: PREV_AT, PREV_COUNT and PREV_FLAG — metadata.recovered_at,
+# recovered_count and recovered as they stood BEFORE this recovery, each empty
+# when the key is absent. Sets NOW_AT, COUNT, and CRASH_LOOP=1 only when the
+# previous recovery falls inside the window.
+#
+# An absent or unparseable PREV_AT is UNKNOWN, never "long ago, therefore a
+# loop". Beads carrying a bare recovered=true predate this record and hold no
+# evidence of recurrence at all, so they stamp a first timestamp and escalate
+# nothing: the legacy population drains in one pass instead of escalating
+# itself. The flag still proves one prior recovery, so the count it seeds is 2.
+CRASH_LOOP_WINDOW="${CRASH_LOOP_WINDOW:-21600}"
+NOW_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+case "${PREV_COUNT:-}" in
+  ''|*[!0-9]*) case "${PREV_FLAG:-}" in true) COUNT=2 ;; *) COUNT=1 ;; esac ;;
+  *)           COUNT=$((PREV_COUNT + 1)) ;;
+esac
+CRASH_LOOP=0
+# The empty case is split off because `date -d ''` does not fail: GNU date
+# resolves it to midnight TODAY, which reads as a recovery minutes ago through
+# the small hours and turns every legacy bead into a loop until 06:00 UTC.
+PREV_EPOCH=""
+case "${PREV_AT:-}" in
+  '') : ;;
+  *)  PREV_EPOCH=$(date -u -d "$PREV_AT" +%s 2>/dev/null || printf '') ;;
+esac
+NOW_EPOCH=$(date -u +%s)
+# `if`, not `[ ... ] && CRASH_LOOP=1`: a false test makes that AND-list the
+# block's last command and its exit status 1, so under `set -e` the caller dies
+# on the ordinary not-a-loop path, which is the one taken almost every cycle.
+case "$PREV_EPOCH" in
+  ''|*[!0-9]*) : ;;
+  *) if [ "$((NOW_EPOCH - PREV_EPOCH))" -lt "$CRASH_LOOP_WINDOW" ]; then CRASH_LOOP=1; fi ;;
+esac
+# <<< crash-loop-window
+```
+```bash
+gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
+```
+Escalate `--key witness-crash-loop` only when `CRASH_LOOP=1`, and say which
+two recoveries were close together — a visit that reports only "recovered
+before" asks a human to re-derive the interval. `recovered_count` outside the
+window is a bead that keeps coming back rather than one that is looping; it is
+recorded here so that signal can be built from evidence, and it is not this
+key.
 
 Continue to check-refinery — do NOT exit the wisp here."""
 

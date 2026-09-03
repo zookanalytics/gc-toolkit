@@ -15,7 +15,8 @@ the pool worker -> refinery -> operator-review pipeline (D3). Base rate:
 ZERO or ONE proposals per run; a chatty run is a smell.
 
 A proposal names a CARRIER before it names rule text: a conventions bullet,
-an operator-profile entry, a review-rubric dimension, or an exemplar pair.
+an operator-profile entry, a work-quality entry, a review-rubric dimension, or
+an exemplar pair.
 The carrier decides the target file, the budget, and which gates apply; the
 rubric holds the selection rule.
 
@@ -43,6 +44,7 @@ Variables:
   {{max_beads_per_run}}: Maximum prompt-update/engineering beads filed per run; dropped survivors re-surface next cycle (state is durable, so this is naturally resumable). (default=3)
   {{profile_entry_cap}}: Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap. (default=12)
   {{rig_list}}: Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set. (default=)
+  {{work_quality_entry_cap}}: Entry budget for the work-quality fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap. (default=12)
 
 Steps (4):
   ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate

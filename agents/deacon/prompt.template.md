@@ -87,8 +87,6 @@ something you ask about.
 
 {{ template "heartbeat-no-consent-ui" . }}
 
-{{ template "operator-profile" . }}
+{{ template "work-quality" . }}
 
 {{ template "scratch-reclaim" . }}
-
-{{ template "operator-next-step-trailing" . }}

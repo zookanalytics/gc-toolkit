@@ -120,14 +120,18 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Held on purpose: a non-empty `gc.takeaway` or `hold_reason`, on the step or on the root `gc.root_bead_id` names, takes a step out of both arms as a note whose remedy is `status=blocked` — releasing a held step to `open` hands it to the pool its route still names, which is what the hold exists to prevent. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
 
-Three further checks guard structure that is not an anchor invariant:
+Four further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
-(generated-artifact freshness; warn-only when absent), and
+(generated-artifact freshness; warn-only when absent),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
 reaches the hook with its stdin intact, the hook's own measurement reads the
 context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound). That is the whole set: **14 checks, each asserting a live structural
+been latched past a bound), and `doctor/check-wisp-cascade-intact` (every bead
+store's schema enforces the wisp auxiliary cascade — the constraint both
+removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
+write naming a wisp that does not exist, so a store without it accumulates
+rows no wisp reaches and reports nothing). That is the whole set: **15 checks, each asserting a live structural
 property** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
@@ -246,6 +250,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
+| `assets/scripts/pre-open-rebase.sh` | merge | Arm 1a: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 2: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
@@ -280,13 +285,14 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-deacon-patrol.toml` | patrol | City infrastructure health: Dolt, orphan processes, doctor sweep. |
 | `formulas/mol-dog-shutdown-dance.toml` | patrol | Due process for one wedged session, against a claimed warrant. |
 | `orders/boot-health.toml` | patrol | Fires the wedged-deacon detector. |
+| `orders/convoy-check.toml` | patrol | Fires the convoy sweep hourly, city-wide: closes the convoys the bead-close autoclose missed. |
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-finding-gate.sh` | patrol | Re-asks doctor at close time, so a merge cannot silently read as a fix. Run by the deacon patrol's doctor sweep. |
-| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached and hourly, past the harness ceiling a foreground call cannot exceed, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
+| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached and hourly, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
 | `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. |

@@ -124,23 +124,12 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 
 
 
-## What the operator cares about
+## Standards for what you produce
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- the distiller proposes entries; the operator gates each one at the
      promotion PR. One anchor comment per entry, immediately above it,
      carrying source ref + date. See docs/feedback-learning.md. -->
-
-<!-- rule:tk-vglpm src:audit:tk-awa7hv adopted:2026-08-26 -->
-- State a decision or an action so the operator can accept or reject it
-  without looking anything up. A bare bead id, a title, or a pointer to a
-  queue is not a decision.
-
-<!-- rule:tk-3znt49 src:audit:tk-awa7hv adopted:2026-08-26 -->
-- The operator's own queues are state, not items to relay: a PR awaiting
-  their review, work already routed, an approval already pending. When work
-  has a proven remedy and raises no policy question, sling it instead of
-  asking them to fund it.
 
 <!-- rule:tk-uzkg2c src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Derive a load-bearing claim at the moment you make it, and check that the
@@ -152,11 +141,6 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   that produced the symptom. Take a report at the severity it was filed,
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
-
-<!-- rule:tk-lz8mpv src:audit:tk-awa7hv adopted:2026-08-26 -->
-- Read a standing ruling for its intent. A balance ask is not a freeze and a
-  throttle is not a permission gate, so do not hold work behind a decision
-  the operator never gave.
 
 <!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
 - File work as a bead in the pass that names it, and put the bead id in the

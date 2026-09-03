@@ -4,7 +4,9 @@
 # controller supplies the loop, cwd = the rig root, and the env (GC_RIG,
 # GC_PACK_STATE_DIR, gh token).
 # Arms, in load-bearing order: gate-ensure (rc=3 = designed HOLD of merge.sh
-# for this pass, not a fault), pr-open, pr-facts --posture-only (the posture
+# for this pass, not a fault), pre-open-rebase (the conflict observer for
+# anchors that have no PR yet, so it runs while they still have none),
+# pr-open, pr-facts --posture-only (the posture
 # merge reads must be written in the same pass), merge (BEADS_ACTOR projected to
 # the refinery: it closes anchors assigned to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
@@ -185,6 +187,14 @@ if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
 elif [ "$gate_rc" != 0 ]; then
   FAILED="${FAILED}gate-ensure rc=$gate_rc; "
 fi
+
+# (1a) pre-open-rebase: the conflict observer for pre_open_gate anchors. It runs
+# before pr-open because pr-open is what ends its domain: once an anchor carries
+# a PR, `mergeable` answers the same question and pr-facts' CONFLICTING arm owns
+# the dispatch. Its failure is not a merge hold — an anchor it could not observe
+# is left exactly as this cadence found it.
+run_pass "(1a) pre-open-rebase" pre-open-rebase.sh \
+  --fix-pool "$FIX_POOL" || FAILED="${FAILED}pre-open-rebase rc=$?; "
 
 # (2) pr-open: pre_open_gate -> pull_request.
 run_pass "(2) pr-open" pr-open.sh || FAILED="${FAILED}pr-open rc=$?; "

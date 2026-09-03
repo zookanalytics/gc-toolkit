@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
-# the arm ORDER (gate-ensure, pr-open, pr-facts --posture-only, merge, pr-facts,
-# convoy-graduate, review-sweep, duplicate-sweep) — the posture arm runs BEFORE
+# the arm ORDER (gate-ensure, pre-open-rebase, pr-open, pr-facts --posture-only,
+# merge, pr-facts, convoy-graduate, review-sweep, duplicate-sweep) — the posture arm runs BEFORE
 # merge.sh reads posture off the bead and would otherwise read one written a
 # pass ago;
 # the heal-gates-merge interlock (rc=3 from gate-ensure HOLDS merge.sh in the
@@ -53,15 +53,20 @@ eq "$rc" 2 "no GC_RIG exits 2"
 has "$out" "GC_RIG is unset" "…and says why"
 
 echo "# arms run in order with derived pools and scoped identities"
-for a in gate-ensure.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh duplicate-sweep.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "gate-ensure.sh,pr-open.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,duplicate-sweep.sh" "the arms ran in the load-bearing order"
+eq "$order" "gate-ensure.sh,pre-open-rebase.sh,pr-open.sh,pr-facts.sh,merge.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,duplicate-sweep.sh" "the arms ran in the load-bearing order"
 dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
 has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
 has "$(grep '^gate-ensure' "$ARM_LOG")" "--default codex --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review AND fix pools"
+has "$(grep '^pre-open-rebase' "$ARM_LOG")" "--fix-pool myrig/gc-toolkit.polecat" "pre-open-rebase got the derived fix pool"
+case "$(grep '^pre-open-rebase' "$ARM_LOG")" in
+  *"|myrig/gc-toolkit.refinery|"*) bad "pre-open-rebase must NOT inherit BEADS_ACTOR (it closes nothing)" ;;
+  *) ok "pre-open-rebase ran without the BEADS_ACTOR projection" ;;
+esac
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
 facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool')

@@ -11,8 +11,11 @@
 #   3. ATOMIC HANDOFF — one gc bd update carries target + refinery assignee
 #      + cleared route + APPENDED notes; a partial handoff cannot ship.
 #   4. CHAIN CLOSE — six session-owned steps close forward via step-close.sh
-#      at BOTH terminal exits (handoff, and the auto_push=false halt), and
-#      workflow-finalize is never touched.
+#      at ALL THREE terminal exits (handoff, the auto_push=false halt, and the
+#      store-only exit), and workflow-finalize is never touched.
+#   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
+#      way the halt arm does, in three writes the claim guard accepts, and
+#      refuses the arm outright when the run has a diff to land.
 #
 # This EXECUTES the real snippets extracted verbatim from the formula (between
 # the markers) against a fake `git`/`gc`, so the test cannot drift from the
@@ -52,6 +55,8 @@ CONSUME="$(extract submit-target-consume)"
 CLOSE="$(extract submit-chain-close)"
 HALT="$(extract submit-auto-push-halt)"
 HALT_CLOSE="$(extract submit-halt-chain-close)"
+STORE="$(extract submit-store-only-exit)"
+STORE_CLOSE="$(extract submit-store-only-chain-close)"
 
 [ -n "$CLOSE" ] \
   && ok "chain close extracted between submit-chain-close markers" \
@@ -60,6 +65,10 @@ HALT_CLOSE="$(extract submit-halt-chain-close)"
 [ -n "$HALT" ] \
   && ok "auto_push=false arm extracted between submit-auto-push-halt markers" \
   || bad "halt-arm extraction EMPTY — markers missing from $TOML"
+
+[ -n "$STORE" ] \
+  && ok "store-only arm extracted between submit-store-only-exit markers" \
+  || bad "store-only-arm extraction EMPTY — markers missing from $TOML"
 
 # The halt arm nests its chain-close copy under a DIFFERENT marker name on
 # purpose. `extract` is a flag-flip over the whole file, so two regions sharing
@@ -88,7 +97,7 @@ eq "$(sed -n '/^# >>> submit-chain-close$/p' "$TOML" | wc -l | tr -d ' ')" "1" \
 # inside one therefore silently joins lines. Both snippets are written
 # backslash-free so what the polecat reads is what this test runs; assert it,
 # because reintroducing a continuation is an easy and invisible edit.
-case "$GATE$RESOLVE$ANCHOR$CONSUME$CLOSE$HALT$HALT_CLOSE" in
+case "$GATE$RESOLVE$ANCHOR$CONSUME$CLOSE$HALT$HALT_CLOSE$STORE$STORE_CLOSE" in
   *\\*) bad "snippets contain a backslash — TOML line-ending escapes will mangle them" ;;
   *)    ok  "snippets are backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
@@ -108,7 +117,9 @@ BP_DEFAULT="$(awk '
   || bad "binding_prefix default is EMPTY — a source-read renders <rig>/refinery, which names no agent"
 
 # --- Fakes. -------------------------------------------------------------------
-# git   : only `git branch --show-current` is used; it answers $FAKE_BRANCH.
+# git   : `branch --show-current` answers $FAKE_BRANCH; the three probes the
+#         store-only arm makes answer $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED,
+#         each empty by default so the arm sees a run with nothing to land.
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
@@ -119,10 +130,12 @@ mkdir -p "$TMP/bin"
 
 cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
-if [ "$1" = "branch" ] && [ "$2" = "--show-current" ]; then
-  printf '%s\n' "${FAKE_BRANCH:-}"
-  exit 0
-fi
+case "$1 $2" in
+  "branch --show-current") printf '%s\n' "${FAKE_BRANCH:-}"; exit 0 ;;
+  "rev-list --count")      printf '%s\n' "${FAKE_AHEAD:-0}"; exit 0 ;;
+  "status --porcelain")    [ -n "${FAKE_DIRTY:-}" ] && printf '%s\n' "$FAKE_DIRTY"; exit 0 ;;
+  "ls-remote origin")      [ -n "${FAKE_PUSHED:-}" ] && printf '%s\n' "$FAKE_PUSHED"; exit 0 ;;
+esac
 exit 0
 GIT
 
@@ -841,6 +854,122 @@ printf '%s\n' "$HALT" \
 CTRL_RC="$(run_halt "$TMP/halt-nochain.sh")"
 eq "$CTRL_RC|$(trace)" "0|UPDATE,DRAIN" \
    "control: comment-only halt arm drains with the chain open (the defect is real)"
+
+# --- 6b. The store-only exit. -------------------------------------------------
+# The third TERMINAL exit, for a run whose whole product is store work: no
+# branch, no commit, nothing for the refinery to merge. Every arm below it is
+# gated on a branch, so before this one existed such a run reached no ending in
+# the formula at all — the bead kept gc.routed_to, which IS a pool's offer
+# predicate, and the pool handed the same finished work to the next polecat.
+# It releases the bead with the halt arm's fields — status, assignee, cleared
+# route, halt_reason, appended notes — minus the three that describe a branch.
+# Two arms, one convention for what releasing a bead means.
+
+# run_store <script> [env assignments...] -> "<rc>"; trace left in $TMP/log.
+run_store() {
+  : > "$TMP/log"; : > "$TMP/closed"; : > "$TMP/attempted"
+  local script="$1"; shift
+  local rc=0
+  env "$@" FAKE_BRANCH=main GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    bash "$script" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s' "$rc"
+}
+
+# The shipped snippet declares STORE_ONLY_RECORD empty — the polecat fills it
+# in. `armed` is that same snippet with the declaration filled, which is what
+# taking the arm looks like.
+printf '%s\n' "$STORE" | sed "s|{{base_branch}}|main|g" > "$TMP/store.sh"
+sed 's|^STORE_ONLY_RECORD=""$|STORE_ONLY_RECORD="tk-filed,gc-filed"|' "$TMP/store.sh" > "$TMP/store-armed.sh"
+bash -n "$TMP/store.sh" \
+  && ok "extracted store-only arm is syntactically valid bash" \
+  || bad "extracted store-only arm failed bash -n"
+[ "$(cmp -s "$TMP/store.sh" "$TMP/store-armed.sh"; echo $?)" = "1" ] \
+  && ok "store-only arm ships STORE_ONLY_RECORD empty (the polecat opts in)" \
+  || bad "store-only arm does not ship an empty STORE_ONLY_RECORD declaration"
+
+# Not opted in: the arm is inert. A polecat with a branch to push must fall
+# through to the gate having written nothing and drained nothing.
+eq "$(run_store "$TMP/store.sh")|$(trace)" "0|" \
+   "empty STORE_ONLY_RECORD: falls through, writes nothing, does not drain"
+
+# THE ARM. Three writes, then the six closes, then the drain — the order is the
+# contract, not an accident: metadata bypasses the claim guard, --status=open is
+# accepted from the holder, and only then does the plain --assignee write land.
+eq "$(run_store "$TMP/store-armed.sh")" "0" "store-only arm exits 0"
+eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "store-only arm releases in three writes, closes six steps, THEN drains"
+eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
+   "$ALL_SIX" \
+   "store-only arm closes the same six steps, forward order"
+
+# The writes themselves, and their ORDER, which is the whole reason there are
+# three. A gc bd update that moves the assignee while this session still holds
+# the bead is refused by bd's claim guard, and the refusal rolls back the
+# metadata and the notes batched into the same call. Metadata first (it bypasses
+# the guard), then --status=open from the holder, then the plain --assignee. The
+# intermediate — open, still assigned, unrouted — no pool query can see.
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
+   "tk-work --set-metadata halt_reason=store_only --set-metadata gc.routed_to= --append-notes Store-only exit: filed tk-filed,gc-filed. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>" \
+   "first write: halt_reason + cleared route + the filed record, --append-notes not --notes"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
+   "second write: --status=open alone, while the bead is still assigned"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
+   "third write: --assignee alone, after the status is open"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
+   "the assignee is NOT batched with the metadata (that call is refused whole)"
+
+# The release is the halt arm's, so the two are compared rather than described:
+# every gc.routed_to write in either arm clears it, and neither routes anywhere.
+eq "$(printf '%s\n' "$STORE" | grep -o -- '--set-metadata gc.routed_to=[^ ]*' | sort -u)" \
+   "$(printf '%s\n' "$HALT" | grep -o -- '--set-metadata gc.routed_to=[^ ]*' | sort -u)" \
+   "store-only arm clears the route exactly as the halt arm does"
+case "$STORE" in
+  *'gc.routed_to=""'*) ok  "store-only arm clears gc.routed_to" ;;
+  *)                   bad "store-only arm does not clear gc.routed_to — the pool re-offers the bead" ;;
+esac
+case "$STORE" in
+  *"--notes "*) bad "store-only arm uses --notes, which REPLACES the dispatch note" ;;
+  *)            ok  "store-only arm appends notes rather than replacing them" ;;
+esac
+
+# THE REFUSAL. The arm is opt-in prose, so the only thing standing between a
+# half-finished run and a released bead is this check. Each of the three
+# signals alone must refuse, and refuse before writing anything.
+eq "$(run_store "$TMP/store-armed.sh" FAKE_AHEAD=2)|$(trace)" "1|DRAIN" \
+   "commits ahead of base: refuses, drains, writes nothing"
+eq "$(run_store "$TMP/store-armed.sh" FAKE_DIRTY=' M formulas/mol-polecat-work.toml')|$(trace)" "1|DRAIN" \
+   "uncommitted changes: refuses, drains, writes nothing"
+eq "$(run_store "$TMP/store-armed.sh" FAKE_PUSHED='abc123	refs/heads/polecat/tk-work')|$(trace)" "1|DRAIN" \
+   "branch already on origin: refuses, drains, writes nothing"
+
+# The arm must not reach the push, and must not hand the bead to the refinery:
+# there is no branch, so a handoff would strand it in the merge queue forever.
+case "$STORE" in
+  *"git push"*)  bad "store-only arm contains a push — it has nothing to push" ;;
+  *)             ok  "store-only arm never reaches git push" ;;
+esac
+eq "$(printf '%s\n' "$STORE" | grep -o -- '--assignee=[^ ]*' | sort -u | tr '\n' ',' | sed 's/,$//')" \
+   '--assignee=""' \
+   "the arm's only assignee write CLEARS it — a branchless bead handed to the refinery never merges"
+
+# Same drift guard the halt arm gets: the chain-close copy is step 7's block,
+# indented one level to sit inside the `if`.
+printf '%s\n' "$STORE_CLOSE" > "$TMP/store-close.sh"
+if diff -q "$TMP/store-close.sh" "$TMP/close-indented.sh" >/dev/null 2>&1; then
+  ok "store-only arm ships step 7's chain-close block, byte for byte (+2 indent)"
+else
+  bad "store-only arm and step 7 chain-close blocks have DRIFTED"
+  diff "$TMP/store-close.sh" "$TMP/close-indented.sh" | sed 's/^/       /' || true
+fi
+
+# CONTROL: the same arm with its chain-close removed still exits 0 and still
+# releases the bead, so only the trace above tells a complete arm from one that
+# leaves six step beads open to be re-offered as new work.
+awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-close$/{f=0; next} !f' \
+  "$TMP/store-armed.sh" > "$TMP/store-nochain.sh"
+eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
+   "control: chain-less store-only arm drains with the chain open (the defect is real)"
 
 # --- 7. Negative control. -----------------------------------------------------
 # Everything above passes against the shipped snippets. That proves nothing

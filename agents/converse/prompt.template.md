@@ -771,6 +771,8 @@ Rules:
 
 {{ template "operator-profile" . }}
 
+{{ template "work-quality" . }}
+
 {{ template "scratch-reclaim" . }}
 
 {{ template "file-feedback-observations" . }}

@@ -315,6 +315,22 @@ clears the dead `reviewed_oid` pin itself, then closes the review bead
 pours a fresh review at the live head on its next pass. No marker is touched
 and no round is spent either way.
 
+Whichever source wins, `signoff.sh` writes that commit back to the review bead
+as `reviewed_oid` before it stamps anything, on both verdicts and whether or
+not the PR is open. The lane state itself names no commit, so that record is
+the whole of what a city verdict leaves behind: the city posts no APPROVED
+GitHub review, and `doctor/check-gate-marker-provenance` resolves a
+city-written marker only against a review bead carrying it. A store that will
+not take the record costs a re-run: signoff exits 2 with nothing posted and no
+marker stamped.
+
+Pre-open, the verdict body is read back off the same bead on the same terms.
+Its notes are the only copy: `pr-open.sh` replays them as the PR's first
+comment when it opens one, and a request-changes child names the bead it came
+from in `source_review_bead` and has nowhere else to read its findings. So an
+append that did not land also costs a re-run, rather than a marker or a rework
+child standing on findings nobody can read.
+
 `signoff.sh` closes the review bead itself, last, stamping
 `signoff_verdict=<approve|request-changes>` in the same write as the close —
 `doctor/check-gate-marker-provenance` reads it to tell an approving review
