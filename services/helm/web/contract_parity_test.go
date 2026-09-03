@@ -679,10 +679,12 @@ func fixtureBoard() board.Board {
 		Partial:       true,
 		PartialErrors: []string{"rig shutupandlisten: context canceled"},
 
-		// Both shapes a build row takes: one current, one whose build failed
-		// and left an older binary serving. The second is the state the strip
-		// exists for, so a fixture without it would let the failing branch of
-		// the mirror go unchecked.
+		// The three shapes a build row takes: one current, one whose build
+		// failed and left an older binary serving, and one whose binary builds
+		// but cannot read the stores. The last two are the states the strip
+		// exists for, so a fixture without them would let the failing branches
+		// of the mirror go unchecked — and probe_status and probe_detail are
+		// carried by no other row, which is the only way TypeScript sees them.
 		PackHealth: []board.PackBuild{
 			{
 				Component:      "gctk",
@@ -696,12 +698,27 @@ func fixtureBoard() board.Board {
 				Detail:         "last build FAILED (rc 1); still serving 1a2b3c4d5e6f",
 			},
 			{
+				Component:      "dolt-probe",
+				BuiltAt:        time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
+				SourceRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+				BinaryRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+				LastBuildRC:    0,
+				RestartPending: false,
+				ProbeStatus:    "unreadable",
+				ProbeDetail:    "rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+				CheckedAt:      time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC),
+				Severity:       board.SevHigh,
+				Detail: "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: " +
+					"rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+			},
+			{
 				Component:      "helm",
 				BuiltAt:        time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
 				SourceRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
 				BinaryRev:      "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
 				LastBuildRC:    0,
 				RestartPending: false,
+				ProbeStatus:    "ok",
 				CheckedAt:      time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC),
 				Severity:       board.SevNormal,
 				Detail:         "current at 9f1c0b7e5a4d",
@@ -794,6 +811,29 @@ func TestFixtureCoversEveryField(t *testing.T) {
 		}
 	}
 	assertCovers(t, "Sitting", mustWireStruct(t, "Sitting"), sittingKeys)
+
+	// pack_health is OPTIONAL on the wire, which is exactly why it needs its own
+	// arm: an absent key is a fixture that exercises none of PackBuild, and every
+	// one of its own optional fields would then be invisible to TypeScript too.
+	// An absent key fails here rather than being skipped.
+	raw, ok := decoded["pack_health"]
+	if !ok {
+		t.Fatal("the fixture carries no pack_health key, so it exercises none of the PackBuild contract")
+	}
+	var packHealth []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &packHealth); err != nil {
+		t.Fatalf("decode fixture pack_health: %v", err)
+	}
+	if len(packHealth) == 0 {
+		t.Fatal("the fixture carries no pack builds, so it exercises none of the PackBuild contract")
+	}
+	packKeys := map[string]bool{}
+	for _, row := range packHealth {
+		for k := range row {
+			packKeys[k] = true
+		}
+	}
+	assertCovers(t, "PackBuild", mustWireStruct(t, "PackBuild"), packKeys)
 }
 
 func keysOf(m map[string]json.RawMessage) map[string]bool {
