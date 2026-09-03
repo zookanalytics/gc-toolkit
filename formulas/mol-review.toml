@@ -204,10 +204,15 @@ this branch's defect.
   same pass: it carries the lessons that are a shape rather than a
   statement, and it is read here because nothing injects it into a prompt.
 ```bash
+# Resolve on the directory, not on one fragment: a checkout lagging the commit
+# that added a fragment still resolves the pack, so a miss costs that fragment
+# and not the whole read.
 PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -r "$c/template-fragments/work-quality.template.md" ] && { PACK="$c"; break; }
+  [ -d "$c/template-fragments" ] && { PACK="$c"; break; }
 done
-if [ -n "$PACK" ]; then cat "$PACK/template-fragments/work-quality.template.md"; else
+if [ -n "$PACK" ] && [ -r "$PACK/template-fragments/work-quality.template.md" ]; then
+  cat "$PACK/template-fragments/work-quality.template.md"
+else
   echo "work-quality fragment not found in this checkout; note that in the verdict's coverage line"
 fi
 # Absent on an older pack pin, and empty until the first exemplar is adopted.

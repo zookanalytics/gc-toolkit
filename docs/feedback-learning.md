@@ -191,7 +191,7 @@ before/after pairs, resolved on demand during a review rather than injected
 into any prompt. For lessons that are a shape rather than a statement.
 
 Every adopted entry carries an anchor comment — immediately above it in the
-three fragment carriers, in the ledger for `review-rubric`:
+four fragment carriers, in the ledger for `review-rubric`:
 
 ```
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
