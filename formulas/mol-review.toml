@@ -209,10 +209,13 @@ finding this diff carries, not the first one that appears.
   that does not state what the diff does is a finding, whether it is a
   placeholder, a restatement of the dispatch, or an account of other work;
   so is a title that understates the scope. When the body looks wrong, read
-  `assets/scripts/pr-open.sh` for the shape this pack's opener emits: a page
-  carrying none of it is an observed fact worth recording, and it still does
-  not tell you what opened the PR. Pre-open there is no page — your verdict
-  becomes its opening comment instead.
+  `assets/scripts/pr-open.sh` for the shape this pack's opener emits, and
+  `assets/scripts/pr-stack.sh` for the delimited beads-on-this-branch section
+  the cadence keeps current below it. A page carrying neither is an observed
+  fact worth recording, and it still does not tell you what opened the PR. A
+  section naming more than the anchor means the branch carries work from more
+  than one bead, and your verdict covers every one of them. Pre-open there is
+  no page — your verdict becomes its opening comment instead.
 - **Work-quality standards** — resolve the work-quality fragment from the
   pack checkout and hold the diff's output (code, comments, docs) to its
   "Standards for what you produce" entries. A violation is a blocking
