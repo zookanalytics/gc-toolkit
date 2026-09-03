@@ -198,6 +198,35 @@ out=$("$SUT" 2>&1)
 has "$out" "1 already current" "the second pass finds one intact section"
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…and rewrites nothing"
 
+echo "# a body whose markers are not one well-formed pair is left alone"
+# Under a lone marker the section read back is never the section written, so
+# an arm that went ahead would rewrite the PR on every 60s tick.
+for shape in "open-only:<!-- gc:branch-beads -->" \
+             "close-only:<!-- /gc:branch-beads -->" \
+             "inverted:<!-- /gc:branch-beads -->\n<!-- gc:branch-beads -->"; do
+  name="${shape%%:*}"; markers="${shape#*:}"
+  store "[$(anchor N polecat/N 110), $(rider N1 branch polecat/N 2026-02-01T00:00:00Z 'rider')]"
+  pr 110 OPEN polecat/N "$(printf '## Summary\n\n%b\n' "$markers")"
+  before=$(body 110)
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" 2>&1)
+  has "$out" "no well-formed marker pair" "$name: the malformed body is refused"
+  hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "$name: …and nothing is written"
+  eq "$(body 110)" "$before" "$name: the body is untouched"
+done
+
+echo "# a duplicated section is refused rather than half-rewritten"
+sect='<!-- gc:branch-beads -->
+## Beads on this branch
+<!-- /gc:branch-beads -->'
+store "[$(anchor P polecat/P 120), $(rider P1 branch polecat/P 2026-02-01T00:00:00Z 'rider')]"
+pr 120 OPEN polecat/P "$(printf '## Summary\n\n%s\n\n%s\n' "$sect" "$sect")"
+before=$(body 120)
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "no well-formed marker pair" "two pairs are refused"
+eq "$(body 120)" "$before" "…and the body is untouched"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

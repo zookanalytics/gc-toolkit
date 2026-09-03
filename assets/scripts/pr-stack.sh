@@ -20,9 +20,10 @@
 # GitHub stores a body it re-wrapped with CRLF, and a marker line carrying a
 # trailing CR matches neither the splice nor the compare, so every pass would
 # append a second section. Idempotence is then the rendered section compared
-# against the one already between the markers, never the whole body. Any read
-# that fails skips that anchor — a truncated ledger published as the whole
-# ledger is worse than last pass's section.
+# against the one already between the markers, never the whole body, and a body
+# whose markers are not one well-formed pair is left alone rather than
+# rewritten every pass. Any read that fails skips that anchor — a truncated
+# ledger published as the whole ledger is worse than last pass's section.
 # Caller: refinery-reconcile.sh. Fail-closed on identity; not set -e.
 set -u
 
@@ -112,17 +113,35 @@ current_section() { # <body-file>
   ' "$1"
 }
 
-# The body with the section replaced in place, or appended when it is new.
-splice_body() { # <body-file> <section-file> <out-file>
-  if grep -qxF "$MARK_OPEN" "$1" 2>/dev/null && grep -qxF "$MARK_CLOSE" "$1" 2>/dev/null; then
-    awk -v o="$MARK_OPEN" -v c="$MARK_CLOSE" -v s="$2" '
-      $0 == o { print; while ((getline l < s) > 0) print l; close(s); f = 1; next }
-      $0 == c { print; f = 0; next }
-      !f { print }
-    ' "$1" > "$3"
-  else
-    { cat "$1"; printf '\n%s\n' "$MARK_OPEN"; cat "$2"; printf '%s\n' "$MARK_CLOSE"; } > "$3"
-  fi
+# 0 = exactly one well-formed pair (replace in place); 1 = neither marker
+# (append); 2 = any other shape — a lone marker, a second pair, a close above
+# its open. Under those, the section this reads back is not the section it
+# wrote, so every pass would disagree with the body and edit it again. A body
+# somebody has cut into a shape this cannot reason about is left alone.
+marker_state() { # <body-file>
+  local o c oi ci
+  o=$(grep -cxF "$MARK_OPEN" "$1" 2>/dev/null || true)
+  c=$(grep -cxF "$MARK_CLOSE" "$1" 2>/dev/null || true)
+  [ "$o" = 0 ] && [ "$c" = 0 ] && return 1
+  { [ "$o" = 1 ] && [ "$c" = 1 ]; } || return 2
+  oi=$(grep -nxF "$MARK_OPEN" "$1" | head -1 | cut -d: -f1)
+  ci=$(grep -nxF "$MARK_CLOSE" "$1" | head -1 | cut -d: -f1)
+  [ "$oi" -lt "$ci" ] || return 2
+  return 0
+}
+
+# The body with the section replaced between its markers.
+splice_in_place() { # <body-file> <section-file> <out-file>
+  awk -v o="$MARK_OPEN" -v c="$MARK_CLOSE" -v s="$2" '
+    $0 == o { print; while ((getline l < s) > 0) print l; close(s); f = 1; next }
+    $0 == c { print; f = 0; next }
+    !f { print }
+  ' "$1" > "$3"
+}
+
+# The body with the section, and its markers, appended below what is there.
+append_section() { # <body-file> <section-file> <out-file>
+  { cat "$1"; printf '\n%s\n' "$MARK_OPEN"; cat "$2"; printf '%s\n' "$MARK_CLOSE"; } > "$3"
 }
 
 # --- enumerate ------------------------------------------------------------------
@@ -183,10 +202,20 @@ while IFS=$'\t' read -r id branch num; do
     echo "$PROG: $id rendered an empty section for '$branch'; PR#$num left as it stands" >&2
     skipped=$((skipped + 1)); continue
   fi
-  if [ "$(current_section "$CUR")" = "$(cat "$SECTION")" ]; then
+  marker_state "$CUR"; ms=$?
+  if [ "$ms" = 2 ]; then
+    rm -f "$SECTION" "$CUR" "$NEW"
+    echo "$PROG: $id PR#$num body carries no well-formed marker pair; left alone (an operator edit this cannot reason about)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  if [ "$ms" = 0 ] && [ "$(current_section "$CUR")" = "$(cat "$SECTION")" ]; then
     rm -f "$SECTION" "$CUR" "$NEW"; current=$((current + 1)); continue
   fi
-  splice_body "$CUR" "$SECTION" "$NEW"
+  if [ "$ms" = 0 ]; then
+    splice_in_place "$CUR" "$SECTION" "$NEW"
+  else
+    append_section "$CUR" "$SECTION" "$NEW"
+  fi
   if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
     edited=$((edited + 1))
     echo "$PROG: $id PR#$num body now names $n beads on '$branch'"
