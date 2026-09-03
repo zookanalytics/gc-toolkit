@@ -12,7 +12,10 @@
 # and an already-open visit carrying an unroutable route is repointed rather
 # than counted as a satisfied escalation. A rig-qualified --pool also selects
 # the store the visit lands in, so route and store cannot disagree.
-# Exit: 0 filed, already open or repointed · 1 unroutable/could not file/verify · 2 usage
+# A CLOSED visit answers too: a situation a sitting closed `moot` or `benign`
+# is not re-filed for GC_ESCALATE_VERDICT_WINDOW seconds (default 86400, 0
+# disables), and each suppressed repeat is tallied on that visit.
+# Exit: 0 filed, already open, repointed or inside the verdict window · 1 unroutable/could not file/verify · 2 usage
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -42,6 +45,14 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              store, so a caller with GC_RIG unset must pass this explicitly —
              the bare default matches no rig-scoped pool. A rig-qualified pool
              also selects the store, so the two always agree.
+
+env:
+  GC_ESCALATE_VERDICT_WINDOW  seconds a `moot` or `benign` verdict suppresses
+             a re-file of the same situation (default 86400). A detector whose
+             condition outlives the sitting re-raises it every cycle otherwise,
+             and each repeat costs a sitting to reach the same answer. 0
+             disables the window. To raise a situation that has genuinely
+             changed, give it a new --key rather than widening this.
 U
 }
 
@@ -205,6 +216,75 @@ if [ -n "$OPEN" ]; then
   fi
   echo "escalate: visit $OPEN already open for $DEDUP_SCOPE — repointed to $POOL, not filing another"
   exit 0
+fi
+
+# A closed visit carries a VERDICT, and two of them say a human was not needed:
+# `moot` (the premise no longer holds) and `benign` (it holds but needs nobody).
+# The converse role stamps them on gc.outcome before it closes
+# (agents/converse/prompt.template.md). Nothing read them back, and the dedup
+# above only sees OPEN visits, so a detector whose condition outlives the
+# sitting re-filed the identical situation on its next cycle and spent another
+# one. This window is where that verdict is honored.
+#
+# Only those two suppress. Every other outcome means the sitting acted, so the
+# next occurrence stands on different ground. A situation that has CHANGED
+# takes a new key by the rule at the top of this file, so the window cannot
+# trap a new signal behind an old answer.
+#
+# The window is read from the whole closed set, not a page of it: one subject
+# already carries 19 closed visits under a single key, and a truncated listing
+# would miss the newest verdict and re-file exactly where suppression is owed.
+# The newest is taken by comparing timestamps rather than by trusting row
+# order.
+#
+# Suppression is COUNTED, never silent — this script exists to end silent
+# mutes. The tally rides the visit that earned the verdict, so a recurrence
+# costs one in-place update instead of a bead per cycle, and a situation that
+# recurs relentlessly reports how many sittings the window saved.
+VERDICT_WINDOW="${GC_ESCALATE_VERDICT_WINDOW:-86400}"
+case "$VERDICT_WINDOW" in ''|*[!0-9]*) VERDICT_WINDOW=86400 ;; esac
+if [ "$VERDICT_WINDOW" -gt 0 ]; then
+  if [ "$SUBJECT_IS_EPHEMERAL" = 1 ]; then
+    VERDICT_SUBJECT=""
+    VERDICT_RAW=$(bd_json list --status=closed --metadata-field "escalation_key=$KEY" --limit=0)
+  else
+    VERDICT_SUBJECT="$SUBJECT"
+    VERDICT_RAW=$(bd_json list --status=closed --metadata-field "escalation_key=$KEY" \
+      --metadata-field "gc.continuation_group=$SUBJECT" --limit=0)
+  fi
+  # Re-checked field by field for the same reason the open listing is: a
+  # listing that silently ignored a filter would suppress everything.
+  VERDICT_ROW=$(printf '%s' "$VERDICT_RAW" | jq -r --arg k "$KEY" --arg s "$VERDICT_SUBJECT" '
+    if type != "array" then empty else
+      [ .[]
+        | select((.metadata.escalation_key // "") == $k)
+        | select($s == "" or (.metadata["gc.continuation_group"] // "") == $s)
+        | select((.metadata["gc.outcome"] // "") as $o | $o == "moot" or $o == "benign")
+        | { id: .id,
+            outcome: (.metadata["gc.outcome"] // ""),
+            n: (((.metadata["escalation.recurrences"] // "0") | tonumber?) // 0),
+            at: (((.closed_at // "") | fromdateiso8601?) // 0) }
+        | select(.at > 0) ]
+      | sort_by(.at)
+      | last
+      | if . == null then empty
+        else [ .id, .outcome, ((now - .at) | floor | tostring), (.n | tostring) ] | @tsv end
+    end' 2>/dev/null)
+  if [ -n "$VERDICT_ROW" ]; then
+    V_ID="${VERDICT_ROW%%	*}";   V_REST="${VERDICT_ROW#*	}"
+    V_OUTCOME="${V_REST%%	*}";  V_REST="${V_REST#*	}"
+    V_AGE="${V_REST%%	*}";      V_COUNT="${V_REST#*	}"
+    case "$V_AGE$V_COUNT" in *[!0-9]*) V_AGE=""; V_COUNT="" ;; esac
+    if [ -n "$V_AGE" ] && [ "$V_AGE" -lt "$VERDICT_WINDOW" ]; then
+      V_COUNT=$((V_COUNT + 1))
+      gc bd update "$V_ID" \
+        --set-metadata "escalation.recurrences=$V_COUNT" \
+        --set-metadata "escalation.recurrence_last=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 \
+        || warn "could not record the recurrence on $V_ID; the suppression below still stands"
+      echo "escalate: $DEDUP_SCOPE was answered '$V_OUTCOME' ${V_AGE}s ago on visit $V_ID — not filing another inside ${VERDICT_WINDOW}s (recurrence $V_COUNT). A situation that has CHANGED takes a new --key; GC_ESCALATE_VERDICT_WINDOW=0 disables the window."
+      exit 0
+    fi
+  fi
 fi
 
 assert_routable "$POOL" || exit 1
