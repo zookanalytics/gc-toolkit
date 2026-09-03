@@ -276,6 +276,24 @@ review_watermark_key = "pr_review_watermark"
 # blocks edge: escalate.sh files it depending on its subject, so an edge back
 # would be a cycle.
 disposition_key = "pr_comment_disposition"
+# The span each disposition covers, as `<disposition>|<exclusive floor>|
+# <inclusive mark>` records, oldest first, joined by ";". A disposition holds
+# one batch and the watermark is cumulative, so an earlier batch's unresolved
+# thread still sits below the mark: without the ranges, the write-back sweep
+# reads one span running back to zero and answers those threads with a commit
+# from the newest bead. pr-facts.sh is the only writer and the only reader, in
+# both of its passes: the transition that routes a batch stamps that batch's
+# record beside the watermark it moves, so the range is durable before a later
+# pass can route over it, and the write-back sweep extends the standing record,
+# mints one from zero for a disposition that predates the history, and drops a
+# record once its batch has nothing owing, always keeping the newest because
+# its mark is the next batch's floor. Each pass refuses to act on a value it
+# could not parse or could not record: the routing pass leaves the watermark
+# where it was and re-dispatches the same batch, and the sweep acknowledges
+# comments and replies to nothing. Absent means no batch was ever recorded,
+# which the sweep answers by minting the one range it can defend; nothing
+# removes the key.
+batch_key = "pr_comment_batch"
 
 [machine_axis]
 # What the merge cadence can do with this anchor on its next pass, recorded by
@@ -437,6 +455,42 @@ since_format = "RFC 3339 UTC"
 #   The match is exact, so any value but `1` is also not an opt-in;
 #   `--unset-metadata` removes the key.
 #
+# gc.first_reaction, gc.first_reaction_reason, gc.first_reaction_target,
+#   gc.first_reaction_at — which of the three exits a first reaction took, why,
+#   what the choice named (the pool for `actionable`, the comma-joined beads
+#   waited on for `blocked`, the visit for `ruling`) and when. Written by
+#   `assets/scripts/first-reaction-dispose.sh`, in one update ahead of the act
+#   itself, so a disposition that dies part-way is still auditable; a rerun
+#   overwrites all four. Nothing in the pack reads them: the record is for
+#   whoever asks later why a bead was routed, waited or sent to a person, and
+#   the act it describes is carried by the route, the `blocks` edge or the
+#   visit rather than by these keys. Absent means no disposition was recorded,
+#   which is either a bead no reaction has run on or one whose reaction never
+#   reached its exit; gc.proactive_reaction is the key that says a reaction was
+#   dispatched. Nothing clears them.
+#
+# gc.blocker_key — the dedup handle on a bead a first reaction filed as the
+#   wait it found, so one bead stands per recurring CAUSE rather than one per
+#   instance. Written by first-reaction-dispose.sh onto the blocker bead at
+#   creation, never onto the reacting subject, and read by the same script:
+#   before filing, it looks for an open or in_progress bead carrying the same
+#   value and waits on that one instead. Absent means the bead was filed
+#   without a cause handle and the next reaction on the same cause will file a
+#   second bead rather than find it. Nothing clears it.
+#
+# planning_artifact_ok — the operator's deliberate exemption from pr-open.sh's
+#   shared-input-artifact guard, which refuses to open a PR onto the default
+#   branch whose whole diff is bead-local planning content with no convoy above
+#   the anchor. `assets/scripts/pr-open.sh` reads it as one of that guard's four
+#   conditions and nothing in the pack writes it: the refusal prints the
+#   `--set-metadata planning_artifact_ok=true` that lifts it and the mechanik
+#   prompt names it, both addressed to a person. A live reader is what earns a
+#   key a line, the same rule that registers gc.proactive. It is read as a
+#   truthy string, so `false`, `0` and `null` do not exempt anything; absent
+#   means the guard evaluates normally, which for every anchor but a planning
+#   artifact aimed at the default branch is a pass. `--unset-metadata` removes
+#   it, and nothing in the pack does.
+#
 # labels — a set both the runtime and the pack read. `warrant`, `learning`,
 #   `observation`, `feedback-pattern` and `prompt-update` mark a bead's role in
 #   a pack loop. `hold:mayor` and `hold:external` are the gascity binary's
@@ -477,6 +531,13 @@ since_format = "RFC 3339 UTC"
 #   The boundary has one sharp edge: a key that becomes a registered key once
 #   that prefix is added or removed is pack state written where the pack's
 #   reader never looks, so nothing reads it and nothing reports it missing.
+#   The other pack in this repo is outside it too. `packs/gascity-keeper` is a
+#   separate opt-in pack with its own pack.toml, agents and formulas, and the
+#   upstream-sync keys those write — the `mol-upstream-gc-*` family's rebase and
+#   PR-prep bookkeeping among them — belong to that pack, which a rig can load
+#   or not. A repo-wide grep for `--set-metadata` therefore finds keys this
+#   registry is right not to carry: what earns a line here is being written,
+#   cleared or read by THIS pack.
 # ---------------------------------------------------------------------------
 
 [metadata.merge_identity]
@@ -485,6 +546,9 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
+  # The operator's exemption from pr-open.sh's shared-input-artifact guard.
+  # Nothing writes it: the refusal prints the command that sets it.
+  "planning_artifact_ok",
   # What the diff does, composed by the polecat that wrote it. pr-open.sh
   # publishes it as the PR's `## Summary` and falls back to the anchor's
   # description when it is absent.
@@ -510,7 +574,7 @@ keys = [
 [metadata.pr_posture]
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
-  "pr_review_watermark", "pr_comment_disposition",
+  "pr_review_watermark", "pr_comment_disposition", "pr_comment_batch",
 ]
 
 [metadata.pr_round_trip]
@@ -541,6 +605,12 @@ keys = [
   # The per-bead opt-in the same scan selects on. Nothing writes it: it is set
   # by hand on a bead whose holder wants a first reaction.
   "gc.proactive",
+  # What the reaction chose and why, written by first-reaction-dispose.sh
+  # before it acts. gc.blocker_key sits on the bead the blocked exit files,
+  # not on the subject: it is how the next reaction on the same cause finds
+  # that bead instead of filing a second one.
+  "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
+  "gc.first_reaction_at", "gc.blocker_key",
 ]
 
 # Warrant beads (label=warrant, routed to the dog pool): the due-process kill
@@ -588,7 +658,11 @@ keys = ["doctor_check", "doctor_finding_predecessor", "reconcile_rig"]
 # something this file has to define; the rest of the namespace is the runtime's
 # alone. The pack stamps gc.routed_to only as a routing decision
 # (stamp-don't-sling, lifecycle.sh --route); the claim semantics belong to the
-# runtime.
+# runtime. Pack CODE is the test, and a runbook is not it: the delivery keys
+# docs/gascity-dispatch-containment.md clears by hand (gc.deferred_routed_to
+# and its two siblings) stay the runtime's, because no script, formula or check
+# here writes, clears or reads one, and a procedure a person runs during an
+# incident does not make a key this file has to define.
 [metadata.runtime_owned]
 keys = [
   "gc.routed_to", "gc.step_ref", "gc.root_bead_id", "gc.execution_routed_to",
