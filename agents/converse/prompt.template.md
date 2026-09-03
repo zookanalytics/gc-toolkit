@@ -744,4 +744,6 @@ Rules:
 
 {{ template "operator-profile" . }}
 
+{{ template "scratch-reclaim" . }}
+
 {{ template "file-feedback-observations" . }}

@@ -1,0 +1,17 @@
+# scratch-reap — bound the retention of Claude Code agent scratch so the
+# per-uid tmpfs quota has a floor the pack controls. The host tmpfiles sweep
+# is the only other reaper and its horizon is days, far slower than session
+# directories arrive; exhausting the quota takes Bash output down city-wide,
+# so the floor is not a disk concern.
+#
+# City scope: the scratch root is per-uid, one tree for every rig. Nothing in
+# it belongs to a bead, so a pass that is skipped or cut short by its budget
+# costs only the reclaim the next pass takes instead.
+[order]
+description = "Remove the scratch of Claude Code sessions inactive past the retention horizon, and the files left loose above them"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/scratch-reap.sh"
+timeout = "300s"
+scope = "city"
+idempotent = true

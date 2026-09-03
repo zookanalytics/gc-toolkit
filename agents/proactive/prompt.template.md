@@ -167,6 +167,8 @@ main. Never `--merge direct`. The pool already defaults
 
 {{ template "operator-profile" . }}
 
+{{ template "scratch-reclaim" . }}
+
 ## Communication
 
 ```bash

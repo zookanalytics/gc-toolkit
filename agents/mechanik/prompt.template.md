@@ -180,6 +180,8 @@ mechanik in a non-gascity rig does not receive it.
 
 {{ template "operator-profile" . }}
 
+{{ template "scratch-reclaim" . }}
+
 {{ template "file-feedback-observations" . }}
 
 {{ template "learned-conventions-mechanik" . }}
