@@ -189,7 +189,8 @@ resumes, and neither names what is waited on.
 
 **"Do not dispatch this yet."** A4 stored `blocked`, A5 cleared route, A8 hold
 labels, A11 arming, and a `blocks` edge. Five ways to fall out of the claim
-predicate. Only two converge, and one of those two has zero uses.
+predicate. Only two converge, and one of those two, A11 arming, is in live
+use but opt-in at every call site.
 
 **"The operator pulled a brake."** B7 and B8. Genuinely one mechanism at two
 scopes.
