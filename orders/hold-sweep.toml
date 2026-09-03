@@ -1,0 +1,18 @@
+# hold-sweep — release the holds whose condition has fired. A `triage.hold`
+# hides a bead from the liveness sweep, so a hold nothing evaluates keeps its
+# bead hidden for as long as the marker stands. hold-sweep.sh records each
+# hold's release condition as metadata and this pass evaluates every live hold
+# against its own condition. Exec, not a formula: one `bd list` plus a bounded
+# probe per hold needs no LLM, and releasing is a mechanical write. Rig-scoped:
+# one pass per importing rig against its own store, because "a merge landed in
+# this rig" is a per-store fact. Hourly, because the conditions are hour-grained
+# and holds change slowly; the runtime's open-tracking gate is the single-flight
+# guard, so keep `timeout` under the tracking sweep's stale-after (10m). Tune
+# the interval from city.toml [[orders.overrides]].
+[order]
+description = "Hold sweep: release every triage.hold whose recorded release condition has fired, and name every hold that carries no condition at all"
+trigger = "cooldown"
+interval = "1h"
+timeout = "180s"
+exec = "$PACK_DIR/assets/scripts/hold-sweep.sh reconcile"
+scope = "rig"
