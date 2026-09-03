@@ -389,17 +389,30 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num dependency probe unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
-  # pr_number holders drop other anchors (the dup guard's business) and explicit
-  # tracking_only opt-outs; a dep-edge holder holds regardless — the edge is the claim.
-  if ! inflight=$(printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" | jq -sr --arg id "$id" --arg live "$LIVE_STATUSES" '
+  # A pr_number holder is qualified by the repository its own pr_url names: bd
+  # matches the bare number, so a bead naming that number in ANOTHER repository
+  # would otherwise hold this merge. Unknown is not foreign — a row whose url is
+  # absent or unparseable names no repository and still holds; only a url that
+  # resolves elsewhere is dropped. pr_number holders also drop other anchors
+  # (the dup guard's business) and explicit tracking_only opt-outs; a dep-edge
+  # holder holds regardless — the edge is the claim, and it is local by
+  # construction.
+  if ! inflight=$(printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" | jq -sr --arg id "$id" --arg live "$LIVE_STATUSES" --arg repo "$ORIGIN_REPO_Q" '
+    def repo_q: # mirrors url_repo_q, case-folded; "?" = names no repository
+      [ ((. // "") | tostring | gsub("[[:space:]]";"") | ascii_downcase)
+        | capture("^[a-z][a-z0-9+.-]*://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]") ]
+      | .[0] | if . == null then "?" else (.h + "/" + .o) end;
     ($live | split(",")) as $ls
+    | ($repo | ascii_downcase) as $ours
     | [ (.[0][] | . + {via: "pr"}), (.[1][] | . + {via: "dep"}), (.[2][] | . + {via: "dep"}) ]
     | [ .[] | select(.id != $id)
         | ((.status // "open") | ascii_downcase) as $st
         | select(($ls | index($st)) != null)
         | ((.metadata.merge_result // "") | tostring) as $mr
         | ((.metadata.tracking_only // "") | tostring | ascii_downcase) as $t
-        | select(.via == "dep" or ($mr == "" and ((["","false","0","null"] | index($t)) != null)))
+        | (.metadata.pr_url | repo_q) as $rq
+        | select(.via == "dep" or ($mr == "" and ((["","false","0","null"] | index($t)) != null)
+                                   and ($rq == "?" or $rq == $ours)))
         | "\(.id) (\($st))" ]
     | .[0] // empty' 2>/dev/null); then
     echo "$PROG: PR#$num in-flight holder filter unreadable; merge held (anchor $id)"

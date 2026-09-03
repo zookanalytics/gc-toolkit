@@ -128,6 +128,62 @@ echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M9b" "closing the visit is the release, and it performs"
 
+
+# A referencing bead is qualified by the repository ITS OWN pr_url names: bd
+# matches the bare number, and the same number in another repository is a
+# different PR. Unknown is not foreign, so only a url resolving elsewhere is
+# dropped — which is what keeps the number-only children above holding.
+kid() { # id num extra-metadata-json
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"pr_number":"%s"%s}}' "$1" "$2" "${3:-}"
+}
+: > "$STUB_DEPS"
+store "[$(anchor Q1 24), $(kid fgn-1 24 ',"pr_url":"https://github.com/other/repo/pull/24"')]"
+printf '%s' "$(prview 24 OPEN CLEAN)" > "$GH_DIR/pr_view_24.json"
+echo '[]' > "$GH_DIR/reviews_24.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded Q1" "a same-numbered bead in ANOTHER repository does not hold this merge"
+
+store "[$(anchor Q2 25), $(kid loc-1 25 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/25"')]"
+printf '%s' "$(prview 25 OPEN CLEAN)" > "$GH_DIR/pr_view_25.json"
+echo '[]' > "$GH_DIR/reviews_25.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead loc-1" "a child carrying THIS repository's pr_url still holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 25" "…and nothing merged"
+
+# pr-facts.sh stamps pr_url beside pr_number on every child it files, so what a
+# url compare drops is the whole in-flight probe. Both ways of naming this
+# repository without matching it byte for byte stay holders.
+store "[$(anchor Q3 26), $(kid case-1 26 ',"pr_url":"https://GitHub.com/Zook/GC-Toolkit/pull/26"')]"
+printf '%s' "$(prview 26 OPEN CLEAN)" > "$GH_DIR/pr_view_26.json"
+echo '[]' > "$GH_DIR/reviews_26.json"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead case-1" "repository identity is case-insensitive, so a differently-cased url holds"
+# …and the case can differ on the checkout's side just as well: the repository
+# a remote url names is the same repository whatever case it is written in.
+store "[$(printf '%s' "$(anchor Q3b 29)" | jq -c '.metadata.pr_url = "https://github.com/Zook/GC-Toolkit/pull/29"'), $(kid case-2 29 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/29"')]"
+printf '%s' "$(prview 29 OPEN CLEAN)" \
+  | jq -c '.url = "https://github.com/Zook/GC-Toolkit/pull/29"
+           | .headRepositoryOwner.login = "Zook" | .headRepository.name = "GC-Toolkit"' > "$GH_DIR/pr_view_29.json"
+echo '[]' > "$GH_DIR/reviews_29.json"
+out=$(STUB_ORIGIN_URL="https://github.com/Zook/GC-Toolkit" "$SUT" 2>&1)
+has "$out" "unclosed rework/review bead case-2" "…and a differently-cased ORIGIN matches the url a bead carries"
+
+store "[$(anchor Q4 27), $(kid junk-1 27 ',"pr_url":"TBD"')]"
+printf '%s' "$(prview 27 OPEN CLEAN)" > "$GH_DIR/pr_view_27.json"
+echo '[]' > "$GH_DIR/reviews_27.json"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead junk-1" "an unparseable pr_url names no repository and still holds"
+
+# The edge is the claim, and an edge is local by construction: a dep-edge holder
+# is never qualified by the url it happens to carry.
+store "[$(anchor Q5 28), $(kid dep-fgn 28 ',"pr_url":"https://github.com/other/repo/pull/28"')]"
+printf '%s' "$(prview 28 OPEN CLEAN)" > "$GH_DIR/pr_view_28.json"
+echo '[]' > "$GH_DIR/reviews_28.json"
+printf 'dep-fgn|blocks|Q5\n' > "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead dep-fgn" "a dep-edge blocker holds whatever repository its url names"
+: > "$STUB_DEPS"
 echo "# approval arms"
 store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green"')]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"
