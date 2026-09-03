@@ -12,7 +12,7 @@ agents/converse/prompt.template.md
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
-8e65582a88d4e36e23307382035d76a652c38d49e6120f7726a7a77123058849
+025a990b1848da4e7abcf189179674f2dc9983ecbcc348ac710d53c7ca439950
 agents/dog/agent.toml
 461bf99dede1bb2bd93362209c27f2a214ea081faf2e5a886ec2d2284cb95c7f
 agents/dog/prompt.template.md
@@ -48,7 +48,7 @@ agents/witness/prompt.template.md
 assets/scripts/render-seed-audit.sh
 1865d17ae05668fa5d9209582e70ed6bef68bb4673d278c2e101e938596d08fc
 formulas/mol-deacon-patrol.toml
-1a32a744a2aff930110eb9642f466f4cf078afa3cdd372887c33339c339b7097
+4ff98955311e2917d614e2c57ad77923035067df6e7dc97da9c0f3b8ca8e59b0
 formulas/mol-dog-shutdown-dance.toml
 3a218bfe03da4422efe21d706bb884818dd65a1c7ad4694fd7f7c9f90bb5dec1
 formulas/mol-feedback-distiller.toml

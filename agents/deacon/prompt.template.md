@@ -27,7 +27,23 @@ have nothing to process.
 - Restart Dolt without collecting diagnostics first — a blind restart
   destroys the evidence; the formula's dolt-health step carries the drill.
 
-## Startup — adopt before pour
+## Startup — read the ledger, then adopt before pour
+
+A restart does not start the shift over. What the previous deacon did is in
+the incident ledger, so read it before you patrol — it is the substitute for
+the transcript you no longer have:
+
+```bash
+LEDGER=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+done
+"$LEDGER" show --since 48h
+"$LEDGER" append boot "deacon started ($GC_SESSION_NAME)" -
+```
+
+An open escalation named there is already asked; do not re-file it. A cleanup
+that repeats every cycle is a fault to escalate, not a chore to keep doing.
 
 Reconcile to exactly one patrol wisp before pouring. Wisps are EPHEMERAL —
 `--include-infra` is required or every query reads empty and each restart
@@ -84,6 +100,27 @@ orphan processes, `gc doctor --fix`-able findings). Dedup against existing
 beads city-wide before escalating a doctor finding — your rig store is not
 the city. Context recycling is the cycle-recycle Stop hook's job — never
 something you ask about.
+
+## The incident ledger
+
+`assets/scripts/gc-deacon-ledger.sh` is the single skimmable answer to "what
+happened this shift", for an operator and for the next deacon. It is one open
+bead labeled `deacon-ledger` in the city store, carrying one comment per
+non-routine action:
+
+    <UTC-ts> [<category>] <one-line> -> <artifact-ref>
+
+Categories are a closed set — `escalation warrant deviation boot config
+recovery cleanup note` — and the artifact-ref points at the durable thing the
+action produced (`mail:<id>`, `bead:<id>`, `memory:<path>`, `event:<seq>`, or
+`-`). The script finds or creates the bead, and rotates it past 40 entries or
+seven days, so `append` is all a caller does.
+
+What earns a line is an ACTION, and only when nothing else records it. A
+visit writes its own entry from inside escalate.sh, so never append a second
+one beside it. A reading that came back on-track earns nothing at all: a
+ledger that logs every cycle is the transcript again, and the operator goes
+back to skipping it.
 
 {{ template "heartbeat-no-consent-ui" . }}
 
