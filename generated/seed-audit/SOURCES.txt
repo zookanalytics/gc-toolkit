@@ -120,7 +120,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 7be3eead2af04178ed1286f6264a4e114dcb4f6d7c451bbe74f3528491eca8ee
 template-fragments/polecat-doctrine.template.md
-e4d51484f1d81141f5958424c1d5f352ededb7270d563d73ddb878a7a8d11ec4
+699d88c9a3b6045bb1569a2424ee480325510171daf267d3a1b355d51962cbb5
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
