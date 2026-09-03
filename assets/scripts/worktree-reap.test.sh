@@ -11,7 +11,9 @@
 # HEAD, and which would otherwise strand every worktree older than a file the
 # default branch dropped. Covers the shape rails that keep an agent's session
 # worktree and the rig checkout out of the candidate set, --dry-run's promise
-# that it reports what a run would take, and the budget yield.
+# that it reports what a run would take, and the budget yield. Covers nested
+# child bead ids (tk-x.1.1), which the grammar must consume whole in both the
+# branch and worktree passes.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -153,6 +155,31 @@ build_city
 gitr branch roadmap origin/main >/dev/null 2>&1
 run > /dev/null
 if has_branch roadmap; then ok "a merged branch that names no bead is left alone"; else bad "a merged branch that names no bead is left alone"; fi
+
+# --- nested child bead ids --------------------------------------------------
+# A bead split off another can itself be split, so ids nest: tk-x.1.1. The
+# grammar has to consume every .N segment. A grammar that stops at the first
+# parses polecat/tk-nest1.1.1 as bead tk-nest1.1 — a shorter, different id — so
+# the open-bead guard is keyed on the wrong bead and a merged tip erases a live
+# child's local ref. Its dead-bead sibling, merged the same way, is still taken.
+build_city
+gitr branch polecat/tk-nest1.1.1 origin/main >/dev/null 2>&1
+gitr branch polecat/tk-nest2.1.1 origin/main >/dev/null 2>&1
+open_beads '[{"id":"tk-keep1"},{"id":"tk-nest1.1.1"}]'
+run > /dev/null
+if has_branch polecat/tk-nest1.1.1; then ok "nested id, merged tip, live bead: the branch is held"; else bad "nested id, merged tip, live bead: the branch is held"; fi
+if has_branch polecat/tk-nest2.1.1; then bad "nested id, merged tip, dead bead: the branch is still taken"; else ok "nested id, merged tip, dead bead: the branch is still taken"; fi
+
+# The worktree pass matches the same grammar with a full-line test, so a
+# nested-id worktree is a candidate rather than skipped: its closed-bead sibling
+# is reaped and an open one is held.
+build_city
+NLIVE="$(mk_wt tk-nest3.1.1)"
+NDEAD="$(mk_wt tk-nest4.1.1)"
+open_beads '[{"id":"tk-keep1"},{"id":"tk-nest3.1.1"}]'
+run > /dev/null
+if exists "$NLIVE"; then ok "nested id, open bead: the worktree is held"; else bad "nested id, open bead: the worktree is held"; fi
+if exists "$NDEAD"; then bad "nested id, closed bead: the worktree is reaped"; else ok "nested id, closed bead: the worktree is reaped"; fi
 
 # --- what holds a worktree --------------------------------------------------
 build_city

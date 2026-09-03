@@ -78,8 +78,11 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 # A bead id as it appears in a directory name or a commit message: two letters,
-# a dash, and an optional .N suffix for a bead split off another.
-BEAD_RE='[a-z][a-z]-[a-z0-9]+(\.[0-9]+)?'
+# a dash, and zero or more .N suffixes. A split bead can itself be split, so ids
+# nest (tk-x.1.1); every segment is part of the id and must be consumed, or a
+# nested id parses as a shorter, different bead — the open-bead guard then keys
+# on the wrong id and a merged tip takes a live child's local ref.
+BEAD_RE='[a-z][a-z]-[a-z0-9]+(\.[0-9]+)*'
 
 # Processes with a cwd on disk. One walk, and `-printf %l` reads each symlink
 # without following it, so a host with thousands of processes costs one command
