@@ -695,16 +695,18 @@ cmd_takeaway() {
 }
 
 # ── Verb: demand ─────────────────────────────────────────────────────
-# What a person owes, filed as a bead the work is blocked by — the replacement
-# for parking a subject on prose. A bead is either ready and therefore moving,
-# or blocked on a named bead by an edge; there is no third state a person has
-# to return and hand-clear.
+# What a person owes, filed as a NATIVE human gate (issue_type=gate,
+# await_type=human) the work is blocked by — the replacement for parking a
+# subject on prose. A bead is either ready and therefore moving, or blocked on
+# a named gate by an edge; there is no third state a person has to return and
+# hand-clear. The gate keeps gc.demand_for so every reader of the demand
+# convention keeps working; those readers pass --include-gates because
+# `bd list` hides gate beads by default.
 #
-# The demand is filed as a SIBLING of <gated-bead>: same parent, or parentless
-# when the gated bead has none. That placement is not tidiness. beads REFUSES a
-# `blocks` edge from a parent to its own descendant, because blocked status
-# cascades and the descendant would inherit the block it is meant to lift, so a
-# demand filed as a CHILD could never gate the thing it is about.
+# The gate is grouped as a SIBLING of <gated-bead> — same parent, or parentless
+# when the gated bead has none — so it reads beside the work on the board. The
+# `blocks` edge then runs sibling->sibling; beads REFUSES one from a parent to
+# its own descendant, which is what a demand filed as a CHILD would be.
 #
 # The edge is the record here, not a garnish on it. `takeaway --waiting-on`
 # writes its edge beside prose a human reads, so a rejected edge only warns;
@@ -751,7 +753,7 @@ cmd_demand() {
         *) echo "$PROG: demand: --kind is 'decision' (a ruling) or 'task' (work only a person can do); got '$kind'" >&2; exit 2 ;;
     esac
     [ -n "$by" ] || by="host"
-    [ -n "$body" ] || body="What a person owes, filed as a bead so the wait is a graph state rather than a comment. Closing this makes $gated ready, and the pool claims it."
+    [ -n "$body" ] || body="What a person owes, filed as a human gate so the wait is a graph state rather than a comment. Resolving this gate makes $gated ready, and the pool claims it."
 
     path=$(rig_path_for_bead "$gated")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
@@ -780,7 +782,10 @@ cmd_demand() {
          | map(select(. != "")) | .[0] // ""' 2>/dev/null || true)
     # <<< demand-sibling-shape
 
-    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
+    # --include-gates: the demand is a human gate (issue_type=gate), which
+    # `bd list` hides by default; without it every re-state files a second
+    # demand instead of refreshing the one that is already open.
+    existing=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 2>/dev/null \
         | scrub \
         | jq -r --arg g "$gated" \
             '[ .[]? | select((.metadata["gc.demand_for"] // "") == $g) | .id ] | first // empty' 2>/dev/null || true)
@@ -812,27 +817,37 @@ cmd_demand() {
         fi
         echo "$PROG: demand: refreshed the open demand $demand on $gated; no second bead filed" >&2
     else
-        set -- -t "$kind" --title "$text" -d "$body"
-        [ -n "$parent" ] && set -- "$@" --parent "$parent"
-        demand=$(gc bd create "$@" --json 2>/dev/null \
+        # File the demand as a NATIVE human gate — issue_type=gate,
+        # await_type=human, the pack's human-escalation state — that blocks the
+        # gated bead. `gc bd update` has no `gate` type, so the gate can only be
+        # born from `gc bd gate create`; the demand metadata is stamped after,
+        # and the kind is recorded in metadata rather than as the issue type.
+        demand=$(gc bd gate create --type=human --blocks "$gated" --title "$text" --json 2>/dev/null \
             | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
         # A create routed to the wrong ledger returns an id rather than an
         # error, and that id can never carry an edge to $gated — so the prefix
         # is checked, not assumed.
         case "$demand" in
-            ""|null)     echo "$PROG: demand: bd create returned no id — nothing filed on $gated." >&2; exit 4 ;;
+            ""|null)     echo "$PROG: demand: gc bd gate create returned no id — nothing filed on $gated." >&2; exit 4 ;;
             "$prefix"-*) : ;;
-            *)           echo "$PROG: demand: bd create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Close it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
+            *)           echo "$PROG: demand: gc bd gate create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Resolve it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
         esac
-        set -- --set-metadata "gc.takeaway=$text" \
+        set -- -d "$body" \
+               --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
+               --set-metadata "gc.demand_kind=$kind" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         gc bd update "$demand" "$@" >/dev/null 2>&1 \
-            || { echo "$PROG: demand: filed $demand but could not stamp it — it is not on the operator's queue yet. Re-run this command." >&2; exit 4; }
+            || { echo "$PROG: demand: filed gate $demand but could not stamp it — it is not on the operator's queue yet. Re-run this command." >&2; exit 4; }
+        # Re-home the gate as the gated bead's SIBLING (best-effort): it is born
+        # parentless, and grouping it under the gated bead's own parent keeps
+        # the board tidy. Non-fatal — a parentless gate blocks exactly as hard,
+        # and the blocks edge runs sibling->sibling either way.
+        [ -n "$parent" ] && gc bd update "$demand" --parent "$parent" >/dev/null 2>&1 || true
     fi
 
     # `dep add <gated> <demand>` reads "<gated> is blocked by <demand>", so the

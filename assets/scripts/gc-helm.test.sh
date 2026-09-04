@@ -1556,6 +1556,11 @@ case "$1 ${2:-}" in
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
   "bd list")  cat "$D_LIST" ;;
   "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
+  "bd gate")
+    # `gc bd gate create --type=human --blocks <gated> --title <t> --json`
+    # returns the new gate's id; the block edge is modelled by the verb's own
+    # dep-add loop (read back from the log below), so gate-create logs no edge.
+    case "${3:-}" in create) printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;; esac ;;
   "bd update")
     # The multi-pair refresh never lands here, which is the dropped clear this
     # store models. The lone-pair repair does — unless the bead id says STUCK,
@@ -1599,23 +1604,28 @@ demand_run() {
 d_create() { grep -E '^bd create ' "$D_LOG" || true; }
 d_update() { grep -E '^bd update ' "$D_LOG" || true; }
 d_deps()   { grep -E '^bd dep add ' "$D_LOG" || true; }
+d_gate()   { grep -E '^bd gate create ' "$D_LOG" || true; }
 
-# (SIBLING) the demand inherits the GATED bead's parent — never becomes its
-# child, which beads would refuse to let it block.
+# (GATE) the demand is a native human gate that blocks the gated bead, born
+# from `gc bd gate create` — the only verb that sets issue_type=gate.
 demand_run tk-kid "operator: pick the storage backend" --by converse
-eq "$DRC" "0" "(SIBLING) a demand on a parented bead succeeds"
-grep -q -- '--parent tk-mum' <<< "$(d_create)" \
-  && ok "(SIBLING) the demand is filed under the gated bead's own parent" \
-  || bad "(SIBLING) no --parent tk-mum in: $(d_create)"
-grep -q -- '--parent tk-kid' <<< "$(d_create)" \
-  && bad "(SIBLING) the demand was filed as a CHILD of the bead it gates" \
+eq "$DRC" "0" "(GATE) a demand on a parented bead succeeds"
+grep -q -- '--type=human' <<< "$(d_gate)" \
+  && ok "(GATE) the demand is a human gate" || bad "(GATE) not --type=human: $(d_gate)"
+grep -q -- '--blocks tk-kid' <<< "$(d_gate)" \
+  && ok "(GATE) …blocking the gated bead" || bad "(GATE) not --blocks tk-kid: $(d_gate)"
+grep -q -- '--title operator: pick the storage backend' <<< "$(d_gate)" \
+  && ok "(GATE) the authored headline is the gate title" \
+  || bad "(GATE) headline is not the title: $(d_gate)"
+eq "$(d_create)" "" "(GATE) no plain bd create — the demand is a gate, not a bare bead"
+# (SIBLING) the gate is grouped under the GATED bead's own parent — never its
+# child, which beads would refuse to let it block.
+grep -q -- '--parent tk-mum' <<< "$(d_update)" \
+  && ok "(SIBLING) the gate is re-homed under the gated bead's own parent" \
+  || bad "(SIBLING) no --parent tk-mum in: $(d_update)"
+grep -q -- '--parent tk-kid' <<< "$(d_update)$(d_gate)" \
+  && bad "(SIBLING) the gate was filed as a CHILD of the bead it gates" \
   || ok "(SIBLING) …and not as a child of the bead it gates"
-grep -q -- '-t decision' <<< "$(d_create)" \
-  && ok "(SIBLING) a ruling is issue_type=decision (a typed board anchor)" \
-  || bad "(SIBLING) not -t decision: $(d_create)"
-grep -q -- '--title operator: pick the storage backend' <<< "$(d_create)" \
-  && ok "(SIBLING) the authored headline is the demand's TITLE" \
-  || bad "(SIBLING) headline is not the title: $(d_create)"
 
 # (EDGE) the wait is an edge on the GATED bead: "tk-kid is blocked by tk-dem1".
 eq "$(d_deps)" "bd dep add tk-kid tk-dem1 -t blocks" \
@@ -1636,31 +1646,32 @@ grep -q 'gc.takeaway_by=converse' <<< "$U" \
 eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-dem1" \
    "(OUT) the demand id is the second field of the 'demand …' line"
 
-# (SIBLINGNONE) a parentless gated bead gets a parentless demand: still a
-# sibling, and still able to carry the edge.
+# (SIBLINGNONE) a parentless gated bead gets a parentless gate: no re-home,
+# and still able to carry the edge.
 demand_run tk-solo "operator: ratify the cutover" --by converse
 eq "$DRC" "0" "(SIBLINGNONE) a demand on a parentless bead succeeds"
-grep -q -- '--parent' <<< "$(d_create)" \
-  && bad "(SIBLINGNONE) invented a parent: $(d_create)" \
+grep -q -- '--parent' <<< "$(d_gate)$(d_update)" \
+  && bad "(SIBLINGNONE) invented a parent: $(d_gate) / $(d_update)" \
   || ok "(SIBLINGNONE) no parent is invented for a parentless subject"
 
-# (KIND) work only a person can do is a task assigned to that person.
+# (KIND) work only a person can do is recorded as gc.demand_kind=task and
+# assigned to that person; the issue type stays gate.
 demand_run tk-solo "sign the vendor contract" --kind task --assignee zook
 eq "$DRC" "0" "(KIND) --kind task is accepted"
-grep -q -- '-t task' <<< "$(d_create)" \
-  && ok "(KIND) …filed as a task" || bad "(KIND) not -t task: $(d_create)"
+grep -q -- 'gc.demand_kind=task' <<< "$(d_update)" \
+  && ok "(KIND) …recorded as a task demand" || bad "(KIND) no gc.demand_kind=task: $(d_update)"
 grep -q -- '--assignee zook' <<< "$(d_update)" \
   && ok "(KIND) …assigned to the person who owes it" || bad "(KIND) no assignee: $(d_update)"
 
 # (KINDBAD) any other kind is a usage error, and files nothing.
 demand_run tk-solo "whatever" --kind epic
 eq "$DRC" "2" "(KINDBAD) an unsupported --kind is a usage error"
-eq "$(d_create)" "" "(KINDBAD) …and nothing is filed"
+eq "$(d_gate)" "" "(KINDBAD) …and nothing is filed"
 
 # (CAP) the ≤140 gate is SHARED with takeaway: the title is the same headline.
 demand_run tk-solo "$T141"
 eq "$DRC" "2" "(CAP) a 141-char demand headline is a usage error"
-eq "$(d_create)" "" "(CAP) …and nothing is filed"
+eq "$(d_gate)" "" "(CAP) …and nothing is filed"
 grep -q 'cap is 140' <<< "$DERR" \
   && ok "(CAP) …and the refusal names the cap" || bad "(CAP) refusal is silent: $DERR"
 demand_run tk-solo "$T140"
@@ -1670,7 +1681,7 @@ eq "$DRC" "0" "(CAP) exactly 140 chars is accepted — one boundary, both verbs"
 # still reads on the board as a question someone owes an answer to.
 demand_run tk-gone "operator: decide"
 eq "$DRC" "4" "(RESOLVE) an unresolvable gated bead is a runtime failure"
-eq "$(d_create)" "" "(RESOLVE) …and no demand is filed"
+eq "$(d_gate)" "" "(RESOLVE) …and no demand is filed"
 grep -q 'does not resolve' <<< "$DERR" \
   && ok "(RESOLVE) …and the refusal says why" || bad "(RESOLVE) refusal is silent: $DERR"
 
@@ -1679,7 +1690,7 @@ grep -q 'does not resolve' <<< "$DERR" \
 printf '[{"id":"tk-old1","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
 demand_run tk-kid "operator: pick the storage backend (still)" --by converse
 eq "$DRC" "0" "(IDEM) a re-stated demand succeeds"
-eq "$(d_create)" "" "(IDEM) …without filing a second bead"
+eq "$(d_gate)" "" "(IDEM) …without filing a second bead"
 grep -q '^bd update tk-old1 ' <<< "$(d_update)" \
   && ok "(IDEM) …refreshing the open one instead" || bad "(IDEM) the open demand was not refreshed: $(d_update)"
 grep -q -- '--title operator: pick the storage backend (still)' <<< "$(d_update)" \
