@@ -913,7 +913,16 @@ cmd_open() {
 
     # File the visit — the canonical gate-visit lines (formulas/mol-visit.toml).
     # >>> gate-visit
-    POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+    # The pool has to name a LIVE agent identity: a pool offer matches by exact
+    # byte equality, and the rig bound above picks both the store this visit
+    # lands in and the rig segment a rig-scoped pool carries — so a subject
+    # whose id resolves to no rig, or to the city, leaves an address naming
+    # nobody while every stamp of it reads back clean. pool-route.sh resolves
+    # it against the live agent set: it prints a proven-live route, refuses one
+    # no agent carries with empty stdout so nothing unclaimable is filed, and
+    # returns the route marked UNVERIFIED when the agent set is unreadable.
+    POOL_ROUTE="$SCRIPT_DIR/pool-route.sh"
+    POOL=$("$POOL_ROUTE" gc-toolkit.converse) || exit 4
     VISIT=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
         -d "$visit_body" \
         --json | jq -r '.id // .[0].id')

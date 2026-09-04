@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Every shipped escalate.sh call site owned by a CITY-scoped agent must name
-# the rig it files into. escalate.sh's default converse pool is
-# ${GC_RIG:+$GC_RIG/}gc-toolkit.converse: a rig-scoped agent renders that
-# qualified and routable, but a city-scoped one runs with GC_RIG unset and
-# renders it bare, an address no live pool holds. The route gate then refuses
-# before filing, so an unbound call site is a recipe that promises a
-# human-visible visit and produces none.
+# the rig it files into. escalate.sh qualifies its default converse pool with
+# GC_RIG: a rig-scoped agent gets a routable address that way, but a
+# city-scoped one runs with GC_RIG unset and is left with a bare name no live
+# pool holds. The route gate then refuses before filing, so an unbound call
+# site is a recipe that promises a human-visible visit and produces none.
 #
 # A prompt is a durable control channel, so a runnable recipe in one counts
 # exactly as much as a formula step.
