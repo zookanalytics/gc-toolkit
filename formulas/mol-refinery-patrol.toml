@@ -26,7 +26,7 @@ per situation key). Resolve both at shell runtime — formula bodies get no
 
 Marked blocks are extracted and executed by their tests
 (find-work-gating-guard, mr-aware-rejection-failclosed,
-preexisting-failure-dedup, one-anchor-per-pr, check-set-normalize) — keep
+preexisting-failure-dedup, one-anchor-per-pr, patrol-wisp-reconcile) — keep
 markers and keep the blocks backslash-free (TOML eats line-ending
 backslashes)."""
 formula = "mol-refinery-patrol"
@@ -703,10 +703,16 @@ Pour the next wisp BEFORE burning this one, and GUARD the assign — a poured
 but unassigned wisp reaches no hook and drops the loop. Forward every
 declared var: a --root-only pour materializes no defaults.
 
+`GC_BEAD_ID` is empty on a fresh session, so the fallback that resolves the
+current wisp has to work: a wisp is an EPHEMERAL molecule, which means
+`--type=molecule --include-infra` plus the title filter. Any narrower query
+reads empty, and an unresolved current wisp is one that never burns.
+
 ```bash
+# >>> patrol-wisp-pour
 CURRENT_WISP=${GC_BEAD_ID:-}
 if [ -z "$CURRENT_WISP" ]; then
-  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')
+  CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '[.[] | select(.title == "mol-refinery-patrol")][0].id // empty')
 fi
 NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}} --var default_merge_strategy={{default_merge_strategy}} --var check_set={{check_set}} --json | jq -r '.new_epic_id // empty')
 if [ -z "$NEXT" ]; then
@@ -727,6 +733,7 @@ else
   gc runtime drain-ack
   exit 1
 fi
+# <<< patrol-wisp-pour
 ```
 
 Close this step. The new wisp is ready — re-read the step order (the plain
