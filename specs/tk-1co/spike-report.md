@@ -240,7 +240,7 @@ under D2. This spike does not reopen that.
 | Move 2, one-time compaction of this rig's index |  **tk-mb8pp3** | filed, routed to the gc-toolkit polecat pool |
 | Move 1, export | none | needs the operator's destination decision (§5) |
 | Move 2, recurring curator | none | file once the operator accepts §5 |
-| Move 3, guidance change | none | promotion-pipeline work, not a polecat bead |
+| Move 3, guidance change | **tk-e9j751** | filed as an observation; enters the distiller's promotion pipeline, not the polecat pool |
 
 The one-time compaction is filed now because it needs no decision: 63
 memories are unreachable whichever way §5 is answered, and the remedy is
