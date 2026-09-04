@@ -12,7 +12,7 @@ agents/converse/prompt.template.md
 agents/deacon/agent.toml
 8bbad64f361dda62161e3f87b60bcc94031ee87655010dfbb45d1765953cb7f7
 agents/deacon/prompt.template.md
-025a990b1848da4e7abcf189179674f2dc9983ecbcc348ac710d53c7ca439950
+e4153db11ef856ca493537acf4cbc2d5d6c43a31b152eea1d2033815a229cd6f
 agents/dog/agent.toml
 461bf99dede1bb2bd93362209c27f2a214ea081faf2e5a886ec2d2284cb95c7f
 agents/dog/prompt.template.md

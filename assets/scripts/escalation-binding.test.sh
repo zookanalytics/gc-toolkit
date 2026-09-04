@@ -18,7 +18,7 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
 # How many call sites the shipped city-scoped surfaces carry today. A floor,
 # not an equality: new callers are expected, a caller going invisible is not.
-SITE_FLOOR=6
+SITE_FLOOR=7
 
 # The owning agent of a surface: an agent prompt owns itself, and a formula
 # named mol-<agent>-* is that agent's recipe. Anything else has no single
