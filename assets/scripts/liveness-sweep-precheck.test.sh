@@ -146,7 +146,7 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-spec","title":"a spec bead hanging off a root still alive","issue_type":"task","metadata":{},"dependencies":[{"issue_id":"f-spec","depends_on_id":"f-root-live","type":"tracks"}]},
   {"id":"f-tracks-dead","title":"tracks something already CLOSED — a wait no more","issue_type":"task","metadata":{},"dependencies":[{"issue_id":"f-tracks-dead","depends_on_id":"f-root-closed","type":"tracks"}]},
   {"id":"f-child","title":"a child whose parent is open — workable, not a wait","issue_type":"bug","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
-  {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
+  {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
   {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}}
@@ -313,6 +313,68 @@ jq '. + [{"id":"v-4","title":"visit: the sweep subject — stamp landed empty","
 BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "0" "a visit whose stamp is EMPTY still reads as live, via its tracks edge"
 has "$OUT" "a visit is already live" "and says which condition fired"
+
+# --- 2c. a stale PR gate is a pass output the baseline cannot represent -------
+# liveness-sweep.sh has TWO outputs: the batch triage visit (which the reported
+# baseline speaks for) and a per-anchor stale-gate escalation (which it cannot).
+# The failure this pins: a pass whose gh read failed cannot intersect the
+# open-PR set, so it classifies a PR-gated anchor `unnamed` and advances the
+# baseline with its id. Once gh recovers and the PR is past its age, that id is
+# no longer NEW and a baseline-only skip buries the escalation for good. The
+# precheck cannot read PR age — that is the pass's gh call — so it runs the pass
+# whenever a PR-gated anchor's re-escalation floor is up, on the same
+# stale_escalated_at stamp the sweep gates on.
+# Pin the floor so the two stamps below sit unambiguously inside and outside it.
+export LIVENESS_SWEEP_STALE_REESCALATE_DAYS=3
+iso_ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-"$1"d +%Y-%m-%dT%H:%M:%SZ; }
+
+echo "── a PR-gated anchor already carried in the baseline still runs the pass ──"
+cp "$TMP/live.bak" "$FIX/live.json"
+# f-pr-open is PR-gated with no stale stamp; carry it and every other survivor in
+# the baseline so the delta is genuinely empty and only the stale-due gate can
+# force the run — this is exactly the failed-gh-then-recovered shape.
+jq 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "0" "a PR-gated anchor carried in the baseline still RUNS — its stale-gate is non-local"
+has "$OUT" "local survivors 3 -> new 0" "the delta really is empty: every survivor is carried"
+has "$OUT" "may owe a stale-gate escalation" "the RUN names the stale-gate reason, not a phantom new candidate"
+has "$OUT" "PR-gated anchors past the stale re-escalation floor: 1" "and reports the one anchor that forced it"
+
+echo "── a PR-gated anchor escalated INSIDE the floor is not due — the board skips ──"
+# The gate respects the floor: it does not degrade into "run forever while any PR
+# is open". An anchor stamped within the floor owes nothing yet.
+RECENT="$(iso_ago 1)"
+jq --arg t "$RECENT" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
+                      | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "1" "a just-escalated anchor is inside its floor — nothing owed, the board skips"
+has "$OUT" "SKIP:" "the verdict is SKIP"
+
+echo "── a PR-gated anchor escalated BEFORE the floor is due again — it runs ──"
+# Mirrors the sweep's re-raise-after-floor: past the floor the anchor owes a
+# fresh escalation, so the precheck must dispatch again.
+OLD="$(iso_ago 10)"
+jq --arg t "$OLD" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
+                   | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "0" "an anchor last escalated before the floor is due again — RUN"
+has "$OUT" "may owe a stale-gate escalation" "and the stale-gate gate is what says so"
+
+# An UNPARSEABLE stamp re-raises, the same fail-open bias as the sweep: a stamp
+# that cannot be read is not proof the escalation was made.
+echo "── a PR-gated anchor with an unreadable stamp is due (fail-open) ──"
+jq 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
+    | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = "not-a-date") else . end)' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
+BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
+eq "$RC" "0" "an unparseable stale stamp is treated as due, never as done"
+
+# Restore the canonical fixtures for the sections that follow.
+cp "$TMP/ready.bak" "$FIX/ready.json"
+cp "$TMP/live.bak" "$FIX/live.json"
 
 # --- 3. "empty" only from verified reads -------------------------------------
 # The inverted failure mode. Each of these must RUN: a probe that cannot be read
@@ -659,7 +721,7 @@ PROG=liveness-sweep
 # runs the same arithmetic the pass does; a PR touched now is not stale, so the
 # bead classifies `gated` and stays out of the candidate set either way.
 # shellcheck disable=SC2089
-OPEN_PRS="[{\"url\":\"https://github.com/zookanalytics/signal-loom/pull/521\",\"updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]"
+OPEN_PRS="[{\"url\":\"https://github.com/zook/gc-toolkit/pull/521\",\"updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]"
 PASS_EPOCH="$(date -u +%s)"
 # shellcheck disable=SC2089
 WORKED='["f-worked"]'

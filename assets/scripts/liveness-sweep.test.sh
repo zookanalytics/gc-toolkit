@@ -58,7 +58,7 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
-# gh stub: only signal-loom answers, with #521/#522 open (so #520 merged and
+# gh stub: only zook/gc-toolkit answers, with #521/#522 open (so #520 merged and
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
 # It serves $GH_PRS verbatim, which is how a test ages a PR: the sweep asks for
 # url,updatedAt and reads both, so a stub that answered only url would classify
@@ -69,7 +69,7 @@ cat > "$TMP/bin/gh" <<'GH'
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
 case "$repo" in
-  */zookanalytics/signal-loom|zookanalytics/signal-loom) cat "$GH_PRS" ;;
+  */zook/gc-toolkit|zook/gc-toolkit) cat "$GH_PRS" ;;
   *) printf '[]\n' ;;
 esac
 GH
@@ -77,7 +77,7 @@ chmod +x "$TMP/bin/gh"
 
 iso_ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-"$1"d +%Y-%m-%dT%H:%M:%SZ; }
 gh_prs() { # gh_prs <days-since-update:521> <days-since-update:522>
-    printf '[{"url":"https://github.com/zookanalytics/signal-loom/pull/521","updatedAt":"%s"},{"url":"https://github.com/zookanalytics/signal-loom/pull/522","updatedAt":"%s"}]\n' \
+    printf '[{"url":"https://github.com/zook/gc-toolkit/pull/521","updatedAt":"%s"},{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' \
         "$(iso_ago "$1")" "$(iso_ago "$2")" > "$TMP/gh-prs.json"
 }
 gh_prs 0 0
@@ -126,10 +126,10 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
   {"id":"c-demand-live","title":"a person owes an answer here","issue_type":"task","metadata":{"gc.takeaway":"holding — which of the two?"}},
   {"id":"c-demand-widen","title":"its demand is deferred, not closed","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
-  {"id":"c-pr-open","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
-  {"id":"c-pr-case","title":"same PR, different case + trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://GitHub.com/zookanalytics/signal-loom/pull/522/files"}},
-  {"id":"c-pr-merged","title":"landed — surfaces for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_url":"https://github.com/zookanalytics/signal-loom/pull/520"}},
-  {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zookanalytics/signal-loom/pull/999"}},
+  {"id":"c-pr-open","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
+  {"id":"c-pr-case","title":"same PR, different case + trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://GitHub.com/zook/gc-toolkit/pull/522/files"}},
+  {"id":"c-pr-merged","title":"landed — surfaces for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_url":"https://github.com/zook/gc-toolkit/pull/520"}},
+  {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 in another repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url","issue_type":"task","metadata":{"merge_result":"pull_request"}},
   {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
@@ -428,7 +428,7 @@ eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
    "an unreadable stamp re-raises rather than muting the anchor forever"
 
 echo "── an unverifiable age reports, and a failed escalation stamps nothing ──"
-printf '[{"url":"https://github.com/zookanalytics/signal-loom/pull/521"},{"url":"https://github.com/zookanalytics/signal-loom/pull/522","updatedAt":"%s"}]\n' \
+printf '[{"url":"https://github.com/zook/gc-toolkit/pull/521"},{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' \
     "$(iso_ago 0)" > "$TMP/gh-prs.json"
 run_sweep "$EXPECT_SURVIVORS"
 grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
