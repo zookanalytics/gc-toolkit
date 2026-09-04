@@ -170,6 +170,32 @@ BD_DB_ARGS=""
 # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
 gc_bd() { gc bd "$@" $BD_DB_ARGS; }
 
+# ── Read the subject once; the guards below all ask its metadata ──────
+# The store is pinned, so this reads the subject's own rig. Both refusals
+# below — already-reacted and operator-commissioned — key off it, and one read
+# keeps them from disagreeing. Positive finding only: an unreadable bead is not
+# evidence of anything, so an empty read falls through to the act.
+SUBJECT_JSON=$(gc_bd show "$BEAD" --json 2>/dev/null | scrub || printf '')
+subject_meta() {
+    printf '%s' "$SUBJECT_JSON" \
+        | jq -r --arg k "$1" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
+}
+
+# ── A first reaction happens once ────────────────────────────────────
+# The act below stamps gc.first_reaction* and releases the subject through
+# gc-helm.sh takeaway --release, which reopens and unassigns it; the caller
+# then stamps gc.proactive_reaction=1. A re-offered advance-and-drain that runs
+# this a second time re-releases a bead a worker has since claimed, yanking
+# live work back to the pool. The first run's stamps describe it fully, so
+# refuse and name them — a second dispose is never correct.
+PRIOR_REACTION=$(subject_meta "gc.first_reaction")
+PRIOR_PROACTIVE=$(subject_meta "gc.proactive_reaction")
+if [ -n "$PRIOR_REACTION" ] || [ "$PRIOR_PROACTIVE" = "1" ]; then
+    PRIOR_AT=$(subject_meta "gc.first_reaction_at")
+    PRIOR_TARGET=$(subject_meta "gc.first_reaction_target")
+    usage_die "$BEAD already carries a first reaction (gc.first_reaction=${PRIOR_REACTION:-<unset>}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
+fi
+
 # ── Route only where something can claim ─────────────────────────────
 # A route to a pool this city does not run is worse than a visit: the bead is
 # open, unassigned and offered to nobody, and nothing says so. gc-proactive.sh
@@ -190,8 +216,7 @@ fi
 # path exists to prevent. Positive finding only: a read that fails or comes
 # back empty proceeds, because an unreadable bead is not evidence of anything.
 if [ "$DISPOSITION" != "ruling" ]; then
-    ORIGIN=$(gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-        | jq -r 'if type == "array" then ((.[0].metadata // {})["gc.origin"] // "") else "" end' 2>/dev/null || printf '')
+    ORIGIN=$(subject_meta "gc.origin")
     if [ "$ORIGIN" = "operator" ]; then
         usage_die "$BEAD carries gc.origin=operator: a human commissioned this topic and is waiting on the conversation, so the visit IS the answer. Take --disposition ruling. If the work is also real, the operator schedules it from the visit."
     fi
