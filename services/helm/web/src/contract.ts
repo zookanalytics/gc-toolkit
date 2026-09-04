@@ -18,7 +18,10 @@
  * change", not as a flaky test.
  *
  * SCOPE: the wire only. These interfaces mirror exactly the Go types reachable
- * from the `GET <mount>/helm` response body — `board.Board` and `board.Tile`.
+ * from the `GET <mount>/helm` response body: the `board.Board` envelope and the
+ * structs nested under it — `board.Tile`, `board.Sitting`, and
+ * `board.PackBuild`. Reachability from the envelope is the rule, not this list:
+ * a struct added under `board.Board` joins the contract automatically.
  * `board.Anchor` and `board.Child` carry JSON tags too, but they are the
  * gather-side input to `BuildBoard` and never cross the wire, so mirroring them
  * here would invent a contract the service does not serve. The parity test
