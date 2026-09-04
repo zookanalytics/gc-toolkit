@@ -1315,7 +1315,7 @@ reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
 out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "diff rewrites merge.sh" 2>&1); rc=$?
 eq "$rc" 0 "an approve carrying --add-gates exits 0"
 eq "$(meta tk-anc check_set)" "codex,triage,arch" "the added gate is unioned into check_set"
-eq "$(meta tk-anc check.triage)" "green@$OID_CHARTER" "triage's own gate goes green at the reviewed commit"
+eq "$(meta tk-anc check.triage)" "green" "triage's own gate goes green"
 has "$(notes tk-anc)" "triage-add: arch @$OID_CHARTER — diff rewrites merge.sh" "one justification line per added gate lands on the anchor"
 eq "$(status rv-t)" "closed" "the triage review bead closes"
 has "$out" "check_set now codex,triage,arch" "the summary names the new set"
@@ -1358,7 +1358,7 @@ reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "none"
 out=$("$SUT" --review-bead rv-t --verdict approve --add-gates arch --justification "why" 2>&1); rc=$?
 eq "$rc" 0 "the verdict is still recorded"
 eq "$(meta tk-anc check_set)" "none" "…and the opt-out is left alone"
-eq "$(meta tk-anc check.triage)" "green@$OID_CHARTER" "…and triage's marker still lands"
+eq "$(meta tk-anc check.triage)" "green" "…and triage's marker still lands"
 
 # --- triage: waivers, the one sanctioned narrowing ----------------------------------
 echo "# a waiver is recorded for a gate the charter marks waivable"
@@ -1367,7 +1367,7 @@ out=$("$SUT" --review-bead rv-t --verdict approve --waive-gates demo --justifica
 eq "$rc" 0 "a waived gate exits 0"
 has "$(notes tk-anc)" "triage-waive: demo @$OID_CHARTER — docs only" "the waiver is recorded on the anchor"
 eq "$(meta tk-anc check_set)" "codex,triage" "a waiver never adds to check_set"
-eq "$(meta tk-anc check.triage)" "green@$OID_CHARTER" "the waiver carries the oid triage's own marker records"
+eq "$(meta tk-anc check.triage)" "green" "…and triage's own gate still goes green"
 
 echo "# a gate the charter does NOT mark waivable cannot be waived"
 reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"

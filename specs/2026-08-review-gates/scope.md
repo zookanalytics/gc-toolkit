@@ -94,9 +94,10 @@ merge.sh: unchanged — merges when every declared gate is green@live head
   `request-changes` when the diff needs work whichever way the decision goes,
   `approve` when the change stands on its own. That keeps the question off
   the rework loop (the reviewer-fatigue anti-pattern foundation.md forbids)
-  without a verdict that parks the gate. `exception@<oid>` belongs to the
-  round cap alone: `signoff.sh` writes it when a gate exhausts
-  `GC_MAX_REVIEW_ROUNDS`, and routes the anchor to a human in the same act.
+  without a verdict that parks the gate. Parking the gate belongs to the
+  round cap alone: `signoff.sh` parks the anchor under `merge_hold=signoff_cap`
+  when a gate exhausts `GC_MAX_REVIEW_ROUNDS`, and routes it to a human in the
+  same act.
   `skills/arch-review/SKILL.md` carries the shape.
 - **`codex` is never waivable.** The charter's menu marks it so, and the
   waiver verb could not reach it in any case: `--waive-gates` records a

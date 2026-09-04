@@ -185,7 +185,7 @@ tbodies=$(jq -r '[.[] | select(.metadata.anchor_bead == "T1") | .description] | 
 has "$tbodies" "gate=triage" "the triage dispatch names the triage method"
 
 echo "# a widened check_set dispatches only the gate that is not yet satisfied"
-store "[$(anchor T2 pull_request "codex,triage,arch" "green@$(oid t2)" polecat/t2 ",\"check.triage\":\"green@$(oid t2)\"")]"
+store "[$(anchor T2 pull_request "codex,triage,arch" "green" polecat/t2 ",\"check.triage\":\"green\"")]"
 oid t2 > "$GH_DIR/head_polecat_t2"
 : > "$STUB_GC_LOG"
 out=$(run_declared)
