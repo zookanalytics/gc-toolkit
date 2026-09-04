@@ -40,12 +40,13 @@ Definitions:
   a bead: `stall_root` when the visit names a target, `escalation_key`
   when `escalate.sh` filed it for one situation, the subject otherwise.
   The fold check keys on `$TOPIC`.
-- **Demand** — what a person owes, as its own bead: a ruling is
-  `issue_type=decision`, a task only a person can perform is a bead
-  assigned to them. Whatever waits on it carries a `blocks` edge to it,
-  so that work is not `bd ready` until the demand closes, and closing the
-  demand is what releases it. `gc-helm.sh demand` files one (step 5); the
-  sitting that settles the question closes it (step 7).
+- **Demand** — what a person owes, as a native human gate
+  (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
+  only a person can perform is assigned to them, and the ruling-vs-task label
+  is recorded in `gc.demand_kind`. Whatever waits on it carries a `blocks`
+  edge to it, so that work is not `bd ready` until the gate resolves, and
+  resolving the gate is what releases it. `gc-helm.sh demand` files one
+  (step 5); the sitting that settles the question resolves it (step 7).
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The visit stays `in_progress`
   throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
@@ -505,13 +506,15 @@ The loop, every visit:
    # Discharge the hold. One question decides both halves — did the decision
    # this sitting waited on land here? — so both read the same switch.
    RULED=no   # yes only when the decision this hold waited on landed here
-   DEMAND=$(gc bd list --status=open,in_progress --json --limit=0 | tr -d '[:cntrl:]' \
+   # --include-gates: the demand is a human gate, hidden from `bd list` by
+   # default, so the discharge would otherwise never find it.
+   DEMAND=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 | tr -d '[:cntrl:]' \
      | jq -r --arg i "$ITEM" '[ .[]? | select((.metadata["gc.demand_for"] // "") == $i)
                                 | select((.assignee // "") == "") | .id ] | first // empty')
    if [ -n "$DEMAND" ] && [ "$RULED" = yes ]; then
-     # SETTLED — the operator ruled in this thread. Closing it lifts the
-     # block and $ITEM goes back to the pool.
-     gc bd close "$DEMAND" --reason "<the ruling, in one line>"
+     # SETTLED — the operator ruled in this thread. Resolving the gate lifts
+     # the block and $ITEM goes back to the pool.
+     gc bd gate resolve "$DEMAND" --reason "<the ruling, in one line>"
    elif [ -n "$DEMAND" ]; then
      # STILL OWED — cut short, or the question outlived the sitting. The
      # demand stays open, re-stated, so the wait stays a graph state.
