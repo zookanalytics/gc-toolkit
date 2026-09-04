@@ -81,8 +81,15 @@ if [ "$AUDIT" -eq 1 ]; then
         | (.metadata.conflict_resolutions // "[]" | fromjson) as $resolutions
         | ($resolutions | map(select(.classification == "dropped-absorbed"))) as $absorbed
         | ($verdicts | map(select(.verdict == "keep"))) as $kept
-        | ($absorbed | map(.commit_sha[0:9])) as $absorbed_shas
-        | ($kept | map(select(.sha[0:9] as $s | $absorbed_shas | index($s)))) as $missed
+        | ($absorbed | map(.commit_sha)) as $absorbed_shas
+        # The survey builds its verdict table from `git log --oneline`, whose
+        # abbreviations vary in length (seven or eight hex here), while the loop
+        # records a longer commit_sha; the two are abbreviations of one commit.
+        # Match by prefix in either direction so a short kept SHA still joins its
+        # longer dropped-absorbed row.
+        | ($kept | map(select(.sha as $s | ($s | length) > 0
+            and ($absorbed_shas | any(. as $a | ($a | length) > 0
+                and (($a | startswith($s)) or ($s | startswith($a)))))))) as $missed
         | {
             bead: .id,
             surveyed: ($verdicts | length),

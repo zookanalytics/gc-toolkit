@@ -417,10 +417,12 @@ else
 fi
 
 # --- audit mode ---------------------------------------------------------------
-# The two records the audit joins are metadata STRINGS holding JSON, and the
-# survey records a short sha while the rebase loop records a long one.
+# The two records the audit joins are metadata STRINGS holding JSON. The survey
+# builds its table from `git log --oneline`, so its sha is a seven- or
+# eight-character abbreviation while the rebase loop records a longer one; the
+# join has to match them by prefix, not by truncating both to a fixed width.
 BEAD=$(jq -nc '{id:"gc-audit",metadata:{
-  commit_verdicts:([{sha:"c10144a48",subject:"cleanup fixture dirs",verdict:"keep",rationale:"no upstream equivalent"},
+  commit_verdicts:([{sha:"c10144a",subject:"cleanup fixture dirs",verdict:"keep",rationale:"no upstream equivalent"},
                     {sha:"aaaaaaaa1",subject:"genuinely local",verdict:"keep",rationale:"local only"},
                     {sha:"bbbbbbbb2",subject:"already upstream",verdict:"drop-merged-upstream",rationale:"patch-id"}]|tojson),
   conflict_resolutions:([{commit_sha:"c10144a4853e4493",commit_subject:"cleanup fixture dirs",classification:"dropped-absorbed",resolution:"upstream has TestMain"},
@@ -431,8 +433,8 @@ if [ "$(field "$AUD" '.survey_misses')" = "1" ]; then
 else
   bad "audit: survey_misses=$(field "$AUD" '.survey_misses'), want 1 ($(cat "$TMP/err"))"
 fi
-if [ "$(field "$AUD" '.missed_commits[0].sha')" = "c10144a48" ]; then
-  ok "audit: joins a short survey sha to a long rebase sha"
+if [ "$(field "$AUD" '.missed_commits[0].sha')" = "c10144a" ]; then
+  ok "audit: joins a seven-character survey sha to a long rebase sha"
 else
   bad "audit: missed sha=$(field "$AUD" '.missed_commits[0].sha')"
 fi
@@ -478,6 +480,18 @@ if ! printf 'not json at all\n' | "$SCRIPT" --audit >/dev/null 2>&1; then
   ok "audit: non-JSON input exits non-zero"
 else
   bad "audit: non-JSON input exited 0"
+fi
+# `git log --oneline` in this checkout abbreviates to eight hex (e.g. e814f9cf).
+# Truncating both records to nine characters and comparing for equality dropped
+# an eight-character survey sha, leaving the miss uncounted; it must still join.
+BEAD=$(jq -nc '{id:"gc-audit-8",metadata:{
+  commit_verdicts:([{sha:"e814f9cf",subject:"guarded cleanup",verdict:"keep",rationale:"no upstream equivalent"}]|tojson),
+  conflict_resolutions:([{commit_sha:"e814f9cf172a857687",commit_subject:"guarded cleanup",classification:"dropped-absorbed",resolution:"upstream has it"}]|tojson)}}')
+AUD=$(printf '%s' "$BEAD" | "$SCRIPT" --audit 2>"$TMP/err")
+if [ "$(field "$AUD" '.survey_misses')" = "1" ] && [ "$(field "$AUD" '.missed_commits[0].sha')" = "e814f9cf" ]; then
+  ok "audit: joins an eight-character survey sha to a long rebase sha"
+else
+  bad "audit: eight-char survey sha uncounted: survey_misses=$(field "$AUD" '.survey_misses') ($(cat "$TMP/err"))"
 fi
 
 echo
