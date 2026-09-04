@@ -22,13 +22,12 @@
 # read back, a comment above the mark re-firing while one below it stays
 # answered, and the reads that record nothing rather than clear a standing
 # `commented`.
-# Also covers the review-round cap reset such a batch performs: once per batch,
-# retiring the dispatch tally and the cap's own park with it, the takeaway the
-# cap wrote for the board included. A park no `signoff_cap` claims, a live
-# demand, a verdict the city posted itself, and a rework hand-back each leave
-# the cap standing. A takeaway whose sitting already ended holds nothing, which
-# is the shape a demand tells from a hold, and it survives the retire: only the
-# cap's own sentence is part of the park.
+# Also covers the lane move such a batch performs: every lane on the anchor to
+# `validating`, once per batch, keyed on the batch id — a batch already recorded
+# moves nothing, not even a lane the validator has carried on to `fixing`, and an
+# anchor gated by no lane moves nothing at all. A verdict the city posted itself
+# and a rework hand-back are not feedback and move no lane. The round cap and its
+# merge_hold park are a separate concern this arm leaves untouched.
 # Write-back: EYES on a routed comment, one threaded reply naming the landing
 # commit, resolve behind it; idempotent across passes; nothing for a comment no
 # bead covers, for our own comments, or for a thread a human answered after us;
@@ -208,38 +207,33 @@ out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
-echo "# CONFLICTING under the cap's own park: no conflict rework THIS pass, but operator feedback still retires the park"
-# The cap's park (merge_hold=signoff_cap paired with signoff_cap) must not
-# out-live the very operator feedback signoff.sh's CAP_WHY advertises as its
-# release, even while the PR conflicts. `continue`ing on the stale hold value
-# the way a person's hold does would skip the posture=commented arm below for
-# this same anchor every pass, forever. So the CONFLICTING arm falls through
-# instead: this pass dispatches no rework FOR THE CONFLICT (merge_hold still
-# read as the park at the top of the loop), but the posture=commented arm
-# reached afterward sees the same feedback and retires the park.
+echo "# CONFLICTING under the cap's own park: no conflict rework, but the lanes still move"
+# A cap park holds the merge, so the CONFLICTING arm files no conflict rework
+# while the branch conflicts. But the cap park is the city's, not an operator's
+# freeze, so the arm falls through rather than `continue`ing: the
+# posture=commented arm reached afterward still moves the lanes on the feedback
+# and routes the batch to the person the park is for. The park itself is left
+# for a ruling to retire.
 store "[$(anchor F5e 91 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"')]"
 printf '%s' "$(prview 91 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_91.json"
 echo '[]' > "$GH_DIR/reviews_91.json"
 printf '[{"id":9200,"user":{"login":"human1"},"body":"please rebase and address this"}]' > "$GH_DIR/comments_91.json"
 out=$(run)
 has "$out" "conflicts but merge_hold parks the review-round cap (gate codex); no rework dispatched this pass" "the cap park alone does not dispatch conflict rework this pass"
-has "$out" "operator feedback resets the signoff round cap, retiring the merge_hold park on gate codex" "…but the SAME pass still sees the feedback that retires the park"
-eq "$(meta F5e merge_hold)" "<absent>" "…and the park really is retired"
-eq "$(meta F5e signoff_cap)" "<absent>" "…with the stamp that claimed it"
-eq "$(meta F5e 'gc.routed_to')" "" "…and the human route"
-eq "$(meta F5e pr_comment_disposition)" "rework:new-2" "…so the comments themselves become work, not a visit, now that the park is gone"
+has "$out" "operator feedback moves every lane to validating" "…but the SAME pass still moves the lanes on the feedback"
+eq "$(meta F5e 'check.codex')" "validating" "…so the lane goes to validating even under the park"
+eq "$(meta F5e merge_hold)" "signoff_cap" "…while the park is left standing — retiring it is not this arm's job"
+eq "$(meta F5e signoff_cap)" "codex" "…with the stamp that names it"
+eq "$(meta F5e 'gc.routed_to')" "human" "…and the human route it was parked under"
+eq "$(meta F5e pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding the park, not to a fresh rework"
 
-echo "# …and the next pass: the CONFLICTING arm re-evaluates with merge_hold really clear, and dedups against the comment-rework that already covers the branch"
-# new-2 (the comment-rework filed above) carries the SAME branch+head dedup key
-# the CONFLICTING arm itself reads (branch metadata, and "head <oid>" inside
-# its own rejection_reason): it already tells whoever works it to bring the
-# branch current before pushing an answer, so a second, separate base-rewrite
-# rework here would only race it. One work item ends up covering this branch,
-# not two — the fix filed the SAME pass the park was retired.
+echo "# …and the next pass changes nothing: the park still holds and the batch is already answered"
+# The watermark advanced with the visit above, so this pass reads no outstanding
+# comment and moves no lane, and the park still vetoes any conflict rework.
 out=$(run)
-eq "$(meta F5e merge_hold)" "<absent>" "the park stays retired"
-has "$out" "rework new-2 already covers branch 'polecat/x91' at this head, no new child" "the CONFLICTING arm dedups against the comment-rework rather than filing a second child"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…so exactly one rework child ends up covering this branch"
+eq "$(meta F5e merge_hold)" "signoff_cap" "the park still stands"
+eq "$(meta F5e 'check.codex')" "validating" "…the lane the batch moved is left where it is"
+has "$out" "no rework dispatched this pass" "…and no conflict rework is filed under the park"
 
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
@@ -735,152 +729,133 @@ out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
 
-# --- operator feedback resets signoff's round cap --------------------------------
-# The cap bounds the city failing to converge against its own reviewer. A review
-# the branch has never been answered against is new input, not one of those
-# rounds, so it goes back to the loop instead of spending the allowance on the
-# operator's own words.
-CAP_STATE=',"merge_hold":"signoff_cap","signoff_cap":"codex"'
-CAP_STATE="$CAP_STATE"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
-CAP_STATE="$CAP_STATE"',"gc.takeaway":"signoff did not converge after 3 rework rounds (cap 3)","gc.takeaway_by":"signoff"'
-CAP_STATE="$CAP_STATE"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-55"'
+# --- a human feedback batch moves every lane to validating -----------------------
+# A review the branch has never been answered against is a finding set like a
+# reviewer's: it enters the lane at validating, where the validator rules on it,
+# and buys no full review. Every lane on the anchor moves, once per batch. The
+# round cap and its merge_hold park are a separate concern this arm leaves alone.
 
-echo "# new operator feedback on a capped anchor resets it, park and all"
-store "[$(anchor R1 55 "$CAP_STATE")]"
+echo "# operator feedback moves the lane to validating and records the batch"
+store "[$(anchor R1 55)]"
 printf '%s' "$(prview 55 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_55.json"
 echo '[]' > "$GH_DIR/reviews_55.json"
 printf '[{"id":8500,"user":{"login":"human1"},"body":"this is not what I asked for"}]' > "$GH_DIR/comments_55.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the batch that reset the cap is recorded by its own id coordinates"
-eq "$(meta R1 merge_hold)" "<absent>" "the hold is lifted — a cap that resets under its own park has not reset"
-eq "$(meta R1 signoff_cap)" "<absent>" "…and the stamp that proved the park was the cap's"
-eq "$(meta R1 blocked_reason)" "<absent>" "…and the reason that named it"
-eq "$(meta R1 'gc.routed_to')" "" "…and the human park, so the anchor is back in the cadence"
-eq "$(meta R1 'gc.takeaway')" "<absent>" "…and the sentence the cap wrote for the board, which is part of that park"
-eq "$(meta R1 'gc.takeaway_by')" "<absent>" "…with the provenance that told it from a sitting's"
-eq "$(meta R1 dispatch_count)" "<absent>" "the dispatch tally goes too: released rounds nobody may dispatch are no release"
-eq "$(meta R1 'dispatch_backstop.codex')" "<absent>" "…with the backstop stamp that dedups its escalation"
-has "$(notes R1)" "operator feedback on PR#55 (review 0, comment 8500" "the reset names the feedback that caused it"
-eq "$(meta R1 pr_comment_disposition)" "rework:new-2" "the comments route to work, not to the visit the park would have forced"
+eq "$(meta R1 'check.codex')" "validating" "the lane goes to validating, not a fresh unreviewed full review"
+eq "$(meta R1 lanes_validating_batch)" "0.8500" "the batch that moved the lane is recorded by its own id coordinates"
+has "$(notes R1)" "operator feedback on PR#55 (review 0, comment 8500" "the move names the feedback that caused it"
+eq "$(meta R1 pr_comment_disposition)" "rework:new-2" "the comments still route to work on an unheld anchor"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 
-echo "# …and the same feedback on a later pass resets nothing"
+echo "# …and the same feedback on a later pass moves nothing"
 BEFORE_NOTES=$(notes R1)
 out=$(run)
-eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the recorded batch is unchanged"
-eq "$(notes R1)" "$BEFORE_NOTES" "…and nothing was appended: one reset per distinct piece of feedback"
-hasnt "$out" "resets the signoff round cap" "…and the pass says nothing about a reset"
+eq "$(meta R1 'check.codex')" "validating" "the lane the batch moved is left where the validator will find it"
+eq "$(notes R1)" "$BEFORE_NOTES" "…and nothing was appended: one move per distinct batch"
+hasnt "$out" "moves every lane to validating" "…and the pass says nothing about a move"
 
-echo "# …nor does a batch already recorded whose watermark write dropped"
-# The watermark and the reset stamp are separate writes. A pass that routed the
-# comments but lost the mark sees the same batch again; what stops the second
-# reset is the recorded batch, not the mark.
-store "[$(anchor R2 56 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","signoff_rounds_reset":"0.8600"')]"
+echo "# every lane, not just one — a two-lane anchor moves both"
+store "[$(printf '%s' "$(anchor M1 70)" | jq -c '.metadata.check_set="codex,arch" | .metadata["check.arch"]="green"')]"
+printf '%s' "$(prview 70 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_70.json"
+echo '[]' > "$GH_DIR/reviews_70.json"
+printf '[{"id":7100,"user":{"login":"human1"},"body":"a batch this branch was never reviewed against"}]' > "$GH_DIR/comments_70.json"
+out=$(run)
+eq "$(meta M1 'check.codex')" "validating" "the first lane moves"
+eq "$(meta M1 'check.arch')" "validating" "…and the second, because a comment batch answers neither yet"
+
+echo "# a batch already recorded moves nothing — not even a lane the validator advanced"
+# The watermark and the batch stamp are separate writes. A pass that routed the
+# comments but lost the mark sees the same batch again; what stops a second move
+# is the recorded batch, and a per-pass move would drag a lane the validator has
+# carried to fixing back to validating.
+store "[$(printf '%s' "$(anchor R2 56)" | jq -c '.metadata["check.codex"]="fixing" | .metadata.lanes_validating_batch="0.8600"')]"
 printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_56.json"
 echo '[]' > "$GH_DIR/reviews_56.json"
 printf '[{"id":8600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_56.json"
 out=$(run)
-hasnt "$out" "resets the signoff round cap" "a batch already recorded resets nothing"
-eq "$(meta R2 merge_hold)" "signoff_cap" "…the cap's park still stands"
-eq "$(meta R2 'gc.routed_to')" "human" "…and its park"
-eq "$(meta R2 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
+hasnt "$out" "moves every lane to validating" "a batch already recorded moves nothing"
+eq "$(meta R2 'check.codex')" "fixing" "…the lane the validator carried to fixing is left there, not dragged back to validating"
+eq "$(meta R2 lanes_validating_batch)" "0.8600" "…and the recorded batch is unchanged"
 
-echo "# a verdict the city posted itself is not feedback, and resets nothing"
-# Identity, not shape: signoff.sh posts its verdicts under the city's own login
-# and a rework hand-back posts nothing at all, so neither can reach the reset.
-store "[$(anchor R3 57 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"')]"
+echo "# a verdict the city posted itself is not feedback, and moves no lane"
+# Identity, not shape: signoff.sh posts under the city's own login and a rework
+# hand-back posts nothing, so neither raises the ids the posture counts and the
+# commented arm is never entered.
+store "[$(anchor R3 57)]"
 printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_57.json"
 printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: request-changes","commit_id":"sha-57"}]' \
   > "$GH_DIR/reviews_57.json"
 printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3"}]' > "$GH_DIR/comments_57.json"
 out=$(run)
 eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
-eq "$(meta R3 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
-eq "$(meta R3 merge_hold)" "signoff_cap" "…the cap's park stands"
-eq "$(meta R3 'gc.routed_to')" "human" "…and the anchor stays parked for the person it was given to"
+eq "$(meta R3 lanes_validating_batch)" "<absent>" "…so no batch is recorded"
+eq "$(meta R3 'check.codex')" "green" "…and the lane is left green, unmoved"
 
 echo "# …and a rework hand-back, which posts nothing at all, is not feedback either"
 KID52='{"id":"kid-52","status":"open","assignee":"","title":"Rework PR#52","notes":"","metadata":{"anchor_bead":"R7","source_review_bead":"rv-52"}}'
-store "[$(anchor R7 52 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"'),$KID52]"
+store "[$(anchor R7 52),$KID52]"
 printf '%s' "$(prview 52 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_52.json"
 echo '[]' > "$GH_DIR/reviews_52.json"
 echo '[]' > "$GH_DIR/comments_52.json"
 out=$(run)
 eq "$(meta_pinned R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
-eq "$(meta R7 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
-eq "$(meta R7 merge_hold)" "signoff_cap" "…and the cap's park stands"
-eq "$(meta R7 'gc.routed_to')" "human" "…with the park it belongs to"
+eq "$(meta R7 lanes_validating_batch)" "<absent>" "…so no batch is recorded"
+eq "$(meta R7 'check.codex')" "green" "…and the lane is left green"
 
-echo "# a park no signoff_cap claims is a person's, and survives the reset"
+echo "# the cap's park is a separate concern — a batch moves the lane and leaves it"
+# A capped anchor is parked under merge_hold=signoff_cap. Feedback still moves the
+# lane, but the park, its stamp, its dispatch tally, its human route and the board
+# takeaway are the round cap's to retire, and this arm touches none of them.
+CAP_STATE=',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"'
+CAP_STATE="$CAP_STATE"',"blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
+CAP_STATE="$CAP_STATE"',"gc.takeaway":"signoff did not converge after 3 rework rounds (cap 3)","gc.takeaway_by":"signoff"'
+CAP_STATE="$CAP_STATE"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-61"'
+store "[$(anchor R8 61 "$CAP_STATE")]"
+printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
+echo '[]' > "$GH_DIR/reviews_61.json"
+printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_61.json"
+out=$(run)
+eq "$(meta R8 'check.codex')" "validating" "the lane still moves on feedback"
+eq "$(meta R8 lanes_validating_batch)" "0.9100" "…and the batch is recorded"
+eq "$(meta R8 merge_hold)" "signoff_cap" "…but the cap's park is untouched"
+eq "$(meta R8 signoff_cap)" "codex" "…and the stamp that names it"
+eq "$(meta R8 dispatch_count)" "5" "…and the dispatch tally"
+eq "$(meta R8 'gc.routed_to')" "human" "…and the human route"
+eq "$(meta R8 'gc.takeaway')" "signoff did not converge after 3 rework rounds (cap 3)" "…and the board takeaway"
+eq "$(meta R8 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding the park"
+
+echo "# a person's own hold is untouched too — the lane moves, the freeze stays, the comments go to them"
 store "[$(anchor R4 58 ',"merge_hold":"true","gc.routed_to":"human"')]"
 printf '%s' "$(prview 58 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_58.json"
 echo '[]' > "$GH_DIR/reviews_58.json"
 printf '[{"id":8800,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_58.json"
 out=$(run)
-eq "$(meta R4 signoff_rounds_reset)" "0.8800" "the counter still resets — the rounds are the cap's, wherever the park came from"
-eq "$(meta R4 merge_hold)" "true" "…but a hold no signoff_cap claims is not the cap's to retire"
-eq "$(meta R4 'gc.routed_to')" "human" "…and the park stands"
+eq "$(meta R4 'check.codex')" "validating" "the lane moves regardless of who holds the anchor"
+eq "$(meta R4 merge_hold)" "true" "…but a person's freeze is not this arm's to lift"
+eq "$(meta R4 'gc.routed_to')" "human" "…and the anchor stays theirs"
 eq "$(meta R4 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
 
-echo "# an orphaned signoff_cap beside a PERSON's hold is not the cap's park either"
-# The park's own pairing is merge_hold==signoff_cap (the literal string), never
-# is_held(merge_hold) alone. Here signoff_cap=codex is an orphan left behind by
-# a park the operator already lifted by hand, and merge_hold=true is a fresh,
-# unrelated freeze (a release hold, say) set afterward. Retiring on cap-non-
-# empty alone would unset that person's hold and claim in the note that it
-# retired "the cap's park", which it never was.
-store "[$(anchor R4b 60 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human","blocked_reason":"release freeze"')]"
-printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
-echo '[]' > "$GH_DIR/reviews_60.json"
-printf '[{"id":8850,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_60.json"
-out=$(run)
-eq "$(meta R4b signoff_rounds_reset)" "0.8850" "the counter still resets — the cap's rounds are separate from its park"
-eq "$(meta R4b merge_hold)" "true" "…but the operator's own hold is NOT lifted"
-eq "$(meta R4b blocked_reason)" "release freeze" "…and the reason it names stands with it"
-eq "$(meta R4b signoff_cap)" "codex" "…and the orphan cap stamp is left exactly where it was"
-eq "$(meta R4b 'gc.routed_to')" "human" "…and the park stands"
-has "$(notes R4b)" "it is a person's and stays" "…and the note says whose hold it is"
-eq "$(meta R4b pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it, not to work"
-
-echo "# …and a sitting still waiting on a person outranks the reset, cap stamp or not"
-store "[$(anchor R5 59 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"'),$(demand R5)]"
-printf '%s' "$(prview 59 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_59.json"
-echo '[]' > "$GH_DIR/reviews_59.json"
-printf '[{"id":8900,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_59.json"
-out=$(run)
-eq "$(meta R5 merge_hold)" "signoff_cap" "a decision a person still owes is not undone by a comment"
-eq "$(meta R5 'gc.routed_to')" "human" "…and the anchor stays parked for it"
-eq "$(meta R5 pr_comment_disposition)" "visit:new-3" "…which is who the comments go to"
-
-echo "# …but a takeaway recording a sitting that ENDED retires the park like any other"
-# The stuck shape this discriminator exists for: every sitting replaces the
-# takeaway it found and none of them clears it, so presence alone would park an
-# anchor from its first conversation onward, whatever the PR went on to say.
-store "[$(anchor R8 61 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","gc.takeaway":"approved as-is on GitHub; merge still held by the gate"')]"
-printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
-echo '[]' > "$GH_DIR/reviews_61.json"
-printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_61.json"
-out=$(run)
-eq "$(meta R8 signoff_rounds_reset)" "0.9100" "the batch is recorded"
-eq "$(meta R8 merge_hold)" "<absent>" "…the cap's park is retired"
-eq "$(meta R8 signoff_cap)" "<absent>" "…with the stamp that claimed it"
-eq "$(meta R8 'gc.routed_to')" "" "…and the human route the cap wrote"
-eq "$(meta R8 pr_comment_disposition)" "rework:new-2" "…so the comments become work"
-eq "$(meta R8 'gc.takeaway')" "approved as-is on GitHub; merge still held by the gate" "…while the sitting's record is left alone"
-
-echo "# a reset the store refuses leaves the cap standing, and says so"
-# One transition carries the whole reset, so a refusal retires nothing: the
-# batch stays unrecorded and the next pass reads the same comments and retries.
-store "[$(anchor R6 51 "$(printf '%s' "$CAP_STATE" | sed 's/sha-55/sha-51/g')")]"
+echo "# a move the store refuses records nothing, and says so"
+# One transition carries the move, so a refusal writes nothing: no batch is
+# recorded and the lane is left where it was, and the next pass retries.
+store "[$(anchor R6 51)]"
 printf '%s' "$(prview 51 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_51.json"
 echo '[]' > "$GH_DIR/reviews_51.json"
 printf '[{"id":8510,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_51.json"
 out=$(STUB_UPDATE_FAIL="R6" run)
-has "$out" "cap reset did not record" "the refusal is reported, not swallowed"
-eq "$(meta R6 signoff_rounds_reset)" "<absent>" "…no batch is recorded, so the next pass retries"
-eq "$(meta R6 merge_hold)" "signoff_cap" "…the park is left standing"
-eq "$(meta R6 'gc.routed_to')" "human" "…and so is the park"
+has "$out" "lane move to validating did not record" "the refusal is reported, not swallowed"
+eq "$(meta R6 lanes_validating_batch)" "<absent>" "…no batch is recorded, so the next pass retries"
+eq "$(meta R6 'check.codex')" "green" "…and the lane is left where it was"
+
+echo "# an anchor gated by no lane has nothing to move"
+store "[$(printf '%s' "$(anchor N1 71)" | jq -c '.metadata.check_set="none" | (.metadata |= del(.["check.codex"]))')]"
+printf '%s' "$(prview 71 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_71.json"
+echo '[]' > "$GH_DIR/reviews_71.json"
+printf '[{"id":7200,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_71.json"
+out=$(run)
+eq "$(meta N1 lanes_validating_batch)" "<absent>" "no lane, no batch recorded"
+hasnt "$out" "moves every lane to validating" "…and nothing is announced"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"
