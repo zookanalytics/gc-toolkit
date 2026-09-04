@@ -80,9 +80,11 @@ store does not resolve, escalate against a bead that has one.
 
 Escalate systemic findings (a Dolt outage, an unrestorable backup, a doctor
 finding no open bead tracks); handle the routine directly (stale locks,
-orphan processes, `gc doctor --fix`-able findings). Dedup against existing
-beads city-wide before escalating a doctor finding — your rig store is not
-the city. Context recycling is the cycle-recycle Stop hook's job — never
+orphan processes, a broken worktree via `gc worktree`). Not `gc doctor
+--fix`: it has no per-check selector, so it applies the whole fixable set at
+once and cannot be scoped to the safe findings — a `--fix`-only finding is
+one to escalate. Dedup against existing beads city-wide before escalating a
+doctor finding — your rig store is not the city. Context recycling is the cycle-recycle Stop hook's job — never
 something you ask about.
 
 {{ template "heartbeat-no-consent-ui" . }}
