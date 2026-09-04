@@ -379,7 +379,18 @@ quiesce_release_molecule_steps() (
 # its own demand is refused.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
-# fails the verb.
+# fails the verb. One wait is written as no edge: a LANDED rider — a bead that
+# both rode the SUBJECT's own branch and has already put its work there, proven
+# by a post-push state (closed, or handed off to the refinery). Its deliverable
+# is in the subject's own head, so the subject's merge is what carries it, and
+# an edge would gate that merge on work that merges WITH it — the blocker
+# merge.sh's dep-edge lane holds on with no release, a PR wedged forever. Same
+# branch WITHOUT that proof is not this case: metadata.branch is set at
+# workspace-setup, before the wait pushes, so a still-open same-branch wait may
+# not be on the branch yet, and its edge stands so the subject cannot merge past
+# it. When EVERY named wait is a landed rider the headline records
+# gc.takeaway_settled, the settled shape --no-wait writes, so no held marker is
+# left edgeless for doctor/check-wait-is-an-edge. Every other wait keeps its edge.
 #
 # The headline says nothing about whether the subject is still waiting, and
 # every sitting stamps one, so the disposition rides beside it in
@@ -390,7 +401,7 @@ quiesce_release_molecule_steps() (
 # doctor/check-wait-is-an-edge reads the pairing.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; npos=0
-    waiting_ids=""; no_wait=""
+    waiting_ids=""; no_wait=""; subj_branch=""; real_waits=""; skipped_riders=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)    by="${1#--by=}"; shift ;;
@@ -526,6 +537,54 @@ cmd_takeaway() {
         fi
     fi
 
+    # Partition --waiting-on into the waits a pool still owes and the LANDED
+    # riders. A landed rider both rode <bead>'s OWN branch and has already put
+    # its work there, so <bead>'s own merge is what carries it
+    # (docs/gascity-human-engagement.md, "a settled sitting"): an edge would
+    # gate <bead>'s merge on work that merges WITH it — the deadlock merge.sh's
+    # dep-edge lane holds on with no release — while asserting a pending wait
+    # that does not exist. Both halves are required. metadata.branch is set at
+    # workspace-setup, before the wait implements, pushes or hands off, so
+    # equality proves the wait MEANS to ride this branch, not that its work is
+    # on it. The proof its work landed is a post-push state: the wait is closed
+    # (merged), or its assignee is the refinery (the handoff submit-and-exit
+    # writes only after it verifies the push). Absent the proof — a wait still
+    # open under a pool, or a probe that will not read — the edge stands, so
+    # <bead> cannot merge past work that has not landed. Only a landed rider is
+    # dropped; if EVERY named wait is one, the sitting is settled with respect to
+    # all of them, so no_wait is set and the headline stamps gc.takeaway_settled
+    # the same way --no-wait does — which keeps doctor/check-wait-is-an-edge (I1)
+    # satisfied without an edge to a wait that is not there.
+    if [ -n "$waiting_ids" ]; then
+        subj_branch=$(meta_now "$bead" branch)
+        have_real=""
+        for _w in $waiting_ids; do
+            [ -n "$_w" ] || continue
+            if [ "$_w" = "$bead" ]; then
+                echo "$PROG: takeaway: --waiting-on $_w is the bead itself; skipped" >&2
+                continue
+            fi
+            # Read the wait once: its branch says whether it rode <bead>'s
+            # branch, its status and assignee whether its work is provably there.
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            _wrow=$(gc bd show "$_w" ${db:+--db "$db"} --json 2>/dev/null | scrub)
+            _wbranch=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then ((.[0].metadata // {}).branch // "") else "" end' 2>/dev/null)
+            _wstatus=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
+            _wassignee=$(printf '%s' "$_wrow" | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null)
+            _rider=""
+            if [ -n "$subj_branch" ] && [ "$_wbranch" = "$subj_branch" ]; then
+                case "$_wstatus" in closed) _rider=1 ;; esac
+                case "$_wassignee" in refinery|*.refinery|*/refinery) _rider=1 ;; esac
+            fi
+            if [ -n "$_rider" ]; then
+                skipped_riders="$skipped_riders $_w"
+                continue
+            fi
+            real_waits="$real_waits $_w"; have_real=1
+        done
+        if [ -n "$skipped_riders" ] && [ -z "$have_real" ]; then no_wait=1; fi
+    fi
+
     # Build args with `set --` ($text/$by contain spaces); --release rides the
     # SAME update so stamp + release stay one Dolt write.
     set --
@@ -585,19 +644,20 @@ cmd_takeaway() {
     fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
-    # <blocker>", so the edge lands on <bead> — what the board reads.
-    for _w in $waiting_ids; do
+    # <blocker>", so the edge lands on <bead> — what the board reads. Only the
+    # waits still owed reach here; landed riders were partitioned out above and
+    # are reported after, so the reason each got no edge is on the log.
+    for _w in $real_waits; do
         [ -n "$_w" ] || continue
-        if [ "$_w" = "$bead" ]; then
-            echo "$PROG: takeaway: --waiting-on $_w is the bead itself; skipped" >&2
-            continue
-        fi
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         if gc bd dep add "$bead" "$_w" -t blocks ${db:+--db "$db"} >/dev/null 2>&1; then
             echo "waiting-on edge: $bead depends on $_w"
         else
             echo "$PROG: takeaway: could not wire --waiting-on $_w (same store? already wired? cycle?) — the takeaway text still stands, but the board cannot see this wait" >&2
         fi
+    done
+    for _w in $skipped_riders; do
+        echo "$PROG: takeaway: --waiting-on $_w is a landed rider on $bead's own branch ($subj_branch) — its work is already there, so $bead's merge is what lands it and no wait edge is written (an edge would gate $bead's merge on work that merges with it, with no release). The board re-asks this wait through $bead's own landing." >&2
     done
     bust_cache
     if [ -n "$release" ]; then
