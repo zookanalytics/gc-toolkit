@@ -47,7 +47,9 @@ rig should write to.
 The guard resolves the target the way `gh` itself does, in the same order:
 
 1. An explicit `--repo` or `-R` on the command, in any of gh's spellings and
-   whether it stands before or after the noun.
+   whether it stands before or after the noun. A selector given more than once
+   binds to its last value, the way gh lets a command-level flag override a
+   global one.
 2. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
    same command line, or ambient in the environment.
 3. The `origin` remote of the working directory.
@@ -57,14 +59,26 @@ repository the working directory belongs to, so an agent standing in a clone of
 someone else's project sends there with no flag to inspect. A guard that read
 only the explicit flag would wave that through.
 
-The working directory is not always the one the hook is told about. A `cd`
-earlier on the same command line moves where `gh` resolves, so the guard follows
-it: `cd ../their-clone && gh issue create` is measured against `their-clone`,
-not against the directory the session was sitting in. A destination the guard
-cannot expand, such as `cd "$SOMEWHERE"`, resolves to no repository and is
-refused. A `cd` inside a subshell is scoped to that subshell, so
-`(cd elsewhere); gh issue create` still resolves against the outer directory —
-the move does not outlast the parentheses.
+An owner/name given without a host is completed with the host `gh` would use:
+`GH_HOST` set inline on the command, exported earlier on the same line, or
+ambient in the environment, and `github.com` when none is set. The same owner
+and name on another forge is therefore not a repository we own.
+
+The working directory is not always the one the hook is told about. A `cd`,
+`pushd`, or `env -C` earlier on the same command line moves where `gh`
+resolves, so the guard follows it: `cd ../their-clone && gh issue create` is
+measured against `their-clone`, not against the directory the session was
+sitting in. A destination the guard cannot expand, such as `cd "$SOMEWHERE"`,
+resolves to no repository and is refused, as do `popd` and the stack-rotation
+forms of `pushd`, which return somewhere this single-line scan does not track. A
+`cd` inside a subshell is scoped to that subshell, so `(cd elsewhere); gh issue
+create` still resolves against the outer directory — the move does not outlast
+the parentheses.
+
+Wrappers in front of the command are stepped through to reach it: `env` with its
+options and `NAME=VALUE` assignments, and `command`, `nohup`, `exec` and the
+like. A `GH_REPO` or `GH_HOST` assignment carried by one of them counts as if it
+stood as an inline prefix.
 
 Host, owner, and name are all compared, lowercased. The host is part of the
 identity, because dropping it would let the same owner and name on a different
@@ -74,7 +88,10 @@ forge read as a repository we own.
 
 `GC_RIG_ROOT` is authoritative and narrow. A rig agent is measured against its
 own rig even while standing in a checkout of something else, and another rig in
-the same city is still someone else's repository for it.
+the same city is still someone else's repository for it. A rig root that is set
+but resolves no origin is broken, not permissive: the owned set is empty and
+every write fails closed, rather than widening to the city or the working
+directory.
 
 City-scope agents such as the deacon and mechanik carry no rig root and
 legitimately work across rigs, so for them the owned set is the origin of every

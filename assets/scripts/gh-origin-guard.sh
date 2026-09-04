@@ -54,6 +54,14 @@ deny() {
 norm_repo() {
     _r=$(printf '%s' "${1:-}" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
     [ -n "$_r" ] || return 0
+    # An unqualified owner/name is completed with the host gh would use for the
+    # call: the effective host the caller resolves ($2), else this process's
+    # ambient GH_HOST, else github.com. Qualifying against the ambient value
+    # alone would read `GH_HOST=other gh ... --repo owner/name` as our own forge.
+    _host=${2:-}
+    [ -n "$_host" ] || _host=${GH_HOST:-github.com}
+    _host=$(printf '%s' "$_host" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
+    [ -n "$_host" ] || _host=github.com
     _r=$(printf '%s' "$_r" \
         | sed -e 's#^[a-z][a-z0-9+.-]*://##' \
               -e 's#^[^/@]*@##' \
@@ -61,7 +69,7 @@ norm_repo() {
               -e 's#\.git$##' \
               -e 's#/*$##')
     case $(printf '%s' "$_r" | awk -F/ '{ print NF }') in
-        2) _r="${GH_HOST:-github.com}/$_r" ;;
+        2) _r="$_host/$_r" ;;
         3) : ;;
         *) return 0 ;;
     esac
@@ -88,11 +96,12 @@ origin_of() {
 # a checkout of someone else's repository would authorize itself.
 allowed_origins() {
     if [ -n "${GC_RIG_ROOT:-}" ]; then
-        _o=$(origin_of "$GC_RIG_ROOT")
-        if [ -n "$_o" ]; then
-            printf '%s\n' "$_o"
-            return 0
-        fi
+        # Set but narrow: the owned set is this rig's origin and nothing else. An
+        # unresolvable rig root yields an EMPTY set, not a fall-through to the
+        # city or the working directory — a broken root must fail closed, or a
+        # checkout of someone else's repository could authorize its own writes.
+        origin_of "$GC_RIG_ROOT"
+        return 0
     fi
     _found=""
     if [ -n "${GC_CITY_PATH:-}" ] && [ -d "$GC_CITY_PATH/rigs" ]; then
@@ -144,10 +153,11 @@ CWD=$(printf '%s' "$PAYLOAD" | jq -r '.cwd // ""' 2>/dev/null)
 #
 # Emits one line per guarded write, fields separated by \037: noun, verb, --repo
 # value, inline GH_REPO value, the pending cd destination, whether an earlier
-# export/unset set GH_REPO in this shell (1/0), and that exported value. A unit
-# separator rather than a tab, because the shell collapses runs of whitespace
-# separators and an empty field would shift the next one into its place. The
-# shell resolves origins; awk only lexes.
+# export/unset set GH_REPO in this shell (1/0), that exported value, the inline
+# GH_HOST value, whether an earlier export/unset set GH_HOST (1/0), and that
+# exported value. A unit separator rather than a tab, because the shell collapses
+# runs of whitespace separators and an empty field would shift the next one into
+# its place. The shell resolves origins; awk only lexes.
 SCAN=$(printf '%s' "$CMD" | awk '
 function push() {
     if (have) { ntok++; T[ntok] = tok }
@@ -158,43 +168,92 @@ function push() {
 # create` from being measured against the directory the session started in. An
 # unexpandable destination becomes "?", which resolves to no repository and is
 # therefore refused rather than assumed to be ours.
-function note_cd(i,   a) {
-    if (i + 1 > ntok) { cdspec = "?"; return }
-    a = T[i + 1]
-    if (a == "-" || a ~ /\$/ || substr(a, 1, 1) == "~") { cdspec = "?"; return }
+function note_cd_val(a) {
+    if (a == "" || a == "-" || a ~ /\$/ || substr(a, 1, 1) == "~") { cdspec = "?"; return }
     if (substr(a, 1, 1) == "/") { cdspec = a }
     else if (cdspec == "?") { return }
     else if (cdspec == "") { cdspec = a }
     else { cdspec = cdspec "/" a }
 }
-function analyze(   i, j, noun, verb, key, repo, inl) {
+function note_cd(i) {
+    if (i + 1 > ntok) { cdspec = "?"; return }
+    note_cd_val(T[i + 1])
+}
+function analyze(   i, j, noun, verb, key, repo, inl, inlhost) {
     if (ntok == 0) return
-    i = 1; inl = ""
+    i = 1; inl = ""; inlhost = ""
     # Leading assignments and command wrappers sit in front of the real command.
-    # GH_REPO among them is the repository gh would use, so it is kept.
+    # GH_REPO and GH_HOST among them are what gh would use for the call, so they
+    # are kept; the rest are skipped to reach the command word.
     while (i <= ntok) {
         if (T[i] ~ /^GH_REPO=/) { inl = substr(T[i], 9); i++; continue }
+        if (T[i] ~ /^GH_HOST=/) { inlhost = substr(T[i], 9); i++; continue }
         if (T[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { i++; continue }
-        if (T[i] == "env" || T[i] == "command" || T[i] == "builtin" ||
+        # env carries its own options and NAME=VALUE assignments before the
+        # command. Skipping only the word `env` left an option such as -i as the
+        # command token, so the wrapped write was never reached. Parse the env
+        # arguments: assignments set GH_REPO/GH_HOST for the call, -C/--chdir
+        # moves the directory the way cd does, -u/--unset drops a carried
+        # variable, and the first bare word is the wrapped command.
+        if (T[i] == "env") {
+            i++
+            while (i <= ntok) {
+                if (T[i] == "--") { i++; break }
+                if (T[i] ~ /^GH_REPO=/) { inl = substr(T[i], 9); i++; continue }
+                if (T[i] ~ /^GH_HOST=/) { inlhost = substr(T[i], 9); i++; continue }
+                if (T[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { i++; continue }
+                if (T[i] == "-C" || T[i] == "--chdir") { note_cd(i); i += 2; continue }
+                if (T[i] ~ /^--chdir=/) { note_cd_val(substr(T[i], 9)); i++; continue }
+                if (T[i] == "-u" || T[i] == "--unset") {
+                    if (T[i + 1] == "GH_REPO") inl = ""
+                    if (T[i + 1] == "GH_HOST") inlhost = ""
+                    i += 2; continue
+                }
+                if (T[i] ~ /^--unset=/) {
+                    if (substr(T[i], 9) == "GH_REPO") inl = ""
+                    if (substr(T[i], 9) == "GH_HOST") inlhost = ""
+                    i++; continue
+                }
+                if (substr(T[i], 1, 1) == "-") { i++; continue }
+                break
+            }
+            continue
+        }
+        if (T[i] == "command" || T[i] == "builtin" ||
             T[i] == "nohup" || T[i] == "exec" || T[i] == "time") { i++; continue }
         break
     }
     if (i > ntok) return
-    # `export GH_REPO=...` and `unset GH_REPO` set the variable for every later
-    # command in this shell, so their effect carries across segments the way a cd
-    # does. The inline `GH_REPO=x gh ...` prefix was captured above and does not
-    # reach here.
+    # `export GH_REPO=`/`GH_HOST=` and their `unset` set the variable for every
+    # later command in this shell, so their effect carries across segments the
+    # way a cd does. The inline `GH_REPO=x gh ...` prefix was captured above and
+    # does not reach here.
     if (T[i] == "export") {
-        for (j = i + 1; j <= ntok; j++)
+        for (j = i + 1; j <= ntok; j++) {
             if (T[j] ~ /^GH_REPO=/) { ghval = substr(T[j], 9); ghset = 1 }
+            if (T[j] ~ /^GH_HOST=/) { hostval = substr(T[j], 9); hostset = 1 }
+        }
         return
     }
     if (T[i] == "unset") {
-        for (j = i + 1; j <= ntok; j++)
+        for (j = i + 1; j <= ntok; j++) {
             if (T[j] == "GH_REPO") { ghval = ""; ghset = 0 }
+            # An unset host falls to the gh default forge, not the ambient
+            # value: mark it set-and-empty so the resolver reads github.com.
+            if (T[j] == "GH_HOST") { hostval = ""; hostset = 1 }
+        }
         return
     }
     if (T[i] == "cd") { note_cd(i); return }
+    # pushd moves the working directory the way cd does. Its stack-rotation
+    # forms (no argument, or +N/-N) and popd return to a directory this
+    # single-line scan does not track, so they mark the destination unresolvable
+    # and an implicit write after one is refused.
+    if (T[i] == "pushd") {
+        if (i + 1 > ntok || T[i + 1] ~ /^[+-]/) { cdspec = "?"; return }
+        note_cd(i); return
+    }
+    if (T[i] == "popd") { cdspec = "?"; return }
     if (T[i] != "gh" && T[i] !~ /\/gh$/) return
     i++
     # gh reads as `gh <noun> <verb>`: the noun is the first token that is not an
@@ -216,24 +275,26 @@ function analyze(   i, j, noun, verb, key, repo, inl) {
     if (key != "issue/create" && key != "issue/comment" &&
         key != "pr/create" && key != "pr/comment" && key != "pr/review") return
     # --repo/-R wins over everything, matching gh: flag, then GH_REPO, then the
-    # repository of the working directory.
+    # repository of the working directory. gh binds a repeated selector to its
+    # LAST value (a command-level --repo overrides a global one before the noun),
+    # so the scan keeps the last match — an owned --repo ahead of an off-origin
+    # one must not shield it.
     repo = ""
     for (j = 1; j <= ntok; j++) {
-        if (T[j] ~ /^--repo=/) { repo = substr(T[j], 8); break }
-        if (T[j] ~ /^-R=/)     { repo = substr(T[j], 4); break }
-        if (T[j] ~ /^-R./)     { repo = substr(T[j], 3); break }  # attached -R<repo>
-        if (T[j] == "--repo" || T[j] == "-R") {
-            if (j < ntok) repo = T[j + 1]
-            break
+        if (T[j] ~ /^--repo=/)      { repo = substr(T[j], 8) }
+        else if (T[j] ~ /^-R=/)     { repo = substr(T[j], 4) }
+        else if (T[j] ~ /^-R./)     { repo = substr(T[j], 3) }  # attached -R<repo>
+        else if (T[j] == "--repo" || T[j] == "-R") {
+            if (j < ntok) { repo = T[j + 1]; j++ }
         }
     }
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval
 }
 function reset(   k) { for (k = 1; k <= ntok; k++) delete T[k]; ntok = 0 }
 BEGIN { SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); BT = sprintf("%c", 96) }
 { buf = (NR > 1 ? buf "\n" $0 : $0) }
 END {
-    n = length(buf); tok = ""; have = 0; ntok = 0; inS = 0; inD = 0; cdspec = ""; cddepth = 0; ghset = 0; ghval = ""
+    n = length(buf); tok = ""; have = 0; ntok = 0; inS = 0; inD = 0; cdspec = ""; cddepth = 0; ghset = 0; ghval = ""; hostset = 0; hostval = ""
     for (i = 1; i <= n; i++) {
         c = substr(buf, i, 1)
         if (inS) { if (c == SQ) inS = 0; else { tok = tok c; have = 1 } ; continue }
@@ -255,6 +316,8 @@ END {
             cdsave[cddepth] = cdspec
             ghsetsave[cddepth] = ghset
             ghvalsave[cddepth] = ghval
+            hostsetsave[cddepth] = hostset
+            hostvalsave[cddepth] = hostval
             continue
         }
         if (c == ")") {
@@ -263,6 +326,8 @@ END {
                 cdspec = cdsave[cddepth]
                 ghset = ghsetsave[cddepth]
                 ghval = ghvalsave[cddepth]
+                hostset = hostsetsave[cddepth]
+                hostval = hostvalsave[cddepth]
                 cddepth--
             }
             continue
@@ -284,7 +349,7 @@ ALLOWED=$(allowed_origins)
 OWNED=$(printf '%s' "$ALLOWED" | paste -sd, - 2>/dev/null)
 
 NOUN=""; VERB=""; TARGET=""; REFUSE=""
-while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval; do
+while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval; do
     [ -n "${_noun:-}" ] || continue
 
     # Where this call would actually run, after any cd ahead of it.
@@ -301,21 +366,33 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
         fi
     fi
 
+    # The host gh would use to complete an unqualified owner/name: GH_HOST set
+    # inline on the call, else exported earlier on the line (empty when unset,
+    # which means gh's default forge), else this process's ambient GH_HOST.
+    if [ -n "${_inhost:-}" ]; then
+        _eff_host=$_inhost
+    elif [ "${_hostset:-0}" = "1" ]; then
+        _eff_host=${_hostval:-github.com}
+    else
+        _eff_host=${GH_HOST:-github.com}
+    fi
+    [ -n "$_eff_host" ] || _eff_host=github.com
+
     if [ -n "${_flag:-}" ]; then
-        _target=$(norm_repo "$_flag")
+        _target=$(norm_repo "$_flag" "$_eff_host")
     elif [ -n "${_inline:-}" ]; then
-        _target=$(norm_repo "$_inline")
+        _target=$(norm_repo "$_inline" "$_eff_host")
     elif [ "${_ghset:-0}" = "1" ]; then
         # An export earlier on the line is what gh sees, overriding any ambient
         # GH_REPO. An emptied or unset one leaves no target, so it resolves
         # against the working directory just as gh would.
         if [ -n "${_ghval:-}" ]; then
-            _target=$(norm_repo "$_ghval")
+            _target=$(norm_repo "$_ghval" "$_eff_host")
         else
             _target=$(origin_of "$_base")
         fi
     elif [ -n "${GH_REPO:-}" ]; then
-        _target=$(norm_repo "$GH_REPO")
+        _target=$(norm_repo "$GH_REPO" "$_eff_host")
     else
         # No explicit target: gh resolves against the working directory's
         # remote, so the guard resolves the same way rather than waving the
