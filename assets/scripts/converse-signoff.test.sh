@@ -301,12 +301,26 @@ else
     # A close that is missing entirely reports close@none and fails here too:
     # deleting the close is not a way to satisfy an ordering check.
     s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF 'Ended (<one-word-outcome>):' | head -1 | cut -d: -f1)
+    s7_stamp=$(printf '%s\n' "$STEP7" | grep -nF 'gc.outcome=<one-word-outcome>' | head -1 | cut -d: -f1)
     s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'gc bd close "$VISIT"' | head -1 | cut -d: -f1)
     if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
         ok "the sign-off is posted BEFORE the visit is closed"
     else
         bad "the sign-off is posted BEFORE the visit is closed" \
             "sign-off@${s7_signoff:-none} close@${s7_close:-none} — a sign-off written after the close lands in a pane the drain is already taking (tk-747cl)"
+    fi
+    # The outcome stamp is the marker converse-claim.sh reads to finish a
+    # stranded visit without posting anything, so it must land AFTER the
+    # sign-off and immediately before the close. A stamp ahead of the sign-off
+    # reopens the original bug: a death between the stamp and the sign-off
+    # strands a visit that then finishes silently, dropping the sign-off it
+    # still owed (tk-ayd4c0).
+    if [ -n "$s7_signoff" ] && [ -n "$s7_stamp" ] && [ -n "$s7_close" ] \
+       && [ "$s7_signoff" -lt "$s7_stamp" ] && [ "$s7_stamp" -lt "$s7_close" ]; then
+        ok "the outcome stamp lands after the sign-off and before the close"
+    else
+        bad "the outcome stamp lands after the sign-off and before the close" \
+            "sign-off@${s7_signoff:-none} stamp@${s7_stamp:-none} close@${s7_close:-none} — a stamp ahead of the sign-off lets converse-claim.sh finish a visit whose sign-off never posted (tk-ayd4c0)"
     fi
 fi
 # The heading and the procedure disagreed for as long as the bug existed, and
@@ -338,27 +352,21 @@ fi
 # exit, so a release keyed to the item's current state finds "held" on an item
 # nobody has ruled on, and drops the declared wait the hold was written to
 # record.
-signoff_block=$(awk '
+release_block=$(awk '
     /^[[:space:]]*```/ {
         if (infence) { if (hit) { printf "%s", buf; exit } infence = 0 }
         else { infence = 1; buf = ""; hit = 0 }
         next
     }
     !infence { next }
-    { buf = buf $0 "\n"; if (index($0, "gc.outcome=<one-word-outcome>") > 0) hit = 1 }
+    { buf = buf $0 "\n"; if (index($0, "--to unanchored") > 0) hit = 1 }
 ' "$PROMPT")
-if [ -z "$signoff_block" ]; then
-    bad "step 7's writes are a runnable block" \
-        "no fenced block performs the sign-off writes — prose alone leaves the role to improvise them"
+if [ -z "$release_block" ]; then
+    bad "step 7 releases a ruled hold in a runnable block" \
+        "no fenced block runs the --to unanchored release — without it an item stays in held after the decision lands, and the state stops meaning waiting"
 else
-    ok "step 7's writes are a runnable block"
-    if printf '%s' "$signoff_block" | grep -qF -- '--to unanchored'; then
-        ok "step 7 still releases a hold whose ruling landed"
-    else
-        bad "step 7 still releases a hold whose ruling landed" \
-            "without the release an item stays in held after the decision lands, and the state stops meaning waiting"
-    fi
-    rel_guard=$(printf '%s' "$signoff_block" | grep -F 'state "$ITEM"' | grep -F '"held"' | head -1)
+    ok "step 7 releases a ruled hold in a runnable block"
+    rel_guard=$(printf '%s' "$release_block" | grep -F 'state "$ITEM"' | grep -F '"held"' | head -1)
     if [ -z "$rel_guard" ]; then
         bad "the release from held is guarded at all" \
             "no conditional in step 7 reads the item's state before transitioning it"
@@ -370,7 +378,7 @@ else
     fi
     # The gate has to fail CLOSED. An absent or affirmative default releases
     # every hold that passes through step 7, which is the defect itself.
-    rel_default=$(printf '%s' "$signoff_block" | grep -E '^[[:space:]]*RULED=' | head -1)
+    rel_default=$(printf '%s' "$release_block" | grep -E '^[[:space:]]*RULED=' | head -1)
     if printf '%s' "$rel_default" | grep -qE '^[[:space:]]*RULED=no([[:space:]]|$)'; then
         ok "the ruling gate defaults to leaving the hold in place"
     else
@@ -876,16 +884,34 @@ case "$1 ${2:-}" in
                   else
                       cat "$FAKE_SHOW"
                   fi ;;
+  # A close is recorded and then MOVES the per-bead read-back, because the
+  # script trusts the read over the exit status: a stub that closed nothing
+  # would leave that gate green on a script that never closed anything either.
+  # FAKE_CLOSE_REFUSE arms bd's close-authority guard — `plain` refuses all but
+  # --force, `all` refuses both — and refusals are recorded before they fire.
+  "bd close")     printf '%s\n' "$*" >> "$FAKE_CLOSES"
+                  forced=0
+                  for a in "$@"; do [ "$a" = "--force" ] && forced=1; done
+                  case "${FAKE_CLOSE_REFUSE:-}" in
+                    plain) [ "$forced" = 1 ] || exit 1 ;;
+                    all)   exit 1 ;;
+                  esac
+                  [ -n "${FAKE_SHOW_DIR:-}" ] && \
+                    printf '[{"id":"%s","status":"closed","assignee":null}]' "${3:-}" \
+                      > "$FAKE_SHOW_DIR/${3:-}.json" ;;
 esac
 exit 0
 GCC
 chmod +x "$CTMP/bin/gc"
 
 # run_claim <claim-json> <current-group> <show-json> [held-id ...]
-#   -> CRC / COUT / CUPD
+#   -> CRC / COUT / CUPD / CCLOSE
 # Any id listed after the show fixture reads back as STILL HELD, so a case can
 # hold one turn of a vacuumed set back and prove the verdict is gated on the
 # whole set rather than on the turn the claim happened to name.
+# CLOSE_REFUSE arms the close-authority refusal for ONE run and is cleared
+# afterwards, so a refusal case cannot leak into the cases that follow it.
+CLOSE_REFUSE=""
 run_claim() {
     printf '%s' "$1" > "$CTMP/claim.json"
     printf '%s' "$3" > "$CTMP/show.json"
@@ -898,12 +924,16 @@ run_claim() {
             "$_rc_held" > "$CTMP/show.d/$_rc_held.json"
     done
     : > "$CTMP/updates"
+    : > "$CTMP/closes"
     CRC=0
     COUT=$(env PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
                FAKE_UPDATES="$CTMP/updates" FAKE_SHOW="$CTMP/show.json" \
-               FAKE_SHOW_DIR="$CTMP/show.d" \
+               FAKE_SHOW_DIR="$CTMP/show.d" FAKE_CLOSES="$CTMP/closes" \
+               FAKE_CLOSE_REFUSE="$CLOSE_REFUSE" \
                sh "$CLAIMER" "$_rc_group" 2>"$CTMP/err") || CRC=$?
     CUPD=$(cat "$CTMP/updates")
+    CCLOSE=$(cat "$CTMP/closes")
+    CLOSE_REFUSE=""
 }
 
 RELEASED='[{"id":"tk-foreign","status":"open","assignee":null}]'
@@ -1213,6 +1243,205 @@ done
 run_claim '{"bead_id":"tk-new","continuation_group":"tk-other","reason":"claimed"}' "tk-subj" "$RELEASED"
 eq "$COUT" "action=drain reason=out-of-group bead=tk-new group=tk-other" \
    "(HOLD-FRESH) a freshly claimed foreign turn is still released and drained"
+
+echo "── a sitting stranded between its outcome stamp and its close is finished ──"
+
+# A sitting does not end in one write. Step 7 posts the sign-off, then stamps
+# gc.outcome on the visit, reads it back, and closes last of all. A session that
+# dies between the stamp and the close leaves a visit that is in_progress,
+# assigned, and carrying a final outcome, and every re-claim reports it as
+# `existing_assignment`. The hold answered, the prompt read that as a sitting
+# still underway and went back to waiting, and the close never ran. A finished
+# sitting was indistinguishable from a held one, and liveness-sweep.sh classifies
+# the live visit's subject as `conversing`, so nothing else raised it either.
+# The stamp lands after the sign-off, so a visit carrying the outcome has already
+# had its last word: finishing it closes a sitting that is over, not one whose
+# sign-off is still owed.
+STRANDED='[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"task_kind":"visit","gc.outcome":"settled"}}]'
+LIVE_VISIT='[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"task_kind":"visit"}}]'
+
+# --- (FINISH) the stamped turn is finished, not held -------------------------
+run_claim "$UNDERWAY" "tk-subj" "$STRANDED"
+eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped" \
+   "(FINISH) a turn carrying a final outcome is a sitting over, not one underway"
+eq "$CRC" "4" "(FINISH) …with an exit status distinct from work, hold and drain"
+if grep -q '^bd close tk-held' <<< "$CCLOSE"; then
+    ok "(FINISH) …and the close the dead session never reached runs here"
+else
+    bad "(FINISH) …and the close the dead session never reached runs here" \
+        "no close issued: ${CCLOSE:-<none>}"
+fi
+
+# The mirror, and the reason the arm is keyed on the stamp rather than on the
+# claim reason: a live sitting carries no outcome and must still be held.
+run_claim "$UNDERWAY" "tk-subj" "$LIVE_VISIT"
+eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
+   "(FINISH) a sitting with no outcome stamp is still held"
+eq "${CCLOSE:-<none>}" "<none>" "(FINISH) …and nothing is closed under a live operator"
+
+# --- (FINISH-SCOPE) gc.outcome is not a visit-only key -----------------------
+# A dog warrant and a graph.v2 step both carry it. Closing whatever the pool
+# hands this role because it has the field would be destruction, so the arm is
+# keyed on task_kind=visit exactly as the group recovery above is.
+run_claim "$UNDERWAY" "tk-subj" \
+    '[{"id":"tk-held","status":"in_progress","assignee":"converse-1","metadata":{"gc.outcome":"pass"}}]'
+eq "$COUT" "action=hold bead=tk-held group=tk-subj reason=already-underway" \
+   "(FINISH-SCOPE) a NON-visit carrying gc.outcome is held, not disposed of"
+eq "${CCLOSE:-<none>}" "<none>" "(FINISH-SCOPE) …and is never closed"
+
+# --- (FINISH-FRESH) the arm fires on the claim shape the strand produces -----
+# The strand leaves the visit in_progress under the identity that stamped it,
+# which is what `existing_assignment` reports. A stamped visit arriving as a
+# FRESH claim means something else reopened it, which is a different question;
+# disposing of it here would answer it by accident.
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"claimed"}' \
+          "tk-subj" "$STRANDED"
+eq "$COUT" "action=work bead=tk-held group=tk-subj" \
+   "(FINISH-FRESH) the finish arm does not fire on a claim it did not start from"
+eq "${CCLOSE:-<none>}" "<none>" "(FINISH-FRESH) …and closes nothing out from under it"
+
+# --- (FINISH-FORCE) bd refuses this session's own id on the rendering alone --
+# The assignee is the canonical mailbox identity and the actor is derived from
+# the session name, so a self-close trips the close-authority guard. gc-helm's
+# dismiss escalates the same way. Plain close FIRST, so a close needing no
+# override never pays for one.
+CLOSE_REFUSE=plain
+run_claim "$UNDERWAY" "tk-subj" "$STRANDED"
+eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped" \
+   "(FINISH-FORCE) a refused close escalates rather than standing"
+if grep -q -- '--force' <<< "$CCLOSE"; then
+    ok "(FINISH-FORCE) …to --force"
+else
+    bad "(FINISH-FORCE) …to --force" "no forced close in: ${CCLOSE:-<none>}"
+fi
+# Matched on the whole first line rather than on the absence of --force: with
+# no close attempted at all there is no --force to find either, and the
+# ordering assertion would read green on a script that closed nothing.
+case "$(head -1 <<< "$CCLOSE")" in
+    "bd close tk-held "*--force*)
+        bad "(FINISH-FORCE) the plain close is tried first" \
+            "the first attempt was already forced: $(head -1 <<< "$CCLOSE")" ;;
+    "bd close tk-held "*)
+        ok "(FINISH-FORCE) the plain close is tried first" ;;
+    *)
+        bad "(FINISH-FORCE) the plain close is tried first" \
+            "no close was attempted at all: ${CCLOSE:-<none>}" ;;
+esac
+
+# --- (FINISH-STUCK) a close that will not take is still a finish -------------
+# The READ decides: a close can exit 0 and leave the visit open. Answering
+# `hold` on that would send the session back to waiting on a sitting that is
+# over, which is the defect itself, so the verdict stands and the operator gets
+# the line naming the command that ends it.
+CLOSE_REFUSE=all
+run_claim "$UNDERWAY" "tk-subj" "$STRANDED"
+eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped" \
+   "(FINISH-STUCK) a close that would not take does not fall back to a hold"
+eq "$CRC" "4" "(FINISH-STUCK) …and keeps the finish status"
+if grep -q 'would not close' "$CTMP/err"; then
+    ok "(FINISH-STUCK) …and the failure is reported, not swallowed"
+else
+    bad "(FINISH-STUCK) …and the failure is reported, not swallowed" \
+        "$(cat "$CTMP/err")"
+fi
+
+# --- (FINISH-VACUUM) a finish names its adopted siblings and closes none -----
+# Siblings are later turns of the sitting's own group. The stamp is on the one
+# visit that ended, so it is the only bead the arm may dispose of.
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-subj","reason":"existing_assignment","continuation_assigned":["tk-sib1"]}' \
+          "tk-subj" "$STRANDED"
+eq "$COUT" "action=finish bead=tk-held group=tk-subj reason=outcome-stamped adopted=tk-sib1" \
+   "(FINISH-VACUUM) a finished turn still names what the claim assigned with it"
+# Both halves, so a run that closed NOTHING cannot read as "no sibling closed".
+if ! grep -q '^bd close tk-held' <<< "$CCLOSE"; then
+    bad "(FINISH-VACUUM) only the stranded turn is closed" \
+        "the stranded turn itself was never closed: ${CCLOSE:-<none>}"
+elif grep -q 'tk-sib1' <<< "$CCLOSE"; then
+    bad "(FINISH-VACUUM) only the stranded turn is closed" "a sibling was closed too: $CCLOSE"
+else
+    ok "(FINISH-VACUUM) only the stranded turn is closed"
+fi
+
+# --- (FINISH-FOREIGN) disposal outranks the release, as the hold does --------
+# Releasing a finished sitting puts the strand back in the pool for the next
+# session to be told to wait on. The group guard never gets to it.
+run_claim '{"bead_id":"tk-held","continuation_group":"tk-other","reason":"existing_assignment"}' \
+          "tk-subj" "$STRANDED"
+eq "$COUT" "action=finish bead=tk-held group=tk-other reason=outcome-stamped" \
+   "(FINISH-FOREIGN) an out-of-group strand is finished, not put back"
+eq "${CUPD:-<none>}" "<none>" "(FINISH-FOREIGN) …and the release never runs"
+
+# --- the prompt and the doc carry the verdict the script now returns ---------
+# An unknown action falls through the prompt's case with VISIT set, so a prompt
+# that never learned this verdict walks a closed visit into step 2 and holds a
+# second sitting on a subject that already settled one.
+have "the prompt has a branch for a sitting already over" 'action=finish' "$PROMPT"
+have "…and posts nothing into a thread the session took with it" \
+     'Post nothing, and run none of' "$PROMPT"
+# A finish returns to step 8, and step 8 re-runs step 1. That terminates on the
+# close: a closed visit is no longer in_progress, so the existing-assignment
+# tier stops matching it. A close that will not take leaves every one of those
+# conditions in place, and the arm would re-derive the same finish for as long
+# as the pane lives. The hold it replaced could not spin — it ends at a human.
+have "…and a close that will not take ends the pane rather than re-deriving" \
+     'escalate and `gc runtime drain-ack` instead of returning to step 8' "$PROMPT"
+# The turn is being disposed of, not entered. Letting its group land in
+# $SUBJECT re-scopes step 8's re-claim onto a subject this thread never had.
+have "…and a finish does not become what the thread is about" \
+     'action=finish*) ;;' "$PROMPT"
+have "the central doc states the fourth verdict" 'action=finish' "$ENGAGE"
+
+# --- (FINISH-BLOCK) the prompt's own close, extracted and RUN ----------------
+# On the claimer-less path nothing else performs the close, so this block is
+# the close rather than a check of one, and grepping the prompt for it proves
+# only that the text is present. It runs against the same stub the claimer does.
+FB="$CTMP/finish-block.sh"
+awk '/# >>> finish-close/ {f = 1; next}
+     /# <<< finish-close/ {f = 0}
+     f {print}' "$PROMPT" > "$FB"
+if [ -s "$FB" ]; then
+    ok "(FINISH-BLOCK) the prompt's close is extractable (# >>> finish-close markers present)"
+else
+    bad "(FINISH-BLOCK) the prompt's close is extractable (# >>> finish-close markers present)" \
+        "no finish-close block in $PROMPT"
+fi
+
+# run_finish_block <show-json> -> CCLOSE
+run_finish_block() {
+    printf '%s' "$1" > "$CTMP/show.json"
+    rm -rf "$CTMP/show.d"
+    mkdir -p "$CTMP/show.d"
+    : > "$CTMP/closes"
+    env PATH="$CTMP/bin:$PATH" FAKE_SHOW="$CTMP/show.json" \
+        FAKE_SHOW_DIR="$CTMP/show.d" FAKE_CLOSES="$CTMP/closes" \
+        FAKE_CLOSE_REFUSE="$CLOSE_REFUSE" VISIT=tk-held \
+        sh "$FB" >/dev/null 2>&1
+    CLOSE_REFUSE=""
+    CCLOSE=$(cat "$CTMP/closes")
+}
+
+# The ordinary case: the claimer already closed it, so this must be a no-op.
+# A block that closed unconditionally would post a second close on every finish.
+run_finish_block '[{"id":"tk-held","status":"closed","assignee":null}]'
+eq "${CCLOSE:-<none>}" "<none>" \
+   "(FINISH-BLOCK) a close the claimer already made is not repeated"
+
+run_finish_block "$STRANDED"
+if grep -q '^bd close tk-held' <<< "$CCLOSE"; then
+    ok "(FINISH-BLOCK) a visit still open is closed where the claimer could not"
+else
+    bad "(FINISH-BLOCK) a visit still open is closed where the claimer could not" \
+        "no close issued: ${CCLOSE:-<none>}"
+fi
+
+CLOSE_REFUSE=plain
+run_finish_block "$STRANDED"
+if grep -q -- '--force' <<< "$CCLOSE"; then
+    ok "(FINISH-BLOCK) …and the close-authority refusal escalates here too"
+else
+    bad "(FINISH-BLOCK) …and the close-authority refusal escalates here too" \
+        "no forced close in: ${CCLOSE:-<none>}"
+fi
 
 # --- the prompt is the half that decides what a hold MEANS -------------------
 # The script can state that a sitting is underway; whether this session's

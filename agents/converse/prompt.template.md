@@ -89,7 +89,16 @@ The loop, every visit:
      G=$(printf '%s' "$RAW" | jq -r '.continuation_group // ""')
      R=$(printf '%s' "$RAW" | jq -r '.reason // ""')
      A=$(printf '%s' "$RAW" | jq -r '(.continuation_assigned // []) | map(select(type == "string" and . != "")) | join(",")')
+     # A stamped outcome on a still-open visit is a sitting that ended
+     # without its close, so it renders `finish` here as well; nothing on
+     # this path can perform the close, which is why the arm below carries it.
+     O=""
+     [ -n "$B" ] && [ "$R" = "existing_assignment" ] && O=$(gc bd show "$B" --json 2>/dev/null | tr -d '[:cntrl:]' \
+       | jq -r 'if type == "array" then (.[0] // {}) else {} end
+                | select(((.metadata // {}).task_kind // "") == "visit")
+                | (((.metadata // {})["gc.outcome"]) // "") | tostring')
      if [ -z "$B" ]; then CLAIM="action=drain reason=no-work"
+     elif [ -n "$O" ]; then CLAIM="action=finish bead=$B group=$G reason=outcome-stamped${A:+ adopted=$A}"
      elif [ "$R" = "existing_assignment" ]; then CLAIM="action=hold bead=$B group=$G reason=already-underway${A:+ adopted=$A}"
      else CLAIM="action=work bead=$B group=$G reason=unreleasable"; fi
    fi
@@ -97,10 +106,17 @@ The loop, every visit:
    case "$CLAIM" in
      action=drain*) gc runtime drain-ack; exit 0 ;;
      # No action=hold arm: a hold falls through with VISIT and SUBJECT set,
-     # which is what re-opening the sitting needs.
+     # which is what re-opening the sitting needs. A finish falls through the
+     # same way; the case below says why it does not bring its group with it.
    esac
    VISIT=$(printf '%s' "$CLAIM" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')
-   SUBJECT=$(printf '%s' "$CLAIM" | sed -n 's/.*group=\([^ ]*\).*/\1/p')
+   # A finish names a sitting being disposed of rather than entered, so its
+   # group is not what this thread is about. Taking it would re-scope step 8's
+   # re-claim onto a subject no one in this thread ever discussed.
+   case "$CLAIM" in
+     action=finish*) ;;
+     *) SUBJECT=$(printf '%s' "$CLAIM" | sed -n 's/.*group=\([^ ]*\).*/\1/p') ;;
+   esac
    ```
    Work only the bead it returns. `VISIT` is that bead's id and `SUBJECT`
    its `continuation_group`; both are used by name below.
@@ -110,6 +126,37 @@ The loop, every visit:
    drain. `reason=unreleasable` means it could not: work the turn it
    hands you, say in your first message that the thread is switching
    subjects, and use `VISIT` as parsed rather than the bead it named.
+
+   **`action=finish` — this visit's sitting is over and only its close is
+   missing.** Everything durable a sitting writes had already landed when
+   the session died: the takeaway on the item, the demand and the hold
+   discharged, and `gc.outcome` stamped on the visit. What was lost is the
+   `gc bd close` that follows that stamp. The claimer performs that close
+   as it hands the line back, so the block below reads as a check that it
+   took. On the claimer-less path above it is the close itself:
+
+   ```bash
+   # >>> finish-close
+   gc bd show "$VISIT" --json 2>/dev/null | tr -d '[:cntrl:]' \
+     | jq -e 'if type == "array" then ((.[0].status // "") == "closed") else false end' >/dev/null \
+     || gc bd close "$VISIT" --reason "stranded after its outcome was stamped" \
+     || gc bd close "$VISIT" --reason "stranded after its outcome was stamped" --force
+   # <<< finish-close
+   ```
+
+   Then go to step 8 and claim again. **Post nothing, and run none of
+   steps 2 through 7.** Their writes all landed once already, so re-running
+   them stamps a second takeaway over the sitting's own and re-states a
+   demand that was answered. Step 7 posts the sign-off before it stamps
+   `gc.outcome`, so a visit carrying the stamp already had its last word;
+   this pane is a different thread, and repeating a sign-off for a
+   conversation it never saw reads as a sitting nobody had.
+
+   Re-claiming only ends the finish when the close took. A visit still open
+   is offered back under the same reason and finishes to the same refusal,
+   so escalate and `gc runtime drain-ack` instead of returning to step 8. A
+   visit that cannot be closed keeps its subject out of the unnamed-wait
+   census for as long as it stands, and clearing it is a person's work.
 
    **`action=hold` — this visit is a sitting already underway.** Do not
    `drain-ack` it and do not work it: either one ends a sitting the
@@ -421,8 +468,6 @@ The loop, every visit:
      "$LC" transition "$ITEM" --to unanchored --route "<the pool that owns it now, or human>" \
        || echo "RELEASE FROM held FAILED on $ITEM — it still reads as waiting on a person"
    fi
-   gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
-   gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    ```
    **Set `RULED` from what this sitting actually settled.** The gate
    starts shut, so a sitting that ends without setting it re-states the
@@ -434,8 +479,15 @@ The loop, every visit:
    Ended (<one-word-outcome>): <what this sitting settled, in one line>
    Look at: <subject-id> — <the one thing to read or do next>
    ```
-   Only then close the visit, with nothing said after it:
+   Only then stamp the outcome and close the visit — the sitting's last
+   actions, with nothing said after them. The stamp is the last write
+   before the close on purpose. An open visit carrying `gc.outcome` is then
+   a sitting whose sign-off already posted and whose only missing write is
+   the close. That is the one shape `converse-claim.sh` finishes without
+   posting anything.
    ```bash
+   gc bd update "$VISIT" --set-metadata "gc.outcome=<one-word-outcome>"
+   gc bd show "$VISIT" --json | jq -e '.[0].metadata["gc.outcome"] // empty' >/dev/null
    gc bd close "$VISIT"
    ```
    **If this sitting ROUTED work, file that work as a SIBLING of the
@@ -462,7 +514,8 @@ The loop, every visit:
    or the turn it found belongs to another subject and has been put back
    — `gc runtime drain-ack` and stop.
    `action=hold` is step 1's case, not this one: it names a sitting still
-   underway, so read it there rather than draining on it.
+   underway, so read it there rather than draining on it. So is
+   `action=finish`, which names one already over.
 
    A turn on another subject is not this thread's to absorb: pool demand
    spawns a session that opens on it, and this thread ends on its
