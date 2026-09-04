@@ -5,8 +5,9 @@
 # verification mismatch (exit 2); human states routing to human and detached
 # states clearing the route, both in the same call; the empty-route refusal that
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
-# close/terminal pairing guards (--close only into a closed state, closed states
-# must --close); --set-dated's compare-and-preserve rule for the @<since>
+# close/terminal pairing guards (--close only into a closed state or into
+# unanchored, closed states must --close); --set-dated's compare-and-preserve
+# rule for the @<since>
 # component; the reopen repair verb; the park-route takeaway guard and its
 # --takeaway writer, capped and mirrored from gc-helm.sh; and the drift
 # assertion against lifecycle/lifecycle.toml.
@@ -696,6 +697,101 @@ eq "$rc" 1 "--to merged without --close exits 1 (a terminal transition must clos
 has "$out" "requires --close" "the missing flag is named"
 eq "$(meta c-1 merge_result)" "pull_request" "a refused terminal transition writes nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refusal attempted a bd update"
+
+# `merged` carries the evidence its own definition names: it means "landed;
+# merged_sha recorded", so a close with no sha is the false landing claim (I5),
+# refused at the write instead of by the doctor after the fact.
+store '[{"id":"c-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-2 --to merged --close 2>&1)"; rc=$?
+eq "$rc" 1 "--to merged --close without merged_sha exits 1"
+has "$out" "merged_sha" "the missing evidence is named"
+eq "$(meta c-2 merge_result)" "pull_request" "a refused merged close writes nothing"
+eq "$(bstatus c-2)" "open" "and closes nothing"
+out="$("$SUT" transition c-2 --to merged --close --set merged_sha= 2>&1)"; rc=$?
+eq "$rc" 1 "an explicitly empty merged_sha is no evidence either"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refused merged close attempted a bd update"
+
+# A key set and unset in the same call is a contradiction no write can resolve:
+# the assembly applies --set then --unset, so the surviving value turns on
+# argument order and the read-back can verify neither. The dangerous instance is
+# --to merged --set merged_sha=<oid> --unset merged_sha, which clears the sha
+# the merged_sha guard just accepted and would close the bead with no landing
+# (I5). Refused before any write.
+store '[{"id":"c-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-6 --to merged --expect pull_request --close --set merged_sha=abc --unset merged_sha 2>&1)"; rc=$?
+eq "$rc" 1 "--set k and --unset k for one key exits 1"
+has "$out" "both set and unset" "the contradiction is named"
+eq "$(meta c-6 merge_result)" "pull_request" "the contradictory call writes nothing"
+eq "$(bstatus c-6)" "open" "and closes nothing"
+eq "$(meta c-6 merged_sha)" "<absent>" "no merged_sha is left behind"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "no bd update was attempted"
+
+# The same key set twice on the set side is the contradiction by another route:
+# the assembly applies each --set in order, so a second empty --set overrides the
+# value the merged_sha guard just accepted on the first token, closing the bead
+# with no landing (I5). A guard that scans for the first non-empty set cannot see
+# the override, so the repeat itself is refused before any write.
+store '[{"id":"c-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-7 --to merged --expect pull_request --close --set merged_sha=abc --set merged_sha= 2>&1)"; rc=$?
+eq "$rc" 1 "a key set twice (--set k=v --set k=) exits 1"
+has "$out" "set more than once" "the duplicate set is named"
+eq "$(meta c-7 merge_result)" "pull_request" "the duplicate-set call writes nothing"
+eq "$(bstatus c-7)" "open" "and closes nothing"
+eq "$(meta c-7 merged_sha)" "<absent>" "no merged_sha is left behind"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "no bd update was attempted"
+
+# `unanchored` is the non-anchor's terminal: lifecycle.toml declares its status
+# open|closed, so --to unanchored --close is the one close that is not a
+# closed_state. It clears merge_result and closes in ONE atomic write — the path
+# a bead with no PR takes instead of the false --to merged landing claim.
+store '[{"id":"c-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"held","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-3 --to unanchored --close 2>&1)"; rc=$?
+eq "$rc" 0 "held -> unanchored --close closes a non-anchor in one write"
+eq "$(meta c-3 merge_result)" "<absent>" "the closed bead carries no merge_result"
+eq "$(bstatus c-3)" "closed" "and it is closed"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "exactly ONE gc bd update carried the close"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--status=closed" "the close rode in that update"
+has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata merge_result" "and it cleared merge_result"
+
+# The release-only form is unchanged: --to unanchored WITHOUT --close still
+# leaves the bead open (a rejection back to the pool, a hold released onward).
+store '[{"id":"c-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"held","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"}}]'
+out="$("$SUT" transition c-4 --to unanchored --route rig/polecat 2>&1)"; rc=$?
+eq "$rc" 0 "held -> unanchored without --close still releases"
+eq "$(bstatus c-4)" "open" "and the released bead stays open"
+eq "$(meta c-4 merge_result)" "<absent>" "with merge_result cleared"
+
+# A bead already at unanchored (open) — a non-anchor that never had a PR — closes
+# through the unanchored self-edge. The edge is idle (from and to both
+# unanchored), so --close has to force the write past the idle self-edge skip.
+store '[{"id":"c-5","status":"open","assignee":"","notes":"","metadata":{}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition c-5 --to unanchored --close 2>&1)"; rc=$?
+eq "$rc" 0 "the unanchored self-edge with --close closes a non-anchor"
+eq "$(bstatus c-5)" "closed" "the bead is closed"
+eq "$(meta c-5 merge_result)" "<absent>" "and carries no merge_result"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "--close bypasses the idle self-edge skip and writes once"
+
+# --to unanchored --close is the NON-ANCHOR terminal, and only from a non-anchor
+# current state: `unanchored` (c-5) or `held` (c-3). From any other state with an
+# edge to unanchored the same call would clear merge_result and close in one write,
+# dropping a live or human-queued anchor from the readers still waiting on it (I5).
+# Each such from-state is refused and writes nothing — it reaches unanchored by its
+# own edge, which leaves it open (c-4), and closes from there.
+for st in pre_open_gate pull_request abandoned retargeted blocked refused_false_completion; do
+  store "[{\"id\":\"cu-$st\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"$st\"}}]"
+  : > "$STUB_GC_LOG"
+  out="$("$SUT" transition "cu-$st" --to unanchored --close 2>&1)"; rc=$?
+  eq "$rc" 1 "$st -> unanchored --close is refused: a live/human-queued anchor cannot close by routing to unanchored"
+  has "$out" "--close refused" "the refusal names the close"
+  eq "$(meta "cu-$st" merge_result)" "$st" "the refused $st bead keeps its merge_result"
+  eq "$(bstatus "cu-$st")" "open" "and stays open"
+  eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and no bd update was attempted"
+done
 
 # --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
 echo "# reopen"

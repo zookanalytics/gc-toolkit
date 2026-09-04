@@ -101,8 +101,10 @@ performer; the full transition table with writers is
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
    `lifecycle.sh` call.
-9. **Close propagates.** `closed` means *landed and verified* — the one signal
-   waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
+9. **Close propagates.** `closed` is the terminal signal waiting parties key on
+   ([lifecycle-composition.md](lifecycle-composition.md)). An anchor closes as
+   `merged` (landed and verified, with a recorded `merged_sha`); a bead that
+   never had a PR closes as `unanchored`, the non-anchor terminal.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park — are handled by five reactive paths:

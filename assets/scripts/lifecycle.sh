@@ -12,10 +12,13 @@
 # while value and oid both hold, and a change to either stamps a fresh one. The
 # reconcile cadence re-derives the same verdict at the same head every few
 # minutes, so a naive clock would restart a three-day wait on every pass.
-# --close only into a closed state, and a closed state requires --close (status
-# and merge_result move together). A state's declared routing rides in the same
-# call unless --route is given: human states stamp gc.routed_to=human, and
-# detached states clear it unless the bead already rests on the park route.
+# --close only into a closed state, or into unanchored from a non-anchor
+# current state — unanchored or held, the terminal a non-anchor takes, whose
+# declared status is open|closed; a closed state requires --close (status and
+# merge_result move together). A state's declared
+# routing rides in the same call unless --route is given: human states stamp
+# gc.routed_to=human, and detached states clear it unless the bead already
+# rests on the park route.
 # A detached state also clears the assignee of a bead still at status=open,
 # unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to
@@ -234,13 +237,37 @@ cmd_transition() {
   is_state "$TO" || { echo "$PROG: '$TO' is not a declared state" >&2; exit 1; }
   # status and merge_result move together: a close on a non-terminal state (or
   # a terminal state left open) is the closed-means-landed violation (I5).
-  if [ "$CLOSE" = 1 ] && ! is_closed_state "$TO"; then
-    echo "$PROG: --close refused with --to $TO — '$TO' is not a closed state (closed_states: $LIFECYCLE_CLOSED_STATES); a closed bead on a non-terminal merge_result is invisible to every open-bead consumer" >&2
+  # `unanchored` is the one exception: lifecycle.toml declares its status
+  # "open|closed", so it MAY close (the terminal a non-anchor takes) without
+  # being a closed_state that MUST close. This target-level guard permits that
+  # close; the current-state guard after the bead read narrows it to a non-anchor
+  # current state, so a live anchor cannot close by routing to unanchored.
+  if [ "$CLOSE" = 1 ] && ! is_closed_state "$TO" && [ "$TO" != "unanchored" ]; then
+    echo "$PROG: --close refused with --to $TO — '$TO' is not a closed state (closed_states: $LIFECYCLE_CLOSED_STATES) and not unanchored; a closed bead on a non-terminal merge_result is invisible to every open-bead consumer" >&2
     exit 1
   fi
   if [ "$CLOSE" = 0 ] && is_closed_state "$TO"; then
     echo "$PROG: --to $TO requires --close — a closed state must close in the same atomic write, or the bead is left open+$TO" >&2
     exit 1
+  fi
+  # `merged` carries the evidence its own definition names: lifecycle.toml
+  # declares [states.merged] meaning = "landed; merged_sha recorded". Require
+  # that sha in the same atomic write, so the state cannot be entered with no
+  # landing to point at — the closed-implies-landed violation
+  # doctor/check-closed-implies-landed reports after the fact, refused here at
+  # the write instead. Every sanctioned writer (merge.sh, pr-facts.sh,
+  # mol-refinery-patrol) already passes --set merged_sha=<oid>; what this
+  # refuses is the bead with no PR that never had one, whose terminal is
+  # `--to unanchored --close`, not a false landing.
+  if [ "$TO" = "merged" ]; then
+    local have_sha="" skv
+    for skv in ${SETS[@]+"${SETS[@]}"}; do
+      case "$skv" in merged_sha=?*) have_sha=1 ;; esac
+    done
+    if [ -z "$have_sha" ]; then
+      echo "$PROG: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead with no PR has not landed: close it with '$PROG transition $id --to unanchored --close' (a closed unanchored bead is legal), not --to merged" >&2
+      exit 1
+    fi
   fi
   # A human state is a bead waiting on a person, so it must name one. An
   # omitted --route takes the default; an EMPTY one is the write that leaves a
@@ -276,6 +303,36 @@ cmd_transition() {
       *@*) : ;;
       *) echo "$PROG: --set-dated '$kv' must carry exactly <value>@<oid>; lifecycle.sh appends the @<since>" >&2; exit 1 ;;
     esac
+  done
+
+  # A key written by --set/--set-dated must be named once on the set side and
+  # not also unset. The update assembly (below) appends every --set, then the
+  # resolved --set-dated, then every --unset, so a key named twice on the set
+  # side, or set and unset together, resolves by argument order and the
+  # post-write read-back can never verify a value it was told to write twice or
+  # to both write and clear. Both shapes reach the closed-with-no-landing (I5)
+  # state this transition refuses: `--to merged --set merged_sha=<oid> --set
+  # merged_sha=` and `--to merged --set merged_sha=<oid> --unset merged_sha`
+  # each satisfy the merged_sha guard above on the first token, then a later
+  # empty set or the unset wins. Repeated --unset of one key is idempotent — it
+  # lands the same absence in any order — so it stays allowed. Reject the
+  # ambiguity before any write rather than leave the bead half-applied.
+  local i j uk setkeys=() ki
+  for kv in ${SETS[@]+"${SETS[@]}"} ${DATED[@]+"${DATED[@]}"}; do setkeys+=("${kv%%=*}"); done
+  for (( i = 0; i < ${#setkeys[@]}; i++ )); do
+    ki="${setkeys[i]}"
+    for (( j = i + 1; j < ${#setkeys[@]}; j++ )); do
+      if [ "$ki" = "${setkeys[j]}" ]; then
+        echo "$PROG: '$ki' is set more than once (--set/--set-dated) — the write applies them in order, so the surviving value turns on argument order and the read-back can never verify; set each key once" >&2
+        exit 1
+      fi
+    done
+    for uk in ${UNSETS[@]+"${UNSETS[@]}"}; do
+      if [ "$ki" = "$uk" ]; then
+        echo "$PROG: '$ki' is both set and unset in one call — the write applies --set then --unset, so the result depends on argument order and can never verify; drop one" >&2
+        exit 1
+      fi
+    done
   done
 
   if [ "$TAKEAWAY_SET" = 1 ]; then
@@ -320,6 +377,21 @@ cmd_transition() {
   fi
   if ! edge_legal "$cur" "$TO"; then
     echo "$PROG: illegal edge $cur -> $TO for $id (declared machine: lifecycle/lifecycle.toml)" >&2
+    exit 1
+  fi
+  # --to unanchored --close unsets merge_result AND closes in one write. That is
+  # a bead's terminal only from a state that is not a live anchor: `unanchored`
+  # (a task that never anchored a PR) or `held` (a sitting whose ruling
+  # concluded). Every other state with an edge to unanchored is a live merge
+  # anchor the cadence drives, or a PR-derived human state a person must repair
+  # and re-engage; the same call would clear its merge_result and close it in one
+  # write, dropping it from the open-anchor readers still waiting on it while
+  # recording a terminal it never reached (I5). Those reach unanchored by their
+  # own edge, which leaves the bead open, and close from there. Keyed on the
+  # CURRENT state read off the bead, so an omitted --expect is held to the same
+  # rule as a named one.
+  if [ "$CLOSE" = 1 ] && [ "$TO" = "unanchored" ] && [ "$cur" != "unanchored" ] && [ "$cur" != "held" ]; then
+    echo "$PROG: --close refused: $id is '$cur' — a one-step --to unanchored --close is the terminal only from 'unanchored' or 'held', and '$cur' is a live or human-queued anchor whose merge_result this would clear while closing it, hiding it from every open-anchor reader. Take it to unanchored by its own edge (which leaves it open), then close." >&2
     exit 1
   fi
   # A bead already resting on the park route keeps it. No pool claims that

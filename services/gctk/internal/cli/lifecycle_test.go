@@ -148,6 +148,15 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"undeclared state", []string{"b-1", "--to", "nowhere"}, "is not a declared state"},
 		{"close on a non-closed state", []string{"b-1", "--to", "abandoned", "--close"}, "not a closed state"},
 		{"closed state without --close", []string{"b-1", "--to", "merged"}, "requires --close"},
+		// `merged` means "landed; merged_sha recorded", so the sha rides the same
+		// atomic write; a bead with no PR takes --to unanchored --close instead.
+		{"--to merged without a merged_sha", []string{"b-1", "--to", "merged", "--close"}, "requires --set merged_sha"},
+		{"--to merged with an empty merged_sha", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha="}, "requires --set merged_sha"},
+		// A key set twice, or set and unset, resolves by argument order and can
+		// never verify; the merged_sha guard scans the first token, so either shape
+		// would otherwise slip an empty sha past it and close with no landing.
+		{"a key set and unset in one call", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha=abc", "--unset", "merged_sha"}, "both set and unset"},
+		{"a key set twice on the set side", []string{"b-1", "--to", "merged", "--close", "--set", "merged_sha=abc", "--set", "merged_sha="}, "set more than once"},
 		{"--set merge_result", []string{"b-1", "--to", "pull_request", "--set", "merge_result=x"}, "written by --to"},
 		{"--set gc.routed_to", []string{"b-1", "--to", "pull_request", "--set", "gc.routed_to=x"}, "route via --route"},
 		{"--set gc.takeaway", []string{"b-1", "--to", "abandoned", "--set", "gc.takeaway=x"}, "written by --takeaway"},

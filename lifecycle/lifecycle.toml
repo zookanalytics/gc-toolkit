@@ -42,9 +42,18 @@ detached_states = ["pre_open_gate", "pull_request"]
 # is refused, because the helm board spends the takeaway as the row's NEEDS
 # sentence and reports a park without one as no question recorded.
 park_route = "human"
-# States whose legal status is closed; every other declared state is open.
-# lifecycle.sh enforces the pairing both ways: --close is accepted only into a
-# closed state, and a transition into a closed state must carry --close.
+# States whose legal status is closed; every other declared state is open,
+# except `unanchored` (declared status = "open|closed" above). lifecycle.sh
+# enforces the pairing: a transition INTO a closed state must carry --close,
+# and --close is refused except into a closed state or into `unanchored` — the
+# terminal a non-anchor takes (a closed unanchored bead is legal; reopen
+# refuses to "repair" it). The `unanchored` close is narrowed by the CURRENT
+# state: only `unanchored` (never an anchor) or `held` (a concluded sitting) may
+# close in one write, because every other state with an edge to `unanchored` is
+# a live or human-queued anchor a one-step close would clear and hide from the
+# readers still waiting on it. Entering `merged` additionally requires
+# --set merged_sha: its meaning is "landed; merged_sha recorded", so it cannot
+# be entered without the landing that defines it.
 closed_states = ["merged"]
 
 # Legal status x merge_result combinations.

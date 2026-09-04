@@ -123,8 +123,9 @@ status in the first place. A re-derived answer routes around a stale stored one.
 the PR lifecycle composable at all: the refinery is the single writer of merged
 truth, and it closes a bead only after verifying the merge actually carried the
 work (see [state-machine.md](state-machine.md), *The merge condition*). So
-`closed` is the one signal that means *landed and verified*, and the waiting
-side keys on it. A waiting party that watched
+`closed` is the one signal the waiting side keys on: for an anchor it means
+landed and verified, and for a bead that never had a PR it means the non-anchor
+terminal was reached. A waiting party that watched
 GitHub directly would be reading a different, earlier fact.
 
 **Fail quiet, in the direction of not acting.** A blocker counts as landed only
