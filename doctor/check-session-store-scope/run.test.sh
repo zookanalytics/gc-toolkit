@@ -22,7 +22,10 @@ case "${1:-}" in
       rc="${STUB_LIST_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"
       cat "$STUB_DIR/sessions.list" 2>/dev/null ;;
   show-environment)
-      if [ "${2:-}" = "-g" ]; then cat "$STUB_DIR/global.env" 2>/dev/null; exit 0; fi
+      if [ "${2:-}" = "-g" ]; then
+          rc="${STUB_GLOBAL_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"
+          cat "$STUB_DIR/global.env" 2>/dev/null; exit 0
+      fi
       [ "${2:-}" = "-t" ] || exit 1
       [ -f "$STUB_DIR/sessions/$3.env" ] || exit 1
       cat "$STUB_DIR/sessions/$3.env" ;;
@@ -118,7 +121,7 @@ has "$OUT" "city__deacon" "the polluted session is named"
 has "$OUT" "GC_RIG=alpha" "the leaked scope key and value are named"
 has "$OUT" "BEADS_DIR=$CITY/rigs/alpha/.beads" "the rig-rooted store path is named"
 has "$OUT" "GC_STORE_SCOPE=rig" "the leaked store scope is named"
-has "$OUT" "gc agents restart city.deacon" "the finding carries the remedy"
+has "$OUT" "gc session reset city.deacon" "the finding carries the remedy"
 
 # --- 4. the other half: a rig-scoped agent reading a DIFFERENT rig -----------
 healthy
@@ -232,6 +235,16 @@ healthy
 OUT=$(PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" STUB_LIST_RC=1 GC_DOCTOR_PROC_ROOT="$TMP/proc" GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "1" "an unlistable tmux server warns, never passes"
 has "$OUT" "UNVERIFIED" "the warning says the answer is unknown"
+
+# --- 13. fail-CLOSED: an unreadable global environment warns, never passes ----
+# Arm 2 reads only the server's global environment. If that probe fails after
+# list-sessions succeeds, every key looks absent and the arm would pass in
+# silence; on an otherwise-healthy fixture the aggregate must still warn.
+healthy
+OUT=$(PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" STUB_GLOBAL_RC=9 GC_DOCTOR_PROC_ROOT="$TMP/proc" GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "1" "an unreadable tmux global environment warns, never passes"
+has "$OUT" "warm-respawn inheritance UNVERIFIED" "the warning names the arm it could not verify"
+hasnt "$OUT" "agree with their own store scope" "a failed global probe cannot reach the OK line"
 
 echo
 echo "check-session-store-scope: $PASS passed, $FAIL failed"

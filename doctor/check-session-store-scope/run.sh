@@ -22,7 +22,8 @@
 # those five are judged here.
 #
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
-# lines. Bounded probes; an unreadable session list warns, never passes.
+# lines. Bounded probes; an unreadable session list or global environment
+# warns, never passes.
 
 set -u
 
@@ -56,11 +57,17 @@ else
     # Name and pane pid in one call: a per-session `list-panes` would double the
     # tmux round trips, and the doctor abandons a check at its own budget.
     sessions=$(gcmux list-sessions -F '#{session_name}	#{pane_pid}' 2>/dev/null); list_rc=$?
-    global=$(gcmux show-environment -g 2>/dev/null)
+    global=$(gcmux show-environment -g 2>/dev/null); global_rc=$?
     if [ "$list_rc" -ne 0 ]; then
         warnings+=("could not list tmux sessions (rc=$list_rc) — store-scope agreement UNVERIFIED. Not a benign skip: the symptom this check exists for is silent, and an agent reading the wrong store writes beads no queue that wants them can see.")
     elif [ -z "$sessions" ]; then
         notes+=("the tmux server holds no sessions — no agent environment to read")
+    fi
+    # Arm 2 reads only $global; an unreadable global environment makes every key
+    # look absent, so the respawn-inheritance arm would silently pass. A failed
+    # probe is UNVERIFIED, not clean — warn so the aggregate can never be OK.
+    if [ "$global_rc" -ne 0 ]; then
+        warnings+=("could not read the tmux server global environment (rc=$global_rc) — warm-respawn inheritance UNVERIFIED. Not a benign skip: with the global environment unread, a store key the server holds is invisible here yet still reaches the next process in a respawned pane.")
     fi
 
     # Store-scope keys the runtime resolves per session. GC_STORE_SCOPE and
@@ -107,9 +114,9 @@ else
             got_rig=$(env_val GC_RIG "$penv")
             if [ "$got_rig" != "$want_rig" ]; then
                 if [ -n "$got_rig" ]; then
-                    errors+=("$sess is $scope_desc but its running process holds GC_RIG=$got_rig — every bd call it makes reads and writes rig $got_rig's store. Restart the session (\`gc agents restart $agent\`); if it recurs, the spawn is handing out a caller's scope.")
+                    errors+=("$sess is $scope_desc but its running process holds GC_RIG=$got_rig — every bd call it makes reads and writes rig $got_rig's store. Restart the session (\`gc session reset $agent\`); if it recurs, the spawn is handing out a caller's scope.")
                 else
-                    errors+=("$sess is $scope_desc but its running process holds no GC_RIG — it resolves the city store instead of rig $want_rig's, so its work lands where that rig's queues cannot see it. Restart the session (\`gc agents restart $agent\`).")
+                    errors+=("$sess is $scope_desc but its running process holds no GC_RIG — it resolves the city store instead of rig $want_rig's, so its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).")
                 fi
             fi
             for key in $path_keys; do
@@ -118,11 +125,11 @@ else
                 named=$(rig_named_by "$val")
                 [ -n "$named" ] || continue
                 [ "$named" = "$want_rig" ] && continue
-                errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc agents restart $agent\`) and re-read this check.")
+                errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.")
             done
             got_scope=$(env_val GC_STORE_SCOPE "$penv")
             if [ -n "$got_scope" ] && [ "$got_scope" != "$want_scope" ]; then
-                errors+=("$sess is $scope_desc but its running process holds GC_STORE_SCOPE=$got_scope, not $want_scope — restart the session (\`gc agents restart $agent\`).")
+                errors+=("$sess is $scope_desc but its running process holds GC_STORE_SCOPE=$got_scope, not $want_scope — restart the session (\`gc session reset $agent\`).")
             fi
         fi
 
