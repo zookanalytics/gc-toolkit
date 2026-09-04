@@ -195,6 +195,7 @@ echo "--- step arm: a root that CLOSED means there is no molecule to resume ---"
 cat > "$TMP/bin/dead-dispose-stub" <<'STUB'
 #!/usr/bin/env bash
 printf 'dead-molecule-dispose %s\n' "$*" >> "${STUB_GC_LOG:?}"
+[ -n "${STUB_DEAD_OUT:-}" ] && printf '%s\n' "$STUB_DEAD_OUT"
 exit "${STUB_DEAD_RC:-0}"
 STUB
 chmod +x "$TMP/bin/dead-dispose-stub"
@@ -231,6 +232,22 @@ OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
 export STUB_DEAD_RC=0
 eq "$rc" "1" "a failed chain disposal exits non-zero"
 has "$OUT" "failed=dead-chain" "the failure is named, not swallowed"
+
+echo "--- step arm: an inner PARTIAL teardown (exit 3) survives as partial ---"
+# dead-molecule-dispose.sh reserves exit 3 for a chain left half torn down. The
+# witness patrol escalates that as a partial write (witness-partial-release),
+# not a retry, so the wrapper must propagate it as its own exit-3 partial and
+# carry the member detail — collapsing it to failed=dead-chain (exit 1) would
+# drop the exact signal the caller acts on.
+dead_fixture
+export STUB_DEAD_RC=3
+export STUB_DEAD_OUT='{"result":"partial","members":"tk-step,tk-sib","detail":"unclosed=tk-sib"}'
+OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
+export STUB_DEAD_RC=0
+export STUB_DEAD_OUT=""
+eq "$rc" "3" "an inner partial teardown exits 3, not 1"
+has "$OUT" "result=partial" "the wrapper reports partial, not failed"
+has "$OUT" "unclosed=tk-sib" "the disposer's member detail is carried into the report"
 
 echo "--- step arm: an unreadable root withholds the release ---"
 # An unreadable root is not a live one. Releasing on a failed probe is how a

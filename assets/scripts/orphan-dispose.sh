@@ -267,15 +267,33 @@ case "$CLASS" in
         # the partial teardown that offers a successor of a finished molecule
         # to a pool. dead-molecule-dispose.sh de-routes the whole chain before
         # it closes anything, and refuses a chain holding a work bead.
+        #
+        # The disposer reserves exit 3 for a chain left half torn down — some
+        # members de-routed or closed, some not. That is the partial-write state
+        # this script's own exit 3 names, and the witness patrol escalates it
+        # (witness-partial-release) rather than retrying, so it must survive the
+        # wrapper: capture the disposer's rc and report instead of discarding
+        # them. An inner 3 becomes this script's partial and carries the member
+        # detail the disposer named; any other nonzero is a plain failed=dead-chain.
         ACTION="dispose-dead-chain"
         DETAIL="root_closed"
         if [ "$APPLY" = "1" ]; then
             if [ -x "$DEAD_DISPOSE" ]; then
-                if "$DEAD_DISPOSE" "$BEAD" --apply >/dev/null 2>&1; then
-                    note_landed dead-chain
-                else
-                    note_failed dead-chain
-                fi
+                DEAD_OUT="$("$DEAD_DISPOSE" "$BEAD" --apply --json 2>/dev/null)"
+                DEAD_RC=$?
+                DEAD_DETAIL="$(printf '%s' "$DEAD_OUT" | jq -r '(.detail // .members // "") | select(. != "")' 2>/dev/null)"
+                case "$DEAD_RC" in
+                    0) note_landed dead-chain ;;
+                    3)
+                        note_landed dead-chain
+                        note_failed dead-chain-incomplete
+                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
+                        ;;
+                    *)
+                        note_failed dead-chain
+                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
+                        ;;
+                esac
             else
                 note_failed "dead-molecule-dispose-missing"
             fi
