@@ -20,10 +20,12 @@
 #   (4)  implicit target inside a THIRD-PARTY clone, GC_RIG_ROOT set -> deny.
 #        This is the case an explicit-flag-only guard misses: gh resolves the
 #        repository from the working directory, so the guard must too.
-#   (5)  GH_REPO, inline and ambient, is a target like any other
-#   (6)  --repo=X, -R X and -R=X spellings
+#   (5)  GH_REPO — inline, exported earlier on the line, or ambient — is a target
+#   (6)  --repo/-R spellings: -R X, --repo=X, -R=X, attached -RX, and either
+#        form standing before the noun as a global flag
 #   (7)  read verbs (view/list/status/checkout) -> allow, at any repository
-#   (8)  a write behind &&, ;, | or a subshell is still inspected
+#   (8)  a write behind &&, ;, | or a subshell is still inspected, and a cd —
+#        including one scoped inside a subshell — resolves where it really lands
 #   (9)  prose in --title/--body that contains "issue create" is not a target
 #   (10) host is part of identity: same owner/name on another forge -> deny
 #   (11) URL, scp and .git spellings of the same repository -> allow
@@ -146,12 +148,31 @@ allowed "inline GH_REPO at own origin" "$RIG" "GH_REPO=zookanalytics/gc-toolkit 
 GH_REPO="get-convex/agent"; export GH_REPO
 denied "ambient GH_REPO at third party" "$RIG" "gh issue create --title 'x' --body 'y'"
 unset GH_REPO
+# An `export GH_REPO=` earlier on the line reaches the later gh in the same
+# shell, so it is the target even though it is not the inline prefix form. The
+# last export wins, and an `unset` between it and the write clears it.
+denied  "exported GH_REPO at third party"         "$RIG" "export GH_REPO=get-convex/agent; gh issue create --title 'x'"
+denied  "exported GH_REPO via && at third party"  "$RIG" "export GH_REPO=get-convex/agent && gh pr create --title 'x'"
+allowed "exported GH_REPO at own origin"          "$RIG" "export GH_REPO=zookanalytics/gc-toolkit; gh issue create --title 'x'"
+denied  "re-exported GH_REPO, last value wins"    "$RIG" "export GH_REPO=zookanalytics/gc-toolkit; export GH_REPO=get-convex/agent; gh issue create --title 'x'"
+allowed "exported then unset GH_REPO, cwd owned"   "$RIG" "export GH_REPO=get-convex/agent; unset GH_REPO; gh issue create --title 'x'"
 
 # --- (6) flag spellings --------------------------------------------------
 echo "  -- flag spellings"
 denied "--repo= form" "$RIG" "gh issue create --repo=get-convex/agent --title 'x'"
 denied "-R form"      "$RIG" "gh issue create -R get-convex/agent --title 'x'"
 denied "-R= form"     "$RIG" "gh issue create -R=get-convex/agent --title 'x'"
+# -R takes its value attached, with no space and no `=`. gh binds it, so the
+# guard must read it too, in either position.
+denied  "-R attached, after the verb"   "$RIG" "gh issue create -Rget-convex/agent --title 'x'"
+denied  "-R attached, before the verb"  "$RIG" "gh -Rget-convex/agent issue create --title 'x'"
+allowed "-R attached, own origin"       "$RIG" "gh issue create -Rzookanalytics/gc-toolkit --title 'x'"
+# The split --repo/-R can stand before the noun as a global flag. Its value is
+# not the noun, and skipping the flag without its value read the repository as
+# the subcommand and cleared the write.
+denied  "split --repo before the noun"          "$RIG" "gh --repo get-convex/agent issue create --title 'x'"
+denied  "split -R before the noun"              "$RIG" "gh -R get-convex/agent issue create --title 'x'"
+allowed "split --repo before the noun, own origin" "$RIG" "gh --repo zookanalytics/gc-toolkit issue create --title 'x'"
 
 # --- (7) reads are untouched ---------------------------------------------
 # The ruling covers sends. Research at a third-party repository stays available,
@@ -187,6 +208,15 @@ denied  "cd to an unexpandable path"     "$RIG" 'cd "$SOMEWHERE" && gh issue cre
 # An explicit target does not depend on the working directory either way.
 allowed "cd elsewhere, own repo by flag" "$RIG" "cd $SANDBOX/third && gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
 denied  "cd home, third party by flag"   "$SANDBOX/third" "cd $RIG && gh issue create --repo get-convex/agent --title 'x'"
+
+# --- (8c) a cd inside a subshell is scoped to it -------------------------
+# A subshell runs with a copy of the cwd, so a cd inside `( )` does not move
+# where a later command resolves. Both directions matter: the cd must not leak
+# out to clear a third-party write, and it must not leak out to refuse an own
+# one.
+echo "  -- cd scoped inside a subshell"
+denied  "subshell cd owned, real cwd third party" "$SANDBOX/third" "(cd $RIG); gh issue create --title 'x'"
+allowed "subshell cd elsewhere, real cwd owned"   "$RIG" "(cd $SANDBOX/third); gh issue create --title 'x'"
 
 # --- (9) prose is not a target -------------------------------------------
 # A --body or --title can contain anything, including text that reads like

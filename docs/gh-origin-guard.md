@@ -46,8 +46,10 @@ rig should write to.
 
 The guard resolves the target the way `gh` itself does, in the same order:
 
-1. An explicit `--repo` or `-R` on the command.
-2. `GH_REPO`, whether inline on the command or ambient in the environment.
+1. An explicit `--repo` or `-R` on the command, in any of gh's spellings and
+   whether it stands before or after the noun.
+2. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
+   same command line, or ambient in the environment.
 3. The `origin` remote of the working directory.
 
 Step 3 is the one that matters most. `gh` with no `--repo` writes to whatever
@@ -60,7 +62,9 @@ earlier on the same command line moves where `gh` resolves, so the guard follows
 it: `cd ../their-clone && gh issue create` is measured against `their-clone`,
 not against the directory the session was sitting in. A destination the guard
 cannot expand, such as `cd "$SOMEWHERE"`, resolves to no repository and is
-refused.
+refused. A `cd` inside a subshell is scoped to that subshell, so
+`(cd elsewhere); gh issue create` still resolves against the outer directory —
+the move does not outlast the parentheses.
 
 Host, owner, and name are all compared, lowercased. The host is part of the
 identity, because dropping it would let the same owner and name on a different

@@ -143,9 +143,10 @@ CWD=$(printf '%s' "$PAYLOAD" | jq -r '.cwd // ""' 2>/dev/null)
 # behind && or a pipe is inspected rather than skipped.
 #
 # Emits one line per guarded write, fields separated by \037: noun, verb, --repo
-# value, inline GH_REPO value, and the pending cd destination. A unit separator
-# rather than a tab, because the shell collapses runs of whitespace separators
-# and an empty --repo field would shift the inline GH_REPO into its place. The
+# value, inline GH_REPO value, the pending cd destination, whether an earlier
+# export/unset set GH_REPO in this shell (1/0), and that exported value. A unit
+# separator rather than a tab, because the shell collapses runs of whitespace
+# separators and an empty field would shift the next one into its place. The
 # shell resolves origins; awk only lexes.
 SCAN=$(printf '%s' "$CMD" | awk '
 function push() {
@@ -179,6 +180,20 @@ function analyze(   i, j, noun, verb, key, repo, inl) {
         break
     }
     if (i > ntok) return
+    # `export GH_REPO=...` and `unset GH_REPO` set the variable for every later
+    # command in this shell, so their effect carries across segments the way a cd
+    # does. The inline `GH_REPO=x gh ...` prefix was captured above and does not
+    # reach here.
+    if (T[i] == "export") {
+        for (j = i + 1; j <= ntok; j++)
+            if (T[j] ~ /^GH_REPO=/) { ghval = substr(T[j], 9); ghset = 1 }
+        return
+    }
+    if (T[i] == "unset") {
+        for (j = i + 1; j <= ntok; j++)
+            if (T[j] == "GH_REPO") { ghval = ""; ghset = 0 }
+        return
+    }
     if (T[i] == "cd") { note_cd(i); return }
     if (T[i] != "gh" && T[i] !~ /\/gh$/) return
     i++
@@ -187,6 +202,9 @@ function analyze(   i, j, noun, verb, key, repo, inl) {
     # rather than by searching is what keeps prose from matching.
     noun = ""; verb = ""
     while (i <= ntok) {
+        # A split --repo/-R carries its value in the NEXT token. Skip both, or
+        # the repository is taken for the noun and the guarded verb never matches.
+        if (T[i] == "--repo" || T[i] == "-R") { i += 2; continue }
         if (substr(T[i], 1, 1) == "-") { i++; continue }
         noun = T[i]
         if (i + 1 <= ntok) verb = T[i + 1]
@@ -203,18 +221,19 @@ function analyze(   i, j, noun, verb, key, repo, inl) {
     for (j = 1; j <= ntok; j++) {
         if (T[j] ~ /^--repo=/) { repo = substr(T[j], 8); break }
         if (T[j] ~ /^-R=/)     { repo = substr(T[j], 4); break }
+        if (T[j] ~ /^-R./)     { repo = substr(T[j], 3); break }  # attached -R<repo>
         if (T[j] == "--repo" || T[j] == "-R") {
             if (j < ntok) repo = T[j + 1]
             break
         }
     }
-    printf "%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval
 }
 function reset(   k) { for (k = 1; k <= ntok; k++) delete T[k]; ntok = 0 }
 BEGIN { SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); BT = sprintf("%c", 96) }
 { buf = (NR > 1 ? buf "\n" $0 : $0) }
 END {
-    n = length(buf); tok = ""; have = 0; ntok = 0; inS = 0; inD = 0; cdspec = ""
+    n = length(buf); tok = ""; have = 0; ntok = 0; inS = 0; inD = 0; cdspec = ""; cddepth = 0; ghset = 0; ghval = ""
     for (i = 1; i <= n; i++) {
         c = substr(buf, i, 1)
         if (inS) { if (c == SQ) inS = 0; else { tok = tok c; have = 1 } ; continue }
@@ -227,7 +246,28 @@ END {
         if (c == DQ) { inD = 1; have = 1; continue }
         if (c == "\\" && i < n) { i++; tok = tok substr(buf, i, 1); have = 1; continue }
         if (c == " " || c == "\t") { push(); continue }
-        if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" ||
+        # A subshell runs with a copy of the shell state, so a cd or an export of
+        # GH_REPO inside ( ) must not leak to a later command. Save on "(",
+        # restore on ")".
+        if (c == "(") {
+            push(); analyze(); reset()
+            cddepth++
+            cdsave[cddepth] = cdspec
+            ghsetsave[cddepth] = ghset
+            ghvalsave[cddepth] = ghval
+            continue
+        }
+        if (c == ")") {
+            push(); analyze(); reset()
+            if (cddepth > 0) {
+                cdspec = cdsave[cddepth]
+                ghset = ghsetsave[cddepth]
+                ghval = ghvalsave[cddepth]
+                cddepth--
+            }
+            continue
+        }
+        if (c == ";" || c == "|" || c == "&" ||
             c == BT || c == "\n") { push(); analyze(); reset(); continue }
         tok = tok c; have = 1
     }
@@ -244,7 +284,7 @@ ALLOWED=$(allowed_origins)
 OWNED=$(printf '%s' "$ALLOWED" | paste -sd, - 2>/dev/null)
 
 NOUN=""; VERB=""; TARGET=""; REFUSE=""
-while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd; do
+while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval; do
     [ -n "${_noun:-}" ] || continue
 
     # Where this call would actually run, after any cd ahead of it.
@@ -265,6 +305,15 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd; do
         _target=$(norm_repo "$_flag")
     elif [ -n "${_inline:-}" ]; then
         _target=$(norm_repo "$_inline")
+    elif [ "${_ghset:-0}" = "1" ]; then
+        # An export earlier on the line is what gh sees, overriding any ambient
+        # GH_REPO. An emptied or unset one leaves no target, so it resolves
+        # against the working directory just as gh would.
+        if [ -n "${_ghval:-}" ]; then
+            _target=$(norm_repo "$_ghval")
+        else
+            _target=$(origin_of "$_base")
+        fi
     elif [ -n "${GH_REPO:-}" ]; then
         _target=$(norm_repo "$GH_REPO")
     else
