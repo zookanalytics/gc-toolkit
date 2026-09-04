@@ -21,26 +21,26 @@ Seven populated directories under `~/.claude/projects/*/memory`, 708 files,
 3,760,255 bytes. File counts are every file in the directory; gc-toolkit's 259
 are 257 memories plus `MEMORY.md` and `MEMORY-hooks-archive.md`.
 
-| Directory | Files | Bytes | `MEMORY.md` |
+| Corpus | Files | Bytes | `MEMORY.md` |
 |---|---|---|---|
-| `-home-zook-loomington` (city root) | 328 | 1,518,168 | 61 lines / 16,752 B |
-| `-home-zook-loomington-rigs-gc-toolkit` | 259 | 1,203,701 | 263 lines / 20,232 B |
-| `-home-zook-loomington-rigs-signal-loom` | 64 | 201,155 | 63 lines / 13,170 B |
-| `-home-zook-loomington-rigs-gascity` | 37 | 752,999 | 42 lines / 19,505 B |
-| `-home-zook-loomington-rigs-shutupandlisten` | 16 | 77,575 | 36 lines / 9,129 B |
-| `-home-zook-dolt` | 2 | 5,573 | 3 lines / 256 B |
-| `-home-zook` | 2 | 1,084 | 3 lines / 159 B |
+| City root | 328 | 1,518,168 | 61 lines / 16,752 B |
+| gc-toolkit (this rig) | 259 | 1,203,701 | 263 lines / 20,232 B |
+| Other rig A | 64 | 201,155 | 63 lines / 13,170 B |
+| Other rig B | 37 | 752,999 | 42 lines / 19,505 B |
+| Other rig C | 16 | 77,575 | 36 lines / 9,129 B |
+| dolt scratch dir | 2 | 5,573 | 3 lines / 256 B |
+| User home | 2 | 1,084 | 3 lines / 159 B |
 
 None of the seven is inside a git repository: `git -C <dir> rev-parse
 --show-toplevel` fails for every one. The host has no backup tool installed
 (no restic, borg, duplicity, snapper, or rsnapshot) and no backup systemd
 unit. `~/.claude/backups` holds 464 KB of rotated `.claude.json` copies and
-nothing else. `/home/zook/.claude` sits on a single ext4 volume at 94% use.
+nothing else. `~/.claude` sits on a single ext4 volume at 94% use.
 One `rm -rf`, one reinstall, or one full disk ends the corpus.
 
 **Memory is shared per rig checkout, not per agent.** The directory keys on
 the repository root rather than the session's working directory: this session
-runs in a polecat worktree under `/home/zook/loomington/.gc/worktrees/` and
+runs in a polecat worktree under the city's `.gc/worktrees/` tree and
 was handed the rig-root memory directory. Of 96 project directories under
 `~/.claude/projects`, 11 have a `memory/` subdirectory and 7 are populated,
 while transcripts stay working-directory-keyed (this polecat's own transcript
@@ -174,10 +174,10 @@ corpus, so within a rig the sharing already works. What does not cross is
 (`bd-close-actor-identity-mismatch`), yet the same tool facts are being
 learned twice under different names:
 
-- signal-loom's `gh-rollup-keeps-stale-check-runs` and gc-toolkit's
+- one rig's `gh-rollup-keeps-stale-check-runs` and gc-toolkit's
   `gh-pr-checks-vs-statuscheckrollup` are both "statusCheckRollup carries
   superseded check runs; filter or use `gh pr checks --required`".
-- gascity's `jq-index-rebinds-dot` and gc-toolkit's
+- another rig's `jq-index-rebinds-dot` and gc-toolkit's
   `jq-index-arg-evaluated-against-the-array` are both "jq's `index()`
   rebinds `.` to the array".
 
@@ -199,10 +199,13 @@ corpus, Claude Code owns the directory's lifecycle, and an agent-run `git add
 -A` under concurrent writers is a corruption path. An export has no such
 coupling and no failure mode that reaches a running agent.
 
-Destination is the loomington town repo, not gc-toolkit: the corpus carries
-private rig names and absolute host paths, which the tk-6s5 public-pack
-primitive keeps out of gc-toolkit artifacts. Cost is 3.76 MB at the first
-commit and about 54 changed files a day after.
+Destination is the town repo, not gc-toolkit: the corpus carries private rig
+names and absolute host paths, which the tk-6s5 public-pack primitive keeps
+out of gc-toolkit artifacts. Cost is 3.76 MB at the first commit, then a daily
+delta this spike measured only for this rig: about 7 files a day (§1 — 93
+created or rewritten in the 13 days to 2026-09-03). The other six corpora were
+not measured, so the all-corpus daily total runs higher and is not derived
+here.
 
 This is the smallest of the three moves and the only one that addresses the
 concern the bead was filed for. It should not be mistaken for the fix.
@@ -257,7 +260,7 @@ Read-only. Runs anywhere on the city host.
 
 ```bash
 # §1 corpus size, and that nothing is versioned
-for d in /home/zook/.claude/projects/*/memory; do
+for d in ~/.claude/projects/*/memory; do
   [ -d "$d" ] || continue
   printf '%4d files %8d bytes  %s  git=%s\n' \
     "$(find "$d" -type f | wc -l)" "$(du -sb "$d" | cut -f1)" \
@@ -266,7 +269,7 @@ for d in /home/zook/.claude/projects/*/memory; do
 done
 
 # §3a index over cap, and which entries fall past line 200
-M=/home/zook/.claude/projects/-home-zook-loomington-rigs-gc-toolkit/memory/MEMORY.md
+M=$(echo ~/.claude/projects/*-rigs-gc-toolkit/memory/MEMORY.md)
 wc -l "$M"; sed -n '201,$p' "$M" | grep -c '](.*\.md)'
 
 # §3c memories citing machinery deleted in PR #465
