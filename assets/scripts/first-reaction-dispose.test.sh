@@ -271,6 +271,40 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "0" "(ORIGIN) an unreadable bead is not evidence of a commission"
 unset FAKE_SHOW_JSON
 
+# ── A first reaction happens once — a second dispose is refused ───────────────
+# The first disposition stamped gc.first_reaction* and RELEASED the subject
+# (reopened, unassigned, routed); the caller then stamped gc.proactive_reaction=1.
+# A re-offered advance-and-drain that runs this again would re-release a bead a
+# worker has since claimed, so the guard refuses and names the prior reaction.
+# It sits ahead of the disposition switch, so it guards every exit.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.proactive_reaction":"1","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "2" "(REACTED) a subject already carrying a first reaction refuses a second dispose"
+hasnt "UPDATE" "$LOG" "(REACTED) …and re-writes no record"
+hasnt "HELM" "$LOG" "(REACTED) …and does not re-release the bead"
+has "already carries a first reaction" "$ERR" "(REACTED) …and the refusal says so"
+has "gc.first_reaction=actionable" "$ERR" "(REACTED) …naming the prior disposition"
+has "at 2026-09-03T04:45:05Z" "$ERR" "(REACTED) …its timestamp"
+has "-> gc-toolkit/gc-toolkit.polecat" "$ERR" "(REACTED) …and its target"
+
+# takeaway --release reopens the bead on every exit, so the ruling exit is
+# re-released just the same and the guard covers it too.
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
+eq "$RC" "2" "(REACTED) …the ruling exit too"
+hasnt "HELM" "$LOG" "(REACTED) …with no re-release"
+
+# The caller's gc.proactive_reaction=1 alone (this script's own stamps lost) is
+# still a completed reaction.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.proactive_reaction":"1"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "2" "(REACTED) gc.proactive_reaction=1 alone also refuses a second dispose"
+
+# Positive finding only: an unreadable bead is not evidence of a prior reaction.
+export FAKE_SHOW_JSON='not json'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "0" "(REACTED) an unreadable bead is not evidence of a prior reaction"
+unset FAKE_SHOW_JSON
+
 # ── The store is pinned to the subject's own rig ─────────────────────────────
 # A blocker filed into another store makes the hold a cross-store edge, which
 # reports success and holds nothing — and this runs from a worktree where an

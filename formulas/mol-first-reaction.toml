@@ -102,6 +102,27 @@ id = "first-reaction"
 title = "Do the cheap reaction and write the first-reaction card to notes"
 needs = ["load-bead"]
 description = """
+**A first reaction happens once — check before you write.** When a session
+runs this workflow inline and closes only an earlier step, the graph re-offers
+this step to a second session on a bead whose reaction is already done. A
+completed reaction carries `gc.first_reaction` (and `gc.proactive_reaction=1`
+from the release). Writing a second card duplicates it, and the
+`advance-and-drain` dispose that follows would re-release a bead a worker may
+already hold — `first-reaction-dispose.sh` refuses the second dispose, but the
+wasted card is avoidable. So check first, and if it is already reacted, write
+no card and run no dispose: close this step, let the claim loop carry you to
+`advance-and-drain`, and take its step-2 chain-close and drain.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
+REACTED=$(gc bd show "$WORK_BEAD_ID" --json | tr -d '[:cntrl:]' | jq -r '(.[0].metadata // {}) | ((.["gc.first_reaction"] // "") != "" or (.["gc.proactive_reaction"] // "") == "1")' 2>/dev/null || printf 'false')
+if [ "$REACTED" = "true" ]; then
+  echo "ALREADY REACTED: $WORK_BEAD_ID has a completed first reaction — do not write a card, do not dispose; close the step chain and drain."
+fi
+```
+
 Do the ONE cheap reaction the bead invites — usually research→spec, or "read
 the body and articulate what it means and what the first move is." Keep it
 proportionate: a first reaction advances the bead one move, it does not
