@@ -85,7 +85,11 @@ treating prose as the hold carrier again. The surface is also unbounded: no
 list of wait verbs finishes, and every phrase one missed would report a clean
 pass. A finding is graded by what the graph carries. A bead with no `blocks`
 edge at all needs one filed. A bead whose every blocker has closed, or names
-another store, has outlived its edge and needs its disposition instead.
+another store, has outlived its edge and needs its disposition instead. The one
+bead exempt is the terminal end of the wait itself — a demand others block on
+carries the hold's headline but can hold no forward edge, so `[holds]` names the
+key that marks it (`terminal_wait_key`, the `gc.demand_for` that `gc-helm.sh
+demand` stamps) and the check skips it.
 
 ### 2. The waiting side re-derives; it never trusts stored state
 

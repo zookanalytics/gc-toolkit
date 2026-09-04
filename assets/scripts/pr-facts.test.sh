@@ -819,6 +819,30 @@ eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the recorded batch is unchanged"
 eq "$(notes R1)" "$BEFORE_NOTES" "…and nothing was appended: one reset per distinct piece of feedback"
 hasnt "$out" "resets the signoff round cap" "…and the pass says nothing about a reset"
 
+# signoff.sh's cap now files its park as a demand (gc.takeaway_by=signoff) the
+# anchor blocks on. Operator feedback retires the park, so it closes that demand
+# with it — left open it would hold the anchor out of `bd ready` under a park
+# this feedback just lifted. A converse sitting's demand (any other writer) is
+# not the cap's to close, and it keeps the park.
+echo "# operator feedback retires the cap's park AND closes the demand that recorded it"
+store "[$(anchor R1d 60 "$CAP_STATE"),{\"id\":\"dm-R1d\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Rule on R1d\",\"notes\":\"\",\"metadata\":{\"gc.demand_for\":\"R1d\",\"gc.takeaway_by\":\"signoff\",\"gc.routed_to\":\"human\"}}]"
+printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
+echo '[]' > "$GH_DIR/reviews_60.json"
+printf '[{"id":8630,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_60.json"
+out=$(run)
+eq "$(meta R1d merge_hold)" "<absent>" "the cap park is retired by the feedback"
+eq "$(bstatus dm-R1d)" "closed" "…and the demand that recorded the park closes with it"
+has "$(notes dm-R1d)" "cap reset by operator feedback" "…recording why it closed"
+
+echo "# a converse sitting's demand keeps the park, and its own demand stays open"
+store "[$(anchor R1s 61 "$CAP_STATE"),$(demand R1s)]"
+printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
+echo '[]' > "$GH_DIR/reviews_61.json"
+printf '[{"id":8640,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_61.json"
+out=$(run)
+eq "$(meta R1s merge_hold)" "signoff_cap" "a sitting's demand keeps the cap park"
+eq "$(bstatus dm-R1s)" "open" "…and its demand stays open (not the cap's to close)"
+
 echo "# …nor does a batch already recorded whose watermark write dropped"
 # The watermark and the reset stamp are separate writes. A pass that routed the
 # comments but lost the mark sees the same batch again; what stops the second

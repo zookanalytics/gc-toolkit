@@ -141,17 +141,44 @@ is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 # is not read either: it is entered only from `unanchored`, and every anchor a
 # round cap parks carries pre_open_gate or pull_request.
 #
+# The cap's OWN demand does not count as a hold against the cap. signoff.sh's
+# round cap files a demand to record its park as an edge, stamped
+# gc.takeaway_by=signoff — the same provenance the park's takeaway carries, and
+# the same field the retire arms read to tell the cap's park from a person's. A
+# retire that read its own demand as a live hold would refuse to lift the park
+# it exists to lift, so this discriminator excludes it, and only a demand a
+# converse sitting owns (any other writer) holds the anchor here.
+#
 # Fails CLOSED — a ledger that will not read answers "held", because releasing
 # an anchor a person is holding hands their decision back to a pool.
-takeaway_is_holding() { # <anchor-id>; 0 = a person still owes an answer here
+takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an answer here
   local rows
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
            --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 0
   rows=$(printf '%s' "$rows" | scrub)
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
-    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
+    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+            | select(((.metadata["gc.takeaway_by"] // "") | tostring) != "signoff") ] | length > 0' \
     >/dev/null 2>&1
+}
+# Close the demand the cap filed to gate this anchor (gc.demand_for=<anchor>,
+# gc.takeaway_by=signoff). The park and its demand retire together: left open it
+# holds the anchor out of `bd ready` under a park the retire just lifted. Only
+# the cap's own — a converse sitting's demand outranks the retire and leaves the
+# park (and its demand) standing.
+close_cap_demand() { # <anchor> <note>
+  local rows id
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 0
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  for id in $(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
+        '.[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+             | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff")
+             | .id' 2>/dev/null); do
+    [ -n "$id" ] || continue
+    gc bd update "$id" --status=closed --append-notes "${2:-}" >/dev/null 2>&1 || true
+  done
 }
 # <<< takeaway-hold-discriminator
 
@@ -795,6 +822,11 @@ TALLY
         # The row was read before this write, and the routing choice below
         # reads both fields: a park retired here must not still hold as one.
         [ "$unparked" = 1 ] && { routed=""; hold=""; }
+        # The park retired; the demand that recorded it retires with it, or it
+        # holds the anchor out of `bd ready` under a park this feedback lifted.
+        # Only the cap's own (by=signoff): a sitting's demand set $holding above
+        # and left the park standing, so this never reaches its demand.
+        [ "$unparked" = 1 ] && close_cap_demand "$id" "pr-facts: cap reset by operator feedback on PR#$num (review $max_r, comment $max_c); the park is retired, so the demand that recorded it closes with it."
         echo "$PROG: $id — PR#$num operator feedback resets the signoff round cap${undo:+, retiring $undo}"
       else
         echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below. The watermark that routing writes retires this batch, so nothing re-reads it: the anchor stays parked until a ruling retires it (signoff.sh reset)." >&2

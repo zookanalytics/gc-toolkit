@@ -253,8 +253,22 @@ fi
 [ "${1:-}" = "merge-base" ] && exit "${STUB_MERGEBASE_RC:-0}"
 exit 0
 STUB
-chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git"
+cat > "$BIN/gc-helm" <<'STUB'
+#!/usr/bin/env bash
+# Stub for gc-helm.sh: records the cap's demand call and models its failure. The
+# real verb's own suite (gc-helm.test.sh) proves it files the demand and wires
+# the edge; here we need only that signoff's cap reaches for it with the right
+# shape, and that the cap survives a demand that does not land.
+set -u
+printf '%s\n' "$*" >> "${STUB_HELM_LOG:?}"
+[ -n "${STUB_HELM_FAIL:-}" ] && exit 4
+exit 0
+STUB
+chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/gc-helm"
 export PATH="$BIN:$PATH"
+# The cap files its park as a demand through gc-helm.sh; point signoff at the
+# stub so the real verb never runs here.
+export GC_HELM_TOOL="$BIN/gc-helm" STUB_HELM_LOG="$TMP/helm.log"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
 export STUB_GH_LOG="$TMP/gh.log" STUB_GH_BODY="$TMP/gh.body" STUB_CREATED="$TMP/created"
 export STUB_SEQ="$TMP/seq" STUB_UPD_FAIL="$TMP/updfail" STUB_GH_ALL="$TMP/gh.all"
@@ -284,7 +298,7 @@ reset() { # $1 = anchor json, extra beads appended via $2
   printf '[%s,%s%s]' "$1" "$REVIEW" "${2:-}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_GH_BODY"
   : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; : > "$STUB_UNSET_NOOP"; printf '0' > "$STUB_SEQ"
-  : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"
+  : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"; : > "$STUB_HELM_LOG"
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 status() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
@@ -693,6 +707,36 @@ eq "$(wc -l < "$STUB_CREATED" | tr -d ' ')" "0" "no rework child is filed past t
 eq "$(status rv-1)" "closed" "the review bead still closes (verdict recorded)"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…carrying signoff_verdict=request-changes, same as any other request-changes close"
 
+# The park is a wait on a person, and I1 wants a wait recorded as a `blocks`
+# edge, not a marker alone. The cap files a demand the anchor blocks on, stamped
+# as its own so the reset arm can tell it from a converse sitting's.
+echo "# the cap files its park as a demand the anchor blocks on"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the cap path still exits 0 when it files a demand"
+has "$(cat "$STUB_HELM_LOG")" "demand tk-anc" "the cap calls gc-helm.sh demand on the anchor"
+has "$(cat "$STUB_HELM_LOG")" "--by signoff" "…stamped as the cap's own (by signoff)"
+has "$(cat "$STUB_HELM_LOG")" "--kind decision" "…as a ruling a person owes"
+has "$(cat "$STUB_HELM_LOG")" "did not converge" "…carrying the cap headline as the demand text"
+
+echo "# the cap survives a demand that does not land: the park stands, warned"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+out=$(STUB_HELM_FAIL=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "a demand that does not land does not fail a park that read back"
+eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park still stands"
+has "$out" "could not file the demand" "…and the failure is reported so it can be filed by hand"
+
+echo "# a converse sitting's demand already gates the anchor: the cap files no second"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+jq -c '. + [{"id":"dm-h","status":"open","assignee":"","metadata":{"gc.demand_for":"tk-anc","gc.takeaway_by":"host","gc.routed_to":"human"},"notes":""}]' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "the cap path exits 0 with a sitting's demand already present"
+eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the cap still parks the anchor"
+eq "$(cat "$STUB_HELM_LOG")" "" "…but files no demand of its own over the sitting's"
+
 # pr-facts.sh's retire arm reads gc.takeaway_by to tell the cap's own board
 # sentence from a sitting's decision on the anchor. A takeaway that lands
 # without its provenance reads as the sitting's, so the operator feedback meant
@@ -992,6 +1036,33 @@ demand closed
 out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-4 2>&1); rc=$?
 eq "$rc" 0 "a closed demand holds nothing"
 eq "$(meta tk-anc check.codex)" "<absent>" "…so the park is retired"
+
+# The cap now files its OWN demand (by=signoff) to record its park as an edge.
+# That demand must not outrank the reset — it IS the park — and it retires with
+# it, or it holds the anchor out of `bd ready` under a park the reset just lifted.
+own_demand() { # a demand the cap filed for tk-anc, gc.takeaway_by=signoff
+  jq -c '. + [{"id":"dm-cap","status":"open","assignee":"",
+    "metadata":{"gc.demand_for":"tk-anc","gc.takeaway_by":"signoff","gc.routed_to":"human"},"notes":""}]' \
+    "$STUB_STORE" > "$STUB_STORE.n"
+  mv "$STUB_STORE.n" "$STUB_STORE"
+}
+echo "# the cap's OWN demand does not outrank its reset — it retires with the park"
+capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" "gc.takeaway_by=signoff"
+own_demand
+out=$("$SUT" reset tk-anc --reason "operator ruling: converged" --batch ruling-own 2>&1); rc=$?
+eq "$rc" 0 "reset proceeds past the cap's own demand (by signoff)"
+eq "$(meta tk-anc merge_hold)" "<absent>" "…the park is retired"
+eq "$(status dm-cap)" "closed" "…and the cap's own demand closes with it"
+has "$(notes dm-cap)" "cap reset by ruling" "…recording why it closed"
+
+echo "# a converse sitting's demand outranks the reset even beside the cap's own"
+capped_pre 3 "gc.takeaway=holding — needs a ruling" "gc.takeaway_by=signoff"
+own_demand
+demand open   # dm-1, a sitting's (no by=signoff)
+out=$("$SUT" reset tk-anc --reason "operator ruling" 2>&1); rc=$?
+eq "$rc" 1 "a sitting's demand still refuses the reset"
+eq "$(status dm-cap)" "open" "…and nothing closes, not even the cap's own demand"
+eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands"
 
 echo "# a ledger that will not answer reads as held"
 capped_pre 3
