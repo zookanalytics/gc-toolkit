@@ -223,17 +223,43 @@ pour_ok() { # <bead-id> <pool>
   [ "$got" = "${2:-}" ]
 }
 
-# Count the LIVE tracking convoys over a bead: >0 means a poured workflow
-# still drives it and a second pour would mint a second root. A dep row with
-# no status field counts (fail-closed toward no-re-pour when the shape is
-# unknown); a closed/dead convoy does not — that pour is over and must not
-# suppress the stranded re-sling. Non-zero rc = the probe could not answer.
-tracking_convoys() { # <bead-id>
-  local raw
+# Count the workflow ROOTS a LIVE tracking convoy carries over a bead: >0 means
+# a poured workflow still drives it and a second pour would mint a second root.
+# The convoy alone is NOT that reach — a pour can mint the convoy and the tracks
+# edge and then die before pouring the root, leaving a LIVE but EMPTY convoy that
+# drives nothing; counting that as in flight holds the anchor forever. So the
+# reach is the root, read the way pour_roots reads it (members via
+# gc.input_convoy_id). Only a live convoy is consulted (a closed/dead pour is
+# over and must not suppress the stranded re-sling); a dep row with no status
+# field counts as live (fail-closed toward no-re-pour when the shape is unknown).
+# A convoy's members are read across all statuses — a root the pour created is
+# reach whether or not its chain has begun to close. Non-zero rc = a read failed
+# and the count is unknown; the caller holds rather than re-sling blind.
+tracked_roots() { # <bead-id>
+  local raw ids rows n total=0
   raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
   [ -n "$raw" ] || return 1
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  printf '%s' "$raw" | jq -r '[ .[] | select((.issue_type // .type // "") == "convoy") | select(((.status // "open") | tostring) as $s | ($s == "open" or $s == "in_progress" or $s == "blocked" or $s == "deferred" or $s == "hooked" or $s == "pinned")) ] | length' 2>/dev/null
+  ids=$(printf '%s' "$raw" | jq -r '
+    .[]
+    | select((.issue_type // .type // "") == "convoy")
+    | select(((.status // "open") | tostring) as $s
+             | ($s == "open" or $s == "in_progress" or $s == "blocked"
+                or $s == "deferred" or $s == "hooked" or $s == "pinned"))
+    | .id' 2>/dev/null)
+  # No LIVE tracking convoy at all is a readable zero, not a failed read:
+  # nothing drives the review, so the caller re-slings it.
+  [ -n "$ids" ] || { printf '0\n'; return 0; }
+  while IFS= read -r c; do
+    [ -n "${c:-}" ] || continue
+    rows=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$ALL_STATUSES") || return 1
+    n=$(printf '%s' "$rows" | jq -r 'length' 2>/dev/null)
+    case "$n" in ''|*[!0-9]*) return 1 ;; esac
+    total=$((total + n))
+  done <<CONVOYS
+$ids
+CONVOYS
+  printf '%s\n' "$total"
 }
 
 meta_of() { # <row-json> <key>
@@ -425,19 +451,26 @@ STRAY
       case "$FOUND" in
         "stranded "*)
           # A review with no route, no pour and no claim is inert — unless a
-          # tracking convoy shows a pour already drives it (exec stamp
-          # dropped): then a re-pour would mint a second workflow root, so it
-          # counts as in flight. Only a never-poured one is re-slung.
+          # live tracking convoy CARRIES A WORKFLOW ROOT, which is a pour that
+          # already drives it (its exec stamp dropped): re-pouring would then
+          # mint a SECOND root, so it counts as in flight. A live convoy with no
+          # root drives nothing — a pour minted the convoy and the tracks edge
+          # but died before pouring the root — so that case, like a never-poured
+          # one, is re-slung rather than held in flight forever.
           rid="${FOUND#stranded }"
           [ -n "$REVIEW_POOL" ] || { skipped=$((skipped + 1)); continue; }
-          if ! convoys=$(tracking_convoys "$rid"); then
-            echo "$PROG: $id stranded review $rid convoy probe unreadable; no re-pour (merge stays held, retry next pass)" >&2
+          if ! roots=$(tracked_roots "$rid"); then
+            echo "$PROG: $id stranded review $rid pour probe unreadable; no re-pour (merge stays held, retry next pass)" >&2
             skipped=$((skipped + 1)); continue
           fi
-          if [ "${convoys:-0}" -gt 0 ] 2>/dev/null; then
+          if [ "${roots:-0}" -gt 0 ] 2>/dev/null; then
             echo "$PROG: $id gate '$g' review $rid is convoy-tracked (a pour already drives it); counted in flight, no re-pour"
             continue
           fi
+          # Zero roots: a tracking convoy exists but carries no workflow root, so
+          # nothing drives the review. Re-sling — this mints the FIRST root; the
+          # empty convoy is left in place, contributing none to a later pass's
+          # union.
           gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" >/dev/null 2>&1
           if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true

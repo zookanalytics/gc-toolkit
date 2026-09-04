@@ -13,10 +13,13 @@
 # a declared or well-formed one is not, and neither is an undeclared legacy
 # exception@ — left for migrate-lane-states.sh; an unpersisted clear is
 # reported); a multi-gate check_set split per gate rather than joined into one
-# name; in-flight dedup (routed, poured, claimed) + stranded repair (convoy
-# probe: re-sling only a review with no LIVE tracking convoy, and converge
-# after a hard sling failure); an in-flight REWORK child (a blocks-dep bead
-# carrying source_review_bead) withholds a fresh dispatch until it closes; the
+# name; in-flight dedup (routed, poured, claimed) + stranded repair (root
+# probe: re-sling a review with no LIVE tracking convoy, AND one whose live
+# convoy carries no workflow root — a pour that minted the convoy but died
+# before the root drives nothing and must not hold the anchor in flight
+# forever — and converge after a hard sling failure); an in-flight REWORK
+# child (a blocks-dep bead carrying source_review_bead) withholds a fresh
+# dispatch until it closes; the
 # dispatch shape
 # (metadata + blocks edge, then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass); merge_hold, and the
@@ -307,18 +310,32 @@ has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3 --on mol-review" "the never-poure
 eq "$(meta rev-3 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 hasnt "$out" "dispatched review new-" "no twin was minted for it"
 
-echo "# stranded review with a tracking convoy is a live pour — never re-slung"
+echo "# stranded review whose live convoy carries a workflow root is a live pour — never re-slung"
 store "[$(anchor D4 pull_request codex "" polecat/d4),
         {\"id\":\"rev-4\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D4\"}},
-        {\"id\":\"conv-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
+        {\"id\":\"conv-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}},
+        {\"id\":\"root-1\",\"status\":\"in_progress\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.kind\":\"workflow\",\"gc.input_convoy_id\":\"conv-1\"}}]"
 printf 'conv-1|tracks|rev-4\n' >> "$STUB_DEPS"
 oid d4 > "$GH_DIR/head_polecat_d4"
 : > "$STUB_GC_LOG"
 out=$(run)
-has "$out" "convoy-tracked" "the convoy-tracked review is recognized as a live pour"
+has "$out" "convoy-tracked" "a live convoy carrying a workflow root is recognized as a live pour"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured (a re-pour mints a second workflow root)"
 eq "$(meta rev-4 'gc.routed_to')" "<absent>" "…and gc.routed_to is not restored beside the live workflow"
 hasnt "$out" "dispatched review new-" "…and no twin was minted"
+
+echo "# stranded review tracked by an EMPTY live convoy (pour minted the convoy but died before the root) is re-slung, not held in flight forever (tk-egoro8)"
+store "[$(anchor D4e pull_request codex "" polecat/d4e),
+        {\"id\":\"rev-4e\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D4e\"}},
+        {\"id\":\"conv-1e\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
+printf 'conv-1e|tracks|rev-4e\n' >> "$STUB_DEPS"
+oid d4e > "$GH_DIR/head_polecat_d4e"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "STRANDED review rev-4e" "an empty tracking convoy carries no root, so it is not a live pour"
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-4e --on mol-review" "…so the stranded review is re-slung, minting the first root"
+eq "$(meta rev-4e 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
+hasnt "$out" "convoy-tracked" "…and it is never counted in flight behind an empty convoy"
 
 echo "# a review tracked ONLY by a closed convoy is dead-tracked — re-slung"
 store "[$(anchor D5 pull_request codex "" polecat/d5),
@@ -551,13 +568,13 @@ has "$out" "pour did not read back" "the unverified pour is reported"
 has "$out" "dispatch NOT counted" "…and the dispatch is not counted"
 eq "$(meta G1 dispatch_count)" "<absent>" "an uncounted dispatch does not consume a round"
 
-echo "# …convergence: the next pass sees the tracking convoy and does not twin"
-printf '{"id":"conv-g1","status":"open","assignee":"","notes":"","issue_type":"convoy","metadata":{}}' > "$TMP/conv.json"
+echo "# …convergence: the next pass sees the tracking convoy's root and does not twin"
+printf '{"id":"conv-g1","status":"open","assignee":"","notes":"","issue_type":"convoy","metadata":{}}\n{"id":"root-g1","status":"in_progress","assignee":"","notes":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-g1"}}' > "$TMP/conv.json"
 store "$(jq -c --slurpfile c "$TMP/conv.json" '. + $c' "$STUB_STORE")"
 printf 'conv-g1|tracks|new-2\n' >> "$STUB_DEPS"
 : > "$STUB_GC_LOG"
 out=$(run)
-has "$out" "convoy-tracked" "the half-landed pour is recognized by its convoy"
+has "$out" "convoy-tracked" "the half-landed pour is recognized by its convoy's root"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…never re-poured"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
 
