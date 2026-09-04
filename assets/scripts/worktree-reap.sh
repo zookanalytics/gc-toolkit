@@ -232,12 +232,38 @@ if [ "$LEDGER_READ" -eq 0 ]; then
 fi
 
 # --- enumerate the registry ------------------------------------------------
-# Prune first: an entry whose directory is already gone is registry litter,
-# and git's own expiry decides when it is safe to drop.
+# Pin, then prune, then list — and none of it in a dry run. An entry whose
+# working tree is gone is registry litter, but `git worktree prune` reclaims it
+# by deleting the entry's admin dir, and that dir holds its HEAD. For a detached
+# worktree that HEAD is the only ref its commits have, so an unpinned prune is
+# the same commit loss the removal path below pins against — and git drops the
+# ref the moment it prunes, with no expiry to make it safe. `git worktree list
+# --porcelain` reports each such row as `prunable` and carries its HEAD, so the
+# tip is pinned by the same archive tag before git is let near it. A dry run
+# neither pins nor prunes: it is the operator's review surface and touches
+# nothing.
 : > "$WORK/wt"
 for i in "${!REPO_PATHS[@]}"; do
     repo="${REPO_PATHS[$i]}"
-    git -C "$repo" worktree prune 2>/dev/null || true
+    if [ "$DRY_RUN" -eq 0 ]; then
+        prune_ok=1
+        while IFS="$US" read -r path sha; do
+            [ -n "$path" ] && [ -n "$sha" ] || continue
+            bead="${CLOSED_BEAD[$path]:-unknown}"
+            tag="$TAG_PREFIX/$bead@${sha:0:12}"
+            git -C "$repo" rev-parse -q --verify "refs/tags/$tag" </dev/null >/dev/null 2>&1 && continue
+            git -C "$repo" -c tag.gpgSign=false tag -a "$tag" "$sha" \
+                -m "prunable worktree $path (bead $bead) pinned before prune by $PROG
+Restore: git -C $repo worktree add $path $tag" </dev/null >/dev/null 2>&1 || prune_ok=0
+        done < <(git -C "$repo" worktree list --porcelain 2>/dev/null \
+                 | awk -v S="$US" '/^worktree / { p = substr($0, 10); sha = "" }
+                                   /^HEAD /     { sha = $2 }
+                                   /^prunable/  { if (p != "" && sha != "") print p S sha }')
+        # No pin, no prune: a tip left unpinned keeps its admin HEAD, so the ref
+        # survives for the next pass rather than being dropped now. git prunes
+        # every prunable entry at once, so one unpinnable tip holds the repo's.
+        [ "$prune_ok" -eq 1 ] && git -C "$repo" worktree prune 2>/dev/null || true
+    fi
     git -C "$repo" worktree list --porcelain 2>/dev/null \
       | awk -v repo="$repo" -v S="$US" '
             function flush() {

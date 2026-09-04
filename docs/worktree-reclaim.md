@@ -64,6 +64,13 @@ reaching its commits, so removing the checkout would leave them unreachable.
 Squash-merged work has the same shape from the other direction: the branch tip
 is never an ancestor of the default branch, so landed work reads as unpushed.
 
+The same pin guards registry litter. A worktree whose directory was deleted out
+from under git leaves an admin `HEAD` behind, and `git worktree prune` reclaims
+that entry by dropping the `HEAD` — for a detached entry the only ref its
+commits have, dropped immediately with no expiry to make it safe. So each
+prunable tip is pinned by an `archive/worktree` tag before the prune runs, and
+a dry run prunes nothing at all.
+
 ## What the reports mean
 
 Reclaim is reported as a count of removals plus the free space on the

@@ -330,6 +330,42 @@ has "$OUT" "would remove 1 worktrees" "--dry-run reports the plan"
 has "$OUT" "$REPO/wt/planned" "--dry-run names each path it would take"
 eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "--dry-run writes no archive tag"
 
+# --- prunable registry litter is pinned, and a dry run prunes nothing -------
+# A worktree whose directory was deleted out from under git leaves an admin
+# HEAD behind. `git worktree prune` reclaims the entry by dropping that HEAD,
+# which for a detached worktree is the only ref its commits have — the same
+# loss the removal pin prevents. A dry run must not prune; a real run pins the
+# tip first. The dry run is the keep and the real run is the take, on one entry.
+new_repo
+mk_wt "$REPO/wt/gone" --detach
+GONE_TIP="$(git -C "$REPO/wt/gone" rev-parse HEAD)"
+bead b-gone closed 100 "$REPO/wt/gone" ""
+rm -rf "$REPO/wt/gone"                 # rogue delete: dir gone, admin entry lingers
+run --dry-run > /dev/null
+if registered "$REPO/wt/gone"; then ok "--dry-run does not prune registry litter"; else bad "--dry-run does not prune registry litter"; fi
+eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "--dry-run pins no prunable tip"
+run > /dev/null
+if registered "$REPO/wt/gone"; then bad "a real run prunes the litter entry"; else ok "a real run prunes the litter entry"; fi
+GTAG="$(git -C "$REPO" tag -l 'archive/worktree/*')"
+has "$GTAG" "archive/worktree/b-gone@" "the prunable tip is pinned before prune, named for its bead"
+eq "$(git -C "$REPO" rev-parse "$GTAG^{commit}" 2>/dev/null)" "$GONE_TIP" "the pin resolves to the tip prune would have orphaned"
+if grep -qxF "$GONE_TIP" < <(git -C "$REPO" rev-list --branches --remotes 2>/dev/null); then
+    bad "the orphaned tip is reachable from no branch — the pin is load-bearing"
+else ok "the orphaned tip is reachable from no branch — the pin is load-bearing"; fi
+
+# No pin, no prune: a repo that cannot write the tag keeps its prunable entry,
+# so the admin HEAD — the detached tip's only ref — survives for a later pass
+# rather than being dropped now.
+new_repo
+mk_wt "$REPO/wt/nopin" --detach
+bead b-nopin closed 100 "$REPO/wt/nopin" ""
+rm -rf "$REPO/wt/nopin"
+chmod -R a-w "$REPO/.git/refs" 2>/dev/null
+run > /dev/null
+chmod -R u+w "$REPO/.git/refs" 2>/dev/null
+if registered "$REPO/wt/nopin"; then ok "an unpinnable prunable tip is not pruned"; else bad "an unpinnable prunable tip is not pruned"; fi
+eq "$(git -C "$REPO" tag -l 'archive/worktree/*' | wc -l)" 0 "and no tag was written before the prune was held"
+
 # --- the budget yields, and says what it left -------------------------------
 # A slow `git` on PATH spends the budget inside the pass, which is the only way
 # a fixture this small reaches the guard. What it yields must be reported as
