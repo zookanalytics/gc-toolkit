@@ -60,10 +60,15 @@ until the fixture was corrected to match what both real writers do.
 
 Two facts fall out of this table.
 
-**Mirroring is bimodal, not haphazard.** The three kinds a reader narrows by
-label mirror it on every single bead (283/283, 61/61, 10/10). The kinds no
-reader narrows carry no label at all. The pattern is a property of each kind's
-writers, and it already matches what the readers need.
+**Label mirroring is a writer property, and one reader depends on it.** The
+three kinds the learning loop writes carry the label on every bead (observation
+283/283, feedback-pattern 61/61, prompt-update 10/10), because their writers
+always set it. Of those, only `observation` is narrowed by a reader;
+`feedback-pattern` and `prompt-update` are read through `metadata.task_kind`, so
+their label is written but unread. Every other kind's label is incidental —
+`doc-update` on 52 of 54, `review` on 1 of 1249, the rest on none — and no
+reader narrows on it. The one kind a reader narrows by label mirrors it on every
+bead, which is what that reader needs.
 
 **The value vocabulary is open.** Ten of the sixteen kinds are written by
 nothing in this pack. `lifecycle/lifecycle.toml` registers the `task_kind`
