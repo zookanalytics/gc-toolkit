@@ -225,6 +225,50 @@ OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title T \
 eq "$?" "0" "a --repo inside a body value does not read as a second target"
 eq "$(meta up-1 gh_target_repo)" "a/b" "the target comes from the flag, not the body text"
 
+# ── a write that would prompt when pasted is refused ──────────────────────
+# gh reads an omitted title or body from an interactive prompt, so a parked
+# command that lacks one carries no prepared text — it would stop and wait.
+reset_state
+OUT=$("$SUT" --message "why" -- gh issue create --repo a/b 2>&1)
+eq "$?" "2" "an issue create with neither title nor body is refused"
+eq "$(count)" "0" "nothing is filed for a command that would prompt"
+has "$OUT" "prompt" "the refusal says the command would prompt"
+has "$OUT" "--title" "the refusal names the missing title"
+has "$OUT" "--body" "the refusal names the missing body"
+
+OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --body B 2>&1)
+eq "$?" "2" "an issue create with no title is refused"
+has "$OUT" "--title" "the refusal names the missing title"
+hasnt "$OUT" "--body" "the refusal names only what is missing, not the present body"
+
+OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title T 2>&1)
+eq "$?" "2" "an issue create with no body is refused"
+has "$OUT" "--body" "the refusal names the missing body"
+hasnt "$OUT" "--title" "the refusal names only what is missing, not the present title"
+
+OUT=$("$SUT" --message "why" -- gh issue comment 5 --repo a/b 2>&1)
+eq "$?" "2" "an issue comment with no body is refused"
+has "$OUT" "--body" "the comment refusal names the missing body"
+
+# The short flags are the same flags, so they satisfy the requirement.
+reset_state
+"$SUT" --message "why" -- gh issue create --repo a/b -t T -b B >/dev/null 2>&1
+eq "$?" "0" "short -t/-b satisfy the inline-content requirement"
+eq "$(count)" "1" "the short-flag form parks one bead"
+
+# pr create and pr comment prompt the same way, and are refused the same way.
+reset_state
+OUT=$("$SUT" --message "why" -- gh pr create --repo a/b 2>&1)
+eq "$?" "2" "a pr create with neither title nor body is refused"
+OUT=$("$SUT" --message "why" -- gh pr comment 5 --repo a/b 2>&1)
+eq "$?" "2" "a pr comment with no body is refused"
+
+# --fill draws a PR's title and body from the commits, so it does not prompt.
+reset_state
+"$SUT" --message "why" -- gh pr create --repo a/b --fill >/dev/null 2>&1
+eq "$?" "0" "pr create --fill needs no inline title or body"
+eq "$(count)" "1" "the --fill form parks one bead"
+
 # ── the own-origin refusal ────────────────────────────────────────────────
 reset_state
 OUT=$("$SUT" --message "why" -- gh issue create --repo zookanalytics/gc-toolkit --title T --body B 2>&1)

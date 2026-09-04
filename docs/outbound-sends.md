@@ -54,7 +54,7 @@ body is written for the upstream maintainer, and the operator is deciding
 something else — whether this is worth another project's attention — so they
 need what was found, where it was hit, and why it earns the send.
 
-Three refusals keep the parked command honest, because it is pasted later, by
+Four refusals keep the parked command honest, because it is pasted later, by
 a person, somewhere else:
 
 - **No `--repo`, no parking.** `gh` resolves an implicit repository against
@@ -64,6 +64,11 @@ a person, somewhere else:
 - **One target, named once.** A command carrying two different repositories is
   refused rather than resolved by guessing, which is the one mistake that
   sends a report to the wrong project.
+- **No interactive prompt.** A write verb that stops to prompt for a field it
+  was not given — `gh issue create` with no `--title` or `--body`, a comment
+  with no `--body` — is refused. `gh` reads the omitted field from a prompt,
+  so a parked command missing it would wait instead of carrying the prepared
+  text.
 
 The command is quoted with `printf %q`, which collapses a multi-line body to
 one pasteable line, and the script then re-splits what it quoted and requires

@@ -150,6 +150,42 @@ if [ -n "$ORIGIN_REPO" ] && [ "$(repo_key "$TARGET")" = "$(repo_key "$ORIGIN_REP
   exit 2
 fi
 
+# A parked command is pasted later, unedited, by a person, so it must run
+# without stopping to prompt. Several gh write verbs prompt for a field they
+# were not handed: `issue create` and `pr create` for a missing title or body,
+# `issue comment` and `pr comment` for a missing body. A parked command that
+# prompts carries no prepared text — it waits — so require the inline content
+# each such verb needs. A verb that never prompts (a `gh api` write, or a read)
+# is not listed here and passes untouched.
+cmd_has_flag() {
+  local want a
+  for want in "$@"; do
+    for a in "${CMD[@]}"; do
+      case "$a" in "$want"|"$want"=*) return 0 ;; esac
+    done
+  done
+  return 1
+}
+NEED_TITLE=0; NEED_BODY=0
+case "$VERB" in
+  "issue create"|"pr create")   NEED_TITLE=1; NEED_BODY=1 ;;
+  "issue comment"|"pr comment") NEED_BODY=1 ;;
+esac
+# `gh pr create --fill*` draws its title and body from the commits, so it does
+# not prompt even when neither flag is given.
+if [ "$VERB" = "pr create" ] && cmd_has_flag --fill --fill-first --fill-verbose; then
+  NEED_TITLE=0; NEED_BODY=0
+fi
+MISSING=()
+if [ "$NEED_TITLE" = 1 ] && ! cmd_has_flag --title -t; then MISSING+=("--title"); fi
+if [ "$NEED_BODY" = 1 ] && ! cmd_has_flag --body -b; then MISSING+=("--body"); fi
+if [ "${#MISSING[@]}" -gt 0 ]; then
+  WANT="${MISSING[0]}"
+  [ "${#MISSING[@]}" -gt 1 ] && WANT="${MISSING[0]} and ${MISSING[1]}"
+  warn "\`$VERB\` with no inline $WANT would prompt for it when pasted — gh reads $WANT from an interactive prompt when the flag is omitted, so the parked command would stop and wait instead of carrying the prepared text. Add $WANT inline (a value, not a file)."
+  exit 2
+fi
+
 # A stable digest over the exact argv, NUL-joined so no argument boundary can
 # be forged by an argument's own bytes.
 sig() {
