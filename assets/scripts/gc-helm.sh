@@ -851,7 +851,11 @@ cmd_demand() {
     fi
 
     # `dep add <gated> <demand>` reads "<gated> is blocked by <demand>", so the
-    # row lands on the gated bead — the side that is waiting.
+    # row lands on the gated bead — the side that is waiting. `gc bd gate
+    # create` already added the primary edge on a fresh gate, so wiring $gated
+    # again is idempotent (an "already wired" warning is expected there); the
+    # loop still owns every --also-blocks target, and the read-back below is
+    # the guarantee for all of them.
     for _w in $gated $also; do
         [ -n "$_w" ] || continue
         if [ "$_w" = "$demand" ]; then
