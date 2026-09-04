@@ -249,6 +249,41 @@ OUT="$("$SUT")"
 eq "$(field "$(line_for lx-pole1 "$OUT")" reason)" "nudged" "  ... and its next finding starts at the nudge again"
 eq "$(cat "$STUB_NUDGE_LOG")" "lx-pole1" "  ... with a fresh nudge"
 
+echo "== the ladder is keyed to the claim: a new anchor is never warranted on an old one's nudge =="
+
+# The finding: state recorded only a per-session last_nudge with no anchor, so
+# a session nudged for one closed claim could finish a different short claim and
+# be warranted for the new one without ever being nudged about it. The bug fired
+# through the grace path, which continues without clearing state.
+reset; base_sessions; demand gc-toolkit/gc-toolkit.polecat no
+
+# Pass 1 — idle on tk-old: the first sighting nudges.
+claim lx-pole1 tk-old; bead tk-old closed 7200
+OUT="$("$SUT")"
+eq "$(field "$(line_for lx-pole1 "$OUT")" reason)" "nudged" "pass 1: idle on tk-old is nudged"
+
+# Pass 2 — the session has since claimed and closed tk-new, seen here inside its
+# grace window. The stale tk-old ladder must not survive the anchor change.
+: > "$STUB_NUDGE_LOG"; claim lx-pole1 tk-new; bead tk-new closed 60
+OUT="$("$SUT")"
+eq "$(field "$(line_for lx-pole1 "$OUT")" verdict)" "grace" "pass 2: tk-new is inside its grace window"
+
+# Pass 3 — tk-new past grace, still idle, with the nudge wait forced to zero so
+# a carried-over last_nudge WOULD warrant immediately. It must nudge tk-new
+# first: the ladder for this claim has sent nothing.
+: > "$STUB_NUDGE_LOG"; bead tk-new closed 7200
+OUT="$(RUNAWAY_NUDGE_WAIT_S=0 "$SUT")"
+L="$(line_for lx-pole1 "$OUT")"
+eq "$(field "$L" verdict)" "flag" "pass 3: a new claim is flagged, not warranted on the old claim's nudge"
+eq "$(field "$L" reason)" "nudged" "  ... it earns its own first nudge"
+eq "$(cat "$STUB_NUDGE_LOG")" "lx-pole1" "  ... naming the session"
+has "$OUT" "warrant=0" "  ... and no warrant is filed for a claim never nudged"
+
+# Pass 4 — the same claim still idle past the wait: NOW it is warrantable,
+# because this time the nudge that preceded it named tk-new.
+OUT="$(RUNAWAY_NUDGE_WAIT_S=0 "$SUT")"
+eq "$(field "$(line_for lx-pole1 "$OUT")" verdict)" "warrant" "pass 4: the same claim, nudged and still idle, is warrantable"
+
 echo "== a nudge that did not go out is not counted as one =="
 
 reset; base_sessions; claim lx-pole1 tk-work; bead tk-work closed 7200

@@ -82,11 +82,17 @@ is empty, and that it should close its step chain and run
 `gc runtime drain-ack`. A nudge is harmless to a session that is already
 draining, which is what makes it the right first move.
 
-Only a later pass that finds the same session still in the state reports
+Only a later pass that finds that same claim still idle reports
 `verdict=warrant`. The deacon files one warrant for the dog pool against that
 session — never a direct kill, and never a second warrant while one is open.
 A nudge that fails to send is not recorded as a nudge, so the next pass
 retries it rather than counting down to a warrant nobody was warned about.
+
+The ladder is keyed to the claim, not just the session: the record names the
+anchor the nudge was about. When a session finishes the nudged claim and idles
+on a different one, the record resets, so the new claim earns its own nudge
+before it can be warranted — a warrant never rests on a nudge that named a
+claim the session has already left behind.
 
 The nudge record is per session under `RUNAWAY_STATE_DIR`, pruned when the
 session is gone. Without a writable state dir the script cannot remember its
