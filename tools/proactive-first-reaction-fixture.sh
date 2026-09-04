@@ -84,17 +84,29 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 # priority (P3), so a board-weight rank must place it LAST — a plain
 # oldest-first sort would put it first. JSON order here is intentionally NOT
 # the expected ranked order, so a no-op (unranked) tool fails the assertions.
+# px-root is a graph.v2 topology ROOT (gc.kind=workflow): routed but never
+# claimable, so demand must DROP it. Its priority/age would rank it FIRST if it
+# leaked through, so the ranking assertions below double as an exclusion probe.
 cat > "$FXDIR/ready.json" <<'JSON'
 [
   {"id":"px-old-lo","title":"oldest but low priority","priority":3,"created_at":"2026-01-01T00:00:00Z"},
   {"id":"px-new-hi","title":"newest, high priority","priority":1,"created_at":"2026-03-01T00:00:00Z"},
-  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"}
+  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"},
+  {"id":"px-root","title":"graph.v2 topology root — routed but NEVER claimable","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}}
 ]
 JSON
+# px-lo/px-hi are allowlisted top-level inputs the scan KEEPS; the rest are
+# each dropped by one precision filter (disallowed type, topology root,
+# feedback-pattern machinery, already-ruled, non-top-level child).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
-  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z"},
-  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z"}
+  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z","issue_type":"task"},
+  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
+  {"id":"px-spec","title":"disallowed type (spec is an output, not an input)","description":"an output artifact","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"spec"},
+  {"id":"px-wf","title":"topology root wearing issue_type task","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.kind":"workflow"}},
+  {"id":"px-fb","title":"feedback-pattern distiller machinery","description":"a learned pattern","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
+  {"id":"px-ruled","title":"a sitting already ruled this","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.takeaway":"ruled: do X"}},
+  {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]}
 ]
 JSON
 
@@ -108,10 +120,13 @@ echo "── demand is always on: routed work flows with no flag and no shed ─
 # No enable flag, no city-cap env — routed demand must simply flow. (The
 # leading `unset` guards against ambient GC_PROACTIVE_* in the test env: the
 # tool must not read them at all any more.)
-eq "demand flows the routed beads unconditionally (3)" "3" \
+eq "demand flows the routed beads (3 of 4: the topology root is dropped)" "3" \
    "$(unset GC_PROACTIVE_ENABLED GC_PROACTIVE_CITY_CAP; P demand | jq 'length')"
 eq "demand output is a valid JSON array (work_query contract)" "array" \
    "$(P demand | jq -r 'type')"
+# The never-claimable topology root must not be counted as demand — counting it
+# spawns a worker gc hook --claim will hand nothing (the churn fix).
+absent "demand drops the never-claimable graph.v2 topology root" "px-root" "$(P demand)"
 # The retired clamps must be GONE from the tool, not merely defaulted open.
 absent "the tool no longer reads the enable gate"  "GC_PROACTIVE_ENABLED"  "$(cat "$PROACTIVE")"
 absent "the tool no longer reads the city cap"     "GC_PROACTIVE_CITY_CAP" "$(cat "$PROACTIVE")"
@@ -226,6 +241,10 @@ else
 fi
 eq "work_query: degrades to [] when gc fails (valid answer, not garbage)" "[]" "$wq_out"
 rm -rf "$POISON"
+# work_query must strip graph.v2 topology roots inline — the gc default query
+# does, and a custom query that omits it counts unclaimable roots as demand.
+has "work_query strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' \
+    "$(extract_toml_block work_query)"
 
 echo "── scale_check is the same demand in COUNT form (agent.toml) ──"
 # The reconciler's pool SPAWN decision runs scale_check, NOT work_query
@@ -238,6 +257,10 @@ has "scale_check answers in COUNT form (0 fallback)" "printf '0'"           "$SC
 absent "scale_check carries no enable gate"         "GC_PROACTIVE_ENABLED"  "$SC_RAW"
 absent "scale_check carries no city-cap clamp"      "GC_PROACTIVE_CITY_CAP" "$SC_RAW"
 has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proactive' "$SC_RAW"
+# The spawn predicate MUST carry work_query's topology-root exclusion, or it
+# counts a root gc hook --claim never offers and spawns a worker with nothing
+# to claim — the churn this pool hit.
+has "scale_check strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' "$SC_RAW"
 POISON="$(mktemp -d)"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
@@ -287,6 +310,24 @@ echo "── the process-scan trigger (movable-forward beads, board-ranked) ─�
 eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --json | jq -r '.[0].id')"
 eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
 has "scan (human) lists a candidate"                      "px-hi" "$(P scan)"
+
+echo "── scan precision: only top-level allowlisted INPUT beads, no machinery ──"
+# A fresh reaction is for un-triaged input beads. Each drop below is a distinct
+# precision filter; the survivors are exactly the two allowlisted top-level
+# inputs. A candidate leaks through only if its filter regresses.
+SCAN_IDS="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+has    "keeps an allowlisted task"                       "px-lo"    "$SCAN_IDS"
+has    "keeps an allowlisted bug"                        "px-hi"    "$SCAN_IDS"
+absent "drops a disallowed type (spec, an output)"       "px-spec"  "$SCAN_IDS"
+absent "drops a topology root wearing issue_type task"   "px-wf"    "$SCAN_IDS"
+absent "drops feedback-pattern distiller machinery"      "px-fb"    "$SCAN_IDS"
+absent "drops a bead a sitting already ruled (takeaway)" "px-ruled" "$SCAN_IDS"
+absent "drops a non-top-level parent-child child"        "px-child" "$SCAN_IDS"
+eq     "keeps exactly the two allowlisted top-level inputs" "2" "$(P scan --json | jq 'length')"
+# The allowlist is a per-rig config var (GC_PROACTIVE_TYPES), tunable without a
+# code change: widening it to include spec surfaces px-spec.
+has    "GC_PROACTIVE_TYPES widens the allowlist" "px-spec" \
+       "$(GC_PROACTIVE_TYPES=task,bug,feature,spike,spec P scan --json | jq -r '.[].id' | tr '\n' ' ')"
 
 echo "── one sweep is CAPPED: a reaction can end in a dispatch ──"
 # A first reaction may route its bead to an implementation pool, so an
