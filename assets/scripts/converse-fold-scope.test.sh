@@ -373,6 +373,215 @@ else
     ok "no takeaway stamps the shared bucket"
 fi
 
+# ── HOLD-ARM PREMISE GATE (visit-hold-premise-gate) ──────────────────────────
+# Deliberately housed in this suite, not a converse-hold-*.test.sh of its own:
+# the pack has no test discovery, so a fresh file is a suite nobody runs
+# (pack-tests-have-no-auto-discovery). This suite already extracts and executes
+# blocks from the same prompt, so the hold-arm gate rides the harness the fold
+# block built — same stub `gc`, same fixtures dir.
+#
+# The defect (tk-3vbus7): step 1's action=hold arm skipped the premise re-check
+# on the action=hold verdict ALONE. But `gc hook --claim` returns
+# existing_assignment (→ action=hold) for ANY bead already assigned to this
+# session identity, including a claim that died BEFORE step 2 ever ran. The gate
+# tells a real hold from a dead claim by a trace only a sitting past step 5
+# leaves: step 5 stamps the demand's id on the VISIT bead as gc.hold_demand
+# before it waits. The key is on the visit, so it is attributable — a sibling
+# sitting on the same item stamps the shared item's demand and takeaway, never
+# this visit's gc.hold_demand, so it cannot forge the trace. Absence routes to
+# step 2, so a visit whose premise died between filing and claiming re-checks it
+# and closes there instead of posting a framing for a dead premise.
+echo "── the hold-arm premise gate is extractable ──"
+extract_hold_block() {
+    awk '/# >>> visit-hold-premise-gate/ {f = 1; next}
+         /# <<< visit-hold-premise-gate/ {f = 0}
+         f {print}' "$PROMPT"
+}
+if [ -n "$(extract_hold_block)" ]; then
+    ok "the premise gate is extractable (# >>> visit-hold-premise-gate markers present)"
+else
+    bad "the premise gate is extractable" "no visit-hold-premise-gate block in $PROMPT"
+fi
+
+# began <visit-id> <subject> — run the extracted gate against the current
+# fixtures and print the resolved BEGAN. Same stub, cwd, and PATH as the fold
+# runner above; a distinct probe file so the two never collide.
+began() {
+    {
+        extract_hold_block
+        printf 'printf "GATE_BEGAN=%%s\\n" "$BEGAN"\n'
+    } >"$TMPD/hold-probe.sh"
+    (
+        cd "$TMPD" &&
+            PATH="$BIN:$PATH" FIXDIR="$FIXDIR" VISIT="$1" SUBJECT="$2" \
+                bash "$TMPD/hold-probe.sh" 2>/dev/null
+    ) | sed -n 's/^GATE_BEGAN=//p' | tail -1
+}
+# The gate reads one thing: gc.hold_demand on THIS visit's bead. hv_demand
+# builds a sibling demand on the shared item — the trace the OLD item-level gate
+# keyed on — kept here to prove this gate ignores it.
+hv_reset() { rm -f "$FIXDIR"/*.json; printf '[]\n' >"$FIXDIR/list.json"; }
+hv_visit() { # id [hold_demand] [stall_root]
+    jq -nc --arg id "$1" --arg hd "${2:-}" --arg sr "${3:-}" \
+        '[{id:$id, metadata:(({"task_kind":"visit"})
+            + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
+            + (if $sr == "" then {} else {"stall_root":$sr} end))}]' \
+        >"$FIXDIR/show-$1.json"
+}
+hv_demand() { # demand-id item-id — a sibling open demand naming the item
+    jq -nc --arg id "$1" --arg i "$2" '[{id:$id, assignee:"", metadata:{"gc.demand_for":$i}}]' \
+        >"$FIXDIR/list.json"
+}
+
+echo "── a claim that died before step 5 leaves no trace: re-check the premise ──"
+# The observed shape (tk-fzvjw7): an escalate visit under a standing scope whose
+# replacement claim found no gc.hold_demand on the visit.
+hv_reset
+hv_visit v-dead
+is "no trace resolves BEGAN=no (fall through to step 2)" "$(began v-dead sub)" "no"
+
+echo "── a visit that stamped gc.hold_demand reached step 5: its hold is real ──"
+hv_reset
+hv_visit v-held d-held
+is "gc.hold_demand resolves BEGAN=yes (re-open at step 4)" "$(began v-held sub)" "yes"
+
+echo "── a sibling demand on the item is not THIS visit's trace ──"
+# The P1 the visit-key closes: a standing scope with sibling sittings on one
+# item carries an open demand for it. The OLD gate resolved the item and read
+# that shared demand as proof this visit held; keyed on the visit it is not.
+hv_reset
+hv_visit v-sib "" item-x   # no gc.hold_demand; item resolvable, as the old gate keyed on
+hv_demand d-x item-x       # a sibling's open demand on the same item
+is "a sibling demand with no visit trace resolves BEGAN=no" "$(began v-sib sub)" "no"
+
+echo "── the visit key stands even when its demand is no longer open ──"
+# A ruling can close the demand while the sitting still holds. The trace is the
+# visit's own record, not the demand's live status, so BEGAN does not depend on
+# the listing.
+hv_reset
+hv_visit v-closed d-gone   # gc.hold_demand set; no matching open demand in list
+is "gc.hold_demand with no open demand resolves BEGAN=yes" "$(began v-closed sub)" "yes"
+
+echo "── the prompt gates the skip on the trace, not on the verdict ──"
+have "the arm routes a traceless claim to step 2" 'fall through to step 2' "$PROMPT"
+have "the arm keeps the fold check skipped on both branches" \
+    'The fold check stays skipped on both branches.' "$PROMPT"
+have "the gate reads gc.hold_demand off the visit (unique to this block)" \
+    'gc.hold_demand' "$PROMPT"
+have "step 5 stamps gc.hold_demand on the visit before it waits" \
+    'set-metadata "gc.hold_demand=$DEMAND"' "$PROMPT"
+
+# ── HOLD-DEMAND STAMP GATE (hold-demand-stamp-gate) ──────────────────────────
+# The P1 this closes (tk-pcjtco): step 1 trusts gc.hold_demand as the SOLE proof
+# of a real hold (the began() cases above), but step 5 wrote it as `update ||
+# echo` and walked on. An update that is refused, or one that returns success
+# without persisting, then leaves the framing posted with no trace, and a later
+# scrollback-less restart reads BEGAN=no and closes the engaged sitting at step
+# 2 as a dead premise — the mirror of the bug the gate exists to catch. The
+# write's own exit status cannot see a value that never landed, so the gate
+# reads the key back off the visit and refuses to frame unless it matches. This
+# runs the extracted stamp block against a stub whose update result and
+# persistence are dialed independently.
+echo "── the stamp fails closed unless the trace lands on the visit ──"
+BIN2="$TMPD/bin2"
+FIX2="$TMPD/fix2"
+mkdir -p "$BIN2" "$FIX2"
+# A stub gc serving the stamp block's two calls. `bd update` persists the demand
+# id it is given (unless STAMP_PERSIST=0) and exits STAMP_RC; `bd show` returns
+# whatever update persisted, or [] if nothing did. STAMP_VALUE overrides the
+# persisted id, for the stamp-landed-wrong case. Anything else exits 2, so a
+# block that grows a third call fails here rather than reading the live store.
+cat >"$BIN2/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "bd" ] || exit 2
+case "${2:-}" in
+    update)
+        if [ "${STAMP_PERSIST:-1}" = "1" ]; then
+            v="${STAMP_VALUE:-}"
+            if [ -z "$v" ]; then
+                for a in "$@"; do
+                    case "$a" in gc.hold_demand=*) v="${a#gc.hold_demand=}" ;; esac
+                done
+            fi
+            printf '%s' "$v" >"$FIX2/stamped"
+        fi
+        exit "${STAMP_RC:-0}"
+        ;;
+    show)
+        if [ -r "$FIX2/stamped" ]; then
+            jq -nc --arg v "$(cat "$FIX2/stamped")" '[{metadata:{"gc.hold_demand":$v}}]'
+        else
+            printf '[]\n'
+        fi
+        ;;
+    *) exit 2 ;;
+esac
+STUB
+chmod +x "$BIN2/gc"
+
+extract_stamp_block() {
+    awk '/# >>> hold-demand-stamp-gate/ {f = 1; next}
+         /# <<< hold-demand-stamp-gate/ {f = 0}
+         f {print}' "$PROMPT"
+}
+if [ -n "$(extract_stamp_block)" ]; then
+    ok "the stamp gate is extractable (# >>> hold-demand-stamp-gate markers present)"
+else
+    bad "the stamp gate is extractable" "no hold-demand-stamp-gate block in $PROMPT"
+fi
+# stamp_rc <update-rc> <persist:0|1> [persist-value] — run the extracted stamp
+# block with the stub dialed to that outcome; print the block's own exit status.
+# Same cwd/PATH discipline as the runners above; a distinct probe file.
+stamp_rc() {
+    rm -f "$FIX2/stamped"
+    extract_stamp_block >"$TMPD/stamp-probe.sh"
+    (
+        cd "$TMPD" &&
+            PATH="$BIN2:$PATH" FIX2="$FIX2" STAMP_RC="$1" STAMP_PERSIST="$2" \
+                STAMP_VALUE="${3:-}" VISIT="v-x" DEMAND="d-x" ITEM="item-x" \
+                bash "$TMPD/stamp-probe.sh" >/dev/null 2>&1
+    )
+    printf '%s\n' "$?"
+}
+# verdict <update-rc> <persist> [value] — "held" when the block proceeds to
+# frame (exit 0), "refused" when it exits before framing.
+verdict() { [ "$(stamp_rc "$@")" = 0 ] && echo held || echo refused; }
+
+is "a stamp that persists lets the hold proceed" "$(verdict 0 1)" "held"
+is "a refused update that left no trace refuses the framing" "$(verdict 1 0)" "refused"
+is "an update that reports success but does not persist still refuses" \
+    "$(verdict 0 0)" "refused"
+is "a stamp that landed the WRONG id refuses the framing" \
+    "$(verdict 0 1 d-other)" "refused"
+
+# Positive control, the role legacy_holder plays for the fold block. The pre-fix
+# stamp was `update || echo` with no read-back, so a success-with-no-persist
+# update satisfied it and the sitting framed with no trace. That it HELD where
+# the gate now REFUSES proves the read-back closes a real regression rather than
+# pinning a case the old line already caught.
+legacy_verdict() {
+    rm -f "$FIX2/stamped"
+    printf 'gc bd update "$VISIT" --set-metadata "gc.hold_demand=$DEMAND" || echo stamp-failed\n' \
+        >"$TMPD/legacy-stamp.sh"
+    (
+        cd "$TMPD" &&
+            PATH="$BIN2:$PATH" FIX2="$FIX2" STAMP_RC="$1" STAMP_PERSIST="$2" \
+                VISIT="v-x" DEMAND="d-x" bash "$TMPD/legacy-stamp.sh" >/dev/null 2>&1
+    )
+    [ "$?" = 0 ] && echo held || echo refused
+}
+is "positive control: the pre-fix update-or-echo framed on a success-no-persist stamp" \
+    "$(legacy_verdict 0 0)" "held"
+
+# The prose the fail-closed shape rests on: the block shows the visit back and
+# gates the framing on the value, not on the write's exit status alone.
+have "the stamp block reads gc.hold_demand back off the visit" \
+    'gc bd show "$VISIT"' "$PROMPT"
+have "…and refuses to frame when the read-back does not match the demand" \
+    'DID NOT PERSIST' "$PROMPT"
+have "…and exits before the framing on that refusal" \
+    'Do NOT post the framing' "$PROMPT"
+
 echo
 echo "converse-fold-scope: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
