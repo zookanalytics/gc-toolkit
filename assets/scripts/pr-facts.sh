@@ -654,9 +654,23 @@ GATES
           elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
           else "restamp" end' 2>/dev/null)
       if [ "$dneed" = "restamp" ]; then
-        gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 \
-          && echo "$PROG: $id re-stamped role marker on covering rework $dup (task_kind=rework, anchor_bead=$id)" \
-          || echo "$PROG: WARN could not re-stamp role marker on covering rework $dup (retry next pass)" >&2
+        # `gc bd update` returns 0 without writing (the claim guard is one such
+        # path), so the exit code cannot prove the marker landed — and a covering
+        # child left unmarked on the anchor's own branch is the misread this stamp
+        # exists to stop. Read both keys back and re-stamp once, claiming the
+        # re-stamp only when it persists; the next pass reaches this same block to
+        # try again rather than report an unmarked child as marked.
+        gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
+        dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+        if [ "$dgot" != "rework|$id" ]; then
+          gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
+          dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+        fi
+        if [ "$dgot" = "rework|$id" ]; then
+          echo "$PROG: $id re-stamped role marker on covering rework $dup (task_kind=rework, anchor_bead=$id)"
+        else
+          echo "$PROG: WARN could not re-stamp role marker on covering rework $dup (retry next pass)" >&2
+        fi
       fi
       echo "$PROG: $id — PR#$num conflicts; rework $dup already covers branch '$fix_branch' at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
       skipped=$((skipped + 1)); continue

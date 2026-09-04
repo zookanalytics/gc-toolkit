@@ -400,6 +400,26 @@ eq "$(meta cov-rw task_kind)" "rework" "the covering child now carries task_kind
 eq "$(meta cov-rw anchor_bead)" "CV" "…and names the anchor it reworks"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "no child was minted"
 
+echo "# …a covering-child restamp that does not persist is reported UNMARKED (retry next pass), never done"
+# The covering-child restamp shares gc bd update's return-0-without-writing
+# failure with the create path: a marker that silently drops must leave the
+# child reported unmarked so the next pass retries, never claimed re-stamped — a
+# live rework left unmarked on the anchor's own branch is the misread the marker
+# exists to stop.
+covd='{"id":"cov-drop","status":"open","assignee":"","notes":"",'
+covd="$covd"'"title":"Rebase PR#38 onto main: base rewritten, PR conflicts",'
+covd="$covd"'"metadata":{"branch":"polecat/x38","gc.routed_to":"'"$FIX"'","rejection_reason":"stale base at head sha-38: x"}}'
+store "[$(anchor CX 38), $covd]"
+printf '%s' "$(prview 38 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_38.json"
+eq "$(meta cov-drop task_kind)" "<absent>" "the covering child starts with no role marker"
+out=$(STUB_DROP_KEYS="cov-drop:task_kind,anchor_bead" run)
+hasnt "$out" "re-stamped role marker on covering rework cov-drop" "a restamp that half-lands is not reported as done"
+has "$out" "could not re-stamp role marker on covering rework cov-drop (retry next pass)" "…the read-back catches the dropped marker and defers to the next pass"
+eq "$(meta cov-drop task_kind)" "<absent>" "the marker really was dropped"
+eq "$(meta cov-drop anchor_bead)" "<absent>" "…both halves of it"
+has "$out" "already covers branch 'polecat/x38' at this head, no new child" "…while it still dedups the conflict"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "no child was minted"
+
 echo "# …a CLOSED covering child is dispositioned; its absent marker is left alone"
 cov2='{"id":"cov-closed","status":"closed","assignee":"","notes":"",'
 cov2="$cov2"'"title":"Rebase PR#37 onto main: base rewritten, PR conflicts",'
