@@ -137,6 +137,7 @@ marker_prefixes = ["dispatch_backstop."]
 gate_marker_prefix = "check."
 gate_hold_verb = "exception"
 route_key = "gc.routed_to"
+terminal_wait_key = "gc.demand_for"
 hold_severity = "warn"
 TOML
 
@@ -500,6 +501,49 @@ eq "$RC" "1" "...and the same marker without its key still holds"
 store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
 OUT=$(PACK="$TMP/pack3" run_check); RC=$?
 eq "$RC" "0" "the built-in list carries the built-in pairing"
+
+# --- 23. the terminal end of a wait is exempt, not a finding --------------
+# A demand bead is the thing others block ON: the gated bead blocks on it and it
+# blocks on nothing, so it can hold no `blocks` edge of its own. It is exempt as
+# a WHOLE, unlike a settled marker (which answers one marker and leaves the bead
+# judged on the rest).
+notheld '{"gc.demand_for":"aa-500","gc.takeaway":"what should happen with X?","gc.routed_to":"human"}' \
+        "a demand bead carrying gc.demand_for is exempt"
+notheld '{"gc.demand_for":"aa-500","triage.hold":"x"}' \
+        "gc.demand_for exempts the bead even beside another marker"
+# An EMPTY value is not the terminal marker: clearing a key does not remove it,
+# so a bead that merely carries gc.demand_for="" is judged on its markers.
+held '{"gc.demand_for":"","gc.takeaway":"parked for a person"}' \
+     "an empty gc.demand_for does not exempt"
+# The exemption does not skip the store: a demand is not counted as a finding,
+# and a store whose only held bead is a demand reads clean and scanned.
+store '[{"id":"aa-101","status":"open","metadata":{"gc.demand_for":"aa-500","gc.takeaway":"needs a ruling","gc.routed_to":"human"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a store whose only held bead is a demand passes"
+has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
+
+# The exemption is DECLARED, like the markers. A declaration that omits
+# terminal_wait_key does not exempt the terminal end — the demand's own markers
+# still assert, which is the fail-safe an omitted field is meant to be.
+mkdir -p "$TMP/pack11/lifecycle"
+{ echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
+  echo 'marker_keys = ["gc.takeaway"]'; echo 'route_key = "gc.routed_to"'; } > "$TMP/pack11/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"gc.demand_for":"aa-500","gc.takeaway":"needs a ruling"}}]'
+OUT=$(PACK="$TMP/pack11" run_check); RC=$?
+eq "$RC" "1" "a declaration that omits terminal_wait_key does not exempt the terminal end"
+has "$OUT" "aa-101" "and the demand's own marker still asserts"
+# A terminal_wait_key declared only in lifecycle.toml is honored, for a key of
+# the declaration's own choosing.
+mkdir -p "$TMP/pack12/lifecycle"
+{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'
+  echo 'terminal_wait_key = "site.terminus"'; } > "$TMP/pack12/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"site.terminus":"aa-9","gc.takeaway":"x"}}]'
+OUT=$(PACK="$TMP/pack12" run_check); RC=$?
+eq "$RC" "0" "a terminal_wait_key declared only in lifecycle.toml is honored"
+# With no lifecycle.toml at all the built-in terminal-wait key stands in.
+store '[{"id":"aa-101","status":"open","metadata":{"gc.demand_for":"aa-500","gc.takeaway":"x"}}]'
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+eq "$RC" "0" "the built-in list carries the built-in terminal-wait key"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -72,6 +72,12 @@ BUILTIN_GATE_PREFIX=''
 BUILTIN_GATE_VERB=''
 BUILTIN_ROUTE_KEY='gc.routed_to'
 BUILTIN_PARK_ROUTE='human'
+# The terminal end of a wait — the bead others block ON. It can carry no
+# `blocks` edge of its own by construction (the gated bead blocks on it; it
+# blocks on nothing), so a marker it carries is exempt, not a finding.
+# gc-helm.sh stamps gc.demand_for on the demand bead it files. Same declared-or-
+# standby role as the marker list.
+BUILTIN_TERMINAL_WAIT_KEY='gc.demand_for'
 # The reporting posture, until lifecycle.toml says otherwise.
 BUILTIN_SEVERITY='warn'
 
@@ -85,7 +91,7 @@ toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
         | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
 }
 marker_keys=""; marker_prefixes=""; gate_prefix=""; gate_verb=""; route_key=""; park_route=""
-settled_keys=""; severity=""; declared=""
+settled_keys=""; severity=""; terminal_wait_key=""; declared=""
 if [ -f "$lifecycle" ]; then
     marker_keys=$(toml_array "$lifecycle" "marker_keys")
     settled_keys=$(toml_array "$lifecycle" "settled_keys")
@@ -94,6 +100,7 @@ if [ -f "$lifecycle" ]; then
     gate_verb=$(toml_scalar "$lifecycle" "gate_hold_verb")
     route_key=$(toml_scalar "$lifecycle" "route_key")
     park_route=$(toml_scalar "$lifecycle" "park_route")
+    terminal_wait_key=$(toml_scalar "$lifecycle" "terminal_wait_key")
     severity=$(toml_scalar "$lifecycle" "hold_severity")
     [ -n "$marker_keys" ] && declared=yes
 fi
@@ -110,6 +117,7 @@ if [ -z "$declared" ]; then
     gate_verb="$BUILTIN_GATE_VERB"
     route_key="$BUILTIN_ROUTE_KEY"
     park_route="$BUILTIN_PARK_ROUTE"
+    terminal_wait_key="$BUILTIN_TERMINAL_WAIT_KEY"
 fi
 # The posture is the exception: it is one value with a safe default, and a
 # declaration that omits it is asking for the default rather than for silence.
@@ -217,6 +225,13 @@ def unsettled($m; $k): ($settled[$k] // "") as $sk
 | ($b.id | tostring) as $id
 | ($b.status | txt) as $st
 | ($b.metadata // {}) as $m
+# The terminal end of a wait — the bead others block ON — can carry no `blocks`
+# edge of its own, so a marker it holds is exempt rather than unedged. This is a
+# whole-bead skip, not a settled marker: the settled-key answers ONE marker and
+# the bead is judged on the rest, while a demand IS the thing waited on and has
+# no forward edge to file at all. Declared like the markers: an empty $twkey
+# (the declaration dropped it) disables this arm and every bead is scanned.
+| select($twkey == "" or (($m[$twkey] | txt) | length) == 0)
 | ( [ $m | to_entries[]
       | .key as $k | (.value | txt) as $v
       | select(
@@ -305,6 +320,7 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
         --argjson settled "$SETTLED_JSON" \
         --arg gatepfx "$gate_prefix" --arg gateverb "$gate_verb" \
         --arg routekey "$route_key" --arg park "$park_route" \
+        --arg twkey "$terminal_wait_key" \
         "$WAIT_JQ" 2>/dev/null); rows_rc=$?
     if [ "$rows_rc" -ne 0 ]; then
         warnings+=("$label: could not read hold markers off the live listing — this store was NOT checked")

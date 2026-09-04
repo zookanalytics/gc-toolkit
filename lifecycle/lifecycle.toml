@@ -233,6 +233,15 @@ marker_prefixes = ["dispatch_backstop."]
 # resting on it waits on somebody, and that wait has the same shape as any
 # other.
 route_key = "gc.routed_to"
+# The terminal end of a wait carries this key: the bead others block ON, which
+# by construction can hold no `blocks` edge of its own. gc-helm.sh stamps
+# gc.demand_for=<gated> on the demand it files — the gated bead blocks on the
+# demand, and the demand blocks on nothing — so the demand is exempt from I1
+# rather than a permanent unedged finding. A capped anchor gets its edge the
+# same way: signoff.sh's cap files a demand it then blocks on. Leaving this line
+# out disables the exemption; the check reads an omitted field as one the
+# declaration dropped.
+terminal_wait_key = "gc.demand_for"
 # How doctor/check-wait-is-an-edge reports a marker with no live blocker.
 # "warn" while a backlog of marker-only holds is still being converted to
 # edges; "error" once none are left. The posture is declared here rather than
