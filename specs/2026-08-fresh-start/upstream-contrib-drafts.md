@@ -143,34 +143,37 @@ each occurrence costs consumers a full pass)
 > consistent snapshot (or serialize/escape output atomically) so a
 > concurrent write cannot tear the payload mid-emit.
 
-## 8. `gc bd heartbeat` cannot refresh a claim that `gc hook --claim` placed
+## 8. `gc bd heartbeat` cannot refresh a claim `gc hook --claim` recorded under a session id
 
-**Repo:** gastownhall/gascity · **severity: high** (no agent can hold a
-lease across a task, so every claimed bead reads expired within five
-minutes and `bd reclaim` cannot tell a live holder from a dead one) ·
-tracked in our fork as `gc-ox80c`
+**Repo:** gastownhall/gascity · **severity: high** (a claim recorded under a
+session id — the pool-worker path — cannot refresh its own lease, so that
+bead reads expired within five minutes and `bd reclaim` cannot tell its live
+holder from a dead one) · tracked in our fork as `gc-ox80c`
 
-> **Body draft:** `gc hook --claim` stamps the assignee as the session
-> **id** (`lx-ojs28`), while `BEADS_ACTOR` in that same session is the
-> session **name** (`gc-toolkit--gc-toolkit__polecat-1-pool`). `gc bd
-> heartbeat` forwards to bd's native owner-only `heartbeat`, which
-> compares actor to assignee exactly, so the holder's own heartbeat is
-> refused: `Error: heartbeat tk-eotd6: issue already claimed by
-> lx-ojs28`. Re-running the identical command as `BEADS_ACTOR=lx-ojs28
-> gc bd heartbeat tk-eotd6` succeeds and moves `lease_expires_at` from
-> 08:00:10Z to 08:05:09Z, so the identity comparison is the whole of the
-> refusal. The claim path already resolves this: `cmd/gc/cmd_hook_claim.go`
-> uses the bead's current assignee as the claim actor, commenting that
-> `BEADS_ACTOR` may be the runtime name, the session bead id, or an alias
-> and that bd's `--claim` requires an exact match.
-> `rewriteBdHeartbeatArgs` in `cmd/gc/cmd_bd.go` validates the id and
-> forwards with the ambient actor, applying no such resolution. The TTL
-> offers no way around it: `issueops.DefaultLeaseTTL` is a five-minute
-> constant reachable only through the `WithLeaseTTL` context key, which
-> no `cmd/bd` path carries. **Proposed fix:** have `gc bd heartbeat`
-> resolve the actor the way the claim path does — read the bead's current
-> assignee and heartbeat as that identity when it is one this session
-> owns.
+> **Body draft:** the assignee `gc hook --claim` records depends on the
+> session. For a pool worker it is the session **id** (`lx-ojs28`), while
+> `BEADS_ACTOR` in that same session is the session **name**
+> (`gc-toolkit--gc-toolkit__polecat-1-pool`). `gc bd heartbeat` forwards to
+> bd's native owner-only `heartbeat`, which matches actor to assignee under
+> `actorMatches` — byte-identical, or equal after canonicalizing separators
+> — and a session id and a session name satisfy neither, so the holder's own
+> heartbeat is refused: `Error: heartbeat tk-eotd6: issue already claimed by
+> lx-ojs28`. Re-running the identical command as `BEADS_ACTOR=lx-ojs28 gc bd
+> heartbeat tk-eotd6` succeeds and moves `lease_expires_at` from 08:00:10Z to
+> 08:05:09Z, so the identity comparison is the whole of the refusal. A
+> session whose `BEADS_ACTOR` already equals the recorded assignee — a named
+> agent, whose claim records its alias/agent form — heartbeats its own claim
+> unaffected; the gap is the session-identity path. The claim side already
+> resolves it: `cmd/gc/cmd_hook_claim.go` uses the bead's current assignee as
+> the claim actor, commenting that `BEADS_ACTOR` may be the runtime name, the
+> session bead id, or an alias and that bd's `--claim` requires a match.
+> `rewriteBdHeartbeatArgs` in `cmd/gc/cmd_bd.go` validates the id and forwards
+> with the ambient actor, applying no such resolution. The TTL offers no way
+> around it: `issueops.DefaultLeaseTTL` is a five-minute constant reachable
+> only through the `WithLeaseTTL` context key, which no `cmd/bd` path carries.
+> **Proposed fix:** have `gc bd heartbeat` resolve the actor the way the claim
+> path does — read the bead's current assignee and heartbeat as that identity
+> when it is one this session owns.
 
 Not included in this draft: the original form of this entry also reported
 that the pool reconciler retries reassign indefinitely on a held bead

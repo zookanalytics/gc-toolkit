@@ -79,12 +79,16 @@ Its only callers are conformance fixtures; `cmd/bd/` wires it to no flag, no
 environment variable, and no config key. Raising the TTL from gc-toolkit is
 not possible, and no gc-toolkit change can make it possible.
 
-## A claim cannot heartbeat itself
+## A pool claim cannot heartbeat itself
 
-`gc hook --claim` stamps the assignee as the session **id** — `lx-ojs28` for
-the session that wrote this record. `BEADS_ACTOR` in the same session is the
-session **name**, `gc-toolkit--gc-toolkit__polecat-1-pool`. `bd heartbeat` is
-owner-only and compares the actor to the assignee, so it refuses:
+The assignee `gc hook --claim` records depends on the session. For a pool
+worker it is the session **id** — `lx-ojs28` for the session that wrote this
+record — while `BEADS_ACTOR` in that same session is the session **name**,
+`gc-toolkit--gc-toolkit__polecat-1-pool`. `bd heartbeat` is owner-only and
+matches the actor against the assignee under `actorMatches`
+(`internal/storage/issueops/identity.go`), which accepts a byte-identical
+actor or one that canonicalizes to the same string. A session id and a session
+name are distinct identities, not two spellings of one, so it refuses:
 
 ```
 $ gc bd heartbeat tk-eotd6
@@ -94,16 +98,22 @@ $ BEADS_ACTOR=lx-ojs28 gc bd heartbeat tk-eotd6
 ✓ Heartbeat tk-eotd6 (lease refreshed)     # 08:00:10Z -> 08:05:09Z
 ```
 
-The claim path already solves this. `cmd/gc/cmd_hook_claim.go` uses the bead's
-current assignee as the claim actor, with a comment naming the exact hazard:
-`BEADS_ACTOR` may be the runtime name, the session bead id, or an alias, and
-bd requires an exact match. `rewriteBdHeartbeatArgs` in `cmd/gc/cmd_bd.go`
-forwards `heartbeat <id>` to bd with the ambient actor and applies no such
-resolution.
+A session whose `BEADS_ACTOR` already equals the assignee its claim recorded
+heartbeats fine. `cmd/gc/cmd_hook_claim.go` records the alias/agent form for a
+named agent, and there the ambient actor and the assignee are the same string.
+The gap is the path that records a session identity — the pool worker, and the
+continuation-pinned claim `continuationPinAssignee` serves — where the assignee
+is a session id the ambient session-name actor never matches. The claim side
+already resolves this: `cmd/gc/cmd_hook_claim.go` uses the bead's current
+assignee as the claim actor, with a comment naming the hazard — `BEADS_ACTOR`
+may be the runtime name, the session bead id, or an alias, and bd requires a
+match. `rewriteBdHeartbeatArgs` in `cmd/gc/cmd_bd.go` forwards `heartbeat <id>`
+to bd with the ambient actor and applies no such resolution.
 
-So every polecat lease expires five minutes into a task that runs for tens of
-minutes, and no agent can prevent it. Expired is the steady state for claimed
-beads, and it carries no information about the holder.
+So a pool worker's lease expires five minutes into a task that runs for tens of
+minutes, and the worker cannot refresh it. For the pool population — the bulk
+of long-running claims — expired is the steady state, and it carries no
+information about the holder.
 
 ## Nothing reads the lease
 
@@ -119,12 +129,13 @@ why the expired majority has caused no incident: it is inert, not benign.
 
 Checklist item 4 stands and gains a second reason. A bare `bd reclaim` on a
 timer would revert live work to open — not only ahead of worktree salvage, as
-the tracker says, but because a live holder's lease is stale by construction
-and reclaim cannot tell it from a dead one. Nothing should reclaim until a
-claim can refresh its own lease.
+the tracker says, but because a live pool holder's lease is stale by
+construction: it cannot heartbeat, and reclaim cannot tell that holder from a
+dead one. Nothing should reclaim while the pool population it would sweep
+cannot refresh its own lease.
 
 The order of operations that follows is: fix the heartbeat identity resolution
-in gascity (`gc-ox80c`), then heartbeat long-running claims here
+in gascity (`gc-ox80c`), then heartbeat long-running pool claims here
 (`tk-dkfyz5`, blocked on it), then reconsider reclaim. The same defect is
 drafted for filing against `gastownhall/gascity` as section 8 of
 [../2026-08-fresh-start/upstream-contrib-drafts.md](../2026-08-fresh-start/upstream-contrib-drafts.md);
