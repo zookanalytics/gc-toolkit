@@ -21,9 +21,11 @@
 # does not mean idle. A session whose last_active has gone stale is not
 # burning anything, and the not-moving scans own it.
 #
-# The action ladder is nudge, then warrant: a first sighting gets one nudge
-# (harmless to a session already draining), and only a later pass that finds
-# the same session still in the state reports verdict=warrant. Filing the
+# The action ladder is nudge, then warrant, keyed to the claim: a first
+# sighting gets one nudge (harmless to a session already draining), and only a
+# later pass that still finds that same claim idle reports verdict=warrant. A
+# session that finishes the nudged claim and idles on a different one starts a
+# fresh ladder, so no warrant fires for a claim no nudge ever named. Filing the
 # warrant is the caller's; this script never kills and never files a bead.
 #
 # Output is one key=value line per candidate session plus a summary line.
@@ -111,12 +113,12 @@ state_get() { # <path> <key>
   sed -n "s/^$2=//p" "$1" | sed -n 1p
 }
 
-state_write() { # <path> <first_flag> <last_nudge> <nudges>
+state_write() { # <path> <first_flag> <last_nudge> <nudges> <anchor>
   [ "$STATE_DIR_OK" = "1" ] || return 1
   local tmp
   tmp="$(mktemp "$STATE_DIR/.rp-tmp.XXXXXX" 2>/dev/null)" || return 1
-  printf '%s\nfirst_flag=%s\nlast_nudge=%s\nnudges=%s\n' \
-    "$STATE_MAGIC" "$2" "$3" "$4" > "$tmp" || { rm -f "$tmp"; return 1; }
+  printf '%s\nfirst_flag=%s\nlast_nudge=%s\nnudges=%s\nanchor=%s\n' \
+    "$STATE_MAGIC" "$2" "$3" "$4" "$5" > "$tmp" || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$1" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
@@ -266,6 +268,20 @@ while IFS=$'\t' read -r sid template rig sname alias last_active; do
     continue
   fi
 
+  # The ladder is keyed to the claim. A nudge tells the session its CURRENT
+  # anchor is idle, so only a later pass that still finds that same anchor idle
+  # may warrant it. A stored ladder whose anchor is not the one the session now
+  # holds warned about a claim it has since finished; carrying that nudge
+  # timestamp forward would let this pass warrant a claim no nudge ever named.
+  # Reset the moment the anchor changes — before the grace check, so a new
+  # claim first seen inside its grace window cannot inherit the old ladder
+  # either. A state file with no anchor (pre-upgrade) reads as a change and
+  # resets once, which is safe.
+  if [ "$(state_get "$state" anchor)" != "$anchor" ]; then
+    nudges=0
+    [ "$DRY_RUN" = "1" ] || state_clear "$state"
+  fi
+
   # `--id <value>`, spaced, is the one flag here that must NOT take the
   # `--flag=value` form: the wrapper picks the store by sniffing a bead id out
   # of the spaced arguments, so `--id=<foreign-prefix>` is never seen and the
@@ -347,13 +363,13 @@ while IFS=$'\t' read -r sid template rig sname alias last_active; do
 
   if [ -n "$last_nudge" ] && [ "$((NOW - last_nudge))" -ge "$NUDGE_WAIT_S" ]; then
     N_WARRANT=$((N_WARRANT + 1))
-    state_write "$state" "$first_flag" "$last_nudge" "$nudges" || true
+    state_write "$state" "$first_flag" "$last_nudge" "$nudges" "$anchor" || true
     emit "$sid" warrant "$template" "$rig" "$anchor" "$astatus" "$closed_age" "$idle" "$demand" "$nudges" still-flagged-after-nudge
     continue
   fi
   if [ -n "$last_nudge" ]; then
     N_FLAG=$((N_FLAG + 1))
-    state_write "$state" "$first_flag" "$last_nudge" "$nudges" || true
+    state_write "$state" "$first_flag" "$last_nudge" "$nudges" "$anchor" || true
     emit "$sid" flag "$template" "$rig" "$anchor" "$astatus" "$closed_age" "$idle" "$demand" "$nudges" nudged-recently
     continue
   fi
@@ -364,11 +380,11 @@ while IFS=$'\t' read -r sid template rig sname alias last_active; do
       "NOTICE: your last claim $anchor is closed, you hold no other claim, and your pool has no queued work. If you have nothing left to run, close your step chain and run gc runtime drain-ack now." \
       >/dev/null 2>&1; then
     nudges=$((nudges + 1))
-    state_write "$state" "$first_flag" "$NOW" "$nudges" || true
+    state_write "$state" "$first_flag" "$NOW" "$nudges" "$anchor" || true
     N_FLAG=$((N_FLAG + 1))
     emit "$sid" flag "$template" "$rig" "$anchor" "$astatus" "$closed_age" "$idle" "$demand" "$nudges" nudged
   else
-    state_write "$state" "$first_flag" "" "$nudges" || true
+    state_write "$state" "$first_flag" "" "$nudges" "$anchor" || true
     N_FLAG=$((N_FLAG + 1))
     emit "$sid" flag "$template" "$rig" "$anchor" "$astatus" "$closed_age" "$idle" "$demand" "$nudges" nudge-failed
   fi
