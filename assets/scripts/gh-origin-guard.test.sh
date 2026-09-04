@@ -33,6 +33,15 @@
 #   (13) unresolvable rig origin + a write verb -> deny (fail closed)
 #   (14) non-Bash tool, non-gh command, empty and malformed stdin -> silent
 #   (15) every case exits 0, and every refusal is one valid JSON deny object
+#   (16) a repeated --repo/-R binds to its LAST value, matching gh
+#   (17) GH_HOST — inline, exported, or ambient — selects the forge that
+#        completes an unqualified owner/name
+#   (18) env options and assignments ahead of the command are parsed, and -C
+#        moves where an implicit write lands
+#   (19) pushd moves the working directory as cd does; popd and stack rotations
+#        resolve to no repository
+#   (20) a rig root that is set but resolves no origin fails closed, it does not
+#        widen to the city or the working directory
 
 set -u
 
@@ -157,6 +166,19 @@ allowed "exported GH_REPO at own origin"          "$RIG" "export GH_REPO=zookana
 denied  "re-exported GH_REPO, last value wins"    "$RIG" "export GH_REPO=zookanalytics/gc-toolkit; export GH_REPO=get-convex/agent; gh issue create --title 'x'"
 allowed "exported then unset GH_REPO, cwd owned"   "$RIG" "export GH_REPO=get-convex/agent; unset GH_REPO; gh issue create --title 'x'"
 
+# --- (5b) GH_HOST selects the forge --------------------------------------
+# An unqualified owner/name is completed with the host gh would use, and GH_HOST
+# chooses it — inline, exported earlier on the line, or ambient. The same
+# owner/name on another forge is not our origin. Normalising against the hook's
+# own environment instead read an off-forge write as one of ours.
+echo "  -- GH_HOST"
+denied  "inline GH_HOST to another forge"    "$RIG" "GH_HOST=gitlab.example.com gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+allowed "inline GH_HOST github, own origin"  "$RIG" "GH_HOST=github.com gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+denied  "exported GH_HOST to another forge"  "$RIG" "export GH_HOST=gitlab.example.com; gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+denied  "GH_HOST beside an inline GH_REPO"   "$RIG" "GH_HOST=gitlab.example.com GH_REPO=zookanalytics/gc-toolkit gh issue create --title 'x'"
+# An unset GH_HOST returns to the default forge, not the value it held.
+allowed "exported then unset GH_HOST, own"   "$RIG" "export GH_HOST=gitlab.example.com; unset GH_HOST; gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+
 # --- (6) flag spellings --------------------------------------------------
 echo "  -- flag spellings"
 denied "--repo= form" "$RIG" "gh issue create --repo=get-convex/agent --title 'x'"
@@ -173,6 +195,12 @@ allowed "-R attached, own origin"       "$RIG" "gh issue create -Rzookanalytics/
 denied  "split --repo before the noun"          "$RIG" "gh --repo get-convex/agent issue create --title 'x'"
 denied  "split -R before the noun"              "$RIG" "gh -R get-convex/agent issue create --title 'x'"
 allowed "split --repo before the noun, own origin" "$RIG" "gh --repo zookanalytics/gc-toolkit issue create --title 'x'"
+# gh binds a repeated --repo/-R to its LAST value: a command-level selector
+# overrides a global one before the noun. Reading the first selector let an
+# owned --repo shield an off-origin one standing after it.
+denied  "conflicting --repo, last is third party"  "$RIG" "gh --repo zookanalytics/gc-toolkit issue create --repo get-convex/agent --title 'x'"
+allowed "conflicting --repo, last is own origin"    "$RIG" "gh --repo get-convex/agent issue create --repo zookanalytics/gc-toolkit --title 'x'"
+denied  "global -R own, command --repo third party" "$RIG" "gh -R zookanalytics/gc-toolkit issue create --repo get-convex/agent --title 'x'"
 
 # --- (7) reads are untouched ---------------------------------------------
 # The ruling covers sends. Research at a third-party repository stays available,
@@ -217,6 +245,30 @@ denied  "cd home, third party by flag"   "$SANDBOX/third" "cd $RIG && gh issue c
 echo "  -- cd scoped inside a subshell"
 denied  "subshell cd owned, real cwd third party" "$SANDBOX/third" "(cd $RIG); gh issue create --title 'x'"
 allowed "subshell cd elsewhere, real cwd owned"   "$RIG" "(cd $SANDBOX/third); gh issue create --title 'x'"
+
+# --- (8d) env carries options before the wrapped command -----------------
+# env takes its own options and NAME=VALUE assignments ahead of the command.
+# Skipping only the word `env` left an option like -i standing as the command,
+# so the wrapped write was never reached. The assignments set the target the way
+# an inline prefix does, -C moves where an implicit write lands, and an option
+# taking a separate argument is stepped over rather than mistaken for the write.
+echo "  -- env options ahead of the write"
+denied  "env -i wraps a third-party write"  "$RIG" "env -i HOME=/h PATH=/b gh issue create --repo get-convex/agent --title 'x'"
+allowed "env -i wraps an own write"         "$RIG" "env -i HOME=/h PATH=/b gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+allowed "env with a bare assignment"        "$RIG" "env GH_REPO=zookanalytics/gc-toolkit gh issue create --title 'x'"
+denied  "env sets GH_REPO to a third party" "$RIG" "env GH_REPO=get-convex/agent gh issue create --title 'x'"
+denied  "env -C into a third-party clone"   "$RIG" "env -C $SANDBOX/third gh issue create --title 'x'"
+denied  "env -u before a third-party write" "$RIG" "env -u GH_TOKEN gh issue create --repo get-convex/agent --title 'x'"
+
+# --- (8e) pushd and popd move the working directory ----------------------
+# pushd changes where an implicit gh write resolves the way cd does; following
+# only cd measured the write against the directory the session started in. Its
+# stack rotations and popd land somewhere this one-line scan cannot follow, so
+# they resolve to no repository and an implicit write after one is refused.
+echo "  -- pushd and popd"
+denied  "pushd into a third-party clone"    "$RIG" "pushd $SANDBOX/third >/dev/null && gh issue create --title 'x'"
+allowed "pushd into our own checkout"       "$SANDBOX/third" "pushd $RIG >/dev/null && gh issue create --title 'x'"
+denied  "popd leaves the target unresolved" "$RIG" "pushd $SANDBOX/third >/dev/null; popd >/dev/null; gh issue create --title 'x'"
 
 # --- (9) prose is not a target -------------------------------------------
 # A --body or --title can contain anything, including text that reads like
@@ -269,6 +321,16 @@ GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
 
 # A resolvable owned set with an unresolvable target still refuses.
 denied "own rig, target unresolvable" "$SANDBOX/plain" "gh issue create --title 'x'"
+
+# A rig root that is set but resolves no origin is a BROKEN root, not a signal
+# to look wider. It yields an empty owned set and fails closed, rather than
+# falling through to the city or the working directory — otherwise a checkout of
+# someone else's repository, reached through a broken rig, would authorize its
+# own writes.
+GC_RIG_ROOT="$SANDBOX/plain"; export GC_RIG_ROOT
+denied "broken rig root, no fallthrough to city" "$SANDBOX/plain" "gh issue create --repo suandl/shutupandlisten --title 'x'"
+denied "broken rig root, no fallthrough to cwd"  "$SANDBOX/third" "gh issue create --title 'x'"
+GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
 
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"
