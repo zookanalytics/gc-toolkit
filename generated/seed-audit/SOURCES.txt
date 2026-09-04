@@ -44,7 +44,7 @@ agents/refinery/prompt.template.md
 agents/witness/agent.toml
 2ac4c3a4b8a391b8910cc14c17e0952b17dc310bfd5fec852527e54a5779b848
 agents/witness/prompt.template.md
-09b60a0670ed2a4fed4116331ef917c1300c868034f78eb9bcd2d502b4af5d82
+9c1adf853eda03911071342f631583bb8fa2688b2a76945c4a9d63df7e9a11f0
 assets/scripts/render-seed-audit.sh
 1865d17ae05668fa5d9209582e70ed6bef68bb4673d278c2e101e938596d08fc
 formulas/mol-deacon-patrol.toml

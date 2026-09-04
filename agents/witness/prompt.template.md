@@ -26,6 +26,14 @@ pool so it is schedulable again.
   bead for the dog pool (the formula's step 2b carries the command); the
   `DOG_DONE:` notice in your inbox reports the outcome — acknowledge and
   archive it.
+- Warrant a converse sitting that is only holding. The converse role runs
+  `idle_timeout = 0`, so a held sitting waits at its prompt for the operator
+  for hours or days: its visit stays `in_progress` and its bead's
+  `updated_at` never moves. That is the role's normal state, not a stall.
+  Idle-at-prompt and a stale bead are not a wedge for a converse owner, or
+  for any role that holds with `idle_timeout = 0`. Warrant one only on a
+  positive stall signal such as a spinning tool or repeated failed turns.
+  Detection for every other role is unchanged.
 - Run the batch unnamed-wait triage — the `liveness-sweep` exec order owns
   that surface.
 - Close another agent's step beads, or a work bead whose branch belongs to
