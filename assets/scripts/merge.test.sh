@@ -70,6 +70,37 @@ has "$out" "claimed by more than one open anchor" "the duplicate holds every anc
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "no merge under a duplicate claim"
 has "$(cat "$STUB_ESC_LOG")" "--subject M3 --key one-anchor-per-pr.12" "escalate.sh got the situation key"
 
+# The duplicate guard is repo-qualified the same way the in-flight holder
+# filter is (REPO_Q_DEF): a second anchor of this number is a duplicate unless
+# its own pr_url names a DIFFERENT repository. An absent or unparseable pr_url
+# names no repository ("?") and must still hold — matching the live PR's url
+# byte for byte would drop it and merge the same PR twice.
+echo "# one-anchor-per-PR: a same-number anchor with no pr_url still holds"
+store "[$(anchor M3c 42), $(printf '%s' "$(anchor M3d 42)" | jq -c 'del(.metadata.pr_url)')]"
+printf '%s' "$(prview 42 OPEN CLEAN)" > "$GH_DIR/pr_view_42.json"
+echo '[]' > "$GH_DIR/reviews_42.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "claimed by more than one open anchor" "an anchor of this number whose pr_url is ABSENT names no repository and still holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither anchor merged"
+
+echo "# one-anchor-per-PR: a same-number anchor with an unparseable pr_url still holds"
+store "[$(anchor M3e 43), $(printf '%s' "$(anchor M3f 43)" | jq -c '.metadata.pr_url = "TBD"')]"
+printf '%s' "$(prview 43 OPEN CLEAN)" > "$GH_DIR/pr_view_43.json"
+echo '[]' > "$GH_DIR/reviews_43.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "claimed by more than one open anchor" "an anchor of this number whose pr_url is UNPARSEABLE still holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither anchor merged"
+
+echo "# one-anchor-per-PR: a same-number anchor in ANOTHER repository does not hold"
+store "[$(anchor M3g 44), $(printf '%s' "$(anchor M3h 44)" | jq -c '.metadata.pr_url = "https://github.com/other/repo/pull/44"')]"
+printf '%s' "$(prview 44 OPEN CLEAN)" > "$GH_DIR/pr_view_44.json"
+echo '[]' > "$GH_DIR/reviews_44.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded M3g" "a same-number anchor whose pr_url names a DIFFERENT repository is a different PR and does not hold"
+
 echo "# retarget holds"
 store "[$(anchor M4 13)]"
 printf '%s' "$(prview 13 OPEN CLEAN)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_13.json"

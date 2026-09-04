@@ -143,6 +143,18 @@ FIRST_RED_GATE_DEF='
     | (first($gates[] | select((($m["check." + .]) // "") != "green"))) // "";
 '
 
+# The repository an anchor's pr_url names, case-folded, "?" when the url is
+# absent or unparseable (mirrors url_repo_q). Shared between the duplicate-
+# anchor guard and the in-flight holder filter so the two repo-qualified keys
+# cannot drift: "?" is the fail-closed wildcard, so an anchor that names no
+# repository still collides with every anchor of its number.
+REPO_Q_DEF='
+  def repo_q: # "?" = names no repository
+    [ ((. // "") | tostring | gsub("[[:space:]]";"") | ascii_downcase)
+      | capture("^[a-z][a-z0-9+.-]*://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]") ]
+    | .[0] | if . == null then "?" else (.h + "/" + .o) end;
+'
+
 # First declared gate NOT green; non-zero = markers unreadable, which the
 # caller must hold on, never read as all-green. The lane is compared to no
 # head: green is a state of the lane, and a commit landing on the branch
@@ -343,17 +355,23 @@ while IFS= read -r row; do
       held=$((held + 1)); continue ;;
   esac
   # One-anchor-per-PR: fail-closed defense (doctor/check-one-anchor-per-pr is
-  # the structural check). Keyed on pr_url so a foreign same-number anchor never
-  # holds ours; a duplicate holds EVERY anchor of the PR.
+  # the structural check). An "other" anchor of this pr_number is a duplicate
+  # unless its own pr_url names a DIFFERENT repository: the repo key is the same
+  # one the in-flight holder filter uses (REPO_Q_DEF), so a foreign same-number
+  # anchor is dropped while one whose pr_url is absent or unparseable names no
+  # repository ("?") and still holds. A duplicate holds EVERY anchor of the PR.
   dups=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
     echo "$PROG: PR#$num duplicate-anchor read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   }
-  others=$(printf '%s' "$dups" | jq -r --arg id "$id" --arg u "$live_url" '
-    [ .[] | select(.id != $id)
-      | select(((.metadata.pr_url // "") | tostring
-                | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p)) == $u)
-      | .id ] | join(",")' 2>/dev/null)
+  others=$(printf '%s' "$dups" | jq -r --arg id "$id" --arg num "$num" --arg repo "$ORIGIN_REPO_Q" \
+    "$REPO_Q_DEF"'
+    ($repo | ascii_downcase) as $ours
+    | [ .[] | select(.id != $id)
+        | select(((.metadata.pr_number // "") | tostring) == $num)
+        | (.metadata.pr_url | repo_q) as $rq
+        | select($rq == $ours or $rq == "?")
+        | .id ] | join(",")' 2>/dev/null)
   if [ -n "$others" ]; then
     echo "$PROG: PR#$num is claimed by more than one open anchor ($id + $others); merge held — close/demote the duplicate (doctor check-one-anchor-per-pr owns the structure)"
     [ -x "$ESCALATE" ] && "$ESCALATE" --subject "$id" --key "one-anchor-per-pr.$num" \
@@ -397,11 +415,8 @@ while IFS= read -r row; do
   # (the dup guard's business) and explicit tracking_only opt-outs; a dep-edge
   # holder holds regardless — the edge is the claim, and it is local by
   # construction.
-  if ! inflight=$(printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" | jq -sr --arg id "$id" --arg live "$LIVE_STATUSES" --arg repo "$ORIGIN_REPO_Q" '
-    def repo_q: # mirrors url_repo_q, case-folded; "?" = names no repository
-      [ ((. // "") | tostring | gsub("[[:space:]]";"") | ascii_downcase)
-        | capture("^[a-z][a-z0-9+.-]*://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/[0-9]") ]
-      | .[0] | if . == null then "?" else (.h + "/" + .o) end;
+  if ! inflight=$(printf '%s\n%s\n%s' "$by_pr" "$children" "$blockers" | jq -sr --arg id "$id" --arg live "$LIVE_STATUSES" --arg repo "$ORIGIN_REPO_Q" \
+    "$REPO_Q_DEF"'
     ($live | split(",")) as $ls
     | ($repo | ascii_downcase) as $ours
     | [ (.[0][] | . + {via: "pr"}), (.[1][] | . + {via: "dep"}), (.[2][] | . + {via: "dep"}) ]
