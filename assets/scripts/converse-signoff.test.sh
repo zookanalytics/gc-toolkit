@@ -1724,8 +1724,8 @@ run_gate
 if [ "$GATE_RC" -eq 0 ]; then ok "a filed demand at status 0 lets the hold proceed"
 else bad "a filed demand at status 0 lets the hold proceed" "rc=$GATE_RC, out: $GATE_OUT"; fi
 lacks_out "…and says nothing about a failure" "NO DEMAND FILED"
-have "the sitting discharges the demand when it settles the question" \
-     'gc bd close "$DEMAND"' "$PROMPT"
+have "the sitting resolves the demand gate when it settles the question" \
+     'gc bd gate resolve "$DEMAND"' "$PROMPT"
 have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "<what is still owed' "$PROMPT"
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
