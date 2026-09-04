@@ -133,8 +133,12 @@ case "$1 ${2:-}" in
     # branch; --waiting-on reads it to tell a same-branch rider from a separate
     # deliverable. Absent id -> empty, which reads the same as an absent key.
     br="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_BRANCHES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'; fi ;;
+    # Top-level assignee, from FAKE_ASSIGNEES (id|assignee). --waiting-on reads it
+    # as one proof a same-branch wait's work has LANDED on the branch: the handoff
+    # submit-and-exit writes only after it verifies the push. Absent id -> empty.
+    asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -199,7 +203,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
-       FAKE_BRANCHES="$TMP/branches"
+       FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -234,14 +238,26 @@ J
 export FAKE_SL_PATH="$TMP/signal-loom"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"
-# metadata.branch per bead, for the --waiting-on same-branch skip. Only the
-# RIDER-* ids carry one; A-PARKED/tk-blk* stay branchless so the edge tests
-# above them keep writing edges. w-diff rides its own branch; w-nobr has none.
+# metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
+# w-pend and CLOSED-w-rider all share A-ONBR's branch; w-diff rides its own and
+# w-nobr has none. A-PARKED/tk-blk* stay branchless so the edge tests above them
+# keep writing edges. A shared branch alone is not landing: the proof is the
+# status/assignee below — w-same is handed off to the refinery and CLOSED-w-rider
+# has merged (both landed riders), while w-pend is still open under a pool, so its
+# work is not on the branch yet and its edge stands.
 cat > "$TMP/branches" <<'BR'
 A-ONBR|polecat/A-ONBR
 w-same|polecat/A-ONBR
+w-pend|polecat/A-ONBR
+CLOSED-w-rider|polecat/A-ONBR
 w-diff|polecat/w-diff
 BR
+# Top-level assignee per bead. The refinery is the post-push handoff that makes
+# w-same a LANDED rider; w-pend's pool assignee is work still owed, not that proof.
+cat > "$TMP/assignees" <<'ASG'
+w-same|gc-toolkit/gc-toolkit.refinery
+w-pend|gc-toolkit/gc-toolkit.polecat-3
+ASG
 unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
 
@@ -444,27 +460,33 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
   && ok "(EDGENONE) …and the plain stamp path is unchanged" \
   || bad "(EDGENONE) the plain path changed: $(cat "$TMP/updates")"
 
-# ── takeaway --waiting-on: a wait that rode the SUBJECT's own branch (tk-4banho)
-# X.branch == A.branch is the signature the refinery records when X's work rode
-# A's branch, so A's merge is what lands X. An edge there gates A's merge on work
-# that merges WITH A, which merge.sh's dep-edge lane holds on with no release —
-# the PR wedges forever. Such a wait is written as NO edge; when every wait is
-# such a rider the sitting is stamped settled (I1: no held marker without an
-# edge); a wait on its own branch still records one, and the fail-closed rule
-# keeps the edge whenever the same-branch test cannot be made. Covered:
-#   (EDGERIDE)   a same-branch rider writes no edge, and says why
-#   (EDGERIDE)   …and the takeaway stamp still lands (subsumed, not dropped)
-#   (EDGERIDE)   …and the all-rider sitting is stamped settled (keeps I1 clean)
-#   (EDGESEP)    a wait on its OWN branch still records its edge
-#   (EDGENOBR)   a wait with no branch still records its edge (fail toward keeping)
-#   (EDGENOSUBJ) a branchless subject never skips — the guard needs A's branch
-#   (EDGEMIX)    one rider + one separate: only the separate lands, unsettled
+# ── takeaway --waiting-on: a LANDED rider on the SUBJECT's own branch (tk-4banho)
+# A landed rider both rode A's branch (X.branch == A.branch) and has already put
+# its work there, proven by a post-push state: X closed (merged), or handed off
+# to the refinery. Then A's own merge is what lands X, and an edge would gate
+# that merge on work that merges WITH A — merge.sh's dep-edge lane holds on it
+# with no release and the PR wedges forever. So a landed rider is written as NO
+# edge, and when every wait is one the sitting is stamped settled (I1: no held
+# marker without an edge). Same branch WITHOUT the landing proof is not that
+# case: metadata.branch is set at workspace-setup, before X pushes, so a
+# still-open same-branch wait may not be on the branch yet and its edge stands.
+# A wait on its own branch keeps its edge, and the fail-closed rule keeps it
+# whenever the test cannot be made. Covered:
+#   (EDGERIDE)     a handed-off same-branch rider writes no edge, and says why
+#   (EDGERIDE)     …and the takeaway stamp still lands (subsumed, not dropped)
+#   (EDGERIDE)     …and the all-rider sitting is stamped settled (keeps I1 clean)
+#   (EDGECLOSED)   a merged (closed) same-branch rider is landed too — no edge
+#   (EDGEUNLANDED) a same-branch wait NOT yet landed keeps its edge, unsettled
+#   (EDGESEP)      a wait on its OWN branch still records its edge
+#   (EDGENOBR)     a wait with no branch still records its edge (fail toward keeping)
+#   (EDGENOSUBJ)   a branchless subject never skips — the guard needs A's branch
+#   (EDGEMIX)      one rider + one separate: only the separate lands, unsettled
 : > "$TMP/updates"; : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-ONBR "routed — folded onto this branch" --by converse \
    --waiting-on w-same >/dev/null 2>"$TMP/werr" || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
   "(EDGERIDE) a wait that rode the subject's own branch writes no edge"
-grep -q "rode A-ONBR's own branch" "$TMP/werr" \
+grep -q "landed rider on A-ONBR's own branch" "$TMP/werr" \
   && ok "(EDGERIDE) …and the skip names why (the subject's merge lands it)" \
   || bad "(EDGERIDE) the skip was silent or misworded (stderr: $(cat "$TMP/werr"))"
 grep -q -- '--set-metadata gc.takeaway=routed — folded onto this branch' "$TMP/updates" \
@@ -473,6 +495,29 @@ grep -q -- '--set-metadata gc.takeaway=routed — folded onto this branch' "$TMP
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
   && ok "(EDGERIDE) …and the all-rider sitting is stamped settled (I1: no held marker without an edge)" \
   || bad "(EDGERIDE) all-rider takeaway left unsettled — I1 would flag it: $(cat "$TMP/updates")"
+
+# (EDGECLOSED) the other landing proof: a same-branch rider that has MERGED.
+: > "$TMP/deps"; : > "$TMP/updates"
+sh "$SCRIPT" takeaway A-ONBR "routed — the rider already merged" --by converse \
+   --waiting-on CLOSED-w-rider >/dev/null 2>&1 || true
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
+  "(EDGECLOSED) a merged same-branch rider is landed — no edge"
+grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
+  && ok "(EDGECLOSED) …and the all-rider sitting is stamped settled" \
+  || bad "(EDGECLOSED) a merged rider left the sitting unsettled: $(cat "$TMP/updates")"
+
+# (EDGEUNLANDED) the hole this fix closes: same branch, but the wait is still
+# open under a pool — its work is NOT on the branch, so the edge must stand and
+# the sitting must NOT settle. Dropping it would let A merge past unlanded work.
+: > "$TMP/deps"; : > "$TMP/updates"
+sh "$SCRIPT" takeaway A-ONBR "waiting on same-branch work still in flight" --by converse \
+   --waiting-on w-pend >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR w-pend -t blocks' "$TMP/deps" \
+  && ok "(EDGEUNLANDED) a same-branch wait not yet landed keeps its edge" \
+  || bad "(EDGEUNLANDED) a same-branch wait was dropped without proof it landed (got: $(cat "$TMP/deps"))"
+grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
+  && bad "(EDGEUNLANDED) an unlanded same-branch wait must NOT settle — the edge is the hold" \
+  || ok "(EDGEUNLANDED) …and the sitting stays unsettled"
 
 : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-ONBR "waiting on a separate PR" --waiting-on w-diff >/dev/null 2>&1 || true
