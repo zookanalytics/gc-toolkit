@@ -133,7 +133,7 @@ guessed main), REVIEWED_OID pinned, intent read, this step bead closed.
 # where an HTML comment is noise in the text the reviewer reads. One line per
 # adopted dimension, naming the "What to check" bullet it amended:
 # <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
-# (none adopted yet)
+# <!-- rule:tk-wamr3 src:pr:#105 (operator feedback) adopted:2026-09-03 --> Comments
 
 [[steps]]
 id = "review"
@@ -191,6 +191,15 @@ finding this diff carries, not the first one that appears.
   covered, does a regression pin the bug that was fixed?
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
   was intended, docs the change just made false.
+- **Comments** — a comment carries the code's non-obvious why. Narration of
+  the change, the bead, or the design doc belongs in the commit message
+  instead. Prose duplicated across files, or restating a comment a few lines
+  up, is a finding. So is a fact narrated at a site that only consumes it:
+  state it once, where it is defined. When a comment is long, ask whether the
+  code is complex or the comment is making a simple thing look complex. A
+  comment that explains a real why earns its place, so this is not a case for
+  stripping comments. Tests and fixtures matter less here than the code they
+  exercise.
 - **The PR as published** — post-open, the page is what a human reads to
   decide the merge, so read its title and body against the diff you just
   read. Re-derive `PR` and `PR_REPO_Q` here the way load-dispatch did, then
