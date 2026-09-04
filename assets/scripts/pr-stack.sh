@@ -8,7 +8,9 @@
 # For each open anchor (a bead carrying merge_result) that records a pr_number:
 # read the branch's bead ledger, three code-written facts unioned —
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
-# rebase hand-back), metadata.fold_target (folded onto it by a polecat), and
+# rebase hand-back whose push cleared its pool route — a child still routed to a
+# pool has not pushed its fix and stays out), metadata.fold_target (folded onto
+# it by a polecat), and
 # metadata.merged_target with merge_result=merged (landed its own PR into it) —
 # then splice the list into a delimited section at the end of the body. Rows
 # that recorded no work are dropped from the ledger — a closed duplicate keeps
@@ -84,9 +86,24 @@ bd_list() {
 # work_outcome under either key, is dropped, so the section never tells a
 # reviewer to approve work that is not on the branch. Any unreadable half fails
 # the whole ledger.
+#
+# The branch key alone is not proof of a commit: signoff.sh stamps
+# branch=<this head> on a rework child at CREATION, before any polecat claims
+# it, and that child sits open and routed to a pool until one does. Its fix is
+# not on the branch, so a direct row that is still routed to a pool
+# (gc.routed_to set, not `human`) and carries no merge_result is dropped — the
+# same route signal merge.sh reads to hold a merge for an in-flight child. The
+# anchor (merge_result set) and a hand-back whose submit-and-exit cleared the
+# route both stay; fold_target and merged_target rows are records of work
+# already on the branch and skip this gate.
 ledger_of() { # <branch>
   local br="$1" direct folded landed
   direct=$(bd_list --status="$ALL_STATUSES" --metadata-field branch="$br") || return 1
+  direct=$(printf '%s' "$direct" | jq '
+    map(select(
+      (((.metadata // {}).merge_result // "") | tostring) != ""
+      or (((.metadata // {})["gc.routed_to"] // "") | tostring | (. == "" or . == "human"))
+    ))') || return 1
   folded=$(bd_list --status="$ALL_STATUSES" --metadata-field fold_target="$br") || return 1
   landed=$(bd_list --status="$ALL_STATUSES" --metadata-field merged_target="$br" \
     --metadata-field merge_result=merged) || return 1

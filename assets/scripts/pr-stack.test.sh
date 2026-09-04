@@ -5,9 +5,10 @@
 # an open PR's branch and the body names it); each of the three ledger keys;
 # the single-bead PR that stays untouched; idempotence across a second pass;
 # the title never being edited; a closed or foreign PR being left alone; a row
-# that recorded no work — a closed duplicate or a no-op outcome carrying the
-# anchor branch — never entering the ledger; and every unreadable read leaving
-# the body exactly as it stands.
+# that recorded no work — a closed duplicate, a no-op outcome carrying the
+# anchor branch, or a rework child still routed to a pool before its fix is
+# pushed — never entering the ledger; and every unreadable read leaving the
+# body exactly as it stands.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,6 +111,32 @@ has "$out" "names 3 beads" "both hand-backs join the ledger"
 has "$(body 20)" '- `D1` — Rework PR#20: address signoff findings' "the rework is named"
 hasnt "$(body 20)" 'D1` — Rework PR#20: address signoff findings _(merged in' \
     "…and is NOT marked as merged in — its commits are on this branch"
+
+echo "# an open rework child still routed to a pool is not yet on the branch"
+# signoff.sh stamps branch=<this head> on the rework child at CREATION, before
+# any polecat claims it. Open and still routed to a pool, its fix has not been
+# pushed; listing it would tell a reviewer that approving the PR approves work
+# the branch does not carry. The ledger drops it, the anchor stands alone, and
+# the one-bead body pr-open.sh wrote is left byte-identical.
+store "[$(anchor T polecat/T 100),
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","rejection_reason":"signoff requested changes"}}')]"
+pr 100 OPEN polecat/T "$OPENER_BODY"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "1 single-bead" "the routed child drops out and the anchor stands alone"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so the one-bead body is never written"
+eq "$(body 100)" "$OPENER_BODY" "the body is byte-identical"
+
+echo "# the route is the discriminator: once the child's push clears it, it joins"
+# The same child, its submit-and-exit route now cleared — the very signal
+# merge.sh reads to tell a pushed hand-back from one a pool has yet to claim.
+# Its commits are on the branch, so it enters the ledger and the body names both.
+store "[$(anchor T polecat/T 100),
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","rejection_reason":"signoff requested changes"}}')]"
+pr 100 OPEN polecat/T "$OPENER_BODY"
+out=$("$SUT" 2>&1)
+has "$out" "names 2 beads" "the hand-back joins once its route is cleared"
+has "$(body 100)" '- `T1` — Rework branch polecat/T' "…and is listed as a contributor"
 
 echo "# an ordinary one-bead PR is left exactly as pr-open.sh composed it"
 store "[$(anchor E polecat/E 30)]"
