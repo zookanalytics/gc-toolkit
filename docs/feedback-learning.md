@@ -40,7 +40,13 @@ ephemeral record unit where "landed" means "recorded". It is never
 routed, never assigned, and never blocks anything.
 
 - **Title:** `obs: <one-line restatement of the feedback> (<source ref>)`
-- **Type/labels:** `-t task -l learning -l observation`
+- **Type/labels:** `-t task -l learning -l observation`. Both halves are
+  required and neither substitutes for the other: `task_kind=observation` is
+  what makes the bead an observation, and the `observation` label is how the
+  distiller, the miner and the recurrence metric narrow their listings before
+  they filter on it. A capture that sets the metadata but omits the label is
+  an observation no reader in the loop enumerates
+  ([component-model.md](component-model.md#what-kind-of-bead-this-is)).
 - **Body sections:** `## Statement` (the generalizable point),
   `## Quote` (verbatim feedback + link), `## Proposed norm` (draft rule
   text, explicitly non-binding), optionally `## Context` (what the diff

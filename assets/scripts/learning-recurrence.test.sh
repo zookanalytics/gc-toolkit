@@ -59,9 +59,17 @@ cat > "$TMP/rigs.json" <<JSON
 JSON
 export STUB_RIGS="$TMP/rigs.json"
 
+# Both writers (mol-feedback-miner, the file-feedback-observations fragment)
+# create with `-l observation` AND stamp task_kind=observation, so the fixture
+# carries both. `mislabelled` drops the metadata to stand for the beads the
+# label alone sweeps in.
 obs() { # id created_at provenance category pattern source
   jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cat "$4" --arg pat "$5" --arg s "$6" \
-    '{id:$id, created_at:$c, metadata:{"obs.provenance":$p, "obs.category":$cat, "obs.distilled":$pat, "obs.source":$s}}'
+    '{id:$id, created_at:$c, metadata:{task_kind:"observation", "obs.provenance":$p, "obs.category":$cat, "obs.distilled":$pat, "obs.source":$s}}'
+}
+mislabelled() { # id created_at category — carries the label, not the kind
+  jq -nc --arg id "$1" --arg c "$2" --arg cat "$3" \
+    '{id:$id, created_at:$c, metadata:{"obs.provenance":("prov-" + $id), "obs.category":$cat}}'
 }
 
 # alpha: one category seen three times (two inside the window, one older),
@@ -140,6 +148,25 @@ eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-quiet")] | .[0].s
    "a rule with no matching observations scores zero, not null"
 eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$J")" "4" "every adopted entry is inventoried"
 eq "$(jq -r '.m2_post_adoption.measurable' <<< "$J")" "3" "an entry without a pattern anchor is not counted as measurable"
+
+# --- 2a. task_kind decides, the label only narrows ------------------------
+# `-l observation` is a listing narrowing, not the discriminator: the label is
+# free-text and any bead may carry it. A bead without task_kind=observation is
+# not an observation, and admitting it would inflate the corpus both metrics
+# are scored against.
+mkdir -p "$TMP/stores2a"
+{
+  obs         k1 "$(ago 5)" "pr:o/r#30:comment:30" real-slug tk-pat1 self
+  mislabelled k2 "$(ago 4)" impostor-slug
+} | jq -s . > "$TMP/stores2a/alpha.json"
+cat > "$TMP/rigs2a.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2a/alpha.json"}]}
+JSON
+K=$(STUB_RIGS="$TMP/rigs2a.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.corpus.observations' <<< "$K")" "1" \
+   "a bead carrying the label but not task_kind=observation is not an observation"
+eq "$(jq -r '.m1_category_repeat.fragmentation.categorised' <<< "$K")" "1" \
+   "and its obs.category never reaches the M1 accounting"
 
 # --- 2b. one provenance key, several distinct corrections -----------------
 # A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made
