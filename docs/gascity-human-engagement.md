@@ -408,16 +408,26 @@ question no longer parks its subject on a sentence and waits for someone
 to come back and read it; it files what the person owes as its own bead
 and blocks the waiting work on that bead.
 
-What a person owes is a bead like any other. A ruling is
-`issue_type=decision`; a task only a named person can perform is a bead
-assigned to them. Either way it carries `gc.routed_to=human`, so it lands
-in the operator's partition of the board, and the authored
-140-character headline is its TITLE — the same primitive `gc.takeaway`
-already enforced, now attached to the thing that is actually owed. The
-work it gates carries a `blocks` edge to it and is therefore not
-`bd ready`. Closing the demand makes that work ready and the pool claims
-it, so discharging a decision advances the pipeline rather than the
-operator's to-do list.
+What a person owes is a native human gate — `issue_type=gate`,
+`await_type=human` — that blocks the waiting work. A ruling files
+unassigned; a task only a named person can perform is assigned to them, and
+which one it is is recorded in `gc.demand_kind`. Either way it carries
+`gc.routed_to=human`, so it lands in the operator's partition of the board,
+and the authored 140-character headline is its TITLE — the same primitive
+`gc.takeaway` already enforced, now attached to the thing that is actually
+owed. Stamping the gate identity is what feeds core's
+notify-on-human-gate-creation and renudge-stale-human-gates orders and lists
+it under `gc bd gate list`; a bare `blocks` edge fires none of them. The work
+it gates carries a `blocks` edge to it and is therefore not `bd ready`.
+Resolving the gate makes that work ready and the pool claims it, so
+discharging a decision advances the pipeline rather than the operator's
+to-do list.
+
+A gate is hidden from `bd list` by default, so every reader of the demand
+convention — the hold check in `signoff.sh` and `pr-facts.sh`, the liveness
+sweeps, converse's own discharge lookup — passes `--include-gates`. The
+`gc.demand_for` key they match on is unchanged; only the visibility flag is
+new.
 
 The writer is `assets/scripts/gc-helm.sh demand`. It resolves the gated
 bead first, files the demand, wires the edge, and then reads the edge back
@@ -427,6 +437,16 @@ owes an answer, which is precisely the state the verb exists to remove.
 One open demand per gated bead: a resumed sitting that re-states the same
 question refreshes the existing demand rather than giving one wait two
 blockers.
+
+The gate is the STATE; the visit is its RESOLUTION. Because the operator does
+not read the "human" mailbox, the notify order is a durable record, not the
+reach — the visit is the attention channel. `orders/gate-visit-sweep.toml`
+files one converse visit on the gated bead of every open human gate, so the
+question arrives as a conversation with framing and an owner. It is the
+default for every gate; stamping `gc.gate_visit=skip` on a gate suppresses
+its visit, which is the operator's selection point when the default is too
+much. `gc-helm.sh open` files one visit per subject, so the sweep re-offers a
+visit only while the gate is still open.
 
 ### The shape constraint, and why it is the hard part
 
