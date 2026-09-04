@@ -765,8 +765,8 @@ if [ -z "$FIX_BEAD" ]; then
 fi
 
 # The stamped fields ARE the work order: branch/target say what to resume and
-# where it lands, existing_pr keeps the rework on THIS PR, the route says who
-# claims it (stamp-don't-sling: the pool's own demand offers it).
+# where it lands, existing_pr keeps the rework on THIS PR, source_review_bead
+# names the findings it answers.
 META=(
   --set-metadata "branch=$BRANCH"
   --set-metadata "target=$FIX_TARGET"
@@ -777,7 +777,6 @@ META=(
 if [ -n "$POST_OPEN" ]; then
   META+=(--set-metadata "existing_pr=$PR_URL" --set-metadata "pr_url=$PR_URL" --set-metadata "pr_number=$PR_NUMBER")
 fi
-META+=(--set-metadata "gc.routed_to=$FIX_POOL")
 gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 
 # The child must BLOCK the anchor. Recorded the other way round it waits on an
@@ -785,17 +784,19 @@ gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 # count_rounds, which walks the anchor's dependencies, cannot see it either.
 gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
 
+# Verify the work order — every field the resumed workflow reads — and the
+# blocks edge BEFORE the pour, so a claimed rework can never run against absent
+# fields.
 FIX_ROW=$(bd_json show "$FIX_BEAD")
 MISSING=$(printf '%s' "$FIX_ROW" | jq -r \
-  --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg p "$FIX_POOL" --arg pr "${POST_OPEN:+$PR_URL}" '
+  --arg b "$BRANCH" --arg t "$FIX_TARGET" --arg pr "${POST_OPEN:+$PR_URL}" '
   (.[0] // {}) as $x | ($x.metadata // {}) as $m | [
     (if ($m.branch // "") == $b then empty else "branch" end),
     (if ($m.target // "") == $t then empty else "target" end),
     (if ($m.source_review_bead // "") != "" then empty else "source_review_bead" end),
     (if ($m.merge_strategy // "") == "mr" then empty else "merge_strategy" end),
     (if ($m.rejection_reason // "") != "" then empty else "rejection_reason" end),
-    (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "pr_fields" end),
-    (if (($m["gc.routed_to"] // "") == $p) or (($x.assignee // "") != "") then empty else "gc.routed_to" end)
+    (if $pr == "" or ($m.existing_pr // "") == $pr then empty else "pr_fields" end)
   ] | join(",") | if . == "" then "ok" else . end' 2>/dev/null)
 if [ "$MISSING" = "ok" ]; then
   EDGE=$(bd_json dep list "$ANCHOR" --direction=down -t blocks \
@@ -806,6 +807,30 @@ if [ "$MISSING" != "ok" ]; then
   warn "rework child $FIX_BEAD work order incomplete (${MISSING:-unreadable}); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
   exit 2
 fi
+
+# Dispatch is a sling, not a bare route stamp. mol-polecat-work gives the rework
+# the same control-dispatcher driver and continuation affinity poured work and
+# reviews (gate-ensure.sh) get; a bare gc.routed_to route has no driver and
+# starves behind assigned molecule steps in the pool's pull queue. The pour
+# retires gc.routed_to and stamps gc.execution_routed_to=<pool> on the work
+# bead — that is the read-back that proves it. On success wake the pool to claim
+# it. On a pour that will not read back, fall back to the bare stamp: driverless
+# and pull-only, but never worse than that.
+WORK_FORMULA="mol-polecat-work"
+gc sling ${GC_RIG:+--rig "$GC_RIG"} "$FIX_POOL" "$FIX_BEAD" --on "$WORK_FORMULA" >/dev/null 2>&1
+if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")" = "$FIX_POOL" ]; then
+  DISPATCH="slung $WORK_FORMULA to"
+  gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+  gc session nudge "$FIX_POOL" "Rework $FIX_BEAD for anchor $ANCHOR" >/dev/null 2>&1 || true
+else
+  gc bd update "$FIX_BEAD" --set-metadata "gc.routed_to=$FIX_POOL" >/dev/null 2>&1 || true
+  if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.routed_to")" = "$FIX_POOL" ]; then
+    DISPATCH="stamped (pour unavailable) for"
+  else
+    warn "rework child $FIX_BEAD neither slung nor routable ($FIX_POOL read back on neither gc.execution_routed_to nor gc.routed_to); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
+    exit 2
+  fi
+fi
 close_review
-echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD routed to $FIX_POOL"
+echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD $DISPATCH $FIX_POOL"
 exit 0
