@@ -84,8 +84,8 @@ orphan processes, a broken worktree via `gc worktree`). Not `gc doctor
 --fix`: it has no per-check selector, so it applies the whole fixable set at
 once and cannot be scoped to the safe findings — a `--fix`-only finding is
 one to escalate. Dedup against existing beads city-wide before escalating a
-doctor finding — your rig store is not the city. Context recycling is the cycle-recycle Stop hook's job — never
-something you ask about.
+doctor finding — your rig store is not the city. Context recycling is the
+cycle-recycle Stop hook's job — never something you ask about.
 
 
 ## Heartbeat Discipline — No Consent UI
