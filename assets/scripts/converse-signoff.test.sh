@@ -1501,26 +1501,54 @@ have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "<what is st
 have "the prompt states the sibling rule for everything a sitting files" \
      'SIBLING of the subject, never a' "$PROMPT"
 
-# THE POINT OF ALL OF IT. A prose hold is a dispatch only a person can resume:
-# it requires someone to come back, read a sentence, and hand-clear a field.
-# No agent in this pack may write one. The readers stay, because live holds
-# predate this rule and keep working. Converting them is separate work, so
-# this pins the WRITE.
+# THE POINT OF ALL OF IT. triage.hold hides a bead from the triage census.
+# liveness-sweep.sh classifies a marked bead held-by-design and its precheck
+# drops it from the survivor set, so a hold that names no condition is a wait
+# only a person can end. hold-sweep.sh is the one writer the pack allows. It
+# earns that by stamping the release condition (triage.hold_until) in the same
+# write, so every hold it creates carries what a reconcile pass reads to
+# release it. A prompt, a formula, or a second script that writes the marker
+# creates an unconditioned prose hold, hidden behind a name no pass reads. So
+# this pins both halves: the sole writer, and the condition it must co-write.
+# The marker's readers stay, because live holds predate this and keep working.
+SANCTIONED_HOLD_WRITER="assets/scripts/hold-sweep.sh"
 holdwriters=""
 for f in "$PROMPT" "$REPO"/agents/*/prompt.template.md "$REPO"/formulas/*.toml \
          "$REPO"/assets/scripts/*.sh "$REPO"/template-fragments/*.md; do
     case "$f" in *.test.sh) continue ;; esac
     [ -r "$f" ] || continue
-    # A WRITE is an assignment to the key. A read is a lookup, and those stay.
-    if grep -qE 'set-metadata "?triage\.hold=|triage\.hold=<' "$f"; then
-        holdwriters="$holdwriters ${f#"$REPO"/}"
-    fi
+    # A WRITE is a set-metadata whose key is triage.hold, spelled as the literal
+    # or through a variable assigned that literal. The variable form is how the
+    # sanctioned writer spells it, and how a copycat would slip a write past a
+    # literal grep, so resolve those variables rather than trust the surface text.
+    pat='set-metadata "?triage\.hold=|triage\.hold=<'
+    while IFS= read -r v; do
+        [ -n "$v" ] || continue
+        pat="$pat"'|set-metadata "?\$'"$v"'=|set-metadata "?\$\{'"$v"'\}='
+    done < <(grep -oE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=["'\'']triage\.hold["'\'']' "$f" \
+                 | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/')
+    grep -qE "$pat" "$f" || continue
+    [ "${f#"$REPO"/}" = "$SANCTIONED_HOLD_WRITER" ] && continue
+    holdwriters="$holdwriters ${f#"$REPO"/}"
 done
 if [ -z "$holdwriters" ]; then
-    ok "no agent, formula, or script in this pack writes a triage.hold"
+    ok "hold-sweep.sh is the sole writer of triage.hold"
 else
-    bad "no agent, formula, or script in this pack writes a triage.hold" \
-        "prose hold written by:$holdwriters — a demand bead plus a blocks edge is the disposition now"
+    bad "hold-sweep.sh is the sole writer of triage.hold" \
+        "triage.hold also written by:$holdwriters — route a hold through hold-sweep.sh, which stamps a release condition, or file a demand bead plus a blocks edge"
+fi
+
+# The sole writer earns its exemption only by co-writing the release condition:
+# hold-sweep.sh's non-empty triage.hold ($K_HOLD) and triage.hold_until
+# ($K_UNTIL) land in one bd update, so no pass ever reads a hold-sweep hold
+# without the condition that would end it. Join the backslash-continued lines,
+# then require one command that writes both.
+joined="$(sed -e ':a' -e '/\\$/{N;s/\\\n//;ba}' "$REPO/$SANCTIONED_HOLD_WRITER")"
+if grep -qE 'set-metadata "\$K_HOLD=[^"].*set-metadata "\$K_UNTIL=' <<<"$joined"; then
+    ok "the sole writer stamps a release condition in the same write as the hold"
+else
+    bad "the sole writer stamps a release condition in the same write as the hold" \
+        "$SANCTIONED_HOLD_WRITER writes triage.hold without co-writing triage.hold_until in the same bd update — the hold it creates is unconditioned"
 fi
 have "the sweep's disposition menu offers demand in its place" \
      'demand (gc-helm.sh demand' "$REPO/assets/scripts/liveness-sweep.sh"
