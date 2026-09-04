@@ -118,8 +118,10 @@ bd_list() { # guarded array read; non-zero = "could not tell"
 # excluded, so a retire never reads the demand it filed as a live hold.
 demand_gate_state() { # <anchor-id>
   local rows
+  # --include-gates: the demand is a human gate (issue_type=gate), which
+  # `bd list` hides by default; without it a held anchor reads released.
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
+           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
   rows=$(printf '%s' "$rows" | scrub)
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \

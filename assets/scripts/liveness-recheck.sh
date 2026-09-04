@@ -154,7 +154,9 @@ fi
 # Best-effort like the ready set: unread means no bead is held, which lists
 # beads rather than hiding them.
 DEMAND_STATE=verified
-DEMAND_RAW=$(gc bd list --has-metadata-key gc.demand_for \
+# --include-gates: a demand is a human gate (issue_type=gate), which `bd list`
+# hides by default, so the person's wait would otherwise read as no hold.
+DEMAND_RAW=$(gc bd list --has-metadata-key gc.demand_for --include-gates \
     --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json 2>/dev/null | scrub)
 if printf '%s' "$DEMAND_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
     DEMAND_JSON=$(printf '%s' "$DEMAND_RAW" | jq -c '

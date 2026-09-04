@@ -118,11 +118,14 @@ bd_write() { # writes go unpinned through gc bd, honoring the same --db pin
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
 bd_read "$READY" ready --unassigned --limit=0 --json \
     || { echo "$PROG: FAIL-SAFE: ready listing unreadable — sweep aborts, nothing filed" >&2; exit 1; }
-bd_read "$LIVE" list --status=open,in_progress --limit=0 --json \
+# --include-gates: a demand is a human gate (issue_type=gate), which `bd list`
+# hides by default. The census must carry it so $demanded names the wait it
+# holds; the gate itself is never classified (it is excluded from `bd ready`).
+bd_read "$LIVE" list --status=open,in_progress --include-gates --limit=0 --json \
     || { echo "$PROG: FAIL-SAFE: live listing unreadable — sweep aborts, nothing filed" >&2; exit 1; }
 # WIDEN carries every non-closed status LIVE omits: "is that target still
 # alive?" means NOT CLOSED (a blocked/deferred target still names the wait).
-bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --limit=0 --json \
+bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --include-gates --limit=0 --json \
     || { echo "$PROG: FAIL-SAFE: widen listing unreadable — sweep aborts, nothing filed" >&2; exit 1; }
 jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE" 2>/dev/null
 jq -e 'type=="array"' "$ALIVE" >/dev/null 2>&1 \

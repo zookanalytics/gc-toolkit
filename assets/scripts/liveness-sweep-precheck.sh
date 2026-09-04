@@ -204,8 +204,10 @@ READS_OK=1
 READ_FAIL=""
 LAST_READ_ERR=""
 bd_read "$READY" ready --unassigned --limit=0 --json || { READS_OK=0; READ_FAIL="ready: $LAST_READ_ERR"; }
-bd_read "$LIVE"  list --status=open,in_progress --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }live: $LAST_READ_ERR"; }
-bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }widen: $LAST_READ_ERR"; }
+# --include-gates: a demand is a human gate (issue_type=gate), hidden from
+# `bd list` by default; the census must carry it so $demanded names its wait.
+bd_read "$LIVE"  list --status=open,in_progress --include-gates --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }live: $LAST_READ_ERR"; }
+bd_read "$WIDEN" list --status=blocked,deferred,pinned,hooked --include-gates --limit=0 --json || { READS_OK=0; READ_FAIL="${READ_FAIL:+$READ_FAIL; }widen: $LAST_READ_ERR"; }
 if [ "$READS_OK" -eq 1 ]; then
     jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE" 2>/dev/null
     jq -e 'type == "array"' "$ALIVE" >/dev/null 2>&1 \
