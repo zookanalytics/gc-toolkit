@@ -67,8 +67,10 @@ gc.takeaway'
 # or empty. Same list as the declaration, same standby role.
 BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
 BUILTIN_MARKER_PREFIXES='dispatch_backstop.'
-BUILTIN_GATE_PREFIX='check.'
-BUILTIN_GATE_VERB='exception'
+# No gate marker is a hold: a lane state is a state of one reviewer's lane, and
+# each is one some actor moves on from. Empty disables the gate arm.
+BUILTIN_GATE_PREFIX=''
+BUILTIN_GATE_VERB=''
 BUILTIN_ROUTE_KEY='gc.routed_to'
 BUILTIN_PARK_ROUTE='human'
 # The reporting posture, until lifecycle.toml says otherwise.

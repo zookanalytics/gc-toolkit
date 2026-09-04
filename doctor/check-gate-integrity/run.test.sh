@@ -42,11 +42,15 @@ store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.json"; }
 OID="0123456789abcdef0123456789abcdef01234567"
 
 # --- 1. healthy anchors pass ---------------------------------------------------
-store "$(bead g-1 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"branch\":\"polecat/g-1\",\"check.codex\":\"green@$OID\"}")" \
+store "$(bead g-1 '{"merge_result":"pull_request","check_set":"codex","branch":"polecat/g-1","check.codex":"green"}')" \
       "$(bead g-2 '{"merge_result":"pre_open_gate","check_set":"none","branch":"polecat/g-2"}')" \
-      "$(bead g-3 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"branch\":\"b\",\"check.codex\":\"exception@$OID\",\"check.codex.reason\":\"prose, not a marker\",\"check.codex.attempts\":\"2@$OID\"}")"
+      "$(bead g-3 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"branch\":\"b\",\"check.codex\":\"fixing\",\"check.codex.reason\":\"prose, not a marker\",\"check.codex.attempts\":\"2@$OID\"}")" \
+      "$(bead g-3b '{"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"unreviewed"}')" \
+      "$(bead g-3c '{"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"reviewing"}')" \
+      "$(bead g-3d '{"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"validating"}')" \
+      "$(bead g-3e '{"merge_result":"pull_request","check_set":"codex","branch":"b"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "well-formed markers, the none sentinel, and sidecar keys all pass"
+eq "$RC" "0" "every lane state, the none sentinel, an absent marker and sidecar keys all pass"
 has "$OUT" "OK:" "the pass message is the OK line"
 
 # --- 2. missing / empty check_set on a gating anchor ------------------------------
@@ -58,22 +62,25 @@ has "$OUT" "g-4" "the absent declaration is flagged"
 has "$OUT" "g-5" "the explicitly empty declaration is flagged"
 has "$OUT" "ungated" "the finding says what empty means to merge.sh"
 
-# --- 3. malformed markers ---------------------------------------------------------
-store "$(bead g-6 '{"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"green@abc123"}')" \
-      "$(bead g-7 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"branch\":\"b\",\"check.codex\":\"passed@$OID\"}")" \
-      "$(bead g-8 '{"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"green"}')"
+# --- 3. markers outside the lane vocabulary ---------------------------------------
+# The legacy grammar is the case that matters: an unmigrated anchor reads as a
+# state no reader knows, and this check is what says so.
+store "$(bead g-6 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"branch\":\"b\",\"check.codex\":\"green@$OID\"}")" \
+      "$(bead g-7 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"branch\":\"b\",\"check.codex\":\"exception@$OID\"}")" \
+      "$(bead g-8 '{"merge_result":"pull_request","check_set":"codex","branch":"b","check.codex":"passed"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "malformed gate markers are ERRORs"
-has "$OUT" "g-6" "a short oid is flagged"
-has "$OUT" "g-7" "an undeclared verb is flagged"
-has "$OUT" "g-8" "a marker with no @oid at all is flagged"
+eq "$RC" "2" "a marker outside the lane vocabulary is an ERROR"
+has "$OUT" "g-6" "an unmigrated green@<oid> is flagged"
+has "$OUT" "g-7" "an unmigrated exception@<oid> is flagged"
+has "$OUT" "g-8" "a bare word that names no lane state is flagged"
 
-# --- 4. green marker with no branch metadata ---------------------------------------
-store "$(bead g-9 "{\"merge_result\":\"pull_request\",\"check_set\":\"codex\",\"check.codex\":\"green@$OID\"}")"
+# --- 4. a green lane needs no branch to be well-formed ------------------------------
+# The old warning asked whether the marker's oid could be compared to a head.
+# A lane state names no oid, so there is nothing a missing branch makes
+# unverifiable here.
+store "$(bead g-9 '{"merge_result":"pull_request","check_set":"codex","check.codex":"green"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "a green marker on an anchor with no branch is a WARNING"
-has "$OUT" "g-9" "the unverifiable green is named"
-has "$OUT" "branch" "the warning names the missing branch metadata"
+eq "$RC" "0" "a green lane on an anchor with no branch is well-formed"
 
 # --- 5. non-gating anchors are out of scope ------------------------------------------
 store "$(bead g-10 '{"merge_result":"abandoned"}')" \

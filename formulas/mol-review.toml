@@ -337,13 +337,16 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads, and never run `gh pr review --approve`.
 
-**2. Failure arms.** "head moved" from signoff.sh is not a failure — a rework
-rebased your pin off the branch while you were reading it, so your findings
-describe a diff that is no longer there: re-pin at the live head signoff
-names, redo load-dispatch and review, and call it again with the new OID.
-What you must not do is re-submit the verdict you already have. A branch that
-only grew does not refuse — signoff binds at your pin and the merge holds on
-the head mismatch. "already closed" is not a failure either and has nothing to
+**2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
+is the dispatch pin and the posted artifact's audit label, never a marker, and
+nothing in the cadence compares a marker to a head. A rebase or a new commit
+that lands on top of the pin while you read does not stale your findings —
+call it once with the OID the dispatch named. Only a rewrite that drops the
+pin from the branch (a rebase, amend or force-push) is different: signoff
+refuses the verdict, but closes the review bead itself `gc.outcome=superseded`
+and exits 0 — there is nothing here to append and nothing to restore,
+gate-ensure pours a fresh review at the live head next pass.
+"already closed" is not a failure either and has nothing to
 re-pin: this dispatch was recorded or retired before you judged it, so drop the
 verdict, close the chain and drain. Any other failure, in this order: append your findings to
 the review bead (`gc bd update "$REVIEW_BEAD" --append-notes ...`); close the

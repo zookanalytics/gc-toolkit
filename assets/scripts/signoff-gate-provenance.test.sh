@@ -165,7 +165,7 @@ echo "# signoff's own output satisfies the provenance check"
 seed
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "the post-open approve records a verdict"
-eq "$(meta tk-anc check.codex)" "green@$HEAD_OID" "…stamping the marker merge-skill.sh reads"
+eq "$(meta tk-anc check.codex)" "green" "…stamping the marker merge-skill.sh reads"
 eq "$(meta rv-1 reviewed_oid)" "$HEAD_OID" "…and recording the same commit on the review bead"
 OUT=$(bash "$CHECK" 2>&1); RC=$?
 eq "$RC" 0 "the provenance check passes on the store signoff just wrote"
@@ -178,7 +178,7 @@ jq -c 'map(if .id == "rv-1" then (.metadata |= del(.reviewed_oid)) else . end)' 
   "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 OUT=$(bash "$CHECK" 2>&1); RC=$?
 eq "$RC" 2 "the same marker without that record is an error"
-has "$OUT" "commit nothing reviewed it for" "…named as a gate standing on no verdict"
+has "$OUT" "records a passed gate nothing reviewed" "…named as a gate standing on no verdict"
 has "$OUT" "tk-anc" "…on the anchor that carries it"
 
 echo "# no GitHub approval is ever what clears it"

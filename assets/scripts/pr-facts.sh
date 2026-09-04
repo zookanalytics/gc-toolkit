@@ -10,15 +10,16 @@
 # ONE rework child per head to the fix pool, stamped prepare_mode and counted as
 # dispatched only once that stamp AND the route itself read back (dedup: a rework
 # child naming this branch whose rejection_reason names this head; an unstamped
-# orphan is adopted by title and an unrouted one re-routed, never twinned; a
-# hold or a live demand dispatches nothing, since rebasing is one horn of what
-# a demand asks); a gate green@ or exception@ a STALE head -> file one
-# re-review child per head to the review pool, carrying mol-review via gc
-# sling --on (dedup: a live review naming the anchor, or one with
-# review_branch=branch and reviewed_oid=<live head>; same orphan adoption),
-# stamped with fix_target_pool for the rework path; dismissal of our OWN
-# superseded CHANGES_REQUESTED (never a human's; signoff_dismissed read back
-# FIRST; skipped under native auto-merge). A merged record never carries an
+# orphan is adopted by title and an unrouted one re-routed, never twinned; an
+# operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
+# since rebasing is one horn of what a demand asks — except the round cap's own
+# park (merge_hold=signoff_cap paired with signoff_cap), which is not an
+# operator's hold to begin with: it falls through instead of blocking outright,
+# so operator feedback below can still retire it even on a conflicting PR);
+# dismissal of our OWN superseded CHANGES_REQUESTED (never a
+# human's; signoff_dismissed read back FIRST; skipped under native auto-merge).
+# No arm here re-reviews a moved head: a lane state is a state of the lane, and
+# gate-ensure dispatches on the lane, not on the commit under it. A merged record never carries an
 # empty merged_sha — an unreadable mergeCommit records
 # merged_sha=unverified:PR#<n>, loudly.
 # Every OPEN non-draft anchor also gets its POSTURE recorded before any dispatch
@@ -34,8 +35,8 @@
 # Such a batch also resets signoff.sh's review-round cap, once per batch: it is
 # review the branch has never been answered against, not a round of the loop the
 # cap measures. The reset retires the dispatch tally with it, and the cap's own
-# park (its exception@, blocked_reason and human route) when signoff_cap and the
-# standing marker still agree it was the cap that wrote them.
+# park (its merge_hold, blocked_reason and human route) when signoff_cap and the
+# standing hold still agree it was the cap that wrote them.
 # After the dispatch arms, a write-back sweep gives the operator an
 # acknowledgement trail where they are already reading. An anchor carrying
 # pr_comment_disposition has a bead covering its comments, so every comment at
@@ -50,7 +51,7 @@
 # that comment, so nothing has answered it yet.
 # Idempotence is read off GitHub, so a repeat pass writes nothing and a failed
 # write retries.
-# Args: --fix-pool <pool> --review-pool <pool>. Caller: refinery-reconcile.sh
+# Args: --fix-pool <pool>. Caller: refinery-reconcile.sh
 # (BEADS_ACTOR projected to the refinery identity). Fail-closed on identity.
 set -u
 
@@ -64,13 +65,11 @@ scrub() { tr -d '\000-\011\013-\037'; }
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
-BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
 
-FIX_POOL=""; REVIEW_POOL=""; POSTURE_ONLY=0
+FIX_POOL=""; POSTURE_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix-pool)     FIX_POOL="${2:-}"; shift 2 ;;
-    --review-pool)  REVIEW_POOL="${2:-}"; shift 2 ;;
     --posture-only) POSTURE_ONLY=1; shift ;;
     *) shift ;;
   esac
@@ -103,6 +102,16 @@ canon_pr_url() {
   printf '%s' "${1:-}" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
+# The round cap's own park pairs merge_hold=signoff_cap (the literal string,
+# never `true`) with a non-empty signoff_cap naming the gate. That ONE pairing
+# is the cap's park — is_held(merge_hold) alone is not enough, since an
+# operator can set merge_hold=true for an unrelated freeze (a release hold,
+# say) while an orphaned signoff_cap stamp still sits on the anchor from an
+# earlier park the operator already lifted by hand (signoff.sh leaves
+# signoff_cap in place on purpose; see signoff.test.sh's "a signoff_cap
+# standing beside no hold retires nothing"). Both the CONFLICTING arm and the
+# operator-feedback reset arm below key on this same predicate.
+is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -207,7 +216,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-recorded=0; flagged=0; reworked=0; regated=0; dismissed_n=0; skipped=0
+recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0
 postured=0; answered=0; unpostured=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
@@ -221,6 +230,10 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
+  # Read once, off this same row, for is_cap_park below: the CONFLICTING arm's
+  # cap-park carve-out and the operator-feedback reset arm's park retirement
+  # both turn on the identical pairing.
+  cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
   # A graduation is the integration-to-main case whatever its branch is named, so
   # the CONFLICTING arm classifies on this as well as on the branch.
   grad=$(printf '%s' "$row" | jq -r '.metadata.graduation // ""')
@@ -420,10 +433,35 @@ GATES
 
   # --- CONFLICTING: file ONE rework child per head to the fix pool ---------------
   if [ "$mergeable" = "CONFLICTING" ] || [ "$merge_state" = "DIRTY" ]; then
-    if is_held "$hold" || is_held "$rhold"; then
+    if is_held "$rhold"; then
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
+    if is_held "$hold" && ! is_cap_park "$hold" "$cap"; then
+      echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
+      skipped=$((skipped + 1)); continue
+    fi
+    if is_cap_park "$hold" "$cap"; then
+      # The cap's own park is not an operator's hold: signoff.sh's CAP_WHY
+      # tells the operator that "new operator feedback on PR#N retires this
+      # cap and its park", and a conflicting PR must not make that a lie by
+      # wedging the park forever. `continue`ing here the way a person's hold
+      # does would end this anchor's iteration before the posture=commented
+      # arm below ever runs, so a capped anchor whose PR conflicts could never
+      # be released by the very feedback the cap advertises — every pass
+      # would print this line and stop, forever.
+      #
+      # So a cap park alone dispatches no rework THIS pass (merge_hold still
+      # reads as the park at the top of this iteration, and the branch is
+      # still conflicted), but falls through instead of `continue`ing: if
+      # there is new operator feedback, the reset arm below retires the park
+      # in this same pass, and the CONFLICTING check runs clean on the NEXT
+      # pass — merge_hold actually empty by then — to file the rework.
+      # Without feedback, nothing below fires and the anchor stays parked
+      # exactly as it does today.
+      echo "$PROG: $id — PR#$num conflicts but merge_hold parks the review-round cap (gate $cap); no rework dispatched this pass — operator feedback below can retire the park, and the rework files once merge_hold actually clears on a later pass"
+      skipped=$((skipped + 1))
+    else
     # A live demand is the same freeze. `gc-helm.sh demand` files what a person
     # owes as its own bead gating this anchor, and "rebase it onto the base" is
     # routinely one horn of the question being asked. A child dispatched under
@@ -579,107 +617,7 @@ GATES
     reworked=$((reworked + 1))
     echo "$PROG: $id — PR#$num conflicts with '$base'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
     continue
-  fi
-
-  # --- a head-bound verdict at a STALE head: one re-review child per head -------
-  # exception@ rides the same path as green@: both bind a verdict to a commit,
-  # and a branch that has moved past either one has had no look at its head.
-  stale_gate=""; stale_oid=""; stale_verb=""
-  if [ -n "$head_oid" ]; then
-    while IFS= read -r g; do
-      [ -n "$g" ] || continue
-      case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
-      m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
-      case "$m" in
-        green@*|exception@*)
-          o="${m#*@}"
-          if [ -n "$o" ] && [ "$o" != "$head_oid" ]; then
-            stale_gate="$g"; stale_oid="$o"; stale_verb="${m%%@*}"; break
-          fi ;;
-      esac
-    done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
-GATES
-  fi
-  if [ -n "$stale_gate" ]; then
-    if is_held "$hold"; then
-      echo "$PROG: $id — PR#$num check.$stale_gate stale but merge_hold set; no re-review dispatched"
-      skipped=$((skipped + 1)); continue
     fi
-    if [ -z "$REVIEW_POOL" ]; then
-      echo "$PROG: $id — PR#$num check.$stale_gate stale but no --review-pool; merge stays held" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    # Dedup per head: a live review naming this anchor, or any review child with
-    # review_branch=branch and reviewed_oid=<live head> (this arm's own stamp).
-    revs=$(bd_list --metadata-field anchor_bead="$id" --status="$LIVE_STATUSES") || {
-      echo "$PROG: $id — re-review dedup probe failed; no dispatch (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    }
-    live_rev=$(printf '%s' "$revs" | jq -r '
-      [ .[] | select(((.metadata.task_kind // "") | tostring) == "review") | .id ] | .[0] // empty' 2>/dev/null)
-    byhead=$(bd_list --metadata-field review_branch="${branch:-$head_ref}" --status="$ALL_STATUSES") || byhead="[]"
-    head_rev=$(printf '%s' "$byhead" | jq -r --arg h "$head_oid" '
-      [ .[] | select(((.metadata.reviewed_oid // "") | tostring) == $h) | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$live_rev" ] || [ -n "$head_rev" ]; then
-      skipped=$((skipped + 1)); continue
-    fi
-    NOTE="Stale-gate re-review: check.$stale_gate was $stale_verb@$stale_oid; the PR head moved to $head_oid with no rework filed. Re-review the live head."
-    # Orphan adoption BEFORE create (same shape as the rebase arm): an
-    # unstamped re-review carries the deterministic title but no anchor_bead.
-    REV_TITLE="Review PR#$num: re-review at live head"
-    if ! rorphans=$(bd_list --status=open --title-contains "$REV_TITLE"); then
-      echo "$PROG: $id — re-review orphan probe failed; no dispatch (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    RID=$(printf '%s' "$rorphans" | jq -r '
-      [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$RID" ]; then
-      echo "$PROG: $id adopting unstamped re-review orphan $RID for PR#$num (created by a prior pass whose stamp failed)"
-    else
-      body=""
-      [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --note "$NOTE" 2>/dev/null) || body=""
-      if [ -n "$body" ]; then
-        RID=$(printf '%s' "$body" | gc bd create "$REV_TITLE" -t task --body-file - --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      else
-        RID=$(gc bd create "$REV_TITLE" -t task --json 2>/dev/null \
-          | jq -r '.id // empty' 2>/dev/null)
-      fi
-    fi
-    if [ -z "$RID" ]; then
-      echo "$PROG: $id could not file the re-review for PR#$num; retry next pass" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    gc bd update "$RID" \
-      --set-metadata task_kind=review \
-      --set-metadata check_name="$stale_gate" \
-      --set-metadata anchor_bead="$id" \
-      --set-metadata review_branch="${branch:-$head_ref}" \
-      --set-metadata review_base="$base" \
-      --set-metadata reviewed_oid="$head_oid" \
-      --set-metadata pr_url="$live_url" \
-      --set-metadata pr_number="$num" \
-      --set-metadata review_pool="$REVIEW_POOL" \
-      ${FIX_POOL:+--set-metadata fix_target_pool="$FIX_POOL"} >/dev/null 2>&1
-    gc bd dep "$RID" --blocks "$id" >/dev/null 2>&1 || true
-    got=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.anchor_bead // empty')
-    if [ "$got" != "$id" ]; then
-      echo "$PROG: WARN re-review $RID did not record anchor_bead=$id; left unrouted (retry next pass)" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    # One sling, no retry (a re-pour mints a second workflow root); the pour
-    # retires gc.routed_to and stamps gc.execution_routed_to — the read-back.
-    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on mol-review >/dev/null 2>&1
-    rgot=$(gc bd show "$RID" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.execution_routed_to"] // empty')
-    if [ "$rgot" != "$REVIEW_POOL" ]; then
-      echo "$PROG: WARN re-review $RID pour did not read back; retry next pass" >&2
-      skipped=$((skipped + 1)); continue
-    fi
-    gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
-    regated=$((regated + 1))
-    echo "$PROG: $id — PR#$num check.$stale_gate $stale_verb@$stale_oid is stale (live head $head_oid); filed re-review $RID routed to $REVIEW_POOL"
-    continue
   fi
 
   # --- an unanswered review comment routes to something -------------------------
@@ -710,7 +648,7 @@ GATES
     reset_key="$max_r.$max_c"
     if [ "$(printf '%s' "$row" | jq -r '(.metadata.signoff_rounds_reset // "") | tostring')" != "$reset_key" ]; then
       RSET=(--set "signoff_rounds_reset=$reset_key")
-      undo=""; unparked=0
+      undo=""; unparked=0; park_note=""
       # The dispatch tally bounds a runaway: reviews that dispatch and leave no
       # verdict. New operator feedback is the evidence this anchor is not that,
       # and the released rounds cannot be dispatched at all while the tally
@@ -723,37 +661,48 @@ GATES
 $(printf '%s' "$row" | jq -r '(.metadata // {}) | keys[]?
   | select(. == "dispatch_count" or startswith("dispatch_backstop."))' 2>/dev/null)
 TALLY
-      # Retire the cap's own park with it. An exception still bound to the head
-      # re-settles the gate, and a human route sends this very batch to a visit,
-      # so a reset leaving either standing would not be one. signoff_cap names
-      # the exception the park belongs to, and the two must still agree: a park
-      # a person put there, or one whose exception was already retired by hand,
-      # is theirs and stays. A sitting still holding this anchor for a ruling
-      # outranks the reset the same way. The cap's own gc.takeaway is not such a
-      # decision — it is the sentence the board renders for this park — so it
-      # retires with the park, and gc.takeaway_by is what tells it from a
-      # sitting's, which is left alone.
-      cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
-      case "$cap" in
-        ?*@?*)
-          cap_gate="${cap%%@*}"; cap_oid="${cap#*@}"
-          if [ -z "$holding" ] && [ "$(printf '%s' "$row" | jq -r --arg k "check.$cap_gate" \
-               '(.metadata[$k] // "") | tostring')" = "exception@$cap_oid" ]; then
-            RSET+=(--unset "check.$cap_gate" --unset blocked_reason --unset signoff_cap --route "")
-            undo="${undo:+$undo, }check.$cap_gate=exception@$cap_oid, blocked_reason and the human route"
-            if [ "$takeaway_by" = signoff ]; then
-              RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
-              undo="${undo:+$undo, }the cap's takeaway"
-            fi
-            unparked=1
-          fi ;;
-      esac
+      # Retire the cap's own park with it. The hold keeps every dispatch arm off
+      # the anchor, and a human route sends this very batch to a visit, so a
+      # reset leaving either standing would not be one. signoff_cap is the stamp
+      # the cap writes with the hold, and both must still stand: a merge_hold a
+      # person put there, or one already lifted by hand, is theirs and stays. A
+      # sitting still holding this anchor for a ruling outranks the reset the
+      # same way. The cap's own gc.takeaway is not such a decision — it is the
+      # sentence the board renders for this park — so it retires with the park,
+      # and gc.takeaway_by is what tells it from a sitting's, which is left
+      # alone.
+      #
+      # "theirs and stays" above is the shared predicate, not a bare
+      # is_held(merge_hold): the cap's own park is the ONE pairing
+      # merge_hold==signoff_cap (the literal string) beside a non-empty
+      # signoff_cap (`cap`, read at the top of this iteration off the same
+      # row). Any OTHER merge_hold value standing beside signoff_cap — set by
+      # hand over an orphaned cap stamp, or a fresh freeze like a release hold
+      # — is a person's, and this reset must not retire it, or say in its own
+      # note that it did.
+      if is_cap_park "$hold" "$cap"; then
+        if [ -z "$holding" ]; then
+          RSET+=(--unset merge_hold --unset blocked_reason --unset signoff_cap --route "")
+          undo="${undo:+$undo, }the merge_hold park on gate $cap, blocked_reason and the human route"
+          if [ "$takeaway_by" = signoff ]; then
+            RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
+            undo="${undo:+$undo, }the cap's takeaway"
+          fi
+          unparked=1
+        fi
+        # else: a sitting still holding the anchor for a ruling outranks the
+        # reset, same as above — nothing further to say here.
+      elif [ -n "$cap" ] && is_held "$hold"; then
+        park_note=" No park was retired: merge_hold does not carry the cap's own park value, so it is a person's and stays (signoff_cap=$cap stands beside it, unclaimed by this reset)."
+      fi
       if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence." >/dev/null; then
-        [ "$unparked" = 1 ] && routed=""
+           "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence.${park_note}" >/dev/null; then
+        # The row was read before this write, and the routing choice below
+        # reads both fields: a park retired here must not still hold as one.
+        [ "$unparked" = 1 ] && { routed=""; hold=""; }
         echo "$PROG: $id — PR#$num operator feedback resets the signoff round cap${undo:+, retiring $undo}"
       else
-        echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below. The watermark that routing writes retires this batch, so nothing re-reads it: the anchor stays capped until the rework moves its head past the exception." >&2
+        echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below. The watermark that routing writes retires this batch, so nothing re-reads it: the anchor stays parked until a ruling retires it (signoff.sh reset)." >&2
       fi
     fi
 
@@ -926,15 +875,16 @@ TALLY
   fi
 
   # --- dismiss our OWN superseded CHANGES_REQUESTED when the gate is green -------
-  # Only when every declared gate is green at the LIVE head but GitHub is still
-  # red on our own stale block. Never a human's review; skipped when native
-  # auto-merge is armed (the dismissal would hand GitHub the landing).
+  # Only when every declared gate reads green but GitHub is still red on our own
+  # block, left at a commit other than the live head. Never a human's review;
+  # skipped when native auto-merge is armed (the dismissal would hand GitHub the
+  # landing).
   all_green=1
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
     m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
-    [ "$m" = "green@$head_oid" ] || all_green=0
+    [ "$m" = "green" ] || all_green=0
   done <<GATES
 $(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
 GATES
@@ -1365,6 +1315,6 @@ if [ "$POSTURE_ONLY" = 1 ]; then
   # pass runs after merge, where the same rc would gate nothing.
   [ "$unpostured" -eq 0 ] || exit 1
 else
-  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $regated re-reviews filed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
+  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
 fi
 exit 0

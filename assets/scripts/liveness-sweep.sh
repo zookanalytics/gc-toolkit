@@ -271,7 +271,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
         | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
         | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
     | ($gates | length) > 0
-      and all($gates[]; ($m["check." + .] // "") | startswith("green@"));
+      and all($gates[]; ($m["check." + .] // "") == "green");
   # Live-visit subjects: union of the gc.continuation_group stamp and the
   # tracks edge — the stamp alone has landed empty on a live visit (su-ab9je).
   ([ ($live[0] // [])[]

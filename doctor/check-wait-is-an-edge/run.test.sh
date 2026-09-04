@@ -214,11 +214,14 @@ held '{"triage.hold":"x"}'                       "triage.hold"
 held '{"blocked_reason":"the cap fired"}'        "blocked_reason"
 held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
 held '{"gc.routed_to":"human"}'                  "gc.routed_to on the park route"
-held '{"check.codex":"exception@abc123"}'        "check.<g> at the exception verb"
 held '{"dispatch_backstop.codex":"5@abc123"}'    "dispatch_backstop.<g>"
 notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
-notheld '{"check.codex":"green@abc123"}'         "a green gate marker"
-notheld '{"check.codex":"fixable@abc123"}'       "a fixable gate marker"
+# No lane state is a hold: each is one some actor moves the anchor on from, and
+# the cap's park is merge_hold, asserted through blocked_reason and gc.takeaway.
+notheld '{"check.codex":"green"}'                "a green lane"
+notheld '{"check.codex":"fixing"}'               "a fixing lane"
+notheld '{"check.codex":"unreviewed"}'           "an unreviewed lane"
+notheld '{"check.codex":"validating"}'           "a validating lane"
 notheld '{"blocked_reason":""}'                  "an empty blocked_reason"
 notheld '{"gc.takeaway":""}'                     "an empty gc.takeaway"
 notheld '{"dispatch_count":"5"}'                 "a dispatch tally with no backstop stamp"
@@ -309,7 +312,7 @@ eq "$RC" "0" "a marker the declaration drops is no longer asserted"
 mkdir -p "$TMP/pack5/lifecycle"
 { echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
   echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
-for m in '{"dispatch_backstop.codex":"5@abc"}' '{"check.codex":"exception@abc"}' '{"gc.routed_to":"human"}'; do
+for m in '{"dispatch_backstop.codex":"5@abc"}' '{"blocked_reason":"the cap fired"}' '{"gc.routed_to":"human"}'; do
   store '[{"id":"aa-101","status":"open","metadata":'"$m"'}]'
   OUT=$(PACK="$TMP/pack5" run_check); RC=$?
   eq "$RC" "0" "a declaration that drops a marker does not inherit it: $m"

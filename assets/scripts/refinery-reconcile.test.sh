@@ -70,7 +70,8 @@ esac
 merge_line=$(grep '^merge.sh' "$ARM_LOG")
 has "$merge_line" "|myrig/gc-toolkit.refinery|" "merge.sh ran as BEADS_ACTOR=<refinery>"
 facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool')
-has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat --review-pool myrig/gc-toolkit.polecat-codex" "pr-facts got both derived pools"
+has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat" "pr-facts got the derived fix pool"
+hasnt "$facts_line" "--review-pool" "…and no review pool: it dispatches no reviews"
 has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
 
 # merge.sh reads pr_posture off the bead and never asks GitHub, so a posture

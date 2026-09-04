@@ -184,9 +184,12 @@ writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
 check_set_default = "codex"
 check_set_sentinel = "none"
-# check.<g> = <verb>@<oid>. green written only by signoff.sh; cleared/re-armed
-# only by the merge cadence. Merge requires every declared gate green@<live head>.
-marker_verbs = ["green", "fixable", "exception"]
+# check.<g> = <state>, one bare lane-state word never bound to a commit. green
+# written only by signoff.sh; cleared/re-armed only by the merge cadence. Merge
+# requires every declared gate to read green. No reader parses this list back
+# out (docs/state-machine.md is the vocabulary's normative source); it is kept
+# here as the declaration the state-space invariant (I2/I6) describes.
+marker_verbs = ["unreviewed", "reviewing", "validating", "fixing", "green"]
 # `approval` as a check_set member is satisfied only by an external APPROVED
 # review at the live head, never by a check.approval marker.
 approval_member = "approval"
@@ -219,10 +222,13 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # and its value carries the count and the head it holds, so its presence is
 # "dispatch_count at the ceiling" as the writer itself recorded it.
 marker_prefixes = ["dispatch_backstop."]
-# check.<g> holds the merge when its verb is `exception`; the other verbs in
-# marker_verbs above are verdicts, and a verdict moves the anchor on.
-gate_marker_prefix = "check."
-gate_hold_verb = "exception"
+# No check.<g> value is a hold. A lane state says what one reviewer owes, and
+# every one of them is a state some actor moves the anchor on from. The park
+# that used to live under `exception@` is merge_hold, and the cap writes
+# blocked_reason and gc.takeaway with it, both declared above — so the wait is
+# still asserted, by the keys that carry its sentence. Leaving the two gate
+# scalars out is what disables that arm; the check reads an omitted field as a
+# marker the declaration dropped.
 # The route that parks a bead for a person is park_route in [machine]. A bead
 # resting on it waits on somebody, and that wait has the same shape as any
 # other.
@@ -244,8 +250,8 @@ hold_severity = "warn"
 # What the PR is doing, recorded on the anchor by pr-facts.sh. pr_posture is a
 # dated key, `<value>@<oid>@<since>`: its review_required value is a cause of an
 # owed row, so the instant the requirement was first read at this head is what
-# orders that row in the operator's queue. pr_merge_state keeps the plain
-# `<value>@<oid>` shape the check keys use — nothing queues on it. merge.sh
+# orders that row in the operator's queue. pr_merge_state keeps a plain
+# `<value>@<oid>` shape — nothing queues on it. merge.sh
 # reads these off the bead; nothing else re-derives them from GitHub.
 posture_key = "pr_posture"
 # The pack's own vocabulary, lowercase, derived in this precedence order: a
@@ -281,13 +287,13 @@ machine_key = "pr.machine"
 # move the anchor, and they are released by different things, so a reader that
 # has to act on one must not have to re-derive which it is.
 #   progressing       some automated actor will act — a pool-routed blocker is
-#                     open, or a gate marker is not bound to the live head
-#   settled           every declared gate reads green@<live head>; the cadence
+#                     open, or a declared lane is short of green
+#   settled           every declared gate reads green; the cadence
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
-#   wedged-exception  a gate reads exception@<live head>: the convergence cap
-#                     stamped it and routed the anchor to a person, and every
-#                     actor that could move the head has been told not to
+#   wedged-exception  merge_hold stands with signoff_cap beside it: the cap
+#                     parked the anchor and routed it to a person, and no
+#                     automated actor will lift it
 #   wedged-veto       a non-city CHANGES_REQUESTED stands with the signoff round
 #                     cap spent, so nothing will file further rework
 machines = ["progressing", "settled", "wedged-exception", "wedged-veto"]
@@ -325,9 +331,9 @@ keys = [
   "review_branch", "review_base", "reviewed_oid", "review_pool",
   "source_review_bead", "task_kind", "dispatch_count", "dispatch_backstop.<g>",
   "fix_target_pool",
-  # The review-round cap. signoff_cap = <gate>@<oid> names the exception the
-  # cap's human park belongs to, so operator feedback can tell that park from
-  # one a person made. pr-facts.sh records each batch of such feedback in
+  # The review-round cap. signoff_cap = <gate> names the gate whose rounds ran
+  # out, so the cap's own merge_hold park can be told from one a person made.
+  # pr-facts.sh records each batch of such feedback in
   # signoff_rounds_reset = <review id>.<comment id>; signoff.sh answers it with
   # signoff_round_floor = <rework children then>@<batch>, the rounds that no
   # longer count (docs/state-machine.md).
