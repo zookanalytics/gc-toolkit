@@ -132,8 +132,13 @@ DIGEST=$(digest_of "$MESSAGE")
 
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 
-# find_by_key <status-list> -> the id of the bead already holding this
-# finding, or empty.
+# find_by_key <status-list> -> the id of the bead already holding this finding,
+# or empty when the store is readable and holds none. Returns NON-ZERO without
+# printing when the lookup itself could not be trusted: the list command exited
+# non-zero, or its output was not a JSON array. A caller must treat that as
+# "unknown", never as "none" — an empty result read as "no existing finding"
+# files the duplicate this script exists to prevent, during the very store-read
+# failure it is meant to survive.
 #
 # The key rides the listing so the store does the narrowing, and --about rides
 # it too when given: a truncated window filtered client-side would miss its
@@ -143,16 +148,24 @@ bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 # everything, and because "no --about" means the finding.about key is ABSENT —
 # a condition --metadata-field cannot express.
 find_by_key() {
-  local statuses="$1"
+  local statuses="$1" out ids
+  # Capture the listing and its exit status BEFORE the parse: piping straight
+  # into jq (as before) let a failed list emit an empty string that the parser
+  # read as "no match", so the fail-open path and the no-match path were the
+  # same. `|| return 2` splits them.
   # shellcheck disable=SC2086  # the --about filter expands to 0 or 2 fields
-  bd_json list --status="$statuses" --metadata-field "finding.key=$KEY" \
-      ${ABOUT:+--metadata-field "finding.about=$ABOUT"} --limit=0 \
+  out=$(bd_json list --status="$statuses" --metadata-field "finding.key=$KEY" \
+      ${ABOUT:+--metadata-field "finding.about=$ABOUT"} --limit=0) \
+    || return 2
+  # A listing that is not a JSON array — an error object, a truncated payload,
+  # the empty string — cannot be read as "no match". Fail closed.
+  printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+  ids=$(printf '%s' "$out" \
     | jq -r --arg k "$KEY" --arg a "$ABOUT" \
-        'if type == "array"
-         then (.[] | select(((.metadata["finding.key"] // "") == $k)
-                        and ((.metadata["finding.about"] // "") == $a)) | .id)
-         else empty end' 2>/dev/null \
-    | head -n 1
+        '.[] | select(((.metadata["finding.key"] // "") == $k)
+                  and ((.metadata["finding.about"] // "") == $a)) | .id' 2>/dev/null) \
+    || return 2
+  printf '%s' "${ids%%$'\n'*}"
 }
 
 SCOPE_LABEL="${SCOPE:-unscoped}"
@@ -171,7 +184,10 @@ fi
 # spans the recurrence, where an open VISIT did not — a sitting closes each
 # visit before the next sweep runs, so the dedup window never covered the gap
 # and one situation filed a visit per tick.
-EXISTING=$(find_by_key "open,in_progress")
+if ! EXISTING=$(find_by_key "open,in_progress"); then
+  warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate of a bead that may already be open. Re-run when the store is readable."
+  exit 1
+fi
 if [ -n "$EXISTING" ]; then
   ROW=$(bd_json show "$EXISTING")
   SEEN=$(printf '%s' "$ROW" | jq -r '.[0].metadata["finding.occurrences"] // "1"' 2>/dev/null)
@@ -204,7 +220,10 @@ fi
 # A finding whose bead was closed as fixed, firing again, means the fix did
 # not hold. That is worth one new bead — and only one: the next recurrence
 # finds THIS bead open above.
-PRIOR=$(find_by_key "closed")
+if ! PRIOR=$(find_by_key "closed"); then
+  warn "dedup lookup failed (list exited non-zero, or its output was not a JSON array) for the closed-bead probe of $DEDUP_SCOPE — refusing to file, so a transient store-read failure cannot create a duplicate. Re-run when the store is readable."
+  exit 1
+fi
 
 BODY="$MESSAGE
 

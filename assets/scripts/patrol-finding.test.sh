@@ -292,14 +292,41 @@ eq "$(beads)" "1" "(empty id) the bead is NOT filed twice"
 has "$OUT" "found by finding.key" "(empty id) says how it re-identified the bead"
 has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-1" "(empty id) the recovered bead still gets its reaction"
 
-# ── 10. the key fails to stamp ───────────────────────────────────────
-# An unstamped key is invisible to every later sweep, so this fails loud
-# rather than filing a bead that guarantees duplicates.
+# ── 10. the dedup lookup itself cannot be read — fail CLOSED ──────────
+# bd list exits non-zero (the store is momentarily unreadable) while bd create
+# would still succeed. The dedup probe cannot then tell "no existing finding"
+# from "could not look"; reading the empty result as "none" files a fresh bead
+# for a key that may already be open — a duplicate produced during the very
+# store-read failure the dedup exists to survive. It must refuse before any
+# create runs. Regression: the fail-OPEN probe filed fnd-1 and exited 0.
 reset
-export STUB_CREATE_NO_ID=1 STUB_LIST_FAIL=1
+export STUB_LIST_FAIL=1
+OUT=$("$SUT" --key doctor-unreadable --scope deacon-findings \
+        --title "doctor sweep failed" --message "state=failed elapsed=612" 2>&1); RC=$?
+eq "$RC" "1" "(list fails) fails closed — not exit 0 — on an unreadable dedup probe"
+eq "$(beads)" "0" "(list fails) files NOTHING; no duplicate while the store is unreadable"
+hasnt "$OUT" "filed fnd" "(list fails) reports no filed bead"
+has "$OUT" "dedup lookup failed" "(list fails) says the lookup, not the finding, failed"
+has "$OUT" "refusing to file" "(list fails) says it refused"
+eq "$(cat "$STUB_PROACTIVE_LOG")" "" "(list fails) no reaction slung for a finding it would not file"
+
+# The refusal is decided at the dedup probe, before create — so it stands
+# whatever create would have done (the old create-returns-no-id case, which the
+# fail-open probe let reach create, now stops one step earlier).
+reset
+export STUB_LIST_FAIL=1 STUB_CREATE_NO_ID=1
 OUT=$("$SUT" --key doctor-lost --title "lost" --message "lost fired" 2>&1); RC=$?
-eq "$RC" "1" "(unfindable) exits non-zero when the bead cannot be identified"
-has "$OUT" "re-run this command" "(unfindable) names the repair"
+eq "$RC" "1" "(list fails + create no-id) still fails closed at the dedup probe"
+eq "$(beads)" "0" "(list fails + create no-id) nothing filed — the guard precedes create"
+
+# The dedup probe reads clean but bd create fails outright: nothing was filed,
+# so it says so and names the repair rather than reporting a success.
+reset
+export STUB_CREATE_FAIL=1
+OUT=$("$SUT" --key doctor-createfail --title "cf" --message "cf fired" 2>&1); RC=$?
+eq "$RC" "1" "(create fails) a failed create exits non-zero"
+eq "$(beads)" "0" "(create fails) nothing filed"
+has "$OUT" "re-run this command" "(create fails) names the repair"
 
 # ── 11. usage ────────────────────────────────────────────────────────
 reset
