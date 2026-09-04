@@ -57,6 +57,8 @@ HALT="$(extract submit-auto-push-halt)"
 HALT_CLOSE="$(extract submit-halt-chain-close)"
 STORE="$(extract submit-store-only-exit)"
 STORE_CLOSE="$(extract submit-store-only-chain-close)"
+OPMERGE="$(extract submit-operator-merge-park)"
+OPMERGE_CLOSE="$(extract submit-operator-merge-chain-close)"
 
 [ -n "$CLOSE" ] \
   && ok "chain close extracted between submit-chain-close markers" \
@@ -69,6 +71,10 @@ STORE_CLOSE="$(extract submit-store-only-chain-close)"
 [ -n "$STORE" ] \
   && ok "store-only arm extracted between submit-store-only-exit markers" \
   || bad "store-only-arm extraction EMPTY — markers missing from $TOML"
+
+[ -n "$OPMERGE" ] \
+  && ok "operator-merge arm extracted between submit-operator-merge-park markers" \
+  || bad "operator-merge-arm extraction EMPTY — markers missing from $TOML"
 
 # The halt arm nests its chain-close copy under a DIFFERENT marker name on
 # purpose. `extract` is a flag-flip over the whole file, so two regions sharing
@@ -97,7 +103,7 @@ eq "$(sed -n '/^# >>> submit-chain-close$/p' "$TOML" | wc -l | tr -d ' ')" "1" \
 # inside one therefore silently joins lines. Both snippets are written
 # backslash-free so what the polecat reads is what this test runs; assert it,
 # because reintroducing a continuation is an easy and invisible edit.
-case "$GATE$RESOLVE$ANCHOR$CONSUME$CLOSE$HALT$HALT_CLOSE$STORE$STORE_CLOSE" in
+case "$GATE$RESOLVE$ANCHOR$CONSUME$CLOSE$HALT$HALT_CLOSE$STORE$STORE_CLOSE$OPMERGE$OPMERGE_CLOSE" in
   *\\*) bad "snippets contain a backslash — TOML line-ending escapes will mangle them" ;;
   *)    ok  "snippets are backslash-free (safe inside a TOML triple-quoted string)" ;;
 esac
@@ -130,6 +136,13 @@ mkdir -p "$TMP/bin"
 
 cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
+# `git -C <dir> remote get-url origin` is the operator-merge arm's rig-origin
+# probe; it answers $FAKE_RIG_ORIGIN regardless of the dir so a case can set the
+# repo the refinery covers without a real checkout.
+if [ "$1" = "-C" ]; then
+  case "$3 $4" in "remote get-url") printf '%s\n' "${FAKE_RIG_ORIGIN:-}" ;; esac
+  exit 0
+fi
 case "$1 $2" in
   "branch --show-current") printf '%s\n' "${FAKE_BRANCH:-}"; exit 0 ;;
   "rev-list --count")      printf '%s\n' "${FAKE_AHEAD:-0}"; exit 0 ;;
@@ -970,6 +983,125 @@ awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-
   "$TMP/store-armed.sh" > "$TMP/store-nochain.sh"
 eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
+
+# --- 6c. The operator-merge park exit. ----------------------------------------
+# The fourth TERMINAL exit, for a run whose PR lives in a repository this rig's
+# refinery does not cover — a bead slung into this pool whose work belonged to an
+# HQ-rig repo, pushed and PR'd there by hand. The refinery reads a PR by NUMBER
+# in its OWN repo (merge.sh), so handing off aims it at whatever carries that
+# number there. This arm parks the anchor for a person instead: the store-only
+# release shape, but routed to the `human` sentinel rather than cleared, with the
+# PR recorded and no merge_result stamped.
+RIG_HTTPS="https://github.com/zookanalytics/gc-toolkit.git"
+RIG_SSH="git@github.com:zookanalytics/gc-toolkit.git"
+FOREIGN_PR="https://github.com/zookanalytics/loomington/pull/3"
+
+printf '%s\n' "$OPMERGE" > "$TMP/opmerge.sh"
+awk '/# >>> submit-operator-merge-chain-close$/{f=1} /# <<< submit-operator-merge-chain-close$/{f=0; next} !f' \
+  "$TMP/opmerge.sh" > "$TMP/opmerge-nochain.sh"
+
+# run_opmerge <pr-url> <rig-origin> [chainless] -> "<rc>"; trace left in $TMP/log.
+#   Fills OPERATOR_MERGE_PR the way a polecat does. FAKE_RIG_ORIGIN is the repo
+#   the refinery covers; the arm's `git -C "$GC_RIG_ROOT" remote get-url origin`
+#   answers it, so no real second checkout is needed.
+run_opmerge() {
+  : > "$TMP/log"; : > "$TMP/closed"; : > "$TMP/attempted"
+  local src="$TMP/opmerge.sh"
+  [ "${3:-}" = chainless ] && src="$TMP/opmerge-nochain.sh"
+  sed "s|^OPERATOR_MERGE_PR=\"\"\$|OPERATOR_MERGE_PR=\"$1\"|" "$src" > "$TMP/opmerge-run.sh"
+  local rc=0
+  FAKE_RIG_ORIGIN="$2" GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" \
+    FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" \
+    bash "$TMP/opmerge-run.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s' "$rc"
+}
+
+bash -n "$TMP/opmerge.sh" \
+  && ok "extracted operator-merge arm is syntactically valid bash" \
+  || bad "extracted operator-merge arm failed bash -n"
+
+# Ships the opt-in variable empty, like store-only's — the polecat fills it.
+case "$OPMERGE" in
+  *'OPERATOR_MERGE_PR=""'*) ok  "operator-merge arm ships OPERATOR_MERGE_PR empty (the polecat opts in)" ;;
+  *)                        bad "operator-merge arm does not ship an empty OPERATOR_MERGE_PR declaration" ;;
+esac
+
+# Not opted in: inert. A polecat handing off the normal way falls through having
+# written nothing and drained nothing.
+eq "$(run_opmerge '' "$RIG_HTTPS")|$(trace)" "0|" \
+   "empty OPERATOR_MERGE_PR: falls through, writes nothing, does not drain"
+
+# THE ARM. A foreign PR: three writes, then six closes, then the drain — the
+# same release order store-only proved, so the claim guard accepts it.
+eq "$(run_opmerge "$FOREIGN_PR" "$RIG_HTTPS")" "0" "operator-merge arm exits 0 on a foreign PR"
+eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "operator-merge arm parks in three writes, closes six steps, THEN drains"
+eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
+   "$ALL_SIX" \
+   "operator-merge arm closes the same six steps, forward order"
+
+# The three writes and their order. The FIRST carries the park: halt_reason, the
+# repo-qualified pr_url, the human route, and the note APPENDED. The route is
+# `human`, not cleared — the one field that differs from store-only.
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
+   "tk-work --set-metadata halt_reason=awaiting_operator_merge --set-metadata pr_url=$FOREIGN_PR --set-metadata gc.routed_to=human --append-notes Parked for operator merge: $FOREIGN_PR is in zookanalytics/loomington, which this rig's refinery does not cover. A person merges the PR and closes this bead. No merge_result is stamped: merge.sh reads the PR number in the refinery's own repo, not this pr_url." \
+   "first write: halt_reason + pr_url + human route + the note, --append-notes not --notes"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
+   "second write: --status=open alone, while the bead is still assigned"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
+   "third write: --assignee alone, after the status is open"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
+   "the assignee is NOT batched with the metadata (that call is refused whole)"
+
+# The park routes to the human sentinel and stamps NO merge_result — a
+# merge_result would put the anchor on merge.sh's enumeration, which is the whole
+# thing this arm exists to avoid.
+case "$OPMERGE" in
+  *"gc.routed_to=human"*) ok  "operator-merge arm routes to the human sentinel" ;;
+  *)                      bad "operator-merge arm does not route to human — the pool re-offers the bead" ;;
+esac
+# The note explains "No merge_result is stamped", so match the WRITE form rather
+# than the bare word the prose also carries.
+case "$OPMERGE" in
+  *"--set-metadata merge_result"*) bad "operator-merge arm writes a merge_result — merge.sh would enumerate the anchor" ;;
+  *)                               ok  "operator-merge arm stamps no merge_result" ;;
+esac
+case "$OPMERGE" in
+  *"--notes "*) bad "operator-merge arm uses --notes, which REPLACES the dispatch note" ;;
+  *)            ok  "operator-merge arm appends notes rather than replacing them" ;;
+esac
+case "$OPMERGE" in
+  *"git push"*) bad "operator-merge arm contains a push — the branch is already on its foreign origin" ;;
+  *)            ok  "operator-merge arm never reaches git push" ;;
+esac
+
+# ssh-form rig origin canonicalizes the same as https, so the discriminator holds
+# whichever URL form the refinery's checkout records.
+eq "$(run_opmerge "$FOREIGN_PR" "$RIG_SSH")" "0" \
+   "ssh-form rig origin: still parks the foreign PR (canonicalization agrees across URL forms)"
+
+# THE REFUSALS. The arm is opt-in prose, so this is what stops a misfilled
+# variable from parking real refinery work or a non-PR string. A PR in the rig's
+# OWN repo belongs to the refinery: refuse, drain, write nothing.
+eq "$(run_opmerge "https://github.com/zookanalytics/gc-toolkit/pull/9" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
+   "a PR in the rig's own repo: refuses, drains, writes nothing"
+eq "$(run_opmerge "not-a-pr-url" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
+   "a non-URL OPERATOR_MERGE_PR: refuses, drains, writes nothing"
+
+# Same drift guard the other terminal arms get: the chain-close copy is step 7's
+# block, indented one level to sit inside the `if`.
+printf '%s\n' "$OPMERGE_CLOSE" > "$TMP/opmerge-close.sh"
+if diff -q "$TMP/opmerge-close.sh" "$TMP/close-indented.sh" >/dev/null 2>&1; then
+  ok "operator-merge arm ships step 7's chain-close block, byte for byte (+2 indent)"
+else
+  bad "operator-merge arm and step 7 chain-close blocks have DRIFTED"
+  diff "$TMP/opmerge-close.sh" "$TMP/close-indented.sh" | sed 's/^/       /' || true
+fi
+
+# CONTROL: the same arm with its chain-close removed still parks and drains, so
+# only the trace tells a complete arm from one that leaves six step beads open.
+eq "$(run_opmerge "$FOREIGN_PR" "$RIG_HTTPS" chainless)|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
+   "control: chain-less operator-merge arm drains with the chain open (the defect is real)"
 
 # --- 7. Negative control. -----------------------------------------------------
 # Everything above passes against the shipped snippets. That proves nothing

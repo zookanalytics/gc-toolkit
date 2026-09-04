@@ -8,7 +8,9 @@ Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, ONE atomic handoff update to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
-bead and names the disposition for whoever owns the close.
+bead and names the disposition for whoever owns the close. A run whose PR
+lands in a repository no refinery covers takes the operator-merge arm, which
+parks the anchor on gc.routed_to=human for a person to merge.
 NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
@@ -308,6 +310,78 @@ the difference between a bead someone can dispose of and one that just sits:
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.
+
+**0b. Operator-merge park — a PR in a repository no refinery covers (TERMINAL).**
+The refinery this step hands to merges in one repository: the one its own
+checkout calls origin, where `assets/scripts/merge.sh` reads
+`gh pr view <num> --repo <that repo>`. A bead slung into this pool whose work
+belongs to a repository that runs no refinery — an HQ-rig repo, say — has its
+branch pushed and its PR opened there by hand during the implement step.
+Handing that anchor to the refinery aims it at whatever carries the same PR
+number in the refinery's own repo, so the run parks the anchor for a person
+instead of handing off.
+
+Set `OPERATOR_MERGE_PR` to the repo-qualified PR URL you opened
+(`https://github.com/<owner>/<repo>/pull/<n>`). Empty means this is ordinary
+refinery work, and the run falls through to the branch gate and handoff. The
+park routes `gc.routed_to=human`, which no pool's exact-match query selects,
+records the `pr_url`, leaves the anchor open and unassigned, and stamps no
+`merge_result`. A person merges the PR and closes the bead. The discriminator
+is the PR's own repo against the repo the refinery covers, both read before
+any write: a PR in the rig's own repo is refused here, so a misfilled variable
+cannot divert real refinery work.
+
+The three writes and their order are the store-only arm's, and for the same
+reason — the claim guard refuses an assignee change batched with metadata. The
+one difference is the route they land: `human`, the park sentinel, not the
+cleared route that returns a bead to its pool.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+# >>> submit-operator-merge-park
+OPERATOR_MERGE_PR=""
+if [ -n "$OPERATOR_MERGE_PR" ]; then
+  canon_gh_repo() {
+    case "$1" in *github.com*) : ;; *) return 0 ;; esac
+    r=${1#*github.com}; r=${r#:}; r=${r#/}; r=${r%/}; r=${r%.git}
+    case "$r" in */*) printf '%s' "$r" | cut -d/ -f1,2 ;; esac
+  }
+  PR_REPO=$(canon_gh_repo "$OPERATOR_MERGE_PR")
+  RIG_REPO=""
+  for d in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:+$GC_CITY_PATH/rigs/gc-toolkit}"; do
+    [ -n "$d" ] || continue
+    RIG_REPO=$(canon_gh_repo "$(git -C "$d" remote get-url origin 2>/dev/null)")
+    [ -n "$RIG_REPO" ] && break
+  done
+  case "$PR_REPO" in
+    */*) : ;;
+    *) echo "OPERATOR-MERGE PARK REFUSED: OPERATOR_MERGE_PR=$OPERATOR_MERGE_PR is not a github.com PR URL (need https://github.com/<owner>/<repo>/pull/<n>)."; gc runtime drain-ack; exit 1 ;;
+  esac
+  if [ -n "$RIG_REPO" ] && [ "$PR_REPO" = "$RIG_REPO" ]; then
+    echo "OPERATOR-MERGE PARK REFUSED: PR is in this rig's own repo ($RIG_REPO), which the refinery covers. Unset OPERATOR_MERGE_PR and hand off the normal way."
+    gc runtime drain-ack
+    exit 1
+  fi
+  echo "operator-merge park: $OPERATOR_MERGE_PR is in $PR_REPO, which this rig's refinery (${RIG_REPO:-origin unread}) does not cover"
+  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=awaiting_operator_merge --set-metadata "pr_url=$OPERATOR_MERGE_PR" --set-metadata gc.routed_to=human --append-notes "Parked for operator merge: $OPERATOR_MERGE_PR is in $PR_REPO, which this rig's refinery does not cover. A person merges the PR and closes this bead. No merge_result is stamped: merge.sh reads the PR number in the refinery's own repo, not this pr_url."
+  gc bd update "$WORK_BEAD_ID" --status=open
+  gc bd update "$WORK_BEAD_ID" --assignee=""
+  # >>> submit-operator-merge-chain-close
+  SC=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+  done
+  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
+  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+    "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+  done
+  # <<< submit-operator-merge-chain-close
+  gc runtime drain-ack
+  exit 0
+fi
+# <<< submit-operator-merge-park
+```
 
 **1. Branch-shape gate (fails closed).** The refinery merges the branch in
 `metadata.branch`; pushing from any other branch strands the bead. The

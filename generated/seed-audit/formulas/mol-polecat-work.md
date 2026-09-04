@@ -8,7 +8,9 @@ Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, ONE atomic handoff update to the refinery -> close own step
 chain -> drain. A run whose whole product is store work has no branch to
 push and takes submit-and-exit's store-only arm instead, which releases the
-bead and names the disposition for whoever owns the close.
+bead and names the disposition for whoever owns the close. A run whose PR
+lands in a repository no refinery covers takes the operator-merge arm, which
+parks the anchor on gc.routed_to=human for a person to merge.
 NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
