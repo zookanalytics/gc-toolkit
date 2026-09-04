@@ -101,6 +101,10 @@ default = "main"
 description = "Post-rebase quality gate command. The default `make check` in gascity is fmt-check + lint + vet + test — the authoritative safety net for the kept set, since conflict resolutions are committed by `git rebase --continue` without the pre-commit hook. Operators can scope down (e.g. --var check_command='make test'); the default is intentionally the full gate."
 default = "make check"
 
+[vars.tagged_check_command]
+description = "Compile-only gate for build-tagged code, run alongside check_command. gascity's `make check` chain is untagged from end to end, so a break behind a `//go:build` constraint compiles clean under the main gate and only surfaces as red CI after the force-push. Compile-only on purpose: the tagged suites are long, and what this catches is a build failure. Empty skips it."
+default = "go vet -tags integration ./..."
+
 [vars.install_command]
 description = "Command that rebuilds and installs the gc binary locally"
 default = "make install"
@@ -232,8 +236,9 @@ title = "Skip — replaced by the rebase check loop + install"
 needs = ["implement"]
 description = """
 Neutralizes `mol-polecat-base`'s self-review step. Verification lives inside
-the `rebase` check loop (which will not exit until `{{check_command}}` is
-green at the rebased HEAD) and in `install`. Close this step and proceed."""
+the `rebase` check loop (which will not exit until `{{tagged_check_command}}`
+and `{{check_command}}` are both green at the rebased HEAD) and in `install`.
+Close this step and proceed."""
 
 [[steps]]
 id = "survey"
@@ -302,6 +307,7 @@ title = "Rebase onto upstream, one conflict per iteration, until the gate is gre
 needs = ["survey"]
 description = """
 **Config: check_command = {{check_command}}**
+**Config: tagged_check_command = {{tagged_check_command}}**
 
 You are **one iteration of a check loop**. Read this whole step before you
 touch anything. You may be iteration 1 starting fresh, iteration N resuming
@@ -441,18 +447,36 @@ for reworks):
 git log {{upstream_remote}}/{{upstream_branch}}..HEAD --oneline
 ```
 
-Run the gate — the authoritative safety net, since conflict resolutions
-landed without the pre-commit hook:
+Run both gates — the authoritative safety net, since conflict resolutions
+landed without the pre-commit hook. Capture each status separately: a shell
+block's exit is only its last command, so a failed tagged compile followed by
+a green `{{check_command}}` would read as passing and stamp a broken tagged
+surface.
 
 ```bash
+# Tagged compile first — the cheap one, and {{check_command}} cannot
+# substitute for it: gascity's `make check` builds only untagged code, and
+# make stops at the first failing prerequisite, so a long gate that dies early
+# would leave the tagged surface unbuilt. Empty tagged_check_command = skip.
+if [ -n '{{tagged_check_command}}' ]; then
+  {{tagged_check_command}}
+  tagged_status=$?
+else
+  tagged_status=0
+fi
 {{check_command}}
+check_status=$?
 ```
 
-- **Green** — stamp the HEAD it passed at, *after* your last commit:
+Neither command aborts the other; read both outputs. The gate is green only
+when both statuses are zero:
+
+- **Green — `tagged_status` and `check_status` both 0** — stamp the HEAD they passed at, *after* your last commit:
   ```bash
-  gc bd update {{issue}} --set-metadata check_passed_sha="$(git rev-parse HEAD)"
+  [ "$tagged_status" -eq 0 ] && [ "$check_status" -eq 0 ] &&
+    gc bd update {{issue}} --set-metadata check_passed_sha="$(git rev-parse HEAD)"
   ```
-- **Red** — fixing it is your job, not an abort. A failure often points at
+- **Red — either status non-zero** — fixing it is your job, not an abort. A failure often points at
   an earlier iteration's resolution; read `metadata.conflict_resolutions`
   for the likely culprit. Fix, commit, re-run, re-stamp. Out of context?
   Close your bead — the next iteration picks up from here.
