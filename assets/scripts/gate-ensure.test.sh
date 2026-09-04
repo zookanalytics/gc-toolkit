@@ -209,12 +209,12 @@ tbodies=$(jq -r '[.[] | select(.metadata.anchor_bead == "T1") | .description] | 
 has "$tbodies" "gate=triage" "the triage dispatch names the triage method"
 
 echo "# a widened check_set dispatches only the gate that is not yet satisfied"
-store "[$(anchor T2 pull_request "codex,triage,arch" "green@$(oid t2)" polecat/t2 ",\"check.triage\":\"green@$(oid t2)\"")]"
+store "[$(anchor T2 pull_request "codex,triage,arch" "" polecat/t2), $(backed rev-t2c T2 codex), $(backed rev-t2t T2 triage)]"
 oid t2 > "$GH_DIR/head_polecat_t2"
 : > "$STUB_GC_LOG"
 out=$(run_declared)
 has "$out" "1 reviews dispatched" "the two green gates are settled; the gate triage added is dispatched"
-arid=$(jq -r '.[] | select(.metadata.anchor_bead == "T2") | .id' "$STUB_STORE")
+arid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
 eq "$(meta "$arid" check_name)" "arch" "the dispatched review is for the added gate"
 ad=$(jq -r --arg id "$arid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$ad" "gate=arch" "…and its dispatch body names the arch method"
