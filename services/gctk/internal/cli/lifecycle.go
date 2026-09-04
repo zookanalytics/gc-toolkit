@@ -221,15 +221,20 @@ type transitionOpts struct {
 	takeawaySet bool
 }
 
-// parseTransition consumes the flag list. A flag whose value is missing takes
-// the empty string and ends the scan; the shell it replaces looped forever on
-// that input, which is not a contract worth reproducing.
+// parseTransition consumes the flag list. A value-taking flag with no following
+// token is a malformed invocation and returns an error: the empty string it
+// would otherwise take drops --expect's compare-and-swap guard, so a truncated
+// command must fail rather than transition unguarded. An explicitly supplied
+// empty argument (--assignee '' clears the assignee) is a real token and is
+// preserved.
 func parseTransition(args []string) (transitionOpts, error) {
 	var o transitionOpts
+	var missing string // a flag consumed with no value token following it
 	next := func(i int) (string, int) {
 		if i+1 < len(args) {
 			return args[i+1], i + 2
 		}
+		missing = args[i]
 		return "", len(args)
 	}
 	for i := 0; i < len(args); {
@@ -271,6 +276,9 @@ func parseTransition(args []string) (transitionOpts, error) {
 		default:
 			return o, fmt.Errorf("unknown argument '%s'", args[i])
 		}
+	}
+	if missing != "" {
+		return o, fmt.Errorf("flag %s needs a value", missing)
 	}
 	return o, nil
 }

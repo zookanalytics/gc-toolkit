@@ -68,25 +68,42 @@ func TestUnknownArgumentIsRefused(t *testing.T) {
 	}
 }
 
-// A trailing flag with no value takes the empty string and ends the scan. This
-// is the one place the port does NOT reproduce lifecycle.sh, which loops
-// forever here: `shift 2` fails at $# = 1 and the while condition never
-// advances. A hang is not a contract worth reproducing, and the empty value
-// falls through to the existing "transition needs --to <state>" refusal.
-func TestATrailingFlagWithNoValueTerminates(t *testing.T) {
-	o, err := parseTransition([]string{"--expect", "pull_request", "--to"})
+// A value-taking flag with no following token is a malformed invocation and is
+// refused. The empty string it would otherwise take drops --expect's
+// compare-and-swap guard, so `--to pull_request --expect` with nothing after it
+// would transition unguarded. lifecycle.sh hangs on this input instead (its
+// `shift 2` underflows at $# = 1); a refusal is the behavior worth keeping.
+func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
+	for _, flag := range []string{
+		"--to", "--expect", "--set", "--set-dated", "--unset",
+		"--assignee", "--route", "--takeaway", "--append-notes",
+	} {
+		// The flag under test is last, with no token after it. A valid earlier
+		// --to keeps each case about the trailing flag, not a missing target.
+		args := []string{"--to", "pull_request", flag}
+		if flag == "--to" {
+			args = []string{flag}
+		}
+		if _, err := parseTransition(args); err == nil {
+			t.Errorf("parseTransition(%v) accepted %s with no value", args, flag)
+		}
+	}
+}
+
+// An explicitly supplied empty argument is a real token, not a missing one, and
+// is preserved: --assignee '' clears the assignee (a request the atomic update
+// must carry) and --expect '' parses to the empty expectation the guard reads as
+// no compare-and-swap. Only the total absence of a following token is malformed.
+func TestExplicitEmptyArgumentIsPreserved(t *testing.T) {
+	o, err := parseTransition([]string{"--to", "merged", "--expect", "", "--assignee", "", "--close"})
 	if err != nil {
-		t.Fatalf("parseTransition: %v", err)
+		t.Fatalf("parseTransition rejected explicit empty arguments: %v", err)
 	}
-	if o.to != "" {
-		t.Errorf("--to = %q, want empty", o.to)
+	if o.expect != "" {
+		t.Errorf("--expect '' = %q, want the empty expectation", o.expect)
 	}
-	var out, errOut bytes.Buffer
-	if rc := cmdTransition([]string{"b-1", "--to"}, &out, &errOut); rc != 1 {
-		t.Errorf("exit = %d, want 1", rc)
-	}
-	if !strings.Contains(errOut.String(), "needs --to <state>") {
-		t.Errorf("stderr = %q, want the missing-state refusal", errOut.String())
+	if !o.assigneeSet || o.assignee != "" {
+		t.Errorf("--assignee '' = (set %v, %q), want (true, \"\")", o.assigneeSet, o.assignee)
 	}
 }
 
@@ -144,6 +161,10 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"empty --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", ""}, "no question recorded"},
 		{"whitespace-only --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", " \t\n "}, "no question recorded"},
 		{"--takeaway over the cap", []string{"b-1", "--to", "abandoned", "--takeaway", strings.Repeat("x", lifecycle.TakeawayMax+1)}, "the cap is 140"},
+		// A value-taking flag with no following token is malformed; the refusal is
+		// on arguments alone, ahead of any read. --expect is the one that matters:
+		// the empty string it used to take dropped the compare-and-swap guard.
+		{"--expect with no value", []string{"b-1", "--to", "pull_request", "--expect"}, "flag --expect needs a value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
