@@ -11,8 +11,9 @@
 #   3. ATOMIC HANDOFF — one gc bd update carries target + refinery assignee
 #      + cleared route + APPENDED notes; a partial handoff cannot ship.
 #   4. CHAIN CLOSE — six session-owned steps close forward via step-close.sh
-#      at ALL THREE terminal exits (handoff, the auto_push=false halt, and the
-#      store-only exit), and workflow-finalize is never touched.
+#      at ALL FOUR terminal exits (handoff, the auto_push=false halt, the
+#      store-only exit, and the operator-merge park), and workflow-finalize
+#      is never touched.
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
 #      way the halt arm does, in three writes the claim guard accepts, and
 #      refuses the arm outright when the run has a diff to land.
@@ -1087,6 +1088,14 @@ eq "$(run_opmerge "https://github.com/zookanalytics/gc-toolkit/pull/9" "$RIG_HTT
    "a PR in the rig's own repo: refuses, drains, writes nothing"
 eq "$(run_opmerge "not-a-pr-url" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
    "a non-URL OPERATOR_MERGE_PR: refuses, drains, writes nothing"
+# A URL that names an owner/repo but is not a pull request — a bare repo URL or
+# an issue URL — carries no /pull/<n>, so it must refuse rather than park a
+# pr_url with no PR behind it. (Weaken the check to a plain owner/repo match and
+# both park instead: that is the regression these two guard.)
+eq "$(run_opmerge "https://github.com/zookanalytics/loomington/issues/3" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
+   "an issue URL (owner/repo, no /pull/<n>): refuses, drains, writes nothing"
+eq "$(run_opmerge "https://github.com/zookanalytics/loomington" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
+   "a bare repo URL (owner/repo, no /pull/<n>): refuses, drains, writes nothing"
 
 # Same drift guard the other terminal arms get: the chain-close copy is step 7's
 # block, indented one level to sit inside the `if`.

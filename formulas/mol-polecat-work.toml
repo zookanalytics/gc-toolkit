@@ -326,10 +326,11 @@ Set `OPERATOR_MERGE_PR` to the repo-qualified PR URL you opened
 refinery work, and the run falls through to the branch gate and handoff. The
 park routes `gc.routed_to=human`, which no pool's exact-match query selects,
 records the `pr_url`, leaves the anchor open and unassigned, and stamps no
-`merge_result`. A person merges the PR and closes the bead. The discriminator
-is the PR's own repo against the repo the refinery covers, both read before
-any write: a PR in the rig's own repo is refused here, so a misfilled variable
-cannot divert real refinery work.
+`merge_result`. A person merges the PR and closes the bead. Two checks read
+before any write: the value must be a full `https://github.com/<owner>/<repo>/pull/<n>`
+URL — a repo or issue URL is refused, not parked as a `pr_url` no one can merge —
+and a PR in the rig's own repo is refused too, since the refinery covers it. A
+misfilled variable cannot divert real refinery work or park a dead bead.
 
 The three writes and their order are the store-only arm's, and for the same
 reason — the claim guard refuses an assignee change batched with metadata. The
@@ -342,22 +343,39 @@ WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 # >>> submit-operator-merge-park
 OPERATOR_MERGE_PR=""
 if [ -n "$OPERATOR_MERGE_PR" ]; then
+  # owner/repo from a git remote (ssh or https, optional .git): the repo the
+  # refinery covers.
   canon_gh_repo() {
     case "$1" in *github.com*) : ;; *) return 0 ;; esac
     r=${1#*github.com}; r=${r#:}; r=${r#/}; r=${r%/}; r=${r%.git}
     case "$r" in */*) printf '%s' "$r" | cut -d/ -f1,2 ;; esac
   }
-  PR_REPO=$(canon_gh_repo "$OPERATOR_MERGE_PR")
+  # owner/repo from a PR WEB URL, empty for anything else. Validates the whole
+  # shape before any write — exact github.com host, owner and repo, /pull/<digits>
+  # (a trailing /files, ?query or #fragment is fine) — so a repo or issue URL
+  # yields nothing here and is refused, not parked as a pr_url no one can merge.
+  gh_pr_repo() {
+    case "$1" in https://github.com/*/*/pull/[0-9]*) : ;; *) return 0 ;; esac
+    rest=${1#https://github.com/}
+    owner=${rest%%/*}; rest=${rest#*/}
+    repo=${rest%%/*}; rest=${rest#*/}
+    case "$rest" in pull/*) : ;; *) return 0 ;; esac
+    num=${rest#pull/}; num=${num%%[!0-9]*}
+    [ -n "$owner" ] && [ -n "$repo" ] && [ -n "$num" ] || return 0
+    printf '%s/%s' "$owner" "$repo"
+  }
+  PR_REPO=$(gh_pr_repo "$OPERATOR_MERGE_PR")
   RIG_REPO=""
   for d in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:+$GC_CITY_PATH/rigs/gc-toolkit}"; do
     [ -n "$d" ] || continue
     RIG_REPO=$(canon_gh_repo "$(git -C "$d" remote get-url origin 2>/dev/null)")
     [ -n "$RIG_REPO" ] && break
   done
-  case "$PR_REPO" in
-    */*) : ;;
-    *) echo "OPERATOR-MERGE PARK REFUSED: OPERATOR_MERGE_PR=$OPERATOR_MERGE_PR is not a github.com PR URL (need https://github.com/<owner>/<repo>/pull/<n>)."; gc runtime drain-ack; exit 1 ;;
-  esac
+  if [ -z "$PR_REPO" ]; then
+    echo "OPERATOR-MERGE PARK REFUSED: OPERATOR_MERGE_PR=$OPERATOR_MERGE_PR is not a github.com pull-request URL (need https://github.com/<owner>/<repo>/pull/<n>)."
+    gc runtime drain-ack
+    exit 1
+  fi
   if [ -n "$RIG_REPO" ] && [ "$PR_REPO" = "$RIG_REPO" ]; then
     echo "OPERATOR-MERGE PARK REFUSED: PR is in this rig's own repo ($RIG_REPO), which the refinery covers. Unset OPERATOR_MERGE_PR and hand off the normal way."
     gc runtime drain-ack
