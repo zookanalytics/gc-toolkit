@@ -5,13 +5,15 @@
 # Covers the two gates and their order: a closed bead is what clears a worktree,
 # and the squash commit on the default branch — not tip-reachability, which a
 # squash-merge destroys — is what clears the branch behind it. Covers what holds
-# a worktree: an open bead, a modification, an untracked file, a live process
-# standing in it, and a ledger that answers with an error or with nothing.
-# Covers the one shape that does NOT hold: a pure deletion, whose content is in
-# HEAD, and which would otherwise strand every worktree older than a file the
-# default branch dropped. Covers the shape rails that keep an agent's session
-# worktree and the rig checkout out of the candidate set, --dry-run's promise
-# that it reports what a run would take, and the budget yield. Covers nested
+# a worktree: a non-closed bead of any status — an open one, and a deferred one,
+# since the guard reads every status but closed — a modification, an untracked
+# file, a live process standing in it, and a ledger that answers with an error
+# or with nothing. Covers the one shape that does NOT hold: a pure deletion,
+# whose content is in HEAD, and which would otherwise strand every worktree
+# older than a file the default branch dropped. Covers the shape rails that keep
+# an agent's session worktree and the rig checkout out of the candidate set,
+# --dry-run's promise that it reports what a run would take, and the per-rig
+# budget yield — one rig's slow pass does not starve the next. Covers nested
 # child bead ids (tk-x.1.1), which the grammar must consume whole in both the
 # branch and worktree passes.
 set -uo pipefail
@@ -27,7 +29,7 @@ SUT="$HERE/worktree-reap.sh"
 RIG="$TMP/rig"
 SESS="$TMP/sessions/agent-a"
 BIN="$TMP/bin"
-export STUB_OPEN="$TMP/open.json" STUB_BD_RC=""
+export STUB_OPEN="$TMP/open.json" STUB_BD_RC="" STUB_DEFERRED="$TMP/deferred.json"
 mkdir -p "$BIN"
 cd "$TMP" || exit 1
 
@@ -36,10 +38,19 @@ cat > "$BIN/gc" <<'STUB'
 set -u
 case "${1:-}" in
   rig)
-    printf '{"rigs":[{"name":"testrig","path":"%s","hq":false}]}\n' "${STUB_RIG_PATH:?}" ;;
+    if [ -n "${STUB_RIGS_JSON:-}" ]; then printf '%s\n' "$STUB_RIGS_JSON"
+    else printf '{"rigs":[{"name":"testrig","path":"%s","hq":false}]}\n' "${STUB_RIG_PATH:?}"; fi ;;
   bd)
     [ -n "${STUB_BD_RC:-}" ] && { echo "gc bd: simulated failure" >&2; exit "$STUB_BD_RC"; }
-    cat "${STUB_OPEN:?}" ;;
+    # Model the store's default status filter: `bd list` with no --status
+    # returns every non-closed bead — here the open set plus the deferred set;
+    # an explicit --status is the old narrow query and sees only the open set.
+    # The reaper dropped --status to hold deferred/hooked work, so this is what
+    # makes the deferred-hold assertions fail on the old code and pass on the new.
+    saw_status=0
+    for a in "$@"; do case "$a" in --status | --status=*) saw_status=1 ;; esac; done
+    if [ "$saw_status" -eq 0 ]; then jq -s 'add' "${STUB_OPEN:?}" "${STUB_DEFERRED:?}"
+    else cat "${STUB_OPEN:?}"; fi ;;
   *) exit 2 ;;
 esac
 STUB
@@ -53,6 +64,7 @@ export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
 git config --global init.defaultBranch main
 run() { bash "$SUT" "$@" 2>&1; }
 open_beads() { printf '%s\n' "$1" > "$STUB_OPEN"; }
+deferred_beads() { printf '%s\n' "$1" > "$STUB_DEFERRED"; }
 gitr() { git -C "$RIG" "$@"; }
 
 # A clone of a bare origin, one commit on main, plus the session directory the
@@ -69,7 +81,37 @@ build_city() {
     gitr config user.email t@t; gitr config user.name t
     mkdir -p "$SESS"
     open_beads '[{"id":"tk-keep1"}]'
+    deferred_beads '[]'
+    unset STUB_RIGS_JSON
     export STUB_BD_RC=""
+}
+
+# Two independent rigs, each a clone with its own session dir and one
+# closed-bead worktree, plus a stub rig list naming both. For the per-rig
+# budget: a slow first rig must not spend the window the second needs.
+build_two_rigs() {
+    rm -rf "$TMP/two"
+    R1="$TMP/two/rig1"; R2="$TMP/two/rig2"; S1="$TMP/two/sess1"; S2="$TMP/two/sess2"
+    local name repo
+    for name in rig1 rig2; do
+        [ "$name" = rig1 ] && repo="$R1" || repo="$R2"
+        git init -q --bare "$TMP/two/$name.git"
+        git init -q "$TMP/two/seed-$name"
+        ( cd "$TMP/two/seed-$name" && git config user.email t@t && git config user.name t \
+            && echo base > file.txt && git add . && git commit -qm base \
+            && git remote add origin "$TMP/two/$name.git" && git push -q origin HEAD:main )
+        rm -rf "$TMP/two/seed-$name"
+        git clone -q "$TMP/two/$name.git" "$repo"
+        git -C "$repo" config user.email t@t; git -C "$repo" config user.name t
+    done
+    mkdir -p "$S1" "$S2"
+    git -C "$R1" worktree add -q "$S1/worktrees/tk-one1" -b polecat/tk-one1 >/dev/null 2>&1
+    git -C "$R2" worktree add -q "$S2/worktrees/tk-two2" -b polecat/tk-two2 >/dev/null 2>&1
+    open_beads '[{"id":"tk-keep1"}]'
+    deferred_beads '[]'
+    export STUB_BD_RC=""
+    export STUB_RIGS_JSON
+    STUB_RIGS_JSON="$(printf '{"rigs":[{"name":"rig1","path":"%s","hq":false},{"name":"rig2","path":"%s","hq":false}]}' "$R1" "$R2")"
 }
 
 # A per-bead worktree in the shape mol-polecat-work pours, on polecat/<bead>.
@@ -231,6 +273,21 @@ OUT="$(run)"
 if exists "$F"; then ok "a ledger lookup that errors holds everything"; else bad "a ledger lookup that errors holds everything"; fi
 export STUB_BD_RC=""
 
+# --- a non-closed bead of any status holds ----------------------------------
+# The guard reads `bd list` with no --status, so its live set is every
+# non-closed bead, not just open/in_progress/blocked. A deferred bead names a
+# crash-recovery worktree the refinery can still resume, so reaping it takes the
+# only local copy, and its merged branch behind it goes the same way. The stub
+# returns the deferred set only for the unfiltered query, so both assertions
+# fail against the old --status open,in_progress,blocked list.
+build_city
+DEFWT="$(mk_wt tk-def1)"
+gitr branch polecat/tk-def2 origin/main >/dev/null 2>&1
+deferred_beads '[{"id":"tk-def1"},{"id":"tk-def2"}]'
+run > /dev/null
+if exists "$DEFWT"; then ok "a deferred bead holds its worktree"; else bad "a deferred bead holds its worktree"; fi
+if has_branch polecat/tk-def2; then ok "a deferred bead holds its merged branch"; else bad "a deferred bead holds its merged branch"; fi
+
 # --- shape rails ------------------------------------------------------------
 # Only <anything>/worktrees/<bead-id> is a candidate. The agent's own session
 # worktree, a directory whose name is not a bead id, and a bead-named directory
@@ -289,6 +346,18 @@ LEFT=0
 for W in tk-lll2 tk-mmm3; do exists "$SESS/worktrees/$W" && LEFT=$((LEFT + 1)); done
 eq "$LEFT" "1" "a yielded pass takes one worktree and leaves the other"
 has "$OUT" "took 1 worktrees" "a yielded pass reports what it actually took"
+
+# --- the per-rig budget: a slow first rig does not starve the second --------
+# The budget clock resets per rig, so time spent reaping the first rig is not
+# charged to the second. Under one shared clock a slow first rig spent the whole
+# window and every later rig reaped nothing. Slow `du` + a 3s budget: the first
+# rig's one worktree outlasts the budget, yet the second still reaps its own.
+build_two_rigs
+OUT="$(PATH="$SLOWBIN:$PATH" WORKTREE_REAP_BUDGET=3 run)"
+if exists "$S1/worktrees/tk-one1"; then bad "per-rig budget: the first rig reaps its worktree"; else ok "per-rig budget: the first rig reaps its worktree"; fi
+if exists "$S2/worktrees/tk-two2"; then bad "per-rig budget: a slow first rig does not starve the second"; else ok "per-rig budget: a slow first rig does not starve the second"; fi
+has "$OUT" "rig1 — yielded" "the yield names the rig that ran out"
+unset STUB_RIGS_JSON
 
 # --- one rig ----------------------------------------------------------------
 build_city

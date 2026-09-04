@@ -4,9 +4,10 @@
 # bead, so the local clone is where a finished item's scaffolding stays, and a
 # rig accumulates one worktree per work item forever.
 #
-# City scope: every non-HQ rig, one pass each. A closed bead is the gate and a
-# squash commit on the default branch is the confirmation, so a pass that is
-# skipped or cut short by its budget costs only the reclaim the next pass
+# City scope: every non-HQ rig, one pass each with its own budget window, so a
+# slow rig never spends the budget a later rig needs. A closed bead is the gate
+# and a squash commit on the default branch is the confirmation, so a pass that
+# is skipped or cut short by its budget costs only the reclaim the next pass
 # takes instead.
 [order]
 description = "Remove the per-bead worktrees of closed beads and the local branches whose content has landed"

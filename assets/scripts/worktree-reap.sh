@@ -16,7 +16,9 @@
 # reachability alone would refuse nearly everything it should take.
 #
 # What holds a worktree:
-#   - the bead named by its directory is open, in_progress or blocked
+#   - the bead named by its directory is not closed — open, in_progress,
+#     blocked, deferred, pinned or hooked; deferred and hooked name live work
+#     (crash-recovery, an in-flight claim) whose only local copy this is
 #   - it holds content that exists nowhere else: a modification, an addition,
 #     an untracked file, or an ignored file the working tree is the only copy of
 #   - a running process has its cwd inside it
@@ -32,8 +34,9 @@
 # Branch deletion is gated separately, because a branch outlives its worktree,
 # and it owns one family: polecat/<bead-id>. A branch that names no bead is
 # left alone whatever its merge state. A polecat/<bead-id> branch is held while
-# its bead is open, in_progress or blocked — a tip already merged into the
-# default branch does not make a live work item's local ref disposable. Once
+# its bead is not closed — the same live set the worktree pass reads — a tip
+# already merged into the default branch does not make a live work item's local
+# ref disposable. Once
 # the bead is no longer live the branch goes: when its tip is an ancestor of
 # the default branch (git's own definition of merged), or when the bead id
 # appears in a commit message there — the squash commit, which is what "the
@@ -48,7 +51,7 @@
 #   worktree-reap.sh              reap every non-HQ rig, print one line each
 #   worktree-reap.sh --dry-run    report the plan, touch nothing
 #   worktree-reap.sh --rig <name> one rig only
-# Env: WORKTREE_REAP_BUDGET (seconds, default 480).
+# Env: WORKTREE_REAP_BUDGET (seconds per rig, default 480).
 # Exit: 0 reaped or nothing to do · 2 usage.
 # Caller: the worktree-reap exec order. See docs/worktree-reclaim.md.
 set -euo pipefail
@@ -71,8 +74,13 @@ case "$BUDGET" in
     '' | *[!0-9]*) echo "$PROG: WORKTREE_REAP_BUDGET must be a whole number of seconds" >&2; exit 2 ;;
 esac
 
+# The budget is per rig, not per pass: reap_rig resets RIG_START at its top, so
+# a slow first rig cannot spend the window on behalf of the rest and every rig
+# the pass reaches gets its own WORKTREE_REAP_BUDGET seconds. START stays the
+# whole-pass wall clock, read only by the final summary.
 START=$(date +%s)
-over_budget() { [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - START)) -ge "$BUDGET" ]; }
+RIG_START=$START
+over_budget() { [ "$BUDGET" -gt 0 ] && [ $(($(date +%s) - RIG_START)) -ge "$BUDGET" ]; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -137,11 +145,12 @@ drop_branch() { # <repo> <branch>
     ! git -C "$1" show-ref --verify --quiet "refs/heads/$2"
 }
 
-TOTAL_WT=0; TOTAL_BR=0; TOTAL_KB=0; TOTAL_HELD=0; YIELDED=""
+TOTAL_WT=0; TOTAL_BR=0; TOTAL_KB=0; TOTAL_HELD=0; YIELDED_RIGS=0
 
 reap_rig() { # <rig-name> <rig-path>
     local rig="$1" repo="$2"
-    local default_ref open_json wt_removed=0 wt_held=0 br_removed=0 freed_kb=0
+    local default_ref open_json wt_removed=0 wt_held=0 br_removed=0 freed_kb=0 yielded=""
+    RIG_START=$(date +%s)
 
     git -C "$repo" fetch --prune --quiet origin 2>/dev/null || true
 
@@ -151,11 +160,17 @@ reap_rig() { # <rig-name> <rig-path>
         return 0
     fi
 
-    # The ledger, read once. Fail closed twice over: a lookup that errors is
-    # not an all-clear, and neither is an empty answer — a Dolt store that is
-    # down answers "no work" in exactly that shape, and every bead would then
-    # read as closed.
-    open_json="$(gc bd --rig "$rig" list --status open,in_progress,blocked --limit 0 --json 2>/dev/null)" || open_json=""
+    # The ledger, read once. The guard holds every bead that is not closed, so
+    # the query carries no --status: `bd list` filters closed out by default
+    # (--all is what adds it back), leaving open, in_progress, blocked, deferred,
+    # pinned and hooked. A deferred or hooked bead is live, resumable work — a
+    # crash-recovery worktree, an in-flight claim — and the narrower
+    # open,in_progress,blocked list dropped it, so the --force removal below took
+    # its only local copy. Fail closed twice over: a lookup that errors is not an
+    # all-clear, and neither is an empty answer — a Dolt store that is down
+    # answers "no work" in exactly that shape, and every bead would then read as
+    # closed.
+    open_json="$(gc bd --rig "$rig" list --limit 0 --json 2>/dev/null)" || open_json=""
     if ! printf '%s' "$open_json" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
         echo "$PROG: $rig — ledger returned no open beads; holding everything (a store that is down answers the same way)"
         return 0
@@ -181,7 +196,7 @@ reap_rig() { # <rig-name> <rig-path>
 
         # The budget is spent deciding as much as removing — every gate below
         # costs a `git status` — so it is read before the gates, not after.
-        if over_budget; then YIELDED="worktrees"; break; fi
+        if over_budget; then yielded="worktrees"; break; fi
         if grep -qxF "$bead" "$WORK/open"; then wt_held=$((wt_held + 1)); continue; fi
         if occupied "$path"; then wt_held=$((wt_held + 1)); continue; fi
         if holds_unique_content "$path"; then wt_held=$((wt_held + 1)); continue; fi
@@ -231,7 +246,7 @@ reap_rig() { # <rig-name> <rig-path>
     # agent session branch, a long-lived claude/research-* or roadmap branch, a
     # design-doc trio — names no bead this pass may reason about and is left
     # alone whatever its merge state. Within the family the order is the point:
-    # a live bead (open, in_progress or blocked) holds its branch BEFORE the
+    # a live bead (any status but closed) holds its branch BEFORE the
     # merged test, because a tip already an ancestor of the default branch (a
     # fast-forward land, or content that reached main another way) does not make
     # a resumable work item's local ref disposable. Only once the bead is no
@@ -239,6 +254,10 @@ reap_rig() { # <rig-name> <rig-path>
     git -C "$repo" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null > "$WORK/branches" || : > "$WORK/branches"
     while IFS= read -r branch; do
         [ -n "$branch" ] || continue
+        # The budget bounds the branch pass too: a worktree pass that spent it
+        # does not then walk every branch unbudgeted. A yield the worktree pass
+        # already named is kept, so the report points at the pass that ran out.
+        if over_budget; then [ -n "$yielded" ] || yielded="branches"; break; fi
         if [ "$branch" = "$bare_default" ]; then continue; fi
         if grep -qxF "$branch" "$WORK/checkedout"; then continue; fi
 
@@ -272,6 +291,11 @@ reap_rig() { # <rig-name> <rig-path>
     printf '%s: %s — %s %d worktrees (%s GiB) and %d branches; held %d worktrees\n' \
         "$PROG" "$rig" "$([ "$DRY_RUN" -eq 1 ] && echo 'would take' || echo 'took')" \
         "$wt_removed" "$(gib $((freed_kb * 1024)))" "$br_removed" "$wt_held"
+    if [ -n "$yielded" ]; then
+        YIELDED_RIGS=$((YIELDED_RIGS + 1))
+        printf '%s: %s — yielded in the %s pass; %ss budget spent, the next pass takes the rest\n' \
+            "$PROG" "$rig" "$yielded" "$BUDGET"
+    fi
 }
 
 RIGS="$(gc rig list --json 2>/dev/null | jq -r '.rigs[]? | select(.hq != true) | "\(.name)\t\(.path)"' 2>/dev/null)" || RIGS=""
@@ -290,7 +314,7 @@ done <<< "$RIGS"
 printf '%s: %s %d worktrees (%s GiB) and %d branches across every rig; held %d worktrees in %ss\n' \
     "$PROG" "$([ "$DRY_RUN" -eq 1 ] && echo 'DRY RUN — would take' || echo 'freed')" \
     "$TOTAL_WT" "$(gib $((TOTAL_KB * 1024)))" "$TOTAL_BR" "$TOTAL_HELD" "$(($(date +%s) - START))"
-if [ -n "$YIELDED" ]; then
-    echo "$PROG: yielded in the $YIELDED pass — ${BUDGET}s budget spent; the next pass takes the rest"
+if [ "$YIELDED_RIGS" -gt 0 ]; then
+    echo "$PROG: $YIELDED_RIGS rig(s) yielded on the ${BUDGET}s per-rig budget; the next pass takes the rest"
 fi
 exit 0

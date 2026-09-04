@@ -22,9 +22,12 @@ to every agent that asks.
 ## What the reaper does
 
 `orders/worktree-reap.toml` runs `assets/scripts/worktree-reap.sh` hourly,
-`scope = "city"`, no LLM and no agent. Each non-HQ rig gets one pass, bounded
-by `WORKTREE_REAP_BUDGET` (480s). A pass skipped or cut short by its budget
-costs only the reclaim the next pass takes instead.
+`scope = "city"`, no LLM and no agent. Each non-HQ rig gets its own pass with
+its own `WORKTREE_REAP_BUDGET` window (480s per rig, reset as the pass moves to
+the next rig): a slow first rig spends only its own budget, never a later rig's,
+so no rig is starved of a pass by the ones ahead of it. A pass skipped or cut
+short by its budget costs only the reclaim the next pass takes instead, and the
+yield names the rig that ran out.
 
 Two gates, and their order is the point.
 
@@ -38,7 +41,10 @@ should take.
 
 ## What holds a worktree
 
-- The bead named by its directory is `open`, `in_progress` or `blocked`.
+- The bead named by its directory is not closed. The guard reads `bd list` with
+  no `--status` filter, whose default is every non-closed bead — `open`,
+  `in_progress`, `blocked`, `deferred`, `pinned`, `hooked` — so a deferred
+  crash-recovery worktree or a hooked in-flight claim is held, not reaped.
 - It holds content that exists nowhere else — a modification, an addition, an
   untracked file, or an ignored file the working tree is the only copy of. git
   omits ignored files from status by default, so the check asks for them.
@@ -67,10 +73,10 @@ bead — an agent session branch (`gc-<agent>-<hash>`), a long-lived
 `claude/research-*` or `roadmap` branch, a design-doc trio — is left alone
 whatever its merge state.
 
-A `polecat/<bead-id>` branch is held while its bead is `open`, `in_progress` or
-`blocked`. A tip already an ancestor of the default branch does not override a
-live bead: a resumable work item's local ref is not disposable because its
-content happens to have reached `main`.
+A `polecat/<bead-id>` branch is held while its bead is not closed — the same
+live set the worktree pass reads. A tip already an ancestor of the default
+branch does not override a live bead: a resumable work item's local ref is not
+disposable because its content happens to have reached `main`.
 
 Once the bead is no longer live the branch goes — when its tip is an ancestor
 of the default branch (git's own definition of merged, which discards no
