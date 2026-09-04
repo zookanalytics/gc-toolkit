@@ -22,20 +22,30 @@ min_active_sessions = 0
 max_active_sessions = 2
 
 # work_query = the running worker's discovery query: routed demand ranked by
-# board weight (oldest-first within a band).
+# board weight (oldest-first within a band). The jq drops graph.v2 topology
+# ROOTS (gc.kind in workflow/scope/spec) — a root is routed only to name its
+# run and gc hook --claim never offers it; the claimable unit is the routed
+# non-topology STEP (e.g. mol-first-reaction.load-bead), which survives the
+# filter. The gc binary's default pool query carries this clause on both the
+# worker and count forms, so this custom pair must too — omit it and the pool
+# counts an unclaimable root as demand, spawns, claims nothing, and drains.
 work_query = '''
 _='' # env-prefix landing: the reconciler prepends VAR='…' to line 1; a bare assignment absorbs and persists it (line 1 must stay a bare assignment).
 target="{{.Rig}}/gc-toolkit.proactive"
-r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
+r=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --sort oldest --limit=20 2>/dev/null | jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end); map(select((.metadata["gc.kind"] // "" | (. == "workflow" or . == "scope" or . == "spec")) | not)) | sort_by(-(prio_w(.priority)), (.created_at // ""))' 2>/dev/null)
 if [ -n "$r" ]; then printf '%s' "$r"; else printf '[]'; fi
 '''
 
-# scale_check = the reconciler's SPAWN predicate; the same demand in count
-# form (0 = no demand = no spawn) so a spawn always finds work to claim.
+# scale_check = the reconciler's SPAWN predicate; work_query's demand in count
+# form (0 = no demand = no spawn) so a spawn always finds work to claim. It
+# carries the SAME topology-root exclusion: counting a root gc hook --claim
+# will never offer spawns a worker with nothing to claim — the churn this pool
+# hit. Counting only non-topology rows makes scale_check a lower bound on what
+# a spawn can claim, by construction.
 scale_check = '''
 _='' # env-prefix landing — same rationale as work_query's line 1.
 target="{{.Rig}}/gc-toolkit.proactive"
-n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq 'length' 2>/dev/null)
+n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq '[ .[] | select((.metadata["gc.kind"] // "" | (. == "workflow" or . == "scope" or . == "spec")) | not) ] | length' 2>/dev/null)
 if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
 '''
 
