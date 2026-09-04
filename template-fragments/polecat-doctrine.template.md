@@ -47,6 +47,17 @@ resumes `metadata.branch` and fixes `metadata.rejection_reason` per
 by name. Do not use internal task-planning tools in place of the steps: the
 step descriptions are the plan.
 
+## A subagent for the search, not the work
+
+- A broad read-only search — sweeping many files or naming conventions when
+  only the conclusion is needed — may go to a read-only search subagent where
+  the provider offers one, so the sweep costs that agent's context rather
+  than the polecat's. A lookup that one grep settles does not earn a subagent.
+- Delegate the search, never the work. Anything producing a change, a
+  verdict, or an outcome another agent needs is a bead. A subagent leaves no
+  trace on the bead, the branch or the PR, so work done inside one is work
+  nobody can find.
+
 ## Directory discipline
 
 `workspace-setup` creates a per-bead git worktree and records it in
