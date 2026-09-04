@@ -60,6 +60,11 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1" = "bd" ] && { [ "$2" = "update" ] || [ "$2" = "close" ]; }; then
   [ -n "${GCLOG:-}" ] && printf '%s\n' "$*" >> "$GCLOG"
+  # GCUPDRC drives a refused write. The stub models NO ownership check of its
+  # own: bd's lives on the `close` verb, and a stub that either enforced or
+  # waived it would be answering the question (7b) and (10b2) ask of the
+  # shipped text and the emitted command instead.
+  case " $* " in *" --status=closed "*) exit "${GCUPDRC:-0}" ;; esac
   exit 0
 fi
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
@@ -217,9 +222,20 @@ REWORK_ARM="$(awk '
 [ -n "$REWORK_ARM" ] \
   && ok "(6) terminal rework arm extracted between one-anchor-per-pr-terminal markers" \
   || bad "(6) terminal rework arm extraction EMPTY — markers missing from $TOML"
-grep -q 'gc bd close "\$WORK"' <<< "$REWORK_ARM" \
+grep -q 'gc bd update "\$WORK" --status=closed' <<< "$REWORK_ARM" \
   && ok "(7) rework arm closes \$WORK (landed-on-branch terminal)" \
   || bad "(7) rework arm must close \$WORK"
+# The VERB is the assertion. bd's ownership check is a property of `bd close`:
+# it compares the actor to the assignee and refuses a bead held by another
+# principal. Every bead the refinery closes is one someone handed it, and the
+# refusal is per-anchor and permanent, so a retry meets it unchanged every pass.
+# `bd update --status=closed` reaches the same status carrying no such check.
+# Neither this suite's stub nor the shared harness models an acting identity, so
+# a stub can answer this question in either direction and prove nothing —
+# the shipped text and the emitted command (10b, 10b2) are what pin it.
+grep -q 'gc bd close' <<< "$REWORK_ARM" \
+  && bad "(7b) rework arm must not close through 'gc bd close' — that verb carries bd's ownership check, which refuses a bead assigned to another principal" \
+  || ok "(7b) rework arm closes through 'bd update --status=closed', past the close-verb ownership check"
 grep -q 'merge_result=' <<< "$REWORK_ARM" \
   && bad "(8) rework arm must NOT stamp merge_result (would mint a second anchor)" \
   || ok "(8) rework arm stamps no merge_result — \$WORK never enters the anchor class"
@@ -286,8 +302,25 @@ case "$REWORK_OK" in
   *) bad "(10a) expected a --to unanchored transition on the child (got: $REWORK_OK)" ;;
 esac
 case "$REWORK_OK" in
-  *"#"*"close w1"*) ok "(10b) the child then closes landed-on-branch" ;;
-  *)               bad "(10b) the child must close after the transition (got: $REWORK_OK)" ;;
+  *"#"*"update w1 --status=closed"*) ok "(10b) the child then closes landed-on-branch" ;;
+  *) bad "(10b) the child must close after the transition (got: $REWORK_OK)" ;;
+esac
+# The mirror of (7b), on the command actually emitted rather than on the source:
+# `bd close` must not appear for ANY bead this arm touches.
+case "$REWORK_OK" in
+  *"bd close "*) bad "(10b2) the arm emitted 'bd close', which bd refuses on a bead assigned to another principal (got: $REWORK_OK)" ;;
+  *)             ok "(10b2) no 'bd close' is emitted — the close cannot meet the close-verb ownership check" ;;
+esac
+# A refused close is reported, not swallowed. The transition already landed, so
+# the child sits unanchored, open and assigned — the shape that reads as work
+# still in flight, and the one a silent close leaves behind every pass.
+: > "$LCLOG"; : > "$TMP/gc.log"
+refused_out=$(EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
+  LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 \
+  GCLOG="$TMP/gc.log" GCUPDRC=1 bash "$TMP/terminal.sh" 2>&1 >/dev/null)
+case "$refused_out" in
+  *"did not close"*|*"close was refused"*) ok "(10b3) a refused close is reported" ;;
+  *) bad "(10b3) a refused close must be reported (got: '$refused_out')" ;;
 esac
 # The anchor keeps its own state: the arm annotates it and transitions nothing.
 case "$REWORK_OK" in
@@ -307,8 +340,9 @@ esac
 # left the queue without landing; leaving it open lets the next pass retry.
 REWORK_REFUSED="$(run_rework 1)"
 case "$REWORK_REFUSED" in
-  *"#"*"close w1"*) bad "(10e) a refused transition must not close the child (got: $REWORK_REFUSED)" ;;
-  *)                ok "(10e) a refused transition leaves the child open for the next pass" ;;
+  *"#"*"w1 --status=closed"*|*"#"*"close w1"*)
+    bad "(10e) a refused transition must not close the child (got: $REWORK_REFUSED)" ;;
+  *) ok "(10e) a refused transition leaves the child open for the next pass" ;;
 esac
 
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining
