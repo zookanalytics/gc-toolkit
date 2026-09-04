@@ -339,9 +339,17 @@ since_format = "RFC 3339 UTC"
 # vocabulary those keys are read with. A key absent from the groups below is
 # not pack state.
 #
-# Each definition names four things, because a reader needs all four and three
-# of them are invisible in the value: what writes the key, what reads it, what
-# its ABSENCE means, and how it is cleared.
+# A reader of a key needs four things, three of them invisible in the value:
+# what writes the key, what reads it, what its ABSENCE means, and how it is
+# cleared. The prose definitions below state all four for the keys where any of
+# them is non-obvious or was an ambiguity this vocabulary had to settle. The
+# rest are registered in the grouped tables under a note stating what their
+# group leaves unsaid; the merge, gate and posture keys carry their mechanics in
+# the [gates], [posture], [holds] and [machine] sections above rather than a
+# definition repeated here. Registration is the completeness guarantee — every
+# key the pack writes appears in a group — and a four-part paragraph is spent
+# only where a reader cannot recover the four from the group and the sections
+# above.
 #
 # owner — the configured git identity of whoever's `bd` wrote the row, which is
 #   an email address rather than an agent. bd sets it; the pack has neither a
@@ -436,14 +444,32 @@ since_format = "RFC 3339 UTC"
 #   not claim the convoy is machine-made and the title tests decide it. Nothing
 #   clears it.
 #
-# gc.takeaway — the operator-facing question, and the only field the board
-#   renders as one. Written by `gc-helm.sh takeaway`, capped at 140 codepoints
-#   and stamped with gc.takeaway_at and gc.takeaway_by. Read by the Helm board.
-#   Absent on a bead parked for a person means the park was never finished: the
-#   board can say a human owns the bead and not what they were asked. It is
-#   never cleared, being the durable record of what the sitting concluded.
-#   `blocked_reason` is not a substitute, recording why work stopped, which is
-#   a conclusion rather than a question.
+# gc.takeaway — the one sentence the operator's board renders for a bead,
+#   stamped alongside gc.takeaway_at and gc.takeaway_by (gc-helm.sh caps the
+#   ones it writes at 140 codepoints). It is written wherever the city needs a
+#   person to read a headline, and gc.takeaway_by names which writer: `gc-helm.sh
+#   takeaway` stamps a sitting's on the anchor (--by host|proactive|converse),
+#   `gc-helm.sh demand` stamps one on the demand bead it files (keyed by
+#   gc.demand_for), signoff.sh stamps the round cap's park sentence on the anchor
+#   with gc.takeaway_by=signoff, and pr-facts.sh (a closed or mis-targeted PR)
+#   and first-reaction-dispose.sh stamp theirs through `lifecycle.sh --takeaway`.
+#   Read by the Helm board as that headline; by [holds] as a marker that holds
+#   while gc.takeaway_settled is absent or empty, which doctor/check-wait-is-an-
+#   edge reads through the same settled pair; and by doctor/check-claim-advancing,
+#   which treats a non-empty value as a step held on purpose and drops it from
+#   the stall scan. Absent on a bead parked for a person means the park was never
+#   finished: the board can name a human owner and not what they were asked.
+#   A sitting's or demand's headline is a durable record — replaced by the next
+#   headline and cleared by nothing a sitting does, so its presence dates the
+#   last sitting, and a live demand bead rather than this key is what still
+#   holds. The one takeaway retired is the round cap's own, and only with its
+#   park: signoff.sh reset and pr-facts.sh's operator-feedback reset unset it
+#   where gc.takeaway_by=signoff and merge_hold=signoff_cap still stands beside a
+#   non-empty signoff_cap (pr-facts additionally requires no live demand still
+#   holding the anchor) — the pairing that tells the cap's sentence from a
+#   sitting's decision, which this verb must never clear. `blocked_reason` is not
+#   a substitute, recording why work stopped, which is a conclusion rather than a
+#   question.
 #
 # gc.proactive — the per-bead opt-in that asks for a first reaction.
 #   `tools/gc-proactive.sh` selects `gc.proactive=1` among ready unassigned
@@ -568,6 +594,13 @@ keys = [
   # signoff_round_floor = <rework children then>@<batch>, the rounds that no
   # longer count (docs/state-machine.md).
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
+  # gate-ensure.sh's one-pass hold before it escalates a wedged review. Finding
+  # a review whose poured workflow is spent with no verdict, it stamps the spent
+  # root here (on the review bead, not the anchor) and waits a pass — mol-review's
+  # failure arm closes its chain before it restores the route, so a single read
+  # can catch a recovery mid-write — and escalates only when a later pass still
+  # reads the same root. Absent means this wedge was not sighted before; nothing
+  # clears it.
   "wedge_seen_root",
 ]
 
@@ -599,8 +632,13 @@ keys = [
   "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",
   "sweep.*", "triage.*", "stall_root",
-  # gc-helm.sh's other write verbs: `react` stamps the reaction it slung,
-  # `dismiss` stamps who set a row aside and when.
+  # gc-helm.sh's other write verbs, each read elsewhere. `react` (and the park
+  # in `takeaway --release`) sets gc.proactive_reaction=1 on the bead it advanced
+  # for a first reaction; tools/gc-proactive.sh skips a bead already carrying it
+  # and first-reaction-dispose.sh reads it as its already-reacted guard.
+  # `dismiss` sets gc.dismissed_by and gc.dismissed_at when a person sets a row
+  # aside, and the Helm source reads gc.dismissed_at. Absent means the verb has
+  # not run on the bead; nothing clears them.
   "gc.proactive_reaction", "gc.dismissed_by", "gc.dismissed_at",
   # The per-bead opt-in the same scan selects on. Nothing writes it: it is set
   # by hand on a bead whose holder wants a first reaction.
@@ -637,18 +675,25 @@ keys = [
   "evidence_count", "distinct_sources", "first_seen", "last_seen",
 ]
 
-# One bead replacing another. Both directions are stored, each beside the store
-# that owns the named bead, because a supersession routinely crosses rigs and a
-# bare id resolves in the wrong one.
+# One bead replacing another, written by bead-rehome.sh: gc.supersedes(_store)
+# onto the successor, gc.superseded_by(_store) onto the retired bead, and it
+# reads gc.superseded_by back to chase a chain to its live end. Both directions
+# are stored, each beside the store that owns the named bead, because a
+# supersession routinely crosses rigs and a bare id resolves in the wrong one.
+# Absent means the bead neither replaces nor was replaced; nothing clears the
+# pair.
 [metadata.supersession]
 keys = [
   "gc.supersedes", "gc.supersedes_store",
   "gc.superseded_by", "gc.superseded_by_store",
 ]
 
-# Bookkeeping the cadences carry on a bead they filed: which doctor check
-# produced a finding, the finding bead it replaced, and the rig a checkout
-# reconcile ran against.
+# Bookkeeping the cadences carry on a bead they filed and read back to stay
+# convergent. doctor_check (with doctor_finding_predecessor) is written and read
+# by doctor-finding-gate.sh, which queries doctor_check to find a check's own
+# prior finding and annotate it rather than file a second; reconcile_rig is
+# written and read by reconcile-rig-checkouts.sh the same way. Absent means the
+# bead is not one a cadence filed; nothing clears them.
 [metadata.cadence]
 keys = ["doctor_check", "doctor_finding_predecessor", "reconcile_rig"]
 
