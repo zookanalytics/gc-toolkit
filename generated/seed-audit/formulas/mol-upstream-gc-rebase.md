@@ -41,6 +41,14 @@ handback itself on the last failing attempt: stamps
 iterations remain as durable history; `metadata.conflict_resolutions`
 accumulates one audit entry per resolved conflict.
 
+The exit condition also appends one `metadata.iteration_timings` entry per
+attempt: when the runtime minted the attempt, when a session picked it up,
+when the iteration's own work ended, when the check ran, the session that ran
+it, and the verdict with its reason. That is the loop's only cost measurement,
+because the ralph condition env carries no duration of its own, and it is what
+separates a loop resolving conflicts from one wedged on the same error every
+attempt.
+
 **Iterations must be pool-routed.** The runtime recycles the previous
 iteration's worker session only when the attempt target is a pool. Sling this
 formula at a pool, never at a named agent — a named target skips the recycle
