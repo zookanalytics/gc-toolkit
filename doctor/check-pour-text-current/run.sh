@@ -17,7 +17,6 @@
 
 set -u
 
-BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 
 # The reconciler's cooldown, and the multiplier that turns it into a "no
 # longer self-healing" threshold. 3x, not 1x: a cooldown order fires slower
@@ -32,7 +31,39 @@ SLACK="${GC_DOCTOR_RECONCILE_SLACK:-3}"
 LIVE_MAX="${GC_DOCTOR_MOLECULE_LIVE_MAX:-86400}"
 
 errors=(); warnings=(); notes=()
-run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
+# >>> doctor-budget
+# One deadline for the whole check, anchored at process start. `gc doctor
+# --check-timeout` (default 60s) abandons an overrunning check and discards
+# everything it had buffered, so a check that has not printed by then is never
+# heard. A per-probe constant does not hold that line: the probes below run
+# once per rig, so their ceilings sum. Each probe gets the time still left
+# instead, capped at half the budget so one wedged store cannot eat the rest,
+# and a probe that no longer fits is refused with 124 — `timeout`'s own expiry
+# code, which every caller's "this store was NOT checked" arm already handles.
+# GC_DOCTOR_CHECK_TIMEOUT overrides the default, in whole seconds. Nothing
+# exports it: the runner passes GC_CITY_PATH and GC_PACK_DIR and no budget.
+BUDGET_DEFAULT=60; BUDGET_RESERVE=5; BUDGET_MIN_PROBE=2
+budget_now() { if [ -n "${EPOCHSECONDS:-}" ]; then printf %s "$EPOCHSECONDS"; else date +%s; fi; }
+budget_init() {
+    BUDGET_TOTAL="${GC_DOCTOR_CHECK_TIMEOUT:-$BUDGET_DEFAULT}"; BUDGET_TOTAL="${BUDGET_TOTAL%s}"
+    case "$BUDGET_TOTAL" in ''|*[!0-9]*) BUDGET_TOTAL="$BUDGET_DEFAULT" ;; esac
+    BUDGET_CAP=$(( BUDGET_TOTAL / 2 ))
+    BUDGET_DEADLINE=$(( $(budget_now) - SECONDS + BUDGET_TOTAL - BUDGET_RESERVE ))
+}
+budget_slice() {
+    local left=$(( BUDGET_DEADLINE - $(budget_now) ))
+    [ "$left" -le "$BUDGET_CAP" ] || left="$BUDGET_CAP"
+    [ "$left" -ge 0 ] || left=0
+    printf %s "$left"
+}
+budget_spent() { [ "$(budget_slice)" -lt "$BUDGET_MIN_PROBE" ]; }
+run_bounded() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@" </dev/null; else "$@" </dev/null; fi; }
+# A probe fed from a pipe cannot borrow run_bounded's </dev/null.
+run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+budget_init
+# <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
@@ -298,6 +329,9 @@ if [ "$checked" -eq 0 ]; then
     detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
     exit 1
+fi
+if budget_spent; then
+    warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
 fi
 if [ "${#errors[@]}" -ne 0 ]; then
     echo "${#errors[@]} place(s) where the executed pack or a running molecule's text is not current (I9)"

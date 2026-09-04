@@ -12,7 +12,7 @@
 # fail-closed defense; the structural check is doctor's); non-empty check_set
 # (empty is never the 'none' opt-out — an unnormalized anchor holds);
 # base == merged_target;
-# every check_set gate green@<live head>; approval (armed by the check_set
+# every check_set gate green; approval (armed by the check_set
 # member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
 # by a latest APPROVED from another account at the live head; a standing
 # CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
@@ -124,14 +124,26 @@ anchor_row() { # live {status, meta}; empty = unreadable, never an all-default r
              | {status: (.status // ""), meta: .metadata}' 2>/dev/null
 }
 
-# First declared gate NOT green@<head> (none/off/approval dropped); non-zero =
-# markers unreadable, which the caller must hold on, never read as all-green.
-hold_gate() { # <check_set> <row> <head>
-  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" --arg head "${3:-}" '
-    (.meta // {}) as $m
-    | (($cs // "") | split(",") | map(gsub("[[:space:]]"; "")) | map(select(length > 0))
+# The "first declared gate not green" predicate (none/off/approval dropped),
+# shared between hold_gate() and the terminal re-read below so the two jq
+# filters can never drift on which gate is red. Takes check_set as $cs and a
+# metadata object as $m.
+FIRST_RED_GATE_DEF='
+  def first_red_gate($cs; $m):
+    (($cs // "") | split(",") | map(gsub("[[:space:]]"; "")) | map(select(length > 0))
        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
-    | (first($gates[] | select((($m["check." + .]) // "") != ("green@" + $head)))) // ""' 2>/dev/null
+    | (first($gates[] | select((($m["check." + .]) // "") != "green"))) // "";
+'
+
+# First declared gate NOT green; non-zero = markers unreadable, which the
+# caller must hold on, never read as all-green. The lane is compared to no
+# head: green is a state of the lane, and a commit landing on the branch
+# neither clears it nor buys a review.
+hold_gate() { # <check_set> <row>
+  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" \
+    "$FIRST_RED_GATE_DEF"'
+    (.meta // {}) as $m
+    | first_red_gate($cs; $m)' 2>/dev/null
 }
 
 # Which status checks actually gate <branch>: rulesets + classic protection via
@@ -296,6 +308,15 @@ while IFS= read -r row; do
     held=$((held + 1)); continue
   fi
   if is_held "$hold"; then
+    # signoff.sh's cap parks an anchor with merge_hold=signoff_cap (the
+    # literal string) and stamps signoff_cap beside it. That pairing —
+    # shared with gate-ensure.sh's identical predicate — is ungreenable by
+    # anything the cadence will do — the release is a person's — so it alone
+    # is the wedge. An operator's own hold (merge_hold=true) is not, even
+    # beside a stale orphan signoff_cap left over from an earlier park.
+    if [ "$hold" = "signoff_cap" ] && [ -n "$(printf '%s' "$fresh" | jq -r '.meta.signoff_cap // ""')" ]; then
+      record_machine "$id" "wedged-exception" "$head_oid" "$aroute"
+    fi
     echo "$PROG: PR#$num merge_hold set (operator gate); merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
@@ -333,22 +354,16 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num base '$base' != merged_target '$target' (retargeted); merge held (anchor $id, pr-facts escalates)"
     held=$((held + 1)); continue
   fi
-  if ! hg=$(hold_gate "$checkset" "$fresh" "$head_oid"); then
+  if ! hg=$(hold_gate "$checkset" "$fresh"); then
     echo "$PROG: PR#$num check-set markers unreadable on anchor $id; merge held"
     held=$((held + 1)); continue
   fi
   if [ -n "$hg" ]; then
-    have=$(printf '%s' "$fresh" | jq -r --arg k "check.$hg" '.meta[$k] // "none"')
-    # The convergence cap's exception, bound to the live head, is ungreenable by
-    # anything the cadence will do: gate-ensure reads it as settled and
-    # dispatches nothing, and the release is a head move nobody is going to
-    # make. Every other shape here is a gate a review is due to raise.
-    if [ "$have" = "exception@$head_oid" ]; then
-      record_machine "$id" "wedged-exception" "$head_oid" "$aroute"
-    else
-      record_machine "$id" "progressing" "$head_oid" "$aroute"
-    fi
-    echo "$PROG: PR#$num check '$hg' not green at live head (have '$have', want 'green@$head_oid'); merge held (anchor $id)"
+    have=$(printf '%s' "$fresh" | jq -r --arg k "check.$hg" '.meta[$k] // "unreviewed"')
+    # A lane short of green is one a review is due to raise. The cap's park is
+    # not reached here: it holds above, on merge_hold.
+    record_machine "$id" "progressing" "$head_oid" "$aroute"
+    echo "$PROG: PR#$num check '$hg' is '$have', not green; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 
@@ -589,8 +604,9 @@ $sa_out" >/dev/null 2>&1 || true
     echo "$PROG: PR#$num anchor $id unreadable immediately before the merge; merge held"
     held=$((held + 1)); continue
   fi
-  freason=$(printf '%s' "$final" | jq -r --arg num "$num" --arg head "$head_oid" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" --arg cs "$checkset" '
+  freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" \
+    "$FIRST_RED_GATE_DEF"'
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
@@ -601,9 +617,7 @@ $sa_out" >/dev/null 2>&1 || true
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
     | ((($m.check_set // "") | tostring)) as $fcs
-    | (($fcs | split(",") | map(gsub("[[:space:]]";"")) | map(select(length > 0))
-        | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval")))) as $gates
-    | ((first($gates[] | select((($m["check." + .]) // "") != ("green@" + $head)))) // "") as $red
+    | first_red_gate($fcs; $m) as $red
     | if $st != "open" then "status is now \($st)"
       elif $mr != "pull_request" then "merge_result is now \($mr)"
       elif $pn != $num then "anchor now claims PR#\($pn)"
@@ -614,7 +628,7 @@ $sa_out" >/dev/null 2>&1 || true
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
       elif ($fcs | gsub("[[:space:],]"; "")) == "" then "check_set emptied after validation"
-      elif $red != "" then "check \($red) is no longer green at \($head)"
+      elif $red != "" then "check \($red) is no longer green"
       else "OK" end' 2>/dev/null); frc=$?
   # Explicit sentinel: "OK" is the only authorization. An empty result or a
   # non-zero jq means the comparison itself failed — hold, never merge blind.

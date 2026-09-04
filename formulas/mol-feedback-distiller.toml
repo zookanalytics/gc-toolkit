@@ -15,7 +15,8 @@ the pool worker -> refinery -> operator-review pipeline (D3). Base rate:
 ZERO or ONE proposals per run; a chatty run is a smell.
 
 A proposal names a CARRIER before it names rule text: a conventions bullet,
-an operator-profile entry, a review-rubric dimension, or an exemplar pair.
+an operator-profile entry, a work-quality entry, a review-rubric dimension, or
+an exemplar pair.
 The carrier decides the target file, the budget, and which gates apply; the
 rubric holds the selection rule.
 
@@ -66,6 +67,11 @@ default = "15"
 
 [vars.profile_entry_cap]
 description = "Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap."
+required = false
+default = "12"
+
+[vars.work_quality_entry_cap]
+description = "Entry budget for the work-quality fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap."
 required = false
 default = "12"
 
@@ -350,8 +356,9 @@ adoption date — argue for a different carrier or a mechanism, never a louder
 restatement, and read the coverage line before treating a zero as quiet)?
 **subsumed or contradicted** (propose the merge)? **over cap** — a promotion
 past its carrier's budget ({{fragment_bullet_cap}} conventions bullets,
-{{profile_entry_cap}} profile entries, {{exemplar_cap}} exemplars) must name
-its displacement or it does not file.
+{{profile_entry_cap}} profile entries, {{work_quality_entry_cap}} work-quality
+entries, {{exemplar_cap}} exemplars) must name its displacement or it does not
+file.
 
 ## 6. Dedup proposals against in-flight work, then bound
 
@@ -407,13 +414,14 @@ possibly retirement proposals — file those like any survivor.
 ```bash
 POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
 BODY="## Rule
-- Carrier: <convention | profile | review-rubric | exemplar>
+- Carrier: <convention | profile | work-quality | review-rubric | exemplar>
 - Action: <ADD | UPDATE | SUPERSEDE | RETIRE | HARDEN>
 - Exact text: <the bullet, entry, dimension, or before/after pair>
 
 ## Target
 - convention    -> template-fragments/learned-conventions-<role>.template.md (cap {{fragment_bullet_cap}})
 - profile       -> template-fragments/operator-profile.template.md (cap {{profile_entry_cap}}); needs an obs.source=operator observation
+- work-quality  -> template-fragments/work-quality.template.md (cap {{work_quality_entry_cap}}); the standard the artifact is held to, no operator observation required
 - review-rubric -> formulas/mol-review.toml, step review, What to check; its anchor goes in that file's TOML comment ledger above the step, never in the step description (rendered text a reviewer reads)
 - exemplar      -> template-fragments/learning-exemplars.template.md (cap {{exemplar_cap}})
 - learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor and no inventory row: the rubric is the loop's own method, not an adopted rule the retirement pass judges

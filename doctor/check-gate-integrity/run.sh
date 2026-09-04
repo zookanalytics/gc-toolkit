@@ -4,20 +4,52 @@
 # pre_open_gate|pull_request) must declare a non-empty check_set — the "none"
 # sentinel is the one legal opt-out; merge.sh reads empty as UNGATED, so an
 # empty or absent declaration silently drops the gate (error). Every
-# check.<g> marker (sidecar keys like check.<g>.reason excluded) must match
-# the grammar green|fixable|exception@<40-hex oid> — a malformed marker is
-# evidence bound to nothing (error). A green marker on an anchor with no
-# branch metadata is a warning: the oid cannot be compared to any head.
+# check.<g> marker (sidecar keys like check.<g>.reason excluded) must be one
+# of the lane states unreviewed|reviewing|validating|fixing|green — a word
+# outside that set is a state no reader knows, and gate-ensure dispatches
+# against it forever (error). An absent marker is the unreviewed lane and is
+# not a finding.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE store warns (1), never passes.
 
 set -u
 
 dir="${GC_PACK_DIR:-.}"
-BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 
 errors=(); warnings=(); notes=()
-run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
+# >>> doctor-budget
+# One deadline for the whole check, anchored at process start. `gc doctor
+# --check-timeout` (default 60s) abandons an overrunning check and discards
+# everything it had buffered, so a check that has not printed by then is never
+# heard. A per-probe constant does not hold that line: the probes below run
+# once per rig, so their ceilings sum. Each probe gets the time still left
+# instead, capped at half the budget so one wedged store cannot eat the rest,
+# and a probe that no longer fits is refused with 124 — `timeout`'s own expiry
+# code, which every caller's "this store was NOT checked" arm already handles.
+# GC_DOCTOR_CHECK_TIMEOUT overrides the default, in whole seconds. Nothing
+# exports it: the runner passes GC_CITY_PATH and GC_PACK_DIR and no budget.
+BUDGET_DEFAULT=60; BUDGET_RESERVE=5; BUDGET_MIN_PROBE=2
+budget_now() { if [ -n "${EPOCHSECONDS:-}" ]; then printf %s "$EPOCHSECONDS"; else date +%s; fi; }
+budget_init() {
+    BUDGET_TOTAL="${GC_DOCTOR_CHECK_TIMEOUT:-$BUDGET_DEFAULT}"; BUDGET_TOTAL="${BUDGET_TOTAL%s}"
+    case "$BUDGET_TOTAL" in ''|*[!0-9]*) BUDGET_TOTAL="$BUDGET_DEFAULT" ;; esac
+    BUDGET_CAP=$(( BUDGET_TOTAL / 2 ))
+    BUDGET_DEADLINE=$(( $(budget_now) - SECONDS + BUDGET_TOTAL - BUDGET_RESERVE ))
+}
+budget_slice() {
+    local left=$(( BUDGET_DEADLINE - $(budget_now) ))
+    [ "$left" -le "$BUDGET_CAP" ] || left="$BUDGET_CAP"
+    [ "$left" -ge 0 ] || left=0
+    printf %s "$left"
+}
+budget_spent() { [ "$(budget_slice)" -lt "$BUDGET_MIN_PROBE" ]; }
+run_bounded() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@" </dev/null; else "$@" </dev/null; fi; }
+# A probe fed from a pipe cannot borrow run_bounded's </dev/null.
+run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+budget_init
+# <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
@@ -55,16 +87,13 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select($mr == "pre_open_gate" or $mr == "pull_request")
         | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
         | ((($m.check_set // "") | tostring)) as $cs
-        | ((($m.branch // "") | tostring)) as $br
         | ( (if $cs == "" then [["nocs", $id, $mr, ""]] else [] end)
           + [ $m | to_entries[]
               | select(.key | test("^check\\.[^.]+$"))
               | select((.value | type) == "string")
               | (.value | gsub("[[:cntrl:]]"; " ")) as $v
-              | (if ($v | test("^(green|fixable|exception)@[0-9a-f]{40}$")) | not
+              | (if ($v | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not
                  then ["badmark", $id, .key, $v]
-                 elif ($v | startswith("green@")) and $br == ""
-                 then ["greennobranch", $id, .key, $v]
                  else empty end) ] )[]
         | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
@@ -76,12 +105,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         [ -n "$kind" ] || continue
         case "$kind" in
             nocs)          errors+=("$label bead $id: gating anchor (merge_result=$k) declares NO check_set — merge.sh reads empty as ungated, so this PR can land with no review; stamp the declared default (gate-ensure.sh) or the explicit \"none\" opt-out") ;;
-            badmark)       errors+=("$label bead $id: gate marker $k=\"$v\" does not match the grammar <green|fixable|exception>@<40-hex oid> — a marker bound to no commit is not evidence, and merge.sh cannot compare it to the live head") ;;
-            greennobranch) warnings+=("$label bead $id: $k=\"$v\" is green but the anchor records NO branch — nothing can verify the oid against a live head, so the marker's evidence binding is unverifiable") ;;
+            badmark)       errors+=("$label bead $id: gate marker $k=\"$v\" is not one of the lane states unreviewed|reviewing|validating|fixing|green — no reader knows that word, so merge.sh holds on it and gate-ensure dispatches against it every pass") ;;
         esac
     done <<< "$rows"
 done <<< "$scopes"
 
+if budget_spent; then
+    warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
+fi
 if [ "${#errors[@]}" -ne 0 ]; then
     echo "gate integrity violated (I6/I7): ${#errors[@]} finding(s)"
     detail "${errors[@]}"

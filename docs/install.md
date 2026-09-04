@@ -160,15 +160,32 @@ The pack's checks, and what a failure means:
 | `check-routed-work-claimable` | every route and assignee names a live target; routed work is in `bd ready` or in `bd blocked`; rig-scoped orders bound (I3) | a pool renamed, an order missing its rig registration, or routed work stranded outside both queues |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
-| `check-gate-integrity` | gating anchors declare `check_set`; markers are well-formed `verb@oid` (I6+I7) | a hand-written or truncated marker |
+| `check-gate-integrity` | gating anchors declare `check_set`; markers are a bare lane-state word (I6+I7) | a hand-written or unmigrated marker |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-cadence-live` | every pack order fired within its interval (I10) | order not registered for a rig, or the controller is down |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` matches its inputs (warn-only if absent) | a prompt input moved without a re-render |
 | `check-recycle-capable` | cycle-recycle can fire: a Stop event reaches the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, and no refinery defer guard is latched | the Stop wiring stopped passing the hook its stdin, the transcript shape moved under the measurement, or an uncommitted tracked file has latched the refinery's git-op guard |
+| `check-wisp-cascade-intact` | every bead store carries the four `ON DELETE CASCADE` foreign keys from the wisp auxiliary tables into `wisps(id)` | a store whose schema migration recorded the constraints as applied without adding them, leaving it to accumulate auxiliary rows no wisp reaches |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.
+
+Each check holds one deadline for its whole run and gives every probe only
+the time left before it, so a slow or wedged data plane costs findings
+rather than the whole check: a probe that no longer fits is refused, the
+store behind it is reported as NOT checked, and the check says the budget
+ended the run. Read that as partial — an arm skipped for time is not an arm
+that passed.
+
+That deadline is 60s, matching `--check-timeout`'s default. The flag sizes
+the doctor's own abandon timer and is not passed to the checks, so raising
+it on a loaded host means exporting the same number of whole seconds as
+`GC_DOCTOR_CHECK_TIMEOUT` too:
+
+```bash
+GC_DOCTOR_CHECK_TIMEOUT=120 gc doctor --check-timeout 120s
+```
 
 ### `gc config show`
 

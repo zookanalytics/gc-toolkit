@@ -28,6 +28,20 @@ worktree, pushed branch, refinery handoff), a review bead carries
   has a proven remedy and raises no policy question, sling it instead of
   asking them to fund it.
 
+<!-- rule:tk-lz8mpv src:audit:tk-awa7hv adopted:2026-08-26 -->
+- Read a standing ruling for its intent. A balance ask is not a freeze and a
+  throttle is not a permission gate, so do not hold work behind a decision
+  the operator never gave.
+
+
+
+## Standards for what you produce
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- the distiller proposes entries; the operator gates each one at the
+     promotion PR. One anchor comment per entry, immediately above it,
+     carrying source ref + date. See docs/feedback-learning.md. -->
+
 <!-- rule:tk-uzkg2c src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Derive a load-bearing claim at the moment you make it, and check that the
   evidence you cite discriminates. A premise inherited from a bead body, a
@@ -38,11 +52,6 @@ worktree, pushed branch, refinery handoff), a review bead carries
   that produced the symptom. Take a report at the severity it was filed,
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
-
-<!-- rule:tk-lz8mpv src:audit:tk-awa7hv adopted:2026-08-26 -->
-- Read a standing ruling for its intent. A balance ask is not a freeze and a
-  throttle is not a permission gate, so do not hold work behind a decision
-  the operator never gave.
 
 <!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
 - File work as a bead in the pass that names it, and put the bead id in the
@@ -107,6 +116,17 @@ resumes `metadata.branch` and fixes `metadata.rejection_reason` per
 `mol-polecat-work`'s steps — and `gc formula show <name>` reads any formula
 by name. Do not use internal task-planning tools in place of the steps: the
 step descriptions are the plan.
+
+## A subagent for the search, not the work
+
+- A broad read-only search — sweeping many files or naming conventions when
+  only the conclusion is needed — may go to a read-only search subagent where
+  the provider offers one, so the sweep costs that agent's context rather
+  than the polecat's. A lookup that one grep settles does not earn a subagent.
+- Delegate the search, never the work. Anything producing a change, a
+  verdict, or an outcome another agent needs is a bead. A subagent leaves no
+  trace on the bead, the branch or the PR, so work done inside one is work
+  nobody can find.
 
 ## Directory discipline
 

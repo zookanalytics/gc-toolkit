@@ -195,18 +195,25 @@ this branch's defect.
   carrying none of it is an observed fact worth recording, and it still does
   not tell you what opened the PR. Pre-open there is no page — your verdict
   becomes its opening comment instead.
-- **Operator principles** — resolve the operator profile from the pack
-  checkout and hold the diff's output (code, comments, docs) to its "What
-  the operator cares about" entries. A violation is a blocking
-  (request-changes) finding. Read the exemplar corpus in the same pass: it
-  carries the lessons that are a shape rather than a statement, and it is
-  read here because nothing injects it into a prompt.
+- **Work-quality standards** — resolve the work-quality fragment from the
+  pack checkout and hold the diff's output (code, comments, docs) to its
+  "Standards for what you produce" entries. A violation is a blocking
+  (request-changes) finding. The operator profile is not read here: its
+  entries govern how a role addresses the operator at runtime, which is a
+  property of an agent and not of a diff. Read the exemplar corpus in the
+  same pass: it carries the lessons that are a shape rather than a
+  statement, and it is read here because nothing injects it into a prompt.
 ```bash
+# Resolve on the directory, not on one fragment: a checkout lagging the commit
+# that added a fragment still resolves the pack, so a miss costs that fragment
+# and not the whole read.
 PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -r "$c/template-fragments/operator-profile.template.md" ] && { PACK="$c"; break; }
+  [ -d "$c/template-fragments" ] && { PACK="$c"; break; }
 done
-if [ -n "$PACK" ]; then cat "$PACK/template-fragments/operator-profile.template.md"; else
-  echo "operator profile not found in this checkout; note that in the verdict's coverage line"
+if [ -n "$PACK" ] && [ -r "$PACK/template-fragments/work-quality.template.md" ]; then
+  cat "$PACK/template-fragments/work-quality.template.md"
+else
+  echo "work-quality fragment not found in this checkout; note that in the verdict's coverage line"
 fi
 # Absent on an older pack pin, and empty until the first exemplar is adopted.
 [ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.template.md" ] && cat "$PACK/template-fragments/learning-exemplars.template.md"
@@ -296,7 +303,7 @@ done
 ```
 
 **Exit criteria:** whole diff read, tests run at the pinned commit, published
-page and operator profile checked, out-of-scope findings filed or named
+page and work-quality standards checked, out-of-scope findings filed or named
 unfiled, findings.md written in the verdict shape, this step bead closed.
 """
 
@@ -330,13 +337,16 @@ done
 Do not post the review yourself, do not touch `check.*`, do not file rework
 beads, and never run `gh pr review --approve`.
 
-**2. Failure arms.** "head moved" from signoff.sh is not a failure — a rework
-rebased your pin off the branch while you were reading it, so your findings
-describe a diff that is no longer there: re-pin at the live head signoff
-names, redo load-dispatch and review, and call it again with the new OID.
-What you must not do is re-submit the verdict you already have. A branch that
-only grew does not refuse — signoff binds at your pin and the merge holds on
-the head mismatch. "already closed" is not a failure either and has nothing to
+**2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
+is the dispatch pin and the posted artifact's audit label, never a marker, and
+nothing in the cadence compares a marker to a head. A rebase or a new commit
+that lands on top of the pin while you read does not stale your findings —
+call it once with the OID the dispatch named. Only a rewrite that drops the
+pin from the branch (a rebase, amend or force-push) is different: signoff
+refuses the verdict, but closes the review bead itself `gc.outcome=superseded`
+and exits 0 — there is nothing here to append and nothing to restore,
+gate-ensure pours a fresh review at the live head next pass.
+"already closed" is not a failure either and has nothing to
 re-pin: this dispatch was recorded or retired before you judged it, so drop the
 verdict, close the chain and drain. Any other failure, in this order: append your findings to
 the review bead (`gc bd update "$REVIEW_BEAD" --append-notes ...`); close the

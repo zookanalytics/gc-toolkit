@@ -2153,7 +2153,8 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 			"merge_result":   "pre_open_gate",
 			"pr.machine":     dated(MachineWedgedException, headLive, wedgedAt),
 			"gc.routed_to":   "human",
-			"check.codex":    "exception@" + headLive,
+			"merge_hold":     "true",
+			"signoff_cap":    "codex",
 			"blocked_reason": "signoff did not converge after 3 rework rounds (cap 3)",
 		}),
 		mergeAnchor("tk-veto", map[string]string{
@@ -2172,7 +2173,7 @@ func TestWedgedAnchorIsOwedAndNamed(t *testing.T) {
 	if !exc.Owed {
 		t.Error("a wedged anchor is owed by the operator: nothing else will move it")
 	}
-	if !strings.Contains(exc.Needs, "wedged") || !strings.Contains(exc.Needs, "exception") {
+	if !strings.Contains(exc.Needs, "wedged") || !strings.Contains(exc.Needs, "review cap") {
 		t.Errorf("needs must name the wedge and its shape, got %q", exc.Needs)
 	}
 	if !exc.PROwedSince.Equal(wedgedAt) {

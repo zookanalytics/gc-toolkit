@@ -3,9 +3,10 @@
 # Covers: adopting an existing OPEN or MERGED PR (flip only, one lifecycle
 # transition, never a twin); refusing fork/foreign/uncertifiable rows; the
 # closed-unmerged headstone (fresh PR + supersede note; same-head close is a
-# human decision left alone); holds gating the create path; the check_set
-# green@live-head gate over every gate the anchor declares; the moved-head
-# refusal on the created PR; and the comment-not-approval verdict replay.
+# human decision left alone); holds gating the create path; the all-lanes-green
+# gate over every gate the anchor declares, which no head move disturbs; the
+# moved-head refusal on the created PR; and the comment-not-approval verdict
+# replay.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,30 +70,47 @@ eq "$(meta A3 merge_result)" "pre_open_gate" "the anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR is opened into the collision"
 
 echo "# holds gate the create path"
-store "[$(pre B1 polecat/b1 ',"merge_hold":"true","check.codex":"green@sha-b1"')]"
+store "[$(pre B1 polecat/b1 ',"merge_hold":"true","check.codex":"green"')]"
 echo "sha-b1" > "$GH_DIR/head_polecat_b1"
 out=$("$SUT" 2>&1)
 has "$out" "held (merge_hold" "merge_hold holds the create"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR published past the hold"
 
-echo "# a declared gate not green at the live head holds"
-store "[$(pre B2 polecat/b2 ',"check.codex":"green@stale-oid"')]"
+echo "# a declared gate short of green holds"
+store "[$(pre B2 polecat/b2 ',"check.codex":"fixing"')]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
+: > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "check 'codex' not green at live head" "a stale marker holds the open"
+has "$out" "check 'codex' is 'fixing', not green" "a lane short of green holds the open"
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
+# The gate check is row-only (green is a state of the lane, not the head), so
+# it is judged before the head fetch: a held anchor pays no network call.
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an ungreen gate holds before the head is ever fetched"
+
+# The whole of the 211: a green lane is green however far the branch has moved
+# since the verdict, so the head the PR opens at is not the gate's business.
+echo "# a green lane publishes at a head no verdict ever named"
+store "[$(pre B2b polecat/b2b ',"check.codex":"green"')]"
+echo "sha-b2b-moved-on" > "$GH_DIR/head_polecat_b2b"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/62"
+printf '%s' "$(prrow 62 OPEN polecat/b2b sha-b2b-moved-on main)" > "$GH_DIR/pr_view_62.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+eq "$(meta B2b merge_result)" "pull_request" "the anchor publishes"
+has "$(cat "$STUB_GH_LOG")" "pr create" "…and the PR is opened"
 
 # The gate is the anchor's whole declared set: a set naming a second reviewer
 # publishes only once that reviewer has answered, and a set naming no
 # marker-bearing gate publishes rather than waiting on a marker no arm writes.
 echo "# a second declared gate with no marker holds the publish"
-store "[$(pre B3 polecat/b3 ',"check.codex":"green@sha-b3"' 'codex,triage')]"
+store "[$(pre B3 polecat/b3 ',"check.codex":"green"' 'codex,triage')]"
 echo "sha-b3" > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "check 'triage' not green at live head (have 'none'" "the unmarked second gate holds"
+has "$out" "check 'triage' is 'unreviewed', not green" "the unmarked second gate holds"
 eq "$(meta B3 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered gate"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "…and the head was never fetched to decide it"
 
 echo "# an empty check_set is never the gateless opt-out"
 store "[$(pre B4 polecat/b4 '' '')]"
@@ -101,6 +119,7 @@ echo "sha-b4" > "$GH_DIR/head_polecat_b4"
 out=$("$SUT" 2>&1)
 has "$out" "no normalized check_set" "an unnormalized anchor is held, not published"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and nothing is opened under it"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an unnormalized check_set holds before the head is ever fetched"
 
 echo "# check_set=none publishes: gateless BY CHOICE is not a missing marker"
 store "[$(pre B5 polecat/b5 '' 'none')]"
@@ -121,7 +140,7 @@ has "$out" "opened PR#62" "an approval-only set opens; merge.sh holds for the hu
 eq "$(meta B6 merge_result)" "pull_request" "anchor flipped"
 
 echo "# create the PR at the reviewed head"
-store "[$(pre C1 polecat/c1 ',"check.codex":"green@sha-c1"'),
+store "[$(pre C1 polecat/c1 ',"check.codex":"green"'),
         {\"id\":\"rev-c1\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"VERDICT: COMMENT ok\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"C1\"}}]"
 echo "sha-c1" > "$GH_DIR/head_polecat_c1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/77"
@@ -144,7 +163,7 @@ echo "# the body summarizes the diff, and demotes the dispatch text"
 # anchor's description is dispatch text — what the work was asked to do — so
 # the polecat's pr_summary is the ## Summary and the description survives one
 # level down.
-store "[$(pre E1 polecat/e1 ',"check.codex":"green@sha-e1","pr_summary":"Compares heads instead of branch names, so a moved head is refused."')]"
+store "[$(pre E1 polecat/e1 ',"check.codex":"green","pr_summary":"Compares heads instead of branch names, so a moved head is refused."')]"
 echo "sha-e1" > "$GH_DIR/head_polecat_e1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/81"
 printf '%s' "$(prrow 81 OPEN polecat/e1 sha-e1 main)" > "$GH_DIR/pr_view_81.json"
@@ -160,7 +179,7 @@ has "$body" "## Refinery handoff" "the handoff block is unchanged"
 echo "# no carried summary keeps today's body"
 # The current text is a poor summary, not an empty one: an anchor whose handoff
 # carried nothing must still open with a body.
-store "[$(pre E2 polecat/e2 ',"check.codex":"green@sha-e2"')]"
+store "[$(pre E2 polecat/e2 ',"check.codex":"green"')]"
 echo "sha-e2" > "$GH_DIR/head_polecat_e2"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/82"
 printf '%s' "$(prrow 82 OPEN polecat/e2 sha-e2 main)" > "$GH_DIR/pr_view_82.json"
@@ -171,7 +190,7 @@ has "$body" "## Summary"$'\n'$'\n'"d E2" "the description is the summary when no
 hasnt "$body" "<details>" "no empty demotion section when there is nothing to demote"
 
 echo "# a whitespace-only summary is the absent case"
-store "[$(pre E3 polecat/e3 ',"check.codex":"green@sha-e3","pr_summary":"   \n  "')]"
+store "[$(pre E3 polecat/e3 ',"check.codex":"green","pr_summary":"   \n  "')]"
 echo "sha-e3" > "$GH_DIR/head_polecat_e3"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/83"
 printf '%s' "$(prrow 83 OPEN polecat/e3 sha-e3 main)" > "$GH_DIR/pr_view_83.json"
@@ -181,7 +200,7 @@ has "$body" "## Summary"$'\n'$'\n'"d E3" "blank prose falls back rather than pub
 hasnt "$body" "<details>" "…and demotes nothing"
 
 echo "# a head that moved between gate and create refuses the stamp"
-store "[$(pre C2 polecat/c2 ',"check.codex":"green@sha-c2"')]"
+store "[$(pre C2 polecat/c2 ',"check.codex":"green"')]"
 echo "sha-c2" > "$GH_DIR/head_polecat_c2"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/78"
 printf '%s' "$(prrow 78 OPEN polecat/c2 sha-c2-moved main)" > "$GH_DIR/pr_view_78.json"
@@ -190,7 +209,7 @@ has "$out" "not the reviewed 'sha-c2'" "the moved head is refused"
 eq "$(meta C2 merge_result)" "pre_open_gate" "nothing stamped; the anchor re-adopts next pass"
 
 echo "# closed-unmerged headstone: supersede at a NEW head"
-store "[$(pre D1 polecat/d1 ',"check.codex":"green@sha-d1-new"')]"
+store "[$(pre D1 polecat/d1 ',"check.codex":"green"')]"
 printf '[%s]' "$(prrow 50 CLOSED polecat/d1 sha-d1-old main)" > "$GH_DIR/pr_list_polecat_d1.json"
 echo "sha-d1-new" > "$GH_DIR/head_polecat_d1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/51"
@@ -202,7 +221,7 @@ eq "$(meta D1 pr_number)" "51" "the fresh PR is the recorded identity"
 has "$(cat "$STUB_GH_LOG")" "pr comment 50" "the superseded PR got the pointer comment"
 
 echo "# closed-unmerged at the SAME head is a human decision"
-store "[$(pre D2 polecat/d2 ',"check.codex":"green@sha-d2"')]"
+store "[$(pre D2 polecat/d2 ',"check.codex":"green"')]"
 printf '[%s]' "$(prrow 52 CLOSED polecat/d2 sha-d2 main)" > "$GH_DIR/pr_list_polecat_d2.json"
 echo "sha-d2" > "$GH_DIR/head_polecat_d2"
 : > "$STUB_GH_LOG"
@@ -230,7 +249,7 @@ guard_ready() { # <id> <branch> <pr-number> — head fixture + create/read-back 
 }
 
 echo "# a spec-only diff onto the default branch with no convoy above it is refused"
-store "[$(pre G1 polecat/g1 ',"check.codex":"green@sha-G1"')]"
+store "[$(pre G1 polecat/g1 ',"check.codex":"green"')]"
 guard_ready G1 polecat/g1 90
 cmpfx main polecat/g1 specs/G1/carve.md
 out=$("$SUT" 2>&1)
@@ -244,7 +263,7 @@ has "$(cat "$STUB_ESCALATE_LOG")" "--key planning-artifact-to-default-branch" \
     "one deduped visit carries it to a person"
 
 echo "# a doc riding with code is a normal PR"
-store "[$(pre G2 polecat/g2 ',"check.codex":"green@sha-G2"')]"
+store "[$(pre G2 polecat/g2 ',"check.codex":"green"')]"
 guard_ready G2 polecat/g2 91
 cmpfx main polecat/g2 specs/G2/notes.md assets/scripts/thing.sh
 out=$("$SUT" 2>&1)
@@ -256,7 +275,7 @@ echo "# a docs/ refresh is the central tier doing its job, not a planning artifa
 # The doc-keeper's whole output is single-file docs/*.md onto the default
 # branch; docs/file-structure.md makes that tier authoritative-about-now, so it
 # is not bead-local content and the guard must not touch it.
-store "[$(pre G3 polecat/g3 ',"check.codex":"green@sha-G3"')]"
+store "[$(pre G3 polecat/g3 ',"check.codex":"green"')]"
 guard_ready G3 polecat/g3 92
 cmpfx main polecat/g3 docs/gascity-reference.md
 out=$("$SUT" 2>&1)
@@ -264,7 +283,7 @@ has "$out" "opened PR#92" "a docs-only PR publishes"
 hasnt "$(cat "$STUB_ESCALATE_LOG")" "planning-artifact" "…and nothing is escalated"
 
 echo "# a convoy above the anchor is the exemption the remedy produces"
-store "[$(pre G4 polecat/g4 ',"check.codex":"green@sha-G4"'),
+store "[$(pre G4 polecat/g4 ',"check.codex":"green"'),
         {\"id\":\"cv-G4\",\"status\":\"open\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
 guard_ready G4 polecat/g4 93
 cmpfx main polecat/g4 specs/G4/carve.md
@@ -274,7 +293,7 @@ has "$out" "opened PR#93" "work under a convoy publishes"
 eq "$(meta G4 merge_result)" "pull_request" "anchor flipped"
 
 echo "# a convoy two levels up still exempts"
-store "[$(pre G5 polecat/g5 ',"check.codex":"green@sha-G5"'),
+store "[$(pre G5 polecat/g5 ',"check.codex":"green"'),
         {\"id\":\"ep-G5\",\"status\":\"open\",\"issue_type\":\"epic\",\"metadata\":{}},
         {\"id\":\"cv-G5\",\"status\":\"open\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
 guard_ready G5 polecat/g5 94
@@ -286,7 +305,7 @@ has "$out" "opened PR#94" "the walk climbs past a non-convoy parent"
 echo "# a non-convoy parent is not a convoy ancestor"
 # The shape of the second cited violation: the bead had a parent, and the
 # parent was a plain task, so no integration branch existed anywhere above it.
-store "[$(pre G6 polecat/g6 ',"check.codex":"green@sha-G6"'),
+store "[$(pre G6 polecat/g6 ',"check.codex":"green"'),
         {\"id\":\"tk-G6\",\"status\":\"open\",\"issue_type\":\"task\",\"metadata\":{}}]"
 guard_ready G6 polecat/g6 95
 cmpfx main polecat/g6 specs/G6/state-model.md specs/G6/surface.md
@@ -296,7 +315,7 @@ has "$out" "is a planning artifact" "a task parent does not exempt"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR was opened"
 
 echo "# a convoy graduation PR is spec-only onto the default branch BY DESIGN"
-store "[$(pre G7 integration/cv-G7 ',"check.codex":"green@sha-G7","graduation":"true"')]"
+store "[$(pre G7 integration/cv-G7 ',"check.codex":"green","graduation":"true"')]"
 guard_ready G7 integration/cv-G7 96
 cmpfx main integration/cv-G7 specs/G7/carve.md
 out=$("$SUT" 2>&1)
@@ -304,7 +323,7 @@ has "$out" "opened PR#96" "the graduation anchor publishes"
 hasnt "$out" "planning artifact" "…and the guard never looks at it"
 
 echo "# the waiver publishes, and files nothing"
-store "[$(pre G8 polecat/g8 ',"check.codex":"green@sha-G8","planning_artifact_ok":"true"')]"
+store "[$(pre G8 polecat/g8 ',"check.codex":"green","planning_artifact_ok":"true"')]"
 guard_ready G8 polecat/g8 97
 cmpfx main polecat/g8 specs/G8/carve.md
 out=$("$SUT" 2>&1)
@@ -312,7 +331,7 @@ has "$out" "opened PR#97" "an operator who meant it gets the PR"
 hasnt "$(cat "$STUB_ESCALATE_LOG")" "planning-artifact" "…and no visit is filed against their decision"
 
 echo "# a target that is not the default branch is never even compared"
-store "[{\"id\":\"G9\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"t G9\",\"description\":\"d G9\",\"metadata\":{\"merge_result\":\"pre_open_gate\",\"branch\":\"polecat/g9\",\"merged_target\":\"integration/cv-G9\",\"check_set\":\"codex\",\"check.codex\":\"green@sha-G9\"}}]"
+store "[{\"id\":\"G9\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"t G9\",\"description\":\"d G9\",\"metadata\":{\"merge_result\":\"pre_open_gate\",\"branch\":\"polecat/g9\",\"merged_target\":\"integration/cv-G9\",\"check_set\":\"codex\",\"check.codex\":\"green\"}}]"
 echo "sha-G9" > "$GH_DIR/head_polecat_g9"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/98"
 printf '%s' "$(prrow 98 OPEN polecat/g9 sha-G9 integration/cv-G9)" > "$GH_DIR/pr_view_98.json"
@@ -325,14 +344,14 @@ echo "# an unreadable compare does not stall the queue"
 # A guard that cannot read the diff has no evidence of the anti-pattern, and
 # the compare is re-read every pass — so refusing here would strand a
 # legitimate PR for as long as the endpoint stays unhappy.
-store "[$(pre GA polecat/ga ',"check.codex":"green@sha-GA"')]"
+store "[$(pre GA polecat/ga ',"check.codex":"green"')]"
 guard_ready GA polecat/ga 99
 out=$("$SUT" 2>&1)
 has "$out" "planning-artifact guard did not evaluate" "the unevaluated guard says so"
 has "$out" "opened PR#99" "…and the create proceeds"
 
 echo "# an empty prefix list turns the guard off"
-store "[$(pre GB polecat/gb ',"check.codex":"green@sha-GB"')]"
+store "[$(pre GB polecat/gb ',"check.codex":"green"')]"
 guard_ready GB polecat/gb 100
 cmpfx main polecat/gb specs/GB/carve.md
 out=$(PR_OPEN_PLANNING_PATHS="" "$SUT" 2>&1)

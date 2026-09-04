@@ -373,6 +373,113 @@ eq "$rc" 2 "a key outside [A-Za-z0-9._-] is rejected"
 out=$("$SUT" --subject tk-a --key k1 --message m --nonsense 2>&1); rc=$?
 eq "$rc" 2 "an unknown argument is rejected"
 
+echo "# a moot or benign verdict suppresses a re-file inside the window"
+# The open-visit dedup above sees only OPEN visits, so without this window a
+# detector whose condition outlives the sitting re-files the identical
+# situation on its next cycle. moot and benign are the two verdicts that mean
+# no human was needed, so only they suppress.
+ago() { date -u -d "@$(( $(date -u +%s) - $1 ))" +%Y-%m-%dT%H:%M:%SZ; }
+closed_visit() {  # id key subject outcome age_seconds [recurrences]
+  printf '{"id":"%s","status":"closed","title":"t","description":"d","notes":"","closed_at":"%s","metadata":{"task_kind":"visit","escalation_key":"%s","gc.continuation_group":"%s","gc.outcome":"%s"%s}}' \
+    "$1" "$(ago "$5")" "$2" "$3" "$4" "${6:+,\"escalation.recurrences\":\"$6\"}"
+}
+
+for verdict in moot benign; do
+  reset "[$(closed_visit v-old k1 tk-a "$verdict" 3600)]"
+  out=$("$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+  eq "$rc" 0 "a $verdict verdict an hour old exits 0"
+  eq "$(visits)" "0" "and files NOTHING — the sitting already answered this"
+  has "$out" "was answered '$verdict'" "names the verdict it is honoring"
+  has "$out" "v-old" "and the visit that carries it"
+  eq "$(meta v-old escalation.recurrences)" "1" "the suppressed repeat is tallied, not silent"
+  eq "$(meta v-old escalation.recurrence_last)" "$(meta v-old escalation.recurrence_last)" "and stamped with when"
+done
+
+echo "# the tally counts up from what the visit already carries"
+reset "[$(closed_visit v-old k1 tk-a moot 3600 7)]"
+"$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(meta v-old escalation.recurrences)" "8" "an existing tally increments"
+
+echo "# the window only holds while it is open"
+reset "[$(closed_visit v-old k1 tk-a moot 90000)]"
+out=$("$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a verdict older than the window files"
+eq "$(visits)" "1" "the visit exists"
+eq "$(meta v-old escalation.recurrences)" "<absent>" "and nothing is tallied on the expired verdict"
+
+echo "# only moot and benign suppress — every other outcome means the sitting acted"
+for verdict in ruled routed disposed folded cut-short; do
+  reset "[$(closed_visit v-old k1 tk-a "$verdict" 3600)]"
+  "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+  eq "$(visits)" "1" "a '$verdict' verdict does not suppress"
+done
+reset "[$(closed_visit v-old k1 tk-a "" 3600)]"
+"$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a closed visit with no outcome at all does not suppress"
+
+echo "# the window is scoped to the situation, exactly like the open dedup"
+reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
+"$SUT" --subject tk-a --key k2 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a different key on the same subject is unaffected"
+reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
+"$SUT" --subject tk-b --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a different subject under the same key is unaffected"
+
+echo "# the NEWEST verdict decides, across every outcome, not the moot the filter reached first"
+# The lookup takes the newest closed visit and suppresses only when THAT one is
+# moot or benign. An older moot still inside the window must not mute a
+# situation a later sitting has since ruled on; both orderings are checked.
+reset "[$(closed_visit v-ruled k1 tk-a ruled 600),$(closed_visit v-moot k1 tk-a moot 3600)]"
+"$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "an older moot INSIDE the window behind a newer ruling does not suppress"
+reset "[$(closed_visit v-ruled k1 tk-a ruled 200000),$(closed_visit v-moot k1 tk-a moot 3600)]"
+out=$("$SUT" --subject tk-a --key k1 --message m 2>&1)
+eq "$(visits)" "0" "a newer moot behind an older ruling does suppress"
+has "$out" "v-moot" "and it is the newest verdict that is named"
+
+echo "# an ephemeral subject matches on the key alone, as its open dedup does"
+# A patrol wisp is burned and re-poured every cycle, so its id cannot identify
+# a situation from one call to the next.
+reset "[$(closed_visit v-old wedged-lx-1 tk-wisp-aaa moot 3600)]"
+out=$("$SUT" --subject tk-wisp-bbb --key wedged-lx-1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a wisp subject honors the verdict its predecessor earned"
+eq "$(visits)" "0" "and files nothing"
+
+echo "# an OPEN visit still outranks the window"
+reset "[{\"id\":\"v-open\",\"status\":\"open\",\"title\":\"t\",\"description\":\"d\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"visit\",\"escalation_key\":\"k1\",\"gc.continuation_group\":\"tk-a\",\"gc.routed_to\":\"gc-toolkit/gc-toolkit.converse\"}},$(closed_visit v-old k1 tk-a moot 3600)]"
+out=$("$SUT" --subject tk-a --key k1 --message m 2>&1)
+has "$out" "already open" "the open-visit answer is the one given"
+eq "$(meta v-old escalation.recurrences)" "<absent>" "and the closed verdict is not tallied for it"
+
+echo "# the window is tunable and can be turned off"
+reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
+GC_ESCALATE_VERDICT_WINDOW=0 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "GC_ESCALATE_VERDICT_WINDOW=0 disables the window"
+reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
+GC_ESCALATE_VERDICT_WINDOW=600 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a window narrower than the verdict's age files"
+reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
+GC_ESCALATE_VERDICT_WINDOW=notanumber "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "0" "a malformed window falls back to the default rather than opening the gate"
+
+echo "# a closed visit with an unparseable or missing timestamp never suppresses"
+# Absent is unknown, and unknown must file: the mute this script exists to end
+# is worse than a duplicate.
+reset '[{"id":"v-old","status":"closed","title":"t","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"tk-a","gc.outcome":"moot"}}]'
+"$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a verdict with no closed_at files"
+reset '[{"id":"v-old","status":"closed","title":"t","description":"d","notes":"","closed_at":"not-a-date","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"tk-a","gc.outcome":"moot"}}]'
+"$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "a verdict with an unparseable closed_at files"
+
+echo "# a recurrence that cannot be recorded still suppresses"
+# The tally is evidence, not the gate: losing it must not re-open the storm.
+reset "[$(closed_visit v-old k1 tk-a moot 3600)]"
+out=$(STUB_UPD_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a failed tally write still exits 0"
+eq "$(visits)" "0" "and still files nothing"
+has "$out" "could not record the recurrence" "and says the tally was lost"
+
 echo
 echo "escalate.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

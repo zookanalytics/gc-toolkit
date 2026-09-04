@@ -104,6 +104,8 @@ cat > "$TMP/ready.json" <<'JSON'
 [
   {"id":"c-plain","title":"an ordinary idle bug","issue_type":"bug"},
   {"id":"c-routed","title":"already dispatched","issue_type":"task","metadata":{"gc.routed_to":"rig/rig.polecat"}},
+  {"id":"root-landed","title":"the ROOT of a spent molecule, still routed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.routed_to":"rig/rig.polecat","gc.input_convoy_id":"conv-landed"}},
+  {"id":"root-live","title":"the ROOT of an in-flight molecule, routed","issue_type":"task","metadata":{"gc.kind":"workflow","gc.routed_to":"rig/rig.polecat","gc.input_convoy_id":"conv-anchorlive"}},
   {"id":"c-visit","title":"visit: something","issue_type":"task","metadata":{"task_kind":"visit"}},
   {"id":"c-subject","title":"triage: a scope","issue_type":"task","metadata":{"task_kind":"triage-subject"}},
   {"id":"c-pattern","title":"a distiller cluster anchor","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
@@ -120,13 +122,13 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zookanalytics/signal-loom/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 in another repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url","issue_type":"task","metadata":{"merge_result":"pull_request"}},
-  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green@756d5d7"}},
-  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","check.codex":"green@aa11","check.ci":"green@aa11"}},
-  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","check.codex":"green@bb22"}},
-  {"id":"c-preopen-fixable","title":"pre-open, fixable — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"fixable@4b366f"}},
-  {"id":"c-preopen-partial","title":"pre-open, one of two markers absent","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","check.codex":"green@cc33"}},
+  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
+  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","check.codex":"green","check.ci":"green"}},
+  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","check.codex":"green"}},
+  {"id":"c-preopen-fixable","title":"pre-open, fixable — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"fixing"}},
+  {"id":"c-preopen-partial","title":"pre-open, one of two markers absent","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","check.codex":"green"}},
   {"id":"c-preopen-nomarker","title":"pre-open, no marker at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"c-preopen-noset","title":"pre-open, marker but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check.codex":"green@dd44"}},
+  {"id":"c-preopen-noset","title":"pre-open, marker but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check.codex":"green"}},
   {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none"}},
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator direction pending"}},
   {"id":"c-hold-bare","title":"held, no reason named","issue_type":"task","metadata":{"triage.hold":"true"}},
@@ -220,6 +222,26 @@ grep -Eq 'sweep.new_ids=[a-z0-9,-]*c-plain' "$GC_CALLS" \
 grep -q 'visit.recheck=.*liveness-recheck.sh' "$GC_CALLS" \
     && ok "visit.recheck stamps the resolved liveness-recheck.sh path" \
     || bad "visit.recheck stamp" "$(cat "$GC_CALLS")"
+
+echo "── a routed workflow ROOT is topology, never routed-and-claimable ──"
+# gc.routed_to on a root names the run; it is not an offer. The hook refuses a
+# workflow-topology candidate (hookCandidateClaimable) and the controller's
+# demand loop refuses to count one (demandRowServable), both keyed on gc.kind,
+# so no worker can ever take the row. Calling it claimable published a count of
+# pool demand that nothing could serve. c-routed is the discriminator: an
+# ordinary routed bead keeps the claimable class.
+FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
+# Exact count per class: a substring match would accept "topology 20" too.
+funnel_count() { printf '%s' "$FUNNEL" | sed 's/.*funnel: //; s/ \xc2\xb7 /\n/g' \
+    | awk -v c="$1" '$1 == c { print $2; found = 1 } END { if (!found) print "<absent>" }'; }
+eq "$(funnel_count topology)" "2" "both routed roots classify as topology"
+eq "$(funnel_count routed-and-claimable)" "1" "routed-and-claimable holds only c-routed"
+for r in root-landed root-live; do
+    case ",$(cat "$BASELINE_FILE")," in
+        *",$r,"*) bad "dropped $r" "a topology root reached the unnamed set" ;;
+        *) ok "dropped $r" ;;
+    esac
+done
 
 echo "── each named class drops, each inverse-defect shape stays visible ──"
 for drop in c-routed c-visit c-subject c-pattern c-ingroup c-trackedvisit \

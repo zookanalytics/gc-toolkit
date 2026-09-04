@@ -63,6 +63,38 @@ Dropping these is as much the design as keeping the list above.
 | the healer passes, **as a category** | each repaired a writer that did not always run; atomic transitions remove the need |
 | prose-carried design | a rule a reader must extract from a paragraph is not enforced |
 
+### What kind of bead this is
+
+A bead's kind is `metadata.task_kind`. Every reader that branches on kind
+reads that key and nothing else — `visit`, `review`, `triage-subject`,
+`observation` and the standing kinds are all resolved this way, in the
+liveness sweeps, the gate scripts, the doctor checks, and `helm`'s visit
+filter.
+
+A label naming the same word is **not** the kind. It is a listing narrowing:
+`gc bd list -l observation` is cheaper than reading every bead's metadata, and
+that is the whole of its job. Two rules follow, and together they are the
+labels-vs-metadata stance:
+
+- **A label may narrow a query; it may never decide one.** A reader that
+  narrows with `-l <kind>` re-filters the result on `task_kind`, because the
+  label is free text and any bead may carry it. The narrowing decides what the
+  reader *sees*; `task_kind` decides what it *counts*.
+- **Which kinds carry a label is per-kind, not uniform.** It is a property of
+  that kind's writers, and a kind earns a `-l` narrowing only once every writer
+  of it sets the label. Kinds written by the learning loop carry one, though
+  only `observation` is narrowed by a reader today; `review`, `visit` and
+  `triage-subject` do not, and no reader wants one there —
+  back-filling labels nothing reads would buy a migration and no property.
+
+The second rule is what makes the first one safe, and it is the half a reader
+can get wrong silently: narrow on a label some writer of the kind omits and
+the query is quietly short, with no error to report. I12 is that proposition.
+
+The `task_kind` **key** is registered in `lifecycle/lifecycle.toml`; its
+**values** are not a closed enum, and the live store carries kinds no pack code
+writes.
+
 ---
 
 ## 2. The lifecycle, as counts
@@ -113,21 +145,26 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I3** | Every routed bead is claimable: route AND assignee name a live target, routed work is in `bd ready` or in `bd blocked`, and rig-scoped orders are bound. | `doctor/check-routed-work-claimable` |
 | **I4** | Every PR has exactly one owning anchor, and every gating anchor is open. | `doctor/check-one-anchor-per-pr` (structural); `merge.sh` also refuses on sight, fail-closed |
 | **I5** | No bead is closed while the work it represents is unlanded: closed anchor ⇒ `merged` + `merged_sha`, or an explicit terminal state. | `doctor/check-closed-implies-landed` |
-| **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is well-formed `verb@oid`. | `doctor/check-gate-integrity` |
-| **I7** | A gate verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: `signoff.sh` contains the only code that sets a `check.*` value. The two other components that touch the key ([authority-map.md](authority-map.md)) only clear it, which cannot forge a verdict. `doctor/check-gate-marker-provenance` (tk-iljtmq) carries the depth half: every green marker on an open gating anchor must name a commit some verdict covers. It resolves against a `task_kind=review` bead whose `anchor_bead`, `reviewed_oid` and `check_name` match the anchor, the marker's commit and the marker's gate, then, for that residue only, against an APPROVED GitHub review on the anchor's `pr_number` sitting at the same oid. It flagged 0 of the 20 in-scope anchors when it shipped, so it is a forward regression detector on a clean baseline. Moving the stamp out of `template-fragments/polecat-non-impl-done.template.md` into the pass that observes the review is tk-eh6xhf, and this check does not replace it. |
+| **I6** | Every gating anchor declares a non-empty `check_set`, and every marker is a bare lane-state word. | `doctor/check-gate-integrity` |
+| **I7** | A gate verdict was written by the one audited writer, `signoff.sh` — narrowed from the old provenance question by making the writer singular. | `doctor/check-gate-integrity` (marker form); the single-writer property is held by construction: `signoff.sh` contains the only code that sets a `check.*` value. The two other components that touch the key ([authority-map.md](authority-map.md)) only clear it, which cannot forge a verdict. `doctor/check-gate-marker-provenance` (tk-iljtmq) carries the depth half: every green lane on an open gating anchor must name a recorded verdict. It resolves against a CLOSED `task_kind=review` bead whose `anchor_bead` and `check_name` match the anchor and the lane, and whose `signoff_verdict` reads `approve` (or, for a bead closed before that stamp existed, `gc.outcome=recorded` with no `signoff_verdict` at all); an open bead or one closed on request-changes is not evidence. For that residue only, it falls back to an APPROVED GitHub review on the anchor's `pr_number` — not compared to any commit, since a lane state names no commit. It flagged 0 of the 20 in-scope anchors when it shipped, so it is a forward regression detector on a clean baseline. Moving the stamp out of `template-fragments/polecat-non-impl-done.template.md` into the pass that observes the review is tk-eh6xhf, and this check does not replace it. |
 | **I8** | Every step bead reaches a terminal state: no offerable step under a closed root, no frontier stalled past its bound. A step under a closed root is offerable when its own status is open and every blocking dependency has closed; one parked at `status=blocked`, or still waiting on a live blocker, is inert residue and reported as a note, because no pool can hand it out. | `doctor/check-step-terminal` |
 | **I9** | A molecule executes the formula text that is current when it runs. | `doctor/check-pour-text-current` (tk-5w3boh): a checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref (the fail-open case, where the naive behind-count reads 0), and a live molecule poured before its formula last changed. Detection, not prevention — step descriptions still freeze at pour while the rig checkout advances on a 15-minute cooldown. |
 | **I10** | Every pack order fires within its declared interval. | `doctor/check-cadence-live` |
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Held on purpose: a non-empty `gc.takeaway` or `hold_reason`, on the step or on the root `gc.root_bead_id` names, takes a step out of both arms as a note whose remedy is `status=blocked` — releasing a held step to `open` hands it to the pool its route still names, which is what the hold exists to prevent. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
+| **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; only `observation` is narrowed on by a reader today, and it is clean at filing, so the check would ship as a forward regression detector. |
 
-Three further checks guard structure that is not an anchor invariant:
+Four further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
-(generated-artifact freshness; warn-only when absent), and
+(generated-artifact freshness; warn-only when absent),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
 reaches the hook with its stdin intact, the hook's own measurement reads the
 context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound). That is the whole set: **14 checks, each asserting a live structural
+been latched past a bound), and `doctor/check-wisp-cascade-intact` (every bead
+store's schema enforces the wisp auxiliary cascade — the constraint both
+removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
+write naming a wisp that does not exist, so a store without it accumulates
+rows no wisp reaches and reports nothing). That is the whole set: **15 checks, each asserting a live structural
 property** — none greps the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
@@ -246,6 +283,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |
 | `assets/scripts/refinery-reconcile.sh` | merge | Drives one cadence pass over this rig's queue. |
+| `assets/scripts/pre-open-rebase.sh` | merge | Arm 1a: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 2: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
@@ -280,13 +318,14 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-deacon-patrol.toml` | patrol | City infrastructure health: Dolt, orphan processes, doctor sweep. |
 | `formulas/mol-dog-shutdown-dance.toml` | patrol | Due process for one wedged session, against a claimed warrant. |
 | `orders/boot-health.toml` | patrol | Fires the wedged-deacon detector. |
+| `orders/convoy-check.toml` | patrol | Fires the convoy sweep hourly, city-wide: closes the convoys the bead-close autoclose missed. |
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-finding-gate.sh` | patrol | Re-asks doctor at close time, so a merge cannot silently read as a fix. Run by the deacon patrol's doctor sweep. |
-| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached and hourly, past the harness ceiling a foreground call cannot exceed, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
+| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached and hourly, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
 | `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. |

@@ -1161,7 +1161,7 @@ func humanSince(t, now time.Time) string {
 func prNeeds(machine, approval string, ask *Blocker) string {
 	switch {
 	case machine == MachineWedgedException:
-		return "wedged: the review cap's exception stands at the live head — only a new commit clears it"
+		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
 	case machine == MachineWedgedVeto:
 		return "wedged: a standing CHANGES_REQUESTED with the rework rounds spent"
 	case ask != nil:

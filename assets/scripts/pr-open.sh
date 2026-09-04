@@ -7,8 +7,8 @@
 # Otherwise: holds gate the create path; refuse a bead-local planning artifact
 # aimed at the default branch with no convoy above it (the shared-input-artifact
 # anti-pattern), naming the integration-branch remedy and escalating it once;
-# require every marker-bearing gate the anchor's check_set declares
-# green@<live head>;
+# require every marker-bearing gate the anchor's check_set declares to read
+# green;
 # `gh pr create` non-draft pinned to origin, body summarizing the polecat's
 # `pr_summary` with the dispatch text demoted (the description only when no
 # summary was carried), read back BY NUMBER, refuse a moved head, replay the
@@ -344,15 +344,10 @@ Branch: $branch"
     fi
   fi
 
-  # The gate: every gate the anchor's own check_set declares, green at the LIVE
-  # head, read pinned to origin. Same predicate merge.sh applies at the merge,
-  # so one anchor is judged by one rule at both transitions.
-  HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
-  head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
-  if [ -z "$head_oid" ]; then
-    echo "$PROG: $id branch '$branch' head unresolved; skip (retry next pass)" >&2
-    skipped=$((skipped + 1)); continue
-  fi
+  # The gate: every gate the anchor's own check_set declares reads green. This
+  # is a row-only check — green is a state of the lane, not a claim about a
+  # commit — so it is judged before the head fetch below: a held anchor pays
+  # no network call.
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   # Empty is never the gateless opt-out: that is the 'none' sentinel. Empty
   # means never normalized, and gate-ensure — arm 1 of this same pass — stamps
@@ -365,14 +360,24 @@ Branch: $branch"
   while IFS= read -r g; do
     [ -n "${g:-}" ] || continue
     marker=$(printf '%s' "$row" | jq -r --arg k "check.$g" '.metadata[$k] // empty')
-    [ "$marker" = "green@$head_oid" ] && continue
-    UNGREEN="$g"; UNGREEN_HAVE="${marker:-none}"; break
+    [ "$marker" = "green" ] && continue
+    UNGREEN="$g"; UNGREEN_HAVE="${marker:-unreviewed}"; break
   done <<GATES
 $(gates_of "$checkset")
 GATES
   if [ -n "$UNGREEN" ]; then
-    echo "$PROG: $id branch '$branch' check '$UNGREEN' not green at live head (have '$UNGREEN_HAVE', want 'green@$head_oid'); held"
+    echo "$PROG: $id branch '$branch' check '$UNGREEN' is '$UNGREEN_HAVE', not green; held"
     held=$((held + 1)); continue
+  fi
+
+  # Every check_set gate reads green — the only cases left need the live head:
+  # what the PR is opened at, and (below) whether a dead PR was closed at
+  # exactly this commit.
+  HEAD_JSON=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$branch" 2>/dev/null)
+  head_oid=$(printf '%s' "$HEAD_JSON" | jq -r '.sha // empty' 2>/dev/null)
+  if [ -z "$head_oid" ]; then
+    echo "$PROG: $id branch '$branch' head unresolved; skip (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
   fi
 
   # A dead PR closed at EXACTLY this head was a decision about this commit;

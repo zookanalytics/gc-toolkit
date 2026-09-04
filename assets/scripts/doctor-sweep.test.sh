@@ -129,6 +129,32 @@ has "$OUT" "state=started" "once the interval has passed it sweeps again"
 await_sweeps 2
 eq "$(grep -c . "$STUB_LOG")" "2" "  ... a second run, not a re-read of the first"
 
+# --- the recorded pid is a real pid, in whichever mode launched it ----------
+# The body is a file, not an inline `sh -c` string, so systemd's argv expansion
+# cannot turn the wrapper's `$$` into a literal `$`. A pid that is not a number
+# is that regression, and it strands every later collect on a `kill -0` of
+# garbage. The fallback row runs everywhere; the systemd row runs only where a
+# user manager is reachable, which is the only place the regression can occur.
+new_state pidfallback
+: > "$STUB_LOG"; export STUB_SLEEP=2 STUB_RC=1 STUB_PAYLOAD="$TMP/payload.json"
+GC_DOCTOR_SWEEP_NO_SYSTEMD=1 "$SUT" >/dev/null
+await_until have_pid
+PID=$(cat "$STATE/current/pid" 2>/dev/null)
+if [[ "$PID" =~ ^[0-9]+$ ]]; then ok "the setsid/nohup fallback records a numeric pid"
+else bad "the setsid/nohup fallback records a numeric pid (got '$PID')"; fi
+await_run
+if command -v systemd-run >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+  new_state pidsystemd
+  : > "$STUB_LOG"; export STUB_SLEEP=2 STUB_RC=1 STUB_PAYLOAD="$TMP/payload.json"
+  "$SUT" >/dev/null
+  await_until have_pid
+  PID=$(cat "$STATE/current/pid" 2>/dev/null)
+  if [[ "$PID" =~ ^[0-9]+$ ]]; then ok "the transient user service records a numeric pid, never a systemd-expanded \$"
+  else bad "the transient user service records a numeric pid (got '$PID')"; fi
+  await_run
+fi
+export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
+
 # --- a malformed interval still sweeps hourly -------------------------------
 # Nothing routine delivers one: every pour site passes the interval, and an
 # omitted declared var renders its default. A bad value must not read as zero.

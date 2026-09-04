@@ -84,7 +84,7 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green@<live head> before merge.sh lands the PR. 'codex' = a review dispatched by the cadence's gate-ensure; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green before merge.sh lands the PR. 'codex' = a review dispatched by the cadence's gate-ensure; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
 default = "codex"
 
 [[steps]]
@@ -612,9 +612,10 @@ unset _cs_canon
 bead already gates this branch, $WORK is a rework hand-back: move it to
 `unanchored` and close it landed-on-branch, never stamp `merge_result` on it
 (a merge_result-carrying rework child joins the anchor enumeration as a
-gateless second anchor), and let gating continue on the existing anchor — the
-pushed head moved, so its head-bound markers are already stale and the cadence
-re-gates them.
+gateless second anchor), and let gating continue on the existing anchor: its
+lane markers are states of the lane, not of the head, so the rework's push does
+not touch them — the cadence re-reads the existing anchor's gate and holds
+until it reads green.
 
 Branch is the join key and `merge_result` present is the whole predicate: any
 declared state carries one, so an anchor parked for a person (`blocked`,

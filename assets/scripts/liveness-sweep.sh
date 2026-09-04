@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # liveness-sweep.sh — the P3 exec pass, fully mechanical (no agent session).
 # Job: classify every open bead in this rig as worked / gated / conversing /
-# held-by-design / routed-and-claimable / machine residue — anything left is
-# an UNNAMED WAIT — then file/refresh ONE batch triage visit (delta only)
-# on the standing per-rig unnamed-waits subject via escalate.sh. Also owns
-# the standing-subject recurrence: each task_kind=triage-subject bead gets a
-# visit iff its scope set CHANGED and no visit is live.
+# held-by-design / routed-and-claimable / topology / machine residue.
+# Anything left is an UNNAMED WAIT. Then file/refresh ONE batch triage visit
+# (delta only) on the standing per-rig unnamed-waits subject via escalate.sh.
+# Also owns the standing-subject recurrence: each task_kind=triage-subject
+# bead gets a visit iff its scope set CHANGED and no visit is live.
 # Replaces formulas/mol-liveness-sweep.toml + mol-triage-recurrence.toml.
 # Caller: orders/liveness-sweep.toml (exec), after liveness-sweep-precheck.sh
 # proves the delta non-empty; safe to run by hand.
@@ -30,7 +30,7 @@ DRY_RUN=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
-        -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "$PROG: unexpected argument: $1" >&2; exit 2 ;;
     esac
     shift
@@ -251,6 +251,16 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
   def standing_kinds: ["triage-subject", "feedback-pattern"];
+  # A workflow root, a scope latch and a step-spec sidecar carry a route and no
+  # executable body. The route names the run, it is not an offer. Both readers
+  # that serve or count pool work refuse them on gc.kind: the hook at
+  # hookCandidateClaimable, the controller demand loop at demandRowServable.
+  # No worker can ever take one. Mirrors beadmeta.WorkflowTopologyKinds, which
+  # no command reads out; a kind added there and not here falls through to the
+  # route arm, the behavior this def replaced.
+  def topology_kind:
+    (.metadata["gc.kind"] // "") as $k
+    | ["workflow", "scope", "spec"] | index($k) != null;
   def machine_convoy:
     (.issue_type // "") == "convoy"
     and ((((.title // "") | startswith("sling-"))
@@ -271,7 +281,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
         | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
         | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
     | ($gates | length) > 0
-      and all($gates[]; ($m["check." + .] // "") | startswith("green@"));
+      and all($gates[]; ($m["check." + .] // "") == "green");
   # Live-visit subjects: union of the gc.continuation_group stamp and the
   # tracks edge — the stamp alone has landed empty on a live visit (su-ab9je).
   ([ ($live[0] // [])[]
@@ -292,6 +302,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
       | . as $b
       | (if machine_convoy or order_wisp then "machine"
          elif ($husks | index($b.id)) != null then "husk"
+         elif topology_kind then "topology"
          elif ((.metadata["gc.routed_to"] // "") != "") then "routed-and-claimable"
          elif (($worked | index($b.id)) != null) then "worked"
          elif ((.metadata.task_kind // "") == "visit") then "conversing"

@@ -106,11 +106,14 @@ zero-count summary — for a dispatcher, "I could not see the queue" and
 "nothing was owed" reading alike is the same disappearing hold this
 machinery exists to remove.
 
-`doctor/check-deferred-dispatch-wired` asserts both halves ship and that
-the order's `exec` still reaches the script's `reconcile` verb. Ship the
-arm without the cadence and `arm` still succeeds, still writes a
-well-formed record, and nothing ever performs it — the same invisible
-hold, one layer down.
+Two checks keep the halves together. The positive control closing
+`assets/scripts/deferred-dispatch.test.sh` asserts the order file ships,
+is a rig-scoped cooldown, does not opt out of the single-flight gate, and
+still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
+(I10) then asserts the registration is live on every importing rig and
+has fired within `max(3×interval, 15m)`. Ship the arm without the cadence
+and `arm` still succeeds, still writes a well-formed record, and nothing
+ever performs it — the same invisible hold, one layer down.
 
 ## What this does not do
 
@@ -129,3 +132,13 @@ me" and "X resolves me" are different claims, and only the first has a
 consumer today; the second is tracked on `tk-4dksv`. The two are the same
 shape — an edge nothing acts on — and this order is the natural host for
 that consumer when it is built.
+
+A blocker in another store holds nothing here either. `bd` resolves a
+dependency id within one store, so a `blocks` edge naming a bead in
+another rig is dropped from `bd show`, absent from `bd blocked`, and
+counts for nothing in `bd list --ready`. An armed bead whose only blocker
+lives elsewhere therefore reads as ready, and the next pass slings it
+while that blocker is still open. The same-store limit belongs to the
+hold doctrine (`docs/component-model.md`, I1), and sequencing across rigs
+needs the blocker mirrored into the waiting bead's own store; that `arm`
+inherits the limit without saying so is tracked on `tk-6shsru`.

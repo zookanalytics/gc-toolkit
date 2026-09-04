@@ -118,7 +118,7 @@ reaches such a bead in any case, because every anchor enumeration is
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` is `green@<live head>`, and the diff is not a bead-local planning artifact aimed at the default branch |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` reads `green`, and the diff is not a bead-local planning artifact aimed at the default branch |
 | pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
@@ -162,7 +162,7 @@ The registry records the same value at `lifecycle/lifecycle.toml`
 
 `codex` is one such review gate, opaque like the rest. Both transitions read
 the same declared list: `pr-open.sh` publishes once every marker-bearing gate
-in `check_set` is `green@<live head>`, and `merge.sh` merges under the same
+in `check_set` reads `green`, and `merge.sh` merges under the same
 condition. `none`/`off` and `approval` are dropped from both — the first is
 the gateless-by-choice sentinel, and the second is evidenced by an external
 GitHub review, which cannot exist before the PR does and which `merge.sh`
@@ -179,43 +179,43 @@ carries that remedy plus one deduped visit. `graduation=true`, an anchor of
 type `convoy`, and `planning_artifact_ok=true` are exempt, and an unreadable
 compare leaves the create to proceed.
 
-Each gate's verdict is a head-bound marker:
+Each gate is a **lane**, and its marker carries one bare state word — a state
+of the lane, never a claim about a commit:
 
 | Marker | Meaning | Merge effect |
 |---|---|---|
-| `check.<g>=green@<oid>` | gate passed at `<oid>` | merges iff `<oid>` is the live head; re-gated once the head moves past it |
-| `check.<g>=fixable@<oid>` | addressable problems; a rework child is in flight | holds |
-| `check.<g>=exception@<oid>` | round cap spent or unmappable result; routed to human | holds; re-gated once the head moves past `<oid>`, or when new operator feedback resets the cap |
+| `check.<g>` absent | the lane is `unreviewed` | holds |
+| `check.<g>=unreviewed` | this lane owes a full review | holds |
+| `check.<g>=reviewing` | a full review is in flight | holds |
+| `check.<g>=validating` | a finding set is in hand and a validation pass is in flight | holds |
+| `check.<g>=fixing` | must-fix findings from this lane are open and work is out on them | holds |
+| `check.<g>=green` | converged | merges |
+
+**Green survives new commits.** A push does not move a lane out of `green`,
+does not stale it, and does not buy a review. Nothing in the cadence compares a
+marker to a head, and no pass re-gates a branch for having grown a commit.
+Only two of these states are written today: `signoff.sh` records `green` on an
+approving verdict and clears the marker on request-changes, returning the lane
+to `unreviewed`. `reviewing`, `validating` and `fixing` are the states the
+validator writes; `fixing` is also what the retired `reconcile-gate-verdicts.sh`
+left behind, migrated. The full lane state machine is
+[specs/tk-ztapg/review-cycle-architecture.md](../specs/tk-ztapg/review-cycle-architecture.md).
 
 `approval` takes no marker of its own. `merge.sh` satisfies it from an
 external APPROVED review at the live head, never from the city's own account
 and never from a `check.approval` marker. `lifecycle/lifecycle.toml` records
 that rule. What the *reviewer* did short of a verdict is posture, not a gate:
 see [Posture](#posture) below. **`signoff.sh` is the single writer of gate
-verdicts** (component-model I7). It refuses any oid that is not 40 lowercase
-hex: the marker earns its authority from `merge.sh` comparing it to the live
-head, and an abbreviated sha compares equal to nothing. A head move stales
-every verb at once, so a fixed branch re-evaluates fresh with no manual reset
-— gate-ensure re-arms the gate by dispatching a fresh review, whose verdict
-overwrites the stale marker.
+verdicts** (component-model I7). A verdict binds to no commit: the reviewed oid
+is recorded on the review bead and named in the posted artifact, and nothing
+compares it to a head.
 
-One shape cannot be re-armed that way. `merge.sh` and gate-ensure both read
+One shape no cadence pass can rewrite. `merge.sh` and gate-ensure both read
 only the gates named in `check_set`, so a `check.<g>` outside it is dispatched
-against by nothing and overwritten by nothing. When such a marker also fails
-the grammar, it is evidence of nothing that nothing could retire, and
-gate-ensure clears it. A well-formed one stays as history, and an undeclared
-`exception@` is the operator's to retire — the re-gate above reaches only the
-gates `check_set` names.
-
-At the head it names, an `exception@` gate is held, not decided. `signoff.sh`'s
-approve path stamps `green@<reviewed oid>` and returns before it counts rounds
-against the cap, so one further approving review releases the gate at that very
-head. No cadence pass will start that review, because gate-ensure and
-`pr-facts.sh` both read an exception bound to the live head as settled. The
-human the anchor is routed to has three moves: dispatch a review by hand,
-change the anchor's `check_set`, or move the head and take the one re-gate the
-table above describes. Reviewing the PR is a fourth: new review comments
-release the cap, and the exception with it.
+against by nothing and overwritten by nothing. When such a marker also carries
+a word outside the lane vocabulary, it is a state no reader knows and nothing
+could retire, and gate-ensure clears it. A well-formed one stays as history —
+a narrowed `check_set` keeps what its lanes recorded.
 
 ### The round cap counts from the last operator feedback
 
@@ -243,11 +243,17 @@ own, and a floor recomputed each pass would swallow every new round and the cap
 would never trip.
 
 A cap that resets while its own park stands has not reset, so the same write
-retires that park: the `exception@` marker, `blocked_reason`, the human route,
-and the `gc.takeaway` the cap wrote for the board. `signoff.sh` stamps
-`signoff_cap=<gate>@<oid>` alongside them, and the reset acts only while that
-stamp and the standing marker still agree — an anchor a person parked by hand,
-or one whose exception they already retired, is theirs and stays. A sitting
+retires that park: `merge_hold`, `blocked_reason`, the human route, and the
+`gc.takeaway` the cap wrote for the board. `signoff.sh` parks the anchor by
+stamping `merge_hold=signoff_cap` — the literal string, not `true` — together
+with `signoff_cap=<gate>`, and the reset (here and in `signoff.sh reset`) acts
+only while that exact pairing still stands: `merge_hold`'s value reads
+`signoff_cap` AND `signoff_cap` is non-empty. That is the one predicate every
+reader uses — `merge.sh`'s and gate-ensure's `wedged-exception` machine axis
+included — so an anchor a person parked by hand (`merge_hold=true`) is never
+mistaken for the cap's, and an operator's later `merge_hold=true` is never
+lifted by this reset even if an orphan `signoff_cap` still stands beside it: a
+hold that does not read exactly `signoff_cap` is theirs and stays. A sitting
 still waiting on a person outranks the reset the same way, and what says so is
 the demand bead `gc-helm.sh demand` filed (`gc.demand_for=<anchor>`), never
 `gc.takeaway`. That field is stamped when a sitting begins and replaced by its
@@ -294,28 +300,54 @@ held by the reviewer directly rather than by the cap.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
-`reviewed_oid=<live head>` on the review bead, and
-`signoff.sh` binds its verdict to that pinned commit (an explicit
-`--reviewed-oid` outranks it; the live head is only a last-resort fallback) —
-so a push between dispatch and verdict stamps green at the *reviewed* commit
-and correctly fails the merge's live-head condition instead of green-lighting
-an unreviewed head. That is the branch growing. A rebase, amend or squash
-takes the pinned commit off the branch instead, and `signoff.sh` refuses both
-verdicts and writes nothing: findings about a diff the branch no longer
-carries mint a rework child with nothing to implement. The reviewer re-pins at
-the live head and reviews that commit. Clearing that dead pin is the whole of
-the recovery path, so `signoff.sh` reads it back and exits 2 naming the manual
-repair rather than reporting a clear that did not happen.
+`reviewed_oid=<live head>` on the review bead, naming the commit the reviewer
+read — it binds no marker, and a push that only adds commits on top (the
+branch growing) leaves the pin `on` the branch and is not this check's
+business. What the pin still guards against is a rewrite: `signoff.sh` asks
+whether `reviewed_oid` is still an ancestor of the live head
+(`git merge-base --is-ancestor`, with a GitHub compare consulted first when a
+PR is open); a rebase, amend, or force-push that takes the pinned commit off
+the branch answers `gone`, and **both verdicts are refused** — findings about
+a diff the branch no longer carries would mint a rework child with nothing to
+implement. The refusal is not a dead end an operator must clear by hand: it
+clears the dead `reviewed_oid` pin itself, then closes the review bead
+`gc.outcome=superseded`, so gate-ensure's in-flight probe stops seeing it and
+pours a fresh review at the live head on its next pass. No marker is touched
+and no round is spent either way.
 
-`signoff.sh` closes the review bead itself, last. A bead that is already
-closed therefore had its verdict recorded, or was retired unjudged by
-`review-sweep.sh`, and either verdict against it is refused on the same terms:
-nothing written, no round spent.
+Whichever source wins, `signoff.sh` writes that commit back to the review bead
+as `reviewed_oid` before it stamps anything, on both verdicts and whether or
+not the PR is open. The lane state itself names no commit, so that record is
+the whole of what a city verdict leaves behind: the city posts no APPROVED
+GitHub review, and `doctor/check-gate-marker-provenance` resolves a
+city-written marker only against a review bead carrying it. A store that will
+not take the record costs a re-run: signoff exits 2 with nothing posted and no
+marker stamped.
+
+Pre-open, the verdict body is read back off the same bead on the same terms.
+Its notes are the only copy: `pr-open.sh` replays them as the PR's first
+comment when it opens one, and a request-changes child names the bead it came
+from in `source_review_bead` and has nowhere else to read its findings. So an
+append that did not land also costs a re-run, rather than a marker or a rework
+child standing on findings nobody can read.
+
+`signoff.sh` closes the review bead itself, last, stamping
+`signoff_verdict=<approve|request-changes>` in the same write as the close —
+`doctor/check-gate-marker-provenance` reads it to tell an approving review
+bead from one that recorded request-changes, now that `(anchor, lane)` alone
+carries no oid to key on. A bead that is already closed therefore had its
+verdict recorded, was retired unjudged by `review-sweep.sh`, or was closed
+`superseded` by the ancestry refusal above, and either verdict against it is
+refused on the same terms: nothing written, no round spent.
+
+A legacy `exception@<oid>` marker — the pre-migration cap park — is not lane
+vocabulary an approve verdict may read or overwrite: `signoff.sh` refuses to
+stamp `green` over one, naming `migrate-lane-states.sh` as the remedy, rather
+than silently releasing a park a human is relying on.
 
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
-an unnormalized anchor holds); every gate named in `check_set` is
-`green@<live head>`; no
+an unnormalized anchor holds); every gate named in `check_set` reads `green`; no
 unclosed rework or review child; PR base equals `merged_target`; GitHub reports
 CLEAN; no holds (`merge_hold`, `rebase_hold`, `tracking_only`). The merge is
 pinned with `--match-head-commit <validated oid>`, so a mid-pass head move
@@ -406,9 +438,9 @@ so a key written only for open pull requests would miss the majority of them.
 
 | Value | Meaning |
 |---|---|
-| `progressing` | some automated actor will act: a pool-routed blocker is open, or a gate marker is not bound to the live head |
-| `settled` | every declared gate reads `green@<live head>`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
-| `wedged-exception` | a gate reads `exception@<live head>`: the convergence cap stamped it and routed the anchor to a person, and every actor that could move the head has been told not to |
+| `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
+| `settled` | every declared gate reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
+| `wedged-exception` | `merge_hold` stands with `signoff_cap` beside it: the convergence cap parked the anchor and routed it to a person, and no automated actor will lift it |
 | `wedged-veto` | a non-city `CHANGES_REQUESTED` stands with the signoff round cap spent, so nothing will file further rework |
 
 The two wedge shapes are separate values because they are released by different
@@ -444,7 +476,7 @@ sequenceDiagram
   P->>P: step-close + drain
   C->>L: gate-ensure — check_set present, every gate raisable
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
-  C->>G: pr-open.sh — gh pr create when every check_set gate is green@live head
+  C->>G: pr-open.sh — gh pr create when every check_set gate reads green
   C->>G: merge.sh — validate, merge --match-head-commit
   C->>L: close + merged_sha, one lifecycle.sh call
 ```
@@ -456,21 +488,20 @@ sequenceDiagram
   the polecat pool. Back to `routed`; the next claimant starts from the
   recorded reason.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
-  and slings exactly one rework child per head and clears the gate marker, so
-  gate-ensure re-arms the dispatch when the child lands. The round cap
-  (default 3) is enforced by `signoff.sh` itself: cap spent ⇒
-  `check.<g>=exception@<head>` and the anchor routes to human. A round is one
-  attempted rework child, counted off the anchor's own children — a review
-  dispatch is not a round, however many read the same commit. One writer,
-  one terminal verdict: no second component writes a verdict. `pr-facts.sh`
-  and `gate-ensure.sh` also clear a marker, each under a condition
-  [authority-map.md](authority-map.md) states, but a clear withdraws evidence
-  and cannot assert it. gate-ensure bounds nothing per round: a dispatch-side
-  refusal there fires the cap early and withholds the very review whose
-  verdict settles the gate, so its `dispatch_count` is a separate number. A
-  head move past that exception therefore re-arms one dispatch, and a branch
-  someone fixed by hand gets a look. It cannot self-feed: the cap arm files no
-  rework child, so nothing inside the cadence can move that head again.
+  and slings exactly one rework child and clears the gate marker, returning the
+  lane to `unreviewed`, so gate-ensure re-arms the dispatch when the child
+  lands. The round cap (default 3) is enforced by `signoff.sh` itself: cap
+  spent ⇒ the anchor is parked under `merge_hold`, stamped `signoff_cap`, and
+  routed to human. A round is one attempted rework child, counted off the
+  anchor's own children — a review dispatch is not a round, however many read
+  the same commit. One writer, one terminal verdict: no second component writes
+  a verdict. `pr-facts.sh` and `gate-ensure.sh` also clear a marker, each under
+  a condition [authority-map.md](authority-map.md) states, but a clear
+  withdraws evidence and cannot assert it. gate-ensure bounds nothing per
+  round: a dispatch-side refusal there fires the cap early and withholds the
+  very review whose verdict settles the gate, so its `dispatch_count` is a
+  separate number. The park cannot self-feed: the cap arm files no rework
+  child, and nothing inside the cadence lifts a `merge_hold`.
 - **Dispatch backstop** (`gate-ensure.sh`): `dispatch_count` bounds
   DISPATCHES at `GC_MAX_REVIEW_DISPATCHES` (default 5). It is not the round
   cap and counts a different thing; it exists for the reviews the round cap
@@ -485,8 +516,7 @@ sequenceDiagram
   files again. Only an operator clears it, by fixing the cause and clearing
   `dispatch_count`.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
-  per head; a gate `green@` or `exception@` at a stale head gets one re-review
-  child per head. Idempotent per head — re-runs never duplicate children. A
+  per head. Idempotent per head — re-runs never duplicate children. A
   hold (`merge_hold`, `rebase_hold`) or a live demand bead
   (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
   branch current is routinely one horn of what such a demand asks, so a child
@@ -505,15 +535,19 @@ sequenceDiagram
   AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
   or by carrying no work-product key at all. It writes nothing to the
   successor's branch or PR, and holds on anything it cannot establish.
-- **Re-gate on head move**: any new commit stales every head-bound marker;
-  gate-ensure sees a declared gate that is neither settled at the live head
-  (`green@` or `exception@` at that head) nor in flight and dispatches one
-  review bead (stamp first, then attach `mol-review` via `gc sling --on`,
-  read the pour back). A head a closed request-changes verdict already judged
-  is not re-gated while the rework it filed is still open: the same commit
-  returns the same findings. This binds the stranded-review repair too —
-  re-slinging an inert review buys the same answer a fresh dispatch is
-  refused for.
+- **No re-gate on head move**: a new commit stales nothing. gate-ensure
+  dispatches on the lane — a declared gate that is neither `green` nor in
+  flight gets one review bead (stamp first, then attach `mol-review` via `gc
+  sling --on`, read the pour back) — and a lane that already reads `green`
+  keeps reading it however far the branch advances. Re-review is a judgement
+  the validator makes, not a trigger a push pulls. gate-ensure holds dispatch
+  rather than pouring a second review while an open rework child is already in
+  flight for the lane — a `blocks`-dep bead on the anchor carrying a non-empty
+  `source_review_bead` (the review bead the rework answers) — and reads a
+  legacy `exception@<oid>` marker as a park — wedged, no dispatch — until
+  `migrate-lane-states.sh` rewrites it to `merge_hold=signoff_cap`; its stray-
+  marker sweep leaves that shape alone rather than clearing it, for the same
+  reason.
 
 ## Disposition
 

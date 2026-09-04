@@ -6,7 +6,10 @@ carries the doctrine, this file carries the mechanics.
 
 Contract (self-cleaning model): receive work -> follow steps in order ->
 push branch, ONE atomic handoff update to the refinery -> close own step
-chain -> drain. NEVER close the work bead: the refinery closes an anchor on a
+chain -> drain. A run whose whole product is store work has no branch to
+push and takes submit-and-exit's store-only arm instead, which releases the
+bead and names the disposition for whoever owns the close.
+NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
 assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
@@ -215,6 +218,96 @@ The `# >>> submit-*` marked blocks below are extracted verbatim and executed
 by assets/scripts/submit-branch-gate.test.sh, so they must stay
 backslash-free (a TOML triple-quoted string eats a trailing backslash) and
 keep their markers.
+
+**0. Store-only exit — a run whose whole product is store work (TERMINAL).**
+Some work has no diff: the deliverable is a bead filed in another rig's
+store, or a record written into this one. Every arm below assumes a branch,
+so such a run reaches no ending here at all — it keeps `gc.routed_to`, which
+IS a pool's offer predicate, and the next polecat is handed the same finished
+work.
+
+Take this arm only when the run produced no commit, and name what it did
+produce in `STORE_ONLY_RECORD` (the bead ids this run created or routed).
+Empty means this is not that case and the run falls through to the branch
+gate. The block refuses the arm when a diff exists, so a run that merely
+forgot to commit cannot park itself as store work.
+
+The release is the one the halt arm writes: open, unassigned, route cleared.
+That shape can be undone from outside. The gc runtime's detached-handoff
+orphan sweep (`isDetachedHandoffOrphanCandidate`,
+`cmd/gc/pool_detached_orphan_sweep.go` in gascity) re-stamps the pool route on
+a bead that is open and unassigned, carries no route of either kind, no
+`gc.kind` and no `merge_result`, and still holds `gc.work_branch` and a
+session back-reference from its claim. This arm leaves exactly that bead, and
+`gc.work_branch` is why it matches: `hookClaimIdentityPatch` in
+`cmd_hook_claim.go` stamps that key at CLAIM time from the worker's own
+checkout, so it stands on a run that produced nothing to merge. The fix for
+that belongs in the runtime. Do not pick a route value here to dodge the
+predicate and do not re-clear the route in a loop; until the runtime changes,
+a bead released by this arm can come back.
+
+A bead that comes back carries the note. A claim on one already stamped
+`halt_reason=store_only`, whose notes name what was filed, is this arm's own
+release returning: re-take the arm, do not redo the work.
+
+The three writes are separate on purpose. A `gc bd update` that changes the
+assignee while you still hold the bead is refused by the claim guard, and the
+refusal rolls back the metadata and the notes in the same call. Metadata
+bypasses the guard, `--status=open` is accepted from the holder, and the plain
+`--assignee` write lands once the status is open. The intermediate state after
+the second write — open, still assigned, unrouted — is invisible to a pool's
+offer predicate, so no window here offers the bead to anyone:
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+# >>> submit-store-only-exit
+STORE_ONLY_RECORD=""
+if [ -n "$STORE_ONLY_RECORD" ]; then
+  AHEAD=$(git rev-list --count "origin/{{base_branch}}..HEAD" 2>/dev/null || echo 0)
+  DIRTY=$(git status --porcelain 2>/dev/null || true)
+  PUSHED=$(git ls-remote origin "refs/heads/polecat/$WORK_BEAD_ID" 2>/dev/null || true)
+  if [ "${AHEAD:-0}" != "0" ] || [ -n "$DIRTY" ] || [ -n "$PUSHED" ]; then
+    echo "STORE-ONLY EXIT REFUSED: this run has work to land"
+    echo "  commits ahead of origin/{{base_branch}}: ${AHEAD:-0}"
+    echo "  uncommitted changes: ${DIRTY:+yes}"
+    echo "  branch already on origin: ${PUSHED:+polecat/$WORK_BEAD_ID}"
+    echo "Land it the normal way: branch gate, target resolve, refinery handoff."
+    echo "If none of it is yours, you are in the shared rig checkout rather than a per-bead worktree: mail the witness that fact instead of releasing the bead."
+    gc runtime drain-ack
+    exit 1
+  fi
+  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --set-metadata gc.routed_to="" --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
+  gc bd update "$WORK_BEAD_ID" --status=open
+  gc bd update "$WORK_BEAD_ID" --assignee=""
+  # >>> submit-store-only-chain-close
+  SC=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+  done
+  : "${SC:?step-close.sh not found in the pack; close each step by its (assignee, gc.step_ref) pair, never by an id read from the environment}"
+  for STEP in load-context workspace-setup preflight-tests implement self-review submit-and-exit; do
+    "$SC" --step "mol-polecat-work.$STEP" --outcome pass || echo "step-close: mol-polecat-work.$STEP was not this session's to close — left for the finalizer"
+  done
+  # <<< submit-store-only-chain-close
+  gc runtime drain-ack
+  exit 0
+fi
+# <<< submit-store-only-exit
+```
+
+**What closes the bead is not yours either way**, and which note you leave is
+the difference between a bead someone can dispose of and one that just sits:
+
+- The work MOVED to another store. The close verb is
+  `assets/scripts/bead-rehome.sh --origin <bead> --successor <filed-bead>
+  --kind re-homed`, plus `--successor-store rig:<name>` where the successor's
+  id prefix is ambiguous. docs/authority-map.md gives that verb to converse
+  dispositions, operator re-homes and duplicate-sweep.sh, so write the exact
+  invocation into the note and mail the witness a `NOTICE:` carrying it.
+- The bead legitimately stays open pending something else — a ruling, a
+  cadence, a person. Open and unrouted IS the resting state and no close verb
+  is owed. Say in the note what would close it.
 
 **1. Branch-shape gate (fails closed).** The refinery merges the branch in
 `metadata.branch`; pushing from any other branch strands the bead. The

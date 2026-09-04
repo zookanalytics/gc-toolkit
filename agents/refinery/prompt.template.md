@@ -95,8 +95,6 @@ nothing — log the verdict line and move on.
 
 {{ template "heartbeat-no-consent-ui" . }}
 
-{{ template "operator-profile" . }}
+{{ template "work-quality" . }}
 
 {{ template "scratch-reclaim" . }}
-
-{{ template "operator-next-step-trailing" . }}
