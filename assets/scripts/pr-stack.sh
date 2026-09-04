@@ -10,8 +10,11 @@
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
 # rebase hand-back), metadata.fold_target (folded onto it by a polecat), and
 # metadata.merged_target with merge_result=merged (landed its own PR into it) —
-# then splice the list into a delimited section at the end of the body. A row
-# whose own branch is some other one got here by a merge, so it names that
+# then splice the list into a delimited section at the end of the body. Rows
+# that recorded no work are dropped from the ledger — a closed duplicate keeps
+# its metadata.branch even for a rebase or rework twin — so the section names
+# only commits the branch actually carries. A row whose own branch is some
+# other one got here by a merge, so it names that
 # branch: a separate work item riding the PR reads differently from a fix to
 # it. The title is never touched: it names the anchor, and the body is where a
 # reviewer reads scope.
@@ -74,7 +77,13 @@ bd_list() {
 }
 
 # The branch's bead ledger: the three keys the cadence writes when work reaches
-# a branch, unioned and deduped. Any unreadable half fails the whole ledger.
+# a branch, unioned and deduped, then the rows that recorded no work removed. A
+# closed duplicate keeps its metadata.branch — and for a rebase or rework twin
+# that branch names this very head — so it reaches the union by that key while
+# having contributed no commit. A row carrying duplicate_of, or a no-op
+# work_outcome under either key, is dropped, so the section never tells a
+# reviewer to approve work that is not on the branch. Any unreadable half fails
+# the whole ledger.
 ledger_of() { # <branch>
   local br="$1" direct folded landed
   direct=$(bd_list --status="$ALL_STATUSES" --metadata-field branch="$br") || return 1
@@ -82,7 +91,12 @@ ledger_of() { # <branch>
   landed=$(bd_list --status="$ALL_STATUSES" --metadata-field merged_target="$br" \
     --metadata-field merge_result=merged) || return 1
   printf '%s\n%s\n%s\n' "$direct" "$folded" "$landed" \
-    | jq -s 'add | unique_by(.id)' 2>/dev/null
+    | jq -s 'add | unique_by(.id)
+        | map(select(
+            (((.metadata // {}).duplicate_of // "") | tostring) == "" and
+            (((.metadata // {}).work_outcome // "") | tostring) != "no-op" and
+            (((.metadata // {})["gc.work_outcome"] // "") | tostring) != "no-op"
+          ))' 2>/dev/null
 }
 
 # The section the PR body should carry. The anchor leads as the bead the PR was
