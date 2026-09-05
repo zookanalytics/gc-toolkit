@@ -9,7 +9,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/gc-deacon-ledger.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-deacon-ledger-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -67,7 +67,7 @@ case "$verb" in
       shift || true
     done
     n=$(( $(jq 'length' "$S") + 1 )); id="led-$n"
-    tmp=$(mktemp)
+    tmp=$(mktemp "${S%/*}/.stub.XXXXXX")
     jq -c --arg id "$id" --arg t "$title" --arg b "$body" --arg l "$label" \
           --arg c "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       '. + [{id:$id, status:"open", title:$t, description:$b, labels:[$l], created_at:$c, comments:[]}]' \
@@ -78,14 +78,14 @@ case "$verb" in
   comment)
     [ -n "${STUB_COMMENT_FAIL:-}" ] && { echo "bd: refused" >&2; exit 1; }
     jq -e --arg id "${1:-}" 'any(.[]; .id == $id)' "$S" >/dev/null || { echo "bd: no such issue" >&2; exit 1; }
-    tmp=$(mktemp)
+    tmp=$(mktemp "${S%/*}/.stub.XXXXXX")
     jq -c --arg id "${1:-}" --arg t "${2:-}" \
       'map(if .id == $id then .comments = ((.comments // []) + [{text: $t}]) else . end)' \
       "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   comments) jq -c --arg id "${1:-}" '[ .[] | select(.id == $id) | (.comments // [])[] ]' "$S" ;;
   close)
-    tmp=$(mktemp)
+    tmp=$(mktemp "${S%/*}/.stub.XXXXXX")
     jq -c --arg id "${1:-}" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
 esac
@@ -107,10 +107,10 @@ desc()     { jq -r --arg id "$1" '.[] | select(.id == $id) | .description' "$STU
 bstatus()  { jq -r --arg id "$1" '.[] | select(.id == $id) | .status' "$STUB_STORE"; }
 # Rewrite a bead's created_at to N days ago, for the age bound.
 age_days() { local d; d=$(date -u -d "@$(( $(date -u +%s) - $2 * 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
-             local t; t=$(mktemp); jq -c --arg id "$1" --arg c "$d" 'map(if .id == $id then .created_at = $c else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
+             local t; t=$(mktemp "${STUB_STORE%/*}/.stub.XXXXXX"); jq -c --arg id "$1" --arg c "$d" 'map(if .id == $id then .created_at = $c else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
 # Plant a ledger entry at a chosen age, bypassing append.
 plant()    { local d; d=$(date -u -d "@$(( $(date -u +%s) - $2 ))" +%Y-%m-%dT%H:%M:%SZ)
-             local t; t=$(mktemp); jq -c --arg id "$1" --arg x "$d $3" 'map(if .id == $id then .comments = ((.comments // []) + [{text: $x}]) else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
+             local t; t=$(mktemp "${STUB_STORE%/*}/.stub.XXXXXX"); jq -c --arg id "$1" --arg x "$d $3" 'map(if .id == $id then .comments = ((.comments // []) + [{text: $x}]) else . end)' "$STUB_STORE" > "$t" && mv "$t" "$STUB_STORE"; }
 
 echo "# find-or-create is idempotent"
 reset

@@ -231,7 +231,7 @@ while IFS=$'\t' read -r id branch num; do
   # One bead is the ordinary PR, and pr-open.sh already names it.
   if [ "$n" -lt 2 ]; then single=$((single + 1)); continue; fi
 
-  if ! { SECTION=$(mktemp) && CUR=$(mktemp) && NEW=$(mktemp); }; then
+  if ! { SECTION=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-stack.XXXXXX") && CUR=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-stack.XXXXXX") && NEW=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-stack.XXXXXX"); }; then
     echo "$PROG: cannot create a temp file" >&2; exit 1
   fi
   render_section "$branch" "$id" "$LEDGER" > "$SECTION"

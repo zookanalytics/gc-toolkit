@@ -360,9 +360,9 @@ case "$sub" in
             --body-file)
               shift
               [ -f "${1:-}" ] || { echo "gh: no such body file" >&2; exit 1; }
-              t=$(mktemp)
+              t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
               jq --rawfile b "$1" '.body = $b' "$f" > "$t" && mv "$t" "$f" ;;
-            --title) shift; t=$(mktemp)
+            --title) shift; t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
               jq --arg v "${1:-}" '.title = $v' "$f" > "$t" && mv "$t" "$f" ;;
           esac
           shift || true
