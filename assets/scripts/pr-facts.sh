@@ -192,7 +192,7 @@ takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an a
 close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = one may
   local rows id live
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   for id in $(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
         '.[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
@@ -205,7 +205,7 @@ close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = 
   # live, and the status filter above already drops closed, so any signoff-owned
   # row that still answers is one that did not retire.
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   live=$(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
         '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
