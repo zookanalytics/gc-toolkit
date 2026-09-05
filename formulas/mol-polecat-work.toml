@@ -349,6 +349,18 @@ fi
 # <<< submit-branch-gate
 ```
 
+**1a. Re-read the work bead before you hand off.** `load-context` read the
+bead once, at the start of the molecule. A coordinator may have appended a
+correction since: a retracted premise, an added requirement, a reviewer's
+note. The handoff is the last point it is still cheap to honor, so read the
+notes now:
+```bash
+gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].notes // ""'
+```
+Reconcile the diff you are about to hand off against what you read, and fix
+what a note contradicts. A note asking for a decision you cannot make is an
+escalation, not something to ship past.
+
 **1b. Resolve the landing target (fails closed).** `{{base_branch}}` is what
 the worktree was poured FROM, not necessarily where the work LANDS. A
 caller-set `metadata.target` always wins (a signoff sets REVIEW_BASE, an
