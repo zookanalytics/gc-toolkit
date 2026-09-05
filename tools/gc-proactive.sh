@@ -33,6 +33,12 @@ SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
+# The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
+# new bead type earns reactions only when added here deliberately. Tunable per
+# rig via GC_PROACTIVE_TYPES without a code change. The default excludes
+# convoy/epic/step/molecule (machinery or work-in-flight), decision (already a
+# surfaced human choice) and spec (an output, not a raw input).
+PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
@@ -76,6 +82,17 @@ rig_beads_db() {
 board_rank() {
     jq 'def prio_w($p): (if $p == null then 1 else ([0, 4 - $p] | max) end);
         sort_by(-(prio_w(.priority)), (.created_at // ""))'
+}
+
+# exclude_topology_roots — drop graph.v2 topology ROOTS (gc.kind in
+# workflow/scope/spec) from a demand array on stdin. A root is routed only to
+# name its run; gc hook --claim never offers it, so a query that counts one
+# spawns a worker that claims nothing and drains. The gc binary's default pool
+# query applies this exact clause on both its worker and count forms; this
+# mirrors it for the proactive custom queries, which inline the same clause in
+# agents/proactive/agent.toml's work_query + scale_check — keep all three in sync.
+exclude_topology_roots() {
+    jq 'map(select((.metadata["gc.kind"] // "" | (. == "workflow" or . == "scope" or . == "spec")) | not))'
 }
 
 usage() {
@@ -193,60 +210,116 @@ cmd_demand() {
         db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
-                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
+                --exclude-type=epic --json --limit 0 2>/dev/null || true)"
         [ -n "$r" ] || r='[]'
     fi
-    # Rank by board weight: spend the scarce proactive slots on the
-    # highest-priority work first (oldest-first within a band), not whatever
-    # bd-ready returned oldest-first across all priorities.
-    printf '%s' "$r" | board_rank
+    # Drop never-claimable topology roots (see exclude_topology_roots) so the
+    # demand mirror matches what gc hook --claim would offer, then rank by board
+    # weight and slice to the worker page. The full routed set is read
+    # (--limit 0) and roots dropped BEFORE the slice, so — like the agent.toml
+    # work_query this mirrors — a page filled by topology roots cannot bury a
+    # claimable step behind them and understate demand to zero. The scarce
+    # proactive slots then spend on the highest-priority work first (oldest
+    # within a band), not whatever bd-ready returned oldest across all bands.
+    printf '%s' "$r" | exclude_topology_roots | board_rank | jq --argjson n "$SCAN_LIMIT" '.[0:$n]'
 }
 
 # ---------------------------------------------------------------------------
-# scan — the PROCESS-SCAN trigger. Find beads "able to be updated": open,
-# ready, unassigned, not an epic, and not already reacted-to / hand-raised
-# (so we never re-react). Unions the explicit per-bead opt-in (gc.proactive=1)
-# with the broader movable-forward scan, deduped. Read-only unless --sling.
+# scan — the PROCESS-SCAN trigger. Find raw INPUT beads "able to be updated":
+# open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
+# top-level, and not already reacted-to / routed / machinery (so we never
+# re-react and never react to work-in-flight). Unions the explicit per-bead
+# opt-in (gc.proactive=1) with the broader movable-forward scan, deduped and
+# precision-filtered (see scan_candidates). Read-only unless --sling.
 # ---------------------------------------------------------------------------
 
-scan_candidates() {
-    if [ -n "$FIXTURE" ]; then
-        local raw='[]'
-        if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        printf '%s' "$raw" | board_rank
-        return 0
-    fi
-
-    # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
-    # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
-    local optin movable db
-    db="$(rig_beads_db)"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
-                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$optin" ] || optin='[]'
-
-    # (B) movable-forward: any ready, unassigned, non-epic bead. We then drop
-    # the ones already advanced (gc.proactive_reaction set) or already
-    # routed somewhere — those are not "able to be updated" by a fresh
-    # first reaction.
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
-                --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$movable" ] || movable='[]'
-
-    # Union, drop already-handled, dedup, then rank by board weight so a
-    # --sling sweep spends its limited headroom on the highest-priority
-    # candidates first.
-    jq -s '
-        (.[0] + .[1])
-        | map(select(
+# scan_precision_filter — from a candidate array on stdin, keep only raw
+# top-level INPUT beads a fresh first reaction may target. Each clause drops a
+# distinct non-input population:
+#   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops convoy/epic/
+#     step/molecule/spec/decision by omission.
+#   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
+#     issue_type task, so the allowlist misses it; drop it explicitly.
+#   - task_kind=feedback-pattern — distiller-loop machinery, not an input.
+#   - task_kind=review — a dispatched signoff lane, work-in-flight.
+#   - durable work/lifecycle markers ($markers) — a review lane carries
+#     check_name/anchor_bead; an implementation anchor carries branch/
+#     merge_result/work_dir/pr_url/pr_number. An anchor is an issue_type
+#     task/bug bead with no task_kind, so the allowlist and the task_kind
+#     clauses both miss it, and its markers are the only signal that the work
+#     is already in motion. Slinging a first reaction at either reassigns
+#     work-in-flight, which the proactive scope forbids.
+#   - gc.takeaway / gc.takeaway_by — a sitting has already RULED this bead.
+#   - top-level only — a parent-child CHILD carries the edge in its own
+#     .dependencies; a convoy's tracks edge lives on the convoy, so this
+#     catches parented beads, not every convoy member.
+# Plus the state predicate shared with the live queries (not already reacted,
+# not routed, has a description). Deduped by id.
+scan_precision_filter() {
+    local types_json markers_json
+    types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
+    # Durable work/lifecycle markers that mark a bead as work-in-flight rather
+    # than raw input. Kept as one list so the review-lane keys and the
+    # implementation-anchor keys share a single source of truth.
+    markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
+    jq --argjson types "$types_json" --argjson markers "$markers_json" '
+        map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
+            and ((.issue_type // "") as $it | ($types | index($it)) != null)
+            and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
+            and ((.metadata["task_kind"] // "") != "feedback-pattern")
+            and ((.metadata["task_kind"] // "") != "review")
+            and ((.metadata["gc.takeaway"] // "") == "")
+            and ((.metadata["gc.takeaway_by"] // "") == "")
+            and (.metadata as $m | ($markers | any(.[]; ($m[.] // "") != "")) | not)
+            and (([ .dependencies[]? | select((.dependency_type // .type) == "parent-child") ] | length) == 0)
           ))
         | unique_by(.id)
-    ' <(printf '%s' "$optin") <(printf '%s' "$movable") | board_rank
+    '
+}
+
+scan_candidates() {
+    local ranked
+    if [ -n "$FIXTURE" ]; then
+        local raw='[]'
+        if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | board_rank)"
+    else
+        # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
+        # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
+        local optin movable db
+        db="$(rig_beads_db)"
+        # Read the FULL opt-in and movable sets (--limit 0), not a page.
+        # scan_precision_filter drops work-in-flight beads (review lanes,
+        # branch/PR anchors, topology roots), so bounding a query to the worker
+        # page BEFORE the filter lets a page of now-dropped rows bury a raw input
+        # past the bound — the union filters to empty while a real candidate sits
+        # at row N+1. Read all, filter, rank, then slice (below), the same
+        # filter-before-bound the demand mirror uses.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
+                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null || true)"
+        [ -n "$optin" ] || optin='[]'
+
+        # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
+        # filter below drops the ones a fresh first reaction must not touch.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
+                    --sort oldest --limit 0 2>/dev/null || true)"
+        [ -n "$movable" ] || movable='[]'
+
+        # Union the two sources, apply the shared precision filter, then rank by
+        # board weight.
+        ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
+            | scan_precision_filter | board_rank)"
+    fi
+
+    # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
+    # rank, so the bound falls on real candidates and a --sling sweep spends its
+    # limited headroom on the highest-priority ones first.
+    printf '%s' "$ranked" | jq --argjson n "$SCAN_LIMIT" 'if $n == 0 then . else .[0:$n] end'
 }
 
 cmd_scan() {

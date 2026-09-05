@@ -84,17 +84,32 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 # priority (P3), so a board-weight rank must place it LAST — a plain
 # oldest-first sort would put it first. JSON order here is intentionally NOT
 # the expected ranked order, so a no-op (unranked) tool fails the assertions.
+# px-root is a graph.v2 topology ROOT (gc.kind=workflow): routed but never
+# claimable, so demand must DROP it. Its priority/age would rank it FIRST if it
+# leaked through, so the ranking assertions below double as an exclusion probe.
 cat > "$FXDIR/ready.json" <<'JSON'
 [
   {"id":"px-old-lo","title":"oldest but low priority","priority":3,"created_at":"2026-01-01T00:00:00Z"},
   {"id":"px-new-hi","title":"newest, high priority","priority":1,"created_at":"2026-03-01T00:00:00Z"},
-  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"}
+  {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"},
+  {"id":"px-root","title":"graph.v2 topology root — routed but NEVER claimable","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}}
 ]
 JSON
+# px-lo/px-hi are allowlisted top-level inputs the scan KEEPS; the rest are
+# each dropped by one precision filter (disallowed type, topology root,
+# feedback-pattern machinery, already-ruled, non-top-level child, a dispatched
+# review lane, an implementation branch/PR anchor).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
-  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z"},
-  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z"}
+  {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z","issue_type":"task"},
+  {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
+  {"id":"px-spec","title":"disallowed type (spec is an output, not an input)","description":"an output artifact","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"spec"},
+  {"id":"px-wf","title":"topology root wearing issue_type task","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.kind":"workflow"}},
+  {"id":"px-fb","title":"feedback-pattern distiller machinery","description":"a learned pattern","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
+  {"id":"px-ruled","title":"a sitting already ruled this","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.takeaway":"ruled: do X"}},
+  {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]},
+  {"id":"px-review","title":"a dispatched review bead (work-in-flight, not input)","description":"VERDICT pending on a branch","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"px-anchor"}},
+  {"id":"px-anchor","title":"an implementation anchor: branch/merge_result, no task_kind, allowlisted type","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug","metadata":{"branch":"polecat/px-anchor","merge_result":"pre_open_gate","work_dir":"/tmp/wt/px-anchor"}}
 ]
 JSON
 
@@ -108,10 +123,13 @@ echo "── demand is always on: routed work flows with no flag and no shed ─
 # No enable flag, no city-cap env — routed demand must simply flow. (The
 # leading `unset` guards against ambient GC_PROACTIVE_* in the test env: the
 # tool must not read them at all any more.)
-eq "demand flows the routed beads unconditionally (3)" "3" \
+eq "demand flows the routed beads (3 of 4: the topology root is dropped)" "3" \
    "$(unset GC_PROACTIVE_ENABLED GC_PROACTIVE_CITY_CAP; P demand | jq 'length')"
 eq "demand output is a valid JSON array (work_query contract)" "array" \
    "$(P demand | jq -r 'type')"
+# The never-claimable topology root must not be counted as demand — counting it
+# spawns a worker gc hook --claim will hand nothing (the churn fix).
+absent "demand drops the never-claimable graph.v2 topology root" "px-root" "$(P demand)"
 # The retired clamps must be GONE from the tool, not merely defaulted open.
 absent "the tool no longer reads the enable gate"  "GC_PROACTIVE_ENABLED"  "$(cat "$PROACTIVE")"
 absent "the tool no longer reads the city cap"     "GC_PROACTIVE_CITY_CAP" "$(cat "$PROACTIVE")"
@@ -226,6 +244,10 @@ else
 fi
 eq "work_query: degrades to [] when gc fails (valid answer, not garbage)" "[]" "$wq_out"
 rm -rf "$POISON"
+# work_query must strip graph.v2 topology roots inline — the gc default query
+# does, and a custom query that omits it counts unclaimable roots as demand.
+has "work_query strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' \
+    "$(extract_toml_block work_query)"
 
 echo "── scale_check is the same demand in COUNT form (agent.toml) ──"
 # The reconciler's pool SPAWN decision runs scale_check, NOT work_query
@@ -238,6 +260,10 @@ has "scale_check answers in COUNT form (0 fallback)" "printf '0'"           "$SC
 absent "scale_check carries no enable gate"         "GC_PROACTIVE_ENABLED"  "$SC_RAW"
 absent "scale_check carries no city-cap clamp"      "GC_PROACTIVE_CITY_CAP" "$SC_RAW"
 has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proactive' "$SC_RAW"
+# The spawn predicate MUST carry work_query's topology-root exclusion, or it
+# counts a root gc hook --claim never offers and spawns a worker with nothing
+# to claim — the churn this pool hit.
+has "scale_check strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' "$SC_RAW"
 POISON="$(mktemp -d)"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
@@ -254,6 +280,61 @@ else
 fi
 eq "scale_check: degrades to 0 when gc fails (no spurious spawn)" "0" "$sc_out"
 rm -rf "$POISON"
+
+echo "── churn guard: work_query and scale_check agree across the page bound ──"
+# The bug this locks out: work_query paged `gc bd ready` to its first N rows and
+# THEN dropped topology roots in jq, while scale_check dropped them over the
+# whole --limit-0 set. With more routed topology roots than the page holds ahead
+# of one claimable step, the page is all roots — work_query returned [] while
+# scale_check counted 1, so the reconciler spawned a worker that could claim
+# nothing and drained (the churn). Both blocks run here against a gc stub that
+# honors `gc bd ready`'s --limit/--sort, over 21 roots (older) ahead of 1 step:
+# 21 exceeds the 20-row page, so a page-then-filter query is empty while a
+# filter-then-slice query keeps the step.
+CHURN="$(mktemp -d)"
+jq -n '[ range(1;22) as $d
+          | { id: "root-\($d)", title: "topology root \($d)", priority: 1,
+              created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: { "gc.kind": "workflow" } } ]
+        + [ { id: "claimable-step", title: "the one routed non-topology step",
+              priority: 1, created_at: "2026-12-01T00:00:00Z",
+              metadata: { "gc.kind": "step" } } ]' > "$CHURN/ready.json"
+cat > "$CHURN/gc" <<'SH'
+#!/bin/sh
+# Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
+# the canned set, so a paged query and a full-set count are comparable.
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+lim=0; srt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) shift; lim="$1" ;;
+    --limit=*) lim="${1#--limit=}" ;;
+    --sort) shift; srt="$1" ;;
+    --sort=*) srt="${1#--sort=}" ;;
+  esac
+  shift
+done
+jq --argjson lim "${lim:-0}" --arg srt "$srt" '
+  (if $srt == "oldest" then sort_by(.created_at // "") else . end)
+  | (if $lim == 0 then . else .[0:$lim] end)' "$GC_STUB_DATA"
+SH
+chmod +x "$CHURN/gc"
+churn_env() { env -u GC_PROACTIVE_ENABLED PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" "$@"; }
+sc_churn="$(churn_env sh -c "$SC" 2>/dev/null || true)"
+eq "scale_check counts the step behind 21 topology roots"                 "1" "$sc_churn"
+wq_churn="$(churn_env sh -c "$WQ" 2>/dev/null || true)"
+eq "work_query returns that step, not [] (filter before the page bound)"  "1" \
+   "$(printf '%s' "$wq_churn" | jq 'length' 2>/dev/null)"
+has "…and it is the claimable step, not a leaked root" "claimable-step" "$wq_churn"
+# The tools/gc-proactive.sh `demand` mirror must filter-before-bound too: driven
+# live (no fixture) against the same stub, it keeps the step the page buried.
+dem_churn="$(env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+              PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" \
+              "$PROACTIVE" demand gc-toolkit/gc-toolkit.proactive 2>/dev/null || true)"
+eq "demand mirror keeps the step behind the page of roots"                "1" \
+   "$(printf '%s' "$dem_churn" | jq 'length' 2>/dev/null)"
+has "…and it is the claimable step"                    "claimable-step" "$dem_churn"
+rm -rf "$CHURN"
 
 echo "── the security invariant: proactive output is mr-only, never direct ──"
 ec=0; GC_PROACTIVE_MERGE=direct P sling px-1 --dry-run >/dev/null 2>&1 || ec=$?
@@ -288,6 +369,31 @@ eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --js
 eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
 has "scan (human) lists a candidate"                      "px-hi" "$(P scan)"
 
+echo "── scan precision: only top-level allowlisted INPUT beads, no machinery ──"
+# A fresh reaction is for un-triaged input beads. Each drop below is a distinct
+# precision filter; the survivors are exactly the two allowlisted top-level
+# inputs. A candidate leaks through only if its filter regresses.
+SCAN_IDS="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+has    "keeps an allowlisted task"                       "px-lo"    "$SCAN_IDS"
+has    "keeps an allowlisted bug"                        "px-hi"    "$SCAN_IDS"
+absent "drops a disallowed type (spec, an output)"       "px-spec"  "$SCAN_IDS"
+absent "drops a topology root wearing issue_type task"   "px-wf"    "$SCAN_IDS"
+absent "drops feedback-pattern distiller machinery"      "px-fb"    "$SCAN_IDS"
+absent "drops a bead a sitting already ruled (takeaway)" "px-ruled" "$SCAN_IDS"
+absent "drops a non-top-level parent-child child"        "px-child" "$SCAN_IDS"
+# The two work-in-flight populations the scan must never sling a fresh reaction
+# at. px-review is a dispatched review lane (task_kind=review + check_name +
+# anchor_bead). px-anchor is the discriminating case: an allowlisted issue_type
+# with a body, top-level, and NO task_kind — every other clause passes it, so
+# only the durable-marker denylist (branch/merge_result/work_dir) can drop it.
+absent "drops a dispatched review bead (work-in-flight)"  "px-review" "$SCAN_IDS"
+absent "drops an implementation branch/PR anchor"         "px-anchor" "$SCAN_IDS"
+eq     "keeps exactly the two allowlisted top-level inputs" "2" "$(P scan --json | jq 'length')"
+# The allowlist is a per-rig config var (GC_PROACTIVE_TYPES), tunable without a
+# code change: widening it to include spec surfaces px-spec.
+has    "GC_PROACTIVE_TYPES widens the allowlist" "px-spec" \
+       "$(GC_PROACTIVE_TYPES=task,bug,feature,spike,spec P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+
 echo "── one sweep is CAPPED: a reaction can end in a dispatch ──"
 # A first reaction may route its bead to an implementation pool, so an
 # uncapped sweep files as many downstream sessions as the scan found
@@ -304,6 +410,70 @@ absent "…and a sweep inside the cap reports nothing left" "left for the next s
 ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
 eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
+
+echo "── scan filters BEFORE the page bound (live path), and 0 = unbounded ──"
+# The bug this locks out: scan_candidates paged each `gc bd ready` to its first
+# SCAN_LIMIT rows and THEN ran scan_precision_filter. When more than a page of
+# work-in-flight beads (branch/PR anchors, review lanes) sort ahead of a raw
+# input, the page is all now-dropped rows: the filter empties the union and
+# `scan --json` returns [] while a claimable input sits one row past the bound,
+# so `scan --sling` schedules nothing. The GC_PROACTIVE_FIXTURE path cannot
+# catch this — it bypasses the live `gc bd ready --limit` calls — so drive the
+# real path against a `gc bd ready` stub that honors --limit/--sort.
+SCANB="$(mktemp -d)"
+# (1) 21 anchors carrying a work-in-flight marker (older) ahead of 1 raw input
+# (newest): 21 exceeds the 20-row page, so a page-then-filter scan is empty
+# while a filter-then-slice scan keeps the input.
+jq -n '[ range(1;22) as $d
+          | { id: "wip-\($d)", title: "work-in-flight anchor \($d)",
+              description: "has a body", issue_type: "task", priority: 1,
+              created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: { "merge_result": "pull_request" } } ]
+        + [ { id: "buried-input", title: "the one raw input past the page bound",
+              description: "a real un-triaged input", issue_type: "task",
+              priority: 1, created_at: "2026-12-01T00:00:00Z", metadata: {} } ]' \
+    > "$SCANB/buried.json"
+# (2) 22 clean inputs: the default page caps at 20 while SCAN_LIMIT=0 returns
+# all 22 — a plain .[0:$n] slice would read 0 as "take none", so this pins the
+# unbounded arm and the cap together.
+jq -n '[ range(1;23) as $d
+          | { id: "in-\($d)", title: "clean input \($d)",
+              description: "a body", issue_type: "task", priority: 2,
+              created_at: ("2026-02-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: {} } ]' > "$SCANB/many.json"
+cat > "$SCANB/gc" <<'SH'
+#!/bin/sh
+# Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
+# the canned set, so a paged scan and a full-set scan are comparable.
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+lim=0; srt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) shift; lim="$1" ;;
+    --limit=*) lim="${1#--limit=}" ;;
+    --sort) shift; srt="$1" ;;
+    --sort=*) srt="${1#--sort=}" ;;
+  esac
+  shift
+done
+jq --argjson lim "${lim:-0}" --arg srt "$srt" '
+  (if $srt == "oldest" then sort_by(.created_at // "") else . end)
+  | (if $lim == 0 then . else .[0:$lim] end)' "$GC_STUB_DATA"
+SH
+chmod +x "$SCANB/gc"
+scanb() { env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+    PATH="$SCANB:$PATH" GC_STUB_DATA="$1" "${@:2}"; }
+sb_buried="$(scanb "$SCANB/buried.json" "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "scan keeps the input the page of anchors buried (filter before bound)" "1" \
+    "$(printf '%s' "$sb_buried" | jq 'length' 2>/dev/null)"
+has "…and it is the raw input, not a leaked work-in-flight anchor" "buried-input" "$sb_buried"
+sb_cap="$(scanb "$SCANB/many.json" "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "scan caps the filtered set at SCAN_LIMIT (20 of 22)" "20" \
+    "$(printf '%s' "$sb_cap" | jq 'length' 2>/dev/null)"
+sb_all="$(scanb "$SCANB/many.json" env GC_PROACTIVE_SCAN_LIMIT=0 "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "SCAN_LIMIT=0 returns the whole filtered set, unbounded (22 of 22)" "22" \
+    "$(printf '%s' "$sb_all" | jq 'length' 2>/dev/null)"
+rm -rf "$SCANB"
 
 echo "── usage/parser agree: no advertised-but-unimplemented flags ──"
 # Finding: usage advertised `sling --reason R` but the parser rejected it.
