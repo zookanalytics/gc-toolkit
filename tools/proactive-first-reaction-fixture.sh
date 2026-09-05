@@ -97,7 +97,8 @@ cat > "$FXDIR/ready.json" <<'JSON'
 JSON
 # px-lo/px-hi are allowlisted top-level inputs the scan KEEPS; the rest are
 # each dropped by one precision filter (disallowed type, topology root,
-# feedback-pattern machinery, already-ruled, non-top-level child).
+# feedback-pattern machinery, already-ruled, non-top-level child, a dispatched
+# review lane, an implementation branch/PR anchor).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
   {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z","issue_type":"task"},
@@ -106,7 +107,9 @@ cat > "$FXDIR/scan.json" <<'JSON'
   {"id":"px-wf","title":"topology root wearing issue_type task","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.kind":"workflow"}},
   {"id":"px-fb","title":"feedback-pattern distiller machinery","description":"a learned pattern","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
   {"id":"px-ruled","title":"a sitting already ruled this","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.takeaway":"ruled: do X"}},
-  {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]}
+  {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]},
+  {"id":"px-review","title":"a dispatched review bead (work-in-flight, not input)","description":"VERDICT pending on a branch","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"px-anchor"}},
+  {"id":"px-anchor","title":"an implementation anchor: branch/merge_result, no task_kind, allowlisted type","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug","metadata":{"branch":"polecat/px-anchor","merge_result":"pre_open_gate","work_dir":"/tmp/wt/px-anchor"}}
 ]
 JSON
 
@@ -378,6 +381,13 @@ absent "drops a topology root wearing issue_type task"   "px-wf"    "$SCAN_IDS"
 absent "drops feedback-pattern distiller machinery"      "px-fb"    "$SCAN_IDS"
 absent "drops a bead a sitting already ruled (takeaway)" "px-ruled" "$SCAN_IDS"
 absent "drops a non-top-level parent-child child"        "px-child" "$SCAN_IDS"
+# The two work-in-flight populations the scan must never sling a fresh reaction
+# at. px-review is a dispatched review lane (task_kind=review + check_name +
+# anchor_bead). px-anchor is the discriminating case: an allowlisted issue_type
+# with a body, top-level, and NO task_kind — every other clause passes it, so
+# only the durable-marker denylist (branch/merge_result/work_dir) can drop it.
+absent "drops a dispatched review bead (work-in-flight)"  "px-review" "$SCAN_IDS"
+absent "drops an implementation branch/PR anchor"         "px-anchor" "$SCAN_IDS"
 eq     "keeps exactly the two allowlisted top-level inputs" "2" "$(P scan --json | jq 'length')"
 # The allowlist is a per-rig config var (GC_PROACTIVE_TYPES), tunable without a
 # code change: widening it to include spec surfaces px-spec.
