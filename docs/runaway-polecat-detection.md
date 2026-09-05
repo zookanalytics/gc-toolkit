@@ -63,7 +63,9 @@ because a healthy session looks exactly like a runaway without it.
   is not idle whatever its last claim says. The three assignee shapes are
   tested together — a pool seat is stamped with its session id, a named
   polecat with its alias, and `gc bd update --claim` writes the session name.
-  A filter written for one shape reads FALSE CLEAN against the other two.
+  A filter written for one shape reads FALSE CLEAN against the other two. A
+  scan that failed or timed out cannot prove the session holds nothing, so it
+  reads `verdict=unknown`, never clean.
 - **Queued demand.** Work waiting in the pool is work the session will claim
   next. `gc hook <template>`, with no `--claim`, is the read-only probe: exit
   0 means an offer is waiting, exit 1 means the queue is empty.
@@ -72,8 +74,8 @@ because a healthy session looks exactly like a runaway without it.
   stale-wisp and stale-bead scans own it.
 
 A session the probe cannot classify — an unreadable anchor, an undateable
-stamp, a demand probe that failed — is reported `verdict=unknown`. Unproven
-is never clean, and it is never warrantable either.
+stamp, a held-work scan that failed, a demand probe that failed — is reported
+`verdict=unknown`. Unproven is never clean, and it is never warrantable either.
 
 ## The ladder
 

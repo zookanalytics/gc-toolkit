@@ -161,7 +161,12 @@ $t $hit"
 }
 
 RIG_CACHE=""
-rig_open_beads() { # <rig> -> path to a JSON array of that rig's live beads
+# A scan that failed, timed out, or answered with a non-array is not an empty
+# rig — it is unreadable, and the held-work guard is fail-closed. Such a scan
+# writes the sentinel `?`, which live_claim reads as unknown. Only a readable
+# JSON array is a real answer, and `[]` is the real answer "this rig has no
+# open beads", so it must NOT fold to the sentinel.
+rig_open_beads() { # <rig> -> path; file holds a JSON array, or `?` if unreadable
   local rig="$1" f
   # The rig names a file here; anything outside the safe set is folded so a
   # value from the session list cannot reach outside the scratch directory.
@@ -171,20 +176,29 @@ rig_open_beads() { # <rig> -> path to a JSON array of that rig's live beads
   # `--rig` rather than an inherited BEADS_DIR: the gc wrapper re-resolves the
   # store from the invoking rig and ignores the environment, so a city-scoped
   # caller that does not name the rig reads its own store for every session.
-  if ! run_bounded gc bd list --rig="$rig" --status=open,in_progress --limit=0 --json 2>/dev/null \
-      | jq -c 'if type == "array" then . else [] end' > "$f" 2>/dev/null; then
-    printf '[]' > "$f"
+  # A non-array payload renders as `empty` and leaves the file empty, so the
+  # size check folds it to the sentinel with every failed or timed-out scan.
+  if run_bounded gc bd list --rig="$rig" --status=open,in_progress --limit=0 --json 2>/dev/null \
+      | jq -c 'if type == "array" then . else empty end' > "$f" 2>/dev/null \
+      && [ -s "$f" ]; then
+    :
+  else
+    printf '?' > "$f"
   fi
-  [ -s "$f" ] || printf '[]' > "$f"
   printf '%s' "$f"
 }
 
 # The bead a session is holding, if any. All three assignee shapes are tested
 # together: a pool seat is stamped with its session id, a named polecat with
 # its alias, and `gc bd update --claim` writes the session name. A filter
-# written for one shape reads FALSE CLEAN against the other two.
-live_claim() { # <rig> <id> <session_name> <alias> -> bead id or empty
-  local f; f="$(rig_open_beads "$1")"
+# written for one shape reads FALSE CLEAN against the other two. An unreadable
+# scan is neither held nor clean: it returns `?`, so the caller reports unknown
+# instead of proving the session idle on a scan it never read. A readable array
+# always starts with `[`, so the first byte tells the two apart.
+live_claim() { # <rig> <id> <session_name> <alias> -> bead id, empty, or `?` if unreadable
+  local f first=""; f="$(rig_open_beads "$1")"
+  IFS= read -r -n1 first < "$f" 2>/dev/null || true
+  [ "$first" = "?" ] && { printf '?'; return; }
   jq -r --arg a "$2" --arg b "$3" --arg c "$4" \
     'first(.[] | select((.assignee // "") as $x | $x != "" and ($x == $a or $x == $b or $x == $c)) | .id) // ""' \
     "$f" 2>/dev/null
@@ -331,6 +345,13 @@ while IFS=$'\t' read -r sid template rig sname alias last_active; do
     continue
   fi
   held="$(live_claim "$rig" "$sid" "$sname" "$alias")"
+  if [ "$held" = "?" ]; then
+    # An unreadable held-work scan cannot prove the session holds nothing, and
+    # unproven is not a finding: report unknown before demand, nudge or warrant.
+    N_UNKNOWN=$((N_UNKNOWN + 1))
+    emit "$sid" unknown "$template" "$rig" "$anchor" "$astatus" "$closed_age" "$idle" unknown "$nudges" held-work-unreadable
+    continue
+  fi
   if [ -n "$held" ]; then
     [ "$DRY_RUN" = "1" ] || state_clear "$state"
     emit "$sid" clean "$template" "$rig" "$anchor" "$astatus" "$closed_age" "$idle" unknown "$nudges" "holds-$held"
