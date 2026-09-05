@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/hold-sweep.sh (tk-a44ar4).
+# Hermetic test for assets/scripts/hold-sweep.sh.
 #
 # WHAT THE SCRIPT IS FOR. A non-empty `triage.hold` hides a bead from the
 # liveness sweep — liveness-sweep.sh classifies it `held-by-design` and
@@ -90,6 +90,12 @@ case "${1:-}" in
       esac
       shift || true
     done
+    # Fail only the merge probe (--has-metadata-key merge_result) while the hold
+    # listing stays readable, so a test can reach the merged-within evaluation
+    # with an unreadable probe — distinct from a readable store holding no merge.
+    if [ -n "${STUB_MERGE_PROBE_FAIL:-}" ] && [ "$key" = "merge_result" ]; then
+      echo "bd: simulated merge-probe failure" >&2; exit 1
+    fi
     # Model bd's category hiding: gates, infra and template/molecule rows are
     # OMITTED from a default listing and revealed only by an --include-* flag. A
     # fixture bead with "hidden":true stands for any of those; the show arm still
@@ -307,8 +313,9 @@ eq "$(meta b-1 triage.hold)" "h" "a condition naming a bead this store cannot re
 has "$out" "UNREADABLE b-1" "and the unreadable condition is named"
 
 # --- RECONCILE: merged-within ------------------------------------------------
-# The reported case: "re-open when any PR has merged within the last 48h",
-# which fired repeatedly with nothing acting on it.
+# merged-within fires when a merge landed in this rig inside the window, waits
+# when the newest merge is older, and waits — not errors — when the store holds
+# no merge at all.
 echo "# reconcile: merged-within"
 store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"held pending merge MOVEMENT","triage.hold_until":"merged-within:48h"},"notes":""},
         {"id":"m-1","status":"closed","closed_at":"'"$MERGE_2H"'","metadata":{"merge_result":"merged","merged_sha":"abc"},"notes":""}]'
@@ -323,12 +330,29 @@ eq "$(meta b-1 triage.hold)" "held pending merge MOVEMENT" "a merge outside the 
 has "$out" "1 waiting" "the pass counts it as waiting"
 
 # An unmerged anchor is not a merge: merge_result exists in other values, and
-# counting one would release every hold the moment any PR was opened.
+# counting one would release every hold the moment any PR was opened. The store
+# is readable and simply holds no merge, so the hold waits — it is not an error.
 store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""},
         {"id":"m-1","status":"open","closed_at":"'"$MERGE_2H"'","metadata":{"merge_result":"pull_request"},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"
 eq "$(meta b-1 triage.hold)" "h" "only merge_result=merged counts as a merge"
-has "$out" "UNREADABLE b-1" "with no merge to read, the probe is unreadable and never releases"
+has "$out" "1 waiting" "an unmerged anchor is a readable-but-empty probe, so the hold waits"
+
+# A readable store with no recorded merge at all is the new-rig case: the
+# condition is well-formed and has simply not fired. It must not read as
+# unreadable, which would report every merged-within hold as an error each pass.
+store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"
+eq "$(meta b-1 triage.hold)" "h" "no merge in the store does not release the hold"
+has "$out" "1 waiting" "a store with no merge is waiting, not unreadable"
+
+# The distinction those waiting cases rest on: a merge probe that cannot be READ
+# is still unreadable and still never releases. The hold listing succeeds here;
+# only the merge probe fails, so the pass reaches the merged-within evaluation.
+store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""}]'
+out="$(STUB_MERGE_PROBE_FAIL=1 "$SUT" reconcile 2>&1)"
+eq "$(meta b-1 triage.hold)" "h" "an unreadable merge probe never releases"
+has "$out" "UNREADABLE b-1" "and is named unreadable, distinct from the waiting cases above"
 
 # --- RECONCILE: date ---------------------------------------------------------
 echo "# reconcile: date (the review-by date)"
@@ -388,6 +412,8 @@ store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"h","triage.hold_u
 out="$("$SUT" reconcile --dry-run 2>&1)"
 eq "$(meta b-1 triage.hold)" "h" "--dry-run writes nothing"
 has "$out" "DRY-RUN would release b-1" "--dry-run says what it would do"
+has "$out" "1 would release" "--dry-run summary counts it as a would-release"
+hasnt "$out" "1 released" "and never as released — a dry-run releases nothing"
 
 # --- RELEASE by hand ---------------------------------------------------------
 echo "# release"
@@ -415,6 +441,9 @@ has "$out" "waiting on the call" "list shows the prose beside the condition"
 out="$("$SUT" list --json 2>&1)"
 eq "$(printf '%s' "$out" | jq -r 'length')" "2" "list --json answers an array of the live holds"
 eq "$(printf '%s' "$out" | jq -r '.[0].until')" "date:2099-01-01" "list --json carries the condition"
+eq "$(printf '%s' "$out" | jq -r '.[] | select(.id=="b-1") | .verdict')" "waiting" "list --json carries each hold's verdict"
+eq "$(printf '%s' "$out" | jq -r '.[] | select(.id=="b-2") | .verdict')" "unconditioned" "list --json verdicts an unconditioned hold too"
+has "$(printf '%s' "$out" | jq -r '.[] | select(.id=="b-1") | .why')" "review-by date" "list --json carries the why text a machine caller would otherwise reimplement"
 
 store '[]'
 out="$("$SUT" list 2>&1)"
@@ -483,10 +512,10 @@ unset STUB_BD_LOG
 
 # --- what one pass costs -----------------------------------------------------
 # The merge probe is a whole-store listing and every merged-within hold asks it
-# the same question — the sweep that prompted this work put one 48h window on
-# 17 beads at once. And the pass runs hourly in every importing rig, so a
-# scratch file it fails to remove is one file per rig per hour, forever. Both
-# regress silently: the answers stay correct while the cost per pass climbs.
+# the same question, so it is read once for the pass rather than once per hold.
+# And the pass runs hourly in every importing rig, so a scratch file it fails to
+# remove is one file per rig per hour, forever. Both regress silently: the
+# answers stay correct while the cost per pass climbs.
 echo "# what one pass costs"
 export STUB_BD_LOG="$TMP/bd.log"
 store '[{"id":"b-1","status":"open","metadata":{"triage.hold":"h","triage.hold_until":"merged-within:48h"},"notes":""},

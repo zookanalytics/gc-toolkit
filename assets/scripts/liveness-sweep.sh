@@ -237,8 +237,9 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # an arm: a `blocks` blocker (what `takeaway --waiting-on` and `demand` write)
 # takes the bead out of the ready set upstream of here, children reach the
 # `gatedparents` arm, `tracks` targets reach the arm below it. `triage.hold`
-# still mutes on presence alone: no agent writes one any more, and the ones on
-# the board name their wait in prose with no edge to discharge.
+# mutes on presence alone, not through an edge this pass could discharge:
+# hold-sweep.sh writes it beside a release condition (`triage.hold_until`), and
+# the hold-sweep reconcile pass ends the hold when that condition fires.
 #
 # $demanded is the one non-edge read, and it exists for one case: gc-helm.sh
 # warns on stderr when a demand's `blocks` edge does not land, and nothing

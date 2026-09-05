@@ -157,27 +157,33 @@ condition_wellformed() { # condition -> rc
 
 # The newest merge in this store, as epoch seconds in $MERGE_EPOCH. Every
 # merged-within hold asks the same question and the probe is a whole-store
-# listing — the sweep that prompted this pass put one 48h window on 17 beads —
-# so the answer is memoised for the pass. Assigned rather than printed: a
-# `$(...)` capture would run it in a subshell and the memo would die there,
-# putting the listing back on every hold.
+# listing, so the answer is memoised for the pass. Assigned rather than
+# printed: a `$(...)` capture would run it in a subshell and the memo would
+# die there, putting the listing back on every hold.
 # A merged anchor is `merge_result=merged` with the close that recorded it, so
 # `closed_at` IS the merge time — merge-push closes the anchor on a verified
 # merge and nothing else writes that pair.
-MERGE_EPOCH=""   # epoch seconds, or "none" once the probe has been read and failed
-newest_merge_epoch() { # -> rc 0 with $MERGE_EPOCH set, rc 1 if it could not be read
-    [ "$MERGE_EPOCH" = "none" ] && return 1
-    [ -n "$MERGE_EPOCH" ] && return 0
+# The two failure shapes are kept apart: an unreadable listing is not evidence a
+# wait ended, but a readable listing with no merge in it is a well-formed
+# condition that has simply not fired — a new rig, or one that has merged
+# nothing. The first is `unreadable`, the second `waiting`.
+MERGE_EPOCH=""   # "" unread, "none" unreadable, "empty" readable-but-none, else epoch
+newest_merge_epoch() { # -> rc 0 $MERGE_EPOCH=epoch, rc 1 unreadable, rc 2 readable-but-none
+    case "$MERGE_EPOCH" in
+        none)  return 1 ;;
+        empty) return 2 ;;
+        "")    : ;;
+        *)     return 0 ;;
+    esac
     local raw newest e
     raw="$(bd_ list --has-metadata-key merge_result --all --json --limit 0 2>/dev/null)" || { MERGE_EPOCH=none; return 1; }
     [ -n "$raw" ] || { MERGE_EPOCH=none; return 1; }
+    printf '%s' "$raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || { MERGE_EPOCH=none; return 1; }
     newest="$(printf '%s' "$raw" | scrub | jq -r '
-        if type != "array" then empty
-        else [ .[]
-               | select((.metadata.merge_result // "") == "merged")
-               | (.closed_at // "") | select(. != "") ] | max // ""
-        end' 2>/dev/null)" || { MERGE_EPOCH=none; return 1; }
-    [ -n "$newest" ] || { MERGE_EPOCH=none; return 1; }
+        [ .[]
+          | select((.metadata.merge_result // "") == "merged")
+          | (.closed_at // "") | select(. != "") ] | max // ""' 2>/dev/null)" || { MERGE_EPOCH=none; return 1; }
+    if [ -z "$newest" ]; then MERGE_EPOCH=empty; return 2; fi
     e="$(epoch_of "$newest")" || { MERGE_EPOCH=none; return 1; }
     MERGE_EPOCH="$e"
 }
@@ -234,11 +240,16 @@ evaluate() { # condition -> sets EV_VERDICT / EV_WHY
     fi
     case "$c" in
         merged-within:*h)
-            local n secs now age
+            local n secs now age rc
             n="${c#merged-within:}"; n="${n%h}"; secs=$((n * 3600))
-            newest_merge_epoch || {
+            newest_merge_epoch; rc=$?
+            if [ "$rc" = 1 ]; then
                 EV_VERDICT="unreadable"
-                EV_WHY="the merge probe could not be read — not releasing on an unreadable probe"; return 0; }
+                EV_WHY="the merge probe could not be read — not releasing on an unreadable probe"; return 0
+            elif [ "$rc" = 2 ]; then
+                EV_VERDICT="waiting"
+                EV_WHY="no merge is recorded in this rig yet, so the ${n}h window has nothing to fire on"; return 0
+            fi
             now="$(now_epoch)"
             [ "$now" -gt 0 ] || { EV_VERDICT="unreadable"; EV_WHY="date(1) produced no epoch"; return 0; }
             age=$((now - MERGE_EPOCH))
@@ -435,14 +446,34 @@ cmd_list() {
     done
 
     if [ "$as_json" = 1 ]; then
-        local all
+        local all rows="" evals=""
         all="$(bd_ list --has-metadata-key "$K_HOLD" --all --json --limit 0 2>/dev/null)" || {
             echo "$PROG: list: could not enumerate holds" >&2; return 1; }
-        printf '%s' "$all" | scrub | jq --arg h "$K_HOLD" --arg u "$K_UNTIL" '
-            [ .[] | select((.status // "") != "closed")
-                  | select(((.metadata[$h] // "") | tostring) != "")
-                  | {id, status, hold: (.metadata[$h] | tostring),
-                     until: ((.metadata[$u] // "") | tostring)} ]' 2>/dev/null
+        # The verdict needs evaluate(), which reads runtime probes jq cannot, so
+        # evaluate each hold in bash and key the verdict/why by id for the render.
+        mktemp_tracked rows || { echo "$PROG: list: mktemp failed" >&2; return 1; }
+        printf '%s' "$all" | scrub | jq -r --arg h "$K_HOLD" --arg u "$K_UNTIL" '
+            if type != "array" then empty
+            else .[] | select((.status // "") != "closed")
+                     | select(((.metadata[$h] // "") | tostring) != "")
+                     | [ .id, ((.metadata[$u] // "") | tostring) ] | @tsv end' > "$rows" 2>/dev/null
+        mktemp_tracked evals || { echo "$PROG: list: mktemp failed" >&2; return 1; }
+        local id until_c
+        while IFS=$'\t' read -r id until_c; do
+            [ -n "${id:-}" ] || continue
+            evaluate "$until_c"
+            jq -cn --arg id "$id" --arg v "$EV_VERDICT" --arg w "$EV_WHY" \
+                '{id:$id, verdict:$v, why:$w}' >> "$evals"
+        done < "$rows"
+        printf '%s' "$all" | scrub | jq --slurpfile ev "$evals" --arg h "$K_HOLD" --arg u "$K_UNTIL" '
+            (reduce $ev[] as $e ({}; .[$e.id] = {verdict: $e.verdict, why: $e.why})) as $byid
+            | [ .[] | select((.status // "") != "closed")
+                    | select(((.metadata[$h] // "") | tostring) != "")
+                    | {id, status,
+                       hold: (.metadata[$h] | tostring),
+                       until: ((.metadata[$u] // "") | tostring),
+                       verdict: ($byid[.id].verdict // ""),
+                       why: ($byid[.id].why // "")} ]' 2>/dev/null
         return 0
     fi
 
@@ -477,7 +508,7 @@ cmd_reconcile() {
         echo "$PROG: reconcile: could not enumerate holds — NOT treating this as an empty board" >&2
         return 1; }
 
-    local expected processed=0 released=0 waiting=0 unconditioned=0 unreadable=0 failed=0
+    local expected processed=0 released=0 would_release=0 waiting=0 unconditioned=0 unreadable=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
     local id text until_c
@@ -490,13 +521,14 @@ cmd_reconcile() {
             fired)
                 if [ "$DRY_RUN" = 1 ]; then
                     echo "$PROG: DRY-RUN would release $id ($until_c: $EV_WHY)"
+                    would_release=$((would_release + 1))
                 elif release_bead "$id" "the recorded condition $until_c fired — $EV_WHY"; then
                     echo "$PROG: released $id ($until_c: $EV_WHY)"
+                    released=$((released + 1))
                 else
                     echo "$PROG: WARN could not release $id — leaving the hold, retrying next pass" >&2
-                    failed=$((failed + 1)); continue
+                    failed=$((failed + 1))
                 fi
-                released=$((released + 1))
                 ;;
             waiting)
                 waiting=$((waiting + 1))
@@ -521,7 +553,13 @@ cmd_reconcile() {
         echo "$PROG: reconcile: enumerated $expected hold(s) but processed $processed — aborting rather than reporting a partial pass as complete" >&2
         return 1
     fi
-    echo "$PROG: $released released, $waiting waiting, $unconditioned unconditioned, $unreadable unreadable, $failed failed (of $expected held)"
+    # Dry-run releases nothing, so it reports what it WOULD release rather than a
+    # released count that names beads still held.
+    if [ "$DRY_RUN" = 1 ]; then
+        echo "$PROG: DRY-RUN $would_release would release, $waiting waiting, $unconditioned unconditioned, $unreadable unreadable (of $expected held)"
+    else
+        echo "$PROG: $released released, $waiting waiting, $unconditioned unconditioned, $unreadable unreadable, $failed failed (of $expected held)"
+    fi
     [ "$failed" = 0 ]
 }
 
