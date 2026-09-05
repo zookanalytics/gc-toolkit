@@ -211,12 +211,21 @@ emit() { # <session> <verdict> <template> <rig> <anchor> <anchor_status> <closed
     "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}"
 }
 
+# The whole classification rests on this list. If it cannot be read — gc
+# failed, timed out, or answered with something other than a
+# `{"sessions": [...]}` object — the pass has proved nothing, least of all that
+# no polecat is running away, so it must not read as a clean zero-session city.
+# Fail closed: mark it unreadable, report one unknown below, and prune no state.
+# A genuine empty list (`{"sessions": []}`) is a real answer, not this case.
 SESSIONS_JSON="$TMPD/sessions.json"
-if ! run_bounded gc session list --json 2>/dev/null \
-    | jq -c '[.sessions[]? | select((.state // "") == "active")]' > "$SESSIONS_JSON" 2>/dev/null; then
-  printf '[]' > "$SESSIONS_JSON"
+SESSIONS_READABLE=1
+if run_bounded gc session list --json > "$TMPD/sessions-raw.json" 2>/dev/null \
+    && jq -e '(.sessions | type) == "array"' "$TMPD/sessions-raw.json" >/dev/null 2>&1; then
+  jq -c '[.sessions[]? | select((.state // "") == "active")]' "$TMPD/sessions-raw.json" \
+    > "$SESSIONS_JSON" 2>/dev/null || SESSIONS_READABLE=0
+else
+  SESSIONS_READABLE=0
 fi
-[ -s "$SESSIONS_JSON" ] || printf '[]' > "$SESSIONS_JSON"
 
 # The role filter runs on the template's AGENT segment, never the whole
 # string: a rig named after a role would otherwise pull every session in it.
@@ -224,18 +233,28 @@ fi
 # tab is IFS whitespace to bash, and a run of IFS whitespace is ONE delimiter —
 # so a single empty field (a pool seat has no alias) shifts every field after
 # it one place left and the row is read as a different session.
-CANDIDATES="$TMPD/candidates.tsv"
-jq -r --arg re "$ROLE_MATCH" '
-  def dash: if . == null or . == "" then "-" else . end;
-  .[]
-  | (.template | dash) as $t
-  | ($t | split("/") | last | split(".") | last) as $role
-  | select($role | test($re))
-  | [ (.id | dash), $t, (.rig | dash), (.session_name | dash), (.alias | dash), (.last_active | dash) ]
-  | @tsv' "$SESSIONS_JSON" > "$CANDIDATES" 2>/dev/null || : > "$CANDIDATES"
+CANDIDATES="$TMPD/candidates.tsv"; : > "$CANDIDATES"
+if [ "$SESSIONS_READABLE" = "1" ]; then
+  jq -r --arg re "$ROLE_MATCH" '
+    def dash: if . == null or . == "" then "-" else . end;
+    .[]
+    | (.template | dash) as $t
+    | ($t | split("/") | last | split(".") | last) as $role
+    | select($role | test($re))
+    | [ (.id | dash), $t, (.rig | dash), (.session_name | dash), (.alias | dash), (.last_active | dash) ]
+    | @tsv' "$SESSIONS_JSON" > "$CANDIDATES" 2>/dev/null || : > "$CANDIDATES"
+fi
 
 SEEN="$TMPD/seen.txt"; : > "$SEEN"
 N=0; N_FLAG=0; N_WARRANT=0; N_UNKNOWN=0
+
+# A session list that could not be read is itself an unknown: the pass cannot
+# prove that no polecat is running away, so it reports one unknown here (and
+# prunes no state below) rather than passing as a clean zero-session city.
+if [ "$SESSIONS_READABLE" != "1" ]; then
+  N_UNKNOWN=$((N_UNKNOWN + 1))
+  emit "<session-list>" unknown - - - - -1 -1 unknown 0 session-list-unreadable
+fi
 
 while IFS=$'\t' read -r sid template rig sname alias last_active; do
   [ -n "$sid" ] || continue
@@ -412,8 +431,10 @@ while IFS=$'\t' read -r sid template rig sname alias last_active; do
 done < "$CANDIDATES"
 
 # Sessions that are gone leave no record behind: a pool seat is short-lived,
-# and a stale file would hand a recycled id somebody else's nudge count.
-if [ "$STATE_DIR_OK" = "1" ] && [ "$DRY_RUN" != "1" ]; then
+# and a stale file would hand a recycled id somebody else's nudge count. Only
+# on a readable pass: an unreadable session list names no live session, so
+# pruning against it would delete every ladder as though the city had emptied.
+if [ "$STATE_DIR_OK" = "1" ] && [ "$DRY_RUN" != "1" ] && [ "$SESSIONS_READABLE" = "1" ]; then
   for path in "$STATE_DIR"/*; do
     [ -e "$path" ] || continue
     owned_file "$path" || continue

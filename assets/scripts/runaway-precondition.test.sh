@@ -368,6 +368,45 @@ OUT="$("$SUT")"
 eq "$(field "$(line_for lx-pole1 "$OUT")" idle_s)" "0" "a last_active ahead of the clock reads as just-moved"
 eq "$(field "$(line_for lx-pole1 "$OUT")" verdict)" "flag" "  ... and still reaches the precondition"
 
+echo "== an unreadable session list is unknown, never a clean zero-session city =="
+
+# The whole classification rests on `gc session list`. The bug this replaces
+# wrote `[]` on any failure, so a gc that errored, timed out, or answered with
+# garbage read exactly like a healthy city with no active polecats — a clean
+# sessions=0 pass that can never warrant. An unreadable list proves nothing.
+reset; base_sessions; claim lx-pole1 tk-work; bead tk-work closed 7200
+demand gc-toolkit/gc-toolkit.polecat no
+OUT="$(STUB_SESSION_LIST_RC=3 "$SUT")"
+L="$(line_for "<session-list>" "$OUT")"
+eq "$(field "$L" verdict)" "unknown" "a session list that errored is unknown"
+eq "$(field "$L" reason)" "session-list-unreadable" "  ... and says why"
+has "$OUT" "sessions=0 flag=0 warrant=0 unknown=1 state_dir=ok" "  ... summary is the unreadable shape, not a clean zero-session pass"
+eq "$(grep -c . "$STUB_NUDGE_LOG")" "0" "  ... and nothing is nudged"
+
+# A non-{"sessions":[...]} answer is unreadable too: unparseable output, or a
+# payload with no .sessions array, is not an empty city.
+reset; printf 'not json at all' > "$STUB_SESSIONS"
+OUT="$("$SUT")"
+eq "$(field "$(line_for "<session-list>" "$OUT")" reason)" "session-list-unreadable" "unparseable output is unreadable"
+reset; printf '{"agents":[]}' > "$STUB_SESSIONS"
+OUT="$("$SUT")"
+eq "$(field "$(line_for "<session-list>" "$OUT")" reason)" "session-list-unreadable" "a payload with no .sessions array is unreadable"
+
+# A genuine empty list is a real answer and must stay clean, never fold to unknown.
+reset; printf '{"sessions":[]}' > "$STUB_SESSIONS"
+OUT="$("$SUT")"
+has "$OUT" "sessions=0 flag=0 warrant=0 unknown=0 state_dir=ok" "an empty list is a clean zero-session pass"
+hasnt "$OUT" "session-list-unreadable" "  ... not folded to unreadable"
+
+# An unreadable pass prunes no state: it names no live session, so the old
+# code's prune would wipe every session's ladder on a single failed read.
+reset; base_sessions; claim lx-pole1 tk-work; bead tk-work closed 7200
+demand gc-toolkit/gc-toolkit.polecat no
+"$SUT" >/dev/null
+eq "$( [ -f "$RUNAWAY_STATE_DIR/lx-pole1" ] && echo yes || echo no)" "yes" "a finding leaves a ladder record"
+STUB_SESSION_LIST_RC=3 "$SUT" >/dev/null
+eq "$( [ -f "$RUNAWAY_STATE_DIR/lx-pole1" ] && echo yes || echo no)" "yes" "an unreadable pass prunes no state"
+
 echo "== the anchor is read from the session's own rig =="
 
 reset

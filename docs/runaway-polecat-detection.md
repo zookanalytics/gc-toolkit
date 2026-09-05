@@ -77,6 +77,13 @@ A session the probe cannot classify — an unreadable anchor, an undateable
 stamp, a held-work scan that failed, a demand probe that failed — is reported
 `verdict=unknown`. Unproven is never clean, and it is never warrantable either.
 
+The scan itself fails closed the same way. When `gc session list` cannot be
+read — it errored, timed out, or answered with something other than a
+`{"sessions": [...]}` object — the run reports one `verdict=unknown` line with
+`reason=session-list-unreadable` and prunes no ladder state, rather than
+passing as a clean zero-session city. A genuine empty list is a real answer
+and stays clean.
+
 ## The ladder
 
 A first finding is nudged: the session is told its claim is closed, its pool
