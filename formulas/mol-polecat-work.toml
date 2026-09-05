@@ -61,9 +61,24 @@ metadata.target on the bead, else the parent convoy chain, else the rig
 default branch)
 **Config: setup_command = {{setup_command}}**
 
-**1. Fetch and derive the work bead:**
+**1. Rig repo, then the work bead.** `git worktree add` takes its repo from
+the current directory, so a session that starts anywhere but its own rig
+worktree builds the task worktree in whatever repo cwd sits in. Name the rig
+checkout from the agent environment instead, and act on it by path:
 ```bash
-git fetch --prune origin
+# >>> workspace-rig-root
+RIG_ROOT="${GC_RIG_ROOT:-}"
+if [ -z "$RIG_ROOT" ] && [ -n "${GC_RIG:-}" ]; then
+  RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path // empty')
+fi
+if [ -z "$RIG_ROOT" ] || ! git -C "$RIG_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "workspace-setup: no rig checkout for '${GC_RIG:-<unset>}' (GC_RIG_ROOT='${GC_RIG_ROOT:-}')" >&2
+  gc runtime drain-ack
+  exit 1
+fi
+RIG_ORIGIN=$(git -C "$RIG_ROOT" remote get-url origin)
+git -C "$RIG_ROOT" fetch --prune origin
+# <<< workspace-rig-root
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 if [ -z "$WORK_BEAD_ID" ]; then
@@ -73,19 +88,42 @@ if [ -z "$WORK_BEAD_ID" ]; then
 fi
 ```
 
-**2. Worktree — reuse or create.** Reuse `metadata.work_dir` when the
-directory still exists; otherwise create one scoped to the BEAD (not the
-agent) and record it immediately so restarts and witness recovery can find it:
+**2. Worktree — a worktree of the rig repo, reused or created.** Reuse
+`metadata.work_dir` only when it is a worktree root of `$RIG_ORIGIN` — its own
+git top-level, not a plain directory nested inside another checkout whose origin
+resolves upward to the parent. A directory that is not its own worktree root, or
+belongs to another repo, carries no branch this bead can land, so set it aside
+rather than work in it. A created worktree is scoped to
+the BEAD (not the agent) and recorded immediately, so restarts and witness
+recovery can find it. Every later step in this formula runs in that directory,
+so a working directory that is not the task worktree in the rig repo stops the
+run:
 ```bash
+# >>> workspace-worktree-rig
 WORKTREE=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.work_dir // empty')
+if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ] && { [ "$(git -C "$WORKTREE" rev-parse --show-toplevel 2>/dev/null)" != "$WORKTREE" ] || [ "$(git -C "$WORKTREE" remote get-url origin 2>/dev/null)" != "$RIG_ORIGIN" ]; }; then
+  echo "workspace-setup: work_dir $WORKTREE is not a worktree of $RIG_ORIGIN rooted at itself — setting it aside" >&2
+  mv "$WORKTREE" "$WORKTREE.wrong-repo.$$"
+  WORKTREE=""
+fi
 if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
   cd "$WORKTREE"
 else
-  WORKTREE_PATH=$(pwd)/worktrees/"$WORK_BEAD_ID"
-  git worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
-  cd "$WORKTREE_PATH"
-  gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$WORKTREE_PATH"
+  WORKTREE=$(pwd)/worktrees/"$WORK_BEAD_ID"
+  if ! git -C "$RIG_ROOT" worktree add "$WORKTREE" --detach origin/{{base_branch}}; then
+    echo "workspace-setup: could not create $WORKTREE from $RIG_ROOT" >&2
+    gc runtime drain-ack
+    exit 1
+  fi
+  cd "$WORKTREE"
+  gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$WORKTREE"
 fi
+if [ "$(pwd)" != "$WORKTREE" ] || [ "$(git rev-parse --show-toplevel)" != "$WORKTREE" ] || [ "$(git remote get-url origin)" != "$RIG_ORIGIN" ]; then
+  echo "workspace-setup: $(pwd) is not the task worktree $WORKTREE in $RIG_ORIGIN" >&2
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< workspace-worktree-rig
 ```
 
 **3. Branch — metadata.branch is AUTHORITATIVE when set** (rejection
