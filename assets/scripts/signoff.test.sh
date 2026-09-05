@@ -42,7 +42,8 @@ if [ "${1:-}" = "sling" ]; then
   # `gc sling [--rig X] <pool> <bead> --on <formula>`: a graph.v2 pour retires
   # gc.routed_to on the work bead and stamps gc.execution_routed_to=<pool>, the
   # read-back signoff.sh proves the pour by. STUB_SLING_NOPOUR models a pour
-  # that never reads back, so the SUT takes its bare-route-stamp fallback.
+  # that exits success but never stamps the route (a partial pour), so the SUT
+  # must refuse a bare-route fallback rather than double-dispatch the work.
   shift; pool=""; bead=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -622,16 +623,17 @@ has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reas
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
 
-echo "# request-changes falls back to the bare route stamp when the pour will not read back"
+echo "# request-changes refuses a bare-route fallback when the pour will not read back (double-dispatch guard)"
 reset "$ANCHOR_PR"
 jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 out=$(STUB_SLING_NOPOUR=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "request-changes still exits 0 on the fallback"
+eq "$rc" 2 "an unproven pour is a retryable failure, not a bare-route success"
 has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat fix-1 --on mol-polecat-work" "the sling is attempted first"
 eq "$(meta fix-1 gc.execution_routed_to)" "<absent>" "no pour read back"
-eq "$(meta fix-1 gc.routed_to)" "rig/gc-toolkit.polecat" "the bare route stamp is the fallback, keeping the rework pull-claimable"
-has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "the fallback child still blocks the anchor"
-eq "$(status rv-1)" "closed" "the review still closes on the fallback"
+eq "$(meta fix-1 gc.routed_to)" "<absent>" "no bare route is stamped — a partial pour plus a pool claim would double-dispatch the work"
+has "$out" "double-dispatch hazard" "the refusal names the double-dispatch hazard"
+has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "the child still blocks the anchor"
+eq "$(status rv-1)" "in_progress" "the review is left unclosed — the failed dispatch is retryable, not consumed as a completed dispatch"
 
 echo "# pre-open request-changes"
 reset "$ANCHOR_PRE"

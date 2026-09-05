@@ -814,8 +814,12 @@ fi
 # starves behind assigned molecule steps in the pool's pull queue. The pour
 # retires gc.routed_to and stamps gc.execution_routed_to=<pool> on the work
 # bead — that is the read-back that proves it. On success wake the pool to claim
-# it. On a pour that will not read back, fall back to the bare stamp: driverless
-# and pull-only, but never worse than that.
+# it. If the route does not read back the pour may still have started the
+# workflow and only failed to stamp the route (a partial pour that exits
+# success); a bare gc.routed_to stamp would then let the pool claim query and
+# the workflow dispatcher both act on the same work — a double-dispatch. So
+# never bare-stamp: exit non-zero and leave the review unclosed, so the dispatch
+# is retried rather than the work double-dispatched.
 WORK_FORMULA="mol-polecat-work"
 gc sling ${GC_RIG:+--rig "$GC_RIG"} "$FIX_POOL" "$FIX_BEAD" --on "$WORK_FORMULA" >/dev/null 2>&1
 if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")" = "$FIX_POOL" ]; then
@@ -823,13 +827,8 @@ if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.execution_routed_to")" = "$FI
   gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
   gc session nudge "$FIX_POOL" "Rework $FIX_BEAD for anchor $ANCHOR" >/dev/null 2>&1 || true
 else
-  gc bd update "$FIX_BEAD" --set-metadata "gc.routed_to=$FIX_POOL" >/dev/null 2>&1 || true
-  if [ "$(row_meta "$(bd_json show "$FIX_BEAD")" "gc.routed_to")" = "$FIX_POOL" ]; then
-    DISPATCH="stamped (pour unavailable) for"
-  else
-    warn "rework child $FIX_BEAD neither slung nor routable ($FIX_POOL read back on neither gc.execution_routed_to nor gc.routed_to); review left open — repair with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
-    exit 2
-  fi
+  warn "rework child $FIX_BEAD: mol-polecat-work pour did not stamp gc.execution_routed_to=$FIX_POOL; not falling back to a bare route (double-dispatch hazard) — review left open for a retry."
+  exit 2
 fi
 close_review
 echo "signoff: request-changes recorded on $ANCHOR (round $((ROUNDS + 1))/$CAP) — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD $DISPATCH $FIX_POOL"
