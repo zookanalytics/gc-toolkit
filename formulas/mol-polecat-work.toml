@@ -27,7 +27,7 @@ after any edit here.
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
 separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
-submit-and-exit resolves it once, in step 4c, and the summary follows it.
+submit-and-exit resolves it once, in step 4b, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
 attempt bounced with the branch intact — resume it per metadata.prepare_mode
@@ -314,14 +314,22 @@ the difference between a bead someone can dispose of and one that just sits:
 invariant is `CURRENT_BRANCH == metadata.branch` — `polecat/<bead-id>` is
 only how FRESH work satisfies it (a rework child legitimately stands on the
 reviewed branch that workspace-setup called authoritative; forcing the
-template there forks the branch under review):
+template there forks the branch under review).
+
+The halt mails the witness. This gate fires in a session that is about to
+end, so a message printed to a dying session's stdout is the same as no
+message at all, and a bead held back here looks exactly like one still being
+worked. The mail carries three facts: the origin ref, local HEAD, and the
+bead's assignee. Equal refs mean the work is pushed, and a refinery assignee
+means the handoff is written too, so what stays open is the step chain:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 # >>> submit-branch-gate
 CURRENT_BRANCH=$(git branch --show-current)
-METADATA_BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
+BEAD_ROW=$(gc bd show "$WORK_BEAD_ID" --json)
+METADATA_BRANCH=$(printf '%s' "$BEAD_ROW" | jq -r '.[0].metadata.branch // empty')
 if [ -n "$METADATA_BRANCH" ]; then
     EXPECTED_BRANCH="$METADATA_BRANCH"
     GATE_SOURCE="metadata.branch"
@@ -335,11 +343,21 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     echo "  expected branch: $EXPECTED_BRANCH"
     echo "  gate source:     $GATE_SOURCE"
     echo "Refinery handoff merges metadata.branch; proceeding would strand the work."
+    PUSHED_REF=$(git ls-remote origin "refs/heads/$EXPECTED_BRANCH" 2>/dev/null | awk '{print $1}')
+    HALT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+    HALT_ASSIGNEE=$(printf '%s' "$BEAD_ROW" | jq -r '.[0].assignee // empty')
     if [ -n "$METADATA_BRANCH" ]; then
-        echo "This bead already names its branch — check out '$EXPECTED_BRANCH', move your commits onto it, re-run submit-and-exit."
+        echo "This bead already names its branch — check out '$EXPECTED_BRANCH' at the pushed head, then re-run submit-and-exit."
+        echo "  origin/$EXPECTED_BRANCH: ${PUSHED_REF:-absent}"
+        echo "  local HEAD:              $HALT_HEAD"
+        echo "  bead assignee:           ${HALT_ASSIGNEE:-<unset>}"
     else
         echo "Re-run workspace-setup: create '$EXPECTED_BRANCH' from origin/{{base_branch}}, cherry-pick your commits, re-run submit-and-exit."
     fi
+    gc mail send "${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness" -s "HELP: submit-and-exit branch gate halted on $WORK_BEAD_ID" -m "Issue: $WORK_BEAD_ID
+Hit: branch-shape gate failed. current='${CURRENT_BRANCH:-<detached HEAD>}' expected='$EXPECTED_BRANCH' gate source=$GATE_SOURCE
+State: origin/$EXPECTED_BRANCH is ${PUSHED_REF:-absent}, local HEAD is $HALT_HEAD, bead assignee is ${HALT_ASSIGNEE:-<unset>}. Equal refs mean the work is pushed; a refinery assignee means the handoff is written too and what stays open is this session's step chain.
+Need: restore the branch at the pushed head and re-run submit-and-exit, or re-run workspace-setup if nothing was pushed. This session halts here." || echo "witness mail failed: this halt reaches no one"
     gc runtime drain-ack
     exit 1
 fi
@@ -386,7 +404,7 @@ with untracked work left behind.
 **3. auto_push=false halt arm, then push.** The halt arm is a TERMINAL exit,
 so it carries its own copy of the chain-close block — `exit 0` never reaches
 step 5, and each fenced block is its own shell (the test pins the copy
-byte-identical to step 5's, +2 indent):
+byte-identical to step 7's, +2 indent):
 
 ```bash
 # >>> submit-auto-push-halt
@@ -421,12 +439,7 @@ if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
 fi
 ```
 
-**4. Clean up the local branch** (it is pushed; the refinery owns it now):
-```bash
-git checkout --detach && git branch -D "$CURRENT_BRANCH"
-```
-
-**4b. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
+**4. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
 as the PR's `## Summary`, and falls back to the anchor's description — the
 dispatch text, written before the diff existed and addressed to you, not to a
 reviewer. You are the only actor that has read the diff, so say what changed
@@ -449,7 +462,7 @@ What the summary describes is the BRANCH, not this pass. On a rework or
 rebase child the PR body publishes the whole branch, so an account of only
 the fix you just made describes something no reviewer is looking at.
 
-**4c. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
+**4b. Resolve the bead the summary belongs on.** `pr-open.sh` publishes
 `pr_summary` off the anchor row it enumerates: the open bead that carries a
 `merge_result` for this branch. On fresh work that is the bead you claimed
 and one write serves both. On a rework or rebase child the anchor is a
@@ -489,7 +502,7 @@ no partial handoff can strand the bead between writes. `--append-notes`, never
 named-session work must not read as pool demand.
 
 The summary is the one field addressed to a bead other than the claimed one.
-When 4c named an anchor, it is stamped there in its own write, before the
+When 4b named an anchor, it is stamped there in its own write, before the
 handoff: it is metadata on a bead this session does not hold, and a failure to
 land it costs a good PR body, not the handoff. Everything the refinery reads
 still arrives in the single atomic write below.
@@ -558,12 +571,34 @@ done
 # <<< submit-chain-close
 ```
 
-**8. Drain and exit:**
+**8. Release the local branch.** The work is pushed, the refinery owns it and
+this session's step chain is closed, so the ref is freed here. Holding it
+checked out blocks every later worktree that resumes this branch, such as a
+rework or rebase child.
+
+The release runs after every durable write this step owes, because it destroys
+the branch shape step 1 asserts. Placed ahead of one, it strands that write: a
+session dying in the window leaves the submit step open, and the re-offer reads
+an empty `CURRENT_BRANCH` against a set `metadata.branch` and halts before
+reaching the write still owed. Placed behind both the handoff and the chain
+close, a death anywhere in this step costs a held ref and nothing else. No
+reader downstream wants the local branch:
+
+```bash
+# >>> submit-branch-release
+RELEASE_BRANCH=$(git branch --show-current)
+if [ -n "$RELEASE_BRANCH" ]; then
+    git checkout --detach && git branch -D "$RELEASE_BRANCH" || echo "branch release failed: $RELEASE_BRANCH stays checked out here. The handoff is already written, so this costs a held ref, nothing more."
+fi
+# <<< submit-branch-release
+```
+
+**9. Drain and exit:**
 ```bash
 gc runtime drain-ack
 exit
 ```
 
 **Exit criteria:** branch pushed and verified, one atomic handoff written,
-refinery signaled, step chain closed forward, drain acknowledged. Done means
-gone."""
+refinery signaled, step chain closed forward, local branch released, drain
+acknowledged. Done means gone."""

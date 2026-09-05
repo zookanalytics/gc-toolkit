@@ -117,12 +117,16 @@ BP_DEFAULT="$(awk '
   || bad "binding_prefix default is EMPTY — a source-read renders <rig>/refinery, which names no agent"
 
 # --- Fakes. -------------------------------------------------------------------
-# git   : `branch --show-current` answers $FAKE_BRANCH; the three probes the
-#         store-only arm makes answer $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED,
-#         each empty by default so the arm sees a run with nothing to land.
-# gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
-#         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
-#         assertions can prove WHAT was written and WHETHER the arm halted.
+# git   : `branch --show-current` answers $FAKE_BRANCH. The store-only arm's
+#         three probes answer $FAKE_AHEAD / $FAKE_DIRTY / $FAKE_PUSHED, and the
+#         push verification's `ls-remote` / `rev-parse HEAD` answer
+#         $FAKE_REMOTE_REF / $FAKE_HEAD; each empty by default. `checkout` and
+#         `branch -D` (the branch release) are recorded to $FAKE_LOG.
+# gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object
+#         and $FAKE_ASSIGNEE as the row's assignee, `gc bd update ...` and
+#         `gc runtime drain-ack` are recorded so the assertions can prove
+#         WHAT was written and WHETHER the arm halted, and `gc mail send`
+#         records its target and writes its body to $FAKE_MAIL_BODY.
 #         `gc agent list --json` answers $FAKE_AGENTS; the value UNREADABLE
 #         makes the call fail, which reaches the guard as a different cause
 #         than an empty roster but must take the same arm.
@@ -134,8 +138,20 @@ case "$1 $2" in
   "branch --show-current") printf '%s\n' "${FAKE_BRANCH:-}"; exit 0 ;;
   "rev-list --count")      printf '%s\n' "${FAKE_AHEAD:-0}"; exit 0 ;;
   "status --porcelain")    [ -n "${FAKE_DIRTY:-}" ] && printf '%s\n' "$FAKE_DIRTY"; exit 0 ;;
-  "ls-remote origin")      [ -n "${FAKE_PUSHED:-}" ] && printf '%s\n' "$FAKE_PUSHED"; exit 0 ;;
 esac
+if [ "$1" = "ls-remote" ]; then
+  [ -n "${FAKE_REMOTE_REF:-}" ] && printf '%s\trefs/heads/x\n' "$FAKE_REMOTE_REF"
+  [ -z "${FAKE_REMOTE_REF:-}" ] && [ -n "${FAKE_PUSHED:-}" ] && printf '%s\n' "$FAKE_PUSHED"
+  exit 0
+fi
+if [ "$1" = "rev-parse" ] && [ "$2" = "HEAD" ]; then
+  printf '%s\n' "${FAKE_HEAD:-}"
+  exit 0
+fi
+if [ "$1" = "checkout" ] || { [ "$1" = "branch" ] && [ "$2" = "-D" ]; }; then
+  printf 'GIT|%s\n' "$*" >> "${FAKE_LOG:-/dev/null}"
+  exit "${FAKE_GIT_RC:-0}"
+fi
 exit 0
 GIT
 
@@ -143,9 +159,17 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
-  "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
+  "bd show")           printf '[{"assignee":"%s","metadata":%s}]\n' "${FAKE_ASSIGNEE:-}" "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update")         shift 2; printf 'UPDATE|%s\n' "$*" >> "$FAKE_LOG"; exit 0 ;;
   "bd list")           printf '%s\n' "${FAKE_ANCHOR_ROWS-[]}"; exit 0 ;;
+  "mail send")         shift 2; MAIL_TO="$1"; shift; MAIL_BODY=""
+                       while [ $# -gt 0 ]; do
+                         if [ "$1" = "-m" ]; then MAIL_BODY="${2-}"; break; fi
+                         shift
+                       done
+                       printf 'MAIL|%s\n' "$MAIL_TO" >> "$FAKE_LOG"
+                       printf '%s' "$MAIL_BODY" > "${FAKE_MAIL_BODY:-/dev/null}"
+                       exit "${FAKE_MAIL_RC:-0}" ;;
   "agent list")        [ "${FAKE_AGENTS-}" = "UNREADABLE" ] && exit 1
                        printf '{"agents":%s}\n' "${FAKE_AGENTS:-[]}"; exit 0 ;;
 esac
@@ -156,15 +180,21 @@ chmod +x "$TMP/bin/git" "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export WORK_BEAD_ID=tk-work
 
-# run_gate <current-branch> <metadata-json>
+# run_gate <current-branch> <metadata-json> [gc-rig] [remote-ref] [head] [assignee]
 #   -> prints "<rc>|<log>"; the log is the recorded gc writes, newline-joined
 #      into one field so a single `eq` can assert both the outcome and the
-#      side effects.
+#      side effects. The halt arm reports to the witness, so {{binding_prefix}}
+#      is substituted the way the materializer does and GC_RIG is per-case.
+#      The report's mail body lands in $TMP/mail, where stdout cannot stand in
+#      for it: the halt's whole point is that stdout reaches no one.
 run_gate() {
   : > "$TMP/log"
-  printf '%s\n' "$GATE" > "$TMP/gate.sh"
+  : > "$TMP/mail"
+  printf '%s\n' "$GATE" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/gate.sh"
   local rc=0
-  FAKE_BRANCH="$1" FAKE_META="$2" FAKE_LOG="$TMP/log" \
+  FAKE_BRANCH="$1" FAKE_META="$2" GC_RIG="${3-}" \
+  FAKE_REMOTE_REF="${4-}" FAKE_HEAD="${5-}" FAKE_ASSIGNEE="${6-}" \
+  FAKE_LOG="$TMP/log" FAKE_MAIL_BODY="$TMP/mail" \
     bash "$TMP/gate.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -182,7 +212,7 @@ run_resolve() {
   printf '%s|%s' "$rc" "$(sed -n 's/^landing target: //p' "$TMP/out")"
 }
 
-printf '%s\n' "$GATE" > "$TMP/gate.sh"
+printf '%s\n' "$GATE" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/gate.sh"
 bash -n "$TMP/gate.sh" \
   && ok "extracted gate is syntactically valid bash" \
   || bad "extracted gate failed bash -n"
@@ -203,7 +233,7 @@ eq "$(run_gate polecat/tk-work '{}')" \
 # still on its agent home branch. Nothing recorded a branch, so the convention
 # catches it. Must halt, and must not record the wrong branch.
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|DRAIN;" \
+   "1|MAIL|gc-toolkit.witness;DRAIN;" \
    "fresh + wrong branch: halts, drain-acks, records no branch"
 
 # THE REGRESSION (tk-3yj8g). Rework child: metadata.branch names the reviewed
@@ -218,17 +248,66 @@ eq "$(run_gate polecat/su-uzy9.5 '{"branch":"polecat/su-uzy9.5"}')" \
 # polecat/<bead-id> from the reviewed branch instead of resuming it. That forks
 # the branch under review, so it must halt even though the name looks correct.
 eq "$(run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}')" \
-   "1|DRAIN;" \
+   "1|MAIL|gc-toolkit.witness;DRAIN;" \
    "rework: halts on a forked polecat/<bead-id> branch, not just any mismatch"
 
-# submit step 4 detaches HEAD before deleting the branch, so a re-run of this
-# step lands here. An empty branch name must never be treated as a match.
+# An empty branch name must never be treated as a match. The branch release
+# is ordered behind every durable write the step owes (asserted in section 7),
+# so a detached HEAD here is not a stage the recipe walks through on its way
+# to one.
 eq "$(run_gate '' '{"branch":"polecat/su-uzy9.5"}')" \
-   "1|DRAIN;" \
+   "1|MAIL|gc-toolkit.witness;DRAIN;" \
    "detached HEAD with metadata.branch set: halts"
 eq "$(run_gate '' '{}')" \
-   "1|DRAIN;" \
+   "1|MAIL|gc-toolkit.witness;DRAIN;" \
    "detached HEAD with no metadata.branch: halts"
+
+# The halt ends the session, so stdout reaches no one. A bead held back here
+# is indistinguishable from one still being worked, which is why the report is
+# the fix and not a courtesy: the rig prefix must render when there is one.
+eq "$(run_gate '' '{"branch":"polecat/su-uzy9.5"}' myrig)" \
+   "1|MAIL|myrig/gc-toolkit.witness;DRAIN;" \
+   "the report addresses the witness with the rig prefix rendered"
+
+# The mail is best-effort: a witness that cannot be reached must not convert a
+# reported halt into a hang or a different exit code.
+# Exported, not prefixed onto `eq`: the command substitution that runs the gate
+# is expanded before a prefix assignment would take effect.
+export FAKE_MAIL_RC=7
+MAIL_FAILS="$(run_gate '' '{"branch":"polecat/su-uzy9.5"}')"
+unset FAKE_MAIL_RC
+eq "$MAIL_FAILS" \
+   "1|MAIL|gc-toolkit.witness;DRAIN;" \
+   "a failing report still drains and still exits 1"
+
+# The two refs the report exists to carry. Origin's ref equal to local HEAD
+# proves the branch was pushed, and an absent origin ref proves nothing ever
+# was. Neither says what remains to be done. Both are printed and both go in the
+# mail, so the witness can tell those two states apart without opening the
+# worktree.
+run_gate '' '{"branch":"polecat/su-uzy9.5"}' '' deadbeef deadbeef >/dev/null
+eq "$(sed -n 's|^  origin/polecat/su-uzy9.5: ||p' "$TMP/out")" "deadbeef" \
+   "the halt reports origin's ref for the expected branch"
+eq "$(sed -n 's/^  local HEAD: *//p' "$TMP/out")" "deadbeef" \
+   "the halt reports local HEAD beside it"
+
+run_gate '' '{"branch":"polecat/su-uzy9.5"}' '' '' abc123 >/dev/null
+eq "$(sed -n 's|^  origin/polecat/su-uzy9.5: ||p' "$TMP/out")" "absent" \
+   "a branch that was never pushed reads as absent, not blank"
+
+# Equal refs say the work is pushed. They do not say whether the handoff
+# followed it, and the two need different recoveries: a missing handoff wants
+# submit-and-exit re-run, a written one wants only the step chain closed. The
+# assignee is the fact that separates them, so the report carries it.
+run_gate '' '{"branch":"polecat/su-uzy9.5"}' '' deadbeef deadbeef gc-toolkit/gc-toolkit.refinery >/dev/null
+eq "$(sed -n 's/^  bead assignee: *//p' "$TMP/out")" "gc-toolkit/gc-toolkit.refinery" \
+   "the halt reports the bead's assignee beside the two refs"
+eq "$(grep -c 'State: origin/polecat/su-uzy9.5 is deadbeef, local HEAD is deadbeef, bead assignee is gc-toolkit/gc-toolkit.refinery' "$TMP/mail")" "1" \
+   "all three facts travel in the mail, not only on the dying session's stdout"
+
+run_gate '' '{"branch":"polecat/su-uzy9.5"}' '' deadbeef deadbeef >/dev/null
+eq "$(sed -n 's/^  bead assignee: *//p' "$TMP/out")" "<unset>" \
+   "an unassigned bead reads as <unset>, not blank"
 
 # An empty-STRING metadata.branch is the absent case, not a branch named "".
 # `// empty` collapses both, and the fallback must engage rather than compare
@@ -533,9 +612,12 @@ eq "$(run_anchor_resolve polecat/su-uzy9.5 \
    "0|tk-zzzz9" \
    "two candidates -> oldest on created_at, matching merge-push's tiebreak"
 
-# Step 4 detaches HEAD, so a re-run reaches this with no branch name. An empty
-# branch must not be sent to `--metadata-field branch=`, which matches every
-# bead recording no branch at all.
+# The branch name can be empty here. This block re-reads it in its own shell,
+# and a worktree resumed after a release arrives detached. Step 1's gate halts a
+# detached HEAD before this point, and step 8's release runs after it, so an
+# empty name is a malformed or resumed shape rather than a normal continuation.
+# It must not be sent to `--metadata-field branch=`, which matches every bead
+# recording no branch at all.
 eq "$(run_anchor_resolve '' "$ANCHOR_ROW")" "0|" \
    "detached HEAD: no lookup rather than matching branchless beads"
 
@@ -971,7 +1053,66 @@ awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-
 eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
 
-# --- 7. Negative control. -----------------------------------------------------
+# --- 7. The branch release. ---------------------------------------------------
+# Releasing the branch destroys the shape section 1's gate asserts, so it is
+# ordered behind every durable write the step owes. Ahead of one, a session
+# that dies in the window leaves that write undone with the submit step still
+# open, and the re-offer reads an empty CURRENT_BRANCH against a set
+# metadata.branch and halts before it can reach the write. There are two such
+# writes, the handoff and the step chain's close, and each gets its assertion.
+HANDOFF_END=$(grep -n '^# <<< submit-target-consume$' "$TOML" | cut -d: -f1)
+CLOSE_END=$(grep -n '^# <<< submit-chain-close$' "$TOML" | cut -d: -f1)
+RELEASE_START=$(grep -n '^# >>> submit-branch-release$' "$TOML" | cut -d: -f1)
+if [ -n "$HANDOFF_END" ] && [ -n "$RELEASE_START" ] && [ "$RELEASE_START" -gt "$HANDOFF_END" ]; then
+  ok "branch release is ordered AFTER the atomic handoff"
+else
+  bad "branch release must follow the handoff (handoff ends ${HANDOFF_END:-?}, release starts ${RELEASE_START:-?})"
+fi
+
+if [ -n "$CLOSE_END" ] && [ -n "$RELEASE_START" ] && [ "$RELEASE_START" -gt "$CLOSE_END" ]; then
+  ok "branch release is ordered AFTER the step chain's close"
+else
+  bad "branch release must follow the chain close (close ends ${CLOSE_END:-?}, release starts ${RELEASE_START:-?})"
+fi
+
+RELEASE="$(extract submit-branch-release)"
+[ -n "$RELEASE" ] \
+  && ok "branch release extracted between submit-branch-release markers" \
+  || bad "branch-release extraction EMPTY — markers missing from $TOML"
+
+printf '%s\n' "$RELEASE" > "$TMP/release.sh"
+bash -n "$TMP/release.sh" \
+  && ok "extracted branch release is syntactically valid bash" \
+  || bad "extracted branch release failed bash -n"
+
+# run_release <current-branch> [git-rc] -> "<rc>|<git calls>"
+run_release() {
+  : > "$TMP/log"
+  printf '%s\n' "$RELEASE" > "$TMP/release.sh"
+  local rc=0
+  FAKE_BRANCH="$1" FAKE_GIT_RC="${2-0}" FAKE_LOG="$TMP/log" \
+    bash "$TMP/release.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+eq "$(run_release polecat/tk-work)" \
+   "0|GIT|checkout --detach;GIT|branch -D polecat/tk-work;" \
+   "on a branch: detaches, then deletes the branch it was standing on"
+
+# The name is re-read here rather than carried from section 1, so an already
+# detached worktree deletes nothing. `git branch -D ""` is the call this guard
+# exists to prevent.
+eq "$(run_release '')" \
+   "0|" \
+   "already detached: releases nothing"
+
+# The handoff is written by the time this runs, so a failure costs a held ref.
+# It must not surface as a non-zero exit that reads like a failed submit.
+eq "$(run_release polecat/tk-work 1)" \
+   "0|GIT|checkout --detach;" \
+   "a failed release still exits 0 (the handoff is already durable)"
+
+# --- 8. Negative control. -----------------------------------------------------
 # Everything above passes against the shipped snippets. That proves nothing
 # unless the same fixtures FAIL against the implementation being replaced —
 # otherwise a future reconciliation could restore base and the suite would stay
