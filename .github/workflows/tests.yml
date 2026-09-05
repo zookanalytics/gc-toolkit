@@ -1,0 +1,42 @@
+name: tests
+
+# Runs the pack's *.test.sh suite off-host on pull requests to main and on
+# pushes to main, so the suite gates changes without loading the polecat
+# self-review or the pool host, and a regression that lands is still caught.
+# The suite is hermetic: each test stubs gc/bd and works in its own temp dir,
+# so the runner image needs no gc binary and no running city — only bash, git,
+# jq (preinstalled on ubuntu-latest) and a Go toolchain for the gctk build that
+# lifecycle.test.sh exercises.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only the latest commit on a ref needs a result; cancel superseded runs.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # lifecycle.test.sh builds services/gctk from source; the rest of the
+      # suite is shell-only. go.mod names the toolchain version. gctk is
+      # stdlib-only (no go.sum), so module caching has nothing to cache.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/gctk/go.mod
+          cache: false
+
+      - name: Run the *.test.sh suite in parallel
+        run: bash tools/run-tests.sh
