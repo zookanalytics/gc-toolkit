@@ -241,6 +241,14 @@ cmd_demand() {
 #   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
 #     issue_type task, so the allowlist misses it; drop it explicitly.
 #   - task_kind=feedback-pattern — distiller-loop machinery, not an input.
+#   - task_kind=review — a dispatched signoff lane, work-in-flight.
+#   - durable work/lifecycle markers ($markers) — a review lane carries
+#     check_name/anchor_bead; an implementation anchor carries branch/
+#     merge_result/work_dir/pr_url/pr_number. An anchor is an issue_type
+#     task/bug bead with no task_kind, so the allowlist and the task_kind
+#     clauses both miss it, and its markers are the only signal that the work
+#     is already in motion. Slinging a first reaction at either reassigns
+#     work-in-flight, which the proactive scope forbids.
 #   - gc.takeaway / gc.takeaway_by — a sitting has already RULED this bead.
 #   - top-level only — a parent-child CHILD carries the edge in its own
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
@@ -248,9 +256,13 @@ cmd_demand() {
 # Plus the state predicate shared with the live queries (not already reacted,
 # not routed, has a description). Deduped by id.
 scan_precision_filter() {
-    local types_json
+    local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
-    jq --argjson types "$types_json" '
+    # Durable work/lifecycle markers that mark a bead as work-in-flight rather
+    # than raw input. Kept as one list so the review-lane keys and the
+    # implementation-anchor keys share a single source of truth.
+    markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
+    jq --argjson types "$types_json" --argjson markers "$markers_json" '
         map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
@@ -258,8 +270,10 @@ scan_precision_filter() {
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
             and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
             and ((.metadata["task_kind"] // "") != "feedback-pattern")
+            and ((.metadata["task_kind"] // "") != "review")
             and ((.metadata["gc.takeaway"] // "") == "")
             and ((.metadata["gc.takeaway_by"] // "") == "")
+            and (.metadata as $m | ($markers | any(.[]; ($m[.] // "") != "")) | not)
             and (([ .dependencies[]? | select((.dependency_type // .type) == "parent-child") ] | length) == 0)
           ))
         | unique_by(.id)
