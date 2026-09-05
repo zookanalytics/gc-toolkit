@@ -197,6 +197,23 @@ meta_of() { # bead-json key -> value or empty
     printf '%s' "$1" | jq -r --arg k "$2" '(.metadata[$k] // "") | tostring' 2>/dev/null
 }
 
+# `bd show` resolves a bead of ANY category, but held_rows/reconcile/list — and
+# every reader of the marker (liveness-sweep.sh, its precheck, liveness-recheck)
+# — enumerate bd's DEFAULT category scope, which omits gates, infra beads and
+# template/molecule rows (a --include-* flag reveals them; none passes one). A
+# hold on such a bead therefore hides nothing and no pass can ever read its
+# condition to release it. cmd_hold asks this before writing, of the same
+# listing the census reads (--id-scoped to one row, and bd applies the hiding,
+# not a rule reconstructed here), so the writer's reach is exactly the census.
+#   rc 0: in the census.  rc 1: hidden or absent.  rc 2: the listing was unreadable.
+in_census() { # id -> rc
+    local id="$1" raw
+    raw="$(bd_ list --id "$id" --all --json --limit 0 2>/dev/null)" || return 2
+    [ -n "$raw" ] || return 2
+    printf '%s' "$raw" | scrub | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
+    printf '%s' "$raw" | scrub | jq -e --arg id "$id" 'any(.[]?; .id == $id)' >/dev/null 2>&1
+}
+
 # The one evaluator. Sets EV_VERDICT and EV_WHY rather than printing them for
 # the caller to split: a two-field return read through `$(...)` puts every
 # evaluation in a subshell, where the merge memo above dies. EV_VERDICT is one
@@ -302,6 +319,19 @@ cmd_hold() {
         echo "$PROG: hold: $bead is closed — a closed bead is not in the sweep's census, so there is nothing to hide" >&2
         return 1
     fi
+
+    # bd show resolved $bead, but the census only sweeps bd's default category
+    # scope. A hidden-category bead (gate, infra, template/molecule row) can
+    # carry a hold, but nothing that reads the marker enumerates it, so the hold
+    # would suppress nothing and no reconcile pass could ever read its condition
+    # to release it. Refuse it here rather than strand an unsweepable marker.
+    in_census "$bead"
+    case $? in
+        1) echo "$PROG: hold: $bead is not in the liveness sweep's census — it is a gate, infra, template or other hidden-category bead the sweep never enumerates. A hold hides a bead from that sweep; this one is already absent from it, so the hold would hide nothing and no reconcile pass could read a condition to release it." >&2
+           return 1 ;;
+        2) echo "$PROG: hold: could not read the census to confirm $bead is in it — refusing rather than write a hold no reconcile pass might see. Retry when the store is readable." >&2
+           return 1 ;;
+    esac
 
     # A bead already held is re-held, not refused: the condition is what a
     # re-hold usually means to change, and refusing would leave the stale one

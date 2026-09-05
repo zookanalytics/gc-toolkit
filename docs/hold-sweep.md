@@ -48,6 +48,14 @@ script reads it from there.
 evaluate, so the writer refuses to create one rather than leaving a bead
 hidden behind a name no pass reads.
 
+The target must be one the sweep can see. `hold` refuses a bead outside the
+liveness-sweep census — a gate, an infra bead, a template or other
+molecule/wisp row that a listing omits unless an `--include-*` flag names it.
+The sweep never enumerates such a bead, so a hold on it would hide nothing, and
+`reconcile` — which reads the same default scope — could never see its
+condition to release it. The refusal is what keeps the writer's reach equal to
+the census that must later find the hold.
+
 Three conditions are evaluable:
 
 | Condition | Fires when |

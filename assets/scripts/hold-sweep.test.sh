@@ -79,19 +79,29 @@ fi
 case "${1:-}" in
   list)
     shift
-    key=""; all=0
+    key=""; all=0; ids=""; include=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --has-metadata-key) shift; key="${1:-}" ;;
+        --id) shift; ids="${1:-}" ;;
         --all) all=1 ;;
+        --include-infra|--include-gates|--include-templates) include=1 ;;
         *) : ;;
       esac
       shift || true
     done
-    jq -c --arg k "$key" --argjson all "$all" '
-      [ .[]
-        | select($k == "" or (.metadata | has($k)))
-        | select($all == 1 or .status != "closed") ]' "$STORE"
+    # Model bd's category hiding: gates, infra and template/molecule rows are
+    # OMITTED from a default listing and revealed only by an --include-* flag. A
+    # fixture bead with "hidden":true stands for any of those; the show arm still
+    # resolves it by id, exactly as the real tool does. Without this a hold on a
+    # hidden-category bead would pass every assertion the census cannot see.
+    jq -c --arg k "$key" --arg ids "$ids" --argjson all "$all" --argjson inc "$include" '
+      ($ids | if . == "" then [] else split(",") end) as $idset
+      | [ .[]
+          | select($k == "" or (.metadata | has($k)))
+          | select($idset == [] or ((.id) as $i | $idset | index($i)))
+          | select($all == 1 or .status != "closed")
+          | select($inc == 1 or ((.hidden // false) != true)) ]' "$STORE"
     ;;
   show)
     id="${2:-}"
@@ -220,6 +230,34 @@ eq "$rc" 1 "hold refuses a closed bead"
 
 out="$("$SUT" hold b-nope --until date:2099-01-01 2>&1)"; rc=$?
 eq "$rc" 1 "hold refuses a bead that does not resolve (bd's object-shaped miss)"
+
+echo "# hold refuses a bead outside the swept census (a hidden category)"
+# A hold hides a bead from the liveness sweep, but that sweep — and every reader
+# of the marker — enumerates only bd's default category scope. A gate, infra or
+# template/molecule row (modelled by "hidden":true; bd show still resolves it)
+# is never seen by a reconcile pass, so a hold on it stamps a release condition
+# nothing reads. The writer refuses it rather than strand an unsweepable marker.
+store '[{"id":"b-mol","status":"open","hidden":true,"metadata":{},"notes":""}]'
+out="$("$SUT" hold b-mol --until date:2000-01-01 2>&1)"; rc=$?
+eq "$rc" 1 "hold refuses a hidden-category bead the census cannot see"
+eq "$(meta b-mol triage.hold)" "<absent>" "a refused hidden-category hold writes no marker"
+has "$out" "census" "the refusal explains the bead is outside the sweep's census"
+
+# The control: the same hold on a census-visible bead succeeds — so the refusal
+# above is the hidden category, not an unrelated failure of this hold.
+store '[{"id":"b-vis","status":"open","metadata":{},"notes":""}]'
+out="$("$SUT" hold b-vis --until date:2000-01-01 --reason "held" 2>&1)"; rc=$?
+eq "$rc" 0 "the same hold on a census-visible bead succeeds"
+eq "$(meta b-vis triage.hold)" "held" "and writes the marker"
+
+# Fail closed on an unreadable census: a hold that cannot confirm its target is
+# in the census is refused, not written, so no unsweepable marker slips through
+# a transient read failure. (bd show still resolves the bead; only list fails.)
+store '[{"id":"b-1","status":"open","metadata":{},"notes":""}]'
+out="$(STUB_BD_LIST_FAIL=1 "$SUT" hold b-1 --until date:2000-01-01 2>&1)"; rc=$?
+eq "$rc" 1 "hold refuses when it cannot read the census to place the bead"
+eq "$(meta b-1 triage.hold)" "<absent>" "and writes no marker on an unreadable census"
+has "$out" "could not read the census" "and says why"
 
 echo "# hold warns when the condition is already true"
 store '[{"id":"b-1","status":"open","metadata":{},"notes":""},
