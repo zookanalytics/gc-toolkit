@@ -514,13 +514,15 @@ bash -n <(printf '%s\n' "$ARM") 2>/dev/null \
 hasnt "$ARM" "gc mail send" "it escalates rather than mails; a polecat's mail budget is zero"
 has "$ARM" "escalate.sh" "and it escalates through escalate.sh"
 
-# The arm executed, against a helper that refuses. A drain on that path leaves
-# the step claimable, which is the loop the hold exists to stop.
+# The arm executed, against helpers that can refuse. The drain is gated on BOTH
+# the escalation and the hold: escalate.sh records the release path, molecule-
+# hold.sh quiesces the molecule, and the arm drains only after both land. Each
+# stub records its call and returns a code the runner controls.
 mkdir -p "$TMP/armpack/assets/scripts"
 cat > "$TMP/armpack/assets/scripts/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 printf 'ESCALATE %s\n' "$*" >> "${ARM_LOG:?}"
-exit 0
+exit "${ARM_ESC_RC:-0}"
 ESC
 cat > "$TMP/armpack/assets/scripts/molecule-hold.sh" <<'MHSTUB'
 #!/usr/bin/env bash
@@ -529,15 +531,15 @@ exit "${ARM_HOLD_RC:-0}"
 MHSTUB
 chmod +x "$TMP/armpack/assets/scripts/escalate.sh" "$TMP/armpack/assets/scripts/molecule-hold.sh"
 
-# run_arm <hold-exit-code> -> "<rc>"; the helper trace is left in $TMP/arm.log
-# and the gc trace in $GC_LOG. {{convoy_id}} is substituted the way the
-# materializer substitutes it before the polecat reads the step.
+# run_arm <hold-exit-code> [escalate-exit-code] -> "<rc>"; the helper trace is
+# left in $TMP/arm.log and the gc trace in $GC_LOG. {{convoy_id}} is substituted
+# the way the materializer substitutes it before the polecat reads the step.
 run_arm() {
   : > "$TMP/arm.log"; : > "$GC_LOG"
   printf '%s\n' "$ARM" | sed 's|{{convoy_id}}|cv-1|g' > "$TMP/arm.sh"
   local rc=0
   OWNER_LIVE=1 WORK_BEAD_ID=tk-work WORK_STATUS=in_progress WORK_OWNER=other-session \
-    ARM_LOG="$TMP/arm.log" ARM_HOLD_RC="$1" \
+    ARM_LOG="$TMP/arm.log" ARM_HOLD_RC="$1" ARM_ESC_RC="${2:-0}" \
     GC_PACK_DIR="$TMP/armpack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     bash "$TMP/arm.sh" >/dev/null 2>&1 || rc=$?
   printf '%s' "$rc"
@@ -546,11 +548,58 @@ run_arm() {
 eq "$(run_arm 0)" "1" "the refusal arm exits 1"
 has "$(cat "$TMP/arm.log")" "ESCALATE --subject tk-work" "it files an escalation on the work bead"
 has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "it holds its own step"
-has "$(gclog)" "runtime drain-ack" "and a hold that landed is followed by the drain"
+has "$(gclog)" "runtime drain-ack" "an escalation and a hold that both landed are followed by the drain"
 
 eq "$(run_arm 1)" "1" "a refused hold still exits 1"
 has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.load-context" "the hold was attempted"
 hasnt "$(gclog)" "runtime drain-ack" "and nothing drained: the step is still claimable"
+
+# The finding this regression pins: escalate.sh could not record a release path.
+# A hold that succeeds is not enough on its own — draining then would park a
+# blocked, de-routed molecule no human is asked about. So a failed escalation
+# means the arm neither holds nor drains, leaving the step claimable and visible.
+eq "$(run_arm 0 1)" "1" "a refused escalation still exits 1"
+has   "$(cat "$TMP/arm.log")" "ESCALATE --subject tk-work" "the escalation was attempted"
+hasnt "$(cat "$TMP/arm.log")" "HOLD --step" "no hold is placed without a release path recorded"
+hasnt "$(gclog)" "runtime drain-ack" "and nothing drained: a successful hold is not enough by itself"
+
+# --- The workspace-setup wiring. ----------------------------------------------
+# One workspace-setup arm, extracted the same way, proving the escalate-gate is
+# not unique to load-context: a hold that lands is still not enough to drain.
+echo "== mol-polecat-work workspace-setup missing-branch refusal arm =="
+WS_ARM="$(awk '
+  $0 ~ /^# >>> workspace-setup-missing-branch-hold$/ {f=1; next}
+  $0 ~ /^# <<< workspace-setup-missing-branch-hold$/ {f=0}
+  f' "$TOML")"
+[ -n "$WS_ARM" ] \
+  && ok "workspace-setup refusal arm extracted between its markers" \
+  || bad "workspace-setup-arm extraction EMPTY — markers missing from $TOML"
+has   "$WS_ARM" "escalate.sh" "it escalates through escalate.sh"
+has   "$WS_ARM" "molecule-hold.sh" "and holds through molecule-hold.sh"
+hasnt "$WS_ARM" "gc mail send" "and never mails; a polecat's mail budget is zero"
+bash -n <(printf '%s\n' "$WS_ARM") 2>/dev/null \
+  && ok "the workspace-setup arm is syntactically valid bash" \
+  || bad "the workspace-setup arm does not parse under bash -n"
+
+run_ws_arm() { # <hold-exit-code> [escalate-exit-code] -> "<rc>"
+  : > "$TMP/arm.log"; : > "$GC_LOG"
+  printf '%s\n' "$WS_ARM" > "$TMP/ws-arm.sh"
+  local rc=0
+  WORK_BEAD_ID=tk-work BRANCH=polecat/tk-work CLAIMED_STEP_BEAD_ID=s-setup \
+    ARM_LOG="$TMP/arm.log" ARM_HOLD_RC="$1" ARM_ESC_RC="${2:-0}" \
+    GC_PACK_DIR="$TMP/armpack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+    bash "$TMP/ws-arm.sh" >/dev/null 2>&1 || rc=$?
+  printf '%s' "$rc"
+}
+
+eq "$(run_ws_arm 0)" "1" "escalation and hold both land: the arm exits 1"
+has "$(cat "$TMP/arm.log")" "ESCALATE --subject tk-work" "it files an escalation on the work bead"
+has "$(cat "$TMP/arm.log")" "HOLD --step mol-polecat-work.workspace-setup" "it holds its own step"
+has "$(gclog)" "runtime drain-ack" "and both landing is followed by the drain"
+
+eq "$(run_ws_arm 0 1)" "1" "a refused escalation still exits 1"
+hasnt "$(cat "$TMP/arm.log")" "HOLD --step" "no hold without a release path recorded"
+hasnt "$(gclog)" "runtime drain-ack" "and a successful hold is not enough by itself: nothing drained"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
