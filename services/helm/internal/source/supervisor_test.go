@@ -34,6 +34,11 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 			writeJSON(w, `{"items":[{"id":"tk-epic","title":"Big epic","status":"open","issue_type":"epic","priority":2}],"total":1}`)
 		case path == base+"/beads" && r.URL.Query().Get("type") == "decision":
 			writeJSON(w, `{"items":[{"id":"sl-dec","title":"Pick a path","status":"open","issue_type":"decision","priority":1}],"total":1}`)
+		// Gates are hidden from the bare status=open scan, so the source pages
+		// them separately (type=gate). Empty in the shared fixture; the
+		// gate-demand case has its own test.
+		case path == base+"/beads" && r.URL.Query().Get("type") == "gate":
+			writeJSON(w, `{"items":[],"total":0}`)
 		case path == base+"/beads/graph/tk-epic":
 			writeJSON(w, `{"root":{"id":"tk-epic","status":"open","issue_type":"epic"},
 				"beads":[{"id":"tk-epic","status":"open"},{"id":"tk-a","status":"open"},{"id":"tk-b","status":"closed"}],
@@ -370,6 +375,58 @@ func TestGatherRefusesNonWorkBeads(t *testing.T) {
 	// And an ordinary bead with no marker stays off the board.
 	if got := kindsOf(res, "tk-plain"); len(got) != 0 {
 		t.Errorf("an unmarked bead is not an anchor, got %v", got)
+	}
+}
+
+// TestGatherAdmitsGateBackedHumanDemand: a human demand is now a native gate
+// (issue_type=gate, gc.routed_to=human, from gc-helm.sh `demand`), which the
+// bare status=open scan hides. The source must page it via type=gate and admit
+// it as a `human` anchor — matching the in-process backend, whose metadata-keyed
+// query has no default type exclusion. A gate WITHOUT the marker is not an
+// anchor: the type is not the key, the marker is.
+func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
+	const base = "/v0/city/testcity"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		switch {
+		case r.URL.Path == base+"/rigs":
+			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
+		case r.URL.Path == base+"/beads" && q.Get("type") == "gate":
+			writeJSON(w, `{"items":[
+				{"id":"tk-gate-demand","title":"operator: pick the backend","status":"open","issue_type":"gate","priority":1,
+				 "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-work","gc.demand_kind":"decision"}},
+				{"id":"tk-gate-bare","title":"a gate carrying no demand marker","status":"open","issue_type":"gate"}
+			],"total":2}`)
+		default:
+			// Every other Gather leg — the typed scans, the base open scan, the
+			// convoy feed — reads empty, isolating the gate path.
+			writeJSON(w, `{"items":[]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	res, err := newTestSource(t, srv).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Errorf("unexpected partial: %v", res.PartialErrors)
+	}
+	// The gate-backed demand reaches the human filter despite being hidden from
+	// the bare status=open scan — the divergence this fixes.
+	if got := kindsOf(res, "tk-gate-demand"); !reflect.DeepEqual(got, []string{"human"}) {
+		t.Errorf("tk-gate-demand kinds = %v, want [human] — a gate-backed human demand must gather", got)
+	}
+	human := anchorOf(res, "tk-gate-demand", "human")
+	if human == nil {
+		t.Fatal("tk-gate-demand missing")
+	}
+	if human.Rig != "gc-toolkit" || human.Prefix != "tk" {
+		t.Errorf("rig/prefix = %s/%s, want gc-toolkit/tk", human.Rig, human.Prefix)
+	}
+	if got := kindsOf(res, "tk-gate-bare"); len(got) != 0 {
+		t.Errorf("a gate without gc.routed_to=human is not an anchor, got %v", got)
 	}
 }
 

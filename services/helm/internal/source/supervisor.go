@@ -25,8 +25,9 @@ const defaultSupervisorPort = 8372
 //
 // It gathers the three TYPE-keyed anchor kinds and the two metadata-keyed ones
 // ([metadataAnchors]: `human` and `parked`). `GET /beads` takes no metadata
-// predicate, so that filter runs client-side over one paged scan of the city's
-// open beads.
+// predicate, so that filter runs client-side over a paged scan of the city's
+// open beads — two scans, since a human demand is now a hidden gate the bare
+// status=open page omits (see [SupervisorSource.openBeads]).
 //
 // A board served from this backend is NARROWER: no `updated_at` (so stale_days
 // is 0), no visits and so no sittings, no in-flight map, and no resolved
@@ -492,23 +493,51 @@ var infraTypes = map[string]bool{
 	"molecule": true,
 }
 
-// openBeads pages the whole city's open beads.
+// openBeads pages the whole city's open beads, GATES INCLUDED.
 //
-// EVERY WAY THIS SCAN COMES BACK SHORT REPORTS ITSELF: both truncations — a
+// `GET /beads` hides issue_type=gate the way `bd list` does: a bare
+// status=open page omits them, a type=gate page returns them. The native
+// human-demand state this backend must gather IS a gate — issue_type=gate,
+// gc.routed_to=human (assets/scripts/gc-helm.sh `demand`) — so without a
+// second, gate-keyed page it never reaches [gatherMetadataAnchors] and the
+// supervisor board silently drops every human gate the in-process backend
+// shows (whose metadata-keyed SearchIssues carries no default type exclusion).
+// The two pages are unioned by id.
+//
+// EVERY WAY EITHER SCAN COMES BACK SHORT REPORTS ITSELF: both truncations — a
 // page that fails after earlier ones succeeded, and the page cap — return the
 // rows already read together with a `warn` the caller records as a partial
 // error. A board missing rows must not report itself complete.
 func (s *SupervisorSource) openBeads(ctx context.Context) (out []apiBead, warn []string, err error) {
+	out, warn, err = s.pageBeads(ctx, "/beads?status=open", "open-bead scan")
+	if err != nil {
+		return nil, warn, err
+	}
+	gates, gwarn, gerr := s.pageBeads(ctx, "/beads?status=open&type=gate", "gate scan")
+	warn = append(warn, gwarn...)
+	if gerr != nil {
+		// A gate page that fails degrades the board to the anchors already
+		// read, and says so — it never discards them.
+		return out, append(warn, "gate scan: "+gerr.Error()), nil
+	}
+	return dedupeBeadsByID(out, gates), warn, nil
+}
+
+// pageBeads pages one `/beads` query to exhaustion. base carries the query's
+// fixed predicates (status, and for the gate scan type); limit and cursor are
+// appended here. label prefixes the truncation warnings so the two scans name
+// themselves distinctly.
+func (s *SupervisorSource) pageBeads(ctx context.Context, base, label string) (out []apiBead, warn []string, err error) {
 	cursor := ""
 	for page := 1; page <= maxBeadPages; page++ {
-		path := fmt.Sprintf("/beads?status=open&limit=%d", beadPageSize)
+		path := fmt.Sprintf("%s&limit=%d", base, beadPageSize)
 		if cursor != "" {
 			path += "&cursor=" + url.QueryEscape(cursor)
 		}
 		var env listEnvelope
 		if e := s.getJSON(ctx, path, &env); e != nil {
 			if len(out) > 0 {
-				return out, append(warn, fmt.Sprintf("open-bead scan stopped after %d page(s): %v", page-1, e)), nil
+				return out, append(warn, fmt.Sprintf("%s stopped after %d page(s): %v", label, page-1, e)), nil
 			}
 			return nil, nil, e
 		}
@@ -523,11 +552,33 @@ func (s *SupervisorSource) openBeads(ctx context.Context) (out []apiBead, warn [
 		}
 		cursor = env.NextCursor
 	}
-	return out, append(warn, fmt.Sprintf("open-bead scan stopped at the %d-page cap; rows may be missing", maxBeadPages)), nil
+	return out, append(warn, fmt.Sprintf("%s stopped at the %d-page cap; rows may be missing", label, maxBeadPages)), nil
 }
 
-// gatherMetadataAnchors admits the two METADATA-keyed kinds from one paged scan
-// of the city's open beads.
+// dedupeBeadsByID unions bead pages, keeping the first row seen for each id.
+// The open and gate pages are disjoint by issue_type today; the dedup is the
+// guard that keeps the union one-row-per-id if a page predicate ever widens.
+func dedupeBeadsByID(pages ...[]apiBead) []apiBead {
+	total := 0
+	for _, p := range pages {
+		total += len(p)
+	}
+	out := make([]apiBead, 0, total)
+	seen := make(map[string]bool, total)
+	for _, p := range pages {
+		for _, b := range p {
+			if b.ID == "" || seen[b.ID] {
+				continue
+			}
+			seen[b.ID] = true
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// gatherMetadataAnchors admits the two METADATA-keyed kinds from [openBeads]'
+// scan of the city's open beads.
 //
 // The selector is [metadataAnchor.matches], shared with the beads backend so
 // the two cannot drift on which beads are anchors. A bead carrying BOTH markers
