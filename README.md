@@ -87,6 +87,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
+- [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 
 ## Related
 
