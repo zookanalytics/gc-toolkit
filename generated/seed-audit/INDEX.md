@@ -34,17 +34,17 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,716 | 1,429 |
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
-| [`converse`](agents/converse.md) | 53,968 | 13,492 |
+| [`converse`](agents/converse.md) | 40,866 | 10,216 |
 | [`deacon`](agents/deacon.md) | 8,285 | 2,071 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
-| [`keeper`](agents/keeper.md) | 21,085 | 5,271 |
-| [`mechanik`](agents/mechanik.md) | 23,347 | 5,836 |
+| [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
+| [`mechanik`](agents/mechanik.md) | 24,668 | 6,167 |
 | [`polecat`](agents/polecat.md) | 20,317 | 5,079 |
 | [`polecat-codex`](agents/polecat-codex.md) | 20,347 | 5,086 |
 | [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
 | [`refinery`](agents/refinery.md) | 8,626 | 2,156 |
-| [`witness`](agents/witness.md) | 11,626 | 2,906 |
+| [`witness`](agents/witness.md) | 12,186 | 3,046 |
 
 ## Formula recipes
 
@@ -56,7 +56,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,195 | 548 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,512 | 628 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
@@ -69,11 +69,11 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 3,945 | 986 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,400 | 600 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,942 | 1,235 |
-| [`mol-review`](formulas/mol-review.md) | `city` | 2,187 | 546 |
+| [`mol-review`](formulas/mol-review.md) | `city` | 2,620 | 655 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,335 | 1,083 |
-| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 8,189 | 2,047 |
+| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 8,626 | 2,156 |
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 3,494 | 873 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
