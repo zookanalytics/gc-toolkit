@@ -238,8 +238,11 @@ eq "$(meta d-7 pr.machine)" "<absent>" "no refusal wrote anything"
 # each re-assertion cost an update plus its read-back — two store subprocesses
 # per anchor, on a cadence whose budget is store subprocesses. What must not
 # change with them gone: the exit code, the report, and the stored value.
+# A detached state sheds its assignee, so a bead resting in one carries none;
+# the fixture models that resting shape, because an idle re-assertion is one
+# whose assignee-clear has nothing left to clear.
 echo "# idle transitions"
-store '[{"id":"n-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"settled@'"$OID"'@2026-08-28T04:05:06Z","gc.routed_to":"rig/pool"}}]'
+store '[{"id":"n-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"settled@'"$OID"'@2026-08-28T04:05:06Z","gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition n-1 --to pull_request --expect pull_request \
   --route rig/pool --set-dated "pr.machine=settled@$OID" 2>&1)"; rc=$?
