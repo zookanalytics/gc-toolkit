@@ -72,6 +72,31 @@ gates_of() { # <check_set>
   return 0
 }
 
+# A conventional-commit PR-title check (which product repos run on every PR)
+# requires the title to open with a type token: `type:` or `type(scope):`.
+# Bead titles carry none, so one is derived from the bead's issue_type. A
+# title that already opens with a recognized conventional type is left
+# untouched, so a bead a human already titled `fix(x): …` is not
+# double-prefixed. The derived types are ordinary conventional types every
+# such check accepts; the recognized set is wider so any hand-written prefix
+# survives.
+CONVENTIONAL_TYPES='build|chore|docs|feat|fix|ops|perf|refactor|revert|security|style|test'
+cc_type_for() { # <issue_type> — the conventional-commit type for a bead kind
+  case "${1:-}" in
+    bug)          printf 'fix' ;;
+    feature|feat) printf 'feat' ;;
+    docs)         printf 'docs' ;;
+    *)            printf 'chore' ;;
+  esac
+}
+cc_title() { # <title> <issue_type> — <title>, guaranteed to open with a type
+  if printf '%s' "$1" | grep -Eq "^(${CONVENTIONAL_TYPES})(\([^)]+\))?!?: "; then
+    printf '%s' "$1"
+  else
+    printf '%s: %s' "$(cc_type_for "$2")" "$1"
+  fi
+}
+
 # Certify one PR row as this anchor's: right repo url, right head branch, OUR
 # head repository (fork gap), not cross-repo, right base. 0=ours, 1=not ours,
 # 2=unreadable (the caller must do nothing for the branch).
@@ -262,6 +287,7 @@ GATES
 
   # --- create, pinned and non-draft ----------------------------------------------
   title=$(printf '%s' "$row" | jq -r '.title // empty')
+  kind=$(printf '%s' "$row" | jq -r '.issue_type // empty')
   desc=$(printf '%s' "$row" | jq -r '.description // empty')
   # The summary is the polecat's account of the diff, carried in pr_summary by
   # the refinery handoff. The anchor's description is dispatch text — what the
@@ -293,8 +319,11 @@ GATES
     [ -n "$SUP_NUM" ] && printf -- '- Supersedes #%s (closed unmerged at `%.8s`); re-implemented and re-gated at `%.8s`.\n' \
       "$SUP_NUM" "$SUP_HEAD" "$head_oid"
   } > "$BODY"
+  # The bead id stays in the title so a PR is traceable to its anchor; the
+  # type prefix goes ahead of it so the conventional-commit check passes.
+  pr_title="$(cc_title "$title" "$kind") ($id)"
   CREATED_URL=$(pr_url_canon "$(gh pr create --repo "$ORIGIN_REPO_Q" --base "$target" \
-    --head "$branch" --title "$title ($id)" --body-file "$BODY" 2>/dev/null || true)")
+    --head "$branch" --title "$pr_title" --body-file "$BODY" 2>/dev/null || true)")
   rm -f "$BODY"
   if [ -z "$CREATED_URL" ]; then
     echo "$PROG: $id branch '$branch' PR create produced nothing; skip (retry next pass)" >&2
