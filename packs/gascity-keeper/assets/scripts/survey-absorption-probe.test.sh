@@ -416,6 +416,33 @@ else
   bad "no commits exited 0"
 fi
 
+# --- a trailing value flag fails closed, it does not hang ---------------------
+# A value flag with no value must die, not hang: `shift 2` cannot consume a flag
+# that has no following value, and with no `set -e` an unguarded parse loop would
+# spin on it. timeout catches a regression to that hang (exit 124); exit 1 is
+# the die.
+for VF in --repo --upstream --range --threshold; do
+  timeout 10s "$SCRIPT" "$VF" >/dev/null 2>&1
+  RC=$?
+  if [ "$RC" -eq 1 ]; then
+    ok "trailing $VF fails closed (exit 1, no hang)"
+  elif [ "$RC" -eq 124 ]; then
+    bad "trailing $VF hangs: the missing-value parse loop spins"
+  else
+    bad "trailing $VF exited $RC, want 1"
+  fi
+done
+# A value flag followed by another flag is a missing value, not a value of
+# "--upstream": it must be rejected as the first flag's missing value, never
+# silently consume the following flag.
+if timeout 10s "$SCRIPT" --repo --upstream upstream "$SHA_LOCAL" 2>"$TMP/err"; then
+  bad "a value flag swallowed the following flag as its value"
+elif grep -q -- "--repo requires a value" "$TMP/err"; then
+  ok "a value flag followed by another flag is rejected as a missing value"
+else
+  bad "value-flag-as-value gave the wrong error: $(cat "$TMP/err")"
+fi
+
 # --- audit mode ---------------------------------------------------------------
 # The two records the audit joins are metadata STRINGS holding JSON. The survey
 # builds its table from `git log --oneline`, so its sha is a seven- or

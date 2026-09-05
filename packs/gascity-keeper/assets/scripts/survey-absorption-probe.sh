@@ -54,12 +54,22 @@ SHAS=()
 
 die() { echo "survey-absorption-probe: $1" >&2; exit 1; }
 
+# A value-taking flag must be followed by a value: one more argument, and not
+# another flag. There is no `set -e`, so without this guard a trailing value
+# flag leaves one argument `shift 2` cannot consume, and the parse loop spins
+# on it forever instead of failing closed.
+need_val() {
+    local flag="$1" count="$2" val="$3"
+    [ "$count" -ge 2 ] || die "$flag requires a value"
+    case "$val" in -*) die "$flag requires a value, got flag: $val" ;; esac
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
-    --repo)      REPO="${2:-}"; shift 2 ;;
-    --upstream)  UPSTREAM="${2:-}"; shift 2 ;;
-    --range)     RANGE="${2:-}"; shift 2 ;;
-    --threshold) THRESHOLD="${2:-}"; shift 2 ;;
+    --repo)      need_val --repo "$#" "${2:-}";      REPO="$2";      shift 2 ;;
+    --upstream)  need_val --upstream "$#" "${2:-}";  UPSTREAM="$2";  shift 2 ;;
+    --range)     need_val --range "$#" "${2:-}";     RANGE="$2";     shift 2 ;;
+    --threshold) need_val --threshold "$#" "${2:-}"; THRESHOLD="$2"; shift 2 ;;
     --audit)     AUDIT=1; shift ;;
     -h|--help)   sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)          die "unknown flag: $1" ;;
