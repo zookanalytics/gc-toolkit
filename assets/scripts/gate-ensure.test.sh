@@ -14,10 +14,13 @@
 # exception@ — left for migrate-lane-states.sh; an unpersisted clear is
 # reported); a multi-gate check_set split per gate rather than joined into one
 # name; in-flight dedup (routed, poured, claimed) + stranded repair (root
-# probe: re-sling a review with no LIVE tracking convoy, AND one whose live
+# probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died
 # before the root drives nothing and must not hold the anchor in flight
-# forever — and converge after a hard sling failure); an in-flight REWORK
+# forever; and when the convoy DOES carry a root, judge it by the poured arm's
+# liveness check — a live chain is in flight, a spent one is wedged, an
+# unreadable one is held — never counted in flight on sight; and converge
+# after a hard sling failure); an in-flight REWORK
 # child (a blocks-dep bead carrying source_review_bead) withholds a fresh
 # dispatch until it closes; the
 # dispatch shape
@@ -26,9 +29,10 @@
 # cap's park under it reading as the wedge; dispatch_count as a tally the round
 # cap never reads; the dispatch backstop (a ceiling on DISPATCHES that refuses
 # loudly -- one deduped visit plus a stamp and a note on the anchor -- and
-# restates itself when the head moves); and the review-wedge escalation
-# (exec-stamp-only reach whose poured workflow is spent -> one deduped visit,
-# held one pass first).
+# restates itself when the head moves); and the review-wedge escalation, shared
+# by both reach shapes (an exec-stamp-only poured review, and a no-stamp review
+# a tracking convoy's root drives) -> a spent workflow is one deduped visit,
+# held one pass first.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,6 +87,48 @@ oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 SHORT="8d7f0cf3c"   # the abbreviated-sha shape that wedged gc-na313
+
+# Store-row fixture builders, shared by the stranded-repair and review-wedge
+# sections. A review's reach to the gate is routed|poured|claimed: review_row is
+# the poured shape (gc.execution_routed_to), stranded_review_row the inert one
+# (no stamp, no route, no assignee). A pour is a convoy (tracks the review) whose
+# member is a workflow root, and the root's steps carry gc.root_bead_id. A chain
+# with every step but the finalizer closed is spent; one non-final step still
+# open is live.
+review_row() { # <id> <anchor>
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"%s","gc.execution_routed_to":"%s","review_pool":"%s"}}' \
+    "$1" "$2" "$POOL" "$POOL"
+}
+stranded_review_row() { # <id> <anchor>
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"%s"}}' \
+    "$1" "$2"
+}
+convoy_row() { # <id>
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","issue_type":"convoy","metadata":{}}' "$1"
+}
+root_row() { # <id> <convoy>
+  printf '{"id":"%s","status":"in_progress","assignee":"","notes":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"%s"}}' "$1" "$2"
+}
+step_row() { # <id> <root> <step> <status>
+  printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"gc.root_bead_id":"%s","gc.step_ref":"mol-review.%s"}}' \
+    "$1" "$4" "$2" "$3"
+}
+# Every step closed but the finalizer: the shape a reviewer leaves behind when
+# it closes its chain and dies before signoff.sh or the route restore.
+spent_steps() { # <root> <id-prefix>
+  printf '%s,%s,%s,%s' \
+    "$(step_row "$2-a" "$1" load-dispatch closed)" \
+    "$(step_row "$2-b" "$1" review closed)" \
+    "$(step_row "$2-c" "$1" verdict-and-drain closed)" \
+    "$(step_row "$2-d" "$1" workflow-finalize open)"
+}
+live_steps() { # <root> <id-prefix>
+  printf '%s,%s,%s,%s' \
+    "$(step_row "$2-a" "$1" load-dispatch closed)" \
+    "$(step_row "$2-b" "$1" review in_progress)" \
+    "$(step_row "$2-c" "$1" verdict-and-drain open)" \
+    "$(step_row "$2-d" "$1" workflow-finalize open)"
+}
 
 echo "# stamping the default"
 store "[$(anchor A1 pre_open_gate "" "" polecat/a1)]"
@@ -301,7 +347,7 @@ has "$out" "0 reviews dispatched" "a claimed review (route consumed) suppresses 
 
 echo "# stranded review (never poured) is re-slung, not counted in flight forever"
 store "[$(anchor D3 pull_request codex "" polecat/d3),
-        {\"id\":\"rev-3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D3\"}}]"
+        $(stranded_review_row rev-3 D3)]"
 oid d3 > "$GH_DIR/head_polecat_d3"
 : > "$STUB_GC_LOG"
 out=$(run)
@@ -310,24 +356,60 @@ has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3 --on mol-review" "the never-poure
 eq "$(meta rev-3 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 hasnt "$out" "dispatched review new-" "no twin was minted for it"
 
-echo "# stranded review whose live convoy carries a workflow root is a live pour — never re-slung"
+echo "# stranded review whose tracked root has a LIVE step chain is a live pour — never re-slung"
 store "[$(anchor D4 pull_request codex "" polecat/d4),
-        {\"id\":\"rev-4\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D4\"}},
-        {\"id\":\"conv-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}},
-        {\"id\":\"root-1\",\"status\":\"in_progress\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.kind\":\"workflow\",\"gc.input_convoy_id\":\"conv-1\"}}]"
+        $(stranded_review_row rev-4 D4),
+        $(convoy_row conv-1),
+        $(root_row root-1 conv-1),
+        $(live_steps root-1 s4)]"
 printf 'conv-1|tracks|rev-4\n' >> "$STUB_DEPS"
 oid d4 > "$GH_DIR/head_polecat_d4"
-: > "$STUB_GC_LOG"
+: > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
 out=$(run)
-has "$out" "convoy-tracked" "a live convoy carrying a workflow root is recognized as a live pour"
+has "$out" "live poured workflow" "a tracked root whose non-final steps are still open is a live pour"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured (a re-pour mints a second workflow root)"
 eq "$(meta rev-4 'gc.routed_to')" "<absent>" "…and gc.routed_to is not restored beside the live workflow"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and a live chain is never escalated as wedged"
 hasnt "$out" "dispatched review new-" "…and no twin was minted"
+
+echo "# stranded review (no exec stamp) whose tracked root is SPENT is wedged, not counted in flight forever"
+store "[$(anchor D4s pull_request codex "" polecat/d4s),
+        $(stranded_review_row rev-4s D4s),
+        $(convoy_row conv-1s),
+        $(root_row root-1s conv-1s),
+        $(spent_steps root-1s s4s)]"
+printf 'conv-1s|tracks|rev-4s\n' >> "$STUB_DEPS"
+oid d4s > "$GH_DIR/head_polecat_d4s"
+: > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
+out=$(run)
+has "$out" "looks WEDGED" "a stranded review whose tracked root is spent is seen as wedged, not in flight"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and not re-slung (a root exists; a re-pour would mint a second)"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "…nothing escalates on the first sighting"
+out=$(run)
+has "$out" "is WEDGED" "the second sighting confirms it"
+esc=$(cat "$STUB_ESCALATE_LOG")
+has "$esc" "--subject rev-4s" "the visit is filed on the wedged stranded review"
+has "$esc" "--key review-wedge" "…under the same wedge key the poured arm uses"
+has "$esc" "root-1s" "…naming the spent workflow"
+
+echo "# stranded review whose tracked root does not enumerate its steps is held, not claimed a live pour"
+store "[$(anchor D4u pull_request codex "" polecat/d4u),
+        $(stranded_review_row rev-4u D4u),
+        $(convoy_row conv-1u),
+        $(root_row root-1u conv-1u)]"
+printf 'conv-1u|tracks|rev-4u\n' >> "$STUB_DEPS"
+oid d4u > "$GH_DIR/head_polecat_d4u"
+: > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
+out=$(run); out="$out$(run)"
+has "$out" "pour-liveness probe unreadable" "a root that does not enumerate its steps proves nothing about the pour"
+hasnt "$out" "live poured workflow" "…so it is never claimed to be a live pour"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured behind an unreadable root"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on an unanswerable probe"
 
 echo "# stranded review tracked by an EMPTY live convoy (pour minted the convoy but died before the root) is re-slung, not held in flight forever (tk-egoro8)"
 store "[$(anchor D4e pull_request codex "" polecat/d4e),
-        {\"id\":\"rev-4e\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D4e\"}},
-        {\"id\":\"conv-1e\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
+        $(stranded_review_row rev-4e D4e),
+        $(convoy_row conv-1e)]"
 printf 'conv-1e|tracks|rev-4e\n' >> "$STUB_DEPS"
 oid d4e > "$GH_DIR/head_polecat_d4e"
 : > "$STUB_GC_LOG"
@@ -339,7 +421,7 @@ hasnt "$out" "convoy-tracked" "…and it is never counted in flight behind an em
 
 echo "# a review tracked ONLY by a closed convoy is dead-tracked — re-slung"
 store "[$(anchor D5 pull_request codex "" polecat/d5),
-        {\"id\":\"rev-5\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"check_name\":\"codex\",\"anchor_bead\":\"D5\"}},
+        $(stranded_review_row rev-5 D5),
         {\"id\":\"conv-2\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}}]"
 printf 'conv-2|tracks|rev-5\n' >> "$STUB_DEPS"
 oid d5 > "$GH_DIR/head_polecat_d5"
@@ -569,12 +651,18 @@ has "$out" "dispatch NOT counted" "…and the dispatch is not counted"
 eq "$(meta G1 dispatch_count)" "<absent>" "an uncounted dispatch does not consume a round"
 
 echo "# …convergence: the next pass sees the tracking convoy's root and does not twin"
-printf '{"id":"conv-g1","status":"open","assignee":"","notes":"","issue_type":"convoy","metadata":{}}\n{"id":"root-g1","status":"in_progress","assignee":"","notes":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-g1"}}' > "$TMP/conv.json"
+printf '%s\n' \
+  "$(convoy_row conv-g1)" \
+  "$(root_row root-g1 conv-g1)" \
+  "$(step_row sg1-a root-g1 load-dispatch closed)" \
+  "$(step_row sg1-b root-g1 review in_progress)" \
+  "$(step_row sg1-c root-g1 verdict-and-drain open)" \
+  "$(step_row sg1-d root-g1 workflow-finalize open)" > "$TMP/conv.json"
 store "$(jq -c --slurpfile c "$TMP/conv.json" '. + $c' "$STUB_STORE")"
 printf 'conv-g1|tracks|new-2\n' >> "$STUB_DEPS"
 : > "$STUB_GC_LOG"
 out=$(run)
-has "$out" "convoy-tracked" "the half-landed pour is recognized by its convoy's root"
+has "$out" "live poured workflow" "the half-landed pour, its exec stamp dropped but its steps still live, is recognized as in flight"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…never re-poured"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
 
@@ -599,39 +687,8 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1"
 
 # --- review-wedge escalation -------------------------------------------------
 # A poured review reaches the gate through its workflow alone. Once that
-# workflow is spent no verdict can still be coming, and only these fixtures
-# distinguish that from a review still legitimately running.
-review_row() { # <id> <anchor>
-  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"%s","gc.execution_routed_to":"%s","review_pool":"%s"}}' \
-    "$1" "$2" "$POOL" "$POOL"
-}
-convoy_row() { # <id>
-  printf '{"id":"%s","status":"open","assignee":"","notes":"","issue_type":"convoy","metadata":{}}' "$1"
-}
-root_row() { # <id> <convoy>
-  printf '{"id":"%s","status":"in_progress","assignee":"","notes":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"%s"}}' "$1" "$2"
-}
-step_row() { # <id> <root> <step> <status>
-  printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"gc.root_bead_id":"%s","gc.step_ref":"mol-review.%s"}}' \
-    "$1" "$4" "$2" "$3"
-}
-# Every step closed but the finalizer: the shape a reviewer leaves behind when
-# it closes its chain and dies before signoff.sh or the route restore.
-spent_steps() { # <root> <id-prefix>
-  printf '%s,%s,%s,%s' \
-    "$(step_row "$2-a" "$1" load-dispatch closed)" \
-    "$(step_row "$2-b" "$1" review closed)" \
-    "$(step_row "$2-c" "$1" verdict-and-drain closed)" \
-    "$(step_row "$2-d" "$1" workflow-finalize open)"
-}
-live_steps() { # <root> <id-prefix>
-  printf '%s,%s,%s,%s' \
-    "$(step_row "$2-a" "$1" load-dispatch closed)" \
-    "$(step_row "$2-b" "$1" review in_progress)" \
-    "$(step_row "$2-c" "$1" verdict-and-drain open)" \
-    "$(step_row "$2-d" "$1" workflow-finalize open)"
-}
-
+# workflow is spent no verdict can still be coming; the fixture builders at the
+# top of the file distinguish that from a review still legitimately running.
 echo "# a spent pour is held one pass, then escalated once"
 store "[$(anchor W1 pull_request codex "" polecat/w1),
         $(review_row rev-w1 W1),
