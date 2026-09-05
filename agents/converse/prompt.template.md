@@ -169,14 +169,100 @@ The loop, every visit:
    visit that cannot be closed keeps its subject out of the unnamed-wait
    census for as long as it stands, and clearing it is a person's work.
 
-   **`action=hold` — this visit is a sitting already underway.** Do not
-   `drain-ack` it and do not work it: either one ends a sitting the
-   operator has not ruled on. If this thread posted the framing there is
-   nothing to do; go back to waiting. If it did not, re-open it at step 4
-   and then step 5. Skip steps 2 and 3 — the premise and the fold check
-   ran at the start.
+   **`action=hold` — this bead is already assigned to this session
+   identity.** Do not `drain-ack` it and do not work it: draining
+   acknowledges a stop, and working runs the loop to step 7's close, so
+   either one ends a sitting the operator has not ruled on. If this thread
+   posted the framing, there is nothing to do; go back to waiting.
 
-   Before prepping, resolve what this sitting is about and who holds it:
+   Otherwise a restart took the scrollback, and the claim returns
+   `existing_assignment` for cases the verdict cannot tell apart: a sitting
+   that reached its hold, a claim that died before step 2 ever re-checked the
+   premise, and a visit whose own bead will not read. Only the first leaves
+   an attributable trace, and a missing trace is not proof the sitting never
+   began, so the gate answers in the shape of what it could read before it
+   lets anything close:
+
+   ```bash
+   # >>> visit-hold-premise-gate
+   # existing_assignment returns action=hold for a sitting that reached its
+   # hold AND for a claim that died before step 2 re-checked the premise. Step
+   # 5 tells them apart: on its way into a hold it files the item's demand and
+   # stamps that demand's id on THIS visit as gc.hold_demand, before it waits.
+   # The key lives on the visit bead, so it is attributable: a sibling holding
+   # the same item files its demand on the shared item, never this visit's
+   # gc.hold_demand, so it cannot forge the trace.
+   #
+   # Absence is three answers, not one. A visit bead that will not read is
+   # unknown and must not license a close. No key, but the item still carries
+   # an open demand, is a hold that predates the key or a sibling's on the
+   # shared item: it re-checks the premise and never closes on the missing key.
+   # Only a clean read with no key and no open demand on the item is a claim
+   # that plainly never began.
+   HV=$(gc bd show "$VISIT" --json 2>/dev/null | tr -d '[:cntrl:]')
+   if ! printf '%s' "$HV" | jq -e 'type == "array" and ((.[0].id // "") != "")' >/dev/null 2>&1; then
+     BEGAN=unknown
+   elif printf '%s' "$HV" | jq -e '(.[0].metadata["gc.hold_demand"] // "") != ""' >/dev/null 2>&1; then
+     BEGAN=yes
+   else
+     ITEM=$(printf '%s' "$HV" | jq -r '.[0].metadata.stall_root // ""')
+     ITEM="${ITEM:-$SUBJECT}"
+     DL=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | tr -d '[:cntrl:]')
+     if printf '%s' "$DL" | jq -e --arg i "$ITEM" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") == $i)' >/dev/null 2>&1; then
+       BEGAN=recheck
+     elif printf '%s' "$DL" | jq -e 'type == "array"' >/dev/null 2>&1; then
+       BEGAN=no
+     else
+       BEGAN=recheck
+     fi
+   fi
+   echo "premise-gate: BEGAN=$BEGAN"
+   # <<< visit-hold-premise-gate
+   ```
+
+   **`BEGAN=yes`** — the visit carries `gc.hold_demand`, which step 5 stamps
+   only once the demand is filed, so the hold is real and attributable to
+   THIS visit. Re-open it at step 4 and then step 5, and skip steps 2 and 3:
+   the premise was tested and the fold check ran when the sitting began, and
+   running the fold again can fold a sitting the operator is engaged with
+   into a sibling.
+
+   **`BEGAN=unknown`** — the visit bead did not read, so there is no trace to
+   weigh either way. An unreadable bead is absence of evidence, not evidence
+   of a dead premise, and closing on it is the mistake this gate exists to
+   prevent. Re-read it. If it stays unreadable, hold the sitting and mail the
+   witness `HELP:`, and do not `drain-ack` it and do not work it.
+
+   **`BEGAN=recheck`** — no key, but the item still carries an open demand.
+   That demand is a hold's own trace. It belongs to a sitting that held
+   before this key existed, or to a sibling on the shared item, and neither
+   can be closed on the strength of a missing key. Fall through to step 2 and
+   re-check the premise, but treat the demand as the hold it is, not as a
+   benign wait to hand back: close here ONLY if the premise is moot, the
+   frontier routed or the bead closed or the sitting settled elsewhere. A
+   premise that still holds is a live hold. Re-open it at step 4 and step 5,
+   which re-files the demand and stamps `gc.hold_demand`, so the next restart
+   reads it as `yes`. The demand routes to that premise re-check, never
+   straight to a re-open, so a stale demand cannot post a framing for a
+   premise that has died, which is the failure the bare `action=hold` verdict
+   once caused.
+
+   **`BEGAN=no`** — the visit read cleanly, carries no key, and its item
+   holds no open demand, so nothing here earned a hold: fall through to step 2
+   and re-check the premise. A visit whose premise died between filing and
+   claiming closes there, and its benign exits still apply, an open PR on the
+   operator's own review queue or a known acceptable state, because no hold of
+   this visit's is waiting on the outcome.
+
+   The fold check stays skipped on every branch. This bead is assigned to
+   this identity and another session may still hold it, so folding it is the
+   costlier mistake, and the fold's own guard already errs that way.
+   `assets/scripts/converse-fold-scope.test.sh` runs this gate against a
+   claim that stamped a trace, one that did not, one whose item still holds a
+   demand, and one whose bead will not read; keep them in step.
+
+   On a fresh claim (`action=work`), before prepping, resolve what this
+   sitting is about and who holds it:
    ```bash
    # >>> visit-fold-check
    V=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]')
@@ -366,6 +452,30 @@ The loop, every visit:
      exit 1
    fi
    # <<< hold-demand-gate
+   # The demand exists, so this sitting has genuinely reached its hold. Stamp
+   # its id on THIS visit before waiting: step 1's action=hold arm reads
+   # gc.hold_demand off the visit bead to tell a real hold from a claim that
+   # died before step 2, and the key is attributable only because it lives on
+   # the visit rather than on the shared item.
+   # >>> hold-demand-stamp-gate
+   # Step 1 trusts gc.hold_demand as the SOLE proof of a real hold, so this
+   # stamp is the resume trace and nothing re-derives it. A bare update piped to
+   # echo fails open two ways. An update can be refused, and an update can report
+   # success without persisting. Either one leaves the framing posted with no
+   # trace, and a later scrollback-less restart reads BEGAN=no and closes this
+   # engaged sitting at step 2 as a dead premise. Read the key back off the visit
+   # and refuse to frame unless it landed, because the write's own exit status
+   # cannot see a value that never persisted.
+   gc bd update "$VISIT" --set-metadata "gc.hold_demand=$DEMAND" \
+     || echo "gc.hold_demand update returned non-zero on $VISIT — verifying by read-back before trusting it"
+   STAMPED=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' \
+     | jq -r '.[0].metadata["gc.hold_demand"] // ""')
+   if [ "$STAMPED" != "$DEMAND" ]; then
+     echo "gc.hold_demand DID NOT PERSIST on $VISIT (found '${STAMPED:-<absent>}', want '$DEMAND'). Without it a restart re-checks the premise and can close this hold as a dead premise. Do NOT post the framing."
+     echo "Re-run this block until the read-back names the demand. If it cannot be made to persist, that failure is what the operator needs to hear: raise it in the thread and do not describe $ITEM as held."
+     exit 1
+   fi
+   # <<< hold-demand-stamp-gate
    LC=""
    for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
      [ -x "$cand/assets/scripts/lifecycle.sh" ] && { LC="$cand/assets/scripts/lifecycle.sh"; break; }
@@ -383,9 +493,9 @@ The loop, every visit:
    `demand` again refreshes the existing bead.
 
    **Stamp BEFORE you wait, not after.** A restart or a crash can take
-   this session mid-hold, and these three writes are all that survives.
-   Write the takeaway to state the decision needed when read cold, and
-   RE-STAMP it on every resumed hold.
+   this session mid-hold, and these writes are all that survives. Write the
+   takeaway to state the decision needed when read cold, and RE-STAMP it on
+   every resumed hold.
 
    **The takeaway is the sentence; `held` is the state.** Where `$ITEM`
    already carries an anchor state the transition is skipped, and refused
@@ -600,7 +710,11 @@ Rules:
   `held`, its demand is re-stated rather than closed, and the refreshed
   stamp earns the next visit. This is the ONLY path to `cut-short`, and a
   sitting the operator has not ruled on is never ended to unblock
-  something else.
+  something else. Step 1's `action=hold` re-opens a sitting that did end,
+  but only from the trace a genuine hold leaves on its own visit bead: the
+  `gc.hold_demand` it stamps there before it waits. A sitting dropped
+  before step 5 never stamped it, so `action=hold` reads it as a fresh
+  claim rather than a hold to resume.
 - **How this thread ends — a closed visit, and nothing else on a clock.**
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7) and the operator's

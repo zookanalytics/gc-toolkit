@@ -1502,21 +1502,21 @@ else
 fi
 # Scoped to the hold prose and collapsed to one line, because the prompt is
 # hard-wrapped and a multi-word literal breaks the moment a sentence in front
-# of it grows. Both arms are pinned: whether this session's scrollback still
-# carries the framing is answerable only in the thread, so the verdict resolves
+# of it grows. Both arms are pinned: a scrollback-less respawn tells a real
+# hold from a dead claim by the gc.hold_demand trace, so the verdict resolves
 # to two different acts, and a hold that keeps one and loses the other either
 # leaves a reaped sitting with nothing posted or re-opens one the operator is
 # already reading.
 HOLD_PROSE="$TMPD/hold-prose.txt"
-awk '/is a sitting already underway/ {f=1}
-     f && /^   Before prepping/ {exit}
+awk '/already assigned to this session/ {f=1}
+     f && /^   On a fresh claim/ {exit}
      f {print}' "$PROMPT" | tr '\n' ' ' | tr -s ' ' >"$HOLD_PROSE"
 have "…and forbids the drain-ack that would take the operator's pane" \
      'Do not `drain-ack`' "$HOLD_PROSE"
 have "…and leaves a thread that already carries the sitting alone" \
      'nothing to do' "$HOLD_PROSE"
-have "…and sends a scrollback-less respawn back through prep and the re-stamp" \
-     're-open it at step 4' "$HOLD_PROSE"
+have "…and re-opens a scrollback-less respawn once its trace proves the hold" \
+     'Re-open it at step 4' "$HOLD_PROSE"
 
 # The nudge is read before step 1, so naming the script alone lands the session
 # outside the block where the hold verdict is read, and passes no group, which

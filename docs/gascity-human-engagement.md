@@ -694,19 +694,34 @@ thread. Without a third verdict the loop has nowhere left to go but the
 sitting it is holding.
 
 `assets/scripts/converse-claim.sh` has that third verdict, `action=hold`,
-keyed on the `existing_assignment` reason. A turn already `in_progress`
-under this session's identity is a sitting underway rather than an offer,
-so the loop leaves the sitting where it found it: nothing claimed,
-nothing released, nothing closed. Adoption still writes. The same hook
-result re-stamps the session identity on the visit, which is how a respawn
-becomes the recorded holder of a hold it inherited, and it pre-assigns open
-same-group siblings when the visit carries `gc.root_bead_id`. Those
-siblings are later turns of the same conversation, so the hold names them
-on its output line and keeps them rather than putting them back. Which of
-two shapes it is, a thread still carrying its own framing or a fresh
-session respawned onto a hold whose scrollback a restart took, is a
-question about this session's scrollback that no script can read, so the
-claimer states the fact and the prompt makes the choice.
+keyed on the `existing_assignment` reason. That reason is not itself proof
+of a held sitting. `gc hook --claim` returns it for any bead already
+`in_progress` under this session's identity, which covers both a sitting
+underway and a claim that died before its premise was ever re-checked. So
+the loop states the fact and leaves the sitting where it found it, with
+nothing claimed, released, or closed, and the prompt decides which case this
+is. Adoption still writes. The same hook result re-stamps the session
+identity on the visit, which is how a respawn becomes the recorded holder of
+a hold it inherited, and it pre-assigns open same-group siblings when the
+visit carries `gc.root_bead_id`. Those siblings are later turns of the same
+conversation, so the hold names them on its output line and keeps them rather
+than putting them back.
+
+The prompt's arm makes that choice from a trace on the visit's own bead:
+`gc.hold_demand`, the id of the demand a sitting files on its way into a hold,
+stamped on the visit before it waits. It lives on the visit, not the shared
+item, so a sibling holding the same item cannot forge it. Present, the hold is
+real and the arm re-opens it and skips the premise re-check. Absent, the arm
+does not close on the missing key. A visit whose bead will not read is held,
+not closed, because absence of a trace on an unreadable bead is not evidence
+of a dead premise. An item that still carries an open demand re-checks the
+premise and closes only a moot one, which re-opens and re-stamps a live legacy
+hold rather than abandoning it. A clean read with no key and no such demand is
+a claim that never began, and re-checks the premise at step 2 where it can
+close. Which of two shapes a readable visit is, a thread still carrying its
+own framing or a fresh session respawned onto a hold whose scrollback a restart
+took, is a question about this session's scrollback that no script can read, so
+the claimer states the fact and the prompt makes the choice.
 
 *The one shape that verdict gets wrong, and the fourth that covers it:* a
 sitting does not end in a single write. The prompt posts the sign-off, then
@@ -733,8 +748,9 @@ that finishes the close is a different thread in any case.
 
 Two constraints follow for anyone tuning this. With the idle clock off no
 clock ends a held sitting, so the wake path is the only pack-owned way one
-ends without a ruling and `action=hold` is the whole of that guard;
-re-arming `idle_timeout` adds a clock, not a substitute for it. And a
+ends without a ruling, and `action=hold` with the visit-trace check the
+prompt gates it on is the whole of that guard; re-arming `idle_timeout` adds
+a clock, not a substitute for it. And a
 wake nudge that names the claimer directly rather than sending the
 session through the prompt's claim block passes no continuation group,
 which silently disables the out-of-group guard above on every wake.
