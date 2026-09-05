@@ -4,11 +4,8 @@
 # branch (flip only — never open a twin); a CLOSED-unmerged-only PR is a
 # headstone — open a fresh PR noting the superseded one (unless the dead head
 # IS the live head: that close was a decision about this exact commit).
-# Otherwise: holds gate the create path; refuse a bead-local planning artifact
-# aimed at the default branch with no convoy above it (the shared-input-artifact
-# anti-pattern), naming the integration-branch remedy and escalating it once;
-# require every marker-bearing gate the anchor's check_set declares to read
-# green;
+# Otherwise: holds gate the create path; require every marker-bearing gate the
+# anchor's check_set declares to read green;
 # `gh pr create` non-draft pinned to origin, body summarizing the polecat's
 # `pr_summary` with the dispatch text demoted (the description only when no
 # summary was carried), read back BY NUMBER, refuse a moved head, replay the
@@ -55,94 +52,13 @@ pr_url_canon() {
   printf '%s\n' "${1:-}" \
     | grep -Eo '[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]+/pull/[0-9]+' | tail -1
 }
-# Same truthiness rule at both call sites, named for what each one asks: a set
-# marker HOLDS when the operator set it, and CONSENTS when it waives a guard.
+# is_held asks whether an operator hold marker (merge_hold, rebase_hold) is set
+# to a truthy value; is_set is the truthiness rule it reads by. Empty and the
+# standard false spellings do not hold.
 is_set() {
   case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac
 }
 is_held() { is_set "${1:-}"; }
-
-# The branch a bead lands on when nothing else names one. Derived per rig from
-# origin/HEAD, the way refinery-reconcile.sh derives its graduation target, so
-# a rig whose default branch is not `main` is not judged against `main`.
-DEFAULT_BRANCH="${PR_OPEN_DEFAULT_BRANCH:-}"
-if [ -z "$DEFAULT_BRANCH" ]; then
-  DEFAULT_BRANCH=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
-  DEFAULT_BRANCH="${DEFAULT_BRANCH#origin/}"
-fi
-[ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="main"
-
-# The path prefixes that hold bead-local planning content. docs/file-structure.md
-# splits documentation in two: `docs/` is the central tier, authoritative about
-# now and refreshed in place, which is what legitimately lands on the default
-# branch on its own; `specs/<bead-id>/` is the local tier, the record of one
-# bead's work. Only the local tier is listed. A rig that files its local tier
-# elsewhere sets the env, and an empty value disables the guard.
-PLANNING_PATHS="${PR_OPEN_PLANNING_PATHS-specs/}"
-planning_prefixes() {
-  printf '%s' "$PLANNING_PATHS" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d'
-  return 0
-}
-
-# Is this branch's whole diff bead-local planning content? 0 = yes, 1 = no,
-# 2 = unanswered — the compare did not read, or it is longer than the endpoint
-# will list, and a verdict from a partial file list is not a verdict.
-diff_is_planning_only() { # <base> <head>
-  local raw n prefixes p pre hit
-  prefixes=$(planning_prefixes)
-  [ -n "$prefixes" ] || return 1
-  raw=$(gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/compare/$1...$2" 2>/dev/null) || return 2
-  raw=$(printf '%s' "$raw" | scrub)
-  printf '%s' "$raw" | jq -e 'type == "object" and has("files")' >/dev/null 2>&1 || return 2
-  n=$(printf '%s' "$raw" | jq -r '.files | length' 2>/dev/null)
-  case "${n:-}" in ''|*[!0-9]*) return 2 ;; esac
-  [ "$n" -gt 0 ] || return 1
-  # The compare endpoint lists at most 300 files. At the cap the rest are
-  # unseen, and a 300-file diff is not the shape this guards anyway.
-  [ "$n" -lt 300 ] || return 2
-  while IFS= read -r p; do
-    [ -n "${p:-}" ] || continue
-    hit=0
-    while IFS= read -r pre; do
-      [ -n "${pre:-}" ] || continue
-      case "$p" in "$pre"*) hit=1; break ;; esac
-    done <<< "$prefixes"
-    [ "$hit" = 1 ] || return 1
-  done <<< "$(printf '%s' "$raw" | jq -r '.files[]? | .filename // empty' 2>/dev/null)"
-  return 0
-}
-
-# The nearest convoy above a bead, on stdout, empty when there is none.
-# 1 = a read failed and the walk cannot answer. Mirrors the parent-chain walk
-# gc sling resolves metadata.target through (gascity
-# internal/sling/sling.go:913, BeadMetadataTarget, which stops at `b.Type ==
-# "convoy"`): parent-child rows sit on the CHILD naming the parent, so the
-# chain is followed one dependency read at a time. The synthetic one-child
-# input convoy every sling creates is joined by `tracks`, not parent-child, so
-# it is invisible here — which is right, it carries no integration branch.
-convoy_above() { # <bead-id>
-  local cur="$1" depth=0 rows found next
-  while [ "$depth" -lt 8 ]; do
-    rows=$(gc bd dep list "$cur" --direction=down --type=parent-child --json 2>/dev/null) || return 1
-    rows=$(printf '%s' "$rows" | scrub)
-    printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-    found=$(printf '%s' "$rows" | jq -r '[ .[]? | select((((.issue_type // "") | tostring)) == "convoy") | .id ] | .[0] // empty' 2>/dev/null)
-    if [ -n "$found" ]; then printf '%s' "$found"; return 0; fi
-    next=$(printf '%s' "$rows" | jq -r '[ .[]? | .id // empty ] | .[0] // empty' 2>/dev/null)
-    [ -n "$next" ] || return 0
-    cur="$next"; depth=$((depth + 1))
-  done
-  return 0
-}
-
-# Best-effort and deduped by situation: escalate.sh keeps exactly one open
-# visit per key, so a refusal that stands for days reaches a person once
-# rather than once per pass.
-ESCALATE="$SCRIPTS_DIR/escalate.sh"
-escalate() { # <subject> <key> <message>
-  [ -x "$ESCALATE" ] || return 0
-  "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
-}
 
 # The marker-bearing gates a check_set declares, one per line. Same drop list
 # merge.sh's hold_gate applies, so publishing and merging judge one anchor by
@@ -293,55 +209,6 @@ while IFS= read -r row; do
   if is_held "$hold" || is_held "$rhold"; then
     echo "$PROG: $id branch '$branch' held (merge_hold='$hold' rebase_hold='$rhold'); no PR opened"
     held=$((held + 1)); continue
-  fi
-
-  # The shared-input-artifact guard. A decisions doc, a carve doc, a spec that
-  # several polecats need before any of them can produce mergeable work is not
-  # bead-local content the default branch should carry on its own: the operator
-  # is handed a document with nothing to review it against, and the children
-  # meant to consume it have no branch to consume it from. The dispatch
-  # doctrine names it the anti-pattern (agents/mechanik/prompt.template.md,
-  # "Dispatch doctrine: an owned convoy is the PR unit").
-  #
-  # Every condition below has to hold, and each one spares a population that
-  # must keep publishing: a doc riding with code is an ordinary PR, a `docs/`
-  # refresh is the central tier doing its job, an anchor whose target is not
-  # the default branch is already landing somewhere else, and a graduation
-  # anchor — the convoy bead itself, carrying `integration/<id>` into the
-  # default branch — is this doctrine's own end state. The convoy-ancestor
-  # condition is the doctrine's shape rather than a proof of one: a convoy
-  # that names no target hands its children no integration branch and still
-  # exempts them here. Judged at the create path, so an adoption or an
-  # operator hold never reaches it.
-  if [ "$target" = "$DEFAULT_BRANCH" ] \
-     && ! is_set "$(printf '%s' "$row" | jq -r '.metadata.planning_artifact_ok // empty')" \
-     && ! is_set "$(printf '%s' "$row" | jq -r '.metadata.graduation // empty')" \
-     && [ "$(printf '%s' "$row" | jq -r '(.issue_type // "") | tostring')" != "convoy" ]; then
-    CONVOY_ABOVE=$(convoy_above "$id"); walk_rc=$?
-    if [ "$walk_rc" -ne 0 ]; then
-      echo "$PROG: $id branch '$branch' — convoy-ancestor walk unreadable; the planning-artifact guard did not evaluate and the create proceeds" >&2
-    elif [ -z "$CONVOY_ABOVE" ]; then
-      diff_is_planning_only "$target" "$branch"; diff_rc=$?
-      if [ "$diff_rc" -eq 2 ]; then
-        echo "$PROG: $id branch '$branch' — compare against '$target' unreadable or over the file cap; the planning-artifact guard did not evaluate and the create proceeds" >&2
-      elif [ "$diff_rc" -eq 0 ]; then
-        echo "$PROG: $id branch '$branch' is a planning artifact aimed at '$DEFAULT_BRANCH': every changed path is under '$PLANNING_PATHS' and no convoy stands above the anchor; no PR opened"
-        echo "$PROG:   remedy — seed the artifact on an owned convoy's integration branch and land the children onto that branch:"
-        echo "$PROG:     CONVOY=\$(gc convoy create '<initiative>' --owned --target integration/<convoy-id> --json | jq -r .convoy_id)"
-        echo "$PROG:     push integration/<convoy-id> carrying the artifact, then: gc bd dep add $id \"\$CONVOY\" --type=parent-child"
-        echo "$PROG:     gc bd update $id --set-metadata target=integration/<convoy-id>"
-        echo "$PROG:   land it on '$DEFAULT_BRANCH' deliberately instead: gc bd update $id --set-metadata planning_artifact_ok=true"
-        escalate "$id" "planning-artifact-to-default-branch" \
-          "$id is ready to open a PR onto $DEFAULT_BRANCH whose whole diff is bead-local planning content under $PLANNING_PATHS, with no convoy above it. No PR was opened, and the anchor stays at pre_open_gate until one of the two moves below is made.
-Remedy: seed the artifact on an owned convoy's integration branch and land the children onto that branch —
-  CONVOY=\$(gc convoy create '<initiative>' --owned --target integration/<convoy-id> --json | jq -r .convoy_id)
-  gc bd dep add $id \"\$CONVOY\" --type=parent-child
-  gc bd update $id --set-metadata target=integration/<convoy-id>
-Or land it on $DEFAULT_BRANCH deliberately: gc bd update $id --set-metadata planning_artifact_ok=true
-Branch: $branch"
-        held=$((held + 1)); continue
-      fi
-    fi
   fi
 
   # The gate: every gate the anchor's own check_set declares reads green. This

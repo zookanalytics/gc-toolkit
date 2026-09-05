@@ -127,12 +127,10 @@ complete but unrecorded convoy deliberately with `gc convoy land`.
 Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
 points one dispatch at any ref; explicit `--var` wins over the auto-compute.
 
-**Anti-pattern:** committing bead-local content directly to main. The
-refinery refuses it: `pr-open.sh` will not publish a diff confined to
-`specs/` onto the default branch when no convoy stands above the anchor, so a
-doc dispatch filed without a convoy stalls at `pre_open_gate` and files a
-visit. Set `planning_artifact_ok=true` on the anchor to land one there
-deliberately.
+**Anti-pattern:** dispatching a shared input artifact to land on main by
+itself, with no convoy above it. Catching this shape is a dispatch judgment
+here, not a downstream gate, so seed the artifact on the convoy's integration
+branch as above.
 
 
 ## Addressing: pools versus named agents
