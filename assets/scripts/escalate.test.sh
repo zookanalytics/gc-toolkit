@@ -481,6 +481,59 @@ out=$(STUB_UPD_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 1 "stamps that do not read back exit 1"
 has "$out" "repair:" "and print the repair command"
 
+echo "# the deacon's filed visits reach its incident ledger"
+# escalate.sh calls the ledger by sibling path, so the SUT runs from a private
+# copy with a RECORDING gc-deacon-ledger.sh beside it. Nothing here touches the
+# real ledger script; what is under test is which calls escalate.sh makes.
+LSUT="$TMP/sut"; mkdir -p "$LSUT"
+cp "$SUT" "$LSUT/escalate.sh"; chmod +x "$LSUT/escalate.sh"
+cat > "$LSUT/gc-deacon-ledger.sh" <<'LSTUB'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "${STUB_LEDGER_LOG:?}"
+[ -n "${STUB_LEDGER_FAIL:-}" ] && exit 1
+exit 0
+LSTUB
+chmod +x "$LSUT/gc-deacon-ledger.sh"
+export STUB_LEDGER_LOG="$TMP/ledger.log"
+ledger() { cat "$STUB_LEDGER_LOG" 2>/dev/null; }
+lreset() { reset "${1:-[]}"; : > "$STUB_LEDGER_LOG"; }
+
+lreset
+out=$(GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key dolt-backup-loomington \
+        --message "manifest is 30h old (>12h = 2x backup cadence)" 2>&1); rc=$?
+eq "$rc" 0 "filing still exits 0 with the ledger wired in"
+eq "$(ledger | grep -c .)" "1" "a filed visit appends exactly one ledger entry"
+has "$(ledger)" "append escalation" "recorded under the escalation category"
+has "$(ledger)" "dolt-backup-loomington: manifest is 30h old" "carrying the situation key and the headline"
+has "$(ledger)" "bead:vis-1" "and pointing at the visit it filed"
+
+lreset
+GC_AGENT=gc-toolkit/gc-toolkit.polecat "$LSUT/escalate.sh" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(ledger | grep -c .)" "0" "a polecat's escalation writes nothing to the deacon's ledger"
+lreset
+GC_AGENT="" "$LSUT/escalate.sh" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(ledger | grep -c .)" "0" "an unidentified caller writes nothing either"
+
+echo "## a repeat is not a second incident"
+lreset
+GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key k1 --message m >/dev/null 2>&1
+GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "the second call dedups as before"
+eq "$(ledger | grep -c .)" "1" "and appends nothing the second time"
+
+echo "## a ledger that fails never costs the visit"
+lreset
+out=$(STUB_LEDGER_FAIL=1 GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a failed ledger append does not change the exit"
+eq "$(visits)" "1" "the visit is filed"
+has "$out" "ledger entry was not written" "and the loss is reported"
+lreset
+rm -f "$LSUT/gc-deacon-ledger.sh"
+out=$(GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a missing ledger script does not change the exit either"
+has "$out" "absent from the ledger" "and says the visit went unrecorded"
+
 echo "# usage"
 out=$("$SUT" --subject tk-a --key k1 2>&1); rc=$?
 eq "$rc" 2 "missing --message is a usage error"

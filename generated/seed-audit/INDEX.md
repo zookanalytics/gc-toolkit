@@ -35,7 +35,7 @@ covers that dimension.
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
 | [`converse`](agents/converse.md) | 45,658 | 11,414 |
-| [`deacon`](agents/deacon.md) | 8,285 | 2,071 |
+| [`deacon`](agents/deacon.md) | 10,001 | 2,500 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
@@ -56,7 +56,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,512 | 628 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,921 | 730 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
