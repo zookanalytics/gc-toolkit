@@ -60,8 +60,8 @@ done
 # merge.sh uses for its seed-audit merge gate.
 GATE_REF="refs/gc-toolkit/pre-open-rebase"
 
-# The target an anchor that records none lands on. Same resolution pr-open.sh
-# uses, so both arms agree on what "the default branch" means for one anchor.
+# The target an anchor that records none lands on, derived per rig from
+# origin/HEAD so a rig whose default branch is not `main` gets its own.
 DEFAULT_BRANCH="${PR_OPEN_DEFAULT_BRANCH:-}"
 if [ -z "$DEFAULT_BRANCH" ]; then
   DEFAULT_BRANCH=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
