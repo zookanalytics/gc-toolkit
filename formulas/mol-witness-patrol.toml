@@ -142,7 +142,12 @@ orphan recovery must skip on kind alone: a visit whose session died SHOULD
 return to the pool (cold continuity is respawn-and-reconstitute). Two
 exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
-  configured named sessions) — the controller owns their lifecycle.
+  configured named sessions) — the controller owns their lifecycle. Recognise
+  one by the bead's live `.assignee`, not the derived `.owner`: `.owner` ranks
+  gc.session_id ahead of the assignee, and the polecat→refinery handoff clears
+  neither session pin, so a bead a live refinery holds while it still carries the
+  dead polecat's session_id resolves to that dead owner and reads as an absent
+  orphan.
 - **Dispatcher-routed control beads** (`gc.routed_to=control-dispatcher`,
   `gc.kind=workflow-finalize`/`ralph`) — infrastructure, not orphans; the
   serve loop picks them up.

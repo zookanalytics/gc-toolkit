@@ -32,7 +32,10 @@
 #     alone and a step whose owner is not its assignee still releases;
 #   * a HALF-LANDED write (the store drops one key while reporting success),
 #     which must exit 3 and name the field, not report a clean release;
-#   * the source arm still delegating to the two commands it was built for;
+#   * the source arm delegating to the two commands it was built for, then
+#     clearing the session pins reopen-source leaves (gc.session_id and
+#     gc.session_name) so orphan recovery stops re-detecting the pooled bead,
+#     with verify reporting partial when a pin reports cleared and rolls back;
 #   * preview being the default: no --apply writes nothing at all;
 #   * usage errors and an unreadable bead, which must write nothing.
 #
@@ -63,7 +66,9 @@ chmod +x "$TMP/bin/bd"
 # claimed by a pool session directly looks like; the other live step shape,
 # assigned to the pool ADDRESS while gc.session_id names the dead session, has
 # its own fixture under "the owner is not the assignee guard". The root carries
-# no assignee and names only gc.session_name.
+# no assignee and names only gc.session_name. The source work bead carries both
+# gc.session_id and gc.session_name from its pool claim — the shape whose pins
+# the source arm must scrub, or orphan recovery re-derives the dead owner.
 fixture() {
   store '[
     {"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"Implement the solution",
@@ -81,7 +86,7 @@ fixture() {
                  "gc.continuation_group":"cg-visit","gc.session_id":"lx-dead"}},
     {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "workflow_id":"tk-root","gc.session_id":"lx-dead"}}
+                 "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}
   ]'
   : > "$STUB_GC_LOG"
 }
@@ -131,6 +136,7 @@ has "$OUT" "result=disposed" "step release reports disposed"
 eq "$(bstatus tk-step)" "open" "step is open"
 eq "$(bassignee tk-step)" "" "step is unassigned"
 eq "$(meta tk-step gc.session_id)" "<absent>" "dead session id cleared"
+eq "$(meta tk-step gc.session_name)" "<absent>" "dead session name cleared"
 eq "$(meta tk-step gc.session_affinity)" "<absent>" "session affinity cleared"
 eq "$(meta tk-step gc.continuation_group)" "<absent>" "continuation group cleared"
 eq "$(meta tk-step gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "route PRESERVED"
@@ -209,6 +215,23 @@ has "$(cat "$STUB_GC_LOG")" "workflow delete-source tk-work --apply" "delete-sou
 has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-work" "reopen-source invoked"
 eq "$(bstatus tk-work)" "open" "source bead returned to the pool"
 eq "$(meta tk-work gc.routed_to)" "gc-toolkit/gc-toolkit.polecat" "source route preserved by reopen-source"
+has "$OUT" "result=disposed" "source disposal reports disposed"
+has "$OUT" "pins" "source arm reports the pin clear in landed"
+eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead session id (reopen leaves it)"
+eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
+
+echo "--- source arm: a pin that will not clear is not a clean release ---"
+# clear_pins bypasses the claim guard, but a store that reports success and drops
+# the key is the rollback verify exists to catch. With the dead session id
+# surviving, orphan recovery would re-detect this bead — so it must read partial,
+# not disposed, and name the pin.
+fixture
+export STUB_DROP_KEYS="tk-work:gc.session_id"
+OUT=$("$SCRIPT" tk-work --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "3" "a source disposal whose pin survives exits 3"
+has "$OUT" "result=partial" "it reports partial, not disposed"
+has "$OUT" "gc.session_id(still=lx-dead)" "the surviving pin is named"
+export STUB_DROP_KEYS=""
 
 echo "--- source arm: reopen does not run when the close failed ---"
 fixture

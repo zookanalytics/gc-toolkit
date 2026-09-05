@@ -16,8 +16,9 @@
 #                  its dependency edges, so the molecule resumes at the same
 #                  step under whichever pool member claims it next.
 #   source         delegate to `gc workflow delete-source --apply` plus
-#                  `gc workflow reopen-source`, which is the contract those
-#                  commands were built for.
+#                  `gc workflow reopen-source`, the contract those commands were
+#                  built for, then clear the session pins so the pooled bead
+#                  stops naming a dead owner.
 #
 # `delete-source` matches workflow roots on gc.source_bead_id. A root poured
 # from an input convoy never carries that key, so it reports already_clean for
@@ -134,13 +135,17 @@ LANDED=""
 note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 note_landed() { LANDED="${LANDED:+$LANDED,}$1"; }
 
-# clear_pins removes the routing pins that name a session. Metadata writes do
-# not go through the claim guard, so this half always lands.
+# clear_pins removes every pin that names a session. Orphan recovery resolves a
+# bead's owner as the first non-empty of gc.session_id, the assignee, then
+# gc.session_name, so one pin left behind keeps resolving the dead session as
+# the owner once the bead is unassigned — and re-detects it every cycle. Metadata
+# writes do not go through the claim guard, so this half always lands.
 clear_pins() {
     if gc bd update "$BEAD" \
         --unset-metadata gc.session_id \
         --unset-metadata gc.session_affinity \
-        --unset-metadata gc.continuation_group >/dev/null 2>&1; then
+        --unset-metadata gc.continuation_group \
+        --unset-metadata gc.session_name >/dev/null 2>&1; then
         note_landed pins
     else
         note_failed pins
@@ -189,13 +194,21 @@ verify() {
         note_failed reread
         return
     }
-    local st asg sid
+    local st asg sid sname
     st="$(printf  '%s' "$after" | jq -r '.[0].status // ""')"
     asg="$(printf '%s' "$after" | jq -r '.[0].assignee // ""')"
     sid="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_id"] // ""')"
+    sname="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_name"] // ""')"
     [ "$st"  = "open" ] || note_failed "status(still=$st)"
     [ -z "$asg" ]       || note_failed "assignee(still=$asg)"
-    [ "$CLASS" = "workflow-step" ] && [ -n "$sid" ] && note_failed "gc.session_id(still=$sid)"
+    # The arms that clear session pins — workflow-step and source — must land it:
+    # a surviving pin is exactly what makes orphan recovery re-detect the bead.
+    case "$CLASS" in
+        workflow-step|source)
+            [ -n "$sid" ]   && note_failed "gc.session_id(still=$sid)"
+            [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
+            ;;
+    esac
     return 0
 }
 
@@ -240,6 +253,13 @@ case "$CLASS" in
                 *)
                     if gc workflow reopen-source "$BEAD" >/dev/null 2>&1; then
                         note_landed reopen-source
+                        # reopen-source returns the bead to the pool but leaves the
+                        # session pins its dead claim stamped, so without this the
+                        # bead keeps naming that dead session as its owner and
+                        # orphan recovery re-detects it every cycle. verify catches a
+                        # pin that reports cleared and rolled back.
+                        clear_pins
+                        verify
                     else
                         note_failed reopen-source
                     fi
