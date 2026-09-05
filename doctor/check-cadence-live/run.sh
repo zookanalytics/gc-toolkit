@@ -185,19 +185,37 @@ if [ -z "$gctk_bin" ]; then
     gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
     [ -n "$gctk_city" ] && gctk_bin="$gctk_city/.gc/services/gctk/bin/gctk"
 fi
-tree_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+# The identity is the services/gctk SUBTREE at HEAD, the same value the build
+# order records and stamps: a merge that touches nothing under it neither
+# rebuilds the binary nor changes what this arm expects, so unrelated commits
+# never light this warning. A hand build carries the toolchain's commit stamp
+# instead, and the subtree that commit holds is the comparable identity.
+gctk_mod="$dir/services/gctk"
+tree_rev=$(git -C "$gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)
 if [ -z "$gctk_bin" ] || [ ! -x "$gctk_bin" ]; then
     notes+=("gctk: no binary deployed — the cadence is running the shell fallbacks, which is the supported state until the last port lands")
 elif [ -z "$tree_rev" ]; then
-    warnings+=("gctk: cannot read this checkout's revision (\`git -C $dir rev-parse HEAD\`) — the deployed binary cannot be compared against it")
+    warnings+=("gctk: cannot read this checkout's services/gctk revision (\`git -C $gctk_mod rev-parse HEAD:./\`) — the deployed binary cannot be compared against it")
 else
-    gctk_rev=$(run_bounded "$gctk_bin" version 2>/dev/null | head -1)
-    case "$gctk_rev" in
-        "")        warnings+=("gctk: \`$gctk_bin version\` answered nothing — the deployed binary cannot be identified") ;;
-        unknown)   warnings+=("gctk: the deployed binary carries no VCS stamp (built with -buildvcs=false, or outside a checkout) — it cannot be compared against the tree") ;;
-        "$tree_rev"|"$tree_rev-dirty") notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12})") ;;
-        *)         warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout is at $tree_rev — a gctk-build tick has not caught up, or its last build FAILED and the previous binary is still serving. The board's PACK row says which.") ;;
-    esac
+    gctk_rev=$(run_bounded "$gctk_bin" version 2>/dev/null | head -1); gctk_rc=${PIPESTATUS[0]}
+    if [ -z "$gctk_rev" ] && [ "$gctk_rc" -eq 124 ]; then
+        # Refused for time, or timed out: the binary was not asked, or did not
+        # answer inside the slice — neither is a fact about the binary.
+        warnings+=("gctk: \`$gctk_bin version\` gave no answer inside the probe's slice of the doctor budget — the deployed binary was NOT identified")
+    else
+        case "$gctk_rev" in
+            "")        warnings+=("gctk: \`$gctk_bin version\` answered nothing — the deployed binary cannot be identified") ;;
+            unknown)   warnings+=("gctk: the deployed binary carries no revision stamp (built with -buildvcs=false outside the build order) — it cannot be compared against the tree") ;;
+            "$tree_rev") notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12})") ;;
+            *)
+                mapped=$(git -C "$gctk_mod" rev-parse "${gctk_rev%-dirty}:./" 2>/dev/null || true)
+                if [ "$mapped" = "$tree_rev" ]; then
+                    notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12}, hand-built at commit ${gctk_rev:0:12})")
+                else
+                    warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout's services/gctk is at $tree_rev — a gctk-build tick has not caught up, or its last build FAILED and the previous binary is still serving. The board's PACK row says which.")
+                fi ;;
+        esac
+    fi
 fi
 
 if budget_spent; then

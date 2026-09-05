@@ -704,6 +704,18 @@ out="$("$SUT" reopen r-3 2>&1)"; rc=$?
 eq "$rc" 1 "reopen refuses an open bead"
 has "$out" "nothing to repair" "and says there is nothing to repair"
 
+# A value-taking flag as the LAST token is a truncated command: refuse it. The
+# empty value it would otherwise take drops --expect's compare-and-swap guard,
+# and a parser that shifts past the end never terminates at all.
+store '[{"id":"v-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+for FLAG in --to --expect --set --set-dated --unset --assignee --route --takeaway --append-notes; do
+  out="$(timeout 10 "$SUT" transition v-1 --to pull_request "$FLAG" 2>&1)"; rc=$?
+  eq "$rc" 1 "$FLAG with no value is refused (exit 1, not a hang)"
+  has "$out" "flag $FLAG needs a value" "and names the flag"
+done
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "a refused truncated command writes nothing"
+
 store '[{"id":"r-4","status":"closed","assignee":"","notes":"","metadata":{}}]'
 out="$("$SUT" reopen r-4 2>&1)"; rc=$?
 eq "$rc" 1 "reopen refuses a closed unanchored bead (a legal closed shape)"

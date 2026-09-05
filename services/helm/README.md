@@ -848,8 +848,8 @@ atomic rename:
 |---|---|
 | `component` | which binary this record describes |
 | `built_at` | when the binary now on disk was produced |
-| `source_rev` | the revision the last build tick saw in the sources |
-| `binary_rev` | the revision the binary now on disk was built from |
+| `source_rev` | the revision the last build tick saw in the sources — the tree hash of the component's own subtree at HEAD (`git rev-parse HEAD:./` from the module), so a merge touching nothing under it does not move it |
+| `binary_rev` | the revision the binary now on disk was built from, in the same terms |
 | `last_build_rc` | exit status of the last build ATTEMPT; 0 for success |
 | `restart_pending` | a published binary nothing is running yet |
 | `checked_at` | when the build order last ran at all |

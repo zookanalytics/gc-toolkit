@@ -12,7 +12,9 @@
 #                                 published binary not yet serving
 # Staleness has three axes: sources newer than the artifact (find -newer), a
 # recorded binary_rev other than the revision this run sees (find -newer is
-# blind to an input a commit deleted), and whether the binary can READ the
+# blind to an input a commit deleted; the revision is the services/helm
+# SUBTREE's tree hash, so a merge that touches nothing under it does not
+# rebuild and restart the service), and whether the binary can READ the
 # stores it serves. The last is fixed by the beads library it embedded, while
 # the store schema moves under it on a `bd` upgrade; `helm-svc probe` asks it,
 # and ok is not reported without it.
@@ -131,7 +133,10 @@ RESTART_PENDING="$STATE_ROOT/restart-pending"
 # the build order itself is still running, and it is the only field a quiet tick
 # moves.
 STATUS="$STATE_ROOT/build-status.json"
-SOURCE_REV="$(git -C "$MOD" rev-parse HEAD 2>/dev/null || true)"
+# HEAD:./ is the tree hash of $MOD at HEAD — the identity of this module's
+# committed inputs, deletions included. The repo HEAD would move on every
+# merge to main and cost a rebuild plus a service restart for each.
+SOURCE_REV="$(git -C "$MOD" rev-parse 'HEAD:./' 2>/dev/null || true)"
 
 # A field of the previous record, or empty. A build that failed keeps the last
 # good binary serving, so its built_at and binary_rev must survive the failure
@@ -287,6 +292,12 @@ if [ "$need_build" -eq 0 ]; then
     # no earlier record names it.
     CURRENT_BUILT_AT="$(prev_field built_at)"
     [ -n "$CURRENT_BUILT_AT" ] || CURRENT_BUILT_AT="$(date -u -r "$BIN" +%FT%TZ 2>/dev/null || true)"
+    # A tick that could not read the revision has learned nothing about the
+    # binary: keep naming the revision it was built from, or the next tick
+    # that can read sees an empty binary_rev and rebuilds — and restarts —
+    # a current binary.
+    CURRENT_REV="$SOURCE_REV"
+    [ -n "$CURRENT_REV" ] || CURRENT_REV="$(prev_field binary_rev)"
 
     # Current in revision terms proves nothing about the store. Ask the binary
     # BEFORE any restart: nothing may be put into service on a binary this run
@@ -301,7 +312,7 @@ if [ "$need_build" -eq 0 ]; then
         if [ "$DEPLOY" -eq 1 ] && [ -e "$RESTART_PENDING" ]; then
             echo "gc-helm-build: $BIN is up to date but not yet serving; retrying the restart"
             if ! restart_service; then
-                write_record 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
+                write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
                 exit 1
             fi
         fi
@@ -313,7 +324,7 @@ if [ "$need_build" -eq 0 ]; then
             echo "gc-helm-build: $BIN is up to date (no city resolved; readability unprobed)"
             write_status unprobed
         fi
-        write_record 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
+        write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
         exit 0
     fi
 
@@ -324,7 +335,7 @@ if [ "$need_build" -eq 0 ]; then
     if [ "$(cat "$PROBE_LATCH" 2>/dev/null || true)" = "$EMBEDDED" ]; then
         echo "gc-helm-build: $BIN CANNOT READ the city's bead stores, and a rebuild would embed the same $BEADS_MODULE $EMBEDDED; bump it in $MOD/go.mod. Detail: $PROBE_DETAIL" >&2
         write_status unreadable "$PROBE_DETAIL"
-        write_record 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
+        write_record 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
         exit 1
     fi
     echo "gc-helm-build: $BIN cannot read the city's bead stores; rebuilding. Detail: $PROBE_DETAIL"

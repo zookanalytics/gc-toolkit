@@ -294,16 +294,18 @@ CACHED
 
 touch_source() { touch "$ROOT/services/helm/cmd/helm-svc/main.go"; }
 
-# A throwaway repo so the builder's `git rev-parse HEAD` has an answer. The
-# revisions are the whole point of the record, and a fixture with no repo would
-# let every revision assertion pass vacuously against the empty string. Local
-# and never pushed, so the identity here is scaffolding, not provenance.
+# A throwaway repo so the builder's revision read has an answer. The revisions
+# are the whole point of the record, and a fixture with no repo would let every
+# revision assertion pass vacuously against the empty string. Local and never
+# pushed, so the identity here is scaffolding, not provenance. What comes back
+# is the services/helm SUBTREE's tree hash — the identity the builder records,
+# which moves only when something under the module changes.
 commit_fixture() { # <dir> -> the new revision on stdout
     git -C "$1" init -q >/dev/null 2>&1 || return 1
     git -C "$1" add -A >/dev/null 2>&1 || return 1
     git -C "$1" -c user.email=fixture@example.invalid -c user.name=fixture \
         -c commit.gpgsign=false commit -q -m "fixture" >/dev/null 2>&1 || return 1
-    git -C "$1" rev-parse HEAD 2>/dev/null
+    git -C "$1/services/helm" rev-parse 'HEAD:./' 2>/dev/null
 }
 
 # `has`, not `//`: jq's alternative operator treats FALSE as absent, so a

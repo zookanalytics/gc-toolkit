@@ -95,9 +95,17 @@ type Client struct{ bin string }
 // New returns a Client bound to the `gc` on PATH.
 func New() *Client { return &Client{bin: "gc"} }
 
-// Show reads one bead. A bead that cannot be read — `gc` failed, the payload
-// did not decode, or the id resolved to nothing — returns nil, and every caller
-// treats that as "refuse to act blind" rather than as an empty bead.
+// Show reads one bead. A bead that cannot be read — `gc` could not run, the
+// payload did not decode, or the id resolved to nothing — returns nil, and
+// every caller treats that as "refuse to act blind" rather than as an empty
+// bead.
+//
+// The exit status is NOT consulted: the shell it replaces reads
+// `gc bd show ... 2>/dev/null | scrub | jq -c '.[0] // empty'` with no
+// pipefail, so a payload printed beside a non-zero exit is a bead there, and a
+// caller cannot tell which implementation answered. Reporting a landed
+// transition as UNVERIFIED (exit 2) because the read-back's `gc` also warned
+// is the divergence this avoids.
 //
 // `bd show --json` answers with an ARRAY when any id resolves and an OBJECT
 // when none does, at rc=0 either way, so a non-array payload is a miss and not
@@ -106,7 +114,10 @@ func (c *Client) Show(id string) *Bead {
 	cmd := exec.Command(c.bin, "bd", "show", id, "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return nil
+		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
 	dec.UseNumber()

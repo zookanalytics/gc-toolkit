@@ -58,14 +58,25 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 }
 
-// version reports the VCS revision the toolchain stamped into the binary. It is
-// what doctor/check-cadence-live compares against the working tree: a cadence
-// running a binary built from another commit is the failure mode the build
-// order's ~5m lag makes possible, and the operator has no other way to see it.
+// sourceRev is the identity gc-gctk-build.sh stamps at link time: the tree
+// hash of services/gctk at the commit it built from (`git rev-parse HEAD:./`),
+// the same value it records as binary_rev. -X main.sourceRev=<hash>.
+var sourceRev string
+
+// version reports the revision this binary was built from. It is what
+// lifecycle.sh and doctor/check-cadence-live compare against the checkout: a
+// cadence running a binary built from other sources is the failure mode the
+// build order's ~5m lag makes possible, and the operator has no other way to
+// see it. The build order's stamp wins because it names the module's own
+// sources; the toolchain's VCS stamp (a commit hash) is the fallback for a
+// build made by hand.
 //
-// A build with no stamp — `go build` outside a repository, or with -buildvcs=false
-// — reports "unknown" rather than inventing a revision.
+// A build with neither — `go build` outside a repository, or with
+// -buildvcs=false — reports "unknown" rather than inventing a revision.
 func version() string {
+	if sourceRev != "" {
+		return sourceRev
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "unknown"

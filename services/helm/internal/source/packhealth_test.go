@@ -147,3 +147,26 @@ func TestGatherOnARecordWrittenBeforeProbeStatusExisted(t *testing.T) {
 		t.Fatalf("got %+v, want one NORMAL row with no probe status", rows)
 	}
 }
+
+// A service may declare a state root one level deeper than .gc/services/<name>
+// (a pack that groups its services), and gc-helm-build.sh writes wherever
+// `gc service list` reports. The reader must see that depth too, or the
+// component silently vanishes from the board.
+func TestGatherReadsAStateRootNestedOneLevelDeeper(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, servicesDir, "toolkit", "helm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"component":"","built_at":"2026-08-26T11:00:00Z","source_rev":"aaaa","binary_rev":"aaaa","last_build_rc":0,"restart_pending":false,"checked_at":"2026-08-26T11:58:00Z"}`
+	if err := os.WriteFile(filepath.Join(dir, buildStatusFile), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows := GatherPackHealth(root, gatherNow)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].Component != "helm" {
+		t.Errorf("component = %q, want the state root's own name", rows[0].Component)
+	}
+}

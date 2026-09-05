@@ -48,12 +48,15 @@ against each implementation, and why the port needs no test suite of its own.
 Until a subcommand's binary is deployed, its script answers. `lifecycle.sh`
 resolves the binary explicitly — `$GCTK_BIN`, else the
 `.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`, `$GC_CITY` or
-`$GC_CITY_ROOT` — and `exec`s it when one is there. `GCTK_BIN=none` forces the
-shell implementation. That precedence is the one the rest of the pack reads,
-and `GC_CITY_PATH` leads it because that is the variable a supervisor puts in
-an agent session: a chain without it answers from the fallback in the shape
-most callers run in. `doctor/check-cadence-live` resolves the same way, for the
-same reason.
+`$GC_CITY_ROOT`, else the `city_path` that `gc service list --json` reports —
+and `exec`s it when one is there. `GCTK_BIN=none` forces the shell
+implementation. That precedence is the one the rest of the pack reads, and
+`GC_CITY_PATH` leads it because that is the variable a supervisor puts in an
+agent session. The listing is what the cadence itself needs: the order runner
+that execs `refinery-reconcile.sh` carries no city variable at all, so an
+env-only chain would leave every order-driven transition on the fallback while
+the board reported the binary current. `doctor/check-cadence-live` resolves by
+the same env chain, for the same reason.
 
 Resolution is never a walk up from the script's own path. The hermetic suites
 run from a tree that lives inside a live city, and a filesystem hunt would find
@@ -66,7 +69,12 @@ The scripts are deleted when the last port lands and the fallback drops.
 `orders/gctk-build.toml` runs `assets/scripts/gc-gctk-build.sh --deploy` on a
 5-minute cooldown: build if a source is newer than the binary or the last
 record shows the binary was built from another revision, publish by atomic
-rename, write a build-status record. It finds the city by the env chain above
+rename, write a build-status record. The revision is the services/gctk
+SUBTREE's tree hash at HEAD (`git rev-parse HEAD:./` from the module), not the
+repo commit: it moves exactly when a committed input of this module changes,
+so a docs-only merge republishes nothing, and the build stamps the same value
+into the binary (`gctk version`). A city with no Go toolchain is a no-op tick,
+not a failing order — the shell fallbacks are the supported state there. It finds the city by the env chain above
 and, failing that, by `gc service list --json`'s `city_path` — the order runner
 carries no city variables at all, so the listing is the only route a scheduled
 tick has. Both tests are needed — `find -newer`
@@ -80,9 +88,12 @@ restart: a published gctk is serving the moment it lands.
 instantly; a gctk change rides the build order. A broken build keeps the last
 good binary serving the cadence. That is slower iteration in exchange for no
 accidental live surgery on merge logic, and two things make the lag visible:
-`doctor/check-cadence-live` compares `gctk version` against the checkout, and
-the board's PACK rows carry the same comparison where the operator already
-looks.
+`doctor/check-cadence-live` compares `gctk version` against the checkout's
+services/gctk subtree, and the board's PACK rows carry the same comparison
+where the operator already looks. lifecycle.sh makes the same comparison
+before it execs a city-resolved binary, and a checkout whose services/gctk is
+at another revision — a rig ahead of the lag, a branch that changed the port —
+takes the shell fallback, which is the writer that matches its callers.
 
 ## The state table lives once
 

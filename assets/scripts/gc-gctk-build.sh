@@ -10,8 +10,12 @@
 #                                 is what the order records
 # Staleness has two axes: sources newer than the artifact (find -newer), and
 # a recorded binary_rev other than the revision this run sees. Both are needed
-# — find -newer is blind to an input a commit deleted.
-# Exit: 0 current (or built) · 1 build failed (the previous binary is left
+# — find -newer is blind to an input a commit deleted. The revision is the
+# services/gctk SUBTREE's tree hash, not the repo HEAD: it moves exactly when a
+# committed input of this module changes, so a docs-only merge does not
+# republish the binary under the cadence's feet.
+# Exit: 0 current (or built), or --deploy on a city without a Go toolchain (the
+# shell fallbacks keep serving) · 1 build failed (the previous binary is left
 # exactly as it was) · 2 usage.
 # Env: GC_SERVICE_STATE_ROOT / GC_CITY_PATH / GC_CITY / GC_CITY_ROOT (state
 # root), else `gc service list --json`'s city_path; GC_GO_BIN, GC_GCTK_GOTMP,
@@ -69,12 +73,26 @@ GO="${GC_GO_BIN:-}"
 if [ -z "$GO" ]; then
     if command -v go >/dev/null 2>&1; then GO="go"; else GO="/usr/local/go/bin/go"; fi
 fi
+# A city with no toolchain is the supported fallback state for the length of
+# the migration, not a failing build order: without this arm every 5-minute
+# tick would record last_build_rc=1 and the board would carry a HIGH row for a
+# component the shell fallbacks are serving perfectly well.
+if ! command -v "$GO" >/dev/null 2>&1; then
+    if [ "$DEPLOY" -eq 1 ]; then
+        echo "gc-gctk-build: no Go toolchain ($GO); nothing to build — the shell fallbacks keep serving"
+        exit 0
+    fi
+    echo "gc-gctk-build: no Go toolchain ($GO); set GC_GO_BIN" >&2
+    exit 1
+fi
 
 # The build-status record, in the same shape and the same place as every other
 # compiled component's, so services/helm reads them all with one rule. See the
 # marked block in gc-helm-build.sh for what each field carries.
 STATUS="$STATE_ROOT/build-status.json"
-SOURCE_REV="$(git -C "$MOD" rev-parse HEAD 2>/dev/null || true)"
+# HEAD:./ is the tree hash of $MOD at HEAD — the identity of this module's
+# committed inputs, deletions included, and nothing else's.
+SOURCE_REV="$(git -C "$MOD" rev-parse 'HEAD:./' 2>/dev/null || true)"
 
 prev_field() { # <key>
     [ -f "$STATUS" ] || return 0
@@ -131,11 +149,16 @@ fi
 if [ "$need_build" -eq 0 ]; then
     # No input is newer and the record already names this revision, so the
     # binary IS this revision. built_at comes off its mtime when no earlier
-    # record names it.
+    # record names it. A tick that could not read the revision (git absent, a
+    # held index.lock) has learned nothing about the binary, so the record
+    # keeps naming the revision it was built from rather than erasing it — an
+    # erased binary_rev would force a rebuild on the next tick that can read.
     CURRENT_BUILT_AT="$(prev_field built_at)"
     [ -n "$CURRENT_BUILT_AT" ] || CURRENT_BUILT_AT="$(date -u -r "$BIN" +%FT%TZ 2>/dev/null || true)"
+    CURRENT_REV="$SOURCE_REV"
+    [ -n "$CURRENT_REV" ] || CURRENT_REV="$(prev_field binary_rev)"
     echo "gc-gctk-build: $BIN is up to date"
-    write_status 0 "$SOURCE_REV" "$CURRENT_BUILT_AT"
+    write_status 0 "$CURRENT_REV" "$CURRENT_BUILT_AT"
     exit 0
 fi
 
@@ -178,11 +201,19 @@ trap 'exit 130' INT
 # Publish only via atomic rename from a scratch file beside $BIN: an in-place
 # -o could truncate the live binary into a half-written file that still passes
 # the callers' -x test.
+#
+# The binary carries the revision it was built from (`gctk version`), stamped
+# as the same subtree identity this record uses, so lifecycle.sh and
+# doctor/check-cadence-live compare one identity against the checkout rather
+# than a commit hash against a tree hash. A build with no revision to stamp
+# falls back to the toolchain's VCS stamp.
+LDFLAGS=""
+[ -z "$SOURCE_REV" ] || LDFLAGS="-X main.sourceRev=$SOURCE_REV"
 build_ok=0
 BIN_TMP=""
 echo "gc-gctk-build: building $MOD -> $BIN"
 if BIN_TMP="$(mktemp "$BIN_DIR/.gctk.build.XXXXXX" 2>/dev/null)"; then
-    if ( cd "$MOD" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" "$GO" build -o "$BIN_TMP" ./cmd/gctk ) && chmod +x "$BIN_TMP" && mv -f "$BIN_TMP" "$BIN"; then
+    if ( cd "$MOD" && TMPDIR="$GOTMP_RUN" GOTMPDIR="$GOTMP_RUN" "$GO" build -ldflags "$LDFLAGS" -o "$BIN_TMP" ./cmd/gctk ) && chmod +x "$BIN_TMP" && mv -f "$BIN_TMP" "$BIN"; then
         build_ok=1
         BIN_TMP=""      # renamed away; nothing left for cleanup to remove
     fi

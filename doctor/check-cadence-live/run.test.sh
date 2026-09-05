@@ -136,11 +136,17 @@ eq "$RC" "1" "an unreadable history warns (the liveness arm did not run)"
 # Orders can fire perfectly while the cadence runs logic several commits old,
 # because the data plane is a binary a build order publishes. Nothing in arms 1
 # and 2 can see that.
+# The identity is the services/gctk subtree, not the commit: the build order
+# records and stamps that, so a commit touching nothing under it is not a
+# mismatch.
+mkdir -p "$TMP/pack/services/gctk/cmd/gctk"
+echo 'package main' > "$TMP/pack/services/gctk/cmd/gctk/main.go"
 git -C "$TMP/pack" init -q >/dev/null 2>&1
 git -C "$TMP/pack" add -A >/dev/null 2>&1
 git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
     -c commit.gpgsign=false commit -q -m fixture >/dev/null 2>&1
-PACK_REV=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
+PACK_REV=$(git -C "$TMP/pack/services/gctk" rev-parse 'HEAD:./' 2>/dev/null)
+PACK_COMMIT=$(git -C "$TMP/pack" rev-parse HEAD 2>/dev/null)
 [ -n "$PACK_REV" ] && ok "the fixture pack has a revision for arm 3 to compare" \
                    || bad "no fixture revision; the gctk arm would pass vacuously"
 
@@ -152,6 +158,22 @@ gctk_stub "$PACK_REV"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
 eq "$RC" "0" "a binary built from this checkout is OK"
 has "$OUT" "matches this checkout" "and says so"
+
+# A hand build carries the toolchain's commit stamp; the subtree that commit
+# holds is what the checkout is compared against.
+gctk_stub "$PACK_COMMIT"
+OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
+eq "$RC" "0" "a binary stamped with the commit that holds this subtree is OK"
+has "$OUT" "matches this checkout" "and says so"
+
+# A commit that touches nothing under services/gctk moves HEAD, not the identity.
+echo '# unrelated' >> "$TMP/pack/orders/tick.toml"
+git -C "$TMP/pack" add -A >/dev/null 2>&1
+git -C "$TMP/pack" -c user.email=fixture@example.invalid -c user.name=fixture \
+    -c commit.gpgsign=false commit -q -m unrelated >/dev/null 2>&1
+gctk_stub "$PACK_REV"
+OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?
+eq "$RC" "0" "a commit outside services/gctk does not make the deployed binary stale"
 
 gctk_stub "0000000000000000000000000000000000000000"
 OUT=$(GCTK_BIN="$TMP/bin/gctk-stub" run_check); RC=$?

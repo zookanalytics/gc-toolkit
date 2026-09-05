@@ -2,6 +2,8 @@ package gcbd
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -105,5 +107,33 @@ func TestMetaOnNilBeadIsEmpty(t *testing.T) {
 	var b *Bead
 	if got := b.Meta("anything"); got != "" {
 		t.Errorf("Meta on a nil bead = %q, want empty", got)
+	}
+}
+
+// The shell fallback reads `gc bd show ... | scrub | jq '.[0] // empty'` with
+// no pipefail: a payload printed beside a non-zero exit is a bead there. Show
+// must agree, or a read-back whose `gc` also warned reports a landed
+// transition as UNVERIFIED (exit 2) from one implementation and as a
+// transition from the other.
+func TestShowReadsThePayloadWhateverGcExitsWith(t *testing.T) {
+	bin := t.TempDir()
+	stub := "#!/bin/sh\necho '[{\"id\":\"b-1\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\"}}]'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	b := New().Show("b-1")
+	if b == nil {
+		t.Fatal("Show = nil for a payload printed beside exit 1; the shell fallback would have read it")
+	}
+	if got := b.Meta("merge_result"); got != "pull_request" {
+		t.Errorf("merge_result = %q, want pull_request", got)
+	}
+	// A gc that cannot run at all is still unreadable.
+	if err := os.Chmod(filepath.Join(bin, "gc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if New().Show("b-1") != nil {
+		t.Error("Show != nil when gc could not be started")
 	}
 }

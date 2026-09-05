@@ -54,8 +54,22 @@ func GatherPackHealth(cityPath string, now time.Time) []board.PackBuild {
 	if cityPath == "" {
 		return nil
 	}
-	matches, err := filepath.Glob(filepath.Join(cityPath, servicesDir, "*", buildStatusFile))
-	if err != nil || len(matches) == 0 {
+	// A service's state root must sit under .gc/services/ but may be nested
+	// one level deeper (a pack that groups its services), and gc-helm-build.sh
+	// writes wherever `gc service list` reports; both depths are read so a
+	// grouped component does not vanish from the board.
+	var matches []string
+	for _, pattern := range []string{
+		filepath.Join(cityPath, servicesDir, "*", buildStatusFile),
+		filepath.Join(cityPath, servicesDir, "*", "*", buildStatusFile),
+	} {
+		m, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		matches = append(matches, m...)
+	}
+	if len(matches) == 0 {
 		return nil
 	}
 	sort.Strings(matches)
