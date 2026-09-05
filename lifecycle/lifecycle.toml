@@ -182,7 +182,11 @@ writer = "agents/converse, the ruling landed (via lifecycle.sh); or human"
 [gates]
 # check_set: comma list of gate names on the anchor. Default stamped by
 # gate-ensure.sh when absent/empty; sentinel "none" is an explicit opt-out.
-check_set_default = "codex"
+# The default pairs the standing correctness review with triage, which
+# classifies each change over the menu in docs/review-charter.md and widens
+# check_set to the dedicated gates it needs. Widening is monotonic and
+# signoff.sh is its only writer.
+check_set_default = "codex,triage"
 check_set_sentinel = "none"
 # check.<g> = <state>, one bare lane-state word never bound to a commit. green
 # written only by signoff.sh; cleared/re-armed only by the merge cadence. Merge

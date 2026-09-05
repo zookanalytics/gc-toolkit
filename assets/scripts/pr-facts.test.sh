@@ -83,7 +83,18 @@ gc bd update "$vid" --set-metadata "escalation_key=$key" \
   --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" >/dev/null
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
 ESC
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
+cat > "$SD/review-dispatch-body.sh" <<'EMIT'
+#!/usr/bin/env bash
+cn=""; note=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check-name) cn="${2:-}"; shift 2 ;;
+    --note) note="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "METHOD gate=$cn${note:+ note: $note}"
+EMIT
 chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 SUT="$SD/pr-facts.sh"
@@ -200,6 +211,14 @@ has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
 eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
 eq "$(meta F3 'check.codex')" "<absent>" "the pre-retarget gate marker is cleared"
+
+echo "# …and EVERY declared gate's marker is cleared, not one fused token"
+store "[$(anchor F3b 25 ',"check_set":"codex,triage,arch","check.triage":"green@sha-25","check.arch":"green@sha-25"')]"
+printf '%s' "$(prview 25 OPEN CLEAN MERGEABLE ',"x":1')" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_25.json"
+out=$(run)
+eq "$(meta F3b 'check.codex')" "<absent>" "codex's marker is cleared"
+eq "$(meta F3b 'check.triage')" "<absent>" "triage's marker is cleared"
+eq "$(meta F3b 'check.arch')" "<absent>" "arch's marker is cleared"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"
@@ -412,6 +431,14 @@ out=$(run)
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"
+
+echo "# …and a multi-gate check_set still reads all-green"
+store "[$(anchor D1b 26 ',"check_set":"codex,triage","check.triage":"green"')]"
+printf '%s' "$(prview 26 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_26.json"
+printf '[{"id":904,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_26.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "reviews/904/dismissals" "two green gates read as all-green (the split is per gate)"
 
 echo "# …a human's CHANGES_REQUESTED is never dismissed"
 store "[$(anchor D2 21)]"

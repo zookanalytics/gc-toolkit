@@ -112,10 +112,13 @@ The machine itself — states, transitions, writers, gates — is drawn once, in
   carrying every field of the transition → read back. A single `bd update` is
   atomic ([gascity-routing-model.md](gascity-routing-model.md)); the old
   healer passes existed because writers split transitions across calls.
-- **One gate-verdict writer** — `signoff.sh`. Clearing a marker is a separate
-  power from writing one: a clear withdraws evidence where a verdict asserts
-  it, so no clearer can make a gate pass. Three components hold that power,
-  each under one condition stated in [authority-map.md](authority-map.md).
+- **One gate-verdict writer** — `signoff.sh`, which also owns the `check_set`
+  widening: adding a gate is a set union with read-back, from a `triage`
+  review only, so the checks-needed decision has one auditable writer.
+  Clearing a marker is a separate power from writing one: a clear withdraws
+  evidence where a verdict asserts it, so no clearer can make a gate pass.
+  Three components hold that power, each under one condition stated in
+  [authority-map.md](authority-map.md). None of them grows `check_set`.
 - **One posture writer** — `pr-facts.sh`, which records what the PR is doing
   (`pr_posture`, `pr_merge_state`, the comment watermarks) so every consumer
   reads it off the anchor instead of re-deriving it from GitHub. It runs twice
@@ -282,6 +285,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared gate raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of gate verdicts (I7). |
+| `assets/scripts/review-charter.sh` | review | The one parser of the charter's gate menu. Triage classifies over its rows and `signoff.sh` warrants a waiver from them, so the grammar has a single reader. |
 | `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |

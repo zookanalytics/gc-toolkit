@@ -84,8 +84,8 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green before merge.sh lands the PR. 'codex' = a review dispatched by the cadence's gate-ensure; 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
-default = "codex"
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of gate names, each requiring check.<name>=green before merge.sh lands the PR. The declared default is 'codex,triage': 'codex' is the standing correctness review dispatched by the cadence's gate-ensure, and 'triage' decides which further gates from docs/review-charter.md the change also needs. 'approval' = an external APPROVED review at the live head. The 'none' sentinel is stamped (never collapsed to empty) so gateless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR."
+default = "codex,triage"
 
 [[steps]]
 id = "validate-identity"
@@ -601,7 +601,7 @@ CHECK_SET="{{check_set}}"
 # >>> check-set-normalize
 _cs_canon="$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')"
 case "$_cs_canon" in
-  '')       CHECK_SET="codex" ;;
+  '')       CHECK_SET="codex,triage" ;;
   none|off) CHECK_SET="none" ;;
 esac
 unset _cs_canon

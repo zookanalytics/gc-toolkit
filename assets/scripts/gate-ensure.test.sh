@@ -13,7 +13,10 @@
 # a declared or well-formed one is not, and neither is an undeclared legacy
 # exception@ — left for migrate-lane-states.sh; an unpersisted clear is
 # reported); a multi-gate check_set split per gate rather than joined into one
-# name; in-flight dedup (routed, poured, claimed) + stranded repair (root
+# name; the declared default codex,triage stamped and dispatched one review per
+# gate; the gate whose method the dispatch body names, and the orphan adoption
+# keyed on that gate so no gate adopts another's unstamped review; in-flight
+# dedup (routed, poured, claimed) + stranded repair (root
 # probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died
 # before the root drives nothing and must not hold the anchor in flight
@@ -48,7 +51,18 @@ harness_init
 # Private scripts dir: the SUT plus a body-emitter stub (interface unchanged).
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh"
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
+cat > "$SD/review-dispatch-body.sh" <<'EMIT'
+#!/usr/bin/env bash
+cn=""; note=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check-name) cn="${2:-}"; shift 2 ;;
+    --note) note="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "METHOD gate=$cn${note:+ note: $note}"
+EMIT
 chmod +x "$SD/review-dispatch-body.sh"
 # escalate.sh stub: records subject/key/message so the wedge arm's one-visit
 # contract can be asserted without a live converse pool.
@@ -68,6 +82,8 @@ unset GC_RIG GC_MAX_REVIEW_DISPATCHES 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
 run() { "$SUT" --default codex --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
+# No --default: the caller-less form, which is what pins the declared default.
+run_declared() { "$SUT" --review-pool "$POOL" --fix-pool "$FIXP" 2>&1; }
 
 anchor() { # id mr checkset marker branch extra-json
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"t %s","metadata":{"merge_result":"%s","branch":"%s","merged_target":"main"%s%s%s}}' \
@@ -153,6 +169,31 @@ has "$(cat "$STUB_GC_LOG")" "sling $POOL $rid --on mol-review" "the review formu
 eq "$(meta A1 dispatch_count)" "1" "dispatch_count incremented on the anchor"
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
+has "$d" "gate=codex" "…and the emitter was told which gate's method to name"
+
+echo "# the declared default pairs codex with triage"
+store "[$(anchor T1 pre_open_gate "" "" polecat/t1)]"
+oid t1 > "$GH_DIR/head_polecat_t1"
+: > "$STUB_GC_LOG"
+out=$(run_declared); rc=$?
+eq "$rc" 0 "the declared-default pass exits 0"
+eq "$(meta T1 check_set)" "codex,triage" "an empty check_set is stamped codex,triage"
+has "$out" "2 reviews dispatched" "each declared gate gets its own review"
+gates=$(jq -r '[.[] | select(.metadata.anchor_bead == "T1") | .metadata.check_name] | sort | join(",")' "$STUB_STORE")
+eq "$gates" "codex,triage" "the two reviews name the two gates — the comma list is split per gate, never fused"
+tbodies=$(jq -r '[.[] | select(.metadata.anchor_bead == "T1") | .description] | sort | join(" ")' "$STUB_STORE")
+has "$tbodies" "gate=triage" "the triage dispatch names the triage method"
+
+echo "# a widened check_set dispatches only the gate that is not yet satisfied"
+store "[$(anchor T2 pull_request "codex,triage,arch" "green" polecat/t2 ",\"check.triage\":\"green\"")]"
+oid t2 > "$GH_DIR/head_polecat_t2"
+: > "$STUB_GC_LOG"
+out=$(run_declared)
+has "$out" "1 reviews dispatched" "the two green gates are settled; the gate triage added is dispatched"
+arid=$(jq -r '.[] | select(.metadata.anchor_bead == "T2") | .id' "$STUB_STORE")
+eq "$(meta "$arid" check_name)" "arch" "the dispatched review is for the added gate"
+ad=$(jq -r --arg id "$arid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
+has "$ad" "gate=arch" "…and its dispatch body names the arch method"
 
 echo "# stamp that does not persist holds the merge (rc=3)"
 store "[$(anchor A2 pull_request "" "" polecat/a2)]"
@@ -640,6 +681,28 @@ has "$out" "adopting unstamped review orphan new-2" "the next pass adopts the or
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one review bead — no twin minted"
 eq "$(meta new-2 anchor_bead)" "H1" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.execution_routed_to')" "$POOL" "…and poured"
+
+# The orphan probe is keyed on a deterministic title, and the dispatch body
+# names the METHOD for the gate it was written for. If the key left the gate
+# out, the second gate of a multi-gate set would adopt the first gate's
+# unstamped review and stamp its own check_name over it — handing a reviewer
+# one method while satisfying a different gate.
+echo "# an orphan is adopted only by the gate whose method it carries"
+store "[$(anchor J1 pull_request "codex,triage" "" polecat/j1)]"
+oid j1 > "$GH_DIR/head_polecat_j1"
+: > "$STUB_GC_LOG"
+out=$(STUB_DROP_KEYS="new-2:anchor_bead" run_declared)
+has "$out" "did not record anchor_bead=J1" "the codex stamp failure is reported (orphan left behind)"
+eq "$(meta new-2 check_name)" "codex" "the orphan is the codex dispatch"
+eq "$(meta new-2 anchor_bead)" "<absent>" "…and it is unstamped, so nothing links it to J1"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "triage did not adopt it — it filed its own review"
+eq "$(meta new-3 check_name)" "triage" "…and that review is the triage gate's"
+jd=$(jq -r '.[] | select(.id == "new-3") | .description' "$STUB_STORE")
+has "$jd" "gate=triage" "…carrying the triage method, not the orphan's codex one"
+out=$(run_declared)
+has "$out" "adopting unstamped review orphan new-2" "the codex gate adopts its OWN orphan on the next pass"
+eq "$(meta new-2 check_name)" "codex" "…and it is still a codex review"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "no twin was minted for either gate"
 
 echo "# a pour whose exec stamp does not read back is not counted"
 store "[$(anchor G1 pull_request codex "" polecat/g1)]"
