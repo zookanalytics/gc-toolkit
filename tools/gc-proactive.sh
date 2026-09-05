@@ -281,34 +281,45 @@ scan_precision_filter() {
 }
 
 scan_candidates() {
+    local ranked
     if [ -n "$FIXTURE" ]; then
         local raw='[]'
         if [ -f "$FIXTURE/scan.json" ]; then raw="$(cat "$FIXTURE/scan.json")"; fi
-        printf '%s' "$raw" | scan_precision_filter | board_rank
-        return 0
+        ranked="$(printf '%s' "$raw" | scan_precision_filter | board_rank)"
+    else
+        # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
+        # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
+        local optin movable db
+        db="$(rig_beads_db)"
+        # Read the FULL opt-in and movable sets (--limit 0), not a page.
+        # scan_precision_filter drops work-in-flight beads (review lanes,
+        # branch/PR anchors, topology roots), so bounding a query to the worker
+        # page BEFORE the filter lets a page of now-dropped rows bury a raw input
+        # past the bound — the union filters to empty while a real candidate sits
+        # at row N+1. Read all, filter, rank, then slice (below), the same
+        # filter-before-bound the demand mirror uses.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
+                    --exclude-type=epic --json --sort oldest --limit 0 2>/dev/null || true)"
+        [ -n "$optin" ] || optin='[]'
+
+        # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
+        # filter below drops the ones a fresh first reaction must not touch.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+        movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
+                    --sort oldest --limit 0 2>/dev/null || true)"
+        [ -n "$movable" ] || movable='[]'
+
+        # Union the two sources, apply the shared precision filter, then rank by
+        # board weight.
+        ranked="$(jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
+            | scan_precision_filter | board_rank)"
     fi
 
-    # (A) explicit opt-in: beads that asked for a first reaction. Pin --db so
-    # the query hits this rig's ledger, not a cwd up-walk (see rig_beads_db).
-    local optin movable db
-    db="$(rig_beads_db)"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    optin="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.proactive=1" --unassigned \
-                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$optin" ] || optin='[]'
-
-    # (B) movable-forward: any ready, unassigned, non-epic bead. The precision
-    # filter below drops the ones a fresh first reaction must not touch.
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
-    movable="$(gc bd ready ${db:+--db "$db"} --unassigned --exclude-type=epic --json \
-                --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
-    [ -n "$movable" ] || movable='[]'
-
-    # Union the two sources, apply the shared precision filter, then rank by
-    # board weight so a --sling sweep spends its limited headroom on the
-    # highest-priority candidates first.
-    jq -s '(.[0] + .[1])' <(printf '%s' "$optin") <(printf '%s' "$movable") \
-        | scan_precision_filter | board_rank
+    # Slice to the worker page (SCAN_LIMIT, 0 = unbounded) AFTER the filter and
+    # rank, so the bound falls on real candidates and a --sling sweep spends its
+    # limited headroom on the highest-priority ones first.
+    printf '%s' "$ranked" | jq --argjson n "$SCAN_LIMIT" 'if $n == 0 then . else .[0:$n] end'
 }
 
 cmd_scan() {

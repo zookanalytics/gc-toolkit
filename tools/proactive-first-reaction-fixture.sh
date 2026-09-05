@@ -411,6 +411,70 @@ ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
 eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
 
+echo "── scan filters BEFORE the page bound (live path), and 0 = unbounded ──"
+# The bug this locks out: scan_candidates paged each `gc bd ready` to its first
+# SCAN_LIMIT rows and THEN ran scan_precision_filter. When more than a page of
+# work-in-flight beads (branch/PR anchors, review lanes) sort ahead of a raw
+# input, the page is all now-dropped rows: the filter empties the union and
+# `scan --json` returns [] while a claimable input sits one row past the bound,
+# so `scan --sling` schedules nothing. The GC_PROACTIVE_FIXTURE path cannot
+# catch this — it bypasses the live `gc bd ready --limit` calls — so drive the
+# real path against a `gc bd ready` stub that honors --limit/--sort.
+SCANB="$(mktemp -d)"
+# (1) 21 anchors carrying a work-in-flight marker (older) ahead of 1 raw input
+# (newest): 21 exceeds the 20-row page, so a page-then-filter scan is empty
+# while a filter-then-slice scan keeps the input.
+jq -n '[ range(1;22) as $d
+          | { id: "wip-\($d)", title: "work-in-flight anchor \($d)",
+              description: "has a body", issue_type: "task", priority: 1,
+              created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: { "merge_result": "pull_request" } } ]
+        + [ { id: "buried-input", title: "the one raw input past the page bound",
+              description: "a real un-triaged input", issue_type: "task",
+              priority: 1, created_at: "2026-12-01T00:00:00Z", metadata: {} } ]' \
+    > "$SCANB/buried.json"
+# (2) 22 clean inputs: the default page caps at 20 while SCAN_LIMIT=0 returns
+# all 22 — a plain .[0:$n] slice would read 0 as "take none", so this pins the
+# unbounded arm and the cap together.
+jq -n '[ range(1;23) as $d
+          | { id: "in-\($d)", title: "clean input \($d)",
+              description: "a body", issue_type: "task", priority: 2,
+              created_at: ("2026-02-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: {} } ]' > "$SCANB/many.json"
+cat > "$SCANB/gc" <<'SH'
+#!/bin/sh
+# Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
+# the canned set, so a paged scan and a full-set scan are comparable.
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+lim=0; srt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) shift; lim="$1" ;;
+    --limit=*) lim="${1#--limit=}" ;;
+    --sort) shift; srt="$1" ;;
+    --sort=*) srt="${1#--sort=}" ;;
+  esac
+  shift
+done
+jq --argjson lim "${lim:-0}" --arg srt "$srt" '
+  (if $srt == "oldest" then sort_by(.created_at // "") else . end)
+  | (if $lim == 0 then . else .[0:$lim] end)' "$GC_STUB_DATA"
+SH
+chmod +x "$SCANB/gc"
+scanb() { env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+    PATH="$SCANB:$PATH" GC_STUB_DATA="$1" "${@:2}"; }
+sb_buried="$(scanb "$SCANB/buried.json" "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "scan keeps the input the page of anchors buried (filter before bound)" "1" \
+    "$(printf '%s' "$sb_buried" | jq 'length' 2>/dev/null)"
+has "…and it is the raw input, not a leaked work-in-flight anchor" "buried-input" "$sb_buried"
+sb_cap="$(scanb "$SCANB/many.json" "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "scan caps the filtered set at SCAN_LIMIT (20 of 22)" "20" \
+    "$(printf '%s' "$sb_cap" | jq 'length' 2>/dev/null)"
+sb_all="$(scanb "$SCANB/many.json" env GC_PROACTIVE_SCAN_LIMIT=0 "$PROACTIVE" scan --json 2>/dev/null || true)"
+eq  "SCAN_LIMIT=0 returns the whole filtered set, unbounded (22 of 22)" "22" \
+    "$(printf '%s' "$sb_all" | jq 'length' 2>/dev/null)"
+rm -rf "$SCANB"
+
 echo "── usage/parser agree: no advertised-but-unimplemented flags ──"
 # Finding: usage advertised `sling --reason R` but the parser rejected it.
 # gc sling has no --reason and the formula has no reason var, so it was removed
