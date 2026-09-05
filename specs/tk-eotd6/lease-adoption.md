@@ -134,12 +134,17 @@ construction: it cannot heartbeat, and reclaim cannot tell that holder from a
 dead one. Nothing should reclaim while the pool population it would sweep
 cannot refresh its own lease.
 
-The order of operations that follows is: fix the heartbeat identity resolution
-in gascity (`gc-ox80c`), then heartbeat long-running pool claims here
-(`tk-dkfyz5`, blocked on it), then reconsider reclaim. The same defect is
-drafted for filing against `gastownhall/gascity` as section 8 of
-[../2026-08-fresh-start/upstream-contrib-drafts.md](../2026-08-fresh-start/upstream-contrib-drafts.md);
-`gc-ox80c` is the fix in our fork, which is what this city runs.
+The first step of that order has since landed. `gc-ox80c`, the heartbeat
+identity fix in our fork, merged as gascity PR #177, so `gc bd heartbeat` now
+resolves a session-id claim's actor to its recorded assignee
+(`resolveHeartbeatActorOverride` in `cmd/gc/cmd_bd.go`), and a live pool holder
+can refresh its own lease. What remains is `tk-dkfyz5`: heartbeat long-running
+pool claims here, then reconsider reclaim. `tk-dkfyz5` is ready now that
+`gc-ox80c` has landed. Whoever takes it should first confirm the fix reached
+the running binary, because a claim cannot refresh under a binary that predates
+it. The same defect is drafted for filing against `gastownhall/gascity`
+upstream as section 8 of
+[../2026-08-fresh-start/upstream-contrib-drafts.md](../2026-08-fresh-start/upstream-contrib-drafts.md).
 
 The witness's session-liveness detection is unaffected by all three and
 remains the only liveness source for the 31 candidates a lease will never
