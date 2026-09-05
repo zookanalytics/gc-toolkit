@@ -222,8 +222,9 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
       <h2 id="sittings-heading">converse sittings</h2>
       <p className="sub">
         {running} running · {sittings.length - running} closed recently. A running sitting is a
-        conversation someone is still in; a closed one shows the outcome it closed on and, when
-        that sitting is the one that wrote it, the takeaway it left.
+        conversation someone is still in; a closed one shows the outcome it closed on, and a
+        running one shows an outcome only when a board dismissal stamped it without closing the
+        visit. The takeaway shows on the sitting that wrote it.
       </p>
       <table>
         <thead>
@@ -250,8 +251,12 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                   <DrillOpen id={s.subject} onOpen={onOpen} />
                 </td>
                 <td>{shortAge(live ? s.opened_at : s.closed_at, now)}</td>
-                {/* A running sitting has not concluded; the em dash is the
-                    absence of an outcome, not an empty one. */}
+                {/* A running sitting usually has no outcome, and the em dash is
+                    that absence rather than an empty string. The exception is a
+                    board dismissal that stamped gc.outcome but could not close
+                    the visit: it leaves a running row honestly reading
+                    "dismissed", the signal that the sitting is stuck open and
+                    needs a manual close. */}
                 <td>{s.outcome || '—'}</td>
                 <td>{s.takeaway || s.title}</td>
               </tr>

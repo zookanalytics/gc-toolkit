@@ -125,6 +125,12 @@ case "$1 ${2:-}" in
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
+    # What gc.outcome reads back as, per visit. dismiss stamps it on a visit and
+    # reads it back before closing, so a stamp that lands empty is caught before
+    # the irreversible close. FAKE_OUTCOME_DIR/<id> holds it; absent reads empty,
+    # like a visit that was never stamped. FAKE_OUTCOME_DROP is the write below
+    # that exits 0 and yet does not land.
+    outcome="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
     # A folded anchor names the bead that carried its work on. The release
     # path reads it to say which disposition it is preserving; an empty
     # string reads the same as an absent key, which is every other bead.
@@ -137,8 +143,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -156,8 +162,9 @@ case "$1 ${2:-}" in
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
     # A store that rejects the write. NOPIN stands for every reason the route
     # pins fail to land; the quiesce must not go on to unassign a bead it has
-    # just failed to de-route.
-    case "$3" in *NOPIN*) exit 1 ;; esac
+    # just failed to de-route. NOSTAMP is the same refusal on a VISIT, where
+    # what fails to land is the outcome the board reads a finished sitting for.
+    case "$3" in *NOPIN*|*NOSTAMP*) exit 1 ;; esac
     # gc.takeaway_settled lands here so a read-back sees what was written.
     # FAKE_SETTLED_DROP=1 loses every one of them (no repair recovers it);
     # =multi loses it only out of a multi-pair stamp, which is the shape a lone
@@ -171,6 +178,15 @@ case "$1 ${2:-}" in
             1)     ;;
             multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
             *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
+          esac ;;
+        # gc.outcome lands per visit so the dismiss read-back sees the stamp.
+        # FAKE_OUTCOME_DROP=1 loses every one of them though the call exits 0,
+        # the exit-0 silent drop the read-back exists to catch; no repair write
+        # recovers it, so it models the store that will not take the stamp at all.
+        gc.outcome=*)
+          case "${FAKE_OUTCOME_DROP:-}" in
+            1) ;;
+            *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
           esac ;;
       esac
     done ;;
@@ -203,8 +219,9 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
-       FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees"
-mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists"
+       FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
+       FAKE_OUTCOME_DIR="$TMP/outcomes"
+mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
 # returns: one full bead row per edge, keyed .dependency_type.
@@ -1035,7 +1052,11 @@ cat > "$TMP/visits.json" <<'JSON'
   {"id":"v-OTHER","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"A-OTHER"}},
   {"id":"n-NOTAVISIT","assignee":"","metadata":{"gc.continuation_group":"A-PARKED"}},
   {"id":"v-STUCK","assignee":"gc-toolkit__converse-lx-2",
-   "metadata":{"task_kind":"visit","gc.continuation_group":"A-STUCK"}}
+   "metadata":{"task_kind":"visit","gc.continuation_group":"A-STUCK"}},
+  {"id":"v-NOSTAMP","assignee":"",
+   "metadata":{"task_kind":"visit","gc.continuation_group":"A-STAMPLESS"}},
+  {"id":"v-DROP","assignee":"",
+   "metadata":{"task_kind":"visit","gc.continuation_group":"A-DROP"}}
 ]
 JSON
 export FAKE_STEPS_JSON="$TMP/visits.json"
@@ -1060,6 +1081,20 @@ if grep -q 'settled offline' <<< "$CL"; then
     ok "(DISMISS-WHY) the close reason carries the operator's words"
 else
     bad "(DISMISS-WHY) reason not recorded (got: $CL)"
+fi
+
+# (DISMISS-OUTCOME) a sitting the operator ends is still a sitting the board
+# has to be able to report, and gc.outcome is the only field it reads a closed
+# one for (services/helm/internal/source/facts.go). v-HELD is the force case,
+# so this also pins the stamp on the path where the close itself is refused
+# first: a metadata write does not go through bd's close-authority guard, so it
+# lands whichever arm the close takes — but only while it is written BEFORE the
+# close rather than folded into it.
+VU="$(grep -E '^bd update v-HELD' "$TMP/updates" || true)"
+if grep -q 'gc.outcome=dismissed' <<< "$VU"; then
+    ok "(DISMISS-OUTCOME) the closed visit is stamped gc.outcome=dismissed"
+else
+    bad "(DISMISS-OUTCOME) the visit closes with no outcome, invisible to every reader of finished sittings (got: ${VU:-<no update on v-HELD>})"
 fi
 
 # (DISMISS-ROW) …and the board row is cleared in the same act.
@@ -1144,6 +1179,59 @@ if grep -q 'was NOT dismissed' <<< "$SOUT"; then
     ok "(DISMISS-STUCK) …and it says the subject was not dismissed"
 else
     bad "(DISMISS-STUCK) the refusal is not stated as one (got: $SOUT)"
+fi
+
+# (DISMISS-UNSTAMPED) the outcome stamp is a precondition of the close, not a
+# best-effort write beside it. The lookup reads only OPEN visits, so a visit
+# closed without gc.outcome is one no re-run of this verb can reach: the board
+# holds a finished sitting it can never report an outcome for. A stamp the
+# store refuses therefore leaves the visit open and the row on the board, the
+# same reading DISMISS-STUCK gets from a close the store refuses.
+: > "$TMP/updates"; : > "$TMP/closes"
+NRC=0
+NOUT="$(sh "$SCRIPT" dismiss A-STAMPLESS 2>&1)" || NRC=$?
+eq "$(grep -c '^bd close v-NOSTAMP' "$TMP/closes" || true)" "0" \
+   "(DISMISS-UNSTAMPED) a visit whose outcome stamp was refused is not closed"
+eq "$(grep -c '^bd update A-STAMPLESS' "$TMP/updates" || true)" "0" \
+   "(DISMISS-UNSTAMPED) …and the row is NOT retired over the sitting it leaves up"
+eq "$NRC" "4" "(DISMISS-UNSTAMPED) …and the run fails, so a caller cannot read it as a dismiss"
+if grep -q 'could not stamp gc.outcome on visit v-NOSTAMP; it was NOT closed' <<< "$NOUT"; then
+    ok "(DISMISS-UNSTAMPED) …and it names the visit and says the close was withheld"
+else
+    bad "(DISMISS-UNSTAMPED) the refused stamp reads as a warning beside a close that happened anyway (got: $NOUT)"
+fi
+if grep -q 'was NOT dismissed' <<< "$NOUT"; then
+    ok "(DISMISS-UNSTAMPED) …and it says the subject was not dismissed"
+else
+    bad "(DISMISS-UNSTAMPED) the refusal is not stated as one (got: $NOUT)"
+fi
+
+# (DISMISS-DROPPED) the same guard for the quieter miss: a --set-metadata pair
+# can read back empty while the update still exits 0, so an exit code of 0 is
+# not proof the outcome landed. The stamp is read back and repaired once, and a
+# visit whose gc.outcome never reads "dismissed" is left open exactly as an
+# outright-refused stamp is. v-DROP is unassigned, so its close would otherwise
+# succeed — the silent drop is the only thing withholding it, which is what
+# isolates the read-back from a close that would have failed anyway.
+: > "$TMP/updates"; : > "$TMP/closes"
+DRPRC=0
+DRPOUT="$(FAKE_OUTCOME_DROP=1 sh "$SCRIPT" dismiss A-DROP 2>&1)" || DRPRC=$?
+eq "$(grep -c '^bd close v-DROP' "$TMP/closes" || true)" "0" \
+   "(DISMISS-DROPPED) a stamp that exits 0 but does not land leaves the visit unclosed"
+eq "$(grep -c '^bd update v-DROP --set-metadata gc.outcome=dismissed' "$TMP/updates" || true)" "2" \
+   "(DISMISS-DROPPED) …read back and written once more before it is given up on"
+eq "$(grep -c '^bd update A-DROP' "$TMP/updates" || true)" "0" \
+   "(DISMISS-DROPPED) …and the row is NOT retired over the sitting it leaves up"
+eq "$DRPRC" "4" "(DISMISS-DROPPED) …and the run fails, so a caller cannot read it as a dismiss"
+if grep -q "gc.outcome on visit v-DROP read back as '<empty>', not 'dismissed'" <<< "$DRPOUT"; then
+    ok "(DISMISS-DROPPED) …and it names the read-back that came up empty"
+else
+    bad "(DISMISS-DROPPED) the silent drop reads as a close that happened anyway (got: $DRPOUT)"
+fi
+if grep -q 'was NOT dismissed' <<< "$DRPOUT"; then
+    ok "(DISMISS-DROPPED) …and it says the subject was not dismissed"
+else
+    bad "(DISMISS-DROPPED) the refusal is not stated as one (got: $DRPOUT)"
 fi
 
 # (DISMISS-BLIND) a visit lookup that did not ANSWER is not a subject with no
