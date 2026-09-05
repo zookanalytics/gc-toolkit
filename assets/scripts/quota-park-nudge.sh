@@ -431,6 +431,48 @@ if command -v timeout >/dev/null 2>&1; then
     if timeout -k 1 1 true >/dev/null 2>&1; then BOUND_MODE=2; else BOUND_MODE=1; fi
 fi
 
+# Can this host's timeout(1) PARSE a fractional duration? The wall-clock bounds
+# accept decimals (posnum), but some timeout(1)s take whole seconds only and
+# answer "0.25" with rc 125 — an error, not a bound. Unchecked, that lands on the
+# FIRST bounded call below (the session list) and trips its `|| exit 0`, ending
+# the pass with no heartbeat and no summary: a documented fractional bound would
+# silently disable recovery city-wide. Probe the exact form run_bounded uses; a
+# working timeout only fails this on a fraction it rejects, so read any failure as
+# integer-only. With no timeout(1) (BOUND_MODE 0) a fraction never reaches it, so
+# the safe default is "supported".
+TIMEOUT_FRAC=1
+if [ "$BOUND_MODE" -eq 2 ]; then
+    timeout -k 0.1 0.1 true >/dev/null 2>&1 || TIMEOUT_FRAC=0
+elif [ "$BOUND_MODE" -eq 1 ]; then
+    timeout 0.1 true >/dev/null 2>&1 || TIMEOUT_FRAC=0
+fi
+
+# Round a fractional CALL_TIMEOUT / KILL_AFTER UP to the next whole second where
+# timeout(1) cannot parse a fraction — a longer bound is the safe direction, and
+# the alternative is the disabled sweep above. Only these two reach timeout(1);
+# SWEEP_BUDGET runs on the awk sweep clock, which takes a fraction on any host. A
+# disabled CALL_TIMEOUT (0) stays disabled; KILL_AFTER is coerced only in the
+# hard-bound mode that passes it. Announced once, like the soft-bound line below.
+ceil_seconds() { awk -v v="$1" 'BEGIN { c = int(v); if (v > c) c++; print c }'; }
+if [ "$TIMEOUT_FRAC" -eq 0 ]; then
+    frac_note=""
+    if posnum_nz "$CALL_TIMEOUT"; then
+        case "$CALL_TIMEOUT" in *.*)
+            whole="$(ceil_seconds "$CALL_TIMEOUT")"
+            frac_note="$frac_note CALL_TIMEOUT ${CALL_TIMEOUT}->${whole}s"; CALL_TIMEOUT="$whole" ;;
+        esac
+    fi
+    if [ "$BOUND_MODE" -eq 2 ]; then
+        case "$KILL_AFTER" in *.*)
+            whole="$(ceil_seconds "$KILL_AFTER")"
+            frac_note="$frac_note KILL_AFTER ${KILL_AFTER}->${whole}s"; KILL_AFTER="$whole" ;;
+        esac
+    fi
+    if [ -n "$frac_note" ]; then
+        echo "quota-park-nudge: this host's timeout(1) rejects fractional durations — rounded up to whole seconds:$frac_note"
+    fi
+fi
+
 # Every gc call goes through here: (1) a bound, HARD (`timeout -k`) where
 # the host allows — expiry is a non-zero rc (124 / 128+n) handled by the
 # caller's failure branch; (2) stdin CLOSED — the session loop reads its work

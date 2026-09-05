@@ -1541,6 +1541,55 @@ PATH="$TMP/nokill:$PATH" bash "$SCRIPT" --status lx-codex > "$TMP/status30b"
 grep -q "no -k" "$TMP/status30b" \
     && bad "the status surface must not carry the soft-bound warning" \
     || ok "the status surface does not carry the soft-bound warning"
+
+# A host whose timeout(1) takes -k for whole seconds but REJECTS a fractional
+# interval must not let a documented fractional bound reach it. QUOTA_PARK_CALL_TIMEOUT
+# / _KILL_AFTER accept a decimal, but on such a host `timeout -k 5 0.25 gc …`
+# exits 125 on the FIRST bounded call, the `sessions=… || exit 0` guard fires, and
+# the whole sweep ends with no heartbeat and no nudge — recovery off, silently. The
+# script probes fractional support and rounds the fraction up to a whole second, so
+# the sweep still runs. The shim accepts `timeout -k 1 1 true` (BOUND_MODE stays
+# hard) but fails 125 on any fractional duration, ahead of the real timeout on PATH.
+REAL_TIMEOUT="$(command -v timeout)"
+mkdir -p "$TMP/nofrac"
+cat > "$TMP/nofrac/timeout" <<TO
+#!/usr/bin/env bash
+# whole-second intervals only; only the duration positions are inspected, so a
+# command argument that merely contains a dot is not read as an interval.
+is_frac() { case "\$1" in *.*) case "\$1" in *[!0-9.]*) return 1 ;; *) return 0 ;; esac ;; *) return 1 ;; esac; }
+if [ "\$1" = "-k" ]; then kd="\$2"; md="\$3"; else kd=""; md="\$1"; fi
+for d in "\$kd" "\$md"; do
+  [ -n "\$d" ] || continue
+  is_frac "\$d" && { echo "timeout: invalid time interval '\$d'" >&2; exit 125; }
+done
+exec "$REAL_TIMEOUT" "\$@"
+TO
+chmod +x "$TMP/nofrac/timeout"
+# The shim discriminates as claimed — otherwise the assertion below could pass for
+# the wrong reason (a shim that took the fraction would prove nothing).
+"$TMP/nofrac/timeout" -k 1 1 true >/dev/null 2>&1 \
+    && ok "nofrac shim accepts an integer -k bound (BOUND_MODE stays hard)" \
+    || bad "nofrac shim accepts an integer -k bound"
+"$TMP/nofrac/timeout" -k 0.25 0.25 true >/dev/null 2>&1 \
+    && bad "nofrac shim rejects a fractional bound" \
+    || ok "nofrac shim rejects a fractional bound"
+
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+PATH="$TMP/nofrac:$PATH" FAKE_SESSIONS="$TMP/sessions-one.json" \
+    QUOTA_PARK_CALL_TIMEOUT=0.25 QUOTA_PARK_KILL_AFTER=0.25 QUOTA_PARK_SWEEP_BUDGET=0 \
+    "$REAL_TIMEOUT" 30 bash "$SCRIPT" > "$TMP/out30c" || true
+eq "$(nudges_for lx-codex)" "1" \
+    "a documented fractional bound does not silently disable the sweep where timeout(1) is integer-only"
+grep -q "rejects fractional durations" "$TMP/out30c" \
+    && ok "the fractional-bound coercion is announced" \
+    || bad "the fractional-bound coercion is announced ($(head -1 "$TMP/out30c"))"
+# Like the soft-bound warning, the coercion belongs to the sweep and must never
+# land among the closed fields the patrols parse.
+PATH="$TMP/nofrac:$PATH" bash "$SCRIPT" --status lx-codex > "$TMP/status30c"
+grep -q "rejects fractional" "$TMP/status30c" \
+    && bad "the status surface must not carry the fractional-coercion warning" \
+    || ok "the status surface does not carry the fractional-coercion warning"
 fi
 
 # --- Run 31: the surface and its doc speak the same language. ----------------
