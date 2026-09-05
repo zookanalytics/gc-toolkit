@@ -38,6 +38,29 @@ cat > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
+if [ "${1:-}" = "sling" ]; then
+  # `gc sling [--rig X] <pool> <bead> --on <formula>`: a graph.v2 pour retires
+  # gc.routed_to on the work bead and stamps gc.execution_routed_to=<pool>, the
+  # read-back signoff.sh proves the pour by. STUB_SLING_NOPOUR models a pour
+  # that exits success but never stamps the route (a partial pour), so the SUT
+  # must refuse a bare-route fallback rather than double-dispatch the work.
+  shift; pool=""; bead=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --rig|--on) shift ;;
+      -*) ;;
+      *) if [ -z "$pool" ]; then pool="$1"; elif [ -z "$bead" ]; then bead="$1"; fi ;;
+    esac
+    shift || true
+  done
+  if [ -z "${STUB_SLING_NOPOUR:-}" ] && [ -n "$bead" ]; then
+    tmp=$(mktemp)
+    jq -c --arg id "$bead" --arg p "$pool" \
+      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
+      "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+  fi
+  exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 shift
 bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id)]' "$STORE"; }
@@ -589,14 +612,28 @@ eq "$(meta fix-1 source_review_bead)" "rv-1" "child names the source review"
 eq "$(meta fix-1 merge_strategy)" "mr" "child stays on the PR path"
 eq "$(meta fix-1 existing_pr)" "https://github.com/o/r/pull/42" "child reworks THIS PR, not a fresh one"
 eq "$(meta fix-1 pr_number)" "42" "child carries the PR number"
-eq "$(meta fix-1 gc.routed_to)" "rig/gc-toolkit.polecat" "child routed to the fix pool (stamp, not sling)"
-hasnt "$(cat "$STUB_GC_LOG")" "sling" "stamp-don't-sling: no gc sling issued"
+eq "$(meta fix-1 gc.execution_routed_to)" "rig/gc-toolkit.polecat" "the pour routes the child to the fix pool"
+eq "$(meta fix-1 gc.routed_to)" "<absent>" "the pour retires the bare route — no driverless stamp"
+has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat fix-1 --on mol-polecat-work" "the child is slung as a driven mol-polecat-work molecule"
+has "$(cat "$STUB_GC_LOG")" "session wake rig/gc-toolkit.polecat" "the pool is woken to claim the rework"
 has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "child blocks the anchor"
-has "$(gc bd ready --json)" '"id":"fix-1"' "the rework child is in bd ready"
+has "$(gc bd ready --json)" '"id":"fix-1"' "the rework child stays open and unblocked"
 hasnt "$(gc bd ready --json)" '"id":"tk-anc"' "the anchor waits on the child, not the reverse"
 has "$(meta fix-1 rejection_reason)" "signoff requested changes" "rejection_reason carries the round context"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
+
+echo "# request-changes refuses a bare-route fallback when the pour will not read back (double-dispatch guard)"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "tk-anc" then .metadata["check.codex"] = "green" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+out=$(STUB_SLING_NOPOUR=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "an unproven pour is a retryable failure, not a bare-route success"
+has "$(cat "$STUB_GC_LOG")" "sling rig/gc-toolkit.polecat fix-1 --on mol-polecat-work" "the sling is attempted first"
+eq "$(meta fix-1 gc.execution_routed_to)" "<absent>" "no pour read back"
+eq "$(meta fix-1 gc.routed_to)" "<absent>" "no bare route is stamped — a partial pour plus a pool claim would double-dispatch the work"
+has "$out" "double-dispatch hazard" "the refusal names the double-dispatch hazard"
+has "$(cat "$STUB_DEPS")" "tk-anc|fix-1|blocks" "the child still blocks the anchor"
+eq "$(status rv-1)" "in_progress" "the review is left unclosed — the failed dispatch is retryable, not consumed as a completed dispatch"
 
 echo "# pre-open request-changes"
 reset "$ANCHOR_PRE"
