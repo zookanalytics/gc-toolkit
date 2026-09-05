@@ -834,6 +834,22 @@ eq "$(meta R1d merge_hold)" "<absent>" "the cap park is retired by the feedback"
 eq "$(bstatus dm-R1d)" "closed" "…and the demand that recorded the park closes with it"
 has "$(notes dm-R1d)" "cap reset by operator feedback" "…recording why it closed"
 
+# The demand closes FIRST, before its park. A close the store refuses leaves the
+# park standing: merge.sh reads the live demand as a blocker, so lifting the
+# park would release the anchor in name only and route this feedback as work the
+# merge still holds. It stays a visit instead, and the floor still resets.
+echo "# a cap reset whose demand will not close keeps the park and routes to the person"
+store "[$(anchor Rdf 62 "$CAP_STATE"),{\"id\":\"dm-Rdf\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Rule on Rdf\",\"notes\":\"\",\"metadata\":{\"gc.demand_for\":\"Rdf\",\"gc.takeaway_by\":\"signoff\",\"gc.routed_to\":\"human\"}}]"
+printf '%s' "$(prview 62 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
+echo '[]' > "$GH_DIR/reviews_62.json"
+printf '[{"id":8660,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_62.json"
+out=$(STUB_UPDATE_FAIL="dm-Rdf" run)
+eq "$(bstatus dm-Rdf)" "open" "the demand did not close"
+eq "$(meta Rdf merge_hold)" "signoff_cap" "…so its park stands rather than release the anchor over a live blocker"
+eq "$(meta Rdf pr_comment_disposition)" "visit:new-3" "…and the feedback routes to the person holding it, not to work"
+has "$(notes Rdf)" "demand did not close" "…and the anchor records why the park was kept"
+hasnt "$out" "the merge_hold park" "…and no park retire is reported"
+
 echo "# a converse sitting's demand keeps the park, and its own demand stays open"
 store "[$(anchor R1s 61 "$CAP_STATE"),$(demand R1s)]"
 printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"

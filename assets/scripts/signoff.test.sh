@@ -720,13 +720,17 @@ has "$(cat "$STUB_HELM_LOG")" "--by signoff" "…stamped as the cap's own (by si
 has "$(cat "$STUB_HELM_LOG")" "--kind decision" "…as a ruling a person owes"
 has "$(cat "$STUB_HELM_LOG")" "did not converge" "…carrying the cap headline as the demand text"
 
-echo "# the cap survives a demand that does not land: the park stands, warned"
+echo "# a demand that cannot be filed refuses the park: the edge is stamped first"
+# gate-ensure suppresses redispatch under merge_hold, so nothing re-fires the
+# cap to refile a demand it left unfiled — a park stamped without one holds
+# forever. The park must not be recorded at all until the edge lands.
 reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
 seed_cap_deps c1 c2 c3
 out=$(STUB_HELM_FAIL=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
-eq "$rc" 0 "a demand that does not land does not fail a park that read back"
-eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park still stands"
-has "$out" "could not file the demand" "…and the failure is reported so it can be filed by hand"
+eq "$rc" 2 "a demand that does not land refuses the park"
+eq "$(meta tk-anc merge_hold)" "<absent>" "…the anchor is NOT parked without the demand behind it"
+has "$out" "could not file the demand" "…and the failure names the unfiled demand"
+eq "$(status rv-1)" "in_progress" "…the review bead stays open for a retry"
 
 echo "# a converse sitting's demand already gates the anchor: the cap files no second"
 reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
@@ -1054,6 +1058,21 @@ eq "$rc" 0 "reset proceeds past the cap's own demand (by signoff)"
 eq "$(meta tk-anc merge_hold)" "<absent>" "…the park is retired"
 eq "$(status dm-cap)" "closed" "…and the cap's own demand closes with it"
 has "$(notes dm-cap)" "cap reset by ruling" "…recording why it closed"
+
+# The park and its demand retire together. Closing the demand FIRST means a
+# close the store refuses leaves the park standing and the floor unwritten, so
+# the anchor is never released over a demand merge.sh still reads as a blocker,
+# and a re-run retries.
+echo "# a cap reset whose demand will not close is not reported as retired"
+capped_pre 3 "gc.takeaway=signoff did not converge after 3 rework rounds (cap 3)" "gc.takeaway_by=signoff"
+own_demand
+printf 'dm-cap\n' > "$STUB_UPD_FAIL"
+out=$("$SUT" reset tk-anc --reason "operator ruling" --batch ruling-stuck 2>&1); rc=$?
+eq "$rc" 2 "a demand that will not close refuses the reset"
+eq "$(status dm-cap)" "open" "…the demand stays open"
+eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the park stands rather than lift over a demand that still holds"
+eq "$(meta tk-anc signoff_round_floor)" "<absent>" "…and the floor is not written, so a re-run retries"
+has "$out" "release the anchor in name only" "…and the refusal explains why nothing was written"
 
 echo "# a converse sitting's demand outranks the reset even beside the cap's own"
 capped_pre 3 "gc.takeaway=holding — needs a ruling" "gc.takeaway_by=signoff"

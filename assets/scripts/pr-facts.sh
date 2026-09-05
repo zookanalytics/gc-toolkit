@@ -163,22 +163,37 @@ takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an a
     >/dev/null 2>&1
 }
 # Close the demand the cap filed to gate this anchor (gc.demand_for=<anchor>,
-# gc.takeaway_by=signoff). The park and its demand retire together: left open it
-# holds the anchor out of `bd ready` under a park the retire just lifted. Only
-# the cap's own — a converse sitting's demand outranks the retire and leaves the
-# park (and its demand) standing.
-close_cap_demand() { # <anchor> <note>
-  local rows id
+# gc.takeaway_by=signoff), and PROVE it closed. The park and its demand retire
+# together: left open the demand holds the anchor out of `bd ready` — merge.sh
+# reads it as a live blocker — under a park the retire just lifted, so a caller
+# that clears the park while this reports success releases the anchor in name
+# only. Fails (non-zero) when the ledger will not read, an update is refused, or
+# a signoff-owned demand still reads live afterward, so the caller can keep the
+# park until both retire. Only the cap's own — a converse sitting's demand
+# outranks the retire, is left standing, and does not count against this.
+close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = one may
+  local rows id live
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 0
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   for id in $(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
         '.[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
              | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff")
              | .id' 2>/dev/null); do
     [ -n "$id" ] || continue
-    gc bd update "$id" --status=closed --append-notes "${2:-}" >/dev/null 2>&1 || true
+    gc bd update "$id" --status=closed --append-notes "${2:-}" >/dev/null 2>&1 || return 1
   done
+  # Read the ledger again: a close that was denied or raced leaves the demand
+  # live, and the status filter above already drops closed, so any signoff-owned
+  # row that still answers is one that did not retire.
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  live=$(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
+        '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+                | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff") ] | length' 2>/dev/null)
+  case "$live" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$live" -eq 0 ]
 }
 # <<< takeaway-hold-discriminator
 
@@ -804,13 +819,24 @@ TALLY
       # note that it did.
       if is_cap_park "$hold" "$cap"; then
         if [ -z "$holding" ]; then
-          RSET+=(--unset merge_hold --unset blocked_reason --unset signoff_cap --route "")
-          undo="${undo:+$undo, }the merge_hold park on gate $cap, blocked_reason and the human route"
-          if [ "$takeaway_by" = signoff ]; then
-            RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
-            undo="${undo:+$undo, }the cap's takeaway"
+          # Retire the cap's demand BEFORE clearing its park. merge.sh reads a
+          # live demand as a blocker, so a park lifted while its demand stands
+          # releases the anchor in name only and this feedback would route as
+          # work the merge still holds. close_cap_demand proves the demand
+          # closed; when it cannot, leave the park standing — the anchor reads
+          # held, the feedback below routes to the person holding it, and a
+          # later pass retries.
+          if close_cap_demand "$id" "pr-facts: cap reset by operator feedback on PR#$num (review $max_r, comment $max_c); the park is retired, so the demand that recorded it closes with it."; then
+            RSET+=(--unset merge_hold --unset blocked_reason --unset signoff_cap --route "")
+            undo="${undo:+$undo, }the merge_hold park on gate $cap, blocked_reason and the human route"
+            if [ "$takeaway_by" = signoff ]; then
+              RSET+=(--unset gc.takeaway --unset gc.takeaway_at --unset gc.takeaway_by)
+              undo="${undo:+$undo, }the cap's takeaway"
+            fi
+            unparked=1
+          else
+            park_note=" The cap's own demand did not close (or still reads live), so its park stands: merge.sh reads the live demand as a blocker, and lifting the park now would release the anchor in name only. The floor still resets; retire the park once the demand closes: signoff.sh reset $id --reason '<ruling>'."
           fi
-          unparked=1
         fi
         # else: a sitting still holding the anchor for a ruling outranks the
         # reset, same as above — nothing further to say here.
@@ -820,13 +846,10 @@ TALLY
       if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
            "${RSET[@]}" --append-notes "pr-facts: operator feedback on PR#$num (review $max_r, comment $max_c; answered through review $rwm, comment $cwm) resets the signoff round cap${undo:+, retiring $undo}. That feedback is review this branch has never been answered against, so the rounds spent before it no longer count against a cap that measures non-convergence.${park_note}" >/dev/null; then
         # The row was read before this write, and the routing choice below
-        # reads both fields: a park retired here must not still hold as one.
+        # reads both fields: a park retired here must not still hold as one. Only
+        # unparked when close_cap_demand proved the demand closed above, so the
+        # anchor is never cleared from the cadence while a demand still holds it.
         [ "$unparked" = 1 ] && { routed=""; hold=""; }
-        # The park retired; the demand that recorded it retires with it, or it
-        # holds the anchor out of `bd ready` under a park this feedback lifted.
-        # Only the cap's own (by=signoff): a sitting's demand set $holding above
-        # and left the park standing, so this never reaches its demand.
-        [ "$unparked" = 1 ] && close_cap_demand "$id" "pr-facts: cap reset by operator feedback on PR#$num (review $max_r, comment $max_c); the park is retired, so the demand that recorded it closes with it."
         echo "$PROG: $id — PR#$num operator feedback resets the signoff round cap${undo:+, retiring $undo}"
       else
         echo "$PROG: WARN $id — PR#$num cap reset did not record; the cap stands and the comments still route below. The watermark that routing writes retires this batch, so nothing re-reads it: the anchor stays parked until a ruling retires it (signoff.sh reset)." >&2

@@ -186,22 +186,37 @@ takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an a
     >/dev/null 2>&1
 }
 # Close the demand the cap filed to gate this anchor (gc.demand_for=<anchor>,
-# gc.takeaway_by=signoff). The park and its demand retire together: left open it
-# holds the anchor out of `bd ready` under a park the retire just lifted. Only
-# the cap's own — a converse sitting's demand outranks the retire and leaves the
-# park (and its demand) standing.
-close_cap_demand() { # <anchor> <note>
-  local rows id
+# gc.takeaway_by=signoff), and PROVE it closed. The park and its demand retire
+# together: left open the demand holds the anchor out of `bd ready` — merge.sh
+# reads it as a live blocker — under a park the retire just lifted, so a caller
+# that clears the park while this reports success releases the anchor in name
+# only. Fails (non-zero) when the ledger will not read, an update is refused, or
+# a signoff-owned demand still reads live afterward, so the caller can keep the
+# park until both retire. Only the cap's own — a converse sitting's demand
+# outranks the retire, is left standing, and does not count against this.
+close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = one may
+  local rows id live
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 0
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   for id in $(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
         '.[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
              | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff")
              | .id' 2>/dev/null); do
     [ -n "$id" ] || continue
-    gc bd update "$id" --status=closed --append-notes "${2:-}" >/dev/null 2>&1 || true
+    gc bd update "$id" --status=closed --append-notes "${2:-}" >/dev/null 2>&1 || return 1
   done
+  # Read the ledger again: a close that was denied or raced leaves the demand
+  # live, and the status filter above already drops closed, so any signoff-owned
+  # row that still answers is one that did not retire.
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  live=$(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
+        '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+                | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff") ] | length' 2>/dev/null)
+  case "$live" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$live" -eq 0 ]
 }
 # <<< takeaway-hold-discriminator
 
@@ -337,6 +352,17 @@ TALLY
   else
     NOTE="$NOTE. No park was retired: signoff_cap claims no standing hold here, so a merge_hold on this anchor is a person's and stays."
   fi
+  # Retire the cap's demand BEFORE clearing its park. merge.sh reads a live
+  # demand as a blocker, so a park lifted while its demand stands releases the
+  # anchor in name only, and the floor write below would report a reset the
+  # merge still holds. Closing first means a refused or raced close leaves the
+  # park standing, so a re-run reads RETIRED again and retries — the floor is
+  # idempotent. Only the cap's own (by=signoff); a converse sitting's demand was
+  # refused at the top.
+  if [ -n "$RETIRED" ] && ! close_cap_demand "$ANCHOR" "signoff: cap reset by ruling — $RESET_REASON. This demand recorded the cap's park; the park is retired, so the wait it gated closes with it."; then
+    warn "the cap park on $ANCHOR is being retired but its demand did not close (or still reads live); merge.sh reads a live demand as a blocker, so clearing the park now would release the anchor in name only. Nothing written — re-run this reset, or close the demand by hand: gc bd list --status=open --metadata-field gc.demand_for=$ANCHOR"
+    exit 2
+  fi
   gc bd update "$ANCHOR" "${WRITES[@]}" --append-notes "$NOTE" >/dev/null 2>&1 || true
 
   AFTER=$(bd_json show "$ANCHOR")
@@ -366,11 +392,7 @@ TALLY
     warn "the reset did not read back on $ANCHOR (${BAD# }); the cap stands and the next signoff pass re-caps. Clear the named keys by hand, or re-run — a floor that did land is harmless to write again."
     exit 2
   fi
-  # The park retired here; the demand that recorded it retires with it. Left
-  # open it holds the anchor out of `bd ready` under a park this reset just
-  # lifted. Only the cap's own (by=signoff): a converse sitting's demand
-  # outranks this verb and was refused at the top.
-  [ -z "$RETIRED" ] || close_cap_demand "$ANCHOR" "signoff: cap reset by ruling — $RESET_REASON. This demand recorded the cap's park; the park is retired, so the wait it gated closes with it."
+  # The demand retired above, before the park it recorded; the park is clear now.
   echo "signoff: round cap on $ANCHOR reset to 0 of $CAP (floor $WANT_FLOOR)${RETIRED:+ — retired $RETIRED}"
   exit 0
 fi
@@ -740,6 +762,23 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # miss a presence check cannot see, so the read-back requires it CLEARED.
   CAP_HEADLINE="signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor"
   CAP_TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # The park is a wait on a person, and a wait is an edge: file the demand the
+  # anchor blocks on BEFORE stamping the park, so the markers never stand
+  # without the edge behind them. gate-ensure suppresses redispatch under
+  # merge_hold, so no later pass re-fires this arm to file a demand it left
+  # unfiled — a park stamped without one holds forever with nothing to answer.
+  # A converse sitting's demand already gates the anchor (takeaway_is_holding
+  # excludes the cap's own), and refiling would overwrite that sitting's
+  # provenance, so file only when none holds. gc-helm.sh demand is idempotent on
+  # the cap's own (one per gated bead, by=signoff), reads its blocks edge back
+  # before it returns, and stamps gc.demand_for to exempt the terminal end from
+  # the same check. When it cannot land the demand, leave the anchor UNPARKED
+  # and the review open for a retry rather than record a park nothing gates.
+  if ! takeaway_is_holding "$ANCHOR" \
+     && ! "$HELM" demand "$ANCHOR" "$CAP_HEADLINE" --by signoff --kind decision >/dev/null 2>&1; then
+    warn "the round cap on $ANCHOR could not file the demand that gates its park (gc-helm.sh demand failed); the anchor is left UNPARKED and the review bead stays open for a retry. File it by hand, then re-run the verdict: $HELM demand $ANCHOR '<what a person owes>' --by signoff --kind decision"
+    exit 2
+  fi
   # merge_hold carries the literal string "signoff_cap", not "true": the cap's
   # own park is recognised by that exact pairing with signoff_cap everywhere in
   # the cadence (reset here, pr-facts.sh's operator-feedback reset), so a
@@ -765,20 +804,6 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
      || [ -n "$(row_meta "$CAP_ROW" gc.takeaway_settled)" ]; then
     warn "the cap park did not read back on $ANCHOR (merge_hold='$(row_meta "$CAP_ROW" merge_hold)', gc.routed_to='$(row_meta "$CAP_ROW" gc.routed_to)', signoff_cap='$(row_meta "$CAP_ROW" signoff_cap)', gc.takeaway='$(row_meta "$CAP_ROW" gc.takeaway)', gc.takeaway_by='$(row_meta "$CAP_ROW" gc.takeaway_by)', gc.takeaway_at='$(row_meta "$CAP_ROW" gc.takeaway_at)' want '$CAP_TAKEAWAY_AT', gc.takeaway_settled='$(row_meta "$CAP_ROW" gc.takeaway_settled)' want cleared); review left open for a retry"
     exit 2
-  fi
-  # The park is a wait on a person, and a wait is an edge: gate the anchor on a
-  # demand so doctor/check-wait-is-an-edge reads this hold as the graph state it
-  # is, not a marker with nothing behind it. A converse sitting's demand already
-  # gates it (takeaway_is_holding, which excludes the cap's own) — refiling would
-  # overwrite that sitting's provenance, so file only when none holds. gc-helm.sh
-  # demand is idempotent on the cap's own (one per gated bead, stamped
-  # gc.takeaway_by=signoff) and stamps gc.demand_for, which exempts the terminal
-  # end from the same check. A demand that does not land leaves the park unedged;
-  # the next pass re-fires this arm and refiles it, so warn rather than fail a
-  # park that did read back.
-  if ! takeaway_is_holding "$ANCHOR" \
-     && ! "$HELM" demand "$ANCHOR" "$CAP_HEADLINE" --by signoff --kind decision >/dev/null 2>&1; then
-    warn "the cap parked $ANCHOR but could not file the demand that gates it (gc-helm.sh demand failed); the park stands. File it by hand so the hold is an edge: $HELM demand $ANCHOR '<what a person owes>' --by signoff --kind decision"
   fi
   close_review
   CAP_WHERE="pre-open (no PR)"
