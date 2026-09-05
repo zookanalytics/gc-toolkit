@@ -326,11 +326,14 @@ Set `OPERATOR_MERGE_PR` to the repo-qualified PR URL you opened
 refinery work, and the run falls through to the branch gate and handoff. The
 park routes `gc.routed_to=human`, which no pool's exact-match query selects,
 records the `pr_url`, leaves the anchor open and unassigned, and stamps no
-`merge_result`. A person merges the PR and closes the bead. Two checks read
-before any write: the value must be a full `https://github.com/<owner>/<repo>/pull/<n>`
-URL — a repo or issue URL is refused, not parked as a `pr_url` no one can merge —
-and a PR in the rig's own repo is refused too, since the refinery covers it. A
-misfilled variable cannot divert real refinery work or park a dead bead.
+`merge_result`. A person merges the PR and closes the bead. Three checks read
+before any write. The value must be a full `https://github.com/<owner>/<repo>/pull/<n>`
+URL, so a repo or issue URL is refused rather than parked as a `pr_url` no one
+can merge. The rig's own repo must resolve from origin, because the same-repo
+guard cannot run without it and a park that skipped it would divert a same-repo
+PR the refinery covers. A PR in that same repo is refused, since the refinery
+covers it. A misfilled variable or an unreadable rig origin cannot divert real
+refinery work or park a dead bead.
 
 The three writes and their order are the store-only arm's, and for the same
 reason — the claim guard refuses an assignee change batched with metadata. The
@@ -360,7 +363,9 @@ if [ -n "$OPERATOR_MERGE_PR" ]; then
     owner=${rest%%/*}; rest=${rest#*/}
     repo=${rest%%/*}; rest=${rest#*/}
     case "$rest" in pull/*) : ;; *) return 0 ;; esac
-    num=${rest#pull/}; num=${num%%[!0-9]*}
+    rest=${rest#pull/}
+    num=${rest%%[!0-9]*}
+    case ${rest#"$num"} in ""|/*|"?"*|"#"*) : ;; *) return 0 ;; esac
     [ -n "$owner" ] && [ -n "$repo" ] && [ -n "$num" ] || return 0
     printf '%s/%s' "$owner" "$repo"
   }
@@ -376,12 +381,17 @@ if [ -n "$OPERATOR_MERGE_PR" ]; then
     gc runtime drain-ack
     exit 1
   fi
-  if [ -n "$RIG_REPO" ] && [ "$PR_REPO" = "$RIG_REPO" ]; then
+  if [ -z "$RIG_REPO" ]; then
+    echo "OPERATOR-MERGE PARK REFUSED: cannot resolve this rig's own repo from origin, so the same-repo guard cannot run and a same-repo PR would be diverted to a human park. Fix the rig origin, then retry."
+    gc runtime drain-ack
+    exit 1
+  fi
+  if [ "$PR_REPO" = "$RIG_REPO" ]; then
     echo "OPERATOR-MERGE PARK REFUSED: PR is in this rig's own repo ($RIG_REPO), which the refinery covers. Unset OPERATOR_MERGE_PR and hand off the normal way."
     gc runtime drain-ack
     exit 1
   fi
-  echo "operator-merge park: $OPERATOR_MERGE_PR is in $PR_REPO, which this rig's refinery (${RIG_REPO:-origin unread}) does not cover"
+  echo "operator-merge park: $OPERATOR_MERGE_PR is in $PR_REPO, which this rig's refinery ($RIG_REPO) does not cover"
   gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=awaiting_operator_merge --set-metadata "pr_url=$OPERATOR_MERGE_PR" --set-metadata gc.routed_to=human --append-notes "Parked for operator merge: $OPERATOR_MERGE_PR is in $PR_REPO, which this rig's refinery does not cover. A person merges the PR and closes this bead. No merge_result is stamped: merge.sh reads the PR number in the refinery's own repo, not this pr_url."
   gc bd update "$WORK_BEAD_ID" --status=open
   gc bd update "$WORK_BEAD_ID" --assignee=""

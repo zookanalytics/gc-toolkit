@@ -1086,6 +1086,13 @@ eq "$(run_opmerge "$FOREIGN_PR" "$RIG_SSH")" "0" \
 # OWN repo belongs to the refinery: refuse, drain, write nothing.
 eq "$(run_opmerge "https://github.com/zookanalytics/gc-toolkit/pull/9" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
    "a PR in the rig's own repo: refuses, drains, writes nothing"
+# The same-repo guard needs the rig's own repo, read from origin. With origin
+# unreadable (empty here) the guard cannot run, and parking anyway would divert a
+# same-repo PR the refinery covers — so the arm refuses instead, proven with the
+# rig's OWN PR, exactly the one that would be diverted. (Skip the guard on an
+# empty RIG_REPO and this same-repo PR parks to human: that is the regression.)
+eq "$(run_opmerge "https://github.com/zookanalytics/gc-toolkit/pull/9" "")|$(trace)" "1|DRAIN" \
+   "unreadable rig origin: refuses rather than park (the same-repo guard cannot run)"
 eq "$(run_opmerge "not-a-pr-url" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
    "a non-URL OPERATOR_MERGE_PR: refuses, drains, writes nothing"
 # A URL that names an owner/repo but is not a pull request — a bare repo URL or
@@ -1096,6 +1103,12 @@ eq "$(run_opmerge "https://github.com/zookanalytics/loomington/issues/3" "$RIG_H
    "an issue URL (owner/repo, no /pull/<n>): refuses, drains, writes nothing"
 eq "$(run_opmerge "https://github.com/zookanalytics/loomington" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
    "a bare repo URL (owner/repo, no /pull/<n>): refuses, drains, writes nothing"
+# A digit run followed by a non-delimiter — /pull/3abc — is not /pull/<n>. Only
+# empty, /, ? or # may follow the digits; a letter suffix means the validator
+# must yield nothing, not truncate 3abc to 3 and park it. (Truncate with
+# num=${num%%[!0-9]*} alone and this parks a PR no one can merge: the regression.)
+eq "$(run_opmerge "https://github.com/zookanalytics/loomington/pull/3abc" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
+   "a PR URL with a non-digit suffix (/pull/3abc): refuses, drains, writes nothing"
 
 # Same drift guard the other terminal arms get: the chain-close copy is step 7's
 # block, indented one level to sit inside the `if`.
