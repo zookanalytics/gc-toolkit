@@ -291,12 +291,16 @@ The actionable subset:
 ```bash
 jq -c '.results[] | select(.status != "ok")' "$PAYLOAD"
 ```
-For each finding: act directly on the simple ones (stale locks, temp
-cleanup, `gc doctor --fix`-able); dedup the rest against existing beads
-city-wide (`bd search` per rig store — your rig store is not the city, and
-a name miss is not proof of absence: search the finding's distinctive nouns
-too) — an OPEN match means tracked, note the id and move on. Escalate only
-the untracked remainder, one situation key per finding so repeats dedup:
+For each finding: act directly on the scoped ones (stale locks, temp
+cleanup, a broken worktree via `gc worktree`); dedup the rest against
+existing beads city-wide (`bd search` per rig store — your rig store is not
+the city, and a name miss is not proof of absence: search the finding's
+distinctive nouns too) — an OPEN match means tracked, note the id and move
+on. Not `gc doctor --fix`: it has no per-check selector, so it applies the
+whole fixable set in one pass and cannot be scoped to the safe findings — a
+finding being fixable is not a sign this city wants it applied, so a
+`--fix`-only finding is one to escalate, not to sweep. Escalate only the
+untracked remainder, one situation key per finding so repeats dedup:
 ```bash
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
