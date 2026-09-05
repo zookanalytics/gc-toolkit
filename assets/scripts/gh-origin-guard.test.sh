@@ -42,6 +42,13 @@
 #        resolve to no repository
 #   (20) a rig root that is set but resolves no origin fails closed, it does not
 #        widen to the city or the working directory
+#   (21) a URL operand on issue/pr comment or pr review names the repository, so
+#        an off-origin URL is refused with no --repo, and it wins over an owned
+#        --repo the way gh does; a number, a branch or a URL inside a body is not
+#        a target
+#   (22) `gh issue new` and `gh pr new`, gh's aliases for create, are guarded
+#   (23) wrapper options (`time -p`, `command --`, `exec -l`) still reach the
+#        wrapped write; `command -v gh` is a lookup and stays unguarded
 
 set -u
 
@@ -331,6 +338,49 @@ GC_RIG_ROOT="$SANDBOX/plain"; export GC_RIG_ROOT
 denied "broken rig root, no fallthrough to city" "$SANDBOX/plain" "gh issue create --repo suandl/shutupandlisten --title 'x'"
 denied "broken rig root, no fallthrough to cwd"  "$SANDBOX/third" "gh issue create --title 'x'"
 GC_RIG_ROOT="$RIG"; export GC_RIG_ROOT
+
+# --- (21) a URL operand names the repository -----------------------------
+# gh issue comment, pr comment and pr review take {<number> | <url>}. Given a
+# URL, gh reads the repository straight from it, so an off-origin URL with no
+# --repo is a send to a third party. Ignoring the operand let that through.
+echo "  -- URL operand names the repository"
+denied  "issue comment url at third party" "$RIG" "gh issue comment https://github.com/get-convex/agent/issues/353 --body 'x'"
+denied  "pr comment url at third party"    "$RIG" "gh pr comment https://github.com/get-convex/agent/pull/12 --body 'x'"
+denied  "pr review url at third party"     "$RIG" "gh pr review https://github.com/get-convex/agent/pull/12 --request-changes --body 'x'"
+allowed "issue comment url at own origin"  "$RIG" "gh issue comment https://github.com/zookanalytics/gc-toolkit/issues/1 --body 'x'"
+allowed "pr comment url at own origin"     "$RIG" "gh pr comment https://github.com/zookanalytics/gc-toolkit/pull/12 --body 'x'"
+# gh writes where the URL points even when --repo disagrees, so an owned --repo
+# must not shield an off-origin URL.
+denied  "off-origin url beats owned --repo" "$RIG" "gh pr comment https://github.com/get-convex/agent/pull/12 --repo zookanalytics/gc-toolkit --body 'x'"
+# A number or a branch names no repository, so it resolves the way a flagless
+# call does — against the working directory — and a URL sitting in a --body is
+# prose, not the operand.
+allowed "number operand resolves to cwd"   "$RIG" "gh pr comment 12 --body 'x'"
+allowed "branch operand resolves to cwd"   "$RIG" "gh pr comment feature/x --body 'x'"
+allowed "url in a body is not the target"  "$RIG" "gh pr comment 12 --body 'see https://github.com/get-convex/agent/pull/1 for context'"
+
+# --- (22) issue new / pr new are create ----------------------------------
+# gh exposes create as `issue new` and `pr new`. The whitelist named only
+# create, so the aliases reached the same write unguarded.
+echo "  -- issue new / pr new aliases"
+denied  "issue new at third party"   "$RIG" "gh issue new --repo get-convex/agent --title 'x' --body 'y'"
+denied  "pr new at third party"       "$RIG" "gh pr new --repo get-convex/agent --title 'x' --body 'y'"
+allowed "issue new at own origin"     "$RIG" "gh issue new --repo zookanalytics/gc-toolkit --title 'x'"
+allowed "pr new at own origin"        "$RIG" "gh pr new --repo zookanalytics/gc-toolkit --title 'x'"
+allowed "issue new implicit own cwd"  "$RIG" "gh issue new --title 'x' --body 'y'"
+
+# --- (23) wrapper options ahead of the write -----------------------------
+# command/exec/time carry options of their own. Skipping only the bare word left
+# `-p` or the `--` sentinel standing as the command, so the wrapped write was
+# never reached. command -v looks the command up and runs nothing, so it is not
+# a send and stays out of the guard.
+echo "  -- wrapper options ahead of the write"
+denied  "time -p wraps a third-party write"     "$RIG" "time -p gh issue create --repo get-convex/agent --title 'x'"
+denied  "command -- wraps a third-party write"  "$RIG" "command -- gh issue create --repo get-convex/agent --title 'x'"
+denied  "exec -l wraps a third-party write"     "$RIG" "exec -l gh issue create --repo get-convex/agent --title 'x'"
+allowed "time -p wraps an own write"            "$RIG" "time -p gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+allowed "command -- wraps an own write"         "$RIG" "command -- gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
+allowed "command -v gh is a lookup, not a send" "$RIG" "command -v gh issue create --repo get-convex/agent --title 'x'"
 
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"

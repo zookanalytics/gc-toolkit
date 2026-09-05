@@ -19,7 +19,9 @@ by the overlays in `pack.toml`.
 
 Five write verbs: `gh issue create`, `gh issue comment`, `gh pr create`,
 `gh pr comment`, and `gh pr review`. Each is refused when the repository it
-targets is not one the session owns.
+targets is not one the session owns. `gh issue new` and `gh pr new`, gh's
+aliases for the two create verbs, are folded to `create` and refused the same
+way.
 
 Reads are untouched. `gh issue view`, `gh pr view`, `gh pr diff`, `gh search`
 and the rest reach any repository normally, so research on an upstream project
@@ -46,18 +48,23 @@ rig should write to.
 
 The guard resolves the target the way `gh` itself does, in the same order:
 
-1. An explicit `--repo` or `-R` on the command, in any of gh's spellings and
+1. A `<url>` operand on `gh issue comment`, `gh pr comment`, or `gh pr review`.
+   These verbs take a `{<number> | <url>}` argument, and given a URL `gh` reads
+   the repository straight from it — so the URL is the target even when a
+   `--repo` disagrees. A bare number or a branch name names no repository and
+   falls through to the steps below.
+2. An explicit `--repo` or `-R` on the command, in any of gh's spellings and
    whether it stands before or after the noun. A selector given more than once
    binds to its last value, the way gh lets a command-level flag override a
    global one.
-2. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
+3. `GH_REPO`, whether set inline on the `gh` command, exported earlier on the
    same command line, or ambient in the environment.
-3. The `origin` remote of the working directory.
+4. The `origin` remote of the working directory.
 
-Step 3 is the one that matters most. `gh` with no `--repo` writes to whatever
-repository the working directory belongs to, so an agent standing in a clone of
-someone else's project sends there with no flag to inspect. A guard that read
-only the explicit flag would wave that through.
+The working-directory step is the one that matters most. `gh` with no `--repo`
+writes to whatever repository the working directory belongs to, so an agent
+standing in a clone of someone else's project sends there with no flag to
+inspect. A guard that read only the explicit flag would wave that through.
 
 An owner/name given without a host is completed with the host `gh` would use:
 `GH_HOST` set inline on the command, exported earlier on the same line, or
@@ -76,9 +83,11 @@ create` still resolves against the outer directory — the move does not outlast
 the parentheses.
 
 Wrappers in front of the command are stepped through to reach it: `env` with its
-options and `NAME=VALUE` assignments, and `command`, `nohup`, `exec` and the
-like. A `GH_REPO` or `GH_HOST` assignment carried by one of them counts as if it
-stood as an inline prefix.
+options and `NAME=VALUE` assignments, and `command`, `nohup`, `exec` and `time`
+with the option forms that still run the wrapped command, such as `time -p`, the
+`command --` sentinel, and `exec -l`. A `GH_REPO` or `GH_HOST` assignment carried
+by one of them counts as if it stood as an inline prefix. `command -v gh` looks
+the command up and runs nothing, so it is not a send and is left alone.
 
 Host, owner, and name are all compared, lowercased. The host is part of the
 identity, because dropping it would let the same owner and name on a different

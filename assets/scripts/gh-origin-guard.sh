@@ -79,6 +79,21 @@ norm_repo() {
     printf '%s' "$_r"
 }
 
+# Extract host/owner/name from the `<url>` operand of `gh issue comment`,
+# `gh pr comment` and `gh pr review` — the URL names the repository directly.
+# A bare number, a branch name, or anything not shaped like an issue/PR URL
+# yields empty, so it is never mistaken for a repository and a branch operand is
+# not read as a false target.
+repo_from_url() {
+    _u=$(printf '%s' "${1:-}" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
+    [ -n "$_u" ] || return 0
+    printf '%s' "$_u" | grep -Eq '^([a-z][a-z0-9+.-]*://)?[a-z0-9.-]+/[^/]+/[^/]+/(issues|pull|discussions)/' || return 0
+    _hon=$(printf '%s' "$_u" \
+        | sed -e 's#^[a-z][a-z0-9+.-]*://##' \
+        | awk -F/ '{ print $1 "/" $2 "/" $3 }')
+    norm_repo "$_hon"
+}
+
 origin_of() {
     [ -n "${1:-}" ] || return 0
     [ -d "$1" ] || return 0
@@ -154,10 +169,11 @@ CWD=$(printf '%s' "$PAYLOAD" | jq -r '.cwd // ""' 2>/dev/null)
 # Emits one line per guarded write, fields separated by \037: noun, verb, --repo
 # value, inline GH_REPO value, the pending cd destination, whether an earlier
 # export/unset set GH_REPO in this shell (1/0), that exported value, the inline
-# GH_HOST value, whether an earlier export/unset set GH_HOST (1/0), and that
-# exported value. A unit separator rather than a tab, because the shell collapses
-# runs of whitespace separators and an empty field would shift the next one into
-# its place. The shell resolves origins; awk only lexes.
+# GH_HOST value, whether an earlier export/unset set GH_HOST (1/0), that exported
+# value, and the positional operand of a URL-capable verb (issue/pr comment, pr
+# review). A unit separator rather than a tab, because the shell collapses runs
+# of whitespace separators and an empty field would shift the next one into its
+# place. The shell resolves origins; awk only lexes.
 SCAN=$(printf '%s' "$CMD" | awk '
 function push() {
     if (have) { ntok++; T[ntok] = tok }
@@ -179,7 +195,7 @@ function note_cd(i) {
     if (i + 1 > ntok) { cdspec = "?"; return }
     note_cd_val(T[i + 1])
 }
-function analyze(   i, j, noun, verb, key, repo, inl, inlhost) {
+function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop) {
     if (ntok == 0) return
     i = 1; inl = ""; inlhost = ""
     # Leading assignments and command wrappers sit in front of the real command.
@@ -219,8 +235,26 @@ function analyze(   i, j, noun, verb, key, repo, inl, inlhost) {
             }
             continue
         }
+        # These wrappers carry options of their own ahead of the command.
+        # Skipping only the bare word left an option like `time -p` or the
+        # `command --` sentinel standing as the command token, so the wrapped
+        # write was never reached. Consume the option forms that still run the
+        # following command; stop at anything else — `command -v gh` looks gh up
+        # and runs nothing, so leaving that unguarded is correct.
         if (T[i] == "command" || T[i] == "builtin" ||
-            T[i] == "nohup" || T[i] == "exec" || T[i] == "time") { i++; continue }
+            T[i] == "nohup" || T[i] == "exec" || T[i] == "time") {
+            w = T[i]; i++
+            while (i <= ntok) {
+                if (T[i] == "--") { i++; break }
+                if (substr(T[i], 1, 1) != "-") break
+                if (w == "time" && T[i] == "-p") { i++; continue }
+                if (w == "command" && T[i] == "-p") { i++; continue }
+                if (w == "exec" && (T[i] == "-c" || T[i] == "-l")) { i++; continue }
+                if (w == "exec" && T[i] == "-a") { i += 2; continue }
+                break
+            }
+            continue
+        }
         break
     }
     if (i > ntok) return
@@ -269,16 +303,37 @@ function analyze(   i, j, noun, verb, key, repo, inl, inlhost) {
         if (i + 1 <= ntok) verb = T[i + 1]
         break
     }
+    # gh exposes `issue new` and `pr new` as aliases for create. Fold them to
+    # the create spelling so the whitelist below covers the documented aliases.
+    if (noun == "issue" && verb == "new") verb = "create"
+    if (noun == "pr" && verb == "new") verb = "create"
     key = noun "/" verb
     # Exactly the verbs the ruling names. `gh api` reaches the same endpoints
     # and is deliberately not covered.
     if (key != "issue/create" && key != "issue/comment" &&
         key != "pr/create" && key != "pr/comment" && key != "pr/review") return
-    # --repo/-R wins over everything, matching gh: flag, then GH_REPO, then the
-    # repository of the working directory. gh binds a repeated selector to its
-    # LAST value (a command-level --repo overrides a global one before the noun),
-    # so the scan keeps the last match — an owned --repo ahead of an off-origin
-    # one must not shield it.
+    # issue comment, pr comment and pr review take a `<number> | <url>` operand
+    # that names the repository directly — gh reads the repo from the URL. The
+    # first positional after the verb is captured here; the shell resolves a URL
+    # among the operands and refuses off-origin, while a bare number or a branch
+    # resolves to nothing and falls through to --repo/GH_REPO/cwd.
+    urlop = ""
+    if (verb == "comment" || verb == "review") {
+        k = i + 2
+        while (k <= ntok) {
+            if (T[k] == "--repo" || T[k] == "-R" ||
+                T[k] == "-b" || T[k] == "--body" ||
+                T[k] == "-F" || T[k] == "--body-file") { k += 2; continue }
+            if (substr(T[k], 1, 1) == "-") { k++; continue }
+            urlop = T[k]; break
+        }
+    }
+    # --repo/-R is the explicit flag target: below a `<url>` operand (resolved
+    # first on the shell side for a URL-capable verb) but above GH_REPO and the
+    # working directory, matching gh. gh binds a repeated selector to its LAST
+    # value (a command-level --repo overrides a global one before the noun), so
+    # the scan keeps the last match — an owned --repo ahead of an off-origin one
+    # must not shield it.
     repo = ""
     for (j = 1; j <= ntok; j++) {
         if (T[j] ~ /^--repo=/)      { repo = substr(T[j], 8) }
@@ -288,7 +343,7 @@ function analyze(   i, j, noun, verb, key, repo, inl, inlhost) {
             if (j < ntok) { repo = T[j + 1]; j++ }
         }
     }
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop
 }
 function reset(   k) { for (k = 1; k <= ntok; k++) delete T[k]; ntok = 0 }
 BEGIN { SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); BT = sprintf("%c", 96) }
@@ -349,7 +404,7 @@ ALLOWED=$(allowed_origins)
 OWNED=$(printf '%s' "$ALLOWED" | paste -sd, - 2>/dev/null)
 
 NOUN=""; VERB=""; TARGET=""; REFUSE=""
-while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval; do
+while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval _inhost _hostset _hostval _urlop; do
     [ -n "${_noun:-}" ] || continue
 
     # Where this call would actually run, after any cd ahead of it.
@@ -378,7 +433,13 @@ while IFS="$(printf '\037')" read -r _noun _verb _flag _inline _cd _ghset _ghval
     fi
     [ -n "$_eff_host" ] || _eff_host=github.com
 
-    if [ -n "${_flag:-}" ]; then
+    # A `<url>` operand on issue/pr comment or pr review names the repository
+    # itself; gh writes there whatever --repo says, so it is resolved first.
+    _url_target=""
+    [ -n "${_urlop:-}" ] && _url_target=$(repo_from_url "$_urlop")
+    if [ -n "${_url_target:-}" ]; then
+        _target=$_url_target
+    elif [ -n "${_flag:-}" ]; then
         _target=$(norm_repo "$_flag" "$_eff_host")
     elif [ -n "${_inline:-}" ]; then
         _target=$(norm_repo "$_inline" "$_eff_host")
