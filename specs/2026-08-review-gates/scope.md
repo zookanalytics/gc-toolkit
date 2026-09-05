@@ -30,8 +30,12 @@ and fully independent of the authoring session:
    auditable (operator decision 2026-08-24, item 9).
 
 Both ride the existing gate machinery unchanged: gate-ensure dispatches any
-named gate, signoff.sh writes the verdict evidence-bound to the reviewed
-commit, merge.sh requires every declared gate green at the live head.
+named gate, signoff.sh records the reviewed commit on the review bead and
+stamps a bare `check.<gate>=green` that binds to no commit, and merge.sh
+requires every declared gate's marker to read `green`. A marker is a state of
+the lane, so an appended commit leaves it green and only a rewrite that drops
+the reviewed commit off the branch supersedes the review; the live head is
+guarded separately, by merge.sh's own PR merge guard.
 
 ## Why small context works
 
