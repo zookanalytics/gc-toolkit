@@ -40,8 +40,8 @@ covers that dimension.
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
 | [`mechanik`](agents/mechanik.md) | 24,535 | 6,133 |
-| [`polecat`](agents/polecat.md) | 20,317 | 5,079 |
-| [`polecat-codex`](agents/polecat-codex.md) | 20,347 | 5,086 |
+| [`polecat`](agents/polecat.md) | 20,588 | 5,147 |
+| [`polecat-codex`](agents/polecat-codex.md) | 20,618 | 5,154 |
 | [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
 | [`refinery`](agents/refinery.md) | 8,626 | 2,156 |
 | [`witness`](agents/witness.md) | 12,186 | 3,046 |
@@ -60,16 +60,16 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,442 | 1,110 |
-| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,548 | 637 |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,149 | 537 |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,470 | 1,117 |
+| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
+| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,156 | 539 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 2,661 | 665 |
 | [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` | 2,596 | 649 |
 | [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` | 2,632 | 658 |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 3,945 | 986 |
+| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` | 4,012 | 1,003 |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` | 2,400 | 600 |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` | 4,779 | 1,194 |
-| [`mol-review`](formulas/mol-review.md) | `city` | 2,620 | 655 |
+| [`mol-review`](formulas/mol-review.md) | `city` | 2,627 | 656 |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,335 | 1,083 |

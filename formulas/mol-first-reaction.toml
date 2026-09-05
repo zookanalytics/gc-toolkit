@@ -24,8 +24,9 @@ reaction, and drains.
 Mechanics the steps are written around: the target bead arrives as the
 input convoy (each step re-derives WORK_BEAD_ID in its own shell — never
 spell the retired `issue` var), and each step closes its own bead through
-assets/scripts/step-close.sh, which resolves by (assignee, gc.step_ref) —
-never a GC_*BEAD_ID env var, which does not track the current step.
+assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
+gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
+step.
 """
 formula = "mol-first-reaction"
 
@@ -354,7 +355,9 @@ root only once every step is closed. Skip the close and this drained session lea
 bead behind, so a fresh worker re-pools on it forever — which on a POOL-routed
 formula means one spawned session per cycle, indefinitely.
 
-Close by `(assignee, gc.step_ref)` through the pack helper. Never close on a
+Close by `(gc.root_bead_id, gc.step_ref)` through the pack helper — an
+assignee repeats across every molecule an agent ran, and the same step of an
+earlier one is already closed. Never close on a
 `GC_*BEAD_ID` environment variable: `GC_BEAD_ID` is not populated in a pool
 worker at all, and `GC_TRIGGER_BEAD_ID` is pinned at spawn and is not
 refreshed by `gc hook --claim`, so it names some other session's bead

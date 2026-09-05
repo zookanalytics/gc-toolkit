@@ -24,8 +24,9 @@ reaction, and drains.
 Mechanics the steps are written around: the target bead arrives as the
 input convoy (each step re-derives WORK_BEAD_ID in its own shell — never
 spell the retired `issue` var), and each step closes its own bead through
-assets/scripts/step-close.sh, which resolves by (assignee, gc.step_ref) —
-never a GC_*BEAD_ID env var, which does not track the current step.
+assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
+gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
+step.
 
 
 Steps (4):

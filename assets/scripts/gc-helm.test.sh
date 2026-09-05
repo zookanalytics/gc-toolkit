@@ -1338,9 +1338,11 @@ export FAKE_STEPS_JSON="$TMP/steps.json"
 # ── The releasing session's own step survives the release ────────────────────
 # mol-first-reaction's terminal step disposes by calling `takeaway --release` on
 # the bead its own molecule is anchored to, and then has to close its own step
-# bead. step-close.sh resolves that bead by (assignee, gc.step_ref), so a
-# quiesce that clears the live step's assignee lands the disposition and strands
-# the molecule: the step stays open and is re-offered forever. This section runs
+# bead. step-close.sh resolves that bead within its molecule and corroborates
+# it by the assignee; this live step carries no gc.session_id stamp, so the
+# assignee is the only handle that proves the bead is this session's, and a
+# quiesce that cleared it would land the disposition but strand the molecule:
+# the step stays open and is re-offered forever. This section runs
 # the real release and then the real step-close.sh against ONE mutating store —
 # a logging-only stub cannot show the second command failing on what the first
 # wrote.

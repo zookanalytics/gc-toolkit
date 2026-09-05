@@ -33,8 +33,8 @@ Hard rules, in force for every step:
 Mechanics the steps are written around: the review bead arrives as the input
 convoy (each step re-derives REVIEW_BEAD in its own shell), and each step
 closes its own bead through assets/scripts/step-close.sh, which resolves by
-(assignee, gc.step_ref) — never a GC_*BEAD_ID env var, which does not track
-the current step.
+(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
+track the current step.
 
 
 Steps (4):

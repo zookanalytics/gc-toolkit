@@ -13,8 +13,9 @@ NEVER close the work bead: the refinery closes an anchor on a
 verified merge, and closes a rework hand-back landed-on-branch, both from
 merge-push. ALWAYS close your own step beads through
 assets/scripts/step-close.sh — a graph.v2 step advances only by closing its
-own bead, and step-close.sh resolves it from the (assignee, gc.step_ref)
-pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead after a claim.
+own bead, and step-close.sh resolves it from the (gc.root_bead_id,
+gc.step_ref) pair; $GC_BEAD_ID / $GC_TRIGGER_BEAD_ID name the wrong bead
+after a claim, and a pool assignee names every molecule the slot ever ran.
 workflow-finalize is the control-dispatcher's — never close it.
 
 Two distinct branch questions: {{base_branch}} is what the worktree is
