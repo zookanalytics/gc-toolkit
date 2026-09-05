@@ -217,9 +217,8 @@ eq "$(run_pour 1 0 1)" "1|w-new|w-new" \
    "a failed rollback burn still exits non-zero (reconcile is the backstop)"
 
 # --- Static guard: no reconcile query may re-acquire an --assignee filter. ----
-# The doctor check (doctor/check-startup-discovery) already locks in
-# --include-infra and the title scope; this locks in the assignee-blindness that
-# closes tk-fj56a, in the same place and for the same reason.
+# Staying assignee-blind keeps an orphaned patrol wisp visible; the checks below
+# hold the --include-infra and title-scope invariants on the same queries.
 WITNESS_BLOCK=$(awk '
   /^[[:space:]]*```/ {f = !f; next}
   f' "$PROMPT")
