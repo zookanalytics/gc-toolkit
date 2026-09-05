@@ -142,6 +142,8 @@ gc bd update "$OBS" --set-metadata task_kind=observation \
   here; say so in the verdict body and let that gate hold it.
 - It never fixes anything, and it never touches the anchor other than
   through `signoff.sh`.
-- It never runs a second time on one dispatch. The verdict is head-bound:
-  a push re-stales `check.triage` and the next pass re-classifies the grown
-  diff.
+- It never re-runs because the branch grew. Its verdict binds no marker to a
+  commit: an appended commit does not re-stale `check.triage`, and no pass
+  re-classifies the grown diff. Only a rewrite that takes the reviewed commit
+  off the branch supersedes the review, and gate-ensure then pours a fresh
+  triage at the live head.
