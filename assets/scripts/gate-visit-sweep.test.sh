@@ -17,6 +17,8 @@
 #     logs it and the next sweep retries;
 #   * the FALSE-EMPTY-QUEUE guard — an unreadable listing exits non-zero rather
 #     than looking like a store with no gates;
+#   * the PARTIAL-READ guard — a list that FAILS after printing a valid array
+#     exits non-zero, not read as its (stale or empty) contents;
 #   * the QUIET PATH — an empty store passes and files nothing;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
 #     mean the cadence that runs this script was quietly un-shipped.
@@ -51,7 +53,10 @@ printf '%s\n' "$*" >> "$GC_LOG"
 case "$1 ${2:-}" in
   "bd list")
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc bd: simulated list failure" >&2; exit 1; }
-    cat "$STUB_GATES" ;;
+    cat "$STUB_GATES"
+    # A list that prints array-shaped stdout AND still fails: the sweep must
+    # take THIS command's status, not the scrub it pipes into.
+    [ -n "${STUB_LIST_RC:-}" ] && exit "$STUB_LIST_RC" ;;
 esac
 exit 0
 STUB
@@ -82,11 +87,11 @@ cat > "$TMP/gates.json" <<'JSON'
 JSON
 printf '[]\n' > "$TMP/empty.json"
 
-STUB_LIST_FAIL=""; HELM_FAIL_BEAD=""
+STUB_LIST_FAIL=""; STUB_LIST_RC=""; HELM_FAIL_BEAD=""
 run() { # run <gates-file>
   : > "$GC_LOG"; : > "$HELM_LOG"; RC=0
   OUT="$(PATH="$BIN:$PATH" GC_HELM_TOOL="$BIN/helm-stub" GC_LOG="$GC_LOG" HELM_LOG="$HELM_LOG" \
-         STUB_GATES="$1" STUB_LIST_FAIL="$STUB_LIST_FAIL" HELM_FAIL_BEAD="$HELM_FAIL_BEAD" \
+         STUB_GATES="$1" STUB_LIST_FAIL="$STUB_LIST_FAIL" STUB_LIST_RC="$STUB_LIST_RC" HELM_FAIL_BEAD="$HELM_FAIL_BEAD" \
          bash "$SUT" 2>"$TMP/err")" || RC=$?
   ERR="$(cat "$TMP/err")"
 }
@@ -111,6 +116,16 @@ has "$ERR" "FAILED to file a visit on tk-w1" "(LOUDFAIL) …and names the gated 
 STUB_LIST_FAIL=1; run "$TMP/gates.json"; STUB_LIST_FAIL=""
 nonzero "$RC" "(ENUMFAIL) an unreadable gate listing exits non-zero"
 hasnt "$(cat "$HELM_LOG")" "open " "(ENUMFAIL) …and files nothing on an unreadable store"
+
+# ── partial-read guard: a non-zero list that still prints JSON is unreadable ──
+# Bash takes a pipeline's status from its last stage, so `gc bd list | scrub`
+# would mask a list that failed AFTER printing a valid array. The stub returns
+# the eligible-gates fixture AND exits non-zero: a regression files a visit on
+# tk-w1 and exits 0, so this case discriminates the pipe from the fixed split.
+STUB_LIST_RC=7; run "$TMP/gates.json"; STUB_LIST_RC=""
+nonzero "$RC" "(PARTIALREAD) a non-zero list that still printed JSON exits non-zero"
+hasnt "$(cat "$HELM_LOG")" "open " "(PARTIALREAD) …and files nothing on an untrustworthy listing"
+has "$ERR" "store unreadable" "(PARTIALREAD) …and reports the store unreadable"
 
 # ── quiet path: an empty store passes and files nothing ───────────────────────
 run "$TMP/empty.json"
