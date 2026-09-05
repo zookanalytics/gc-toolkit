@@ -231,5 +231,43 @@
   "partial": true,
   "partial_errors": [
     "rig shutupandlisten: context canceled"
+  ],
+  "pack_health": [
+    {
+      "component": "gctk",
+      "built_at": "2026-08-10T04:02:01Z",
+      "source_rev": "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+      "binary_rev": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+      "last_build_rc": 1,
+      "restart_pending": false,
+      "checked_at": "2026-08-11T15:00:00Z",
+      "severity": "HIGH",
+      "detail": "last build FAILED (rc 1); still serving 1a2b3c4d5e6f"
+    },
+    {
+      "component": "dolt-probe",
+      "built_at": "2026-08-11T14:40:00Z",
+      "source_rev": "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+      "binary_rev": "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+      "last_build_rc": 0,
+      "restart_pending": false,
+      "probe_status": "unreadable",
+      "probe_detail": "rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+      "checked_at": "2026-08-11T15:00:00Z",
+      "severity": "HIGH",
+      "detail": "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused"
+    },
+    {
+      "component": "helm",
+      "built_at": "2026-08-11T14:55:00Z",
+      "source_rev": "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+      "binary_rev": "9f1c0b7e5a4d3c2b1a09876543210fedcba98765",
+      "last_build_rc": 0,
+      "restart_pending": false,
+      "probe_status": "ok",
+      "checked_at": "2026-08-11T15:00:00Z",
+      "severity": "NORMAL",
+      "detail": "current at 9f1c0b7e5a4d"
+    }
   ]
 }

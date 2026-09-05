@@ -3,7 +3,7 @@ import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase, resolveTerminalSession } from './terminal/endpoint';
-import type { Board, Sitting, Tile } from './contract';
+import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board shape lives in ./contract.ts — the hand-written mirror of the Go
 // structs in internal/board, guarded by the parity check in
@@ -162,6 +162,38 @@ function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
     gaps.push(`${noApproval} are green with no readable answer on whether GitHub wants a review`);
   }
   return { rows: rows.length, gaps };
+}
+
+// The pack-build strip: what each compiled component is serving, and whether it
+// matches its sources.
+//
+// It sits above the anchors because it qualifies them. Nothing in the running
+// system builds these binaries — the launchers exec what a build order
+// published — so this very page can be rendered by a binary older than the
+// sources that describe it, and every row below would look normal while doing
+// it. Nothing else on the page can say so.
+//
+// Rows are unconditional whenever the city has any record at all: a strip that
+// appears only on trouble is a strip nobody learns to read. A city with no
+// record renders nothing rather than an invented all-clear.
+function PackHealth({ rows }: { rows: PackBuild[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="pack-health" aria-labelledby="pack-health-heading">
+      <h2 id="pack-health-heading">pack builds</h2>
+      <ul>
+        {rows.map((row) => (
+          <li key={row.component} className={`pack-health__row pack-health__row--${row.severity}`}>
+            <span className="pack-health__sev">{row.severity}</span>
+            <span className="pack-health__name">{row.component}</span>
+            {/* `detail` is derived server-side so this view and the CLI cannot
+                disagree about what a row means. Render it; never re-derive it. */}
+            <span className="pack-health__detail">{row.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 // The drill-in entry point, shared by both tables. A button rather than a
@@ -382,6 +414,8 @@ export function App() {
           </>
         )}
       </section>
+
+      <PackHealth rows={board?.pack_health ?? []} />
 
       {/* An owed row IS an anchor needing attention — it is the one the section
           above just listed — so the unqualified sentence contradicts it. */}

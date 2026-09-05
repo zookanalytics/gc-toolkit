@@ -481,4 +481,10 @@ type Board struct {
 	Sittings      []Sitting `json:"sittings"`
 	Partial       bool      `json:"partial,omitempty"`
 	PartialErrors []string  `json:"partial_errors,omitempty"`
+
+	// PackHealth is the build state of the pack's compiled components. It is
+	// not derived from the anchors and does not participate in ranking — it
+	// rides the envelope because it answers a question about the board itself:
+	// whether the binary rendering it is the one the sources describe.
+	PackHealth []PackBuild `json:"pack_health,omitempty"`
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/lifecycle.sh — the one writer of lifecycle
-# transitions. Covers: the state verb; legal/illegal edges; --expect; the ONE
-# atomic `gc bd update` carrying every field; bd refusal (exit 1); post-write
+# Hermetic test for the anchor lifecycle — THE writer of lifecycle transitions.
+# Covers: the state verb; legal/illegal edges; --expect; the ONE atomic
+# `gc bd update` carrying every field; bd refusal (exit 1); post-write
 # verification mismatch (exit 2); human states routing to human and detached
 # states clearing the route, both in the same call; the empty-route refusal that
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
@@ -9,8 +9,16 @@
 # must --close); --set-dated's compare-and-preserve rule for the @<since>
 # component; the reopen repair verb; the park-route takeaway guard and its
 # --takeaway writer, capped and mirrored from gc-helm.sh; and the drift
-# assertion between lifecycle/lifecycle.toml and the embedded
-# lifecycle-state-table block.
+# assertion against lifecycle/lifecycle.toml.
+#
+# TWO ARMS, ONE BODY. The lifecycle writer exists twice during the gctk
+# migration — `gctk lifecycle` (services/gctk) and the shell fallback in
+# lifecycle.sh — and a caller cannot tell which answered. So every assertion
+# below runs against both: arm "shell" forces the fallback with GCTK_BIN=none,
+# arm "gctk" points GCTK_BIN at a freshly built binary and reaches it through
+# lifecycle.sh, which also proves the preference wiring. Each arm holds its own
+# mirror of the state table against lifecycle.toml — the embedded shell block
+# for one, `gctk lifecycle --dump-machine` for the other.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,33 +27,73 @@ SUT="$HERE/lifecycle.sh"
 TOML="$ROOT/lifecycle/lifecycle.toml"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# Build the port BEFORE the harness puts stub binaries on PATH: the stub git
+# answers nothing, and a toolchain that consults it for a VCS stamp would be
+# reading a fixture. -buildvcs=false keeps the build off that path entirely; no
+# assertion here reads a version.
+GCTK_BUILT=""
+GCTK_BUILD_LOG="$TMP/gctk-build.log"
+GO_PRESENT=0
+if command -v go >/dev/null 2>&1; then
+    GO_PRESENT=1
+    if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
+        GCTK_BUILT="$TMP/gctk"
+    fi
+fi
+
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
 harness_init
 [ -x "$SUT" ] || chmod +x "$SUT"
 
-# --- drift: the embedded table IS lifecycle.toml -------------------------------
-echo "# drift against lifecycle.toml"
-BLOCK="$(awk '/# >>> lifecycle-state-table/{f=1;next} /# <<< lifecycle-state-table/{f=0} f' "$SUT")"
-[ -n "$BLOCK" ] && ok "state-table block extracted" || bad "state-table markers missing"
-eval "$BLOCK"
+# --- lifecycle.toml, read the same way for both arms ---------------------------
+toml_states() { awk '/^states = \[/{f=1;next} f&&/^\]/{exit} f{gsub(/[ ",]/,"");print}' "$TOML" | tr '\n' ' ' | sed 's/ $//'; }
+toml_human()  { sed -n 's/^human_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
+toml_detached() { sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
+toml_park()   { sed -n 's/^park_route = "\(.*\)"/\1/p' "$TOML"; }
+toml_closed() { sed -n 's/^closed_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '", '; }
+toml_edges()  {
+  awk '
+    /^\[\[transition\]\]/ { from=""; to="" }
+    /^from = /  { gsub(/from = |"/,""); from=$0 }
+    /^to = /    { gsub(/to = |"/,""); to=$0; print from ">" to }' "$TOML" | sort
+}
 
-TOML_STATES=$(awk '/^states = \[/{f=1;next} f&&/^\]/{exit} f{gsub(/[ ",]/,"");print}' "$TOML" | tr '\n' ' ' | sed 's/ $//')
-eq "$LIFECYCLE_STATES" "$TOML_STATES" "states match lifecycle.toml"
-TOML_HUMAN=$(sed -n 's/^human_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' )
-eq "$(printf '%s' "$LIFECYCLE_HUMAN_STATES" | tr -s ' ')" "$(printf '%s' "$TOML_HUMAN" | sed 's/^ *//;s/ *$//' | tr -s ' ')" "human states match lifecycle.toml"
-TOML_DETACHED=$(sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' )
-eq "$(printf '%s' "$LIFECYCLE_DETACHED_STATES" | tr -s ' ')" "$(printf '%s' "$TOML_DETACHED" | sed 's/^ *//;s/ *$//' | tr -s ' ')" "detached states match lifecycle.toml"
-TOML_PARK=$(sed -n 's/^park_route = "\(.*\)"/\1/p' "$TOML")
-eq "$LIFECYCLE_PARK_ROUTE" "$TOML_PARK" "park route matches lifecycle.toml"
-TOML_CLOSED=$(sed -n 's/^closed_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '", ')
-eq "$LIFECYCLE_CLOSED_STATES" "$TOML_CLOSED" "closed states match lifecycle.toml"
-TOML_EDGES=$(awk '
-  /^\[\[transition\]\]/ { from=""; to="" }
-  /^from = /  { gsub(/from = |"/,""); from=$0 }
-  /^to = /    { gsub(/to = |"/,""); to=$0; print from ">" to }' "$TOML" | sort)
-SH_EDGES=$(printf '%s\n' "$LIFECYCLE_TRANSITIONS" | sed '/^$/d' | sort)
-eq "$SH_EDGES" "$TOML_EDGES" "transition edges match lifecycle.toml"
+# The shell fallback carries the table as constants in a marked block.
+drift_shell() {
+  echo "# drift against lifecycle.toml (embedded shell table)"
+  BLOCK="$(awk '/# >>> lifecycle-state-table/{f=1;next} /# <<< lifecycle-state-table/{f=0} f' "$SUT")"
+  [ -n "$BLOCK" ] && ok "state-table block extracted" || bad "state-table markers missing"
+  eval "$BLOCK"
+  eq "$LIFECYCLE_STATES" "$(toml_states)" "states match lifecycle.toml"
+  eq "$(printf '%s' "$LIFECYCLE_HUMAN_STATES" | tr -s ' ')" "$(toml_human)" "human states match lifecycle.toml"
+  eq "$(printf '%s' "$LIFECYCLE_DETACHED_STATES" | tr -s ' ')" "$(toml_detached)" "detached states match lifecycle.toml"
+  eq "$LIFECYCLE_PARK_ROUTE" "$(toml_park)" "park route matches lifecycle.toml"
+  eq "$LIFECYCLE_CLOSED_STATES" "$(toml_closed)" "closed states match lifecycle.toml"
+  eq "$(printf '%s\n' "$LIFECYCLE_TRANSITIONS" | sed '/^$/d' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
+}
+
+# The port carries it in a typed package and prints it on demand.
+drift_gctk() {
+  echo "# drift against lifecycle.toml (gctk lifecycle --dump-machine)"
+  DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
+  [ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^human_states //p')" "$(toml_human)" "human states match lifecycle.toml"
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^park_route //p')" "$(toml_park)" "park route matches lifecycle.toml"
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
+  # The cap is not in lifecycle.toml: it is a rendering bound the two takeaway
+  # writers share, and the shell arm holds lifecycle.sh's copy against
+  # gc-helm.sh. Chaining the port to lifecycle.sh completes that line.
+  eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
+     "$(sed -n 's/^LIFECYCLE_TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$SUT" | head -1)" \
+     "takeaway cap matches lifecycle.sh"
+}
+
+suite() {
 
 # The machine axis is declared here and spent by the helm board, which mirrors
 # it as Go constants. One meaning, two lists: a value added on one side only
@@ -672,6 +720,18 @@ out="$("$SUT" reopen r-3 2>&1)"; rc=$?
 eq "$rc" 1 "reopen refuses an open bead"
 has "$out" "nothing to repair" "and says there is nothing to repair"
 
+# A value-taking flag as the LAST token is a truncated command: refuse it. The
+# empty value it would otherwise take drops --expect's compare-and-swap guard,
+# and a parser that shifts past the end never terminates at all.
+store '[{"id":"v-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+for FLAG in --to --expect --set --set-dated --unset --assignee --route --takeaway --append-notes; do
+  out="$(timeout 10 "$SUT" transition v-1 --to pull_request "$FLAG" 2>&1)"; rc=$?
+  eq "$rc" 1 "$FLAG with no value is refused (exit 1, not a hang)"
+  has "$out" "flag $FLAG needs a value" "and names the flag"
+done
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "a refused truncated command writes nothing"
+
 store '[{"id":"r-4","status":"closed","assignee":"","notes":"","metadata":{}}]'
 out="$("$SUT" reopen r-4 2>&1)"; rc=$?
 eq "$rc" 1 "reopen refuses a closed unanchored bead (a legal closed shape)"
@@ -683,6 +743,51 @@ has "$out" "status" "the unverified field is named"
 
 out="$("$SUT" reopen r-nope 2>&1)"; rc=$?
 eq "$rc" 2 "reopen on an unreadable bead exits 2"
+
+}
+
+echo "## arm: shell fallback (GCTK_BIN=none)"
+export GCTK_BIN=none
+drift_shell
+suite
+
+echo
+echo "## arm: gctk lifecycle (reached through lifecycle.sh)"
+if [ -n "$GCTK_BUILT" ]; then
+    export GCTK_BIN="$GCTK_BUILT"
+    drift_gctk
+    suite
+    # The arm proves nothing unless lifecycle.sh actually handed off. gctk's
+    # usage text names itself; the fallback's does not.
+    has "$("$SUT" 2>&1)" "gctk lifecycle" "lifecycle.sh execs the binary when GCTK_BIN resolves"
+elif [ "$GO_PRESENT" -eq 0 ]; then
+    bad "no Go toolchain: the gctk lifecycle port was NOT exercised, and this suite is its acceptance bar"
+else
+    bad "gctk did not build; the port was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+fi
+
+echo
+echo "## arm: the city chain, with no GCTK_BIN to shortcut it"
+# GC_CITY_PATH is the city root a supervisor puts in an agent session; GC_CITY
+# and GC_CITY_ROOT are absent there. A resolver blind to it leaves every agent
+# on the fallback, so the port ships and never runs in the shape most callers
+# have. Reached with GCTK_BIN unset, which is how a real caller reaches it.
+if [ -n "$GCTK_BUILT" ]; then
+    CITY="$TMP/city"
+    mkdir -p "$CITY/.gc/services/gctk/bin"
+    cp "$GCTK_BUILT" "$CITY/.gc/services/gctk/bin/gctk"
+    # gctk's usage names itself; the fallback's does not. Same discriminator the
+    # gctk arm uses for the handoff.
+    for VAR in GC_CITY_PATH GC_CITY GC_CITY_ROOT; do
+        out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$VAR=$CITY" "$SUT" 2>&1)
+        has "$out" "gctk lifecycle" "$VAR alone resolves the deployed binary"
+    done
+    # The control: the same binary on disk, named by nothing.
+    out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" 2>&1)
+    hasnt "$out" "gctk lifecycle" "no city named: the shell fallback answers"
+else
+    bad "gctk did not build; the city resolution chain was NOT exercised"
+fi
 
 echo
 echo "passed: $PASS  failed: $FAIL"
