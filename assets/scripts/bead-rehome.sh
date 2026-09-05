@@ -22,6 +22,9 @@ set -euo pipefail
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
+
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""
 
@@ -87,6 +90,8 @@ rigs_json() {
     printf '%s' "$RIGS_JSON"
 }
 
+# Both resolvers end in `return 0`: under set -e a non-zero "no match" would
+# abort before the die below can name the unresolvable store.
 store_path() { # rig:<name> -> repo path, empty when unresolvable
     local ref="$1" name
     case "$ref" in
@@ -97,13 +102,12 @@ store_path() { # rig:<name> -> repo path, empty when unresolvable
     return 0
 }
 
-# Both resolvers end in `return 0`: under set -e a non-zero "no match" would
-# abort before the die below can name the unresolvable store.
-store_for_bead() { # bead id -> rig:<name> via prefix; empty on 0 or >1 hits
-    local id="$1" pfx="${1%%-*}" hits
-    [ "$pfx" != "$id" ] || return 0
-    hits=$(rigs_json | jq -r --arg p "$pfx" '[.rigs[]? | select(.prefix == $p) | .name] | if length == 1 then .[0] else empty end' 2>/dev/null || true)
-    [ -n "$hits" ] && printf 'rig:%s' "$hits"
+# The id-prefix derivation lives in bead-store.sh, so a stamped pointer and the
+# destructive gates that read one place the same id in the same store.
+store_for_bead() { # bead id -> rig:<name> via prefix; empty when unresolved
+    local name
+    name=$("$BEAD_STORE" "$1") || return 0
+    [ -n "$name" ] && printf 'rig:%s' "$name"
     return 0
 }
 

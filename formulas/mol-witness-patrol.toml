@@ -28,9 +28,9 @@ the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
 Marked blocks (bug-dispatch, host-bead-skip, liveness-map-guard,
-liveness-lookup, warrant-file, husk-guard, crash-loop-window,
-patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
-tests; keep markers, keep them backslash-free."""
+liveness-lookup, warrant-file, husk-guard, owning-store-guard,
+crash-loop-window, patrol-wisp-pour, refinery-queue-nudge) are extracted and
+executed by their tests; keep markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -344,9 +344,50 @@ target (`git merge-base --is-ancestor origin/$BRANCH origin/main`), the
 work landed: escalate the observation, close the bead, clean the worktree.
 Otherwise reset:
 
-**5. Cleanup + return to pool.** Remove the worktree (from the rig root:
-`git worktree remove <path> --force; git worktree prune`). Then hand the bead
-to `orphan-dispose.sh`, which picks the disposal from what the bead IS:
+**5. Cleanup + return to pool.** The worktree is removed on the authority of
+the bead that owns it, so that bead has to be provably present in the store
+its own id prefix names. A bare `gc bd show` cannot supply that proof: it
+resolves a live id from whichever store holds it, but a miss is answered by
+the store you are standing in, not the one the prefix names, so an absent
+answer cannot tell a bead gone from its own store from a lookup sent to the
+wrong store. Reading that miss as an unowned directory is what licenses a
+wrong delete. `bead-store.sh --present` derives the store from the prefix and
+asks it by `--db`, and it refuses an unknown prefix as readily as a missing
+bead:
+
+```bash
+# >>> owning-store-guard
+BS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/bead-store.sh" ] && { BS="$c/assets/scripts/bead-store.sh"; break; }
+done
+OWNED=0
+if [ -z "$BS" ]; then
+  echo "witness: bead-store.sh not found — the store owning <bead> is unproven; REFUSING to remove $WORKTREE" >&2
+elif "$BS" --present "<bead>"; then
+  OWNED=1
+else
+  echo "witness: <bead> does not resolve in the store its prefix names — REFUSING to remove $WORKTREE; a worktree whose owner cannot be placed is not an unowned one" >&2
+fi
+# <<< owning-store-guard
+```
+
+Remove the worktree only under the guard, and from the rig root — a husk
+resolves the worktree list from the wrong repo:
+
+```bash
+if [ "$OWNED" = "1" ]; then
+  git -C "${GC_RIG_ROOT:-.}" worktree remove "$WORKTREE" --force
+  git -C "${GC_RIG_ROOT:-.}" worktree prune
+fi
+```
+
+A refusal leaves the worktree standing and escalates
+(`escalate.sh --subject <bead> --key witness-unplaceable-owner ...`). Disposal
+still runs either way: a bead whose store cannot be named is exactly the bead a
+person needs to see, and leaving it owned hides it.
+
+Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
+the bead IS:
 
 ```bash
 OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
