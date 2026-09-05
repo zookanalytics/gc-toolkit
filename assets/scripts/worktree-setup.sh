@@ -103,12 +103,21 @@ restore_stage() {
 
 # Reclaim a stage dir a force-killed run left behind: its EXIT trap never ran,
 # so nothing else merges it back and the staged contents are lost forever.
-# Adopt any orphan for THIS target before touching the worktree — including on
-# the already-a-worktree sync path below, which is where surviving orphans
-# actually accumulate. Merge back with the same "existing files win" rule
-# restore_stage uses. A stage named for a DIFFERENT target is left untouched:
-# it may be a concurrent run's live stage, and its contents are not ours. This
-# is best-effort self-heal and must never block worktree creation.
+# Before touching the worktree — including on the already-a-worktree sync path
+# below, where surviving orphans actually accumulate — reclaim any orphan this
+# target can prove is its own, merging it back with the same "existing files
+# win" rule restore_stage uses. Attribution lives entirely in the name, because
+# the parent directory is shared by every agent in the rig:
+#   - "<this-target>.XXXXXX": this target's own scoped orphan — adopt it.
+#   - "<other-target>.XXXXXX": another target's scoped stage — leave it; it may
+#     be that target's live, in-flight stage and its contents are not ours.
+#   - "XXXXXX" with no target segment: a legacy orphan from before stages were
+#     scoped. Nothing can prove which target created it, so adopting it into
+#     whichever target runs first leaks one target's files into another. Such
+#     unscoped names can no longer be created, so it is always old debris, never
+#     a live stage — quarantine it out of the stage namespace with its contents
+#     intact, for an attribution-aware manual sweep, and let no target claim it.
+# Best-effort self-heal; it must never block worktree creation.
 adopt_orphan_stages() {
     PARENT=$(dirname "$WT")
     [ -d "$PARENT" ] || return 0
@@ -117,9 +126,14 @@ adopt_orphan_stages() {
         REST=${ORPHAN##*/}
         REST=${REST#.gascity-worktree-stage.}
         case "$REST" in
-            "$STAGE_SLUG".*) ;;   # this target's own orphan
-            *.*) continue ;;      # another target's stage — may be live, leave it
-            *) ;;                 # legacy un-scoped orphan (pre-dates scoping)
+            "$STAGE_SLUG".*) ;;   # this target's own scoped orphan — adopt below
+            *.*) continue ;;      # another target's scoped stage — may be live, leave it
+            *)                    # legacy un-scoped orphan — unprovable owner, quarantine it
+                QUARANTINE="$PARENT/.gascity-worktree-orphan.$REST"
+                if [ ! -e "$QUARANTINE" ] && mv "$ORPHAN" "$QUARANTINE" 2>/dev/null; then
+                    echo "worktree-setup: quarantined unattributable legacy stage dir ${ORPHAN##*/} as ${QUARANTINE##*/} (owning target unknown; reclaim manually)" >&2
+                fi
+                continue ;;
         esac
         mkdir -p "$WT"
         for ENTRY in "$ORPHAN"/.[!.]* "$ORPHAN"/..?* "$ORPHAN"/*; do
