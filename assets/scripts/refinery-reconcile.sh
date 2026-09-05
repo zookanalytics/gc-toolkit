@@ -12,7 +12,8 @@
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
 # review-sweep (cleanup over closed anchors; no projection, no merge authority),
 # duplicate-sweep (BEADS_ACTOR projected: it closes duplicate dispatches through
-# bead-rehome; no merge authority).
+# bead-rehome; no merge authority), pr-stack (PR bodies only; no projection, no
+# merge authority).
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
 # gate: the controller watchdog closes any tracking bead older than 2m, which
 # reopens that gate under a pass still running.
@@ -253,6 +254,13 @@ run_pass "(6) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(7) duplicate-sweep" duplicate-sweep.sh ) \
   || FAILED="${FAILED}duplicate-sweep rc=$?; "
+
+# (8) pr-stack: re-render each open PR's beads-on-this-branch section. Last, and
+# after merge: a bead this pass landed onto another anchor's branch is in the
+# ledger it reads, so the body names it on the same tick rather than a minute
+# later. It writes only PR bodies — no bead, no merge authority — so it runs
+# unprojected and its failure gates nothing.
+run_pass "(8) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
 
 if [ -n "$LOG_SINK" ]; then
   {

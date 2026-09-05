@@ -254,6 +254,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 4 merged or arm 5 recorded on this pass is
    disposable on the same tick.
+9. **pr-stack.sh** — the beads-on-this-branch section of an open PR's body. No
+   merge authority, and the only arm that writes no bead. A body is composed
+   once, by arm 2, out of one anchor; commits keep arriving on the branch after
+   that and none of them touch it, so a reviewer approves a scope the body does
+   not describe. For each open anchor recording a `pr_number`, this arm reads
+   the branch's bead ledger — `branch` (committed onto the branch: the anchor,
+   plus every rework and rebase hand-back), `fold_target` (folded onto it by a
+   polecat), and `merged_target` with `merge_result=merged` (landed its own PR
+   into it) — and splices the list into a delimited section at the end of the
+   body. The title is left alone: it names the anchor, and the body is where a
+   reviewer reads scope. A branch carrying one bead publishes nothing, because
+   arm 2 already named it. Idempotence is the rendered section compared against
+   the one between the markers, never the whole body, and the body is read
+   `\r`-stripped: GitHub stores a body it re-wrapped with CRLF, and a marker
+   line carrying a trailing CR would match nothing and append a second section
+   every pass. Any read that fails leaves that PR as it stands — a truncated
+   ledger published as the whole ledger is worse than last pass's section. It
+   runs last, and after arm 4, so a bead this pass landed onto another anchor's
+   branch is named on the same tick.
 
 ## Single-flight: the tracking gate and the pass lock
 
