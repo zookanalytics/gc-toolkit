@@ -16,7 +16,7 @@ PROMPT="$ROOT/agents/deacon/prompt.template.md"
 AGENT="$ROOT/agents/deacon/agent.toml"
 LEDGER="$HERE/gc-deacon-ledger.sh"
 ESCALATE="$HERE/escalate.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-deacon-ledger-wiring-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0

@@ -34,7 +34,7 @@ ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-control-char-scrub-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 
 # Markers are anchored: a header sentence naming one is prose, not a fence.
 extract() { awk '/^[[:space:]]*# >>> control-char-scrub[[:space:]]*$/{inb=1; next} /^[[:space:]]*# <<< control-char-scrub[[:space:]]*$/{inb=0} inb' "$1"; }

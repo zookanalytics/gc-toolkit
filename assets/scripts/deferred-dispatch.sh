@@ -41,7 +41,11 @@ DRY_RUN=0
 TMPFILES=()
 cleanup() { [ "${#TMPFILES[@]}" -gt 0 ] && rm -f "${TMPFILES[@]}"; return 0; }
 trap cleanup EXIT
-mktemp_tracked() { local f; f="$(mktemp)" || return 1; TMPFILES+=("$f"); printf '%s' "$f"; }
+# Answers in $REPLY rather than on stdout, because a caller writing
+# `f="$(mktemp_tracked)"` would run the append inside a command-substitution
+# subshell: the registry the EXIT trap reads is the caller's, and the
+# subshell's copy of it dies with the substitution, leaking every allocation.
+mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch.XXXXXX")" || return 1; TMPFILES+=("$REPLY"); }
 
 bd_() {
     if [ -n "$BD_DB" ]; then gc bd --db "$BD_DB" "$@"; else gc bd "$@"; fi
@@ -217,7 +221,7 @@ cmd_list() {
         esac
         shift || true
     done
-    local rows; rows="$(mktemp_tracked)" || { echo "$PROG: list: mktemp failed" >&2; return 1; }
+    local rows; mktemp_tracked || { echo "$PROG: list: mktemp failed" >&2; return 1; }; rows="$REPLY"
     armed_rows "$rows" || { echo "$PROG: list: could not enumerate armed beads" >&2; return 1; }
 
     if [ "$as_json" = 1 ]; then
@@ -250,7 +254,7 @@ sling_bead() { # id target args_json -> rc
     local -a extra=()
     if [ "$args_json" != "[]" ] && [ -n "$args_json" ]; then
         printf '%s' "$args_json" | jq -e 'type == "array"' >/dev/null 2>&1 || return 3
-        local argf; argf="$(mktemp_tracked)" || return 3
+        local argf; mktemp_tracked || return 3; argf="$REPLY"
         printf '%s' "$args_json" | jq -r '.[]' > "$argf" 2>/dev/null || return 3
         while IFS= read -r a; do [ -n "$a" ] && extra+=("$a"); done < "$argf"
     fi
@@ -275,7 +279,7 @@ cmd_reconcile() {
         shift || true
     done
 
-    local rows; rows="$(mktemp_tracked)" || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }
+    local rows; mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; rows="$REPLY"
     armed_rows "$rows" || {
         echo "$PROG: reconcile: could not enumerate armed beads — NOT treating this as an empty queue" >&2
         return 1; }

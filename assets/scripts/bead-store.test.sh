@@ -16,7 +16,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/bead-store.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bead-store-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0

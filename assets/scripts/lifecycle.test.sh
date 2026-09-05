@@ -25,7 +25,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SUT="$HERE/lifecycle.sh"
 TOML="$ROOT/lifecycle/lifecycle.toml"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lifecycle-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 # Build the port BEFORE the harness puts stub binaries on PATH: the stub git

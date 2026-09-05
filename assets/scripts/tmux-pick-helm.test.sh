@@ -11,7 +11,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PICK="$HERE/tmux-pick-helm.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-tmux-pick-helm-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 # The picker resolves helm-svc from GC_SERVICE_STATE_ROOT, then GC_CITY_PATH,

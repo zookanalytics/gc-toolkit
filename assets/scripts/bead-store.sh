@@ -164,7 +164,7 @@ case "$MODE" in
   db)   printf '%s\n' "$DB"; exit 0 ;;
 esac
 
-ERR_FILE=$(mktemp)
+ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-bead-store.XXXXXX")
 PAYLOAD=$(bounded gc bd --db "$DB" show "$BEAD" --json 2>"$ERR_FILE" | scrub)
 STORE_ERR=$(scrub <"$ERR_FILE"); rm -f "$ERR_FILE"
 

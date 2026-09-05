@@ -172,11 +172,11 @@ longest_span() {
 printf '['
 first_commit=1
 
-upstream_raw=$(mktemp)
-upstream_pat=$(mktemp)
-eligible_file=$(mktemp)
-unmatched_file=$(mktemp)
-hits_file=$(mktemp)
+upstream_raw=$(mktemp "${TMPDIR:-/tmp}/gctk-survey-absorption.XXXXXX")
+upstream_pat=$(mktemp "${TMPDIR:-/tmp}/gctk-survey-absorption.XXXXXX")
+eligible_file=$(mktemp "${TMPDIR:-/tmp}/gctk-survey-absorption.XXXXXX")
+unmatched_file=$(mktemp "${TMPDIR:-/tmp}/gctk-survey-absorption.XXXXXX")
+hits_file=$(mktemp "${TMPDIR:-/tmp}/gctk-survey-absorption.XXXXXX")
 trap 'rm -f "$upstream_raw" "$upstream_pat" "$eligible_file" "$unmatched_file" "$hits_file"' EXIT
 
 for SHA in "${SHAS[@]}"; do

@@ -59,7 +59,7 @@ for f in "$FORMULA_TOML" "$AGENT_TOML" "$PROMPT_MD"; do
 done
 command -v jq >/dev/null 2>&1 || { echo "fixture: jq required" >&2; exit 2; }
 
-FXDIR="$(mktemp -d)"
+FXDIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 # shellcheck disable=SC2329  # invoked indirectly via the EXIT trap
 cleanup() { rm -rf "$FXDIR"; }
 trap cleanup EXIT
@@ -228,7 +228,7 @@ extract_toml_block() {
     done < "$AGENT_TOML"
 }
 WQ="$(extract_toml_block work_query | sed -e 's#{{\.Rig}}#gc-toolkit#g' -e 's#{{\.RigRoot}}#/tmp/proactive-nope#g')"
-POISON="$(mktemp -d)"
+POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
 : > "$POISON/called"
@@ -264,7 +264,7 @@ has "scale_check rig-qualifies the same route"      '{{.Rig}}/gc-toolkit.proacti
 # counts a root gc hook --claim never offers and spawns a worker with nothing
 # to claim — the churn this pool hit.
 has "scale_check strips graph.v2 topology roots (gc.kind clause)" 'or . == "spec"' "$SC_RAW"
-POISON="$(mktemp -d)"
+POISON="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$POISON/gc" <<SH
 #!/bin/sh
 : > "$POISON/called"
@@ -291,7 +291,7 @@ echo "── churn guard: work_query and scale_check agree across the page bound
 # honors `gc bd ready`'s --limit/--sort, over 21 roots (older) ahead of 1 step:
 # 21 exceeds the 20-row page, so a page-then-filter query is empty while a
 # filter-then-slice query keeps the step.
-CHURN="$(mktemp -d)"
+CHURN="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 jq -n '[ range(1;22) as $d
           | { id: "root-\($d)", title: "topology root \($d)", priority: 1,
               created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
@@ -420,7 +420,7 @@ echo "── scan filters BEFORE the page bound (live path), and 0 = unbounded �
 # so `scan --sling` schedules nothing. The GC_PROACTIVE_FIXTURE path cannot
 # catch this — it bypasses the live `gc bd ready --limit` calls — so drive the
 # real path against a `gc bd ready` stub that honors --limit/--sort.
-SCANB="$(mktemp -d)"
+SCANB="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 # (1) 21 anchors carrying a work-in-flight marker (older) ahead of 1 raw input
 # (newest): 21 exceeds the 20-row page, so a page-then-filter scan is empty
 # while a filter-then-slice scan keeps the input.
@@ -612,7 +612,7 @@ has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
-UFX="$(mktemp -d)"
+UFX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$UFX/u1.show.json" <<'JSON'
 [{"id":"u1","title":"u","description":"trusted seed body","status":"open","issue_type":"task","parent":"","metadata":{"pr_number":"5"},"notes":"n","comment_count":1,"dependencies":[]}]
 JSON

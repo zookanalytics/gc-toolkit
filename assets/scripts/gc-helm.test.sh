@@ -11,11 +11,12 @@
 #   the demand verb's sibling shape and fail-closed edge
 #   the retired board verb refuses and names helm-svc board
 #   the dismiss verb: both halves of the operator's explicit clear
+#   the rig-enumeration helper leaving no trap installed on its caller
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/gc-helm.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -2025,6 +2026,40 @@ grep -q 'tk-a, tk-b' <<< "$DERR" \
   && ok "(LOOKUPMULTIPLE) diagnostic identifies both gates" \
   || bad "(LOOKUPMULTIPLE) missing conflicting ids: $DERR"
 printf '[]\n' > "$D_LIST"
+
+# ── the rig-enumeration helper leaves nothing installed ──────────────────────
+# A trap is process-global: one installed inside a helper and left there
+# rewrites how every later line of the caller answers a signal, and outlives
+# the file it was installed to remove. The helper is lifted and run directly
+# — every real call site is a command substitution, whose subshell would hide
+# the residue this asserts is absent.
+ENUM="$TMP/enum-helper.sh"
+sed -n '/^rigs_count() {/,/^}/p;/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
+mkdir -p "$TMP/enumbin"
+cat > "$TMP/enumbin/gc" <<'ENUMGC'
+#!/usr/bin/env bash
+[ "$1 ${2:-}" = "rig list" ] && printf '{"rigs":[{"name":"r","path":"/p","prefix":"tk"}]}\n'
+exit 0
+ENUMGC
+chmod +x "$TMP/enumbin/gc"
+cat > "$TMP/enum-probe.sh" <<'ENUMPROBE'
+set -eu
+PROG=probe; FIXTURE=""; RIGS=""; TIMEOUT_BIN=""
+with_timeout() { shift; "$@"; }
+. "$1"
+enumerate_rigs
+printf 'RIGS[%s]\nTRAPS[%s]\n' "$RIGS" "$(trap)"
+ENUMPROBE
+ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
+EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
+grep -q 'RIGS\[\[' <<< "$EOUT" \
+  && ok "(ENUM) the helper enumerated, so the temp-file path really ran" \
+  || bad "(ENUM) the helper did not enumerate (out: $EOUT)"
+grep -q 'TRAPS\[\]' <<< "$EOUT" \
+  && ok "(ENUM) …and left no trap installed on the caller" \
+  || bad "(ENUM) the helper left traps installed (out: $EOUT)"
+eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l)" "0" \
+   "(ENUM) …and removed its stderr capture"
 
 echo ""
 echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference): $PASS passed, $FAIL failed"

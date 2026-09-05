@@ -13,7 +13,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -438,7 +438,7 @@ printf '%s' "$(prview 73 MERGED CLEAN)" > "$GH_DIR/pr_view_73.json"
 cat > "$TMP/s4hook.sh" <<HOOK
 #!/usr/bin/env bash
 [ "\${1:-}" = "S4" ] || exit 0
-tmp=\$(mktemp)
+tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
 jq -c 'map(if .id == "S4" then (.metadata |= del(.merge_result)) else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
 HOOK
 chmod +x "$TMP/s4hook.sh"
@@ -455,7 +455,7 @@ printf '%s' "$(prview 76 MERGED CLEAN)" > "$GH_DIR/pr_view_76.json"
 cat > "$TMP/s7hook.sh" <<HOOK
 #!/usr/bin/env bash
 [ "\${1:-}" = "S7" ] || exit 0
-tmp=\$(mktemp)
+tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
 jq -c 'map(if .id == "S7" then (.metadata.pr_number = "77"
   | .metadata.pr_url = "https://github.com/zook/gc-toolkit/pull/77"
   | .metadata.branch = "polecat/x77") else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
@@ -493,7 +493,7 @@ cat > "$TMP/sahook.sh" <<HOOK
 n=\$(cat "$TMP/sa.count" 2>/dev/null || echo 0); n=\$((n + 1))
 printf '%s' "\$n" > "$TMP/sa.count"
 [ "\$n" -ge 2 ] || exit 0
-tmp=\$(mktemp)
+tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
 jq -c 'map(if .id == "SA" then (.metadata |= del(.merge_result)) else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
 HOOK
 chmod +x "$TMP/sahook.sh"
@@ -587,7 +587,7 @@ cat > "$TMP/phook.sh" <<HOOK
 [ "\${1:-}" = "C5" ] || exit 0
 n=\$(cat "$PHOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$PHOOK_COUNT"
 if [ "\$n" = 2 ]; then
-  tmp=\$(mktemp)
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
   jq -c 'map(if .id == "C5" then .metadata.pr_posture = "commented@sha-74" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
 fi
 HOOK
@@ -610,7 +610,7 @@ cat > "$TMP/hook.sh" <<HOOK
 [ "\${1:-}" = "T2" ] || exit 0
 n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
 if [ "\$n" = 2 ]; then
-  tmp=\$(mktemp)
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
   jq -c 'map(if .id == "T2" then .metadata.merge_hold = "true" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
 fi
 HOOK
@@ -634,7 +634,7 @@ cat > "$TMP/hook3.sh" <<HOOK
 [ "\${1:-}" = "T3" ] || exit 0
 n=\$(cat "$HOOK_COUNT" 2>/dev/null || echo 0); n=\$((n + 1)); printf '%s' "\$n" > "$HOOK_COUNT"
 if [ "\$n" = 2 ]; then
-  tmp=\$(mktemp)
+  tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-merge-test.XXXXXX")
   jq -c 'map(if .id == "T3" then .metadata["check.codex"] = "fixing" else . end)' "\$STUB_STORE" > "\$tmp" && mv "\$tmp" "\$STUB_STORE"
 fi
 HOOK

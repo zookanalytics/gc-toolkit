@@ -46,7 +46,7 @@ TOOL="$HERE/../assets/scripts/gc-helm.sh"
 [ -x "$TOOL" ] || { echo "fixture: $TOOL not executable" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "fixture: jq required" >&2; exit 2; }
 
-FXDIR="$(mktemp -d)"
+FXDIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"
 # shellcheck disable=SC2329  # invoked indirectly via the EXIT trap
 cleanup() { rm -rf "$FXDIR"; }
 trap cleanup EXIT
@@ -115,7 +115,7 @@ echo "── hermetic: open visit ⇒ active, not stranded ──"
 # polecats. Two sibling epics with the identical stranded shape: tk-visited
 # has an open visit, tk-lonely has none. The spare must hit the visited one
 # and ONLY the visited one (visit-gated, not a blanket suppression).
-LIVE="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
+LIVE="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; cp "$FXDIR/rigs.json" "$LIVE/rigs.json"
 # updated_at must be RECENT, not a hardcoded date: this case asserts NORMAL,
 # and a fixed past date eventually crosses STALE_DAYS and bumps NORMAL→ELEVATED
 # (a time-bomb). Compute it relative to now so the assertion never rots. The
@@ -152,7 +152,7 @@ echo "── hermetic: dead-owner in-progress is stuck, not moving (PROBLEM 1) �
 # control (session active, .running null to prove we ignore it), and a MIXED
 # anchor (one live + one dead in-progress child). Recent updated_at so the
 # staleness bump never perturbs the severity assertions.
-DO="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$DO/rigs.json"
+DO="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; cp "$FXDIR/rigs.json" "$DO/rigs.json"
 DO_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat > "$DO/anchors.ndjson" <<JSON
 {"id":"tk-dead","title":"Dead-owner epic","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$DO_RECENT","description":"","progress":null,"children":[{"id":"tk-d1","status":"in_progress","assignee":"gc-toolkit__polecat-dead"},{"id":"tk-d2","status":"open","assignee":""}]}
@@ -200,7 +200,7 @@ echo "── hermetic: unowned non-machine convoy is the orphan exception (PROBL
 # normal floating anchor. (The render path is driven directly here; the gather's
 # machine-convoy exclusion — sling-* and "input convoy for …" — is a Dolt-side
 # filter exercised by the live smoke, not hermetically.)
-UO="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$UO/rigs.json"; printf '{}' > "$UO/sessions.json"
+UO="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; cp "$FXDIR/rigs.json" "$UO/rigs.json"; printf '{}' > "$UO/sessions.json"
 UO_RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat > "$UO/anchors.ndjson" <<JSON
 {"id":"tk-orphan","title":"Orphan convoy","kind":"unowned","source":"unowned","owned":false,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"$UO_RECENT","description":"","progress":null,"children":[{"id":"tk-orf1","status":"open","assignee":""}]}
@@ -236,7 +236,7 @@ echo "── hermetic: takeaway drives NEEDS (present → sentence; absent → t
 # bead-id list; the mechanical heads/xref ids move to --json (open_heads,
 # cross_rig_refs). A whitespace-laden takeaway is collapsed to one line so it
 # can never break the human table.
-TKV="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$TKV/rigs.json"; printf '{}' > "$TKV/sessions.json"
+TKV="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; cp "$FXDIR/rigs.json" "$TKV/rigs.json"; printf '{}' > "$TKV/sessions.json"
 cat > "$TKV/anchors.ndjson" <<'JSON'
 {"id":"tk-tk","title":"has takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"takeaway":"need operator to pick the storage backend before schema lands","takeaway_at":"2026-06-10T00:00:00Z","takeaway_by":"proactive","children":[{"id":"tk-c1","status":"open","assignee":""},{"id":"tk-c2","status":"closed","assignee":""}]}
 {"id":"tk-bare","title":"stranded no takeaway","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"blocks sl-zzz9 downstream","progress":null,"takeaway":"","children":[{"id":"tk-c3","status":"open","assignee":""},{"id":"tk-c4","status":"open","assignee":""}]}
@@ -292,7 +292,7 @@ eq   "--limit=1 takes the single top row"        "1" "$(B --json --limit=1 | jq 
 has  "capped table notes 'showing N of M'" "showing 2 of 4" "$(GC_HELM_MAX_ROWS=2 B)"
 
 echo "── hermetic: dedup (a bead matched by two gathers shows once) ──"
-DUP="$(mktemp -d)"; cp "$FXDIR/rigs.json" "$DUP/rigs.json"; printf '{}' > "$DUP/sessions.json"
+DUP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; cp "$FXDIR/rigs.json" "$DUP/rigs.json"; printf '{}' > "$DUP/sessions.json"
 cat > "$DUP/anchors.ndjson" <<'JSON'
 {"id":"tk-dup","title":"Dual","kind":"epic","source":"epic","rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-a","status":"open","assignee":""}]}
 {"id":"tk-dup","title":"Dual","kind":"convoy","source":"convoy","owned":true,"rig":"gc-toolkit","prefix":"tk","priority":2,"updated_at":"2026-06-01T00:00:00Z","description":"","progress":null,"children":[{"id":"tk-b","status":"closed","assignee":""}]}
@@ -309,7 +309,7 @@ echo "── hermetic: the ID/RIG columns never truncate (tk-mtuej) ──"
 # "sl-kg9z6.4." and the operator could not tell which row was which. RIG failed
 # the same way at 13 ("shutupandlisten" → "shutupandlist", butted against KIND).
 # Both widths are now derived from the widest value on the board.
-WIDE="$(mktemp -d)"; printf '{}' > "$WIDE/sessions.json"
+WIDE="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; printf '{}' > "$WIDE/sessions.json"
 cat > "$WIDE/rigs.json" <<'JSON'
 [{"name":"shutupandlisten","path":"/tmp/fx-shutupandlisten","prefix":"sl"}]
 JSON
@@ -343,7 +343,7 @@ eq "ordinary board keeps RIG at its classic column" "23" \
    "$(B | awk '/^  SEV/ {print index($0, "RIG"); exit}')"
 
 echo "── hermetic: empty board ──"
-EMPTY="$(mktemp -d)"; : > "$EMPTY/anchors.ndjson"; cp "$FXDIR/rigs.json" "$EMPTY/rigs.json"; printf '{}' > "$EMPTY/sessions.json"
+EMPTY="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; : > "$EMPTY/anchors.ndjson"; cp "$FXDIR/rigs.json" "$EMPTY/rigs.json"; printf '{}' > "$EMPTY/sessions.json"
 has  "empty board says nothing floats" "Nothing floats" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" 2>/dev/null)"
 eq   "empty board --json is []" "0" "$(GC_HELM_FIXTURE="$EMPTY" "$TOOL" --json | jq 'length')"
 rm -rf "$EMPTY"
@@ -359,7 +359,7 @@ echo "── hermetic: failed gather → error + NO cache; legit-empty → cache
 # gather-failure line — NOT the quiet empty-board message —, exit non-zero,
 # and write NO cache, so a transient failure can never be served as a false
 # "0 anchors" all-clear for the cache TTL.
-GF="$(mktemp -d)"; mkdir -p "$GF/bin" "$GF/rig/.beads" "$GF/tmp"
+GF="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; mkdir -p "$GF/bin" "$GF/rig/.beads" "$GF/tmp"
 cat > "$GF/bin/gc" <<GCEOF
 #!/bin/sh
 case "\$1 \$2" in
@@ -383,7 +383,7 @@ rm -rf "$GF"
 
 # (b) Control: a legitimately EMPTY board (every query answers, with valid
 # empty JSON) still prints the quiet message, exits 0, and IS cached.
-GE="$(mktemp -d)"; mkdir -p "$GE/bin" "$GE/rig/.beads" "$GE/tmp"
+GE="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; mkdir -p "$GE/bin" "$GE/rig/.beads" "$GE/tmp"
 cat > "$GE/bin/gc" <<GCEOF
 #!/bin/sh
 case "\$1 \$2" in
@@ -409,7 +409,7 @@ echo "── hermetic: no timeout/gtimeout on PATH → board degrades, does not 
 # from (b)) and run with PATH set to ONLY that dir — with_timeout must fall
 # through to running the command unbounded instead of the old hard death
 # ("[: : integer expression expected" + jq --argjson garbage).
-NT="$(mktemp -d)"; mkdir -p "$NT/bin" "$NT/tmp"
+NT="$(mktemp -d "${TMPDIR:-/tmp}/gctk-helm-surface-fixture.XXXXXX")"; mkdir -p "$NT/bin" "$NT/tmp"
 for c in jq date mktemp rm cat head tail sed mkdir mv id cksum cut readlink dirname sort tr uniq wc; do
     p="$(command -v "$c" 2>/dev/null || true)"; [ -n "$p" ] && ln -s "$p" "$NT/bin/$c"
 done
