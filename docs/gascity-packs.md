@@ -192,7 +192,7 @@ even with every step quiet — and on the root's other steps, skipping
 `workflow-finalize` so the graph can still retire. It closes nothing. The
 blocking write deliberately carries no assignee: bd's claim guard refuses
 `--assignee ""` on an `in_progress` bead and the refusal is atomic over the
-whole update, so batching the two loses the status change as well (tk-z27pw).
+whole update, so batching the two loses the status change as well.
 Sibling claims are cleared afterwards, route first, because the reverse order
 leaves a bead briefly `open + unassigned + routed`, which is the offer predicate
 itself.

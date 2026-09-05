@@ -219,10 +219,13 @@ if [ -z "$TARGET" ]; then
   fi
 fi
 
-# Resolve the root once. A read that FAILED is not a step with no root: the
-# first is an unproven quiesce (fail closed below), the second a step
-# legitimately held alone. bd_json_array keeps them distinct — a valid array
-# that merely lacks gc.root_bead_id still resolves ROOT_READABLE=1, ROOT="".
+# Resolve the root once. Both a failed read and a valid payload that carries no
+# gc.root_bead_id are unproven quiesces: every caller is a graph.v2 molecule
+# step, so a missing root is metadata corruption, not a step legitimately held
+# alone. bd_json_array keeps the two apart only for their diagnostics — a failed
+# read leaves ROOT_READABLE=0, a valid array that lacks the key leaves
+# ROOT_READABLE=1 with ROOT="" — and both fail closed below rather than draining
+# a molecule whose root and siblings were never checked.
 ROOT=""; ROOT_READABLE=1
 if TARGET_JSON=$(bd_json_array show "$TARGET"); then
   ROOT=$(printf '%s' "$TARGET_JSON" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)
@@ -295,7 +298,8 @@ elif [ -n "$ROOT" ]; then
     QUIESCE_FAILED=1
   fi
 else
-  echo "$PROG: NOTE — $TARGET carries no gc.root_bead_id; held the step alone, and a routed root or sibling could still re-offer" >&2
+  echo "$PROG: FATAL — $TARGET carries no gc.root_bead_id; every caller is a graph.v2 molecule step, so a missing root is corruption, not a step held alone, and a routed root or sibling cannot be proven quiesced" >&2
+  QUIESCE_FAILED=1
 fi
 
 # ── Quiesce the root's other steps. They are pre-assigned by the graph, so

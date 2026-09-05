@@ -256,7 +256,7 @@ eq "$(meta other-load 'gc.routed_to')" "$POOL"                "another molecule'
 
 hasnt "$(gclog)" "--status=closed" "nothing is closed anywhere on the success path"
 
-echo "== atomicity: the blocking write carries no assignee (tk-z27pw) =="
+echo "== atomicity: the blocking write carries no assignee (a batched --assignee rolls the status back) =="
 BLOCK_LINE=$(grep -m1 -- '--status=blocked' "$GC_LOG")
 has   "$BLOCK_LINE" "--unset-metadata gc.routed_to" "status and route clear ship in ONE update"
 has   "$BLOCK_LINE" "blocked_reason" "the reason ships with the status"
@@ -382,14 +382,15 @@ OUT=$(FAKE_CTRL=1 "$SCRIPT" --step "$STEP" --reason "ctl" 2>&1); RC=$?
 eq "$RC" "0" "a raw control byte in a title does not blind resolution"
 eq "$(bstatus s-load)" "blocked" "and the hold still lands"
 
-echo "== a step with no root still gets held =="
+echo "== a rootless step is held but fails closed: a missing root is not a quiet molecule =="
 reset_store
 jq -c 'map(if .id == "s-load" then (.metadata |= del(.["gc.root_bead_id"])) else . end)' \
   "$FAKE_STORE" > "$TMP/s" && mv "$TMP/s" "$FAKE_STORE"
 OUT=$("$SCRIPT" --step "$STEP" --reason "no root" 2>&1); RC=$?
-eq "$RC" "0" "the hold lands without a root"
-eq "$(bstatus s-load)" "blocked" "the step is blocked"
+eq "$RC" "1" "a missing root exits 1 — every caller is a molecule step, so no root is corruption, not a quiet molecule"
+eq "$(bstatus s-load)" "blocked" "the step is still held — the missing root is downstream of the load-bearing write"
 has "$OUT" "carries no gc.root_bead_id" "and the gap is reported, not hidden"
+has "$OUT" "Do not drain" "and the caller is told not to drain"
 eq "$(meta root-1 'gc.routed_to')" "$POOL" "an unresolvable root is left alone"
 
 echo "== dry run writes nothing =="
