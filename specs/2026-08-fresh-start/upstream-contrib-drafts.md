@@ -1,6 +1,6 @@
 ---
 name: Upstream contribution drafts — build-factory trial findings
-description: Ready-to-file issue drafts for upstream defects — five surfaced by the 2026-08-08 build-factory trial (evidence in build-factory-trial-reactions.md) and two by the same-day live-adoption validator run (evidence in live-adoption-findings.md), each with reproduction and a proposed fix. For the operator to file against gastownhall/gascity-packs (or gascity core where noted) at their leisure; bodies are self-contained.
+description: Ready-to-file issue drafts for upstream defects, each with reproduction and a proposed fix — five surfaced by the 2026-08-08 build-factory trial (evidence in build-factory-trial-reactions.md), two by the same-day live-adoption validator run (evidence in live-adoption-findings.md), and later entries appended as they are found. For the operator to file against gastownhall/gascity-packs (or gascity core where noted) at their leisure; bodies are self-contained.
 ---
 
 # Upstream contribution drafts
@@ -10,6 +10,8 @@ city/rig layout, gascity pack 0.4.0 `f69ec02`). Evidence:
 [build-factory-trial-reactions.md](build-factory-trial-reactions.md).
 Drafts 6–7: defects surfaced by the 2026-08-08 live-adoption validator
 run. Evidence: [live-adoption-findings.md](live-adoption-findings.md).
+Draft 8: the lease primitive's adoption review. Evidence:
+[../tk-eotd6/lease-adoption.md](../tk-eotd6/lease-adoption.md).
 Ordered by severity within each batch. Each body below is self-contained
 for filing.
 
@@ -141,27 +143,49 @@ each occurrence costs consumers a full pass)
 > consistent snapshot (or serialize/escape output atomically) so a
 > concurrent write cannot tear the payload mid-emit.
 
-## 8. Reconciler retries reassign on a held pool bead whose lease is already expired; `gc bd heartbeat` is a no-op on lease fields
+## 8. `gc bd heartbeat` cannot refresh a claim `gc hook --claim` recorded under a session id
 
-**Repo:** gastownhall/gascity · **severity: high** (a pool built for
-long holds strands its work for unbounded time)
+**Repo:** gastownhall/gascity · **severity: high** (a claim recorded under a
+session id — the pool-worker path — cannot refresh its own lease, so that
+bead reads expired within five minutes and `bd reclaim` cannot tell its live
+holder from a dead one) · tracked in our fork as `gc-ox80c`
 
-> **Body draft:** When a pool session dies holding an `in_progress`
-> bead, `releaseOrphanedPoolAssignments` retries
-> `cannot reassign <bead>: held by "<pool-instance>" (in_progress); …
-> pass --force … or use bd reclaim` every cycle, indefinitely — while
-> the bead's lease is already expired, so the `bd reclaim` path it
-> names would succeed immediately (verified live:
-> `gc bd reclaim --id <bead> --older-than 0s` released it instantly
-> after ~14 minutes wedged). Because the bead stays assigned, the pool
-> sees no unassigned demand and spawns nobody. Separately, `gc bd
-> heartbeat` does not touch the lease fields, so a live holder cannot
-> extend its lease and a dead holder's lease expiry is the only signal
-> — which the reassign path then ignores. **Proposed fix:** when the
-> holder's lease is expired, have the reconciler take the reclaim path
-> it already recommends in its own error text (or make reassign treat
-> an expired lease as abandonment); and make `heartbeat` refresh the
-> lease so long-holding sessions are distinguishable from dead ones.
-> Context: a conversation-holding pool (sessions deliberately parked
-> `in_progress` for a human) makes both halves load-bearing.
+> **Body draft:** the assignee `gc hook --claim` records depends on the
+> session. For a pool worker it is the session **id** (`lx-ojs28`), while
+> `BEADS_ACTOR` in that same session is the session **name**
+> (`gc-toolkit--gc-toolkit__polecat-1-pool`). `gc bd heartbeat` forwards to
+> bd's native owner-only `heartbeat`, which matches actor to assignee under
+> `actorMatches` — byte-identical, or equal after canonicalizing separators
+> — and a session id and a session name satisfy neither, so the holder's own
+> heartbeat is refused: `Error: heartbeat tk-eotd6: issue already claimed by
+> lx-ojs28`. Re-running the identical command as `BEADS_ACTOR=lx-ojs28 gc bd
+> heartbeat tk-eotd6` succeeds and moves `lease_expires_at` from 08:00:10Z to
+> 08:05:09Z, so the identity comparison is the whole of the refusal. A
+> session whose `BEADS_ACTOR` already equals the recorded assignee — a named
+> agent, whose claim records its alias/agent form — heartbeats its own claim
+> unaffected; the gap is the session-identity path. The claim side already
+> resolves it: `cmd/gc/cmd_hook_claim.go` uses the bead's current assignee as
+> the claim actor, commenting that `BEADS_ACTOR` may be the runtime name, the
+> session bead id, or an alias and that bd's `--claim` requires a match.
+> `rewriteBdHeartbeatArgs` in `cmd/gc/cmd_bd.go` validates the id and forwards
+> with the ambient actor, applying no such resolution. The TTL offers no way
+> around it: `issueops.DefaultLeaseTTL` is a five-minute constant reachable
+> only through the `WithLeaseTTL` context key, which no `cmd/bd` path carries.
+> **Proposed fix:** have `gc bd heartbeat` resolve the actor the way the claim
+> path does — read the bead's current assignee and heartbeat as that identity
+> when it is one this session owns.
 
+Not included in this draft: the original form of this entry also reported
+that the pool reconciler retries reassign indefinitely on a held bead
+whose lease has expired, instead of taking the `bd reclaim` path its own
+error text recommends. gascity has since reworked that release path —
+`releaseOrphanedPoolAssignments` decides on session liveness through
+`liveOpenSessionAssignmentExists`, with `releaseConfirmedOrphanSessionWork`
+added as the orphaned-seat tie-break — and the behavior has not been
+re-measured against it. Verify before filing that half.
+
+The same entry previously reported `gc bd heartbeat` as a no-op on the
+lease fields. That is fixed: gc no longer rewrites the verb into a
+`gc.last_heartbeat_at` metadata write and forwards to bd's native
+heartbeat, which is why the refusal above is now an identity error rather
+than a silent success.
