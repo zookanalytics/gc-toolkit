@@ -202,13 +202,39 @@ It files (or refreshes) exactly one open visit per situation key, which is
 how a human hears about it.
 
 After either route: continue if possible, otherwise leave the bead resumable
-(branch + notes recorded) and drain. If the ruling that comes back is
-stand-down — the premise was falsified, or a live sitting owns the decision —
-the disposal step is the sitting's
+(branch + notes recorded) and drain.
+
+**Draining without closing your step means holding the molecule first.** This
+covers every reason you decline work you must not close: a duplicate dispatch,
+a premise you found falsified, work another branch already delivered. A step
+left `open` is claimable, so the pool hands it to a fresh polecat within
+minutes, that polecat re-derives your refusal and leaves it open again, and the
+cycle burns one pool slot per iteration until a human notices. Clearing the
+route without changing the status does not stop it: the stranded-worker repair
+sweeps open steps assigned to a drained session and re-stamps a route on any it
+finds unrouted. Hold the molecule, then drain:
+
+```bash
+"$SCRIPTS/molecule-hold.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined, and what releases the hold>" || { echo "hold did not land; NOT draining" >&2; exit 1; }
+gc runtime drain-ack
+```
+
+It sets your step `blocked`, which is not-closed and not-claimable, and clears
+the route on the step, on the molecule root, and on the root's other steps. It
+closes nothing, so whatever a live worker is holding stays where it is.
+
+Drain only if the hold landed. It exits non-zero when it cannot prove which
+bead is yours, when duplicate step beads make that ambiguous, when the blocking
+write is refused, or when a route it had to clear — on the molecule root or on a
+sibling step — survived. A drain on any of those paths leaves something in the
+molecule claimable.
+
+If the ruling that comes back is stand-down — the premise was falsified, or a
+live sitting owns the decision — the disposal step is the sitting's
 `gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`: it parks the
 anchor and quiesces the molecule's routed steps in one writer, so the chain
 stops re-offering, and `--no-wait` records that the ruling ended the wait
-rather than moving it. Your part stays the same: record, escalate, drain.
+rather than moving it. Your part stays the same: record, escalate, hold, drain.
 
 ## Communication
 
