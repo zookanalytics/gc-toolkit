@@ -98,6 +98,15 @@ ctl=""
 [ "${FAKE_CTRL:-0}" = "1" ] && ctl="$(printf '\001')"
 case "$verb" in
   show)
+    if [ -f "${FAKE_SHOWFAIL:-/dev/null}" ] && grep -qx "${1:-}" "${FAKE_SHOWFAIL:-/dev/null}" 2>/dev/null; then
+      echo "bd: cannot show ${1:-} (stub)" >&2
+      exit 1
+    fi
+    if [ -n "${FAKE_OBJ_SHOW:-}" ] && [ "${FAKE_OBJ_SHOW:-}" = "${1:-}" ]; then
+      # bd returns an object, not a one-element array, when nothing resolves.
+      printf '{"error":"no such issue","id":"%s"}\n' "${1:-}"
+      exit 0
+    fi
     jq -c --arg id "${1:-}" --arg c "$ctl" \
       '[ .[] | select(.id == $id) | .title = ((.title // "b") + $c) ]' "$S" ;;
   list)
@@ -108,6 +117,18 @@ case "$verb" in
         --assignee=*) wassignee="${a#--assignee=}" ;;
       esac
     done
+    # The sibling enumeration is the only list of exactly open,in_progress with
+    # no assignee filter; discover() always pins an assignee. Fail only that one.
+    if [ "$wstatus" = "open,in_progress" ] && [ -z "$wassignee" ]; then
+      if [ "${FAKE_LISTFAIL:-0}" = "1" ]; then
+        echo "bd: cannot list (stub)" >&2
+        exit 1
+      fi
+      if [ "${FAKE_BADJSON_LIST:-0}" = "1" ]; then
+        printf 'this is not an array\n'
+        exit 0
+      fi
+    fi
     jq -c --arg st "$wstatus" --arg as "$wassignee" --arg c "$ctl" '
       [ .[]
         | (.status // "open") as $bst
@@ -173,6 +194,7 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" FAKE_UPDFAIL="$TMP/updfail"
 export FAKE_UPDFAIL_ROUTE="$TMP/updfail.route" FAKE_UPDFAIL_ASSIGNEE="$TMP/updfail.assignee"
+export FAKE_SHOWFAIL="$TMP/showfail"
 
 MINE="gc-toolkit--gc-toolkit__polecat-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
@@ -189,7 +211,7 @@ gclog()    { cat "$GC_LOG"; }
 # The live molecule shape: an in_progress claimed step, a routed root, four
 # pre-assigned open siblings, and a finalize step held by the dispatcher.
 reset_store() {
-  : > "$GC_LOG"; : > "$FAKE_UPDFAIL"; : > "$FAKE_UPDFAIL_ROUTE"; : > "$FAKE_UPDFAIL_ASSIGNEE"
+  : > "$GC_LOG"; : > "$FAKE_UPDFAIL"; : > "$FAKE_UPDFAIL_ROUTE"; : > "$FAKE_UPDFAIL_ASSIGNEE"; : > "$FAKE_SHOWFAIL"
   cat > "$FAKE_STORE" <<STORE
 [
  {"id":"root-1","status":"in_progress","assignee":"","metadata":{"gc.routed_to":"$POOL","gc.input_convoy_id":"cv-1"}},
@@ -410,6 +432,58 @@ eq "$(bstatus s-load)" "blocked" "the load-bearing write happened first"
 eq "$(meta root-1 'gc.routed_to')" "<absent>" "and the root is still de-routed"
 has "$OUT" "siblings keep the routes and claims" "the un-quiesced siblings are named, not silently skipped"
 eq "$(meta s-setup 'gc.routed_to')" "$POOL" "and they demonstrably still carry them"
+
+# ── The quiesce reads themselves can fail. bd_json swallows gc's exit through
+# the pipe, so a failed show/list once read as an empty result — an empty root
+# route or an empty sibling set — and the molecule drained "quiet" while its root
+# or siblings were never read. Each read now fails closed on a bad command or a
+# non-array payload, keeping that distinct from a genuinely empty store.
+echo "== fail-closed: a target whose own read fails cannot resolve a root to quiesce =="
+reset_store
+echo "s-load" > "$FAKE_SHOWFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --reason "target unreadable" 2>&1); RC=$?
+: > "$FAKE_SHOWFAIL"
+eq "$RC" "1" "a target whose root-resolving read fails exits 1, not 0"
+has "$OUT" "could not read s-load to resolve its root" "the unreadable target is named"
+has "$OUT" "Do not drain" "and the caller is told not to drain"
+eq "$(bstatus s-load)" "blocked" "the step is still held — the read failure is downstream of the load-bearing write"
+eq "$(meta root-1 'gc.routed_to')" "$POOL" "the root is left untouched, not falsely reported quiet"
+
+echo "== fail-closed: a root whose route cannot be READ is not a quiet root =="
+reset_store
+echo "root-1" > "$FAKE_SHOWFAIL"
+OUT=$("$SCRIPT" --step "$STEP" --reason "root route unreadable" 2>&1); RC=$?
+: > "$FAKE_SHOWFAIL"
+eq "$RC" "1" "a root whose show fails exits 1 — an unread route cannot be proven clear"
+has "$OUT" "could not read root root-1 to check its route" "the unreadable root is named"
+has "$OUT" "Do not drain" "and the caller is told not to drain"
+eq "$(bstatus s-load)" "blocked" "the step is still held"
+eq "$(meta root-1 'gc.routed_to')" "$POOL" "the route is left intact, not falsely reported clear"
+
+echo "== fail-closed: a root show that returns an OBJECT, not an array, is unreadable =="
+reset_store
+OUT=$(FAKE_OBJ_SHOW=root-1 "$SCRIPT" --step "$STEP" --reason "root resolves to an object" 2>&1); RC=$?
+eq "$RC" "1" "a non-array root payload exits 1 — bd returns an object when nothing resolves, and that is not a quiet root"
+has "$OUT" "could not read root root-1 to check its route" "the unreadable-shape root is named"
+eq "$(meta root-1 'gc.routed_to')" "$POOL" "its route is left intact, not falsely reported clear"
+
+echo "== fail-closed: a sibling enumeration that FAILS is not an empty one =="
+reset_store
+OUT=$(FAKE_LISTFAIL=1 "$SCRIPT" --step "$STEP" --reason "sibling list unreadable" 2>&1); RC=$?
+eq "$RC" "1" "a failed sibling enumeration exits 1 — an unread sibling set cannot be proven quiet"
+has "$OUT" "could not enumerate sibling steps" "the failed enumeration is named"
+has "$OUT" "Do not drain" "and the caller is told not to drain"
+eq "$(bstatus s-load)" "blocked" "the step is still held"
+eq "$(meta root-1 'gc.routed_to')" "<absent>" "the root was de-routed before the enumeration failed"
+eq "$(bassignee s-setup)" "$MINE" "the siblings keep their claims — an unproven set is not quiesced"
+
+echo "== fail-closed: an unparseable sibling payload is not an empty one =="
+reset_store
+OUT=$(FAKE_BADJSON_LIST=1 "$SCRIPT" --step "$STEP" --reason "sibling list unparseable" 2>&1); RC=$?
+eq "$RC" "1" "a sibling list that returns non-array JSON exits 1 — an unparseable set is not a quiet one"
+has "$OUT" "could not enumerate sibling steps" "the unparseable enumeration is named"
+eq "$(bstatus s-load)" "blocked" "the step is still held"
+eq "$(bassignee s-setup)" "$MINE" "the siblings keep their claims"
 
 # --- The formula wiring. ------------------------------------------------------
 # Extracted verbatim, so a wholesale reconciliation against the base formula

@@ -117,6 +117,20 @@ bd_json() {
   gc bd "$@" --json 2>/dev/null | scrub
 }
 
+# bd_json swallows gc's exit status through the pipe, and the quiesce reads
+# below assign its output without checking the status or the shape — so a failed
+# `show`/`list` and a genuinely empty one arrive as the same empty string.
+# Treating an unread store as a quiet one is the false success this script exists
+# to prevent. bd_json_array fails on a non-zero command or a payload that is not
+# a JSON array (bd emits an object when nothing resolves), so the caller can tell
+# "the store says nothing is routed" from "the store could not be read."
+bd_json_array() { # <bd args...> -> the array on stdout; non-zero on a failed read or a non-array payload
+  local out
+  out=$(bd_json "$@") || return 1
+  printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  printf '%s' "$out"
+}
+
 IDENTITIES=$(printf '%s\n%s\n%s\n' \
   "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | awk 'NF && !seen[$0]++')
 if [ -z "$IDENTITIES" ]; then
@@ -205,7 +219,16 @@ if [ -z "$TARGET" ]; then
   fi
 fi
 
-ROOT=$(bd_json show "$TARGET" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)
+# Resolve the root once. A read that FAILED is not a step with no root: the
+# first is an unproven quiesce (fail closed below), the second a step
+# legitimately held alone. bd_json_array keeps them distinct — a valid array
+# that merely lacks gc.root_bead_id still resolves ROOT_READABLE=1, ROOT="".
+ROOT=""; ROOT_READABLE=1
+if TARGET_JSON=$(bd_json_array show "$TARGET"); then
+  ROOT=$(printf '%s' "$TARGET_JSON" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)
+else
+  ROOT_READABLE=0
+fi
 
 if [ "$DRY_RUN" = "1" ]; then
   if [ "$HELD_ALREADY" = "1" ]; then
@@ -253,15 +276,23 @@ finish() {
 
 # ── De-route the root. A routed root re-offers the molecule even with every
 # step quiet. Metadata-only, so the root's status and assignee are untouched.
-if [ -n "$ROOT" ]; then
-  ROOT_ROUTE=$(bd_json show "$ROOT" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
-  if [ -n "$ROOT_ROUTE" ]; then
-    if gc bd update "$ROOT" --unset-metadata gc.routed_to >/dev/null 2>&1; then
-      echo "$PROG: de-routed root $ROOT (was $ROOT_ROUTE)"
-    else
-      echo "$PROG: FATAL — could not de-route root $ROOT (was $ROOT_ROUTE); it re-offers this molecule however quiet the steps are" >&2
-      QUIESCE_FAILED=1
+if [ "$ROOT_READABLE" = "0" ]; then
+  echo "$PROG: FATAL — could not read $TARGET to resolve its root (bd show failed or returned a non-array); the step is held, but a routed root or sibling cannot be proven quiesced" >&2
+  QUIESCE_FAILED=1
+elif [ -n "$ROOT" ]; then
+  if ROOT_JSON=$(bd_json_array show "$ROOT"); then
+    ROOT_ROUTE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+    if [ -n "$ROOT_ROUTE" ]; then
+      if gc bd update "$ROOT" --unset-metadata gc.routed_to >/dev/null 2>&1; then
+        echo "$PROG: de-routed root $ROOT (was $ROOT_ROUTE)"
+      else
+        echo "$PROG: FATAL — could not de-route root $ROOT (was $ROOT_ROUTE); it re-offers this molecule however quiet the steps are" >&2
+        QUIESCE_FAILED=1
+      fi
     fi
+  else
+    echo "$PROG: FATAL — could not read root $ROOT to check its route (bd show failed or returned a non-array); an unread route cannot be proven clear, and a routed root re-offers the molecule" >&2
+    QUIESCE_FAILED=1
   fi
 else
   echo "$PROG: NOTE — $TARGET carries no gc.root_bead_id; held the step alone, and a routed root or sibling could still re-offer" >&2
@@ -274,18 +305,20 @@ fi
 # `open + unassigned + routed`, which is exactly the pool's offer predicate.
 [ -n "$ROOT" ] || finish
 
-SIBLINGS=$(bd_json list --status=open,in_progress --limit=0 \
-  | jq -r --arg root "$ROOT" --arg self "$TARGET" '
-      if type == "array" then
-        .[]
-        | select((.metadata["gc.root_bead_id"] // "") == $root)
-        | select(.id != $self)
-        | select((.metadata["gc.step_ref"] // "") | endswith(".workflow-finalize") | not)
-        | select(((.metadata["gc.routed_to"] // "") | test("control-dispatcher")) | not)
-        | select(((.metadata["gc.routed_to"] // "") != "") or ((.assignee // "") != ""))
-        | [.id, (.metadata["gc.step_ref"] // "-"), (.metadata["gc.routed_to"] // ""), (.assignee // "")]
-        | @tsv
-      else empty end' 2>/dev/null)
+if ! SIB_JSON=$(bd_json_array list --status=open,in_progress --limit=0); then
+  echo "$PROG: FATAL — could not enumerate sibling steps (bd list failed or returned a non-array); $TARGET is held, but its siblings' routes and claims are unproven and the molecule can still be re-offered" >&2
+  QUIESCE_FAILED=1
+  finish
+fi
+SIBLINGS=$(printf '%s' "$SIB_JSON" | jq -r --arg root "$ROOT" --arg self "$TARGET" '
+      .[]
+      | select((.metadata["gc.root_bead_id"] // "") == $root)
+      | select(.id != $self)
+      | select((.metadata["gc.step_ref"] // "") | endswith(".workflow-finalize") | not)
+      | select(((.metadata["gc.routed_to"] // "") | test("control-dispatcher")) | not)
+      | select(((.metadata["gc.routed_to"] // "") != "") or ((.assignee // "") != ""))
+      | [.id, (.metadata["gc.step_ref"] // "-"), (.metadata["gc.routed_to"] // ""), (.assignee // "")]
+      | @tsv' 2>/dev/null)
 
 [ -n "$SIBLINGS" ] || finish
 
