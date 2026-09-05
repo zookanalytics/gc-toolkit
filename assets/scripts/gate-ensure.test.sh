@@ -406,7 +406,7 @@ hasnt "$out" "live poured workflow" "…so it is never claimed to be a live pour
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured behind an unreadable root"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on an unanswerable probe"
 
-echo "# stranded review tracked by an EMPTY live convoy (pour minted the convoy but died before the root) is re-slung, not held in flight forever (tk-egoro8)"
+echo "# stranded review tracked by an EMPTY live convoy (pour minted the convoy but died before the root) is re-slung, not held in flight forever"
 store "[$(anchor D4e pull_request codex "" polecat/d4e),
         $(stranded_review_row rev-4e D4e),
         $(convoy_row conv-1e)]"
