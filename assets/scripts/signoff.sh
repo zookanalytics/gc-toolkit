@@ -49,6 +49,14 @@ set -uo pipefail
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
+# The sibling that files what a person owes as its own bead (`gc-helm.sh
+# demand`). The round cap parks an anchor for a person, and a park is a wait: it
+# gates the anchor on a demand so the hold is a graph edge, not a marker alone
+# (component-model I1, doctor/check-wait-is-an-edge). Overridable so the hermetic
+# test can stand in for it without a live store.
+HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
+
 usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
@@ -156,17 +164,74 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 # is not read either: it is entered only from `unanchored`, and every anchor a
 # round cap parks carries pre_open_gate or pull_request.
 #
-# Fails CLOSED — a ledger that will not read answers "held", because releasing
-# an anchor a person is holding hands their decision back to a pool.
-takeaway_is_holding() { # <anchor-id>; 0 = a person still owes an answer here
+# The cap's OWN demand does not count as a hold against the cap. signoff.sh's
+# round cap files a demand to record its park as an edge, stamped
+# gc.takeaway_by=signoff — the same provenance the park's takeaway carries, and
+# the same field the retire arms read to tell the cap's park from a person's. A
+# retire that read its own demand as a live hold would refuse to lift the park
+# it exists to lift, so this discriminator excludes it, and only a demand a
+# converse sitting owns (any other writer) holds the anchor here.
+#
+# demand_gate_state reads the demand ledger for an anchor in three, because its
+# two callers ask opposite questions of the same rows:
+#   0  a demand a converse sitting owns (by != signoff) holds the anchor
+#   1  the ledger read cleanly and no such demand holds
+#   2  the ledger would not read — the list failed or returned a non-array
+# gc.demand_for names the demand's anchor; the cap's own demand (by=signoff) is
+# excluded, so a retire never reads the demand it filed as a live hold.
+demand_gate_state() { # <anchor-id>
   local rows
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 0
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
   rows=$(printf '%s' "$rows" | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
-    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
-    >/dev/null 2>&1
+    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+            | select(((.metadata["gc.takeaway_by"] // "") | tostring) != "signoff") ] | length > 0' \
+    >/dev/null 2>&1 && return 0
+  return 1
+}
+# Fails CLOSED — a ledger that will not read answers "held", because releasing an
+# anchor a person is holding hands their decision back to a pool. The retire path
+# needs only that boolean and collapses "unreadable" into "held"; the cap writer
+# reads demand_gate_state directly, because a park must stand on a demand it
+# proved, not on a read that did not happen.
+takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an answer here
+  local st; demand_gate_state "${1:-}"; st=$?
+  [ "$st" -ne 1 ]
+}
+# Close the demand the cap filed to gate this anchor (gc.demand_for=<anchor>,
+# gc.takeaway_by=signoff), and PROVE it closed. The park and its demand retire
+# together: left open the demand holds the anchor out of `bd ready` — merge.sh
+# reads it as a live blocker — under a park the retire just lifted, so a caller
+# that clears the park while this reports success releases the anchor in name
+# only. Fails (non-zero) when the ledger will not read, an update is refused, or
+# a signoff-owned demand still reads live afterward, so the caller can keep the
+# park until both retire. Only the cap's own — a converse sitting's demand
+# outranks the retire, is left standing, and does not count against this.
+close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = one may
+  local rows id live
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  for id in $(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
+        '.[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+             | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff")
+             | .id' 2>/dev/null); do
+    [ -n "$id" ] || continue
+    gc bd update "$id" --status=closed --append-notes "${2:-}" >/dev/null 2>&1 || return 1
+  done
+  # Read the ledger again: a close that was denied or raced leaves the demand
+  # live, and the status filter above already drops closed, so any signoff-owned
+  # row that still answers is one that did not retire.
+  rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  live=$(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
+        '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
+                | select(((.metadata["gc.takeaway_by"] // "") | tostring) == "signoff") ] | length' 2>/dev/null)
+  case "$live" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$live" -eq 0 ]
 }
 # <<< takeaway-hold-discriminator
 
@@ -302,6 +367,17 @@ TALLY
   else
     NOTE="$NOTE. No park was retired: signoff_cap claims no standing hold here, so a merge_hold on this anchor is a person's and stays."
   fi
+  # Retire the cap's demand BEFORE clearing its park. merge.sh reads a live
+  # demand as a blocker, so a park lifted while its demand stands releases the
+  # anchor in name only, and the floor write below would report a reset the
+  # merge still holds. Closing first means a refused or raced close leaves the
+  # park standing, so a re-run reads RETIRED again and retries — the floor is
+  # idempotent. Only the cap's own (by=signoff); a converse sitting's demand was
+  # refused at the top.
+  if [ -n "$RETIRED" ] && ! close_cap_demand "$ANCHOR" "signoff: cap reset by ruling — $RESET_REASON. This demand recorded the cap's park; the park is retired, so the wait it gated closes with it."; then
+    warn "the cap park on $ANCHOR is being retired but its demand did not close (or still reads live); merge.sh reads a live demand as a blocker, so clearing the park now would release the anchor in name only. Nothing written — re-run this reset, or close the demand by hand: gc bd list --status=open --metadata-field gc.demand_for=$ANCHOR"
+    exit 2
+  fi
   gc bd update "$ANCHOR" "${WRITES[@]}" --append-notes "$NOTE" >/dev/null 2>&1 || true
 
   AFTER=$(bd_json show "$ANCHOR")
@@ -331,6 +407,7 @@ TALLY
     warn "the reset did not read back on $ANCHOR (${BAD# }); the cap stands and the next signoff pass re-caps. Clear the named keys by hand, or re-run — a floor that did land is harmless to write again."
     exit 2
   fi
+  # The demand retired above, before the park it recorded; the park is clear now.
   echo "signoff: round cap on $ANCHOR reset to 0 of $CAP (floor $WANT_FLOOR)${RETIRED:+ — retired $RETIRED}"
   exit 0
 fi
@@ -700,6 +777,32 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # miss a presence check cannot see, so the read-back requires it CLEARED.
   CAP_HEADLINE="signoff did not converge after $ROUNDS rework rounds (cap $CAP); findings are in the review beads under this anchor"
   CAP_TAKEAWAY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # The park is a wait on a person, and a wait is an edge: file the demand the
+  # anchor blocks on BEFORE stamping the park, so the markers never stand
+  # without the edge behind them. gate-ensure suppresses redispatch under
+  # merge_hold, so no later pass re-fires this arm to file a demand it left
+  # unfiled — a park stamped without one holds forever with nothing to answer.
+  # demand_gate_state reads the ledger in three. A converse sitting's demand
+  # already gates the anchor (its own, by=signoff, is excluded): refiling would
+  # overwrite that sitting's provenance, so the cap files none and parks. None
+  # holds: the cap files its own before parking. The ledger will not read: a park
+  # stamped on a read that did not happen is the marker-without-an-edge this arm
+  # exists to prevent, so refuse it. gc-helm.sh demand is idempotent on the cap's
+  # own (one per gated bead, by=signoff), reads its blocks edge back before it
+  # returns, and stamps gc.demand_for to exempt the terminal end from the same
+  # check. When the ledger is unreadable, or the demand it says to file will not
+  # land, leave the anchor UNPARKED and the review open for a retry rather than
+  # record a park nothing gates.
+  demand_gate_state "$ANCHOR"; DEMAND_STATE=$?
+  if [ "$DEMAND_STATE" -eq 2 ]; then
+    warn "the round cap on $ANCHOR could not read the demand ledger to tell whether a person already holds it (gc bd list failed or returned no listing); a park stamped now could stand with no edge behind it, so the anchor is left UNPARKED and the review bead stays open for a retry. Re-run the verdict once the ledger reads."
+    exit 2
+  fi
+  if [ "$DEMAND_STATE" -eq 1 ] \
+     && ! "$HELM" demand "$ANCHOR" "$CAP_HEADLINE" --by signoff --kind decision >/dev/null 2>&1; then
+    warn "the round cap on $ANCHOR could not file the demand that gates its park (gc-helm.sh demand failed); the anchor is left UNPARKED and the review bead stays open for a retry. File it by hand, then re-run the verdict: $HELM demand $ANCHOR '<what a person owes>' --by signoff --kind decision"
+    exit 2
+  fi
   # merge_hold carries the literal string "signoff_cap", not "true": the cap's
   # own park is recognised by that exact pairing with signoff_cap everywhere in
   # the cadence (reset here, pr-facts.sh's operator-feedback reset), so a
