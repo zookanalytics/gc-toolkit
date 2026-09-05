@@ -60,11 +60,27 @@ case "$1 $2" in
     # A store that cannot be opened prints NOTHING and exits 1 — the same exit
     # code a genuine miss uses. That is why the payload decides, not the code.
     [ -d "$DB" ] || exit 1
+    # bd resolves a bare id as an exact match first, then as a prefix, and a
+    # prefix matching several ids is ambiguous rather than a miss. Each shape
+    # answers with the SAME miss object on stdout for the two error cases and
+    # states the reason on stderr, exactly as the real tool does — the guard has
+    # to survive all three.
     if [ -f "$DB/$ID" ]; then
       printf '[{"id":"%s","status":"open"}]\n' "$ID"; exit 0
     fi
-    printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
-    exit 1 ;;
+    MATCHES=$(ls "$DB" 2>/dev/null | awk -v p="$ID" 'index($0,p)==1')
+    N=$(printf '%s' "$MATCHES" | grep -c . || true)
+    if [ "$N" = 1 ]; then
+      printf '[{"id":"%s","status":"open"}]\n' "$MATCHES"; exit 0
+    elif [ "$N" = 0 ]; then
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
+      echo "Issue $ID not found" >&2
+      exit 1
+    else
+      printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
+      echo "ambiguous issue ID: \"$ID\" matches $N issues: [$(printf '%s' "$MATCHES" | tr '\n' ' ' | sed 's/ *$//')]" >&2
+      exit 1
+    fi ;;
   *) exit 1 ;;
 esac
 GC
@@ -85,6 +101,11 @@ unset FAKE_RIGS_FAIL 2>/dev/null || true
 mkbead "$TMP/rigs/alpha" al-lives
 mkbead "$TMP/rigs/beta"  bt-lives
 mkbead "$TMP/hq"         lx-lives
+# For the exact-id checks below: `al-uniq` is a prefix of exactly one bead, and
+# `al-dup` a prefix of two — a unique-partial hit and an ambiguous reference.
+mkbead "$TMP/rigs/alpha" al-uniqfull
+mkbead "$TMP/rigs/alpha" al-dup1
+mkbead "$TMP/rigs/alpha" al-dup2
 
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 
@@ -174,10 +195,35 @@ has "$ERR" "carried by 2 rigs" "  ... and saying how many carry it"
 FAKE_RIGS="$TMP/dup.json" run --absent dp-lives
 eq "$RC" 3 "  ... and the verdict is unproven, so neither store's answer is used"
 
+# --- within the owning store, only an EXACT id is a verdict ------------------
+# bd resolves a bare id as an exact-or-prefix match. A prefix landing on one
+# longer bead is a hit about a DIFFERENT bead; a prefix landing on several
+# answers with the same miss object a true not-found uses, and says "ambiguous"
+# only on stderr. Neither is a verdict about the id that was asked for, so a
+# destructive gate must read both as unproven.
+run --present al-uniq
+eq "$RC" 3 "a unique-prefix hit names a longer bead, so this id's presence is unproven"
+has "$ERR" "only as a prefix" "  ... and says the match was a prefix, not the id"
+run --absent al-uniq
+eq "$RC" 3 "  ... and --absent is unproven too: a prefix hit is not an absence"
+
+run --absent al-dup
+eq "$RC" 3 "an ambiguous reference is unproven, never absent"
+has "$ERR" "ambiguous reference" "  ... naming why no verdict is owed"
+run --present al-dup
+eq "$RC" 3 "  ... and --present refuses the same ambiguity"
+
+# The exact not-found that the ambiguous miss is byte-identical to still
+# resolves cleanly to absence — the stderr is what tells the two apart.
+run --absent al-nope
+eq "$RC" 0 "an exact not-found is still proven absent, distinct from ambiguity"
+run --present al-nope
+eq "$RC" 1 "  ... and --present reports it absent"
+
 # --- the shape a destructive gate is written in -----------------------------
 # `--absent && destroy` must fire on exactly one input and refuse the rest.
 fired=""
-for id in bt-lives zz-nope nodashes vd-anything dp-lives bt-gone; do
+for id in bt-lives zz-nope nodashes vd-anything dp-lives bt-gone al-uniq al-dup; do
   R="$FAKE_RIGS"; [ "$id" = dp-lives ] && R="$TMP/dup.json"
   FAKE_RIGS="$R" "$SUT" --absent "$id" >/dev/null 2>&1 && fired="$fired $id"
 done

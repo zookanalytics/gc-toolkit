@@ -59,7 +59,7 @@ cannot:
 |---|---|---|
 | yes | the store its prefix names answered, and the verdict holds | 0 |
 | no | that store answered, and the opposite is true | 1 |
-| unproven | no store could be asked at all | 3 |
+| unproven | no store could be asked, or it answered about a different or an ambiguous id | 3 |
 
 `--absent` exits 0 only in the first column, so a gate written as
 
@@ -77,6 +77,26 @@ Reading the payload is what makes that distinction available. A store that
 cannot be opened exits 1 and prints nothing; a genuine miss exits 1 and prints
 the error object above. The exit code is the same on both, so the verdict
 comes from what was printed.
+
+## An exact id, or no verdict
+
+Even the store the prefix names answers a bare id as an exact-or-prefix match,
+so its answer is a verdict only about the id actually asked for.
+
+A hit proves presence only when it carries that exact id. `bd show tk-abc` when
+no `tk-abc` exists but `tk-abcdef` does returns `tk-abcdef` on exit 0 — a real
+bead, but a different one. Reading it as "tk-abc is present" is a claim about a
+bead the store never confirmed, so a hit whose id is longer than the id asked
+for is unproven.
+
+A miss object is worse: it is byte-identical whether the id matched nothing or
+matched several. `bd show tk-ab` when a dozen `tk-ab*` beads exist prints the
+same `{"error":"no issues found matching the provided IDs"}` a true not-found
+prints, on the same exit 1, and says "ambiguous issue ID … matches N issues"
+only on stderr. So absence is the exact not-found alone: the store states it on
+stderr, and ambiguity or any other lookup error is unproven, never absent. A
+destructive gate that read an ambiguous reference as absence would delete on a
+reference to a dozen live beads.
 
 ## Who asks it
 

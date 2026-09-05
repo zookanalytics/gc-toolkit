@@ -17,6 +17,14 @@
 # pins a store, and the only one that reaches the HQ store, which no `--rig`
 # value names.
 #
+# The owning store answers a bare id as an exact-or-prefix match, so its answer
+# is a verdict only about THIS id when the id is exact. A hit whose id is longer
+# is a partial match on some other bead. A miss object is byte-identical whether
+# nothing matched or several did, and only the exact not-found — which the store
+# states on stderr — earns `absent`; ambiguity and any other lookup error are
+# unproven. A reference that resolves to one other bead, or to many, is never a
+# verdict.
+#
 # Every verdict fails closed, and the exit code says which kind of answer it
 # is: 1 is a proven no, 3 is no answer at all. `--absent` exits 0 only when a
 # store answered and does not hold the bead, so
@@ -39,9 +47,10 @@
 #       1 proven otherwise — the opposite state was read from the owning
 #         store, or, in a resolution mode, no rig carries the prefix
 #       2 usage
-#       3 unproven — no store could be reached to ask. A verdict mode ends
-#         here for every unresolved prefix as well: an id no rig claims is a
-#         store nobody asked, not a bead nobody has.
+#       3 unproven — no store could be reached to ask, or the store answered
+#         about a different or an ambiguous id rather than this exact one. A
+#         verdict mode ends here for every unresolved prefix as well: an id no
+#         rig claims is a store nobody asked, not a bead nobody has.
 # Callers: escalation-rig.sh, bead-rehome.sh, and any gate whose next act is
 # destructive. Test: bead-store.test.sh.
 set -uo pipefail
@@ -149,16 +158,37 @@ case "$MODE" in
   db)   printf '%s\n' "$DB"; exit 0 ;;
 esac
 
-PAYLOAD=$(bounded gc bd --db "$DB" show "$BEAD" --json 2>/dev/null | scrub)
+ERR_FILE=$(mktemp)
+PAYLOAD=$(bounded gc bd --db "$DB" show "$BEAD" --json 2>"$ERR_FILE" | scrub)
+STORE_ERR=$(scrub <"$ERR_FILE"); rm -f "$ERR_FILE"
 
-# The payload decides, never the exit code: a store that cannot be opened exits
-# the same 1 as a genuine miss and prints nothing at all. A hit is an array of
-# beads; a miss is the error object; an empty or unparsable payload is neither,
-# and answers nothing.
-if printf '%s' "$PAYLOAD" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+# The payload and the store's own stderr decide, never the exit code: a store
+# that cannot be opened exits the same 1 as a genuine miss and prints nothing at
+# all. bd resolves a bare id as an exact-or-prefix match, so neither a hit nor a
+# miss is a verdict about THIS id on its own:
+#   - a hit proves presence only when it carries the exact id; an array whose
+#     ids are all longer is a prefix match on some other bead, and this id's own
+#     state is unproven.
+#   - the miss object is byte-identical for a genuine not-found and an ambiguous
+#     reference. Only the exact not-found, which the store states on stderr,
+#     earns absence; ambiguity and any other lookup error are unproven.
+UNPROVEN_MSG="$RIG_NAME ($DB) gave no readable answer about $BEAD — no verdict"
+if printf '%s' "$PAYLOAD" | jq -e --arg b "$BEAD" 'type == "array" and any(.[]; (.id? // "") == $b)' >/dev/null 2>&1; then
   STATE=present
+elif printf '%s' "$PAYLOAD" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  STATE=unproven
+  MATCHED=$(printf '%s' "$PAYLOAD" | jq -r '[.[].id] | join(", ")' 2>/dev/null)
+  UNPROVEN_MSG="$BEAD is present in $RIG_NAME ($DB) only as a prefix of $MATCHED, a different bead, so its own state is unproven"
 elif printf '%s' "$PAYLOAD" | jq -e 'type == "object" and (.error | type) == "string"' >/dev/null 2>&1; then
-  STATE=absent
+  if grep -qiE 'ambiguous' <<<"$STORE_ERR"; then
+    STATE=unproven
+    UNPROVEN_MSG="$BEAD is an ambiguous reference in $RIG_NAME ($DB); it matches several ids, so it is unproven, never absent"
+  elif grep -qiF 'not found' <<<"$STORE_ERR"; then
+    STATE=absent
+  else
+    STATE=unproven
+    UNPROVEN_MSG="$RIG_NAME ($DB) answered about $BEAD with an error that is not a plain not-found, so its absence is unproven"
+  fi
 else
   STATE=unproven
 fi
@@ -173,5 +203,5 @@ case "$MODE:$STATE" in
   present:absent)
     echo "$PROG: $BEAD is absent from $RIG_NAME ($DB), the store its prefix names" >&2; exit 1 ;;
   *)
-    echo "$PROG: $RIG_NAME ($DB) gave no readable answer about $BEAD — no verdict" >&2; exit 3 ;;
+    echo "$PROG: $UNPROVEN_MSG" >&2; exit 3 ;;
 esac
