@@ -841,8 +841,21 @@ cmd_demand() {
                --set-metadata "gc.demand_kind=$kind" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
-        gc bd update "$demand" "$@" >/dev/null 2>&1 \
-            || { echo "$PROG: demand: filed gate $demand but could not stamp it — it is not on the operator's queue yet. Re-run this command." >&2; exit 4; }
+        if ! gc bd update "$demand" "$@" >/dev/null 2>&1; then
+            # `gc bd gate create` requires --blocks, so $demand was born already
+            # blocking $gated. Without this stamp it carries no gc.demand_for, so
+            # the existing-demand lookup above cannot find it: a re-run would file
+            # a SECOND gate while this unstamped one keeps $gated blocked, unseen
+            # by every reader that discovers demands by gc.demand_for. Resolve the
+            # orphan before returning so the board is clean and the re-run starts
+            # from no demand at all.
+            if gc bd gate resolve "$demand" >/dev/null 2>&1; then
+                echo "$PROG: demand: filed gate $demand but could not stamp it; resolved the orphan so it no longer blocks $gated. Re-run this command." >&2
+            else
+                echo "$PROG: demand: filed gate $demand but could not stamp it, and could not resolve it — it still blocks $gated with no demand metadata. Clear it by hand, then re-run: gc bd gate resolve $demand" >&2
+            fi
+            exit 4
+        fi
         # Re-home the gate as the gated bead's SIBLING (best-effort): it is born
         # parentless, and grouping it under the gated bead's own parent keeps
         # the board tidy. Non-fatal — a parentless gate blocks exactly as hard,
