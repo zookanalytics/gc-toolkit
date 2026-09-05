@@ -14,8 +14,13 @@
 # Usage:
 #   liveness-recheck.sh <visit-bead-id> [--all] [--json]
 #   liveness-recheck.sh --ids <id[,id ...]> [--all] [--json]
-# With a visit id it reads sweep.new_ids / sweep.carried_ids / sweep.pass_at.
-#   --all   also enumerate carried ids that are still idle
+# With a visit id it reads sweep.new_ids / sweep.carried_ids /
+# sweep.carried_promoted_ids / sweep.pass_at. The promoted slice is the bounded
+# set the sweep rotated back into the agenda this pass; it prints as its own
+# titled RE-EXAMINED section so a sitting sees those beads by title from the
+# census alone, which is the board the claim-time hook works from.
+#   --all   also enumerate the REST of the carried backlog with titles; the
+#           promoted slice is always titled, and without --all the rest stay bare
 #   --json  emit the census as one JSON object
 # Read-only: never writes a bead, never touches git, never calls the network.
 # Exit: 0 census printed · 1 unreadable · 2 usage · 3 visit carries no stamps.
@@ -70,6 +75,7 @@ PASS_AT=""
 SUBJECT=""
 NEW_RAW=""
 CARRIED_RAW=""
+PROMOTED_RAW=""
 
 if [ -n "$VISIT" ] && [ -n "$IDS_ARG" ]; then
     echo "liveness-recheck: pass a visit id OR --ids, not both" >&2
@@ -85,6 +91,7 @@ if [ -n "$VISIT" ]; then
     VISIT_META=$(printf '%s' "$VISIT_JSON" | jq -c '.[0].metadata // {}')
     NEW_RAW=$(printf   '%s' "$VISIT_META" | jq -r '.["sweep.new_ids"]     // ""')
     CARRIED_RAW=$(printf '%s' "$VISIT_META" | jq -r '.["sweep.carried_ids"] // ""')
+    PROMOTED_RAW=$(printf '%s' "$VISIT_META" | jq -r '.["sweep.carried_promoted_ids"] // ""')
     PASS_AT=$(printf   '%s' "$VISIT_META" | jq -r '.["sweep.pass_at"]     // ""')
     SUBJECT=$(printf   '%s' "$VISIT_META" | jq -r '.["gc.continuation_group"] // ""')
     if [ -z "$NEW_RAW" ] && [ -z "$CARRIED_RAW" ]; then
@@ -102,13 +109,24 @@ else
 fi
 
 NEW_IDS=$(split_ids "$NEW_RAW")
+PROMOTED_IDS=$(split_ids "$PROMOTED_RAW")
 CARRIED_IDS=$(split_ids "$CARRIED_RAW")
-# A carried id that is also new is listed once, as new (the agenda wins).
-if [ -n "$NEW_IDS" ] && [ -n "$CARRIED_IDS" ]; then
-    CARRIED_IDS=$(printf '%s\n' "$CARRIED_IDS" | grep -Fxv -f <(printf '%s\n' "$NEW_IDS") || true)
+# The agenda outranks the background, and each id is listed once: a NEW id wins
+# over a promoted or carried copy, and a promoted (re-examined this pass) id wins
+# over a plain carried copy. The promoted slice is a subset of the carried set,
+# so it is removed from the bare carried list and rendered as its own titled
+# section — this is what stops the claim-time census from collapsing the rotated
+# slice back into the untitled carried block, where a promoted bead reads as a
+# bare id a sitting skips and so is never re-examined.
+if [ -n "$NEW_IDS" ] && [ -n "$PROMOTED_IDS" ]; then
+    PROMOTED_IDS=$(printf '%s\n' "$PROMOTED_IDS" | grep -Fxv -f <(printf '%s\n' "$NEW_IDS") || true)
+fi
+HIGHER_IDS=$(printf '%s\n%s\n' "$NEW_IDS" "$PROMOTED_IDS" | awk 'NF && !seen[$0]++')
+if [ -n "$HIGHER_IDS" ] && [ -n "$CARRIED_IDS" ]; then
+    CARRIED_IDS=$(printf '%s\n' "$CARRIED_IDS" | grep -Fxv -f <(printf '%s\n' "$HIGHER_IDS") || true)
 fi
 
-ALL_IDS=$(printf '%s\n%s\n' "$NEW_IDS" "$CARRIED_IDS" | awk 'NF && !seen[$0]++')
+ALL_IDS=$(printf '%s\n%s\n%s\n' "$NEW_IDS" "$PROMOTED_IDS" "$CARRIED_IDS" | awk 'NF && !seen[$0]++')
 if [ -z "$ALL_IDS" ]; then
     echo "liveness-recheck: no ids to re-check"
     exit 0
@@ -117,6 +135,7 @@ ID_CSV=$(printf '%s' "$ALL_IDS" | paste -sd, -)
 
 to_json_array() { printf '%s' "${1:-}" | jq -R . | jq -sc 'map(select(length > 0))'; }
 NEW_JSON=$(to_json_array "$NEW_IDS")
+PROMOTED_JSON=$(to_json_array "$PROMOTED_IDS")
 CARRIED_JSON=$(to_json_array "$CARRIED_IDS")
 
 # --- read 1: every listed bead in ONE call, closed ones included (--all is
@@ -185,6 +204,7 @@ CENSUS=$(jq -n \
     --argjson ready "$READY_JSON" \
     --argjson demandby "$DEMAND_JSON" \
     --argjson new "$NEW_JSON" \
+    --argjson promoted "$PROMOTED_JSON" \
     --argjson carried "$CARRIED_JSON" \
     --arg visit "$VISIT" \
     --arg subject "$SUBJECT" \
@@ -253,14 +273,16 @@ CENSUS=$(jq -n \
   def live: [.[] | select(.verdict == "idle" or .verdict == "marker"
                           or .verdict == "recorded" or .verdict == "unreadable")] | length;
   ($new | map(classify(.))) as $newr
+  | ($promoted | map(classify(.))) as $prom
   | ($carried | map(classify(.))) as $carr
   | {visit: $visit, subject: $subject,
      pass_at: $pass_at, checked_at: $checked_at, age: $age,
      ready_state: $ready_state,
      demand_state: $demand_state,
      pr_liveness: "not-rechecked",
-     new: $newr, carried: $carr,
+     new: $newr, promoted: $prom, carried: $carr,
      summary: {new_listed: ($newr | length), new_live: ($newr | live),
+               promoted_listed: ($prom | length), promoted_live: ($prom | live),
                carried_listed: ($carr | length), carried_live: ($carr | live)}}
 ')
 
@@ -326,10 +348,13 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
             "  routing it."]
       else [] end)
    + section(.new; "NEW"; true)
+   + section(.promoted; "RE-EXAMINED (rotated in from the carried backlog)"; true)
    + section(.carried; "CARRIED"; ($all == 1))
    + ["",
       "Corrected census: " + (.summary.new_listed | tostring) + " new listed -> "
         + (.summary.new_live | tostring) + " live; "
+        + (.summary.promoted_listed | tostring) + " re-examined -> "
+        + (.summary.promoted_live | tostring) + " live; "
         + (.summary.carried_listed | tostring) + " carried listed -> "
         + (.summary.carried_live | tostring) + " live.",
       "The visit body is the snapshot; this is the board. Work from this."]

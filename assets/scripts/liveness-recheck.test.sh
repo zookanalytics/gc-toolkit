@@ -97,7 +97,7 @@ bead() { # bead <id> <status> <metadata-json> [title]
           closed_at: (if $st == "closed" then "2026-08-12T02:44:44Z" else null end),
           metadata: $m}'
 }
-verdict_of() { printf '%s' "$1" | jq -r --arg id "$2" '[(.new[], .carried[]) | select(.id == $id)] | .[0].verdict // "ABSENT"'; }
+verdict_of() { printf '%s' "$1" | jq -r --arg id "$2" '[(.new[], .promoted[]?, .carried[]) | select(.id == $id)] | .[0].verdict // "ABSENT"'; }
 
 STUB_VISIT="$TMP/visit.json";     export STUB_VISIT
 STUB_BEADS="$TMP/beads.json";     export STUB_BEADS
@@ -277,6 +277,58 @@ C="$("$SCRIPT" tk-visit --json 2>/dev/null)"
 eq "$(printf '%s' "$C" | jq -r '[.new[].id] | join(",")')"     "b-idle" "the duplicate stays in the new section"
 eq "$(printf '%s' "$C" | jq -r '[.carried[].id] | join(",")')" "b-held" "…and is removed from carried, not counted twice"
 
+echo "── the rotated carried slice stays TITLED in the claim-time census (no --all) ──"
+# The sweep promotes a bounded slice of the carried backlog into the agenda each
+# pass, but a sitting works from THIS census, not the visit body, and the converse
+# hook runs the re-check without --all. If the promoted slice collapsed back into
+# the bare carried-id list here the rotation would be cosmetic and those beads
+# skipped again. sweep.carried_promoted_ids names the slice; it must print as its
+# own titled section while the REST of the carried backlog stays bare unless --all
+# (the bounded-cost design is preserved).
+jq -nc '[{metadata: {"sweep.new_ids": "b-idle",
+                     "sweep.carried_ids": "k-promo,k-rest",
+                     "sweep.carried_promoted_ids": "k-promo",
+                     "sweep.pass_at": "2026-08-12T00:10:00Z"}}]' > "$STUB_VISIT"
+jq -nc --argjson b "[
+  $(bead b-idle  open '{}' 'the new one')
+ ,$(bead k-promo open '{}' 'PROMOTED-TITLE re-examine me')
+ ,$(bead k-rest  open '{}' 'RESTCARRIED-TITLE still bare')
+]" '$b' > "$STUB_BEADS"
+jq -nc '[{id:"b-idle"},{id:"k-promo"},{id:"k-rest"}]' > "$STUB_READY"
+C="$("$SCRIPT" tk-visit --json 2>/dev/null)"
+eq "$(printf '%s' "$C" | jq -r '[.promoted[].id] | join(",")')" "k-promo" "the promoted slice becomes its own re-examined section"
+eq "$(printf '%s' "$C" | jq -r '[.carried[].id] | join(",")')" "k-rest"  "…and is removed from the bare carried list, not shown twice"
+eq "$(verdict_of "$C" k-promo)" "idle" "a still-open promoted bead is on the live agenda"
+eq "$(printf '%s' "$C" | jq -r '.summary.promoted_live')" "1" "the summary counts the re-examined live"
+R="$("$SCRIPT" tk-visit 2>/dev/null)"
+printf '%s' "$R" | grep -q "PROMOTED-TITLE" \
+    && ok "the promoted bead's TITLE renders without --all (the sitting re-examines it by name)" \
+    || bad "promoted title without --all" "$R"
+printf '%s' "$R" | grep -q "RE-EXAMINED" \
+    && ok "the census names the RE-EXAMINED section" \
+    || bad "re-examined section header" "$R"
+printf '%s' "$R" | grep -q "RESTCARRIED-TITLE" \
+    && bad "the rest of the carried backlog stays bare without --all" "k-rest title leaked — bounded cost broken" \
+    || ok "the rest of the carried backlog stays bare without --all (bounded cost preserved)"
+printf '%s' "$R" | grep -q "k-rest" \
+    && ok "…but the bare carried id is still listed, nothing hidden" \
+    || bad "k-rest listed as a bare id" "$R"
+R2="$("$SCRIPT" tk-visit --all 2>/dev/null)"
+printf '%s' "$R2" | grep -q "RESTCARRIED-TITLE" \
+    && ok "--all still titles the rest of the carried backlog" \
+    || bad "--all titles the rest of carried" "$R2"
+
+echo "── an id both new and promoted is listed once as NEW; a plain carried copy drops ──"
+jq -nc '[{metadata: {"sweep.new_ids": "x1",
+                     "sweep.carried_ids": "x1,x2,x3",
+                     "sweep.carried_promoted_ids": "x1,x2"}}]' > "$STUB_VISIT"
+jq -nc --argjson b "[$(bead x1 open '{}'),$(bead x2 open '{}'),$(bead x3 open '{}')]" '$b' > "$STUB_BEADS"
+jq -nc '[{id:"x1"},{id:"x2"},{id:"x3"}]' > "$STUB_READY"
+C="$("$SCRIPT" tk-visit --json 2>/dev/null)"
+eq "$(printf '%s' "$C" | jq -r '[.new[].id] | join(",")')"      "x1" "an id both new and promoted stays in NEW"
+eq "$(printf '%s' "$C" | jq -r '[.promoted[].id] | join(",")')" "x2" "the promoted slice keeps only what NEW did not claim"
+eq "$(printf '%s' "$C" | jq -r '[.carried[].id] | join(",")')"  "x3" "the bare carried list keeps only what neither claimed"
+
 echo "── a visit filed before the stamps shipped says so instead of guessing ──"
 jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
 ERR="$("$SCRIPT" tk-visit 2>&1 >/dev/null)"; RC=$?
@@ -296,7 +348,7 @@ printf 'FAIL\n' > "$STUB_VISIT"
 # liveness-sweep.test.sh; here the key strings are pinned so writer and
 # reader cannot drift apart.
 echo "── liveness-sweep.sh stamps the keys this script reads ──"
-for key in sweep.new_ids sweep.carried_ids sweep.pass_at visit.recheck; do
+for key in sweep.new_ids sweep.carried_ids sweep.carried_promoted_ids sweep.pass_at visit.recheck; do
     grep -qF "$key=" "$SWEEP" && ok "the sweep stamps $key" \
         || bad "the sweep stamps $key" "no $key= write in $SWEEP"
 done

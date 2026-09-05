@@ -16,8 +16,9 @@
 # Caller: orders/liveness-sweep.toml (exec), after liveness-sweep-precheck.sh
 # proves the delta non-empty; safe to run by hand.
 # State: $GC_PACK_STATE_DIR/liveness-sweep/<rig>/ — `reported`, the delta
-# baseline (comma-joined ids), beside `last-pass`, the cadence window. Both
-# are keyed per rig the same way the precheck keys them. A pass that starts
+# baseline (comma-joined ids), `carried-cursor`, the rotation offset into the
+# carried backlog, beside `last-pass`, the cadence window. All three are
+# keyed per rig the same way the precheck keys them. A pass that starts
 # closes the window, and the precheck closes it too once it has proved there
 # is no pass to start.
 # Bias everywhere: an unreadable probe excludes nothing (re-report, never
@@ -39,6 +40,13 @@ STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
 # but a parse error that aborts the whole classification.
 case "$STALE_PR_DAYS" in ''|*[!0-9]*) STALE_PR_DAYS=2 ;; esac
 case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
+# Carried ids are otherwise enumerated only as bare tokens, which a sitting
+# skips, so a bead that survives one pass has zero chance of re-examination.
+# Each filed visit rotates this many carried ids back into the named agenda
+# under their own heading; the cursor persists, so every carried bead returns
+# within ceil(carried / N) filed visits. Small on purpose: the re-examination
+# cost per pass stays bounded and constant.
+CARRIED_ROTATE="${LIVENESS_SWEEP_CARRIED_ROTATE:-5}"
 
 DRY_RUN=0
 while [ $# -gt 0 ]; do
@@ -69,6 +77,7 @@ else RIG_KEY=_unscoped; fi
 STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/liveness-sweep}"
 STATE_DIR="$STATE_BASE/$RIG_KEY"
 BASELINE_FILE="$STATE_DIR/reported"
+CURSOR_FILE="$STATE_DIR/carried-cursor"
 STAMP="$STATE_DIR/last-pass"
 
 # Close the cadence window. liveness-sweep-precheck.sh, the order's `check`,
@@ -505,6 +514,17 @@ advance_baseline() {
         || echo "$PROG: WARN: cannot write baseline at $BASELINE_FILE" >&2
 }
 
+# Persist the rotation offset. Called only where the current slice was surfaced
+# to a sitting — the pass that files this visit, or the refile guard finding the
+# same slice already filed and dispositioned. A live-visit skip or an
+# empty-agenda pass never burns the cursor: its slice was not shown.
+advance_cursor() { # advance_cursor <next-offset>
+    [ "$DRY_RUN" -eq 0 ] || return 0
+    mkdir -p "$STATE_DIR" 2>/dev/null || { echo "$PROG: WARN: cannot write cursor at $CURSOR_FILE" >&2; return 0; }
+    printf '%s\n' "$1" > "$CURSOR_FILE" 2>/dev/null \
+        || echo "$PROG: WARN: cannot write cursor at $CURSOR_FILE" >&2
+}
+
 # resolve the claim-time re-check script — searched, never assumed (importer
 # rigs have no assets/ of their own).
 RECHECK_SH=""
@@ -526,38 +546,85 @@ sweep_visit() {
         echo "$PROG: batch visit already live on $SWEEP_SUBJECT; $CARRIED_COUNT carried, $NEW_COUNT new await it (baseline not advanced)"
         return 0
     fi
-    if [ "$NEW_COUNT" = "0" ]; then
-        echo "$PROG: nothing new — nothing filed"
-        advance_baseline
-        return 0
-    fi
-    # Re-file guard: an agenda a sitting already closed out `dispositioned` is
-    # not news. The test is the id SET; a cut-short or unreadable prior files.
-    # Fail-open on a non-zero read even when it printed a matching array.
-    local new_key prior_rc prior refile=""
-    new_key=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
-    prior_rc=0
-    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; else gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
-    if [ "$prior_rc" -eq 0 ]; then
-        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" '
-            if type == "array" then
-              [ .[]
-                | select(((.metadata // {}).task_kind // "") == "visit")
-                | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
-                | select(((((.metadata // {})["sweep.new_ids"] // "") | tostring)
-                          | split(",") | map(select(length > 0)) | sort | join(",")) == $key)
-                | .id ] | (.[0] // "")
-            else "" end' 2>/dev/null)
-    fi
-    if [ -n "$refile" ] && [ -n "$new_key" ]; then
-        echo "$PROG: same NEW set as dispositioned visit $refile; not re-filed (baseline advanced)"
+    # Rotate a bounded slice of the carried backlog back into the enumerated
+    # agenda. Computed BEFORE the file/skip decisions below: the promoted slice
+    # is part of the filed agenda, so a pass with no NEW ids but a live carried
+    # backlog still has something to put in front of a sitting. A carried id is
+    # otherwise shown only as a bare token, which a sitting skips; the cursor
+    # persists across passes, so consecutive passes over the same carried set
+    # surface DIFFERENT ids and every carried bead is re-examined within
+    # ceil(carried / CARRIED_ROTATE) surfaced visits. Ordered by id: the offset
+    # walks the id-sorted carried set, the one stable order available (the delta
+    # baseline records no per-id age).
+    local cursor rotated promoted restcarried next_cursor
+    cursor=$(head -n1 "$CURSOR_FILE" 2>/dev/null | tr -cd '0-9')
+    [ -n "$cursor" ] || cursor=0
+    cursor=$((10#$cursor))   # base-10 (drops any leading zeros JSON would reject)
+    rotated=$(printf '%s' "$CARRIED" | jq -c --argjson n "$CARRIED_ROTATE" --argjson cur "$cursor" '
+        (sort_by(.id)) as $c
+        | ($c | length) as $len
+        | if $len == 0 then {promoted: [], rest: [], next: 0}
+          else (if $n > $len then $len else $n end) as $take
+            | ($cur % $len) as $start
+            | [ range(0; $take) | ($start + .) % $len ] as $idx
+            | { promoted: [ $idx[] as $j | $c[$j] ],
+                rest:     [ range(0; $len) as $k | select(($idx | index($k)) == null) | $c[$k] ],
+                next:     (($start + $take) % $len) }
+          end')
+    promoted=$(printf '%s' "$rotated" | jq -c '.promoted')
+    restcarried=$(printf '%s' "$rotated" | jq -c '.rest')
+    next_cursor=$(printf '%s' "$rotated" | jq -r '.next')
+
+    # The filed agenda is the NEW ids plus the promoted carried slice. Only when
+    # BOTH are empty is there nothing to put in front of anyone (no candidates at
+    # all): record the empty census and stop. A non-empty promoted slice is a
+    # filed agenda even with zero new ids — that is the carried backlog's one path
+    # back into the enumerated agenda.
+    local promoted_count
+    promoted_count=$(printf '%s' "$promoted" | jq 'length')
+    if [ "$NEW_COUNT" = "0" ] && [ "$promoted_count" = "0" ]; then
+        echo "$PROG: nothing new, nothing carried to rotate — nothing filed"
         advance_baseline
         return 0
     fi
 
-    # Build the body: new candidates enumerated (capped), carried as bare ids.
+    # Re-file guard: an agenda a sitting already closed out `dispositioned` is not
+    # news. The key is the id SET of the ACTUAL filed agenda — NEW ids plus the
+    # promoted carried slice — so a stable NEW set paired with a fresh carried
+    # rotation is a different agenda and still files. A cut-short or unreadable
+    # prior files; fail-open on a non-zero read even when it printed a matching
+    # array. On a match the slice was already surfaced and dispositioned, so
+    # advance the cursor past it: the next pass rotates on rather than re-testing
+    # the same slice forever.
+    local agenda_key prior_rc prior refile=""
+    agenda_key=$(jq -rn --argjson new "$NEW" --argjson promoted "$promoted" \
+        '[ $new[].id, $promoted[].id ] | unique | join(",")')
+    prior_rc=0
+    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; else gc bd list --status=closed --metadata-field "gc.continuation_group=$SWEEP_SUBJECT" --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
+    if [ "$prior_rc" -eq 0 ]; then
+        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$agenda_key" '
+            if type == "array" then
+              [ .[]
+                | select(((.metadata // {}).task_kind // "") == "visit")
+                | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
+                | select(( [ (((.metadata // {})["sweep.new_ids"] // "") | tostring),
+                             (((.metadata // {})["sweep.carried_promoted_ids"] // "") | tostring) ]
+                           | map(split(",")) | add | map(select(length > 0)) | unique | join(",")) == $key)
+                | .id ] | (.[0] // "")
+            else "" end' 2>/dev/null)
+    fi
+    if [ -n "$refile" ] && [ -n "$agenda_key" ]; then
+        echo "$PROG: same agenda as dispositioned visit $refile; not re-filed (baseline advanced, carried rotation advanced)"
+        advance_baseline
+        advance_cursor "$next_cursor"
+        return 0
+    fi
+
+    # Build the body: new candidates enumerated (capped), then a rotating slice
+    # of the carried backlog enumerated, then the rest as bare ids.
     local body
     body=$(jq -nr --argjson new "$NEW" --argjson carried "$CARRIED" \
+        --argjson promoted "$promoted" --argjson restcarried "$restcarried" \
         --arg pass_at "$PASS_AT" --arg cap "$LIST_CAP" \
         --arg pr "$PR_LIVENESS" --arg convoy "$CONVOY_LIVENESS" --arg husk "$HUSK_LIVENESS" '
       ($cap | tonumber) as $c
@@ -566,13 +633,17 @@ sweep_visit() {
           (if $pr == "unverified" then "WARNING: the open-PR read failed for at least one repository — PR-parked beads may be listed." else empty end),
           (if $convoy == "unverified" then "WARNING: a convoy read failed — a molecule-driven work bead may be listed." else empty end),
           (if $husk == "unverified" then "WARNING: a root/convoy/anchor read failed — a landed workflow step may be listed." else empty end),
-          "",
-          "New this pass:",
-          ($new[0:$c][] | "  \(.id) — \(.title) [\(.type)]"),
-          (if ($new | length) > $c then "  …plus \(($new | length) - $c) more: \($new[$c:] | map(.id) | join(", "))" else empty end),
+          (if ($new | length) > 0 then ("",
+              "New this pass:",
+              ($new[0:$c][] | "  \(.id) — \(.title) [\(.type)]"),
+              (if ($new | length) > $c then "  …plus \(($new | length) - $c) more: \($new[$c:] | map(.id) | join(", "))" else empty end))
+           else empty end),
+          (if ($promoted | length) > 0 then ("",
+              "Re-examined from the carried backlog (\($promoted | length) of \($carried | length), rotating each pass):",
+              ($promoted[] | "  \(.id) — \(.title) [\(.type)]")) else empty end),
           "",
           "Carried (still unnamed from earlier passes, not re-litigated): \($carried | length)",
-          (if ($carried | length) > 0 then "  \($carried | map(.id) | join(", "))" else empty end),
+          (if ($restcarried | length) > 0 then "  \($restcarried | map(.id) | join(", "))" else empty end),
           "",
           "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (file a visit/gate) · kill (gc bd close <id> --reason) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing) · demand (gc-helm.sh demand <id> \"<what a person owes>\" — files that as a SIBLING bead and blocks <id> on it; a hold written as prose is not a disposition, it is a field someone has to come back and clear)"
         ] | join("\n")')
@@ -589,11 +660,16 @@ sweep_visit() {
     # Stamp the census as machine state on the visit so a claim-time re-check
     # is one command, then advance the baseline (visit first, stamp second: a
     # failed create must leave the baseline for the next pass to re-report).
+    # The promoted slice is stamped alongside the full carried set: the body's
+    # rotation is provenance a sitting reads only if it reads the body at all,
+    # but liveness-recheck.sh's census IS the board, so it needs the slice by id
+    # to render those beads titled without enumerating the whole carried backlog.
     visit=$(printf '%s' "$out" | grep -oE 'visit [A-Za-z0-9._-]+' | head -n1 | cut -d' ' -f2)
     if [ -n "$visit" ]; then
         bd_write update "$visit" \
             --set-metadata "sweep.new_ids=$(printf '%s' "$NEW" | jq -r 'map(.id) | join(",")')" \
             --set-metadata "sweep.carried_ids=$(printf '%s' "$CARRIED" | jq -r 'map(.id) | join(",")')" \
+            --set-metadata "sweep.carried_promoted_ids=$(printf '%s' "$promoted" | jq -r 'map(.id) | join(",")')" \
             --set-metadata "sweep.pass_at=$PASS_AT" >/dev/null 2>&1 \
             || echo "$PROG: WARN: could not stamp the census on visit $visit" >&2
         if [ -n "$RECHECK_SH" ]; then
@@ -604,6 +680,7 @@ sweep_visit() {
         fi
     fi
     advance_baseline
+    advance_cursor "$next_cursor"
 }
 if [ -n "$SWEEP_SUBJECT" ]; then
     sweep_visit || exit 1

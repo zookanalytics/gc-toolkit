@@ -9,6 +9,7 @@ set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/liveness-sweep.sh"
+PRECHECK="$HERE/liveness-sweep-precheck.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -314,10 +315,23 @@ run_sweep "$EXPECT_SURVIVORS,z-departed"
 eq "$(cat "$BASELINE_FILE")" "$EXPECT_SURVIVORS" \
    "a dispositioned bead (z-departed) leaves the baseline, so a regression re-reports it"
 
-echo "── an unchanged population files nothing and still advances ──"
+echo "── ready set == baseline (0 new): the carried backlog still files a re-examined slice ──"
+# The bug this branch removes: a pass with no NEW ids returned before it rotated
+# the carried backlog, so a stable carried set had no path back into the titled
+# agenda (observed live as an 83-id block byte-identical across a day). A
+# carried-only pass now promotes a bounded slice and files.
 run_sweep "$EXPECT_SURVIVORS"
-eq "$(cat "$ESC_CALLS")" "" "0 new → no visit filed"
-grep -q "nothing new — nothing filed" <<< "$OUT" && ok "…and says so" || bad "quiet-pass line" "$OUT"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
+   "0 new but a live carried backlog → a visit still files (no unrelated new id required)"
+grep -q "Re-examined from the carried backlog" "$ESC_BODIES" \
+    && ok "…and it promotes a carried slice into the enumerated agenda" \
+    || bad "carried-only rotation section" "$(cat "$ESC_BODIES")"
+grep -q "New this pass:" "$ESC_BODIES" \
+    && bad "a 0-new visit must not print an empty 'New this pass:' header" "$(cat "$ESC_BODIES")" \
+    || ok "…and omits the empty 'New this pass:' header when there is no new id"
+eq "$(cat "$BASELINE_FILE")" "$EXPECT_SURVIVORS" "…and the baseline still advances (unchanged population)"
+eq "$(cat "$TMP/state/testrig/carried-cursor" 2>/dev/null)" "5" \
+   "…and the rotation cursor advances (0 → 5), so the next pass surfaces the next slice"
 
 echo "── a live visit on the subject skips AND leaves the baseline alone ──"
 jq '. + [{"id":"v-batch","status":"in_progress","title":"visit: tk-subject","metadata":{"task_kind":"visit","gc.continuation_group":"tk-subject"}}]' \
@@ -349,6 +363,17 @@ prior dispositioned "$NEWKEY" v-failed
 PRIOR_VISITS="$TMP/prior.json" GC_LIST_RC=1 run_sweep ABSENT
 eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
    "a failing closed-visit listing files, even when what it printed matches"
+# The re-file key is the WHOLE filed agenda (NEW ids + promoted carried), not the
+# NEW set alone: a dispositioned old NEW set must not suppress a pass that also
+# owes a fresh carried rotation. baseline=PARTIAL → NEW={c-docupdate} (a set a
+# prior visit dispositioned) with 21 carried behind it that still must rotate.
+prior dispositioned "c-docupdate" v-oldnew
+PRIOR_VISITS="$TMP/prior.json" run_sweep "$PARTIAL"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
+   "a dispositioned NEW set does not suppress a pass that still owes a carried rotation"
+grep -q "Re-examined from the carried backlog" "$ESC_BODIES" \
+    && ok "…and the filed agenda carries the promoted carried slice" \
+    || bad "carried rotation under a matching prior NEW set" "$(cat "$ESC_BODIES")"
 
 echo "── fail-safe: an unreadable listing aborts, files nothing, keeps the baseline ──"
 GC_READY_FAIL=1 run_sweep "old-baseline"
@@ -551,6 +576,110 @@ else
         && bad "and never reached the warn arm" "$(cat "$TMP/err")" \
         || ok "and never reached the warn arm"
 fi
+
+echo "── carried ids rotate across passes and the cursor persists in the state file ──"
+# Without rotation a carried id is a bare token forever; a sitting skips it, so
+# it has zero chance of re-examination. Each filed visit must promote the NEXT
+# slice of the carried set into the enumerated agenda, advancing a cursor that
+# survives across passes. run_sweep wipes all state, so this drives the script
+# directly, resetting the baseline (same carried set each pass) but preserving
+# the cursor file beside it.
+ROT_STATE="$TMP/rot-state"; rm -rf "$ROT_STATE"; mkdir -p "$ROT_STATE/testrig"
+ROT_BASE="$ROT_STATE/testrig/reported"; ROT_CUR="$ROT_STATE/testrig/carried-cursor"
+cat > "$TMP/rot-ready.json" <<'JSON'
+[
+  {"id":"k1","title":"carried one","issue_type":"bug","metadata":{}},
+  {"id":"k2","title":"carried two","issue_type":"bug","metadata":{}},
+  {"id":"k3","title":"carried three","issue_type":"bug","metadata":{}},
+  {"id":"k4","title":"carried four","issue_type":"bug","metadata":{}},
+  {"id":"k5","title":"carried five","issue_type":"bug","metadata":{}},
+  {"id":"k6","title":"carried six","issue_type":"bug","metadata":{}},
+  {"id":"k7","title":"carried seven","issue_type":"bug","metadata":{}},
+  {"id":"k8","title":"carried eight","issue_type":"bug","metadata":{}},
+  {"id":"knew","title":"the ever-new trigger","issue_type":"bug","metadata":{}}
+]
+JSON
+printf '%s\n' '[{"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}}]' > "$TMP/rot-live.json"
+printf '[]\n' > "$TMP/rot-widen.json"
+# baseline holds k1..k8 (carried); knew is new each pass, so a visit always files.
+rot_pass() {
+    printf 'k1,k2,k3,k4,k5,k6,k7,k8\n' > "$ROT_BASE"
+    : > "$ESC_CALLS"; : > "$ESC_BODIES"; : > "$GC_CALLS"
+    LIVENESS_SWEEP_STATE_DIR="$ROT_STATE" \
+      FAKE_READY="$TMP/rot-ready.json" FAKE_LIVE="$TMP/rot-live.json" FAKE_WIDEN="$TMP/rot-widen.json" \
+      bash "$SCRIPT" >/dev/null 2>"$TMP/rot-err"
+}
+# the ids enumerated under the rotation heading (id is awk field 1 of "  <id> — …")
+promoted_ids() { awk '/Re-examined from the carried backlog/{f=1;next} /^Carried /{f=0} f && /^  [a-z0-9]/{print $1}' "$ESC_BODIES" | paste -sd, -; }
+
+rot_pass
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "pass 1 files a visit"
+grep -q "Re-examined from the carried backlog (5 of 8" "$ESC_BODIES" \
+    && ok "pass 1 promotes a bounded slice of the carried backlog into the agenda" \
+    || bad "pass 1 rotation section" "$(cat "$ESC_BODIES")"
+P1_PROMOTED="$(promoted_ids)"; P1_CUR="$(cat "$ROT_CUR" 2>/dev/null)"
+eq "$P1_CUR" "5" "the cursor is persisted beside reported (advanced to 5)"
+# The slice must ride the visit as durable state, not just the body: the sitting
+# works from liveness-recheck.sh's census, which reads this stamp to render the
+# rotated ids titled without --all.
+eq "$(grep -oE 'sweep\.carried_promoted_ids=[a-z0-9,-]*' "$GC_CALLS" | head -1 | cut -d= -f2)" "$P1_PROMOTED" \
+   "the promoted slice is stamped durably (sweep.carried_promoted_ids) for the claim-time re-check"
+
+rot_pass
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "pass 2 files a visit"
+P2_PROMOTED="$(promoted_ids)"; P2_CUR="$(cat "$ROT_CUR" 2>/dev/null)"
+if [ -n "$P1_PROMOTED" ] && [ -n "$P2_PROMOTED" ] && [ "$P1_PROMOTED" != "$P2_PROMOTED" ]; then
+    ok "two passes over the SAME carried set enumerate DIFFERENT carried ids ($P1_PROMOTED | $P2_PROMOTED)"
+else bad "carried ids rotate between passes" "p1='$P1_PROMOTED' p2='$P2_PROMOTED'"; fi
+eq "$P2_CUR" "2" "the cursor survives and advances again across passes (5 → 2)"
+UNION="$(printf '%s\n%s\n' "$P1_PROMOTED" "$P2_PROMOTED" | tr ',' '\n' | sort -u | grep -c .)"
+eq "$UNION" "8" "the rotations together reach every carried bead within ceil(8/5)=2 passes"
+
+echo "── order path: the precheck opens the gate the carried-backlog rotation needs ──"
+# orders/liveness-sweep.toml runs liveness-sweep.sh only when its `check`,
+# liveness-sweep-precheck.sh, exits 0. The rotation above is reachable only if
+# the check RUNS on a stable carried backlog — the case the check keys its skip
+# against. Drive BOTH over one board + baseline, rather than the exec alone: the
+# gate assertion is the regression a precheck skipping on 0-new would fail,
+# leaving the rotation dead on the path it was added to fix.
+ORD_STATE="$TMP/ord-state"; rm -rf "$ORD_STATE"; mkdir -p "$ORD_STATE/testrig"
+cat > "$TMP/ord-ready.json" <<'JSON'
+[
+  {"id":"o1","title":"carried alpha","issue_type":"bug","metadata":{}},
+  {"id":"o2","title":"carried beta","issue_type":"bug","metadata":{}},
+  {"id":"o3","title":"carried gamma","issue_type":"bug","metadata":{}}
+]
+JSON
+printf '%s\n' '[{"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}}]' > "$TMP/ord-live.json"
+printf '[]\n' > "$TMP/ord-widen.json"
+# Every survivor is already in reported: 0 new, a full carried backlog.
+printf 'o1,o2,o3\n' > "$ORD_STATE/testrig/reported"
+: > "$ESC_CALLS"; : > "$ESC_BODIES"; : > "$GC_CALLS"
+# 1) the gate: the check must RUN (exit 0), not skip.
+PRE_OUT="$(LIVENESS_SWEEP_STATE_DIR="$ORD_STATE" \
+    FAKE_READY="$TMP/ord-ready.json" FAKE_LIVE="$TMP/ord-live.json" FAKE_WIDEN="$TMP/ord-widen.json" \
+    bash "$PRECHECK" 2>&1)"; PRE_RC=$?
+eq "$PRE_RC" "0" "0 new + a live carried backlog → the check RUNS the pass (gate open)"
+grep -q "carried candidate" <<< "$PRE_OUT" \
+    && ok "…and the verdict names the carried rotation, not a new id" \
+    || bad "check carried-run reason" "$PRE_OUT"
+# 2) the worker the gate admits: the exec files the carried rotation.
+LIVENESS_SWEEP_STATE_DIR="$ORD_STATE" \
+    FAKE_READY="$TMP/ord-ready.json" FAKE_LIVE="$TMP/ord-live.json" FAKE_WIDEN="$TMP/ord-widen.json" \
+    bash "$SCRIPT" >/dev/null 2>"$TMP/ord-err"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
+   "…and the exec the gate admits files the carried-backlog visit"
+grep -q "Re-examined from the carried backlog" "$ESC_BODIES" \
+   && ok "…promoting the carried slice into the enumerated agenda" \
+   || bad "order-path rotation section" "$(cat "$ESC_BODIES")"
+# The gate still CLOSES on a genuinely empty board — the fix moved the skip
+# threshold from "0 new" to "0 candidates", it did not remove the skip.
+rm -rf "$TMP/ord-state2"
+printf '[]\n' > "$TMP/ord-empty.json"
+LIVENESS_SWEEP_STATE_DIR="$TMP/ord-state2" \
+    FAKE_READY="$TMP/ord-empty.json" FAKE_LIVE="$TMP/ord-live.json" FAKE_WIDEN="$TMP/ord-widen.json" \
+    bash "$PRECHECK" >/dev/null 2>&1; PRE_RC2=$?
+eq "$PRE_RC2" "1" "an empty board still SKIPS — the gate closes when nothing survives"
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"

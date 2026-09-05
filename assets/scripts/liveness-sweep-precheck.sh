@@ -7,15 +7,19 @@
 # every exclusion made here, the sweep also makes, and the three non-local /
 # non-monotone ones (worked-via-convoy, the open-PR intersection, the
 # pre-open gate verdicts) are deliberately NOT made — so the local survivor
-# set is a SUPERSET of the sweep's true candidates and "zero new locally"
-# proves "zero new really", but only for the batch triage visit. The pass has a
-# second output — the per-anchor stale-gate escalation — that no unnamed-waits
-# baseline can represent, so the check ALSO runs whenever a PR-gated anchor's
-# re-escalation floor is up (the stale-due gate below). Anything else — any
-# unreadable probe, a missing subject, its own abort — RUNS the pass: a probe
-# that cannot be read excludes nothing. It also sets the 6h cadence (a
-# condition trigger has no interval). The per-rig window is spent by whichever
-# side ends the pass's
+# set is a SUPERSET of the sweep's true candidates and "zero survivors
+# locally" proves "zero candidates really", but only for the batch triage
+# visit. The skip is gated on that empty survivor set, not on an empty delta:
+# the sweep files a visit — or rotates a slice of the carried backlog back
+# into the enumerated agenda — whenever ANY candidate survives, so a stable
+# carried set (nothing new, but a backlog to rotate) still owes a pass and the
+# check must open the gate for it. The pass also has a second output — the
+# per-anchor stale-gate escalation — that no unnamed-waits baseline can
+# represent, so the check ALSO runs whenever a PR-gated anchor's re-escalation
+# floor is up (the stale-due gate below). Anything else — any unreadable
+# probe, a missing subject, its own abort — RUNS the pass: a probe that cannot
+# be read excludes nothing. It also sets the 6h cadence (a condition trigger
+# has no interval). The per-rig window is spent by whichever side ends the pass's
 # chance to run: liveness-sweep.sh when a pass starts, or this check when it
 # has proved the board quiet, since then no pass will. A RUN verdict never
 # spends it, because more callers evaluate a check than dispatch from it (the
@@ -327,10 +331,14 @@ if [ "$READS_OK" -eq 1 ]; then
 fi
 
 # The ONE place DECISION may become skip — it needs every positive fact at once.
-# N_STALE_DUE empty (its jq failed) defaults to the run side, like every probe.
-if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_NEW" = "0" ] && [ -z "$LIVE_VISIT" ] && [ "${N_STALE_DUE:-1}" = "0" ]; then
+# Gated on the whole survivor set, not the delta: the sweep rotates a slice of
+# the carried backlog every pass, so a stable carried set (0 new) still owes a
+# pass; only an empty survivor set means the sweep would file nothing. And on no
+# stale-due anchor: N_STALE_DUE empty (its jq failed) defaults to the run side,
+# like every probe.
+if [ "$READS_OK" -eq 1 ] && [ "$JQ_OK" -eq 1 ] && [ "$N_SURVIVORS" = "0" ] && [ -z "$LIVE_VISIT" ] && [ "${N_STALE_DUE:-1}" = "0" ]; then
     DECISION=skip
-    REASON="0 new local candidates (of $N_SURVIVORS still unnamed, $N_BASELINE already reported) and no live visit on $SUBJECT"
+    REASON="0 unnamed-wait candidates ($N_BASELINE previously reported, none still unnamed) and no live visit on $SUBJECT"
 elif [ "$READS_OK" -ne 1 ]; then
     REASON="a required bead read was UNREADABLE ($READ_FAIL) — an unreadable probe excludes nothing"
 elif [ "$N_SUBJECTS" = "0" ]; then
@@ -341,10 +349,12 @@ elif [ "$JQ_OK" -ne 1 ]; then
     REASON="the local classification did not produce a JSON array — treating that as unknown, never as empty"
 elif [ -n "$LIVE_VISIT" ]; then
     REASON="a visit is already live on $SUBJECT; $N_NEW new local candidate(s) await it"
-elif [ "$N_NEW" = "0" ] && [ "${N_STALE_DUE:-0}" != "0" ]; then
+elif [ "$N_NEW" != "0" ]; then
+    REASON="$N_NEW new local candidate(s) since the last reported pass"
+elif [ "${N_STALE_DUE:-0}" != "0" ]; then
     REASON="$N_STALE_DUE PR-gated anchor(s) past the re-escalation floor may owe a stale-gate escalation the unnamed baseline cannot represent"
 else
-    REASON="$N_NEW new local candidate(s) since the last reported pass"
+    REASON="$N_SURVIVORS carried candidate(s) to rotate back into the enumerated agenda (0 new since the last reported pass)"
 fi
 DECIDED=1
 

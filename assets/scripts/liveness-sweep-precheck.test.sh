@@ -279,38 +279,50 @@ eq "$RC" "1" "exit 1 — no agent session is dispatched at all"
 has "$OUT" "SKIP:" "the verdict is SKIP"
 has "$OUT" "no agent session this pass" "it says so in as many words"
 
-echo "── a stable population is not news: survivors already in the baseline ──"
+echo "── a stable carried backlog still runs: 0 new, but a rotation to file ──"
 # Every survivor is in sweep.reported, so the delta is empty even though the
-# census is not. This is the common case on a busy rig.
+# census is not — the common case on a busy rig. The sweep rotates a slice of
+# the carried backlog back into the enumerated agenda every pass, so this owes
+# a pass and the gate must open; a carried bead a skip left behind stays a bare
+# id forever.
 jq 'map(select(.id == "f-carried" or .id == "f-plain"))' "$TMP/ready.bak" > "$FIX/ready.json"
 cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
-eq "$RC" "1" "carried-only survivors are not new — no agent session"
+eq "$RC" "0" "carried-only survivors still run the pass — the sweep owes them a rotation"
 has "$OUT" "local survivors 2 -> new 0" "the funnel shows the census, not just the delta"
+has "$OUT" "carried candidate" "the verdict names the carried rotation, not a new id"
 
-echo "── a live visit on the SWEEP subject runs the pass even with nothing new ──"
+# The live-visit override, tested on an EMPTY board — the case that skips on
+# its own — so the live visit is the only thing that can turn it into a run. (A
+# carried board runs regardless now, so it cannot isolate this behavior.)
+echo "── a live visit on the SWEEP subject runs the pass even on an empty board ──"
+jq 'map(select([.id] | inside(["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live","f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec"])))' \
+   "$TMP/ready.bak" > "$FIX/ready.json"
 jq '. + [{"id":"v-2","title":"visit: the sweep subject","metadata":{"task_kind":"visit","gc.continuation_group":"f-subject"}}]' \
-   "$FIX/live.json" > "$TMP/live.visit" && cp "$TMP/live.visit" "$FIX/live.json"
+   "$TMP/live.bak" > "$TMP/live.visit" && cp "$TMP/live.visit" "$FIX/live.json"
 run_precheck
-eq "$RC" "0" "a live visit on the subject runs the pass"
+eq "$RC" "0" "a live visit on the subject runs the pass even with no survivors"
 has "$OUT" "a visit is already live" "and says which condition fired"
-# A live visit on some OTHER subject must not block the skip — the condition is
-# about this sweep's subject, not about visits in general.
-cp "$TMP/live.bak" "$FIX/live.json"
-BASELINE_CSV="f-carried,f-plain" run_precheck
-eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
-# The su-ab9je shape at the SUBJECT level (bead tk-d6ddn). The sitting is live
-# and held, but its gc.continuation_group stamp landed empty, so only the tracks
-# edge names f-subject. Read on the stamp alone this is "no visit", and the
-# precheck greenlights a pass that files a SECOND visit on a subject converse is
-# still holding — the mirror of mol-liveness-sweep's own step-3 guard, on the
-# same fixture shape, so the two cannot drift apart.
-echo "── a live visit named ONLY by its tracks edge still runs the pass ──"
-jq 'map(select(.id == "f-carried" or .id == "f-plain"))' "$TMP/ready.bak" > "$FIX/ready.json"
+# A live visit on some OTHER subject must not force a run — the condition is
+# about this sweep's subject, not about visits in general. v-1 and v-3 (in
+# live.bak) name other subjects, so the empty board must still skip.
+echo "── a live visit on a DIFFERENT subject does not force a run ──"
+cp "$TMP/live.bak" "$FIX/live.json"
+run_precheck
+eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
+has "$OUT" "SKIP:" "and the empty board reaches a real SKIP verdict"
+
+# The su-ab9je shape at the SUBJECT level: the sitting is live and held, but its
+# gc.continuation_group stamp landed empty, so only the tracks edge names
+# f-subject. Read on the stamp alone this is "no visit", and the precheck would
+# greenlight a pass that files a SECOND visit on a subject a sitting still
+# holds — the mirror of the exec's own live-visit guard, on the same fixture
+# shape, so the two cannot drift apart.
+echo "── a live visit named ONLY by its tracks edge still counts as live ──"
 jq '. + [{"id":"v-4","title":"visit: the sweep subject — stamp landed empty","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-4","depends_on_id":"f-subject","type":"tracks"}]}]' \
    "$TMP/live.bak" > "$TMP/live.visit2" && cp "$TMP/live.visit2" "$FIX/live.json"
-BASELINE_CSV="f-carried,f-plain" run_precheck
+run_precheck
 eq "$RC" "0" "a visit whose stamp is EMPTY still reads as live, via its tracks edge"
 has "$OUT" "a visit is already live" "and says which condition fired"
 
@@ -341,16 +353,20 @@ has "$OUT" "local survivors 3 -> new 0" "the delta really is empty: every surviv
 has "$OUT" "may owe a stale-gate escalation" "the RUN names the stale-gate reason, not a phantom new candidate"
 has "$OUT" "PR-gated anchors past the stale re-escalation floor: 1" "and reports the one anchor that forced it"
 
-echo "── a PR-gated anchor escalated INSIDE the floor is not due — the board skips ──"
-# The gate respects the floor: it does not degrade into "run forever while any PR
-# is open". An anchor stamped within the floor owes nothing yet.
+echo "── a PR-gated anchor escalated INSIDE the floor owes no stale-gate escalation ──"
+# The floor is respected: an anchor stamped within it owes nothing yet, so the
+# stale-gate does not fire and the run reason is never the stale-gate. The board
+# still RUNS — a carried backlog runs the pass regardless (the survivor-set gate
+# owes those beads a rotation) — but for the carried-rotation reason, so the
+# floor's effect shows as the stale-gate staying silent, not as a skip.
 RECENT="$(iso_ago 1)"
 jq --arg t "$RECENT" 'map(select(.id == "f-pr-open" or .id == "f-carried" or .id == "f-plain"))
                       | map(if .id == "f-pr-open" then (.metadata.stale_escalated_at = $t) else . end)' \
    "$TMP/ready.bak" > "$FIX/ready.json"
 BASELINE_CSV="f-carried,f-plain,f-pr-open" run_precheck
-eq "$RC" "1" "a just-escalated anchor is inside its floor — nothing owed, the board skips"
-has "$OUT" "SKIP:" "the verdict is SKIP"
+eq "$RC" "0" "the carried backlog still runs the pass — a stable board is not a skip"
+has "$OUT" "carried candidate" "the RUN names the carried rotation"
+hasnt "$OUT" "may owe a stale-gate escalation" "the inside-floor anchor owes no escalation — the floor is respected"
 
 echo "── a PR-gated anchor escalated BEFORE the floor is due again — it runs ──"
 # Mirrors the sweep's re-raise-after-floor: past the floor the anchor owes a
