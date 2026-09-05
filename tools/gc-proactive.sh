@@ -210,15 +210,18 @@ cmd_demand() {
         db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
         r="$(gc bd ready ${db:+--db "$db"} --metadata-field "gc.routed_to=$target" --unassigned \
-                --exclude-type=epic --json --sort oldest --limit="$SCAN_LIMIT" 2>/dev/null || true)"
+                --exclude-type=epic --json --limit 0 2>/dev/null || true)"
         [ -n "$r" ] || r='[]'
     fi
     # Drop never-claimable topology roots (see exclude_topology_roots) so the
-    # demand mirror matches what gc hook --claim would offer, then rank by
-    # board weight: spend the scarce proactive slots on the highest-priority
-    # work first (oldest-first within a band), not whatever bd-ready returned
-    # oldest-first across all priorities.
-    printf '%s' "$r" | exclude_topology_roots | board_rank
+    # demand mirror matches what gc hook --claim would offer, then rank by board
+    # weight and slice to the worker page. The full routed set is read
+    # (--limit 0) and roots dropped BEFORE the slice, so — like the agent.toml
+    # work_query this mirrors — a page filled by topology roots cannot bury a
+    # claimable step behind them and understate demand to zero. The scarce
+    # proactive slots then spend on the highest-priority work first (oldest
+    # within a band), not whatever bd-ready returned oldest across all bands.
+    printf '%s' "$r" | exclude_topology_roots | board_rank | jq --argjson n "$SCAN_LIMIT" '.[0:$n]'
 }
 
 # ---------------------------------------------------------------------------
