@@ -262,6 +262,9 @@ workdir with two live transcripts → advisory fallback.
 
 ## Follow-up work
 
-- gascity `gc-zb3st` — R1, reconcile session_key on the SessionStart hook.
+- gascity `gc-zb3st` — R1a, the reconciling `session_key` writer.
+- gascity `gc-39arr` — R1b, fire the managed Claude hook on the mid-session
+  rotations (`resume`, `clear`, `compact`, `fork`). R1a and R1b are the two
+  halves of R1 and land together; R1a is inert without R1b.
 - gascity `gc-1fke8` — R2, self-announcing agent-token-telemetry discriminator
   (resolves tk-jnrm6i's escalation noise).
