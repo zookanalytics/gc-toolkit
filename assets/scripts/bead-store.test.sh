@@ -60,6 +60,15 @@ case "$1 $2" in
     # A store that cannot be opened prints NOTHING and exits 1 — the same exit
     # code a genuine miss uses. That is why the payload decides, not the code.
     [ -d "$DB" ] || exit 1
+    # A bare `<prefix>-` has an empty local part: real bd reads it as an invalid
+    # marker and answers the generic not-found, not a prefix scan. Model that, or
+    # the naive scan below calls it "ambiguous" and masks the fail-open a bare
+    # marker opens for `--absent`.
+    case "$ID" in
+      *-) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'
+          echo "Issue $ID not found" >&2
+          exit 1 ;;
+    esac
     # bd resolves a bare id as an exact match first, then as a prefix, and a
     # prefix matching several ids is ambiguous rather than a miss. Each shape
     # answers with the SAME miss object on stdout for the two error cases and
@@ -158,6 +167,16 @@ eq "$RC" 3 "an id with no '<prefix>-' segment is unproven"
 run nodashes
 eq "$RC" 1 "  ... and refuses in resolution mode"
 
+# A bare `<prefix>-` is the fail-open one step past an unknown prefix: `al` DOES
+# resolve to alpha, so an empty id would probe alpha's store and read its generic
+# not-found as this id's absence. The refusal has to come BEFORE the probe.
+run --absent al-
+eq "$RC" 3 "a prefix-only id ('<prefix>-') is unproven, never absent, even when its prefix resolves"
+run al-
+eq "$RC" 1 "  ... and refuses in resolution mode"
+eq "$(grep -c "show al- --json" "$FAKE_GC_LOG" || true)" "0" \
+  "  ... and no store was probed about 'al-' — the refusal precedes any lookup"
+
 FAKE_RIGS_FAIL=1 run --absent al-gone
 eq "$RC" 3 "an unreadable rig list is unproven, not absent"
 has "$ERR" "could not read" "  ... reported apart from 'no such prefix', which has a different repair"
@@ -223,7 +242,7 @@ eq "$RC" 1 "  ... and --present reports it absent"
 # --- the shape a destructive gate is written in -----------------------------
 # `--absent && destroy` must fire on exactly one input and refuse the rest.
 fired=""
-for id in bt-lives zz-nope nodashes vd-anything dp-lives bt-gone al-uniq al-dup; do
+for id in bt-lives zz-nope nodashes vd-anything dp-lives bt-gone al-uniq al-dup al-; do
   R="$FAKE_RIGS"; [ "$id" = dp-lives ] && R="$TMP/dup.json"
   FAKE_RIGS="$R" "$SUT" --absent "$id" >/dev/null 2>&1 && fired="$fired $id"
 done

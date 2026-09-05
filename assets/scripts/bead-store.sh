@@ -103,9 +103,15 @@ case "$MODE" in
   *)              UNPLACED=1 ;;
 esac
 
+# A resolvable id is `<prefix>-<id>` with text on both sides of the first dash.
+# A bare `<prefix>-` names a store but no bead. Its prefix resolves to a rig, so
+# probing it reads that store's generic not-found as this id's own absence. That
+# is the fail-open this guard refuses, so require a non-empty id, not just a
+# non-empty prefix.
 PREFIX="${BEAD%%-*}"
-[ -n "$PREFIX" ] && [ "$PREFIX" != "$BEAD" ] || {
-  echo "$PROG: '$BEAD' has no '<prefix>-' segment to resolve a store from" >&2
+SUFFIX="${BEAD#*-}"
+[ -n "$PREFIX" ] && [ "$PREFIX" != "$BEAD" ] && [ -n "$SUFFIX" ] || {
+  echo "$PROG: '$BEAD' is not a '<prefix>-<id>' pair (needs text on both sides of the first '-'), so no store can be asked about it" >&2
   exit "$UNPLACED"
 }
 

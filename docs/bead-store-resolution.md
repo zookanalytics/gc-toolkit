@@ -73,6 +73,13 @@ guard at the opposite polarity rather than the negation of `--absent`: both
 refuse an unproven store, which is what keeps "I could not tell" out of both
 branches.
 
+A reference that is not a full `<prefix>-<id>` is refused before any store is
+asked: a string with no prefix dash, and a bare `<prefix>-` with no id after
+the prefix. The bare marker is the subtle one. Its prefix resolves to a real
+store, so probing it would read that store's not-found as this id's own
+absence, the same way a foreign prefix's ambient miss does. It names a store
+but no bead, so it earns no verdict.
+
 Reading the payload is what makes that distinction available. A store that
 cannot be opened exits 1 and prints nothing; a genuine miss exits 1 and prints
 the error object above. The exit code is the same on both, so the verdict
