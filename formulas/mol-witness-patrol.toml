@@ -296,11 +296,34 @@ The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
 pardon-or-execute, DOG_DONE notice back); if it executes, the dead
 session's beads return through THIS step next cycle.
 
-**3. Salvage.** Read `metadata.work_dir` and `metadata.branch` from the
-bead. Before ANY salvage git write, assert the work_dir is its OWN worktree
-root — a husk directory (worktree removed, dir survives) lets `cd` succeed
-while every git command resolves to the ENCLOSING repo, so `git add -A &&
-git push` would publish the town repo's working tree:
+**3. Salvage.** Read the bead's recovery pointers and resolve the repo that
+OWNS the branch. The witness runs from its agent home, whose git toplevel is
+the town repo, so an unpinned git or gh call resolves `origin` there and a
+branch that lives in a rig repo reads as absent — a false "gone" that invites
+discarding pushed work. `branch-context.sh` resolves the owning rig from the
+bead (store ref, then work_dir, then the patrol's own rig) and pins every
+existence, geometry, and push check to it, reporting `unknown` for anything it
+cannot assert rather than absence:
+```bash
+BEAD_JSON=$(gc bd show <bead> --json)
+WORKTREE=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.work_dir // empty')
+BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
+STORE_REF=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata["gc.root_store_ref"] // empty')
+BC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/branch-context.sh" ] && { BC="$c/assets/scripts/branch-context.sh"; break; }
+done
+eval "$("$BC" resolve --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH")"
+# sets RIG_ROOT, OWNER_REPO, OWNING_ORIGIN_URL, REPO_CTX, BRANCH_ON_ORIGIN
+```
+`REPO_CTX=ok` asserts the owning repo was found and its origin read. On anything
+else, escalate
+(`escalate.sh --subject <bead> --key witness-branch-recovery-unknown ...`) and
+treat the branch's state as unknown rather than gone.
+
+Before ANY salvage git write, assert work_dir is its OWN worktree root — a husk
+directory (worktree removed, dir survives) lets `cd` succeed while every git
+command resolves to the ENCLOSING repo, so `git add -A && git push` would
+publish that repo's working tree:
 ```bash
 # >>> husk-guard
 WORKTREE_SAFE=0
@@ -315,34 +338,47 @@ if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
 fi
 # <<< husk-guard
 ```
-If the branch is already on origin (`git ls-remote --heads origin $BRANCH`,
-run from the RIG ROOT — a husk resolves `origin` from the wrong repo), the
-worktree is disposable: go to step 4. Otherwise salvage — every git write
-gated on the guard:
+`BRANCH_ON_ORIGIN=present` means the work is already published and the worktree
+disposable — go to step 4. Otherwise salvage. The salvage push publishes to the
+worktree's origin, so gate it on `push-target-ok`, which refuses when the
+worktree's origin is not the owning origin (a husk points it at the wrong repo).
+A push of work that may already be on origin is idempotent and never loses
+commits, while `unknown` must never be read as gone:
 ```bash
-if [ "$WORKTREE_SAFE" = "1" ]; then
+if [ "$BRANCH_ON_ORIGIN" = "present" ]; then
+  echo "branch already on origin — worktree disposable; skipping salvage." >&2
+elif [ "$WORKTREE_SAFE" = "1" ] && "$BC" push-target-ok --worktree "$WORKTREE" --owning-origin "$OWNING_ORIGIN_URL" --bead <bead>; then
   cd "$WORKTREE"
   git status --porcelain
-  # Commit whatever is uncommitted/untracked, then publish the branch. All
-  # work is useful work — never discard.
+  # All work is useful work — commit whatever is uncommitted, then publish.
   git add -A
   git commit -m "witness: salvage work from orphaned agent (<bead>)" || true
   BRANCH=$(git branch --show-current)
   git push origin HEAD
   gc bd update <bead> --set-metadata branch="$BRANCH"
 else
-  echo "husk or missing work_dir — REFUSING salvage writes (see HUSK GUARD); nothing salvageable." >&2
+  echo "husk, wrong-origin, or missing work_dir — REFUSING salvage writes (see guards); nothing salvageable." >&2
 fi
 ```
-When nothing is salvageable (no worktree and no branch on origin, or the
+When nothing is salvageable (no worktree and no branch on the owning origin, or a
 guard refused), escalate the refusal best-effort
 (`escalate.sh --subject <bead> --key witness-salvage-refused ...`) and fall
 through — recovery is load-bearing, the notice advisory.
 
-**4. Verify before reset.** If the branch is already reachable from the
-target (`git merge-base --is-ancestor origin/$BRANCH origin/main`), the
-work landed: escalate the observation, close the bead, clean the worktree.
-Otherwise reset:
+**4. Verify before reset.** Ask the owning repo whether the branch already
+landed on the target. `branch-context.sh merged` reads it after the salvage
+push and defers to the compare API on a shallow checkout, whose grafted
+boundary makes a landed branch read as unmerged; a branch it cannot freshly
+fetch (deleted upstream, network) is `unknown`, never a stale-ref discard:
+```bash
+TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "main"')
+BRANCH_MERGED=$("$BC" merged --store-ref "$STORE_REF" --worktree "$WORKTREE" --branch "$BRANCH" --target "$TARGET")
+```
+`yes` — the work landed: escalate the observation, close the bead, clean the
+worktree. `no` — the work is unmerged: return it to the pool (step 5).
+`unknown` — no context could answer authoritatively, so do NOT reset and do NOT
+report the work discardable; escalate (`--key witness-branch-recovery-unknown`)
+and leave the bead for a human.
 
 **5. Cleanup + return to pool.** Remove the worktree (from the rig root:
 `git worktree remove <path> --force; git worktree prune`). Then hand the bead
