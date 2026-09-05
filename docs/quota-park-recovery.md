@@ -440,14 +440,18 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_BACKOFF_BASE` / `_CAP` | `120` / `900` | seconds between retries; must be ≥ 1 |
 | `QUOTA_PARK_ESCALATE_AFTER` | `7200` | one escalation visit (via `escalate.sh`) per long park; `0` disables |
 | `QUOTA_PARK_EXCLUDE` | — | ERE of aliases never nudged |
-| `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call; `0` disables the bound |
-| `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM; must be ≥ 1 (`timeout -k 0` is accepted and would silently restore the soft bound) |
-| `QUOTA_PARK_SWEEP_BUDGET` | `120` | seconds per pass before the rest defers; `0` disables |
+| `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call, a fraction allowed (e.g. `0.5`); `0` disables the bound |
+| `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM, a fraction allowed; must be > 0 (`timeout -k 0` is accepted and would silently restore the soft bound) |
+| `QUOTA_PARK_SWEEP_BUDGET` | `120` | seconds per pass before the rest defers, a fraction allowed; `0` disables |
 | `QUOTA_PARK_STALE_AFTER` | `600` | how long `--status` treats a sweep and a sighting as evidence; must be ≥ 1 |
 | `QUOTA_PARK_STATE_DIR` | `$GC_CITY/.gc/runtime/quota-park` | per-session episode state |
 
 Every numeric knob above is validated once, up front, and falls back to its
-default if it is not a bare integer **at or above its floor**. A garbage value
+default if it is out of range. The count and interval knobs must be a bare
+integer **at or above its floor**; the three wall-clock bounds
+(`CALL_TIMEOUT`, `KILL_AFTER`, `SWEEP_BUDGET`) also take a fraction like `0.5`,
+since they reach `timeout(1)` and the sweep clock rather than integer
+arithmetic. A garbage value
 fails differently in each place it lands and announces itself in none of them: a
 bad backoff bypasses backoff (`[: oops: integer expression expected` reads as
 "window elapsed", so every cycle nudges), a bad `ESCALATE_AFTER` reads as

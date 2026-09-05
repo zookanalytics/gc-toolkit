@@ -84,6 +84,16 @@ HEARTBEAT_FILE="$STATE_DIR/.heartbeat"
 COVERAGE_FILE="$STATE_DIR/.sweep-coverage"
 
 NOW="$(date +%s)"
+# Sub-second clock for the SWEEP_BUDGET check only; state-file timestamps stay
+# whole-second (NOW). `date +%N` is GNU — where date(1) lacks it the reading
+# carries a non-digit and now_ns falls back to whole-second resolution, so the
+# budget still bounds the pass, just no finer than a second.
+now_ns() {
+    local t; t="$(date +%s%N 2>/dev/null)"
+    case "$t" in '' | *[!0-9]* ) t="$(( $(date +%s) * 1000000000 ))" ;; esac
+    printf '%s' "$t"
+}
+START_NS="$(now_ns)"
 
 # Ownership marker: first line of every file this order writes; every
 # read/delete/prune path tests it before treating a file as its own (shape is
@@ -109,6 +119,17 @@ state_get() {
 # True for a bare non-empty integer — everything read back out of a state file
 # is fed to arithmetic, and `$(( ))` on garbage is fatal under `set -e`.
 num() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac }
+
+# True for a non-negative decimal — an integer or fractional seconds (15, 0,
+# 0.2, .5). Only the wall-clock bounds take these; they reach timeout(1) and
+# the sweep clock, never the integer `$(( ))` the num guards protect. Rejects a
+# lone dot, a sign, and a second dot.
+posnum() { case "${1:-}" in '' | . | *[!0-9.]* | *.*.* ) return 1 ;; *) return 0 ;; esac }
+
+# True for a POSITIVE decimal (0, 0.0, .0 read as zero; 0.2 does not). A zero
+# CALL_TIMEOUT or SWEEP_BUDGET means "disabled" and `timeout -k 0` silently
+# restores the soft bound, so the live-bound callers test this, not posnum.
+posnum_nz() { posnum "$1" && case "$1" in *[!0.]* ) return 0 ;; *) return 1 ;; esac; }
 
 # True for a timestamp this order could have written: an integer, not in the
 # FUTURE. A future last_try/first_seen/last_run each defeats a guard by
@@ -241,11 +262,14 @@ detector_class() {
 # Validate every numeric knob (a stray "15s" breaks a different guard
 # silently in each case); zero means "disable" only where documented.
 num_min() { num "${1:-}" && [ "$1" -ge "$2" ]; }
-num_min "$CALL_TIMEOUT"   0 || CALL_TIMEOUT=15
-num_min "$SWEEP_BUDGET"   0 || SWEEP_BUDGET=120
-# Floor 1: `timeout -k 0` silently restores the soft bound; turning the bound
-# off is CALL_TIMEOUT=0's job.
-num_min "$KILL_AFTER"     1 || KILL_AFTER=5
+# The wall-clock bounds take fractional seconds (see posnum); they reach
+# timeout(1) and the sweep clock, not integer arithmetic. CALL_TIMEOUT and
+# SWEEP_BUDGET keep 0 as the documented off switch; KILL_AFTER must stay
+# positive — `timeout -k 0` silently restores the soft bound, and turning the
+# call bound off is CALL_TIMEOUT=0's job.
+posnum    "$CALL_TIMEOUT" || CALL_TIMEOUT=15
+posnum    "$SWEEP_BUDGET" || SWEEP_BUDGET=120
+posnum_nz "$KILL_AFTER"   || KILL_AFTER=5
 num_min "$ESCALATE_AFTER" 0 || ESCALATE_AFTER=7200
 num_min "$BACKOFF_BASE"   1 || BACKOFF_BASE=120
 num_min "$BACKOFF_CAP"    1 || BACKOFF_CAP=900
@@ -412,7 +436,7 @@ fi
 # caller's failure branch; (2) stdin CLOSED — the session loop reads its work
 # list on fd 0. No timeout(1) degrades to an unbounded call.
 run_bounded() {
-    if [ "$CALL_TIMEOUT" -le 0 ] || [ "$BOUND_MODE" -eq 0 ]; then
+    if ! posnum_nz "$CALL_TIMEOUT" || [ "$BOUND_MODE" -eq 0 ]; then
         "$@" </dev/null
     elif [ "$BOUND_MODE" -eq 2 ]; then
         timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@" </dev/null
@@ -423,15 +447,17 @@ run_bounded() {
 
 # Said once per pass on a soft-bound host: the summary's numbers are then a
 # floor, not a full pass.
-if [ "$CALL_TIMEOUT" -gt 0 ] && [ "$BOUND_MODE" -eq 1 ]; then
+if posnum_nz "$CALL_TIMEOUT" && [ "$BOUND_MODE" -eq 1 ]; then
     echo "quota-park-nudge: this host's timeout(1) has no -k — call bounds are SIGTERM-only, so a gc call that ignores it is effectively unbounded"
 fi
 
 # True once the pass outran SWEEP_BUDGET (0 = none); checked per session so a
-# slow sweep stops at a session boundary.
+# slow sweep stops at a session boundary. Measured on the sub-second clock
+# (START_NS / now_ns), so a fractional budget is honored where date(1) has %N.
+SWEEP_BUDGET_NS="$(awk -v b="$SWEEP_BUDGET" 'BEGIN { printf "%.0f", b * 1000000000 }')"
 sweep_expired() {
-    [ "$SWEEP_BUDGET" -gt 0 ] || return 1
-    [ "$(( $(date +%s) - NOW ))" -ge "$SWEEP_BUDGET" ]
+    posnum_nz "$SWEEP_BUDGET" || return 1
+    [ "$(( $(now_ns) - START_NS ))" -ge "$SWEEP_BUDGET_NS" ]
 }
 
 checked=0; parked=0; nudged=0; skipped=0; unreadable=0; rejected=0; unconfirmed_now=0

@@ -378,6 +378,29 @@ export QUOTA_PARK_STATE_DIR="$TMP/state"
 export QUOTA_PARK_BACKOFF_BASE=120 QUOTA_PARK_BACKOFF_CAP=900
 export QUOTA_PARK_ESCALATE_AFTER=7200
 
+# --- Sub-second wall-clock bounds for the hang/deferral runs -----------------
+# The runs below drive the script's real timeout(1) bounds and its sweep-budget
+# clock. Sub-second bounds keep each hang from spending whole seconds of wall
+# time, but need two host capabilities: a timeout(1) that takes a fractional
+# interval, and a date(1) with %N so the script's own sweep clock (now_ns) is
+# sub-second too. With both, the bounds go under a second; without either they
+# fall back to the original whole-second values — correct, only slow. Probed
+# once; every run reads a $B_* variable rather than a literal, so the fast and
+# fallback values live in one place.
+FAST_BOUNDS=0
+if command -v timeout >/dev/null 2>&1 && timeout 0.05 true >/dev/null 2>&1; then
+    case "$(date +%N 2>/dev/null)" in '' | *[!0-9]* ) ;; *) FAST_BOUNDS=1 ;; esac
+fi
+if [ "$FAST_BOUNDS" = 1 ]; then
+    B_HANG=0.25    # a bounded hang (peek/nudge/mail) returns at once
+    B_KILL=0.25    # SIGKILL grace after B_HANG for a call that ignores SIGTERM
+    B_DEFER=0.5    # a single hang that must overrun B_BUD1 on its own (run 9)
+    B_BUD1=0.2     # sweep budget one B_DEFER hang overruns
+    B_BUD2=0.5     # sweep budget a two-to-three B_HANG prefix overruns (16, 21)
+else
+    B_HANG=1; B_KILL=1; B_DEFER=1; B_BUD1=1; B_BUD2=2
+fi
+
 # --- Run 1: both parks nudged, nothing else touched. ------------------------
 bash "$SCRIPT" > "$TMP/out1"
 eq "$(nudges_for lx-claude)"   "1" "Claude session-limit park is nudged"
@@ -479,7 +502,7 @@ else
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"
 started=$(date +%s)
-FAKE_HANG_PEEK=lx-claude QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+FAKE_HANG_PEEK=lx-claude QUOTA_PARK_CALL_TIMEOUT=$B_HANG QUOTA_PARK_SWEEP_BUDGET=0 \
     timeout 20 bash "$SCRIPT" > "$TMP/out8" || true
 elapsed=$(( $(date +%s) - started ))
 eq "$(nudges_for lx-codex)"  "1" "a wedged peek does not strand later sessions in the sweep"
@@ -491,7 +514,7 @@ eq "$(nudges_for lx-claude)" "0" "the wedged session itself is skipped, not nudg
 # --- Run 9: past the sweep budget, the remainder defers to the next cycle. --
 rm -f "$TMP/state"/*
 : > "$TMP/nudges"
-FAKE_HANG_PEEK=lx-claude QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=1 \
+FAKE_HANG_PEEK=lx-claude QUOTA_PARK_CALL_TIMEOUT=$B_DEFER QUOTA_PARK_SWEEP_BUDGET=$B_BUD1 \
     timeout 20 bash "$SCRIPT" > "$TMP/out9" || true
 eq "$(nudges_for lx-codex)" "0" "sessions past the sweep budget are deferred, not swept"
 grep -q "deferred (sweep budget" "$TMP/out9" && ok "summary reports the deferred remainder" \
@@ -662,6 +685,14 @@ FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_TAIL_LINES=x bash "$SCRIPT" > 
 eq "$(nudges_for lx-codex)" "1" \
     "malformed QUOTA_PARK_TAIL_LINES falls back (detection is not silently switched off)"
 
+# A wall-clock bound takes a fraction now, but a malformed one (a second dot, a
+# unit suffix) still falls back rather than reaching timeout(1) as a bad interval.
+rm -f "$TMP/state"/*
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" QUOTA_PARK_CALL_TIMEOUT=0.2.3 bash "$SCRIPT" > /dev/null
+eq "$(nudges_for lx-codex)" "1" \
+    "malformed fractional QUOTA_PARK_CALL_TIMEOUT falls back (the sweep still runs)"
+
 # --- Run 13b: ZERO is not a valid value for most of these knobs. ------------
 # `0` passes an is-it-an-integer test and then disables recovery just as
 # thoroughly as garbage does, which is worse than garbage because it looks
@@ -733,7 +764,7 @@ else
     : > "$TMP/nudges"
     slow_sweep() {
         FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_DELIVERY=1 \
-            QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+            QUOTA_PARK_CALL_TIMEOUT=$B_HANG QUOTA_PARK_SWEEP_BUDGET=0 \
             timeout 20 bash "$SCRIPT" > /dev/null || true
     }
     slow_sweep
@@ -869,11 +900,12 @@ cat > "$TMP/sessions-prefix.json" <<'JSON'
  {"id":"lx-codex","alias":"gc-toolkit/gc-toolkit.ripley","state":"active","running":true,"attached":false}
 ]}
 JSON
-# Three 1s hangs against a 2s budget: the prefix alone always overruns the pass,
-# so lx-codex is reachable only by starting somewhere other than the top.
+# Three hanging peeks against a budget under three of them: the prefix alone
+# always overruns the pass, so lx-codex is reachable only by starting somewhere
+# other than the top.
 prefix_sweep() {
     FAKE_SESSIONS="$TMP/sessions-prefix.json" FAKE_HANG_GLOB='lx-hang*' \
-        QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=2 \
+        QUOTA_PARK_CALL_TIMEOUT=$B_HANG QUOTA_PARK_SWEEP_BUDGET=$B_BUD2 \
         timeout 30 bash "$SCRIPT" > "$TMP/out16" || true
 }
 
@@ -917,7 +949,7 @@ else
     }
     slow_mail_sweep() {
         FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_MAIL=1 \
-            QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+            QUOTA_PARK_CALL_TIMEOUT=$B_HANG QUOTA_PARK_SWEEP_BUDGET=0 \
             timeout 30 bash "$SCRIPT" > /dev/null || true
     }
     long_park_state
@@ -1112,14 +1144,14 @@ cat > "$TMP/sessions-deferred.json" <<'JSON'
 JSON
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 : > "$TMP/nudges"
-# lx-clean is swept first and is fast; the two 1s hangs then burn the whole
-# budget; so lx-codex — parked, and the one session here that needs recovering —
-# is deferred. Two hangs against a 2s budget rather than one against 1s: the
-# budget is measured from a whole-second stamp taken before the session list, so
-# a single-second budget can elapse before the FIRST session is reached and defer
-# the entire pass, including the clean session this asserts on.
+# lx-clean is swept first and is fast; the hanging prefix then overruns the
+# budget, so lx-codex — parked, and the one session here that needs recovering —
+# is deferred. Two hangs, not one: the clean session ahead of them must still be
+# reached, so the budget sits above one hang and below two. On the whole-second
+# fallback clock that margin also covers the sub-second already spent when the
+# pre-session-list stamp was taken.
 FAKE_SESSIONS="$TMP/sessions-deferred.json" FAKE_HANG_GLOB='lx-hang*' \
-    QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_SWEEP_BUDGET=2 \
+    QUOTA_PARK_CALL_TIMEOUT=$B_HANG QUOTA_PARK_SWEEP_BUDGET=$B_BUD2 \
     timeout 30 bash "$SCRIPT" > "$TMP/out21" || true
 grep -q "deferred (sweep budget" "$TMP/out21" \
     && ok "the pass really did defer part of the list" \
@@ -1474,7 +1506,7 @@ rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 : > "$TMP/nudges"
 START=$(date +%s)
 FAKE_SESSIONS="$TMP/sessions-termproof.json" FAKE_TERMPROOF_PEEK=lx-termproof \
-    QUOTA_PARK_CALL_TIMEOUT=1 QUOTA_PARK_KILL_AFTER=1 QUOTA_PARK_SWEEP_BUDGET=0 \
+    QUOTA_PARK_CALL_TIMEOUT=$B_HANG QUOTA_PARK_KILL_AFTER=$B_KILL QUOTA_PARK_SWEEP_BUDGET=0 \
     timeout 30 bash "$SCRIPT" > "$TMP/out30" || true
 ELAPSED=$(( $(date +%s) - START ))
 [ "$ELAPSED" -lt 6 ] \
