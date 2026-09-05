@@ -72,7 +72,7 @@ case "${ROOT##*/}" in
 esac
 [ -O "$ROOT" ] || { echo "$PROG: refusing to reap '$ROOT' — not owned by uid $UID_NUM" >&2; exit 2; }
 
-WORK="$(mktemp -d)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/gctk-scratch-reap.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 LIVE="$WORK/live"; REMOVE_LIST="$WORK/remove"
 STRAY_LIST="$WORK/stray"; STRAY_LINK_LIST="$WORK/stray-links"

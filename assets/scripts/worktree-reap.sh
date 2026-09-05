@@ -81,7 +81,7 @@ done
 # whitespace, so an empty field stays an empty field.
 US=$'\x1f'
 
-WORK="$(mktemp -d)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/gctk-worktree-reap.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 START=$(date +%s)

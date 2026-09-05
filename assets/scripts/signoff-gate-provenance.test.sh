@@ -18,7 +18,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/signoff.sh"
 CHECK="$HERE/../../doctor/check-gate-marker-provenance/run.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-signoff-gate-provenance-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -55,7 +55,7 @@ case "\${1:-}" in
     else printf '%s\n' "\$out"; fi ;;
   update)
     shift; id="\$1"; shift
-    tmp=\$(mktemp); cp "\$STORE" "\$tmp"
+    tmp=\$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-gate-provenance.XXXXXX"); cp "\$STORE" "\$tmp"
     while [ \$# -gt 0 ]; do
       case "\$1" in
         --set-metadata) shift; k="\${1%%=*}"; v="\${1#*=}"

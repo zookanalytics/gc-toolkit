@@ -7,7 +7,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/doctor-sweep.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-doctor-sweep-test.XXXXXX")"
 cleanup() {
   [ -n "${STUB_LOG:-}" ] && pkill -f "$TMP/rig/doctor" >/dev/null 2>&1
   rm -rf "$TMP"

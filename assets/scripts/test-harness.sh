@@ -95,7 +95,7 @@ case "$sub" in
         exit 0 ;;
       reopen-source)
         [ -n "${STUB_REOPEN_SOURCE_RC:-}" ] && { echo "gc: simulated reopen-source failure" >&2; exit "${STUB_REOPEN_SOURCE_RC}"; }
-        tmp="$(mktemp)"
+        tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
         jq -c --arg id "$sid" 'map(if .id == $id then
               (.metadata |= (del(.workflow_id) | del(.["gc.session_affinity"]) | del(.["gc.continuation_group"])))
               | .status = "open" | .assignee = ""
@@ -422,7 +422,7 @@ case "$sub" in
           sid=$(printf '%s' "$gqvars" | jq -r '.id // ""')
           c=$(printf '%s' "$gqvars" | jq -r '.c // ""')
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
-          t=$(mktemp)
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg id "$sid" --arg c "$c" '
             def mark: if (.id == $id)
               then .reactionGroups = ((((.reactionGroups // []) | map(select(.content != $c)))) + [{content: $c, viewerHasReacted: true}])
@@ -437,7 +437,7 @@ case "$sub" in
           tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
           body=$(printf '%s' "$gqvars" | jq -r '.b // ""')
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
-          t=$(mktemp)
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           # databaseId 0 and our own login keep the reply out of every react and
           # acted-on filter, exactly as a real reply of ours is kept out.
           jq --arg t "$tid" --arg b "$body" --arg self "${STUB_SELF_LOGIN:-}" '
@@ -454,7 +454,7 @@ case "$sub" in
           [ "${STUB_RESOLVE_RC:-0}" = "0" ] || exit "${STUB_RESOLVE_RC:-0}"
           tid=$(printf '%s' "$gqvars" | jq -r '.t // ""')
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
-          t=$(mktemp)
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
           jq --arg t "$tid" '.threads = ((.threads // []) | map(if .id == $t then .isResolved = true else . end))' "$f" > "$t" && mv "$t" "$f"
           printf 'RESOLVE %s\n' "$tid" >> "${STUB_GH_LOG:?}"
           echo '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'; exit 0 ;;

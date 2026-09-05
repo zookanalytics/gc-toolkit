@@ -17,7 +17,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pre-open-rebase-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # Captured before harness_init shadows PATH with the stub bin.
 REAL_GIT="$(command -v git)"

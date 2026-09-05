@@ -42,7 +42,7 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "missing '$2'" ;; esac; }
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-doctor-budget-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 now() { date +%s; }
 
 extract() { awk -v f="$FENCE" '

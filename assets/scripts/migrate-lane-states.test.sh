@@ -18,7 +18,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-migrate-lane-states-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -139,7 +139,7 @@ echo
 echo "# --apply: a park write that does NOT land leaves the legacy marker"
 echo "#   standing for a retry — the visit is filed BEFORE the write, so a"
 echo "#   retry recovers instead of stranding a hold with nothing on the board"
-tmpf=$(mktemp)
+tmpf=$(mktemp "${TMPDIR:-/tmp}/gctk-migrate-lane-states-test.XXXXXX")
 jq -c '. + [{"id":"P2","status":"open","assignee":"","title":"t-P2","metadata":{"merge_result":"pull_request","check_set":"codex","check.codex":"exception@6666666666666666666666666666666666666666","blocked_reason":"needs licensing review"}}]' \
   "$STUB_STORE" > "$tmpf" && mv "$tmpf" "$STUB_STORE"
 export STUB_UPDATE_FAIL="P2"   # models a write that is lost/timed out: reports nothing, changes nothing

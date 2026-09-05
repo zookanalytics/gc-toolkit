@@ -1582,7 +1582,7 @@ printf '%s' "$(prview 61 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_61.json"
 threads 61 "$(one_thread 61)"
 cat > "$TMP/stamp-hook" <<HOOK
 #!/usr/bin/env bash
-t=\$(mktemp)
+t=\$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX")
 jq '[ .[] | if .id == "WD2" then .metadata += {"pr_comment_disposition":"rework:KD","pr_comment_watermark":"100","pr_review_watermark":"0"} else . end ]' "\${STUB_STORE:?}" > "\$t" && mv "\$t" "\${STUB_STORE:?}"
 HOOK
 chmod +x "$TMP/stamp-hook"

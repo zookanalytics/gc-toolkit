@@ -21,15 +21,6 @@ FIX='fix: mktemp -d "${TMPDIR:-/tmp}/gctk-<producer>.XXXXXX" (learned rule: mkte
 
 found=0
 
-# Where a command may start: the head of a line, a substitution, a separator,
-# a case arm's `)`, a negation, or a compound keyword the command follows. The
-# word also appears as data — in a dependency list (`for c in jq mktemp rm`),
-# as a stub path, as `command -v mktemp` — and none of those allocate anything.
-# The trailing class is what keeps a name like `mktemp_tracked` from reading as
-# a call.
-OPEN='(\$\(|`|^[[:space:]]*|[;&|{()!][[:space:]]*|(^|[[:space:]])(if|elif|then|else|while|until|do)[[:space:]]+)'
-CALL="${OPEN}mktemp([^A-Za-z0-9_.-]|\$)"
-
 is_comment() { # whole-line comments only; `cmd  # note` is code
     case "$(printf '%s' "$1" | tr -d '[:space:]')" in '#'*) return 0 ;; esac
     return 1
@@ -40,16 +31,12 @@ is_comment() { # whole-line comments only; `cmd  # note` is code
 # `--tmpdir[=DIR]` and `--suffix=SUFF` choose a directory or a suffix and never
 # a basename: with no separate TEMPLATE beside them the name is still the libc
 # `tmp.XXXXXXXXXX`. `-t` takes no argument of its own, so the word after it is
-# the template.
-is_bare() {
-    local rest="$1" word short="" after="" skip=0
-    # Cut through the mktemp that is in COMMAND position, not the first
-    # `mktemp` substring: a helper named mktemp_tracked would otherwise stand
-    # in for the untemplated call inside it.
-    rest="$(printf '%s' "$rest" | sed -E "s/^.*${OPEN}mktemp//")"
+# the template. `$1` is the text AFTER `mktemp`, already isolated to one command.
+is_bare_args() {
+    local rest word short="" after="" skip=0
     # Stop at the end of the command: a closing paren, pipe, redirect,
     # separator or logical operator ends the argument list.
-    rest="$(printf '%s' "$rest" | sed -E 's/[)|;&<>].*//')"
+    rest="$(printf '%s' "$1" | sed -E 's/[)|;&<>].*//')"
     for word in $rest; do
         if [ "$skip" = 1 ]; then skip=0; continue; fi   # an option's own argument
         case "$word" in
@@ -68,14 +55,43 @@ is_bare() {
     return 0
 }
 
+# Where a command may start: the head of a line, a command substitution, a
+# separator, a subshell/group/negation/case-arm boundary, and the whitespace
+# after a compound keyword. Splitting the line at each turns every command into
+# its own segment, so each `mktemp` is judged against only its own argument list
+# — a templated call no longer vouches for a bare one beside it, and the greedy
+# cut that read only the last call on a line is gone.
+split_commands() {
+    printf '%s' "$1" | sed -E '
+        s/\$\(/\n/g
+        s/`/\n/g
+        s/[;&|]/\n/g
+        s/[(){}!]/\n/g
+        s/(^|[[:space:]])(if|elif|then|else|while|until|do)([[:space:]]+)/\1\n/g'
+}
+
 scan_line() { # <file> <lineno> <body> <context-message>
-    local f="$1" no="$2" body="$3" ctx="$4"
+    local f="$1" no="$2" body="$3" ctx="$4" seg args
     is_comment "$body" && return
-    grep -qE "$CALL" <<< "$body" 2>/dev/null || return
-    if is_bare "$body"; then
-        echo "$f:$no: $ctx; $FIX"
-        found=1
-    fi
+    case "$body" in *mktemp*) ;; *) return ;; esac
+    while IFS= read -r seg || [ -n "$seg" ]; do
+        # A segment begins at a command position. Strip leading blanks and any
+        # assignment-word prefix (`VAR=val …`, as in `TMPDIR=/x mktemp`) so the
+        # command name comes first, then read whether that command is mktemp.
+        # The trailing-char class keeps a name like `mktemp_tracked`, a stub
+        # path, or the word as data (`command -v mktemp`) from reading as a call.
+        seg="$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+//; :a; s/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+//; ta')"
+        case "$seg" in
+            mktemp) args="" ;;
+            mktemp[!A-Za-z0-9_.-]*) args="${seg#mktemp}" ;;
+            *) continue ;;
+        esac
+        if is_bare_args "$args"; then
+            echo "$f:$no: $ctx; $FIX"
+            found=1
+            return
+        fi
+    done < <(split_commands "$body")
 }
 
 for f in "$@"; do

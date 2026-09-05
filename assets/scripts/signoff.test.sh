@@ -54,7 +54,7 @@ if [ "${1:-}" = "sling" ]; then
     shift || true
   done
   if [ -z "${STUB_SLING_NOPOUR:-}" ] && [ -n "$bead" ]; then
-    tmp=$(mktemp)
+    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "$bead" --arg p "$pool" \
       'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"

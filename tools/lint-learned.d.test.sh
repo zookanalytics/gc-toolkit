@@ -286,6 +286,56 @@ runm "$TMP/option-args-templated.sh"
 eq "$RC" 0 "a template beside the option argument is still a chosen name"
 eq "$OUT" "" "a clean file prints nothing"
 
+echo "── mktemp-untemplated: an assignment prefix is still a command ──"
+
+# `VAR=val mktemp` runs mktemp with VAR set for that one command. It is a
+# command start the head-of-line-and-separator recognizer walked past, so the
+# rule read it as data and let a bare, unattributable allocation through.
+mk "$TMP/assign-prefix.sh" <<'FIX'
+#!/usr/bin/env bash
+TMPDIR=/var/tmp @MKT@ -d
+A=1 B=2 @MKT@
+FIX
+runm "$TMP/assign-prefix.sh"
+eq "$RC" 1 "an assignment-prefixed call is a call"
+has "$OUT" "assign-prefix.sh:2:" "a single assignment before the command is reported"
+has "$OUT" "assign-prefix.sh:3:" "a run of assignment words before it is reported"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "and nothing else is"
+
+# The same prefix in front of a chosen name is clean: the assignment is not an
+# operand, so it must not be mistaken for the template.
+mk "$TMP/assign-prefix-templated.sh" <<'FIX'
+#!/usr/bin/env bash
+TMPDIR=/var/tmp @MKT@ "${TMPDIR:-/tmp}/gctk-thing.XXXXXX"
+FIX
+runm "$TMP/assign-prefix-templated.sh"
+eq "$RC" 0 "a chosen name behind an assignment prefix is clean"
+eq "$OUT" "" "a clean file prints nothing"
+
+echo "── mktemp-untemplated: more than one call on a line ──"
+
+# Each call is judged on its own argument list. A greedy scan that read only the
+# last call on a line let a templated call vouch for a bare one beside it,
+# whichever order they fell in.
+mk "$TMP/two-calls.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(@MKT@); B=$(@MKT@ "${TMPDIR:-/tmp}/gctk-two.XXXXXX")
+C=$(@MKT@ "${TMPDIR:-/tmp}/gctk-two.XXXXXX") || D=$(@MKT@)
+FIX
+runm "$TMP/two-calls.sh"
+eq "$RC" 1 "a bare call beside a templated one is still reported"
+has "$OUT" "two-calls.sh:2:" "the bare call before a templated one is found"
+has "$OUT" "two-calls.sh:3:" "the bare call after a templated one is found"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "and each such line is reported once"
+
+mk "$TMP/two-calls-templated.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(@MKT@ "${TMPDIR:-/tmp}/gctk-a.XXXXXX"); B=$(@MKT@ "${TMPDIR:-/tmp}/gctk-b.XXXXXX")
+FIX
+runm "$TMP/two-calls-templated.sh"
+eq "$RC" 0 "two chosen names on one line are clean"
+eq "$OUT" "" "a clean file prints nothing"
+
 echo "── mktemp-untemplated: scope ──"
 
 mk "$TMP/prose.md" <<'FIX'

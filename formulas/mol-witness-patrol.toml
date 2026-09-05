@@ -160,8 +160,8 @@ temp files, never --argjson (ARG_MAX):
 # empty when the map is usable and carries the escalation reason otherwise. This
 # runs once per cycle with no bead in scope, so no bead's owner can reach the
 # decision.
-SESSIONS_RAW=$(mktemp)
-SESSION_BEADS=$(mktemp)
+SESSIONS_RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
+SESSION_BEADS=$(mktemp "${TMPDIR:-/tmp}/gctk-witness-patrol.XXXXXX")
 gc session list --state=all --json > "$SESSIONS_RAW" 2>/dev/null || true
 gc bd list --type=session --label=gc:session --include-infra --all --json --limit=0 > "$SESSION_BEADS" 2>/dev/null || true
 # The session list is the load-bearing source. A non-object, or an object with
