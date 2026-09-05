@@ -534,7 +534,18 @@ The cost is real: a held visit nobody answers holds a `max_active_sessions`
 slot indefinitely, where an idle clock would recycle it. The bound is the
 pack default in `agents/converse/agent.toml`, and a rig raises it in
 `city.toml`. How many held visits it takes to fill the pool is therefore a
-per-rig number. `gc-helm dismiss` is the release valve.
+per-rig number. `gc-helm dismiss` is the release valve, and converse puts it
+at the foot of every framing it posts as a copyable line, so ending a sitting
+is a switch in the thread rather than an errand the operator has to remember.
+It is the verb rather than a bare `gc bd close` because a held visit is
+assigned to the session holding it, and a session restarted mid-hold closes
+under a different identity string than the one on the bead: bd refuses that
+close outright. `dismiss` stamps `gc.outcome=dismissed`, then closes, escalating
+to `--force` only when the plain close is refused. The stamp is a precondition
+of the close, not a best-effort write beside it: the verb closes only the visits
+it can read as OPEN, so a visit closed without an outcome is one no re-run
+reaches. A refused stamp leaves that visit open and the subject's row on the
+board, and the run exits 4.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every
@@ -1014,6 +1025,15 @@ definition first, because everything below uses it:
 > has to be able to answer it with *no*. The sequence of visits under
 > a subject is the dialogue's durable spine — board-legible,
 > cold-reconstructable, no provider transcript required.
+>
+> **A sitting is not a unit of work.** What it produces is beads: new
+> ones filed, ones slung to a pool, edges wired, an outcome appended
+> to the subject. It writes no files and makes no commits, because
+> moving a bead forward is what a molecule does — so a sitting that
+> finds work needing doing routes it to one, and where nothing can
+> reach the work, the gap is itself a bead to file. What reaches the
+> operator is the point where the operator is needed for a judgment,
+> which is narrower than judgment and narrower still than action.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and
 > those are routinely a day or more apart — a queued visit holds its

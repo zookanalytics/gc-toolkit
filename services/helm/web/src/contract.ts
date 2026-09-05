@@ -223,8 +223,11 @@ export interface Sitting {
   status: string;
   /**
    * The one-word justification a sitting closed on (`gc.outcome`: folded,
-   * moot, benign, diagnosed, cut-short, or the word a held sitting signs off
-   * with). Empty while it is still running.
+   * moot, benign, diagnosed, cut-short, the word a held sitting signs off with,
+   * or `dismissed` when the operator ends it from the board). Normally empty
+   * while a sitting is still running, with one exception: a board dismissal
+   * that stamped the outcome but could not close the visit leaves a running
+   * sitting reading `dismissed` until it is closed or signed off over.
    */
   outcome: string;
   /** The converse session that ran it — what an operator attaches to. */

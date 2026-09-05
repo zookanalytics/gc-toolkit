@@ -441,6 +441,42 @@ it('shows running sittings and recently closed ones with their outcome', async (
   expect(within(done).getByText(/the path was the launcher/)).toBeTruthy();
 });
 
+// A board dismissal stamps gc.outcome before it closes the visit; when the
+// close then fails, the visit stays open carrying "dismissed". The row shows
+// it — running, yet with an outcome — because that pairing is the signal the
+// sitting is stuck open and needs a manual close, not a contradiction to hide.
+it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
+  const stuck: Board = {
+    ...BOARD,
+    sittings: [
+      {
+        id: 'tk-vst09',
+        rig: 'gc-toolkit',
+        subject: 'tk-epic',
+        title: 'visit: tk-epic — the operator ended it from the board',
+        status: 'in_progress',
+        outcome: 'dismissed',
+        session: 'gc-toolkit__converse-9',
+        opened_at: '2026-08-21T18:34:00Z',
+        takeaway: '',
+      },
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(stuck), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+
+  const row = within(sittingsSection()).getByText('tk-vst09').closest('tr') as HTMLElement;
+  expect(within(row).getByText('running')).toBeTruthy();
+  // The outcome shows rather than collapsing to the em dash: a running row
+  // reading "dismissed" is the stuck-sitting signal, not an empty cell.
+  expect(within(row).getByText('dismissed')).toBeTruthy();
+});
+
 // The record is not an attention list: a sitting must not appear as a row in
 // the ranked table, where it would compete with work that needs doing.
 it('keeps sittings out of the ranked table', async () => {

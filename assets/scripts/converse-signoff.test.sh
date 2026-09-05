@@ -1754,6 +1754,132 @@ fi
 have "the sweep's disposition menu offers demand in its place" \
      'demand (gc-helm.sh demand' "$REPO/assets/scripts/liveness-sweep.sh"
 
+echo "── a sitting is a conversation, not a unit of work ──"
+# The role knew what it must not do and not what it IS, so every prohibition
+# read as a fence around one repo rather than as a consequence of the shape of
+# the work. From "protect the pack checkout" a session reasons that a repo
+# which is not pack source is fair game. The statement has to come first, on
+# page one, and the prohibition has to rest on it.
+if printf '%s\n' "$INTRO" | grep -q 'not a unit of work'; then
+    ok "the opening says what a sitting is, not only what it may not do"
+else
+    bad "the opening says what a sitting is, not only what it may not do" \
+        "without it every rule below is a fence with no principle behind it, and the role argues about where the fence ends"
+fi
+if printf '%s\n' "$INTRO" | grep -q 'no commits'; then
+    ok "…and that it produces no commits"
+else
+    bad "…and that it produces no commits" \
+        "the commit prohibition belongs to the definition; stated only as a rule it reads as scoped to whatever repo the rule names"
+fi
+OUTPUT_RULE="$(awk '/^- \*\*Beads are your only output/ {f = 1; print; next} f && /^- \*\*/ {exit} f {print}' "$PROMPT")"
+if [ -z "$OUTPUT_RULE" ]; then
+    bad "the beads-only-output rule is still extractable" \
+        "no '- **Beads are your only output' rule in $PROMPT — the extraction is stale, not the prompt"
+else
+    ok "the beads-only-output rule is still extractable"
+    if printf '%s\n' "$OUTPUT_RULE" | grep -q 'not a unit of work'; then
+        ok "…and rests on what a sitting is, not on what a checkout holds"
+    else
+        bad "…and rests on what a sitting is, not on what a checkout holds" \
+            "the rule is right either way; only the right REASON survives contact with a repo that is not pack source"
+    fi
+    if printf '%s\n' "$OUTPUT_RULE" | grep -q 'live pack source'; then
+        bad "…and no longer justifies itself by the checkout" \
+            "'the checkout is live pack source' invites the scope argument: it says nothing about any other repo"
+    else
+        ok "…and no longer justifies itself by the checkout"
+    fi
+fi
+
+echo "── what reaches the operator is a judgment only they can make ──"
+# "Does a pool cover it, and everything uncovered goes to the operator" is the
+# wrong test in both directions: it hands over work nobody automated yet, and
+# it reads driving a judgment — the evidence, the analysis, the framing — as
+# the operator's job rather than the sitting's.
+have "the prompt names the operator boundary as a judgment they are needed for" \
+     'the point where the OPERATOR is needed' "$PROMPT"
+have "…and says work that merely needs doing goes to a molecule" \
+     'goes to a molecule' "$PROMPT"
+have "…and makes an unreachable gap a bead, not a chore handed over" \
+     'a bead to file in its own right' "$PROMPT"
+
+echo "── an informed sitting may close, and doubt keeps it open ──"
+# The mandatory trailing decision made one ending illegal: the operator asked,
+# was answered, and wants to close out. Manufacturing a decision for them is
+# how that ending got spent as attention. The correction over-corrects just as
+# easily, so both halves are pinned: the omission is legal, and doubt still
+# holds the sitting open.
+lacks "no rule makes a decision mandatory on every framing" \
+      'decide is not a hold' "$PROMPT" \
+      "that clause forbids the informed close-out: the operator wanted to know something, now knows it, and the sitting can end"
+have "the omission is stated as legal" \
+     'nothing for the operator to decide is legal' "$PROMPT"
+have "…and doubt still leaves the sitting open" \
+     'the sitting stays open' "$PROMPT"
+# The fragment injection: the prompt claimed it did not inject the fragment and
+# restated it for that reason, while the template ends with the injection. Both
+# copies of a rule drift apart the moment one of them describes the other
+# wrongly.
+if grep -q '{{ template "operator-next-step-trailing" \. }}' "$PROMPT"; then
+    ok "the prompt injects the trailing-decision fragment"
+    lacks "…and does not claim it goes uninjected" \
+          'converse does not inject that fragment' "$PROMPT" \
+          "the template ends with the injection; a prompt that says otherwise sends the next editor to keep a copy that is not a copy"
+else
+    bad "the prompt injects the trailing-decision fragment" \
+        "the injection is gone; the restated rule in step 5 is now the only copy and the reference to the fragment is dead"
+fi
+
+echo "── every framing hands over the switch that ends the sitting ──"
+# A sitting stays up until its visit closes, and nothing reaps one. The
+# operator's lever existed but lived in a rule the operator never reads, so
+# ending a conversation meant remembering a command. It goes at the foot of the
+# framing, and it has to be a command that RUNS: a held visit is assigned to
+# the session holding it, and a session restarted mid-hold closes under a
+# different identity string, which bd refuses outright.
+have "the framing ends with a copyable close-out" 'dismiss <the subject' "$PROMPT"
+have "…written with the resolved path, not a variable the operator never set" \
+     'Write the resolved path and the real id' "$PROMPT"
+have "…and it is framed as a control, not a chore" 'a control, not a chore' "$PROMPT"
+# The verb has to do what the prompt promises of it, or the offered line is the
+# hand-written close under another name.
+dismiss_body() { sed -n '/^cmd_dismiss()/,/^}/p' "$HELM"; }
+if dismiss_body | grep -q 'gc.outcome=dismissed'; then
+    ok "dismiss stamps the outcome a finished sitting is read for"
+else
+    bad "dismiss stamps the outcome a finished sitting is read for" \
+        "the operator's close-out would leave a closed visit no board can report — the unstamped close step 7 refuses to perform"
+fi
+d_stamp=$(dismiss_body | grep -n 'gc.outcome=dismissed' | head -1 | cut -d: -f1)
+d_close=$(dismiss_body | grep -n 'gc bd close "\$_v"' | head -1 | cut -d: -f1)
+if [ -n "$d_stamp" ] && [ -n "$d_close" ] && [ "$d_stamp" -lt "$d_close" ]; then
+    ok "…before the close, so it lands whichever arm the close takes"
+else
+    bad "…before the close, so it lands whichever arm the close takes" \
+        "stamp@${d_stamp:-none} close@${d_close:-none} — a stamp written after a close that needed --force is a write onto the refusal path"
+fi
+if dismiss_body | grep -q -- '--force'; then
+    ok "dismiss escalates past the holder's claim rather than asking the operator to"
+else
+    bad "dismiss escalates past the holder's claim rather than asking the operator to" \
+        "without the fallback the offered command fails on exactly the sittings a restart touched, which is the normal case for a long hold"
+fi
+
+# The injected fragment ends a reply at the operator's decision and keeps
+# standing-by notes off the bottom. The close-out sits below it, so the
+# override has to be named where it happens: two copies of a placement rule
+# that disagree in silence leave the next reader to guess which one is wrong.
+FRAG="$REPO/template-fragments/operator-next-step-trailing.template.md"
+if grep -qF -- 'sits below it' "$FRAG"; then
+    ok "the fragment still ends a reply at the operator's decision"
+    have "…so the close-out below it is named as the deliberate override" \
+         'deliberately overridden' "$PROMPT"
+else
+    bad "the fragment still ends a reply at the operator's decision" \
+        "the rule moved in $FRAG; step 5's 'deliberately overridden' now names nothing and the two copies are out of step"
+fi
+
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
