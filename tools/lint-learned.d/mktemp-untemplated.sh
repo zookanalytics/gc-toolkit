@@ -11,8 +11,12 @@
 # agents and extraction tests run verbatim); `# >>> name`…`# <<< name`
 # marker-fenced snippets in *.md. Prose outside a fence quotes the shape
 # rather than running it. Whole-line comments are skipped for the same reason.
-# No exception list: a template is always available, and a path built from a
-# variable counts.
+#
+# A finding is a real command position. Quoted strings and here-doc bodies are
+# data fed to a command, not commands, so a `mktemp` inside one is left alone;
+# an executable wrapper (`command`, `env`, `exec`, `nohup`, `time`, `timeout`)
+# runs what follows, so the wrapped call is seen through. No exception list: a
+# template is always available, and a path built from a variable counts.
 # Exit: 0 clean, 1 findings as `<file>:<line>: <message>`.
 
 set -uo pipefail
@@ -58,16 +62,50 @@ is_bare_args() {
 # Where a command may start: the head of a line, a command substitution, a
 # separator, a subshell/group/negation/case-arm boundary, and the whitespace
 # after a compound keyword. Splitting the line at each turns every command into
-# its own segment, so each `mktemp` is judged against only its own argument list
-# — a templated call no longer vouches for a bare one beside it, and the greedy
-# cut that read only the last call on a line is gone.
+# its own segment, so each `mktemp` is judged against only its own argument
+# list. Single- then double-quoted spans collapse to one word first, so a
+# separator or a `mktemp` inside a string is data, not a command; `$(…)` and
+# `` `…` `` are split out before the double-quote pass so a substitution that
+# runs inside double quotes stays a command position.
 split_commands() {
-    printf '%s' "$1" | sed -E '
-        s/\$\(/\n/g
-        s/`/\n/g
-        s/[;&|]/\n/g
-        s/[(){}!]/\n/g
-        s/(^|[[:space:]])(if|elif|then|else|while|until|do)([[:space:]]+)/\1\n/g'
+    printf '%s' "$1" \
+        | sed -E "s/'[^']*'/_/g" \
+        | sed -E 's/\$\(/\n/g; s/`/\n/g' \
+        | sed -E 's/"[^"]*"/_/g; s/[;&|]/\n/g; s/[(){}!]/\n/g; s/(^|[[:space:]])(if|elif|then|else|while|until|do)([[:space:]]+)/\1\n/g'
+}
+
+# Peel assignment-word prefixes and executable wrappers so the wrapped command
+# is examined, not the wrapper. `command mktemp`, `env VAR=x mktemp`, `time
+# mktemp`, `exec mktemp`, `nohup mktemp` and `timeout N mktemp` all run mktemp.
+# `command -v NAME` / `command -V NAME` look a name up without running it, so
+# the operand is data and this prints nothing. An option that takes a separate
+# word is not modelled: leaving that word makes the call read as something
+# other than mktemp, a miss rather than a false finding.
+resolve_command() {
+    local restore_f="" w=""
+    case $- in *f*) ;; *) restore_f=1 ;; esac
+    set -f
+    # shellcheck disable=SC2086
+    set -- $1
+    [ -z "$restore_f" ] || set +f
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            [A-Za-z_]*=*) shift; continue ;;
+        esac
+        case " command env exec nohup time timeout " in
+            *" $1 "*) ;;
+            *) break ;;
+        esac
+        if [ "$1" = command ]; then
+            case "${2:-}" in -v|-V) return 0 ;; esac
+        fi
+        w="$1"; shift
+        while [ "$#" -gt 0 ]; do
+            case "$1" in -?*) shift ;; *) break ;; esac
+        done
+        [ "$w" = timeout ] && [ "$#" -gt 0 ] && case "$1" in [0-9]*) shift ;; esac
+    done
+    printf '%s' "$*"
 }
 
 scan_line() { # <file> <lineno> <body> <context-message>
@@ -75,12 +113,13 @@ scan_line() { # <file> <lineno> <body> <context-message>
     is_comment "$body" && return
     case "$body" in *mktemp*) ;; *) return ;; esac
     while IFS= read -r seg || [ -n "$seg" ]; do
-        # A segment begins at a command position. Strip leading blanks and any
-        # assignment-word prefix (`VAR=val …`, as in `TMPDIR=/x mktemp`) so the
-        # command name comes first, then read whether that command is mktemp.
-        # The trailing-char class keeps a name like `mktemp_tracked`, a stub
-        # path, or the word as data (`command -v mktemp`) from reading as a call.
-        seg="$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+//; :a; s/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+//; ta')"
+        # A segment begins at a command position. Peel any assignment-word
+        # prefix (`VAR=val …`, as in `TMPDIR=/x mktemp`) and executable wrapper
+        # so the command name comes first, then read whether that command is
+        # mktemp. The trailing-char class keeps a name like `mktemp_tracked`, a
+        # stub path, or the word as data (`command -v mktemp`) from reading as
+        # a call.
+        seg="$(resolve_command "$seg")"
         case "$seg" in
             mktemp) args="" ;;
             mktemp[!A-Za-z0-9_.-]*) args="${seg#mktemp}" ;;
@@ -94,6 +133,31 @@ scan_line() { # <file> <lineno> <body> <context-message>
     done < <(split_commands "$body")
 }
 
+# Lines of a *.sh file that hold a real command, paired with their line number.
+# A here-doc body is the data a command reads, not commands, so the lines from
+# an opener to its terminator are dropped; `<<-` strips leading tabs on the
+# terminator, and `<<<` is a here-string, which opens no body.
+sh_command_lines() {
+    awk '
+        hd != "" {
+            t = $0
+            if (dash) sub(/^\t+/, "", t)
+            if (t == hd) hd = ""
+            next
+        }
+        {
+            if (match($0, /(^|[^<])<<-?[[:space:]]*[^[:space:]<>;&|()]+/)) {
+                m = substr($0, RSTART, RLENGTH)
+                dash = (m ~ /<<-/)
+                sub(/^[^<]*<<-?[[:space:]]*/, "", m)
+                gsub(/["'\''\\]/, "", m)
+                hd = m
+            }
+            if ($0 ~ /mktemp/) print NR":"$0
+        }
+    ' "$1" 2>/dev/null
+}
+
 for f in "$@"; do
     [ -f "$f" ] || continue
     # The detector directory states the shape in its own fix text; the
@@ -105,7 +169,7 @@ for f in "$@"; do
             while IFS= read -r hit; do
                 scan_line "$f" "${hit%%:*}" "${hit#*:}" \
                     'bare `mktemp` — the temp path lands in the shared /tmp/tmp.* family and cannot be traced to this script'
-            done < <(grep -n 'mktemp' "$f" 2>/dev/null)
+            done < <(sh_command_lines "$f")
             ;;
         *.toml)
             # ``` fences and `# >>>` markers both delimit shell that is run

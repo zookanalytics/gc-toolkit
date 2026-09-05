@@ -377,6 +377,88 @@ eq "$RC" 0 "the detector directory is skipped — the shape is stated there"
 runm "$TMP/does-not-exist.sh"
 eq "$RC" 0 "a path that is not a file drops out"
 
+echo "── mktemp-untemplated: executable wrappers ──"
+
+# A wrapper runs the command that follows it, so a bare call behind one is
+# still an untemplated allocation. A recognizer that only knows the head of a
+# line and a separator leaves the rule fail-open for every wrapped spelling.
+mk "$TMP/wrapped.sh" <<'FIX'
+#!/usr/bin/env bash
+command @MKT@ -d
+env TMPDIR=/var/tmp @MKT@ -d
+time @MKT@ -d
+exec @MKT@ -d
+nohup @MKT@ -d
+timeout 5 @MKT@ -d
+FIX
+runm "$TMP/wrapped.sh"
+eq "$RC" 1 "a bare call behind an executable wrapper is still a call"
+for n in 2 3 4 5 6 7; do
+    has "$OUT" "wrapped.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 6 "and nothing else is"
+
+# The same wrappers in front of a chosen name stay clean, and `command -v`/`-V`
+# look a name up without running it, so the operand is data, not a call.
+mk "$TMP/wrapped-templated.sh" <<'FIX'
+#!/usr/bin/env bash
+command @MKT@ "${TMPDIR:-/tmp}/gctk-x.XXXXXX"
+env TMPDIR=/var/tmp @MKT@ -d "${TMPDIR:-/tmp}/gctk-x.XXXXXX"
+time @MKT@ -t gctk-x.XXXXXX
+command -v @MKT@
+command -V @MKT@
+FIX
+runm "$TMP/wrapped-templated.sh"
+eq "$RC" 0 "a chosen name behind a wrapper, and a command -v/-V lookup, are clean"
+eq "$OUT" "" "a clean file prints nothing"
+
+echo "── mktemp-untemplated: quoted strings are data ──"
+
+# A separator or the word inside a string literal is data the shell passes on,
+# not a command. Treating it as one blocks unrelated shell changes on a false
+# positive, since any detector finding fails the gate.
+mk "$TMP/quoted.sh" <<'FIX'
+#!/usr/bin/env bash
+printf "literal; @MKT@ -d"
+printf 'literal; @MKT@ -d'
+echo "$x; @MKT@ -d"
+FIX
+runm "$TMP/quoted.sh"
+eq "$RC" 0 "a separator and a call inside a quoted string are not a command"
+eq "$OUT" "" "a clean file prints nothing"
+
+# A command substitution runs even inside double quotes, so a bare call there
+# is still found — collapsing quoted spans must not swallow it.
+mk "$TMP/quoted-substitution.sh" <<'FIX'
+#!/usr/bin/env bash
+E="$(@MKT@ -d)"
+FIX
+runm "$TMP/quoted-substitution.sh"
+eq "$RC" 1 "a bare call in a substitution inside double quotes is still a call"
+has "$OUT" "quoted-substitution.sh:2:" "and the finding names its line"
+
+echo "── mktemp-untemplated: here-doc bodies are data ──"
+
+# The lines of a here-doc are fed to a command as input, not run, so a bare
+# call in the body is not an allocation. The line after the terminator is
+# ordinary code again. `<<-` and a plain `<<` both open a body.
+mk "$TMP/heredoc.sh" <<'FIX'
+#!/usr/bin/env bash
+cat <<DOC
+@MKT@ -d
+DOC
+cat <<-'END'
+@MKT@ -d
+END
+@MKT@ -d
+FIX
+runm "$TMP/heredoc.sh"
+eq "$RC" 1 "a here-doc body is not scanned, but code after the terminator is"
+has "$OUT" "heredoc.sh:8:" "the real call after the here-docs is reported"
+hasnt "$OUT" "heredoc.sh:3:" "the plain here-doc body is not"
+hasnt "$OUT" "heredoc.sh:6:" "the <<- here-doc body is not"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "and nothing else is"
+
 
 echo
 echo "lint-learned.d.test.sh: $PASS passed, $FAIL failed"
