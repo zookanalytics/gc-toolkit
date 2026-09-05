@@ -42,9 +42,12 @@ command -v jq >/dev/null 2>&1 \
 # issue_type=gate/await_type=human bead carrying gc.demand_for (the gated
 # bead); `bd list` hides gates, so --include-gates is load-bearing. A read
 # failure exits non-zero: an unreadable store must never read as an empty one.
+# The list status is read before `scrub`, since piping into tr would report
+# tr's success and mask a failed list that still printed an array.
 GATES_RAW=$(gc bd list --include-gates --has-metadata-key gc.demand_for \
-    --status=open,in_progress --limit=0 --json 2>/dev/null | scrub) \
+    --status=open,in_progress --limit=0 --json 2>/dev/null) \
     || { echo "$PROG: could not list human gates — store unreadable, nothing filed" >&2; exit 1; }
+GATES_RAW=$(printf '%s' "$GATES_RAW" | scrub)
 printf '%s' "$GATES_RAW" | jq -e 'type == "array"' >/dev/null 2>&1 \
     || { echo "$PROG: gate listing is not a JSON array — store unreadable, nothing filed" >&2; exit 1; }
 
