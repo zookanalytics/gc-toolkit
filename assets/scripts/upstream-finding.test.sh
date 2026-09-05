@@ -269,6 +269,38 @@ reset_state
 eq "$?" "0" "pr create --fill needs no inline title or body"
 eq "$(count)" "1" "the --fill form parks one bead"
 
+# ── a global flag before the verb does not evade the prompt guard ─────────
+# gh accepts `-R`/`--repo` before the verb (`gh --repo a/b issue create` is a
+# valid shape), and --repo takes a value. The verb must be found past those, or
+# the prompt guard — which fires only for a recognised verb — is silently
+# skipped and an incomplete write is parked as pasteable.
+reset_state
+OUT=$("$SUT" --message "why" -- gh --repo a/b issue create 2>&1)
+eq "$?" "2" "an issue create with --repo before the verb and no content is refused"
+eq "$(count)" "0" "nothing is filed for the flag-first prompt case"
+has "$OUT" "prompt" "the refusal says the command would prompt"
+has "$OUT" "--title" "the refusal names the missing title"
+has "$OUT" "--body" "the refusal names the missing body"
+
+OUT=$("$SUT" --message "why" -- gh -R a/b issue create 2>&1)
+eq "$?" "2" "a -R before the verb is refused the same way"
+
+OUT=$("$SUT" --message "why" -- gh --repo=a/b issue create 2>&1)
+eq "$?" "2" "a --repo=a/b with an attached value before the verb is refused the same way"
+
+OUT=$("$SUT" --message "why" -- gh --repo a/b pr comment 5 2>&1)
+eq "$?" "2" "a pr comment with --repo before the verb and no body is refused"
+has "$OUT" "--body" "the refusal names the missing body"
+
+# The valid flag-first form still parks, and the verb is read past the flag —
+# not left as a bare `gh`, which is what let the incomplete form through.
+reset_state
+"$SUT" --message "why" -- gh --repo get-convex/agent issue create --title T --body B >/dev/null 2>&1
+eq "$?" "0" "a complete issue create with --repo before the verb parks"
+eq "$(count)" "1" "the flag-first form parks exactly one bead"
+eq "$(meta up-1 gh_verb)" "issue create" "the verb is read past the leading --repo, not left as bare gh"
+eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the target still resolves with --repo before the verb"
+
 # ── the own-origin refusal ────────────────────────────────────────────────
 reset_state
 OUT=$("$SUT" --message "why" -- gh issue create --repo zookanalytics/gc-toolkit --title T --body B 2>&1)

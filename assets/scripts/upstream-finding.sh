@@ -76,12 +76,20 @@ case "$(basename -- "${CMD[0]}")" in
     warn "the command must be a \`gh\` invocation (got '${CMD[0]}')"; usage; exit 2 ;;
 esac
 
-# The verb, for the label a human reads: the leading non-flag words after gh.
-VERB=""
+# The verb names the gh command — the label a human reads, and what the prompt
+# guard below keys on. It is the first one or two non-flag words after `gh`, but
+# gh accepts its global flags before the verb (notably `-R`/`--repo`, which
+# takes a value), so leading flags are skipped first. The guard fires only for a
+# recognised verb, so the verb must be found even when a global flag precedes it.
+VERB=""; skip=0
 for a in "${CMD[@]:1}"; do
-  case "$a" in -*) break ;; esac
-  VERB="${VERB:+$VERB }$a"
-  case "$VERB" in *" "*) break ;; esac
+  if [ "$skip" = 1 ]; then skip=0; continue; fi
+  case "$a" in
+    --repo|-R) skip=1; continue ;;   # global flag; its value is the next arg
+    --repo=*)  continue ;;           # global flag with an attached value
+    -*)        [ -n "$VERB" ] && break; continue ;;  # a later flag ends the verb; a leading one is skipped past
+    *)         VERB="${VERB:+$VERB }$a"; case "$VERB" in *" "*) break ;; esac ;;
+  esac
 done
 [ -n "$VERB" ] || VERB="gh"
 
