@@ -71,6 +71,9 @@ case "${1:-}" in
     if [ -n "$id" ]; then
       jq -c --arg id "$id" '[.[] | select(.id == $id)]' "${STUB_BEADS:?}"
     else
+      # The held-work rig scan (no --id). A test forces it to fail to prove the
+      # scan is fail-closed: an unreadable scan must not read as "holds nothing".
+      [ "${STUB_BD_RIG_RC:-0}" = "0" ] || exit "${STUB_BD_RIG_RC}"
       # `index(.status)` would evaluate .status against the SPLIT ARRAY, not
       # the bead, and filter everything out; bind the row first.
       jq -c --arg rig "$rig" --arg st "$want_status" \
@@ -314,6 +317,28 @@ demand gc-toolkit/gc-toolkit.polecat fail
 OUT="$("$SUT")"
 eq "$(field "$(line_for lx-pole1 "$OUT")" reason)" "demand-unreadable" "an unreadable demand probe is unknown, not empty"
 eq "$(grep -c . "$STUB_NUDGE_LOG")" "0" "  ... and is never nudged"
+
+# The held-work scan guards a formula that leaves its last claim closed between
+# step claims while the session still holds the work bead. A scan that failed or
+# timed out cannot prove the session holds nothing, so it is unknown, not idle.
+# The bug this replaces wrote `[]` on a failed scan: the session was nudged and
+# then, a pass later past the wait, warranted, all without the scan ever proving
+# it idle.
+reset; base_sessions; claim lx-pole1 tk-work; bead tk-work closed 7200
+demand gc-toolkit/gc-toolkit.polecat no
+OUT="$(STUB_BD_RIG_RC=3 "$SUT")"
+L="$(line_for lx-pole1 "$OUT")"
+eq "$(field "$L" verdict)" "unknown" "an unreadable held-work scan is unknown, not empty"
+eq "$(field "$L" reason)" "held-work-unreadable" "  ... and says why"
+eq "$(grep -c . "$STUB_NUDGE_LOG")" "0" "  ... and is never nudged"
+has "$OUT" "unknown=1" "  ... and the summary counts it"
+# A pass later, still unreadable and with the wait forced to zero so a recorded
+# nudge WOULD warrant: it stays unknown, because no readable scan ever put it in
+# the state that a warrant rests on.
+: > "$STUB_NUDGE_LOG"
+OUT="$(STUB_BD_RIG_RC=3 RUNAWAY_NUDGE_WAIT_S=0 "$SUT")"
+eq "$(field "$(line_for lx-pole1 "$OUT")" verdict)" "unknown" "still unreadable a pass later is still unknown"
+has "$OUT" "warrant=0" "  ... never a warrant on an unproven session"
 
 # A session with no rig names no store, so the held-work scan cannot run and
 # the session cannot be proved idle. City-scoped sessions carry no rig field.
