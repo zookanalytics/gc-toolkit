@@ -206,7 +206,7 @@ mechanik in a non-gascity rig does not receive it.
 
 ```bash
 gc mail inbox                    # Check messages
-gc hook                          # Check for assigned/routed beads
+gc hook                          # Your assigned beads; routed demand is pools only
 gc bd create "..." -t decision   # File decisions for human review
 ```
 

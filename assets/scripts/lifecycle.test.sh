@@ -88,6 +88,22 @@ has "$(notes a-1)" "Merged to main at abc123" "--append-notes landed"
 updates=$(grep -c '^bd update' "$STUB_GC_LOG" || true)
 eq "$updates" "1" "exactly ONE gc bd update carried the whole transition"
 has "$(grep '^bd update' "$STUB_GC_LOG")" "--status=closed" "the close rides in the same update"
+# …and the close is reached by `update --status=closed`, never by the `close`
+# verb. bd's ownership check lives on `bd close`: it compares the actor to the
+# assignee and refuses a bead held by another principal, pointing at --force.
+# a-1 above is assigned to "rig/refinery", which is the shape of every anchor
+# this writer closes — a bead someone handed the refinery. The refusal is
+# per-anchor and permanent, so a retry meets it unchanged on every later pass;
+# the update form carries no such check, which is what lets one atomic write
+# both record and close.
+#
+# The assertion is on the emitted command because no stub can answer it. The
+# shared harness models no acting identity, so its `bd close` would succeed
+# exactly as its `bd update` does; teaching it to refuse would prove nothing
+# either, since the property being pinned is that the call is never issued.
+# The --status=closed assertion above is this one's mirror: together they say
+# the close both happened and happened by the verb that carries no such check.
+hasnt "$(cat "$STUB_GC_LOG")" "bd close" "the close never uses the \`bd close\` verb, whose ownership check refuses a bead assigned to another principal"
 has "$out" '"ok":true' "--json reports the transition"
 has "$out" '"from":"pull_request"' "--json names the from state"
 

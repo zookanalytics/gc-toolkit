@@ -628,7 +628,16 @@ unaskable: tk-yps55 sat parked for 29 hours after its fix merged and
 cost a whole sitting to rediscover that it was finished, on a parked
 budget where roughly 40% of the reserved rows were already terminal.
 Pass `--waiting-on` for every bead a sitting routes work into; a wait
-recorded only in prose is a wait nothing will ever re-ask.
+recorded only in prose is a wait nothing will ever re-ask. A wait whose
+work has ALREADY landed on the subject's own branch is the one the verb
+folds for you: its deliverable is in the subject's head, so the subject's
+own merge is what lands it, and `takeaway` writes no edge there — an edge
+would gate that merge on work that merges with it, which `merge.sh` holds
+on with no release — and a sitting whose every wait is such a rider is
+stamped settled, the same shape `--no-wait` writes. Landed is proven, not
+assumed from the shared branch: the wait is closed, or handed off to the
+refinery. A same-branch wait still open under a pool keeps its edge, because
+its work may not be on the branch yet and the subject must not merge past it.
 
 *Where that edge cannot be written, and what re-asks the wait instead
 (2026-08-22, `tk-a9k0l`):* the canonical converse shape files the routed
@@ -687,6 +696,29 @@ two shapes it is, a thread still carrying its own framing or a fresh
 session respawned onto a hold whose scrollback a restart took, is a
 question about this session's scrollback that no script can read, so the
 claimer states the fact and the prompt makes the choice.
+
+*The one shape that verdict gets wrong, and the fourth that covers it:* a
+sitting does not end in a single write. The prompt posts the sign-off, then
+stamps `gc.outcome` on the visit, reads it back, and closes last of all. A
+session that dies between the stamp and the close leaves a visit that is
+`in_progress`, assigned, and carrying a final outcome. It is complete in
+every way except the one that ends it, and the claim result says only
+`existing_assignment`, so the hold answers and the prompt goes back to
+waiting. The close never runs. `assets/scripts/liveness-sweep.sh` reads
+the still-live visit as `conversing`, which keeps its subject out of the
+unnamed-wait census for as long as the strand stands, so nothing else
+raises it either.
+
+`action=finish` is keyed on the stamp. Every path that writes `gc.outcome`
+closes the visit immediately after it, so a `task_kind=visit` still open
+while carrying one is a sitting whose record is already complete. The
+claimer performs that close itself rather than returning an instruction to
+perform it, and escalates to `--force` when bd's close-authority guard
+refuses the two renderings of this session's own identity. The prompt's
+arm re-checks that the close took, which is also what performs it on the
+claimer-less path, and posts nothing. The stamp lands only after the
+sign-off, so a visit carrying it already had its last word, and the pane
+that finishes the close is a different thread in any case.
 
 Two constraints follow for anyone tuning this. With the idle clock off no
 clock ends a held sitting, so the wake path is the only pack-owned way one

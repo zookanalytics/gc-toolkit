@@ -31,7 +31,8 @@ poured is
 | `TestDoSling_Reassign_NoOpWhenAlreadyEmpty` | gastown source | `rigs/gascity/internal/sling/sling_test.go:3809` (added in `043e61ea6cb99a9f89657e292c9459be8620714c`, observed at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17`) | 2026-05-21 |
 | Upstream tutorial `docs/tutorials/06-beads.md` — **rewritten repeatedly since the PR #1736 ruling, but never reconciled with it** | gastownhall/gascity | https://github.com/gastownhall/gascity/blob/207775a00b1a35e4ab4e05eceb6dc15bc2bead84/docs/tutorials/06-beads.md (last touched in `207775a00b1a35e4ab4e05eceb6dc15bc2bead84`, 2026-07-23). Not a stalled file: nine commits have touched it since the ruling-era `eac98595e701008087f7ee6acecbf55d5dca7794` (2026-05-16), rewriting over half of it (blob `c5c9527032d` → `6fb68f315`, 160 insertions / 148 deletions; measured from the `19a0bb201` pin this row previously cited, blob `63dc267d4`, it is 159 / 153). Four of those nine touched the `## How agents find work` section quoted at the end of this doc — `14153ed41` (#3073), `2315679e2` (#3461), `317e1cda6`, `207775a00` — and two rewrote the very steps at issue: `14153ed41` the claim step, `317e1cda6` the routing step. What survived every pass is the assignee-vs-`gc.routed_to` conflation the ruling settled, so the row's finding stands on a live reading, not on upstream inaction. | 2026-08-13 |
 | Upstream CLI reference (`--reassign` row only) | gastownhall/gascity | `rigs/gascity/docs/reference/cli.md:2789` at upstream/main `19a0bb201eb6d1723a10eecdae20371bd8ceeb17` | 2026-05-21 |
-| `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:607` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:210`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:202`) carries, so `--force` does not relax it; error text at `internal/sling/sling.go:686`. Verified current at gascity/main `434d57656` (the singleton assignee-stamping change, last commit to touch the guard). | 2026-06-19 |
+| `CrossStoreRouteError` cross-store route guard | gascity source | `rigs/gascity/internal/sling/sling_core.go:797` (`validateBuiltInRouteStoreReachable`), gated by `shouldValidateBuiltInRouteStoreReachable` (`sling_core.go:334`) — note its predicate omits the `!opts.Force` bypass that `shouldGuardCrossRig` (`sling_core.go:265`) carries, so `--force` does not relax it; error type at `internal/sling/sling.go:740` with its message at `:752`. Re-derived in the `rigs/gascity` fork at `main` `f8f4ee8c8`; the finding is unchanged from the 2026-06-19 survey, only its line anchors moved. | 2026-09-03 |
+| Lane 1 writes `gc.routed_to` and never `assignee` — there is no singleton stamp | gascity source (`rigs/gascity`) + running `gc` binary | `cliBeadRouter.Route` (`cmd/gc/cmd_sling.go:759`) sets exactly one key: it collapses a pool slot suffix through `agentutil.NormalizePoolRouteTarget` (`:778`) and calls `Store.SetMetadata(req.BeadID, beadmeta.RoutedToMetadataKey, …)` (`:780`). It never reads whether the target is a named session, and `RouteRequest` (`internal/sling/sling.go:105`) carries no field that would let it. Nothing else on the sling path writes the field either: the sole `Assignee` mutation in `internal/sling/` is the `--reassign` clear (`update.Assignee = &empty`, `sling_core.go:2021-2023` in `reopenForReassignInStore`), every other occurrence being a read or a warning. Read side, the reason this matters: `poolDemandOriginGateScript` (`internal/config/workquery.go:788`) exits before the routed tier unless `$GC_SESSION_ORIGIN` is `ephemeral` or empty, and a named session is started with `named` (`cmd/gc/session_reconciler.go:4170`, `cmd/gc/build_desired_state.go:1115`). The two `gc hook` views come from one `if` in `cmd/gc/cmd_hook.go`: in session-template context it passes `$GC_SESSION_ORIGIN` through (`:408`, the agent's view), otherwise it blanks it (`:413`, the controller's view), and that context is established only for the argument-less form (`:266-274`). Routed demand on a named identity is still counted by the controller as a wake-only signal (`NamedSessionRoutedDemand`, wake reason `routed-demand`, `cmd/gc/compute_awake_set.go:202`), so the session wakes on work its own hook will not show it. Binary confirmation, installed `gc` at `/home/zook/.local/bin/gc`: the router's `setting gc.routed_to on %s` occurs once and `setting assignee on %s` zero times. Read in the `rigs/gascity` fork at `main` `f8f4ee8c8`. | 2026-09-03 |
 | PR #2779 — `gc.routed_to` made the sole persisted routing key; `gc.run_target` demoted from it (merged 2026-06-01) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/2779 (commit `fb32be6941be7627aaf169809e31629f0baf6118`); definition in `engdocs/design/session-model-unification.md`. **The "compile-time-only" reading this row once carried is retired**: #2779 demoted `gc.run_target` from the routing key, not from every runtime reader — it shipped the workflow-root fallbacks (`legacyWorkflowRunTarget`, `bdReadyPoolDemandMigrationShell`) in the same commit, and PR #3421 later added the broad controller recovery. See the route-recovery row below. | 2026-06-19 (re-judged 2026-08-15) |
 | Controller route recovery — a **stored** `gc.run_target` is read at runtime and restored into `gc.routed_to` | gastownhall/gascity | `restoreCarriedWorkRoutes` / `carriedPoolRoute` / `liveGraphWorkflowDrivesBead` at `rigs/gascity/cmd/gc/route_recovery.go`, called from `cmd/gc/city_runtime.go:635` (startup, phase `startup-route-recovery`) and `:1218` (every patrol tick, phase `recover_unrouted_work_routes`). Added by PR #3421 (`a7509adca`, 2026-06-28), whose message names it "the automatic, broader-scoped equivalent of the manual `gc doctor --fix` run-target-to-routed-to backfill" and states the scope: a plain kind-less standalone work bead ("the dominant work shape, which a workflow-only recovery would catch none of") plus a pre-`ga-eld2x` workflow root, with control-dispatcher and topology beads left untouched. The live-workflow skip, and the explicit refusal to clear `gc.run_target` when a graph workflow retires the claim route ("blanking it strands the bead invisible to pool demand", `ga-20zd`), are `dbc0012ac` (PR #143, 2026-08-15). The two narrower workflow-root-only readers: `legacyWorkflowRunTarget` (`cmd/gc/work_routing_metadata.go`, consumed by `pool_desired_state.go:163`, `pool_session_name.go`, `build_desired_state.go:1824`) and `runTargetRoutedToBackfillCheck` (`cmd/gc/doctor_run_target_backfill.go`, lists `gc.kind=workflow` only). Read at gascity `origin/main`; file history is `a7509adca` / `41491b490` / `0ca343426` / `dbc0012ac`. | 2026-08-15 |
 | PR #3670 — `feat: add default_sling_targets for multi-target random dispatch` (merged 2026-07-03) | gastownhall/gascity | https://github.com/gastownhall/gascity/pull/3670; field at `rigs/gascity/internal/config/config.go:645`, resolver at `rigs/gascity/cmd/gc/cmd_sling.go:291`. Verified current at gascity/main `4ff645484`. | 2026-07-16 |
@@ -79,15 +80,26 @@ answer for.
   the default sling path and the dispatch shape used by mayor,
   mechanik, deacon, and refinery when handing work back to the
   polecat pool.
-- **Sets:** `metadata.gc.routed_to=<target>`. For a **pool target**
-  (an agent that supports instance expansion) it leaves `assignee`
-  empty. For a **singleton target** (a named session — no instance
-  expansion) it *also* stamps `assignee=<target>`, because the
-  singleton's hook skips the Tier 3 routed-pool query and would
-  otherwise never surface the bead. That singleton stamp automates the
-  ruling's own "assign the named-session identity directly" step, so it
-  refines rather than contradicts the "no `assignee` by default"
-  decision quoted above.
+- **Sets:** `metadata.gc.routed_to=<target>`, and nothing else. The
+  built-in router writes that one key and does not branch on the shape
+  of the target (`cliBeadRouter.Route`,
+  `rigs/gascity/cmd/gc/cmd_sling.go:759`), so `assignee` is left empty
+  for a **pool target** (an agent that supports instance expansion) and
+  for a **singleton target** (a named session — no instance expansion)
+  alike. That is the ruling's "no `assignee` by default", applied
+  without exception.
+- **Addresses a pool completely, a singleton only halfway.** Pool
+  members run the Tier 3 routed query, so `gc.routed_to` is the whole
+  address. A named session's hook skips Tier 3, so a bead carrying only
+  `gc.routed_to=<singleton>` is never offered to the identity it names.
+  The controller still counts that demand and can wake the session on it
+  (`NamedSessionRoutedDemand`, wake reason `routed-demand` in
+  `rigs/gascity/cmd/gc/compute_awake_set.go:202`), which is what makes
+  the shape hard to spot: the session wakes, and its own `gc hook`
+  returns nothing. Delivering to a named session takes the Lane 2
+  assignee write, in place of the sling or straight after it. See
+  ["Stamping only `gc.routed_to` on a named singleton strands the
+  work"](gascity-agents.md#stamping-only-gcrouted_to-on-a-named-singleton-strands-the-work).
 - **Conditional on the target carrying no `default_sling_formula`.**
   The field contract above is Lane 1's only while that field is unset.
   A target that carries a default formula — including one that merely
@@ -117,13 +129,15 @@ answer for.
   ["Where they diverge"](#where-they-diverge-an-instance-suffixed-gcrouted_to).
 - **CLI example:**
   ```bash
-  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde    # pool: gc.routed_to only
-  gc sling gc-toolkit/gc-toolkit.mechanik tk-abcde   # singleton: gc.routed_to + assignee
+  gc sling gc-toolkit/gc-toolkit.polecat tk-abcde   # pool, rig-scoped: gc.routed_to, claimable
+  gc sling gc-toolkit.mechanik tk-abcde             # singleton, city-scoped (no <rig>/): gc.routed_to, NOT claimable
+  bd update tk-abcde --assignee gc-toolkit.mechanik  # Lane 2: the exact name its hook matches, claimable
   ```
-- **Does NOT:** set `assignee` **for pool targets** — the reconciler
-  picks an available worker from the pool by matching `gc.routed_to`.
-  (Singleton targets are the exception just described: sling stamps
-  the assignee so the named session's own hook surfaces the work.)
+- **Does NOT:** set `assignee`, for any target. On a pool that is the
+  point: the reconciler picks an available worker by matching
+  `gc.routed_to`, and a stamped assignee would drop the bead out of the
+  pool's unassigned claim filter. On a singleton it is the gap Lane 2
+  fills.
 - **Cross-store boundary:** sling routes only *within a single bead
   store*. It refuses to route a bead that lives in one rig's `.beads`
   store to a target (pool or agent) in a *different* rig's store —
@@ -146,7 +160,7 @@ answer for.
   `gc.routed_to` empty.
 - **CLI example:**
   ```bash
-  bd update tk-abcde --assignee gc-toolkit/gc-toolkit.mechanik
+  bd update tk-abcde --assignee gc-toolkit.mechanik   # city-scoped singleton: no <rig>/ prefix
   ```
 - **Does NOT:** set `gc.routed_to`. The named session's hook query
   finds the work via assignee, not via routed metadata.
@@ -160,20 +174,18 @@ answer for.
   PR #1841 (merged 2026-05-12) to make this transition atomic from
   the caller's perspective.
 - **Sets:** `metadata.gc.routed_to=<target>` and clears the prior
-  `assignee`. For a **pool target** the assignee stays empty after
-  the clear. For a **singleton target** the Lane 1 singleton stamp
-  still runs *after* the clear, so the net effect is "prior assignee
-  cleared, `assignee=<target>` set."
+  `assignee`. The assignee stays empty after the clear whatever the
+  target is, because nothing on the sling path writes that field. A
+  hand-back to a named session therefore needs the Lane 2 write after
+  the sling, or it lands in the stranded shape Lane 1 describes.
 - **CLI example:**
   ```bash
   gc sling gc-toolkit/gc-toolkit.polecat tk-abcde --reassign   # pool: clear, then gc.routed_to only
   ```
-- **Does NOT:** re-assign to a *third party*. `--reassign` itself only
-  ever clears the prior assignee — it never names a new one. For pool
-  targets the result is *clear* + *route* with no assignee; for
-  singleton targets the new `assignee=<target>` comes from the Lane 1
-  singleton-stamp rule (the sling target itself), not from
-  `--reassign`.
+- **Does NOT:** name a new assignee. `--reassign` only ever clears the
+  prior one, and no later step of the sling path fills it back in, so
+  the result is *clear* + *route* with the assignee empty — for a
+  singleton target exactly as for a pool one.
 
 #### `--reassign` idempotency
 
@@ -213,10 +225,9 @@ does in Lane 3.
   bead, whereas `--formula` launches a formula that has no source bead.
 - **Sets (classic, non-graph formula):** `metadata.molecule_id=<wisp-root>`
   on the **source bead**, then routes that **source bead** through
-  exactly Lane 1's field contract (`gc.routed_to=<target>`, plus the
-  singleton assignee stamp where the target is a named session). The
-  **wisp root is deliberately left unrouted** so it is never
-  independently claimed.
+  exactly Lane 1's field contract (`gc.routed_to=<target>`, and no
+  `assignee`, named-session target included). The **wisp root is
+  deliberately left unrouted** so it is never independently claimed.
 - **Sets (graph.v2 formula):** on the **source / work bead**,
   `gc.routed_to` is **actively retired** and
   `gc.execution_routed_to=<target>` is stamped in its place. `assignee`
@@ -561,10 +572,10 @@ every lane branch is taken downstream of that. So the field contract of a
 targetless sling is whichever lane the *resolved target* implies:
 
 - **Resolved target carries no `default_sling_formula`** → Lane 1, whose
-  contract applies unchanged: a **pool target** gets
-  `metadata.gc.routed_to=<target>` and no `assignee`; a **singleton
-  target** additionally gets `assignee=<target>` from the same
-  singleton-stamp rule.
+  contract applies unchanged: `metadata.gc.routed_to=<target>` and no
+  `assignee`, whether the resolved target is a pool or a singleton. A
+  singleton still needs the Lane 2 assignee write before it can claim
+  what was resolved to it.
 - **Resolved target carries `default_sling_formula`** — its own or one
   inherited from city scope → **Lane 4**, via the same formula-branch
   predicate an explicit target hits (`:978`); under a graph.v2 default

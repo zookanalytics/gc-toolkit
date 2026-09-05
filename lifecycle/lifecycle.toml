@@ -343,6 +343,12 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
+  # Consecutive failures to record a merged PR on this anchor. merge.sh and
+  # pr-facts.sh both perform that record and both retry every pass with no
+  # memory, so the count is the only thing that can tell a store busy for a
+  # tick from a refusal no later pass will clear. Written by
+  # assets/scripts/record-failure-cap.sh, cleared by the record that lands.
+  "merge_record_failures",
 ]
 
 [metadata.gates]

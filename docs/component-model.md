@@ -286,6 +286,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pre-open-rebase.sh` | merge | Arm 1a: asks git whether a pre-open anchor's branch still merges, and dispatches the rebase child no PR-fact arm can. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 2: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/merge.sh` | merge | Arm 3: the single writer of merged truth. |
+| `assets/scripts/record-failure-cap.sh` | merge | The memory the record arms lack: counts consecutive failures to record a merged PR on the anchor, and files one visit past the cap. Called by `merge.sh` and `pr-facts.sh`, which spend one budget between them. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 6: closes a dispatched review with no reviewable surface left. No merge authority. |
@@ -325,7 +326,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-finding-gate.sh` | patrol | Re-asks doctor at close time, so a merge cannot silently read as a fix. Run by the deacon patrol's doctor sweep. |
-| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached and hourly, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
+| `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
 | `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. |

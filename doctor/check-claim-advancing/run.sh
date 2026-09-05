@@ -17,7 +17,7 @@
 #
 #   UNHELD    the bead carries no assignee at all         -> error
 #   ORPHANED  the assignee names no session at all        -> error
-#   DEAD      the holding session is not running          -> error
+#   DEAD      the holding session is not active           -> error
 #   STALLED   the holder runs, but its last_active is     -> error
 #             older than the bound as well
 #
@@ -25,7 +25,7 @@
 # session roster, and `_cache_age_s` sits beside `sessions` rather than inside
 # each one, so it ages the whole roster and not just `last_active`. Against a
 # roster older than the bound, an absent session may be a holder that started
-# after the snapshot, and `running: false` may be a state its holder has since
+# after the snapshot, and a non-`active` state may be one its holder has since
 # left. So all three degrade to warnings there, and only UNHELD still reports
 # as an error. `gc session list` exposes no uncached mode to fall back on.
 #
@@ -200,6 +200,21 @@ case "${cache_age:-}" in *[!0-9]*|"") cache_age=0 ;; esac
 stale_roster=0
 [ "$cache_age" -gt "$STALL" ] && stale_roster=1
 
+# Liveness is read from `.state` (a holder is live iff state == "active"), the
+# field both `gc session list --json` schemas carry — the same rule
+# quota-park-nudge.sh and helm-surface-fixture.sh follow, because `.running` is
+# null during controller churn and absent from the CLI-fallback shape, so a
+# filter on it drops exactly the live sessions. If the roster carries neither
+# `state` nor `running` on any session, its schema has drifted past what
+# liveness can be read from: judging every holder against the absent field
+# would classify them all DEAD and every pool scaled to zero. Decline instead —
+# an unreadable liveness probe warns, it does not fail every claim at once.
+if ! printf '%s' "$sessions" | jq -e 'any(.[]?; has("state") or has("running"))' >/dev/null 2>&1; then
+    echo "cannot determine whether claimed steps are being advanced (I11)"
+    detail "\`gc session list --json\` returned sessions carrying neither a \`state\` nor a \`running\` field; the roster schema has drifted and liveness cannot be read. Judging every holder against the absent field would classify them all DEAD and every pool scaled to zero, so this run declines rather than emit those false alarms."
+    exit 1
+fi
+
 # Arm 2 needs the agent registry: an unclaimed step is judged against the pool
 # its route names, and a suspended or session-less pool has to stay quiet.
 agents_raw=$(run_bounded gc agent list --json 2>/dev/null); agents_rc=$?
@@ -266,7 +281,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
                elif $s == null
                then {cls: (if $stale then "orphaned_cached" else "orphaned" end),
                      bid: $bid, as: $as, held: $held, ex: ""}
-               elif (($s.running // false) | tostring) != "true"
+               elif (($s.state // "") | tostring) != "active"
                then {cls: (if $stale then "dead_cached" else "dead" end),
                      bid: $bid, as: $as, held: $held,
                      ex: (($s.state // "unknown") | tostring | gsub("[[:cntrl:]]"; " "))}
@@ -304,10 +319,10 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
             case "$cls" in
                 unheld)   errors+=("$label step $bid: in_progress for ${held}m with NO assignee. Nothing holds it, and \`bd ready\` cannot offer it either because its status is not open, so it is reachable by neither path; release it (status=open) so a pool can re-offer it.") ;;
                 orphaned) errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — id, session_name and alias were all tried. Nothing holds this step and nothing will advance it; release it (status=open, assignee=\"\") so a pool can re-offer it.") ;;
-                dead)     errors+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session is not running (state=$ex). The claim outlived its holder; release it so a pool can re-offer it.") ;;
+                dead)     errors+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session is not active (state=$ex). The claim outlived its holder; release it so a pool can re-offer it.") ;;
                 stalled)  errors+=("$label step $bid: claimed ${held}m ago by \"$as\", which is running but has produced no output for ${ex}m. A holder quiet past the ${STALL_MINUTES}m bound is parked, not working; nudge it to deliver the step it holds, or release the claim.") ;;
                 orphaned_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", which names no session — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have started after that snapshot. Re-run once the cache is fresh.") ;;
-                dead_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session read as not running (state=$ex) — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may be running now. Re-run once the cache is fresh.") ;;
+                dead_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", whose session read as not active (state=$ex) — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may be active now. Re-run once the cache is fresh.") ;;
                 stalled_cached) warnings+=("$label step $bid: claimed ${held}m ago by \"$as\", last output ${ex}m ago — but \`gc session list\` answered from a ${cache_age}s cache, itself older than the ${STALL_MINUTES}m bound, so the holder may have produced output since. Re-run once the cache is fresh.") ;;
                 unknown)  notes+=("$label step $bid: claimed ${held}m ago by \"$as\", whose last_active is \"$ex\" and does not parse as a timestamp — liveness could not be judged for this holder; reported, not judged") ;;
             esac
@@ -437,7 +452,7 @@ if [ "${#unclaimed[@]}" -ne 0 ]; then
         pool_total["$ptmpl"]="$ptotal"; pool_free["$ptmpl"]="$pfree"; pool_names["$ptmpl"]="$pnames"
     done <<< "$(printf '%s' "$sessions" | jq -r --argjson occ "$occupied_json" '
         (reduce ($occ[]? | tostring) as $o ({}; .[$o] = 1)) as $O
-        | [ .[] | select(((.running // false) | tostring) == "true")
+        | [ .[] | select(((.state // "") | tostring) == "active")
             | ((.template // "") | tostring) as $t | select($t != "")
             | { t: $t,
                 free: (if ($O[((.id // "") | tostring)] != null

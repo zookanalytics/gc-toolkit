@@ -44,6 +44,9 @@ case "${1:-}" in
     done
     out=$(jq -c --arg st ",$statuses," '
       [ .[] | select(.status as $s | $st | contains("," + $s + ",")) ]' "$STORE")
+    # A bd that silently ignored --metadata-field. Every caller re-checks the
+    # rows it matched; this is what exercises those re-checks.
+    [ -n "${STUB_LIST_IGNORE_FIELDS:-}" ] && fields=()
     for f in ${fields[@]+"${fields[@]}"}; do
       k="${f%%=*}"; v="${f#*=}"
       out=$(printf '%s' "$out" | jq -c --arg k "$k" --arg v "$v" \
@@ -67,6 +70,13 @@ case "${1:-}" in
       esac
       shift || true
     done
+    # One create can fail while another lands: the run that mints a standing
+    # subject issues two, and the fail-open arm is only reachable when the
+    # first fails by itself.
+    case "${STUB_CREATE_FAIL_MATCH:-}" in
+      "") : ;;
+      *) case "$title" in *"$STUB_CREATE_FAIL_MATCH"*) echo "bd: refused" >&2; exit 1 ;; esac ;;
+    esac
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     tmp=$(mktemp)
     jq -c --arg id "vis-$n" --arg t "$title" --arg d "$body" \
@@ -76,6 +86,10 @@ case "${1:-}" in
   update)
     shift; id="$1"; shift
     if [ -n "${STUB_UPD_FAIL:-}" ]; then exit 1; fi
+    case "${STUB_UPD_FAIL_MATCH:-}" in
+      "") : ;;
+      *) case "$*" in *"$STUB_UPD_FAIL_MATCH"*) exit 1 ;; esac ;;
+    esac
     tmp=$(mktemp); cp "$STORE" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -94,7 +108,8 @@ STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
-unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL 2>/dev/null || true
+unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
+      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
@@ -102,6 +117,11 @@ export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse
   {"qualified_name":"gc-toolkit.dog"}]}'
 # Most cases below are a rig-bound caller; the rig-less ones drop GC_RIG themselves.
 export GC_RIG=gc-toolkit
+
+# The store's standing triage subject, already open. An ephemeral subject is
+# redirected onto it, so seeding it keeps a create count counting visits
+# rather than the mint.
+STANDING='{"id":"sub-0","status":"open","assignee":"","title":"triage: escalations raised from an ephemeral subject (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"ephemeral-subject-findings"},"notes":""}'
 
 reset() {
   printf '%s' "${1:-[]}" > "$STUB_STORE"
@@ -292,7 +312,7 @@ out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message "fork rate
 eq "$rc" 0 "a differing ephemeral subject exits 0"
 eq "$(visits)" "0" "the next cycle's wisp files no duplicate"
 has "$out" "already open" "the previous cycle's visit was found"
-hasnt "$(grep '^bd list' "$STUB_GC_LOG")" "gc.continuation_group" "the wisp subject does not ride the dedup listing"
+hasnt "$(grep 'bd list' "$STUB_GC_LOG")" "gc.continuation_group" "the wisp subject does not ride the dedup listing"
 
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-wisp-aaa"},"notes":""}]'
 "$SUT" --subject tk-wisp-bbb --key k1 --message m >/dev/null 2>&1
@@ -302,11 +322,11 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"
 "$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "0" "the same wisp subject still dedups"
 
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k2","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+reset "[$STANDING,{\"id\":\"vis-0\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k2\",\"gc.continuation_group\":\"lx-wisp-aaaaa\"},\"notes\":\"\"}]"
 "$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a different key still files, ephemeral subject or not"
 
-reset '[{"id":"vis-0","status":"closed","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+reset "[$STANDING,{\"id\":\"vis-0\",\"status\":\"closed\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k1\",\"gc.continuation_group\":\"lx-wisp-aaaaa\"},\"notes\":\"\"}]"
 "$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a closed visit re-opens the situation for a wisp subject too"
 
@@ -342,12 +362,108 @@ eq "$(visits)" "0" "and no duplicate is filed"
 eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "the key-only match is repointed too"
 has "$out" "repointed" "and says so"
 
-echo "# an ephemeral subject still records what raised the visit"
+echo "# an ephemeral subject is filed on a durable standing subject"
+# The sitting writes its outcome to the subject and its takeaway to the item,
+# which is the subject when the visit names no stall_root
+# (agents/converse/prompt.template.md step 7). A wisp is burned at the end of
+# its iteration, so a visit filed on one carries both writes to a bead that is
+# gone before anyone claims it.
 reset
-"$SUT" --subject lx-wisp-aaaaa --key doctor-fork-rate --message "fork rate high" >/dev/null 2>&1
-eq "$(meta vis-1 gc.continuation_group)" "lx-wisp-aaaaa" "the raising wisp is still stamped"
-has "$(cat "$STUB_DEPS")" "vis-1|lx-wisp-aaaaa|tracks" "the visit still tracks the raising wisp"
-has "$(field vis-1 title)" "visit: lx-wisp-aaaaa" "and the title still names it"
+out=$("$SUT" --subject lx-wisp-aaaaa --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
+eq "$rc" 0 "an ephemeral subject files"
+eq "$(visits)" "2" "the standing subject is minted alongside the visit"
+eq "$(meta vis-1 task_kind)" "triage-subject" "the minted bead is a standing triage subject"
+eq "$(meta vis-1 triage.scope)" "ephemeral-subject-findings" "carrying the scope the lookup filters on"
+has "$(field vis-1 title)" "triage: escalations raised from an ephemeral subject" "and a title that says what hangs there"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit's group is the standing subject, not the wisp"
+has "$(cat "$STUB_DEPS")" "vis-2|vis-1|tracks" "and its tracks edge points there too"
+hasnt "$(cat "$STUB_DEPS")" "lx-wisp-aaaaa" "nothing is wired to the wisp"
+has "$(field vis-2 title)" "visit: vis-1" "the title names the durable subject"
+eq "$(meta vis-2 escalation_raised_by)" "lx-wisp-aaaaa" "the raising wisp survives as provenance"
+has "$(field vis-2 description)" "lx-wisp-aaaaa" "and the body names it, for the sitting that reads it"
+has "$out" "is ephemeral and cannot receive" "the redirect is announced"
+has "$(cat "$STUB_GC_LOG")" "--metadata-field task_kind=triage-subject" "both markers ride the standing-subject lookup"
+has "$(cat "$STUB_GC_LOG")" "--metadata-field triage.scope=ephemeral-subject-findings" "including the scope"
+
+echo "# …reusing the one that is already open, never minting a second"
+reset "[$STANDING]"
+"$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message m >/dev/null 2>&1
+eq "$(visits)" "1" "only the visit is created"
+eq "$(meta vis-1 gc.continuation_group)" "sub-0" "it hangs on the standing subject already there"
+eq "$(meta vis-1 escalation_raised_by)" "lx-wisp-bbbbb" "with this cycle's wisp recorded"
+
+echo "# two findings share the bucket but keep their own escalation_key"
+# The subject no longer tells them apart, so the key is the only thing that
+# does. The converse fold check resolves a visit's topic as stall_root, else
+# the key, else the subject, and a redirected visit names no stall_root
+# (agents/converse/prompt.template.md). A visit that reached the bucket
+# without its own key would fold into its sibling and close unread.
+reset "[$STANDING]"
+"$SUT" --subject lx-wisp-aaaaa --key doctor-dolt-noms-size --message m >/dev/null 2>&1
+"$SUT" --subject lx-wisp-bbbbb --key doctor-check-cadence-live --message m >/dev/null 2>&1
+eq "$(visits)" "2" "each situation files its own visit"
+eq "$(meta vis-1 gc.continuation_group)" "sub-0" "both hang on the one standing subject"
+eq "$(meta vis-2 gc.continuation_group)" "sub-0" "sharing the bucket"
+eq "$(meta vis-1 escalation_key)" "doctor-dolt-noms-size" "the first carries its own key"
+eq "$(meta vis-2 escalation_key)" "doctor-check-cadence-live" "and the second a different one"
+
+# A closed subject cannot receive an append or a takeaway either.
+reset "[$(printf '%s' "$STANDING" | sed 's/"status":"open"/"status":"closed"/')]"
+"$SUT" --subject lx-wisp-ccccc --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "2" "a CLOSED standing subject is not reused — a fresh one is minted"
+
+echo "# a durable subject is never redirected"
+reset
+"$SUT" --subject tk-stuck --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "1" "no standing subject is minted"
+eq "$(meta vis-1 gc.continuation_group)" "tk-stuck" "the subject stays the bead the caller named"
+eq "$(meta vis-1 escalation_raised_by)" "<absent>" "and no provenance is invented"
+hasnt "$(cat "$STUB_GC_LOG")" "task_kind=triage-subject" "the standing-subject lookup never runs"
+
+echo "# the redirect never runs on a path that files nothing"
+# The mint sits after the dedup and after the route check, so neither a
+# suppressed escalation nor a refused one leaves a bucket behind.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
+"$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "0" "a deduped ephemeral escalation mints nothing"
+
+reset
+out=$("$SUT" --subject lx-wisp-aaaaa --key k1 --message m --pool no/such.pool 2>&1); rc=$?
+eq "$rc" 1 "an unroutable ephemeral escalation still exits 1"
+eq "$(visits)" "0" "and mints nothing — the refusal precedes every create"
+
+echo "# a standing subject that cannot be minted files on the wisp, loudly"
+# The trade the whole script is built on: a visit whose disposition will be
+# lost has still asked a human, and filing nothing asks nobody.
+reset
+out=$(STUB_CREATE_FAIL_MATCH="triage:" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "the escalation still files"
+eq "$(visits)" "1" "exactly the visit"
+eq "$(meta vis-1 gc.continuation_group)" "lx-wisp-aaaaa" "on the wisp, nothing durable having been resolved"
+has "$out" "will be lost when it burns" "and says what that costs"
+
+echo "# markers that do not read back cost the NEXT escalation, not this one"
+reset
+out=$(STUB_UPD_FAIL_MATCH="triage.scope" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "the escalation files"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on it — an unmarked bead is still durable"
+has "$out" "markers did not read back" "the lost markers are reported"
+has "$out" "repair:" "with the repair that makes it findable again"
+
+# A listing that ignored its filters answers with an unrelated open bead. The
+# re-check refuses it, so the visit is never wired to a bead nobody escalated
+# about.
+reset '[{"id":"other","status":"open","assignee":"","title":"an unrelated open bead","metadata":{},"notes":""}]'
+STUB_LIST_IGNORE_FIELDS=1 "$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+eq "$(meta vis-1 task_kind)" "triage-subject" "an unfiltered answer is refused and a bucket minted instead"
+eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the minted bucket"
+hasnt "$(cat "$STUB_DEPS")" "|other|" "and no edge reaches the unrelated bead"
+
+# The same fail-open the dedup listing takes: an unreadable lookup mints a
+# second bucket rather than dropping the subject.
+reset "[$STANDING]"
+STUB_LIST_FAIL=1 "$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+eq "$(visits)" "2" "an unreadable lookup mints a duplicate bucket rather than filing on the wisp"
 
 echo "# an unreadable listing files anyway (a duplicate beats a mute)"
 reset

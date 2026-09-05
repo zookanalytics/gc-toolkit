@@ -8,16 +8,20 @@
 #   converse-claim.sh                 first claim of a session: any group
 #   converse-claim.sh <current-group> re-claim: only this group is workable
 # Output: one key=value line; exit status says what to do:
-#   action=work  bead=<id> group=<g> [reason=unreleasable]     exit 0
-#   action=hold  bead=<id> group=<g> reason=already-underway [adopted=<ids>] exit 3
-#   action=drain reason=no-work                                exit 1
-#   action=drain reason=out-of-group bead=<id> group=<g>       exit 1
+#   action=work   bead=<id> group=<g> [reason=unreleasable]    exit 0
+#   action=hold   bead=<id> group=<g> reason=already-underway [adopted=<ids>] exit 3
+#   action=finish bead=<id> group=<g> reason=outcome-stamped [adopted=<ids>] exit 4
+#   action=drain  reason=no-work                               exit 1
+#   action=drain  reason=out-of-group bead=<id> group=<g>      exit 1
 # The RELEASE is the load-bearing half: never drain on a turn not put back
 # (a held visit waits for witness patrol otherwise), release the WHOLE claim
 # (the vacuumed continuation_assigned siblings too), and when part of the set
 # will not go back, work the first still-HELD turn instead of draining.
 # The HOLD verdict is load-bearing for the opposite reason: it is the only
-# answer that neither works a live sitting nor ends it.
+# answer that neither works a live sitting nor ends it. FINISH covers the one
+# case a hold gets wrong: a sitting whose record is complete and whose close
+# never ran looks exactly like a live one from the claim alone, so the outcome
+# stamp is read off the bead and the close is completed here.
 # Caller: the converse prompt's claim loop.
 set -u
 
@@ -31,7 +35,7 @@ scrub() { tr -d '\000-\011\013-\037'; }
 PROG="converse-claim"
 
 usage() {
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1-}" in
@@ -55,6 +59,13 @@ fi
 REASON=$(printf '%s' "$CLAIM" | jq -r '.reason // ""' 2>/dev/null || printf '')
 GROUP=$(printf '%s' "$CLAIM" | jq -r '.continuation_group // ""' 2>/dev/null || printf '')
 
+# One read of the claimed bead answers both questions the claim result cannot:
+# the continuation group its stamp may have dropped, and whether the turn is
+# already carrying a final outcome. A read that fails leaves this empty, and
+# both derivations below then give the answer they give for a recording that
+# is simply absent.
+BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
+
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
 # carries the subject (tk-tu5g3; su-ab9je is the edge holding where the stamp
@@ -67,7 +78,7 @@ GROUP=$(printf '%s' "$CLAIM" | jq -r '.continuation_group // ""' 2>/dev/null || 
 # visit carrying neither recording still resolves to the fallback below; the
 # writer-side loss (tk-ax6y4) is repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
-    GROUP=$(gc bd show "$BEAD" --json 2>/dev/null | scrub \
+    GROUP=$(printf '%s' "$BEAD_JSON" \
         | jq -r 'if type == "array" then (.[0] // {}) else {} end
                  | select(((.metadata // {}).task_kind // "") == "visit")
                  | [ ((.dependencies // [])[]?
@@ -105,11 +116,64 @@ fi
 # releasing a turn mid-sitting is the same destruction by the other door. A
 # turn only reaches in_progress under this identity because an earlier turn of
 # this session decided to work it, so the guard has had its say.
+#
+# A hold is wrong for one shape of that claim, and it is the shape a sitting
+# ends in. A visit records its ending in writes that are not atomic: the
+# prompt posts the sign-off, then stamps gc.outcome, reads it back, and
+# closes. Every path that stamps the field closes immediately after it
+# (the fold in step 1, the moot/benign exit in step 2, the sign-off path in
+# step 7), so a visit still open while carrying one is a sitting whose record
+# is complete and whose close did not run. Held, it is offered back to its own
+# session for as long as the pool has demand, and the close never runs. The
+# item keeps whatever headline it has: the hold stamped one when the sitting
+# began, and a closing takeaway that failed on the way out is not recovered
+# here.
+#
+# Keyed on task_kind=visit for the reason the group recovery is: gc.outcome is
+# a general key — a dog warrant and a graph.v2 step both carry it — and closing
+# some other bead the pool handed this role would be destruction. Keyed on
+# existing_assignment because that is the claim shape the strand produces: the
+# visit stays in_progress under the identity that stamped it. A stamped visit
+# arriving as a FRESH claim means something else reopened it, which is a
+# different question than this arm answers.
+OUTCOME=$(printf '%s' "$BEAD_JSON" \
+    | jq -r 'if type == "array" then (.[0] // {}) else {} end
+             | select(((.metadata // {}).task_kind // "") == "visit")
+             | (((.metadata // {})["gc.outcome"]) // "") | tostring' 2>/dev/null || printf '')
+
+# finish_close <bead-id> <outcome> — close a visit whose record is complete.
+# bd's close-authority guard compares the assignee against an actor derived
+# from the session name and refuses the two renderings of one identity, so a
+# refusal escalates to --force the way gc-helm.sh's dismiss does; the holder
+# being overridden here is this session. The READ decides, not either exit
+# status — a close that reported success and left the visit open is the strand
+# again, one door over.
+finish_close() {
+    _why="stranded after gc.outcome=$2 was stamped; close completed by $PROG"
+    gc bd close "$1" --reason "$_why" >/dev/null 2>&1 \
+        || gc bd close "$1" --reason "$_why" --force >/dev/null 2>&1
+    gc bd show "$1" --json 2>/dev/null | scrub \
+        | jq -e 'if type == "array" then ((.[0].status // "") == "closed") else false end' \
+          >/dev/null 2>&1
+}
+
 if [ "$REASON" = "existing_assignment" ]; then
     ADOPTED=$(printf '%s' "$CLAIM" | jq -r '
         (.continuation_assigned // [])
         | map(select(type == "string" and . != ""))
         | join(",")' 2>/dev/null || printf '')
+    if [ -n "$OUTCOME" ]; then
+        if finish_close "$BEAD" "$OUTCOME"; then
+            echo "$PROG: $BEAD carried gc.outcome=$OUTCOME with no close; closed it here" >&2
+        else
+            # Still a finish: sending the caller back to waiting on a
+            # sitting that is over is the defect itself, and the caller's own
+            # close is the backstop for whatever refused here.
+            echo "$PROG: $BEAD carries gc.outcome=$OUTCOME and would not close; close it by hand: gc bd close $BEAD --force" >&2
+        fi
+        echo "action=finish bead=$BEAD group=$GROUP reason=outcome-stamped${ADOPTED:+ adopted=$ADOPTED}"
+        exit 4
+    fi
     echo "action=hold bead=$BEAD group=$GROUP reason=already-underway${ADOPTED:+ adopted=$ADOPTED}"
     exit 3
 fi

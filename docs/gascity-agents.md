@@ -409,13 +409,21 @@ Named singletons run their `gc hook` work query with
 `$GC_SESSION_ORIGIN=named`. The Tier 3 routed-pool tier is gated
 to `ephemeral` (or empty) origins only — named singletons see
 only **Tier 1** (in-progress, crash recovery) and **Tier 2**
-(ready, pre-assigned) work. They still skip Tier 3, but routing
-work to a named singleton does not require hand-stamping the
-assignee: `gc sling <singleton-qualified-name> <bead>` detects
-the singleton target and stamps `assignee=<target>` alongside
-`gc.routed_to`, so the bead surfaces via the singleton's Tier 2
-(`bd ready --assignee`) query. `bd update <bead> --assignee` is
-still valid and equivalent. See [Work routing](#work-routing) and
+(ready, pre-assigned) work.
+
+So addressing is direction-dependent. A **pool** target is fully
+addressed by `gc.routed_to`, which is what `gc sling` writes, and
+the bead must stay unassigned for the pool's claim filter to
+offer it. A **named singleton** is addressed by `assignee` and by
+nothing else: `bd update <bead> --assignee
+<singleton-qualified-name>` (Lane 2) is what makes the bead
+reachable, and `gc sling` does not do it for you — it stamps
+`gc.routed_to` and stops there, for every target. Slinging to a
+named singleton and walking away leaves the work unclaimable; see
+the [stranding
+footgun](#stamping-only-gcrouted_to-on-a-named-singleton-strands-the-work).
+
+See [Work routing](#work-routing) and
 [gascity-routing-model.md](gascity-routing-model.md) for the
 lane breakdown.
 
@@ -752,11 +760,11 @@ Same Tier 1 + Tier 2 gating as named singletons —
 `$GC_SESSION_ORIGIN=named` skips Tier 3 routed pool. Patrol wisps
 are *produced* by the patrol cycle itself (Tier 1 / Tier 2 hits),
 not consumed from the routed pool. Outside work that needs a
-specific patrol agent to act can be routed with `gc sling
-<patrol-qualified-name> <bead>` — which stamps `assignee` for
-singleton targets so the work surfaces via Tier 2 — or assigned
-directly with `bd update --assignee <patrol-qualified-name>`
-(Lane 2). Same rule as any named singleton.
+specific patrol agent to act has to be assigned to it: `bd update
+<bead> --assignee <patrol-qualified-name>` (Lane 2). A `gc sling`
+at the same name stamps `gc.routed_to` and stops there, which
+Tier 3 would have to read and the patrol agent's hook does not.
+Same rule as any named singleton.
 
 ### Examples in the wild
 
@@ -974,7 +982,7 @@ summoned by a routed visit bead, and it addresses like the pool column.)
 | `gc mail inbox` | reads `assignee=<my-ids>` | reads `assignee=<my-ids>` | reads `assignee=<my-ids>` |
 | `bd update <bead> --assignee <addr>` | QualifiedName (Lane 2) | instance name (Lane 2; usually unwanted for pool work — prefer sling) | adhoc session name |
 | `bd update <bead> --set-metadata gc.routed_to=<target>` | ✗ — singleton ignores Tier 3 | QualifiedName / PoolName (Lane 1) | ✗ — work_query stub ignores Tier 3 |
-| `gc sling <target> <bead>` | QualifiedName — stamps `assignee`+`gc.routed_to`, so Tier 2 surfaces it (Lane 1) | QualifiedName / PoolName (Lane 1) | ✗ — sling_query exits non-zero |
+| `gc sling <target> <bead>` | ✗ — stamps `gc.routed_to` only, which the singleton ignores; assign it instead (Lane 2) | QualifiedName / PoolName (Lane 1) | ✗ — sling_query exits non-zero |
 | `gc runtime drain <addr>` | session id or alias | session id or instance alias (no pool-level drain — drain each instance, or shrink `max_active_sessions` in config) | session id or adhoc alias |
 
 Pool-wide drain (`gc agent drain`) was removed when the runtime
@@ -1112,12 +1120,21 @@ skips the Tier 3 routed-pool query. A bead carrying *only*
 invisible to the singleton's hook, which runs only Tier 1 / Tier 2
 (assignee match).
 
-`gc sling <singleton-qualified-name> <bead>` is the safe path: it
-detects the singleton target and stamps `assignee=<target>`
-alongside `gc.routed_to`, so the bead surfaces via the singleton's
-Tier 2 (`bd ready --assignee`) query. `bd update <bead> --assignee
-<singleton-qualified-name>` (Lane 2) is the equivalent explicit
-form. See [gascity-routing-model.md, Lane
+`gc sling <singleton-qualified-name> <bead>` does not rescue it.
+Sling stamps `gc.routed_to` and nothing else, whatever the target,
+so it produces exactly the stranded shape above. The fix is the
+assignee write:
+
+```bash
+bd update <bead> --assignee <singleton-qualified-name>
+```
+
+Do that instead of the sling, or right after it. The diagnostic
+for a bead you suspect is stranded is that the two `gc hook` forms
+disagree: `gc hook <qualified-name>`, with the name as an
+argument, reports the controller's view and will show the bead,
+while a bare `gc hook` inside the target's own session reports the
+agent's view and shows nothing. See [gascity-routing-model.md, Lane
 1](gascity-routing-model.md#lane-1--gc-sling-target-bead-queue--template-routing)
 and [Lane
 2](gascity-routing-model.md#lane-2--bd-update-bead---assignee-named-session-direct-named-session-delivery).
@@ -1424,7 +1441,8 @@ session materialized only while one of these holds:
 
 | Wake reason | Durable? | How |
 |---|---|---|
-| Work on the hook (a bead `assignee`'d to the agent) | yes — until the work is done | `bd update --assignee`, `gc sling` |
+| Work on the hook (a bead `assignee`'d to the agent) | yes — until the work is done | `bd update --assignee` |
+| Routed demand at the agent's name | yes, while the demand stands — but it is wake-only, and puts nothing on the hook | `gc sling` |
 | A pin | yes — until you unpin | the `S`-picker entry (or `gc session pin`) |
 | An active attach | **no** — drops the moment you detach, even to hop tmux windows | `gc session attach` |
 

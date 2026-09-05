@@ -26,7 +26,8 @@ harness_init() {
   export STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit"
   export STUB_ORIGIN_HEAD="main"
   export STUB_SELF_LOGIN="gc-city-bot"
-  export STUB_UPDATE_FAIL="" STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
+  export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS=""
+  export STUB_LIST_FAIL="" STUB_SHOW_FAIL=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
@@ -175,6 +176,17 @@ case "$verb" in
   update)
     id="${1:-}"; shift || true
     case " ${STUB_UPDATE_FAIL:-} " in *" $id "*) echo "gc: simulated update refusal for $id" >&2; exit 1 ;; esac
+    # STUB_CLOSE_FAIL="id id2" — the same knob the `close` subcommand reads,
+    # applied to the other spelling of a close: refuse only the writes carrying
+    # --status=closed, leaving metadata-only writes on the same bead succeeding.
+    # That asymmetry is bd's own — its ownership check is a property of the
+    # close, and a bare --set-metadata on a bead assigned to another principal
+    # still lands. STUB_UPDATE_FAIL refuses both, so it cannot model a record
+    # whose close is permanently refused while a counter beside it still writes.
+    case " ${STUB_CLOSE_FAIL:-} " in
+      *" $id "*) case " $* " in *" --status=closed "*)
+        echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
+    esac
     sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""
     while [ $# -gt 0 ]; do
       case "$1" in

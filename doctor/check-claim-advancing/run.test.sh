@@ -228,7 +228,7 @@ clear_stores
 
 # ORPHANED and DEAD are read out of the same roster, so a stale one degrades
 # them too: an absent session may be a holder that started after the snapshot,
-# and running:false may be a state its holder has since left.
+# and a non-active state may be one its holder has since left.
 CACHE=7200 sessions "$(live lx-1 pool-1 rig/pool.polecat 30)"
 store alpha "$(claim a-1 rig/pool.gone 7200)"
 OUT=$(run_check); RC=$?
@@ -243,7 +243,7 @@ store alpha "$(claim a-1 rig/pool.polecat 7200)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a stale cache degrades DEAD to a warning"
 has "$OUT" "state=asleep" "the dead warning still names the holder's state"
-has "$OUT" "may be running now" "the dead warning says why it is not judged"
+has "$OUT" "may be active now" "the dead warning says why it is not judged"
 clear_stores
 
 # UNHELD is read off the bead, not the roster, so a stale cache cannot soften it.
@@ -700,6 +700,49 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unread root leaves arm 2 a warning, not the never-claimed error"
 has "$OUT" "returned no row" "the arm 2 warning names the unresolved root"
 hasnt "$OUT" "nudge the pool" "the pool is not nudged against a root that went unread"
+clear_stores
+
+# --- 16. the CLI fallback session schema is judged, not false-flagged ------
+# `gc session list --json` answers in two shapes: the API path carries
+# `running` and `_cache_age_s`; the CLI fallback carries neither, only `.state`.
+# Liveness reads `.state`, so the fallback shape must reach the same verdict as
+# the API shape — a live holder is not DEAD, and a live pool is not read as
+# scaled to zero. A fallback roster: `.state` present, no `running`, no
+# `_cache_age_s`.
+fb_roster() { printf '{"sessions":[%s]}' "$1" > "$TMP/sessions.json"; }
+
+# arm 1: a working holder (state active) with no `running` field is not DEAD.
+fb_roster "$(printf '{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","state":"active","last_active":"%s"}' "$(ago 30)")"
+store alpha "$(claim a-1 rig/pool.polecat 7200)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a working holder read through the fallback schema is not DEAD"
+hasnt "$OUT" "a-1" "no finding names the live holder"
+hasnt "$OUT" "not active" "no holder is classified DEAD when only .running is absent"
+clear_stores
+
+# arm 2: a live pool session holding nothing, no `running` field, is the same
+# ERROR the API shape produces — not a silent "scaled to zero" note.
+agents "$(agent rig/pool.polecat false 2)"
+fb_roster "$(printf '{"id":"lx-1","session_name":"pool-1","alias":"","state":"active","last_active":"%s","template":"rig/pool.polecat"}' "$(ago 30)")"
+store alpha "$(openstep a-u1 rig/pool.polecat 7200)"
+ready alpha '{"id":"a-u1"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live pool read through the fallback schema is judged, not scaled-to-zero"
+has "$OUT" "1 of 1 running session(s) holding nothing" "the idle-worker finding is restored under the fallback shape"
+hasnt "$OUT" "no running session" "the fallback shape is not misread as a pool scaled to zero"
+clear_stores
+
+# --- 17. a roster carrying neither `state` nor `running` declines -----------
+# Fail closed on schema drift past the fallback shape: with no liveness field
+# at all, judging every holder against the absent field would classify them all
+# DEAD and every pool scaled to zero. Decline (warn) rather than emit those
+# false alarms.
+printf '{"sessions":[{"id":"lx-1","session_name":"pool-1","alias":"rig/pool.polecat","last_active":"%s"}]}' "$(ago 30)" > "$TMP/sessions-noliveness.json"
+store alpha "$(claim a-1 rig/pool.polecat 7200)"
+OUT=$(SESSIONS_JSON="$TMP/sessions-noliveness.json" run_check); RC=$?
+eq "$RC" "1" "a roster with neither state nor running WARNS, never mass-reports DEAD"
+has "$OUT" "cannot determine" "the warning says the check declined to judge"
+hasnt "$OUT" "not active" "no holder is classified DEAD against the absent field"
 clear_stores
 
 echo

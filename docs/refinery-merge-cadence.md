@@ -156,6 +156,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    identity the merge does, since it writes merged truth about one PR onto a
    bead that may have moved to another since the enumeration.
 
+   A record that fails is retried on the next pass, which is the whole repair
+   for the common cause and no repair at all for a cause the next pass meets
+   unchanged. `record-failure-cap.sh` is what tells the two apart: it counts
+   consecutive failures in `merge_record_failures` on the anchor and, past
+   `GC_MAX_RECORD_FAILURES` (3), files one visit naming the PR, the anchor and
+   the by-hand record. The record that lands clears the count. This arm, the
+   merge's own record below it, and pr-facts's out-of-band record all call it,
+   so the same repair attempted by three writers spends one budget rather than
+   three. The count is metadata-only because every refusal it bounds is a
+   refusal of the transition's own write, which a bare `--set-metadata` on the
+   same bead is not subject to.
+
    The seed-audit check is the one gate here that is a property of the merge
    rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an

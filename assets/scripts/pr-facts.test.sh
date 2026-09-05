@@ -55,7 +55,7 @@ harness_init
 meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh"
+mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -131,6 +131,40 @@ eq "$(bstatus F1)" "closed" "anchor closed"
 eq "$(meta F1 merge_result)" "merged" "merge_result=merged"
 eq "$(meta F1 merged_sha)" "merged-sha-10" "merged_sha recorded"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "pr-facts never merges"
+hasnt "$(cat "$STUB_GC_LOG")" "bd close" "the record never uses the \`bd close\` verb, whose ownership check refuses a bead assigned to another principal"
+
+# This arm and merge.sh's two record arms perform the same repair on the same
+# anchor, so their failures count against ONE budget: a backstop keeping its own
+# tally would let each writer sit forever at two-of-three while the anchor is
+# refused on every pass by both. record-failure-cap.sh is the shared counter, and
+# STUB_CLOSE_FAIL is what makes this the real shape rather than a total outage —
+# the close is refused and the counter beside it still writes, which is bd's own
+# asymmetry.
+echo "# the out-of-band record shares the retry budget"
+store "[$(anchor F1b 12)]"
+printf '%s' "$(prview 12 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_12.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_CLOSE_FAIL="F1b" run 2>&1)
+has "$out" "record failed for F1b" "a refused record is still reported"
+eq "$(meta F1b merge_record_failures)" "1" "…and counted on the anchor, in the same key merge.sh counts in"
+eq "$(cat "$STUB_ESC_LOG")" "" "…escalating nothing under the cap"
+
+# A count merge.sh already carried is what this arm's failure lands on top of,
+# which is the whole point of one budget: the third failure escalates whichever
+# writer reaches it.
+store "[$(anchor F1c 13 ',"merge_record_failures":"2"')]"
+printf '%s' "$(prview 13 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_13.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_CLOSE_FAIL="F1c" run 2>&1)
+eq "$(meta F1c merge_record_failures)" "3" "a failure here counts on top of merge.sh's"
+has "$(cat "$STUB_ESC_LOG")" "--key merge-record-failed.13" "…and reaching the cap escalates from this arm too"
+
+# The record that lands clears the shared count.
+store "[$(anchor F1d 14 ',"merge_record_failures":"2"')]"
+printf '%s' "$(prview 14 MERGED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_14.json"
+out=$(run)
+eq "$(bstatus F1d)" "closed" "the record lands"
+eq "$(meta F1d merge_record_failures)" "<absent>" "…and clears the count it inherited"
 
 echo "# closed-unmerged -> abandoned + escalate"
 store "[$(anchor F2 11)]"
