@@ -148,9 +148,11 @@ observed writing to the wrong bead — or to none:
 | `$GC_TRIGGER_BEAD_ID` | not refreshed by `gc hook --claim` (tk-niu2f), so it still names the session's spawn bead | OPEN — the close succeeds against *another live session's* in-progress step |
 
 Close through `assets/scripts/step-close.sh --step <formula>.<step-id>` instead.
-It resolves the target from the store by (`assignee`, `metadata."gc.step_ref"`)
-— a pair that names exactly one bead and cannot go stale across a claim — and
-refuses to write at all when it cannot prove which bead is yours. The pack's
+It resolves the target from the store by (`metadata."gc.root_bead_id"`,
+`metadata."gc.step_ref"`) — the molecule and the step. A pool agent wears one
+assignee across every run it makes, so only that pair names exactly one bead;
+the assignee corroborates the match and never identifies it alone. It refuses
+to write at all when it cannot prove which bead is yours. The pack's
 `doctor/check-step-close-owns-bead` holds the line.
 
 **`gc runtime drain-ack` is a session verb, not a step verb.** It tells the

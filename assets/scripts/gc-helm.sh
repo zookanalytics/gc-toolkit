@@ -257,7 +257,7 @@ quiesce_release_molecule_steps() (
     _anchor="$1"; _db="$2"
 
     # The spellings a bead's assignee can carry for THIS session — the same
-    # three step-close.sh resolves by.
+    # three step-close.sh tries as the assignee.
     _me=$(printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
 
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
@@ -316,12 +316,11 @@ quiesce_release_molecule_steps() (
 
             # Never de-pin the bead this release is being performed FROM. The
             # quiesce exists to stop an ABANDONED molecule re-attracting spawns;
-            # a bead the releasing session holds is the live one, and
-            # step-close.sh resolves it by (assignee, gc.step_ref), so clearing
-            # that assignee strands the molecule this release is completing.
-            # With no identity in the environment step-close.sh refuses to close
-            # anything at all, so there is no case where the skip is needed and
-            # unavailable.
+            # a bead the releasing session holds is the live one, not a husk,
+            # and the session still owes its own step chain's close, so this
+            # quiesce leaves it alone. With no identity in the environment
+            # step-close.sh refuses to close anything at all, so there is no
+            # case where the skip is needed and unavailable.
             if [ -n "$_who" ] && [ -n "$_me" ] && printf '%s\n' "$_me" | grep -qxF -- "$_who"; then
                 echo "$PROG: takeaway: kept live $_kind $_sid ($_step) — this session holds it and still has to close it"
                 continue
