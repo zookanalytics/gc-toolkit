@@ -101,6 +101,20 @@ echo '[]' > "$GH_DIR/reviews_44.json"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M3g" "a same-number anchor whose pr_url names a DIFFERENT repository is a different PR and does not hold"
 
+# The wildcard is symmetric. When it is THIS anchor whose pr_url is absent, it
+# names no repository and must collide with every same-number anchor, including
+# one whose pr_url resolves to a DIFFERENT repository. Keying this anchor to the
+# origin remote instead of its own row would merge it while a foreign
+# same-number anchor sits unresolved.
+echo "# one-anchor-per-PR: a URL-less THIS anchor is the wildcard against a foreign same-number anchor"
+store "[$(printf '%s' "$(anchor M3i 45)" | jq -c 'del(.metadata.pr_url)'), $(printf '%s' "$(anchor M3j 45)" | jq -c '.metadata.pr_url = "https://github.com/other/repo/pull/45"')]"
+printf '%s' "$(prview 45 OPEN CLEAN)" > "$GH_DIR/pr_view_45.json"
+echo '[]' > "$GH_DIR/reviews_45.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "open anchor (M3i + M3j)" "this anchor's OWN absent pr_url makes it the wildcard that holds against a foreign same-number anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and the URL-less anchor is not merged past the unresolved foreign twin"
+
 echo "# retarget holds"
 store "[$(anchor M4 13)]"
 printf '%s' "$(prview 13 OPEN CLEAN)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_13.json"

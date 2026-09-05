@@ -355,22 +355,25 @@ while IFS= read -r row; do
       held=$((held + 1)); continue ;;
   esac
   # One-anchor-per-PR: fail-closed defense (doctor/check-one-anchor-per-pr is
-  # the structural check). An "other" anchor of this pr_number is a duplicate
-  # unless its own pr_url names a DIFFERENT repository: the repo key is the same
-  # one the in-flight holder filter uses (REPO_Q_DEF), so a foreign same-number
-  # anchor is dropped while one whose pr_url is absent or unparseable names no
-  # repository ("?") and still holds. A duplicate holds EVERY anchor of the PR.
+  # the structural check). This anchor and each same-number "other" are both
+  # keyed by the repository their OWN pr_url names (repo_q, shared with the
+  # in-flight holder filter). A pr_url that is absent or unparseable names no
+  # repository ("?") and is a wildcard on EITHER side: this anchor's own missing
+  # url makes it collide with every same-number anchor, just as a URL-less other
+  # collides with it. Two anchors that name DIFFERENT concrete repositories are
+  # distinct PRs and do not collide. A match, or a "?" on either side, is a
+  # duplicate that holds EVERY anchor of the PR.
   dups=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
     echo "$PROG: PR#$num duplicate-anchor read failed; merge held (anchor $id)"
     held=$((held + 1)); continue
   }
-  others=$(printf '%s' "$dups" | jq -r --arg id "$id" --arg num "$num" --arg repo "$ORIGIN_REPO_Q" \
+  others=$(printf '%s' "$dups" | jq -r --arg id "$id" --arg num "$num" --arg ourl "$prurl" \
     "$REPO_Q_DEF"'
-    ($repo | ascii_downcase) as $ours
+    ($ourl | repo_q) as $ours
     | [ .[] | select(.id != $id)
         | select(((.metadata.pr_number // "") | tostring) == $num)
         | (.metadata.pr_url | repo_q) as $rq
-        | select($rq == $ours or $rq == "?")
+        | select($ours == "?" or $rq == "?" or $rq == $ours)
         | .id ] | join(",")' 2>/dev/null)
   if [ -n "$others" ]; then
     echo "$PROG: PR#$num is claimed by more than one open anchor ($id + $others); merge held — close/demote the duplicate (doctor check-one-anchor-per-pr owns the structure)"
