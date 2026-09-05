@@ -22,7 +22,19 @@ The line that matters: **a durable document must never live only as a
 bead comment.** Bead comments are operational state, not the record. If
 someone would want to read it after the bead closes, it is a file.
 
-## 2. Which tier?
+## 2. Is another pack's skill driving the write?
+
+When another pack's skill hard-codes the path it files a document into, that
+pack owns the path. When one is driving, file where it says and skip the tier
+question; the document is still committed. `docs/brainstorms/`, `docs/plans/`,
+`docs/solutions/` and `docs/residual-review-findings/` belong to the
+compound-engineering pack (`ce-brainstorm`, `ce-plan`, `ce-compound`,
+`ce-work`); `docs/file-structure.md` records why each is carved out.
+
+A document you write on your own account is this procedure's, whatever
+else is in flight.
+
+## 3. Which tier?
 
 - Authoritative — **what's true now**, that someone owns keeping current
   → `docs/<topic>.md`.
@@ -34,7 +46,7 @@ Unsure? Ask which claim the document makes. *What is true* is central;
 pack's `docs/file-structure.md` carries the tier rules in full, including
 the bead-ID-alone directory naming.
 
-## 3. Commit it
+## 4. Commit it
 
 Write the file on your work branch and commit it with the rest of your
 work. That commit is what makes it durable and reviewable — the point of
