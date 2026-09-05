@@ -278,6 +278,61 @@ fi
 eq "scale_check: degrades to 0 when gc fails (no spurious spawn)" "0" "$sc_out"
 rm -rf "$POISON"
 
+echo "── churn guard: work_query and scale_check agree across the page bound ──"
+# The bug this locks out: work_query paged `gc bd ready` to its first N rows and
+# THEN dropped topology roots in jq, while scale_check dropped them over the
+# whole --limit-0 set. With more routed topology roots than the page holds ahead
+# of one claimable step, the page is all roots — work_query returned [] while
+# scale_check counted 1, so the reconciler spawned a worker that could claim
+# nothing and drained (the churn). Both blocks run here against a gc stub that
+# honors `gc bd ready`'s --limit/--sort, over 21 roots (older) ahead of 1 step:
+# 21 exceeds the 20-row page, so a page-then-filter query is empty while a
+# filter-then-slice query keeps the step.
+CHURN="$(mktemp -d)"
+jq -n '[ range(1;22) as $d
+          | { id: "root-\($d)", title: "topology root \($d)", priority: 1,
+              created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
+              metadata: { "gc.kind": "workflow" } } ]
+        + [ { id: "claimable-step", title: "the one routed non-topology step",
+              priority: 1, created_at: "2026-12-01T00:00:00Z",
+              metadata: { "gc.kind": "step" } } ]' > "$CHURN/ready.json"
+cat > "$CHURN/gc" <<'SH'
+#!/bin/sh
+# Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
+# the canned set, so a paged query and a full-set count are comparable.
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+lim=0; srt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) shift; lim="$1" ;;
+    --limit=*) lim="${1#--limit=}" ;;
+    --sort) shift; srt="$1" ;;
+    --sort=*) srt="${1#--sort=}" ;;
+  esac
+  shift
+done
+jq --argjson lim "${lim:-0}" --arg srt "$srt" '
+  (if $srt == "oldest" then sort_by(.created_at // "") else . end)
+  | (if $lim == 0 then . else .[0:$lim] end)' "$GC_STUB_DATA"
+SH
+chmod +x "$CHURN/gc"
+churn_env() { env -u GC_PROACTIVE_ENABLED PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" "$@"; }
+sc_churn="$(churn_env sh -c "$SC" 2>/dev/null || true)"
+eq "scale_check counts the step behind 21 topology roots"                 "1" "$sc_churn"
+wq_churn="$(churn_env sh -c "$WQ" 2>/dev/null || true)"
+eq "work_query returns that step, not [] (filter before the page bound)"  "1" \
+   "$(printf '%s' "$wq_churn" | jq 'length' 2>/dev/null)"
+has "…and it is the claimable step, not a leaked root" "claimable-step" "$wq_churn"
+# The tools/gc-proactive.sh `demand` mirror must filter-before-bound too: driven
+# live (no fixture) against the same stub, it keeps the step the page buried.
+dem_churn="$(env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+              PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" \
+              "$PROACTIVE" demand gc-toolkit/gc-toolkit.proactive 2>/dev/null || true)"
+eq "demand mirror keeps the step behind the page of roots"                "1" \
+   "$(printf '%s' "$dem_churn" | jq 'length' 2>/dev/null)"
+has "…and it is the claimable step"                    "claimable-step" "$dem_churn"
+rm -rf "$CHURN"
+
 echo "── the security invariant: proactive output is mr-only, never direct ──"
 ec=0; GC_PROACTIVE_MERGE=direct P sling px-1 --dry-run >/dev/null 2>&1 || ec=$?
 eq  "GC_PROACTIVE_MERGE=direct is REFUSED (non-zero)" "1" "$ec"

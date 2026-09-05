@@ -34,7 +34,7 @@ agents/polecat/prompt.template.md
 agents/proactive/PROVENANCE.md
 90cb3c0c5c2db9bade0f04b0411628827e0afda04588822fe66c43d503f792f1
 agents/proactive/agent.toml
-2a8ae3ad6616fd0aacb365b1609be39586f1ea500162829e06bb1ab8478a808a
+2ab0d0a15e057e2a1163ac3f1e0c6d882e53f39aa7975af74215ad0dbc306453
 agents/proactive/prompt.template.md
 a187e0362f3d1c62aefaa8db74176545ee3626213f135ffe147e77ba7fbcf0cf
 agents/refinery/agent.toml
