@@ -23,6 +23,9 @@
 #     would then scope it — which is no scope at all, and is refused;
 #   * the SUBSTRING trap — jq's `inside`/`contains` match substrings, so a
 #     session named lx-zzk would "own" lx-zzk9's bead. Exact membership only;
+#   * OWNERSHIP BY SESSION STAMP — inside a known molecule an unassigned step
+#     bead is ours only when its gc.session_id stamp is empty or this session's;
+#     one another session stamped is neither discovered nor accepted as a hint;
 #   * the OPEN-STATUS anchor — a graph.v2 step is assigned by the graph, not by
 #     the claim, so it executes at status `open` and never reaches in_progress.
 #     Resolution must turn on the (assignee, step_ref) pair, not on a status the
@@ -457,6 +460,40 @@ run --step "$FSTEP"
 eq "$RC" "0" "(CLOSED-BY-PEER) a step closed by another session in our molecule is done"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CLOSED-BY-PEER) nothing was re-written"
 has "$OUT" "already closed" "(CLOSED-BY-PEER) says so"
+
+# (f) The unassigned half of the same condition. The finalizer strips the
+# assignee at a terminal exit, so a blank assignee alone cannot tell our own
+# stripped bead from a live one a second worker holds — the gc.session_id stamp
+# a claim leaves is what tells them apart. A bead our molecule holds under
+# another session's stamp is that session's, so the root-scoped discovery must
+# not close it even with --root naming our molecule.
+cat > "$FAKE_BEADS" <<B
+tk-frgn11||$FSTEP|open|root-mine|lx-other
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --root root-mine
+eq "$RC" "2" "(FOREIGN-STAMP) an unassigned bead our molecule holds under another session's stamp is not closed"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(FOREIGN-STAMP) nothing was written"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-frgn11" "(FOREIGN-STAMP) the other session's bead was NOT closed"
+
+# (g) The hint path takes the same gate: a --bead naming that bead does not
+# verify as ours, so it is reported and dropped rather than obeyed.
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --root root-mine --bead tk-frgn11
+eq "$RC" "2" "(FOREIGN-STAMP-HINT) a hint on another session's unassigned bead does not verify"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(FOREIGN-STAMP-HINT) nothing was written"
+hasnt "$(cat "$FAKE_CLOSED")" "tk-frgn11" "(FOREIGN-STAMP-HINT) the hinted foreign-stamp bead was NOT closed"
+
+# (h) The positive control on the same shape and the same --root: the stamp
+# naming THIS session is our own finalizer-stripped bead, and it still closes.
+# The gate rejects another session's stamp, not every unassigned bead.
+cat > "$FAKE_BEADS" <<B
+tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+B
+: > "$FAKE_CLOSED"
+run --step "$FSTEP" --root root-mine
+eq "$RC" "0" "(FOREIGN-STAMP) our own stamp on an unassigned bead still closes"
+has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(FOREIGN-STAMP) closed our own stripped bead"
 
 # --- 1e. husks from earlier runs do not stall the close ----------------------
 # The cost of scoping would be a stall whenever the scope cannot be derived, so

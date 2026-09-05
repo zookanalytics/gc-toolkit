@@ -142,22 +142,24 @@ fi
 # substrings, which would let session lx-zzk own lx-zzk9's bead. A known
 # molecule gates every answer below it: one assignee covers every molecule a
 # pool agent ever ran, so a matching assignee corroborates the candidate and
-# never outranks its root. While $ROOT is empty that gate is inert and the
-# answer is back to the non-unique pair, so every caller of verify() has to
-# treat an unscoped verdict as unproven.
+# never outranks its root. An unassigned candidate inside the molecule is ours
+# only when its gc.session_id stamp is empty or this session's; a stamp naming
+# another session means that session holds it. While $ROOT is empty that gate is
+# inert and the answer is back to the non-unique pair, so every caller of
+# verify() has to treat an unscoped verdict as unproven.
 verify() {
   local cand="$1" json
   [ -n "$cand" ] || return 1
   json=$(bd_json show "$cand")
   [ -n "$json" ] || return 1
-  printf '%s' "$json" | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" --arg root "$ROOT" '
+  printf '%s' "$json" | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" --arg root "$ROOT" --arg sid "${GC_SESSION_ID:-}" '
     ($ids | split("\n") | map(select(. != ""))) as $me
     | .[0] as $b
     | if $b == null then empty
       elif (($b.metadata["gc.step_ref"] // "") != $step) then empty
       elif ($root != "") and (($b.metadata["gc.root_bead_id"] // "") != $root) then empty
       elif (($me | index($b.assignee // "")) != null) then ($b.status // "")
-      elif (($b.assignee // "") == "") and ($root != "") then ($b.status // "")
+      elif (($b.assignee // "") == "") and ($root != "") and (($b.metadata["gc.session_id"] // "") | . == "" or . == $sid) then ($b.status // "")
       else empty end
   ' 2>/dev/null
 }
@@ -237,19 +239,23 @@ $(printf '%s' "$json" | jq -r --arg f "$FORMULA." '
 # Every bead at <status> for this step this shell may close. One status per
 # call: the caller resolves in_progress ahead of open. Inside a known molecule
 # the (root, step_ref) pair is the identity and the assignee only corroborates,
-# so a bead the finalizer stripped is still resolved and one held by another
-# session is not. With no molecule the (assignee, step_ref) pair is all there
-# is, which is what it has always been.
+# so a bead the finalizer stripped of its assignee is still resolved as ours,
+# while one another session holds is not — by its assignee, or, when it is
+# unassigned, by a gc.session_id stamp naming a session other than this one.
+# With no molecule the (assignee, step_ref) pair is all there is, which is what
+# it has always been.
 discover() {
   local want_status="$1" ident json
   if [ -n "$ROOT" ]; then
     bd_json list --metadata-field "gc.root_bead_id=$ROOT" --status="$want_status" --limit=0 \
-      | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" '
+      | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" --arg sid "${GC_SESSION_ID:-}" '
           ($ids | split("\n") | map(select(. != ""))) as $me
           | if type == "array" then
               .[] | . as $b
                   | select(($b.metadata["gc.step_ref"] // "") == $step)
-                  | select((($b.assignee // "") == "") or (($me | index($b.assignee // "")) != null))
+                  | select((($me | index($b.assignee // "")) != null)
+                           or ((($b.assignee // "") == "")
+                               and (($b.metadata["gc.session_id"] // "") | . == "" or . == $sid)))
                   | $b.id
             else empty end
         ' 2>/dev/null
