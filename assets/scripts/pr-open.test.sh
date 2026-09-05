@@ -223,6 +223,40 @@ out=$(STUB_LIST_FAIL=1 "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "an unreadable enumeration exits non-zero"
 has "$out" "false all-clear" "…and says why"
 
+echo "# the opened title carries a conventional-commit type from the bead kind"
+# A conventional-commit PR-title check requires a leading type token. The type
+# is derived from the bead's issue_type, unless the title already opens with a
+# recognized one — then it is kept, never double-prefixed. The bead id suffix
+# survives in every case.
+tanchor() { # id issue_type title  — a green pre_open_gate anchor + its head
+  echo "sha-$1" > "$GH_DIR/head_polecat_$1"
+  printf '{"id":"%s","status":"open","issue_type":"%s","title":"%s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"polecat/%s","merged_target":"main","check_set":"codex","check.codex":"green"}}' \
+    "$1" "$2" "$3" "$1" "$1"
+}
+store "[$(tanchor ttbug  bug     'Reject a moved head'),
+        $(tanchor tttask task    'Reshape the reconcile loop'),
+        $(tanchor ttdoc  docs    'Document the merge cadence'),
+        $(tanchor ttfeat feature 'Support integration branches'),
+        $(tanchor ttpfx  task    'fix(pr-open): keep the bead id in the title'),
+        $(tanchor ttbare ''      'Tidy the enumerate step')]"
+# STUB_PR_CREATE_URL empty: create logs its args (the --title among them) and
+# returns nothing, so the pass stops before the readback. The title is read
+# from the logged create, where gh's arg log space-joins argv — so a title is
+# the run between --title and the --body-file that always follows it.
+export STUB_PR_CREATE_URL=""
+: > "$STUB_GH_LOG"
+"$SUT" >/dev/null 2>&1
+tlog=$(cat "$STUB_GH_LOG")
+has "$tlog" "--title fix: Reject a moved head (ttbug) --body-file"            "bug maps to fix"
+has "$tlog" "--title chore: Reshape the reconcile loop (tttask) --body-file"  "task maps to chore"
+has "$tlog" "--title docs: Document the merge cadence (ttdoc) --body-file"    "docs maps to docs"
+has "$tlog" "--title feat: Support integration branches (ttfeat) --body-file" "feature maps to feat"
+has "$tlog" "--title fix(pr-open): keep the bead id in the title (ttpfx) --body-file" \
+    "an existing conventional prefix is kept, not double-prefixed"
+hasnt "$tlog" "chore: fix(pr-open):" "…and no derived type is prepended to it"
+has "$tlog" "--title chore: Tidy the enumerate step (ttbare) --body-file" \
+    "a bead with no issue_type falls back to chore"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
