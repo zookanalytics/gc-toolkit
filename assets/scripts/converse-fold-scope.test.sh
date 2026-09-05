@@ -388,9 +388,16 @@ fi
 # leaves: step 5 stamps the demand's id on the VISIT bead as gc.hold_demand
 # before it waits. The key is on the visit, so it is attributable — a sibling
 # sitting on the same item stamps the shared item's demand and takeaway, never
-# this visit's gc.hold_demand, so it cannot forge the trace. Absence routes to
-# step 2, so a visit whose premise died between filing and claiming re-checks it
-# and closes there instead of posting a framing for a dead premise.
+# this visit's gc.hold_demand, so it cannot forge the trace.
+#
+# A missing key is not one answer but three, because absence is not proof a
+# sitting never began. A visit bead that will not read is UNKNOWN: it fails
+# closed to a hold, never a close. No key but an open demand still on the item
+# is a hold that predates the key, or a sibling's on the shared item: RECHECK
+# re-tests the premise and closes only a moot one, and re-stamping the key on a
+# live premise heals a legacy hold, while the item's demand never forges a
+# resume. Only a clean read with no key and no open item demand is a claim that
+# plainly never began, which routes to step 2's close.
 echo "── the hold-arm premise gate is extractable ──"
 extract_hold_block() {
     awk '/# >>> visit-hold-premise-gate/ {f = 1; next}
@@ -445,14 +452,19 @@ hv_reset
 hv_visit v-held d-held
 is "gc.hold_demand resolves BEGAN=yes (re-open at step 4)" "$(began v-held sub)" "yes"
 
-echo "── a sibling demand on the item is not THIS visit's trace ──"
-# The P1 the visit-key closes: a standing scope with sibling sittings on one
-# item carries an open demand for it. The OLD gate resolved the item and read
-# that shared demand as proof this visit held; keyed on the visit it is not.
+echo "── no key but an open demand on the item: a legacy hold or a sibling's ──"
+# A hold filed before this trace existed carries no gc.hold_demand on its visit,
+# only the demand on the item, and every hold the shipped prompt filed is that
+# shape; a sibling's hold on a shared item is too. Absent the key the two are
+# one shape, and the gate must not close on the missing key: it re-checks the
+# premise (recheck), which closes only a moot premise and re-opens a live one,
+# re-stamping the key so the next restart reads it clean. Keyed on the visit it
+# still cannot forge a resume: recheck re-checks the premise, it does not
+# re-open a sitting on the item's demand alone.
 hv_reset
-hv_visit v-sib "" item-x   # no gc.hold_demand; item resolvable, as the old gate keyed on
-hv_demand d-x item-x       # a sibling's open demand on the same item
-is "a sibling demand with no visit trace resolves BEGAN=no" "$(began v-sib sub)" "no"
+hv_visit v-legacy "" item-x   # no gc.hold_demand; the item still carries its demand
+hv_demand d-x item-x          # the open demand on the item (a legacy hold's, or a sibling's)
+is "no key + an open item demand resolves BEGAN=recheck (fail closed, not a close)" "$(began v-legacy sub)" "recheck"
 
 echo "── the visit key stands even when its demand is no longer open ──"
 # A ruling can close the demand while the sitting still holds. The trace is the
@@ -462,10 +474,29 @@ hv_reset
 hv_visit v-closed d-gone   # gc.hold_demand set; no matching open demand in list
 is "gc.hold_demand with no open demand resolves BEGAN=yes" "$(began v-closed sub)" "yes"
 
-echo "── the prompt gates the skip on the trace, not on the verdict ──"
+echo "── a visit whose own bead will not read is unknown, never a silent close ──"
+# gc bd show can fail on a store blip, or resolve to nothing. Either way the
+# visit's own state is unread, and absence of a trace on an unread bead is not
+# proof the sitting never began. The pre-fix gate defaulted BEGAN=no and sent it
+# to step 2's close; it must fail closed to a hold instead.
+hv_reset
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/show-v-blip.json"   # a read that did not happen
+is "an unreadable visit read resolves BEGAN=unknown (hold, do not close)" "$(began v-blip sub)" "unknown"
+hv_reset   # no show fixture for v-missing: bd show resolves to nothing
+is "a visit that resolves to nothing resolves BEGAN=unknown" "$(began v-missing sub)" "unknown"
+
+echo "── the prompt gates the skip on the trace, and fails closed on absence ──"
 have "the arm routes a traceless claim to step 2" 'fall through to step 2' "$PROMPT"
-have "the arm keeps the fold check skipped on both branches" \
-    'The fold check stays skipped on both branches.' "$PROMPT"
+have "an unreadable read holds rather than closes (BEGAN=unknown)" \
+    'BEGAN=unknown' "$PROMPT"
+have "an unreadable read mails the witness rather than draining" \
+    'hold the sitting and mail the' "$PROMPT"
+have "an open item demand without the key re-checks (BEGAN=recheck)" \
+    'BEGAN=recheck' "$PROMPT"
+have "recheck closes only a moot premise, not on the demand" \
+    'close here ONLY if the premise is moot' "$PROMPT"
+have "the arm keeps the fold check skipped on every branch" \
+    'The fold check stays skipped on every branch.' "$PROMPT"
 have "the gate reads gc.hold_demand off the visit (unique to this block)" \
     'gc.hold_demand' "$PROMPT"
 have "step 5 stamps gc.hold_demand on the visit before it waits" \
