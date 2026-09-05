@@ -1086,6 +1086,12 @@ eq "$(run_opmerge "$FOREIGN_PR" "$RIG_SSH")" "0" \
 # OWN repo belongs to the refinery: refuse, drain, write nothing.
 eq "$(run_opmerge "https://github.com/zookanalytics/gc-toolkit/pull/9" "$RIG_HTTPS")|$(trace)" "1|DRAIN" \
    "a PR in the rig's own repo: refuses, drains, writes nothing"
+# The same guard is case-insensitive, because GitHub owner/repo names are: a PR
+# URL that spells the rig's own repo in a different case than origin still names
+# the repo the refinery covers, so it must refuse rather than park. (Compare the
+# two case-sensitively and this same-repo PR parks to a human: the regression.)
+eq "$(run_opmerge "https://github.com/zookanalytics/gc-toolkit/pull/9" "https://github.com/ZookAnalytics/gc-toolkit.git")|$(trace)" "1|DRAIN" \
+   "a same-repo PR whose URL and origin differ only by case: refuses (repo names are case-insensitive)"
 # The same-repo guard needs the rig's own repo, read from origin. With origin
 # unreadable (empty here) the guard cannot run, and parking anyway would divert a
 # same-repo PR the refinery covers — so the arm refuses instead, proven with the

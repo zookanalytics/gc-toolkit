@@ -386,7 +386,13 @@ if [ -n "$OPERATOR_MERGE_PR" ]; then
     gc runtime drain-ack
     exit 1
   fi
-  if [ "$PR_REPO" = "$RIG_REPO" ]; then
+  # GitHub owner/repo names are case-insensitive, so normalize both sides to
+  # lower case before the same-repo comparison. A PR URL that spells the rig's
+  # own repo in a different case than origin does still names the repo the
+  # refinery covers; a case-sensitive test would divert it to a human park.
+  PR_REPO_CANON=$(printf '%s' "$PR_REPO" | tr '[:upper:]' '[:lower:]')
+  RIG_REPO_CANON=$(printf '%s' "$RIG_REPO" | tr '[:upper:]' '[:lower:]')
+  if [ "$PR_REPO_CANON" = "$RIG_REPO_CANON" ]; then
     echo "OPERATOR-MERGE PARK REFUSED: PR is in this rig's own repo ($RIG_REPO), which the refinery covers. Unset OPERATOR_MERGE_PR and hand off the normal way."
     gc runtime drain-ack
     exit 1
