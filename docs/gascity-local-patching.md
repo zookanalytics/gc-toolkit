@@ -292,6 +292,30 @@ sling this formula at a pool, never at a named agent.
 (`mol-upstream-gc-rebase-rework` exists for manual dispatch; this
 formula does not sling it.)
 
+Before any of that, the survey step gives each divergent commit a
+verdict, and `survey-absorption-probe.sh` supplies the evidence. For every
+commit it reports how many of the lines the commit ADDS already appear in
+upstream's copy of the same file, the upstream line span holding that
+overlap, and the added lines upstream does not have. A commit whose added
+text upstream already carries is one the rebase would otherwise meet as a
+conflict and drop, an iteration later.
+
+The probe reports overlap and never a verdict. Text overlap is not
+absorption: upstream can hold the same lines as a fork commit while using
+them for a different purpose, in which case the commit's whole value is the
+one line the probe lists as unmatched. Nothing mechanical separates that
+from a real absorption, so the survey step sends the surveyor to the
+reported span, requires them to say what upstream's code there does before
+writing a verdict, and keeps the verdict theirs. Dropping on a high overlap
+alone would discard local work, which is the expensive direction to be
+wrong in.
+
+The two records let the loop be scored against itself. A commit the survey
+called `keep` that an iteration then classified `dropped-absorbed` is an
+absorption the survey missed, and `survey-absorption-probe.sh --audit`
+counts them from the rebase bead. The keeper's completion mail carries that
+count whenever it is not zero.
+
 The iteration classifies each conflicted commit:
 - **mechanical** — the intent transfers cleanly, only anchors shifted.
   Resolve the markers and keep the commit.
