@@ -134,15 +134,19 @@ else
         fi
 
         # --- Arm 2: a respawn of this pane would not inherit a store key ------
-        # Only city-scoped sessions are exposed: a rig-scoped one sets each key
-        # to its own value, which shadows the server's.
-        [ -n "$want_rig" ] && continue
+        # The per-key test governs both scopes: a session shadows only the keys
+        # it sets. A rig-scoped session sets GC_RIG, GC_RIG_ROOT and BEADS_DIR,
+        # so a server value for those cannot reach its respawn — but it sets none
+        # of GC_STORE_ROOT, GC_STORE_SCOPE, GC_BEADS_PREFIX, and a global value
+        # for one of those inherits into the next process exactly as it would on
+        # a city-scoped session. Skipping rig-scoped sessions wholesale is the
+        # fail-open this arm exists to catch.
         for key in $scope_keys; do
             gval=$(env_val "$key" "$global")
             [ -n "$gval" ] || continue
             [ -n "$(env_val "$key" "$senv")" ] && continue
             env_removed "$key" "$senv" && continue
-            warnings+=("$sess is city-scoped and its session environment neither sets nor removes $key, while the tmux server's global environment holds $key=$gval — \`respawn-pane\` takes no env argument, so the next process in this pane inherits it. Clear it on the server (\`tmux set-environment -gu $key\`) and restart the session.")
+            warnings+=("$sess is $scope_desc and its session environment neither sets nor removes $key, while the tmux server's global environment holds $key=$gval — \`respawn-pane\` takes no env argument, so the next process in this pane inherits it. Clear it on the server (\`tmux set-environment -gu $key\`) and restart the session.")
         done
     done <<< "$sessions"
 fi

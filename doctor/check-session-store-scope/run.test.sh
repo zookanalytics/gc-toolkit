@@ -71,6 +71,8 @@ GC_AGENT=alpha/city.witness
 GC_ALIAS=alpha/city.witness
 GC_CITY_PATH=$CITY
 GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
 EOF
     pane 200 <<EOF
 GC_AGENT=alpha/city.witness
@@ -175,7 +177,19 @@ eq "$RC" "1" "a store key on the tmux server that a city-scoped session neither 
 has "$OUT" "city__deacon" "the exposed session is named"
 has "$OUT" "respawn-pane" "the warning names the path that would inherit it"
 has "$OUT" "tmux set-environment -gu GC_RIG" "the warning carries the remedy"
-hasnt "$OUT" "alpha--city__witness is city-scoped" "a rig-scoped session sets the key itself and is not exposed"
+hasnt "$OUT" "alpha--city__witness is scoped to rig alpha" "a rig-scoped session that sets GC_RIG shadows the server's value and is not exposed for it"
+
+# --- 7b. warm-respawn on a RIG-scoped session: a key it does not shadow ------
+# The pre-open review's finding: a rig-scoped session sets GC_RIG, GC_RIG_ROOT
+# and BEADS_DIR but never GC_STORE_SCOPE, so a server global for that key still
+# reaches its respawn. Skipping rig-scoped sessions wholesale read rc=0 here.
+healthy
+printf 'GC_STORE_SCOPE=city\n' > "$TMP/global.env"
+OUT=$(run); RC=$?
+eq "$RC" "1" "a store key on the server that a RIG-scoped session neither sets nor removes is a WARNING"
+has "$OUT" "alpha--city__witness is scoped to rig alpha" "the rig-scoped session is evaluated, not skipped"
+has "$OUT" "GC_STORE_SCOPE=city" "the leaked store-scope key and value are named"
+has "$OUT" "tmux set-environment -gu GC_STORE_SCOPE" "the warning carries the server-clear remedy"
 
 # --- 8. the withholding marker is what clears it (the fix's own effect) ------
 healthy
