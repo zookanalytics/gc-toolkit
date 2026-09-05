@@ -76,9 +76,9 @@ case "$CHECK_NAME" in
     cat <<'M'
 The standing correctness review. The method is the `mol-review` steps
 themselves: read the whole diff, run the tests the diff touches at the pinned
-commit, hold the output to the operator profile, and grade findings P0/P1/P2
-with file:line. Placement and architecture belong to the `arch` gate; judge
-whether the change is correct and safe as merged.
+commit, hold its output to the work-quality standards, and grade findings
+P0/P1/P2 with file:line. Placement and architecture belong to the `arch` gate;
+judge whether the change is correct and safe as merged.
 M
     ;;
   triage)
