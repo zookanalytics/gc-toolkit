@@ -176,8 +176,16 @@ nothing has warranted it.
 
 ## One divergence from the script, stated
 
-`lifecycle.sh` loops forever when a flag is given without its value (`shift 2`
-fails at `$# = 1` and the `while` condition never advances). The port treats a
-missing value as the empty string and ends the scan, which reaches the existing
-"transition needs --to <state>" refusal. No test covers the input; a hang is
-not a contract worth reproducing.
+`lifecycle.sh` loops forever when a value-taking flag is given without its
+value: its `shift 2` underflows at `$# = 1`, so the `while` condition never
+advances. The port refuses that input. `parseTransition` records the flag whose
+value token is absent and returns `flag <name> needs a value`, and
+`cmdTransition` prints it and exits non-zero before the `--to` check and before
+any bead read. The refusal is deliberate, not the empty string the shell would
+fall through on: an empty value drops `--expect`'s compare-and-swap guard, so a
+truncated `--to pull_request --expect` would otherwise transition unguarded.
+
+`TestValueTakingFlagRejectsAMissingValue` asserts the refusal for every
+value-taking flag, and `TestExplicitEmptyArgumentIsPreserved` covers the other
+side: an explicitly supplied empty token (`--assignee ''`, `--expect ''`) is a
+real argument and is kept, not read as missing.
