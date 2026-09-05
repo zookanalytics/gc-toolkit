@@ -71,6 +71,14 @@ merge_stage_entry() (
     DST="$2"
 
     if [ -d "$SRC" ]; then
+        # A staged directory loses to an existing non-directory at the same
+        # path: the existing file wins, so drop the whole losing source subtree.
+        # Recursing would mkdir over the file, which fails and strands the
+        # subtree in the stage/orphan dir, defeating the rmdir that reclaims it.
+        if [ -e "$DST" ] && [ ! -d "$DST" ]; then
+            rm -rf "$SRC"
+            exit 0
+        fi
         mkdir -p "$DST"
         for ENTRY in "$SRC"/.[!.]* "$SRC"/..?* "$SRC"/*; do
             [ -e "$ENTRY" ] || continue

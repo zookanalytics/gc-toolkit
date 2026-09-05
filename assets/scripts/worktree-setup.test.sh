@@ -17,6 +17,9 @@
 #       the target's name;
 #   (g) two targets share one parent: a legacy orphan is never consumed by the
 #       wrong one — unprovable ownership means quarantine, not adoption.
+#   (h) a staged directory loses to an existing file at the same path: the
+#       existing file wins and the whole losing source subtree is dropped, so
+#       the orphan dir is still fully reclaimed rather than stranded.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -117,6 +120,22 @@ absent  "$P/agentG1/foreign.txt"             "(g) legacy orphan NOT merged into 
 absent  "$P/agentG2/foreign.txt"             "(g) legacy orphan NOT merged into agentG2"
 present "$P/.gascity-worktree-orphan.LEGX/foreign.txt" "(g) legacy orphan quarantined, contents preserved"
 eq "$(stages "$P")" ""                       "(g) no active stage dir left in the shared parent"
+
+# --- (h) a staged DIRECTORY loses to an existing file at the same path. The
+#         existing file wins, and the whole losing source subtree is dropped, so
+#         the orphan dir is still fully reclaimed instead of leaking: recursing
+#         would mkdir over the file, strand the subtree, and defeat the rmdir. ---
+P="$TMP/h"; mkdir -p "$P"
+run "$P/agentH" agentH
+echo LIVE > "$P/agentH/collision"            # target holds a FILE where the orphan holds a DIR
+O="$P/$STAGE_PREFIX.agentH.CRASH4"; mkdir -p "$O/collision"
+echo STALE > "$O/collision/nested.txt"; echo solo > "$O/solo.txt"
+run "$P/agentH" agentH
+eq "$(cat "$P/agentH/collision")" "LIVE"     "(h) existing file not clobbered by a staged dir"
+present "$P/agentH/solo.txt"                 "(h) orphan-only entry still adopted past the collision"
+absent  "$P/agentH/collision/nested.txt"    "(h) losing staged subtree dropped, not merged under the file"
+absent  "$O"                                "(h) orphan dir removed though a staged dir lost to a file"
+eq "$(stages "$P")" ""                       "(h) no stage dir left when a staged dir loses to a file"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
