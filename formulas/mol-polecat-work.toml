@@ -115,8 +115,9 @@ if [ "$OWNER_LIVE" != "0" ]; then
     [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
   : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
-  "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is already $WORK_STATUS under live $WORK_OWNER, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Decide which dispatch owns the bead, then re-offer that one."
-  if "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID is already $WORK_STATUS under live $WORK_OWNER"; then
+  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-duplicate-dispatch --message "Duplicate dispatch on $WORK_BEAD_ID: it is already $WORK_STATUS under live $WORK_OWNER, and convoy {{convoy_id}} dispatched it again to $GC_SESSION_NAME. Held at load-context; no workspace was touched and nothing was closed. Decide which dispatch owns the bead, then re-offer that one."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "duplicate dispatch: $WORK_BEAD_ID is already $WORK_STATUS under live $WORK_OWNER"; then
     gc runtime drain-ack
   else
     echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -140,13 +141,19 @@ repair sweeps `open` and `in_progress` beads assigned to a drained session and
 re-stamps a run_target fallback on any it finds unrouted. `blocked` is outside
 that sweep. The escalation above is what releases the hold.
 
-The drain is conditional on the hold. `molecule-hold.sh` exits non-zero when it
-cannot prove which bead this shell is executing, when duplicate step beads make
-that ambiguous, when the blocking write is refused, and when a route it had to
-clear — on the molecule root or on a sibling step — survived. Draining on any of
-those paths leaves this step or the molecule around it claimable, which is the
-loop the hold exists to stop, so every arm below drains only after a hold that
-landed.
+The drain is conditional on the escalation AND the hold. The escalation records
+the release path — a board-visible visit a human can claim — so a hold on its
+own is never enough: a blocked, de-routed molecule with no visit is a silent
+stall no one is asked to clear, which is worse than the loop. If `escalate.sh`
+cannot file or route that visit it exits non-zero, and the arm then neither
+holds nor drains, leaving the step claimable and visible so the next worker
+retries rather than parking it silently. `molecule-hold.sh` in turn exits
+non-zero when it cannot prove which bead this shell is executing, when duplicate
+step beads make that ambiguous, when the blocking write is refused, and when a
+route it had to clear — on the molecule root or on a sibling step — survived.
+Draining on any of those paths leaves this step or the molecule around it
+claimable, which is the loop the hold exists to stop, so every arm below drains
+only after an escalation that landed and a hold that landed.
 
 `CLAIMED_STEP_BEAD_ID` is the `bead_id` from the `gc hook --claim --json` that
 handed you the step you are running. Set it at the top of each step. It is a
@@ -214,8 +221,11 @@ CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 if [ -z "$WORK_BEAD_ID" ]; then
   echo "mol-polecat-work requires an input convoy with exactly one tracked member" >&2
-  MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-  if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key polecat-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-polecat-work cannot derive its work bead; the pour is malformed and must be redone. Held at workspace-setup; nothing was touched or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
     gc runtime drain-ack
   else
     echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -251,8 +261,11 @@ if [ -n "$BRANCH" ]; then
       git checkout "$BRANCH" || exit 1
       if ! git merge --ff-only "origin/$BRANCH"; then
         echo "Local $BRANCH diverged from origin/$BRANCH. STOP and reconcile."
-        MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-        if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "local $BRANCH diverged from origin/$BRANCH; reconcile the two by hand, then re-offer this molecule"; then
+        SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+        : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+        if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-divergence --message "Local $BRANCH diverged from origin/$BRANCH while resuming $WORK_BEAD_ID; the two must be reconciled by hand before this work can proceed. Held at workspace-setup; nothing was touched or closed."; then
+          echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+        elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "local $BRANCH diverged from origin/$BRANCH; reconcile the two by hand, then re-offer this molecule"; then
           gc runtime drain-ack
         else
           echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -266,13 +279,18 @@ if [ -n "$BRANCH" ]; then
     git checkout "$BRANCH" || exit 1
   else
     echo "metadata.branch=$BRANCH is set but no local or origin branch exists. STOP — do not create a different branch."
-    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-    if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "metadata.branch=$BRANCH names a branch that exists neither locally nor on origin; restore it or clear metadata.branch, then re-offer this molecule"; then
+# >>> workspace-setup-missing-branch-hold
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-missing-branch --message "metadata.branch=$BRANCH on $WORK_BEAD_ID names a branch that exists neither locally nor on origin; restore it or clear metadata.branch before this work can resume. Held at workspace-setup; nothing was touched or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.workspace-setup" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "metadata.branch=$BRANCH names a branch that exists neither locally nor on origin; restore it or clear metadata.branch, then re-offer this molecule"; then
       gc runtime drain-ack
     else
       echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
     fi
     exit 1
+# <<< workspace-setup-missing-branch-hold
   fi
 fi
 ```
@@ -505,8 +523,11 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     else
         echo "Re-run workspace-setup: create '$EXPECTED_BRANCH' from origin/{{base_branch}}, cherry-pick your commits, re-run submit-and-exit."
     fi
-    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-    if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); move the commits onto $EXPECTED_BRANCH, then re-offer this molecule"; then
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-branch-shape --message "Branch shape gate on $WORK_BEAD_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Held at submit-and-exit; nothing was pushed or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); move the commits onto $EXPECTED_BRANCH, then re-offer this molecule"; then
       gc runtime drain-ack
     else
       echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -542,8 +563,11 @@ else
     echo "  current branch:  $CURRENT_BRANCH"
     echo "Nothing names a landing branch, and base_branch is empty or the branch being pushed — recording it would be a self-merge."
     echo "Set it, then re-run submit-and-exit:  gc bd update $WORK_BEAD_ID --set-metadata target=<landing-branch>"
-    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-    if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "no landing branch: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}; set target on $WORK_BEAD_ID, then re-offer this molecule"; then
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-no-landing-target --message "No landing branch for $WORK_BEAD_ID: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}, so recording a target would be a self-merge. Set target on $WORK_BEAD_ID. Held at submit-and-exit; nothing was pushed or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "no landing branch: metadata.target is unset and base_branch is ${BASE_BRANCH:-empty}; set target on $WORK_BEAD_ID, then re-offer this molecule"; then
       gc runtime drain-ack
     else
       echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -571,8 +595,11 @@ if [ "$AUTO_PUSH" = "false" ]; then
   BRANCH=$(git branch --show-current)
   if [ -z "${LANDING_TARGET:-}" ]; then
     echo "LANDING_TARGET unset — run step 1b before this arm."
-    MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-    if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset; step 1b did not run"; then
+    SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+    : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+    if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Held at submit-and-exit; nothing was pushed or closed."; then
+      echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+    elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the auto_push halt arm with LANDING_TARGET unset; step 1b did not run"; then
       gc runtime drain-ack
     else
       echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
@@ -682,8 +709,11 @@ still arrives in the single atomic write below.
 # >>> submit-target-consume
 if [ -z "${LANDING_TARGET:-}" ]; then
   echo "LANDING_TARGET unset — run step 1b before this arm."
-  MH=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && { MH="$c/assets/scripts/molecule-hold.sh"; break; }; done
-  if "${MH:?molecule-hold.sh not found in the pack}" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the handoff with LANDING_TARGET unset; step 1b did not run"; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack}"
+  if ! "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-landing-target-unset --message "submit-and-exit reached the handoff with LANDING_TARGET unset on $WORK_BEAD_ID; step 1b (target resolve) did not run. Held at submit-and-exit; nothing was pushed or closed."; then
+    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.submit-and-exit" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "submit-and-exit reached the handoff with LANDING_TARGET unset; step 1b did not run"; then
     gc runtime drain-ack
   else
     echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
