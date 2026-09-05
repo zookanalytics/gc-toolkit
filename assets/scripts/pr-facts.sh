@@ -31,9 +31,13 @@
 # --posture-only exits non-zero when any anchor is left without a current
 # posture and nothing standing already holds it: the caller holds merge.sh for
 # that pass rather than let it validate against a fact from an earlier tick.
-# An unanswered review comment is posture `commented`, and it routes to
-# something — a fix-pool rework child, or a visit when a human already holds the
-# anchor — with the watermarks advancing only once that routing reads back.
+# Unanswered review feedback routes to something — a fix-pool rework child
+# carrying the review bodies and inline comments verbatim, or a visit when a
+# human already holds the anchor — with the watermarks advancing only once that
+# routing reads back. It routes under posture `commented` and equally under a
+# human `changes_requested`, which holds the merge but answers nothing; a
+# dismissed review is in neither state, so a dismissal takes it and the inline
+# comments under it out of the batch.
 # Such a batch also resets signoff.sh's review-round cap, once per batch: it is
 # review the branch has never been answered against, not a round of the loop the
 # cap measures. The reset retires the dispatch tally with it, and the cap's own
@@ -215,6 +219,62 @@ gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
   [ "$rc" -eq 0 ] || return 1
   printf '%s' "$raw" | scrub | jq -sc '.' 2>/dev/null
 }
+# >>> unanswered-feedback-body
+# The work order carries the feedback itself, not a link to it. A polecat has
+# to know what was asked without a second GitHub read, and a review BODY is not
+# on the /files page its inline comments live on, so an objection stated in the
+# body alone reaches a page-pointing work order as nothing at all.
+feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> — markdown on stdout
+  jq -nr --argjson revs "$1" --argjson cmts "$2" --argjson rmark "$3" --argjson cmark "$4" \
+         --arg self "$SELF_LOGIN" '
+    def clip($n): if (length) > $n then (.[0:$n] + "\n\n_(truncated — the rest is on the PR)_") else . end;
+    def body: ((.body // "") | tostring);
+    ([ $revs[] | select(((.user.login // "") | tostring) != $self)
+              | (((.state // "") | tostring)) as $st
+              | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
+              | select((body | gsub("[[:space:]]"; "")) != "")
+              | select(((.id // 0) | tonumber) > $rmark) ] | sort_by(.id)) as $R
+  | ([ $cmts[] | select(((.user.login // "") | tostring) != $self)
+              | select(((.id // 0) | tonumber) > $cmark) ] | sort_by(.id)) as $C
+  | ((if ($R | length) > 0 then ["## Review bodies"]
+        + [ $R[] | "### \(.user.login // "?") — \(.state // "?") (review \(.id))\n\n\(body | clip(4000))" ]
+      else [] end)
+   + (if ($C | length) > 0 then ["## Inline comments"]
+        + [ $C[] | "### \(.path // "?")\(if ((.line // .original_line) != null) then ":\(.line // .original_line)" else "" end) — \(.user.login // "?") (comment \(.id))\n\n\(body | clip(2000))" ]
+      else [] end)
+   | join("\n\n")) | clip(16000)' 2>/dev/null
+}
+# A comment outlives the review that carried it: GitHub keeps the inline rows of
+# a dismissed review on /pulls/N/comments, so a dismissal that takes the body
+# out of the batch leaves the comments under it routing. A dismissal is the only
+# thing that retires them. The review space's filter is narrower than that and
+# cannot stand in for this one: it also drops an APPROVED review, whose inline
+# comments are live feedback, and a PR green everywhere else would merge over
+# them. A comment naming no review, or naming one the review list does not
+# carry, is standalone and stays.
+live_comments() { # <reviews-json> <comments-json> — comments no dismissal retired
+  jq -nc --argjson revs "$1" --argjson cmts "$2" '
+    ([ $revs[]
+       | select(((.state // "") | tostring) == "DISMISSED")
+       | ((.id // 0) | tostring) ]) as $retired
+  | [ $cmts[]
+      | (((.pull_request_review_id // "") | tostring)) as $parent
+      | select(($retired | index($parent)) == null) ]' 2>/dev/null
+}
+# A batch names the reviews it answers, the way a signoff-sourced child names
+# its review bead. An empty-bodied CHANGES_REQUESTED is named here even though
+# the body filter above keeps it out of the watermark: it is the review holding
+# the merge, and its inline comments are what the child has to answer.
+feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
+  jq -nr --argjson revs "$1" --argjson rmark "$2" --arg self "$SELF_LOGIN" '
+    [ $revs[] | select(((.user.login // "") | tostring) != $self)
+              | select(((.id // 0) | tonumber) > $rmark)
+              | select((((.state // "") | tostring) == "CHANGES_REQUESTED")
+                       or ((((.state // "") | tostring) == "COMMENTED")
+                           and (((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")))
+              | (.id | tostring) ] | sort | join(",")' 2>/dev/null
+}
+# <<< unanswered-feedback-body
 
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
@@ -327,7 +387,7 @@ while IFS= read -r row; do
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; pinned=0
+  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; revs_raw=""; cmts_raw=""; cmts_live=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
@@ -340,30 +400,52 @@ while IFS= read -r row; do
     # login, and a weaker posture written here would clear a standing
     # `commented` that is holding the merge. Record nothing; hold what stands.
     echo "$PROG: $id — PR#$num posture not recorded: the acting login is unresolved" >&2
-  elif [ "$rd" = "CHANGES_REQUESTED" ]; then
-    # The strongest posture there is, and merge.sh already vetoes on the review
-    # itself. The comments underneath belong to signoff.sh's rework loop, which
-    # is why this arm neither reads nor watermarks them here.
-    posture="changes_requested"
   else
     revs_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/reviews?per_page=100") || revs_raw=""
     cmts_raw=$(gh_rows "repos/$ORIGIN_REPO/pulls/$num/comments?per_page=100") || cmts_raw=""
     if [ -z "$revs_raw" ] || [ -z "$cmts_raw" ]; then
-      echo "$PROG: $id — PR#$num review history unreadable; posture not recorded (retry next pass)" >&2
+      # A standing CHANGES_REQUESTED is settled by reviewDecision alone, so the
+      # posture is still recorded; only the dispatch below needs the lists, and
+      # it holds for a pass that can read them.
+      if [ "$rd" = "CHANGES_REQUESTED" ]; then
+        posture="changes_requested"
+        echo "$PROG: $id — PR#$num review history unreadable; posture read from the review decision, the feedback under it not routed (retry next pass)" >&2
+      else
+        echo "$PROG: $id — PR#$num review history unreadable; posture not recorded (retry next pass)" >&2
+      fi
     else
-      # A COMMENTED review with an empty body carries only its inline comments,
-      # which the comment read below already sees; counting it here would leave
-      # a posture no comment id can ever answer.
+      # The comment space drops what a dismissal retired before anything counts
+      # it, so the two spaces agree about what a dismissal takes out. A filter
+      # that cannot run counts the unfiltered list: over-routing costs a rework
+      # round an operator can close, dropping the batch costs the objection
+      # itself.
+      cmts_live=$(live_comments "$revs_raw" "$cmts_raw")
+      if [ -z "$cmts_live" ]; then
+        echo "$PROG: $id — PR#$num could not filter retired reviews out of the comment list; counting it unfiltered" >&2
+        cmts_live="$cmts_raw"
+      fi
+      # A review with an empty body carries only its inline comments, which the
+      # comment read below already sees; counting it here would leave a posture
+      # no comment id can ever answer. CHANGES_REQUESTED counts beside
+      # COMMENTED: an operator uses it to mean "change this", and it is the
+      # feedback the loop most has to answer. A dismissed review is in neither
+      # state, so a dismissal takes its ids out of the batch.
       max_r=$(printf '%s' "$revs_raw" | jq -r --arg self "$SELF_LOGIN" '
         [ .[] | select(((.user.login // "") | tostring) != $self)
-          | select(((.state // "") | tostring) == "COMMENTED")
+          | (((.state // "") | tostring)) as $st
+          | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
           | select(((.body // "") | tostring | gsub("[[:space:]]"; "")) != "")
           | (.id // 0) ] | max // 0' 2>/dev/null)
-      max_c=$(printf '%s' "$cmts_raw" | jq -r --arg self "$SELF_LOGIN" '
+      max_c=$(printf '%s' "$cmts_live" | jq -r --arg self "$SELF_LOGIN" '
         [ .[] | select(((.user.login // "") | tostring) != $self) | (.id // 0) ] | max // 0' 2>/dev/null)
       case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
       case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
-      if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ]; then posture="commented"
+      if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ]; then unanswered=1; fi
+      # The posture is what merge.sh reads, and a standing CHANGES_REQUESTED
+      # outranks the batch underneath it: the veto stands whether or not that
+      # feedback has been routed yet. What routes is `unanswered`, below.
+      if [ "$rd" = "CHANGES_REQUESTED" ]; then posture="changes_requested"
+      elif [ "$unanswered" = 1 ]; then posture="commented"
       elif [ "$rd" = "APPROVED" ]; then posture="approved"
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
@@ -628,14 +710,19 @@ GATES
     fi
   fi
 
-  # --- an unanswered review comment routes to something -------------------------
+  # --- unanswered review feedback routes to something ---------------------------
   # Reached only when the anchor is otherwise clear: the conflict and stale-gate
-  # arms above already left a child in flight holding the merge, and the comments
-  # get their own dispatch on the pass after that child lands. Whatever this
+  # arms above already left a child in flight holding the merge, and the feedback
+  # gets its own dispatch on the pass after that child lands. Whatever this
   # routes to holds the merge until it closes, and the watermarks move only once
-  # the routing has read back — a comment nothing answered can never fall below
+  # the routing has read back — feedback nothing answered can never fall below
   # the mark.
-  if [ "$posture" = "commented" ]; then
+  # The batch is the same whether the posture reads `commented` or
+  # `changes_requested`. A CHANGES_REQUESTED holds the merge on its own, and a
+  # hold is not an answer: objections nothing routes converge to codex-green
+  # untouched, while the commits landing meanwhile read as rework that addressed
+  # them.
+  if [ "$unanswered" = 1 ]; then
     fix_branch="${head_ref:-$branch}"
     routed=$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')
     # Read once: both the cap retirement below and the routing choice after it
@@ -726,6 +813,7 @@ TALLY
     [ "$routed" = "human" ] && why="the anchor is already routed to a human"
     [ -n "$holding" ]       && why="a sitting is holding it for an operator ruling"
     if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
+    CSRC=$(feedback_reviews "$revs_raw" "$rwm")
     DISP=""
     if [ "$choice" = "rework" ]; then
       # Same allowlist as the CONFLICTING arm's `stale-base-dispatch-mode`: the
@@ -736,12 +824,24 @@ TALLY
         *)         prepare_mode=merge ;;
       esac
       if [ "$grad" = "true" ]; then prepare_mode=merge; fi
-      # Deterministic per batch: the same outstanding comments name the same
+      # Deterministic per batch: the same outstanding feedback names the same
       # child, a later batch names a different one. Both halves of the probe
       # matter — a fully stamped hit means this batch was already dispatched and
       # only the watermark write failed, an unstamped hit is an orphan from a
-      # pass whose stamp dropped, and re-creating either mints a twin.
+      # pass whose stamp dropped, and re-creating either mints a twin. The title
+      # IS that probe's key, so rewording it strands every child in flight under
+      # the old one.
       CTITLE="Address review comments on PR#$num (through review $max_r, comment $max_c)"
+      CBODY=$(feedback_body "$revs_raw" "$cmts_live" "$rwm" "$cwm")
+      [ -n "$CBODY" ] || CBODY="Unanswered review feedback on PR#$num (through review $max_r, comment $max_c). The bodies could not be rendered; read them at $live_url."
+      CBODY="## Unanswered review feedback on PR#$num
+
+$live_url — head $head_oid${CSRC:+, review $CSRC}
+
+Answer every item below: a fix, or a reply on the PR saying why not. One that
+asks for a decision you cannot make is an escalation, never a silent close.
+
+$CBODY"
       if ! ckids=$(bd_list --status="$ALL_STATUSES" --title-contains "$CTITLE"); then
         echo "$PROG: $id — PR#$num comment dedup probe failed; nothing dispatched (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
@@ -763,17 +863,20 @@ TALLY
         if [ -n "$CFIX" ]; then
           echo "$PROG: $id adopting unstamped comment-rework orphan $CFIX for PR#$num (created by a prior pass whose stamp failed)"
         else
-          CFIX=$(gc bd create "$CTITLE" -t task --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+          CFIX=$(printf '%s\n' "$CBODY" | gc bd create "$CTITLE" -t task --body-file - --json 2>/dev/null \
+                   | jq -r '.id // empty' 2>/dev/null)
         fi
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
         fi
+        CSRCSET=(); [ -z "$CSRC" ] || CSRCSET=(--set-metadata "source_review=$CSRC")
         gc bd update "$CFIX" \
           --set-metadata anchor_bead="$id" \
           --set-metadata branch="$fix_branch" \
           --set-metadata target="$base" \
-          --set-metadata rejection_reason="Review comments on PR#$num are unanswered at head $head_oid. Read them at $live_url/files and answer every one — a fix, or a reply on the PR saying why not — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+          --set-metadata rejection_reason="Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item — a fix, or a reply on the PR saying why not — then push to '$fix_branch'. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+          ${CSRCSET[@]+"${CSRCSET[@]}"} \
           --set-metadata prepare_mode="$prepare_mode" \
           --set-metadata merge_strategy=mr \
           --set-metadata existing_pr="$live_url" \
@@ -826,7 +929,7 @@ TALLY
     else
       VKEY="pr-comments.$num.$max_r.$max_c"
       escalate "$id" "$VKEY" \
-        "PR#$num ($live_url) carries review comments nothing has answered (highest: review $max_r, comment $max_c; answered through review $rwm, comment $cwm), and the city cannot route work for them because $why. Answer them on the PR, file the rework by hand, or close this visit once they are addressed — the merge is held until then."
+        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c; answered through review $rwm, comment $cwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, file the rework by hand, or close this visit once it is addressed — the merge is held until then."
       VID=$(visit_for "$id" "$VKEY") || VID=""
       if [ -z "$VID" ]; then
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
@@ -1184,7 +1287,9 @@ WB_LONG_THREADS
     def foreign: (.author.login // "") != $self;
     ( [ .reviews[]
         | select(foreign)
-        | select((.state // "") == "COMMENTED")
+        # the states max_r watermarks (COMMENTED + CHANGES_REQUESTED): a body-only
+        # veto advances pr_review_watermark and routes a child, so acknowledge it too
+        | select((.state // "") | IN("COMMENTED", "CHANGES_REQUESTED"))
         | select(((.body // "") | gsub("[[:space:]]"; "")) != "")
         | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $rwm)
         | select(reacted(.reactionGroups) | not)

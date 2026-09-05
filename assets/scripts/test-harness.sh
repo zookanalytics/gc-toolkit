@@ -501,13 +501,13 @@ case "$sub" in
       */pulls/*/reviews/*/dismissals)
         printf 'DISMISS %s\n' "$path" >> "${STUB_GH_LOG:?}"
         exit "${STUB_DISMISS_RC:-0}" ;;
-      */pulls/*/reviews*)
+      */pulls/*/reviews*|*/pulls/*/comments*)
         n="${path##*/pulls/}"; n="${n%%/*}"
-        f="$G/reviews_$n.json"
-        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
-      */pulls/*/comments*)
-        n="${path##*/pulls/}"; n="${n%%/*}"
-        f="$G/comments_$n.json"
+        # STUB_GH_LIST_RC: the history delivered as a real gh failure. An absent
+        # fixture is an EMPTY history, which a caller cannot tell from an
+        # unreadable one on the output alone — only the exit code says which.
+        [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
+        case "$path" in *comments*) f="$G/comments_$n.json" ;; *) f="$G/reviews_$n.json" ;; esac
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */rules/branches/*)
         b="${path##*/rules/branches/}"
