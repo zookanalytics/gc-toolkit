@@ -1287,7 +1287,9 @@ WB_LONG_THREADS
     def foreign: (.author.login // "") != $self;
     ( [ .reviews[]
         | select(foreign)
-        | select((.state // "") == "COMMENTED")
+        # the states max_r watermarks (COMMENTED + CHANGES_REQUESTED): a body-only
+        # veto advances pr_review_watermark and routes a child, so acknowledge it too
+        | select((.state // "") | IN("COMMENTED", "CHANGES_REQUESTED"))
         | select(((.body // "") | gsub("[[:space:]]"; "")) != "")
         | select((.databaseId // 0) > 0 and (.databaseId // 0) <= $rwm)
         | select(reacted(.reactionGroups) | not)

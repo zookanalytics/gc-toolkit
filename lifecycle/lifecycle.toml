@@ -358,6 +358,14 @@ keys = [
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_comment_disposition",
+  # The comment-batch disposition history: one
+  # `<disposition>|<exclusive floor>|<inclusive mark>` record per batch, oldest
+  # first, joined by ";". It outlives the single-valued pr_comment_disposition
+  # because the bead a batch routed may not have closed when the next batch
+  # arrives, and a thread an earlier batch left unresolved still sits at or below
+  # the cumulative pr_comment_watermark. pr-facts.sh writes it as it routes each
+  # batch and reconciles it in the write-back sweep.
+  "pr_comment_batch",
 ]
 
 [metadata.pr_round_trip]

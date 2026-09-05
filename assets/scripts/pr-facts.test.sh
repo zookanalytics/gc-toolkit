@@ -1000,8 +1000,12 @@ eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "…and the veto st
 
 echo "# …and the veto resets the round cap like any other operator feedback"
 # The cap's release was unreachable for the strongest signal an operator has,
-# because the batch that performs it was never read under a veto.
-CAPCR=',"check.codex":"exception@sha-56","signoff_cap":"codex@sha-56"'
+# because the batch that performs it was never read under a veto. The park it
+# retires is the cap's current shape (merge_hold=signoff_cap beside signoff_cap),
+# not the legacy check.<gate>=exception@ marker: that marker is indistinguishable
+# from an operator gate exception, so migrate-lane-states.sh is what clears it,
+# once and under an operator, and this arm never touches it.
+CAPCR=',"merge_hold":"signoff_cap","signoff_cap":"codex"'
 CAPCR="$CAPCR"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
 CAPCR="$CAPCR"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-56"'
 store "[$(anchor PB 56 "$CAPCR")]"
@@ -1011,7 +1015,8 @@ echo '[]' > "$GH_DIR/comments_56.json"
 out=$(run)
 eq "$(meta PB signoff_rounds_reset)" "9660.0" "the veto's own batch resets the cap"
 eq "$(meta PB dispatch_count)" "<absent>" "…retiring the tally no head move could clear while it stood"
-eq "$(meta PB 'check.codex')" "<absent>" "…and the park the cap put there"
+eq "$(meta PB merge_hold)" "<absent>" "…and the cap's park, so the veto is not held behind it"
+eq "$(meta PB signoff_cap)" "<absent>" "…with the stamp that proved the park was the cap's"
 eq "$(meta PB pr_comment_disposition)" "rework:new-2" "…so the objection routes to work, not to the visit the park would have forced"
 
 echo "# …a review DISMISSED before it routed is never filed"
@@ -1036,7 +1041,7 @@ printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "RE
 printf '[{"id":9710,"user":{"login":"human1"},"state":"DISMISSED","body":"never mind"}]' > "$GH_DIR/reviews_57.json"
 printf '[{"id":9711,"user":{"login":"human1"},"body":"WHY IS THIS HERE?","path":"docs/file-structure.md","line":12,"pull_request_review_id":9710}]' > "$GH_DIR/comments_57.json"
 out=$(run)
-eq "$(meta PC pr_posture)" "review_required@sha-57" "what a dismissal left behind is not a human waiting"
+eq "$(meta_pinned PC pr_posture)" "review_required@sha-57" "what a dismissal left behind is not a human waiting"
 hasnt "$out" "routed to rework" "…so nothing is filed for it"
 eq "$(meta PC pr_comment_watermark)" "<absent>" "…and the watermark does not step past it"
 
@@ -1060,7 +1065,7 @@ printf '%s' "$(prview 66 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPR
 printf '[{"id":9720,"user":{"login":"human1"},"state":"APPROVED","body":"","commit_id":"sha-66"}]' > "$GH_DIR/reviews_66.json"
 printf '[{"id":9721,"user":{"login":"human1"},"body":"one more thing","path":"docs/state-machine.md","line":7,"pull_request_review_id":9720}]' > "$GH_DIR/comments_66.json"
 out=$(run)
-eq "$(meta PD pr_posture)" "commented@sha-66" "an approval does not retire the comment it carried"
+eq "$(meta_pinned PD pr_posture)" "commented@sha-66" "an approval does not retire the comment it carried"
 has "$out" "routed to rework:new-2" "…so the comment under it routes"
 eq "$(meta PD pr_comment_watermark)" "9721" "…and the watermark follows it"
 has "$(desc new-2)" "one more thing" "the child carries the comment"
@@ -1448,6 +1453,16 @@ threads 47 '{"reviews":[{"id":"RV-47","databaseId":55,"state":"COMMENTED","body"
 out=$(run)
 eq "$(reacted 47 RV-47)" "true" "the review body is acknowledged"
 eq "$(reacted 47 RV-47e)" "false" "an empty-bodied review carries no comment to acknowledge"
+
+echo "# …and a CHANGES_REQUESTED review body is acknowledged the same way"
+# max_r counts a veto's body beside a COMMENTED one, so the write-back reacts to
+# the states it can advance the mark past. A body-only veto routed to a child,
+# its review left unreacted, would tell the operator the city acted on nothing.
+store "[$(anchor W8c 74 "$(wb_rmeta rework:K8c 55)"), $(child K8c open)]"
+printf '%s' "$(prview 74 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_74.json"
+threads 74 '{"reviews":[{"id":"RV-74","databaseId":55,"state":"CHANGES_REQUESTED","body":"not what I asked for","author":{"login":"johnzook"},"reactionGroups":[]}],"threads":[]}'
+out=$(run)
+eq "$(reacted 74 RV-74)" "true" "a veto's review body earns the same acknowledgement a COMMENTED one does"
 
 echo "# a thread the identity cannot resolve is left alone"
 store "[$(anchor W9 48 "$(wb_meta rework:K9)"), $(child K9 closed)]"
