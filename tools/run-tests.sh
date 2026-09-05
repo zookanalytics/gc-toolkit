@@ -174,6 +174,12 @@ while [ "$done_n" -lt "$total" ]; do
   if [ -n "$rpid" ] && [ -n "${PID_IDX[$rpid]:-}" ]; then
     finish "$rpid" "$rc"
     inflight=$((inflight - 1)); done_n=$((done_n + 1))
+  elif [ "$rc" -eq 127 ]; then
+    # wait -n reports no child though a job is in flight — a job that failed to
+    # fork. Fail closed and stop rather than spin waiting for one that will
+    # never arrive.
+    echo "run-tests: $inflight in-flight job(s) unaccountable (failed fork?); failing closed" >&2
+    FAIL=$((FAIL + inflight)); done_n=$((done_n + inflight)); inflight=0
   fi
 done
 
@@ -181,13 +187,19 @@ if [ "$FAIL" -gt 0 ]; then
   printf '\n===== %d failed =====\n' "$FAIL"
   for idx in "${FAILED[@]}"; do
     rel="${TESTS[$idx]#"$ROOT"/}"
+    log="$LOGDIR/$idx.log"
     printf '\n----- %s -----\n' "$rel"
-    lines=$(wc -l <"$LOGDIR/$idx.log" 2>/dev/null || echo 0)
+    lines=$(wc -l <"$log" 2>/dev/null || echo 0)
     if [ "$lines" -gt 200 ]; then
-      printf '(showing last 200 of %s lines)\n' "$lines"
-      tail -n 200 "$LOGDIR/$idx.log"
+      # A failing assertion can sit anywhere in a long log, so surface the
+      # framework's FAIL markers before the tail — a plain tail of an "ok"-heavy
+      # file hides the one line that matters.
+      printf '(%s lines; failing markers, then tail)\n' "$lines"
+      grep -nE 'FAIL|not ok|✗' "$log" | head -40
+      printf '  --- tail ---\n'
+      tail -n 25 "$log"
     else
-      cat "$LOGDIR/$idx.log"
+      cat "$log"
     fi
   done
 fi
