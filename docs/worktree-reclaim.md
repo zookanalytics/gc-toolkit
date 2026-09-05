@@ -24,8 +24,8 @@ which.
 A worktree is removed when all of these hold:
 
 - some bead names its path in `metadata.work_dir`, and none of the beads
-  naming that path is still open
-- no open bead names its branch, and no open pull request has that branch as
+  naming that path is still live
+- no live bead names its branch, and no open pull request has that branch as
   its head
 - the newest close among the beads naming it is older than
   `WORKTREE_REAP_CLOSED_AFTER` (24h)
@@ -33,6 +33,18 @@ A worktree is removed when all of these hold:
 - it is not an agent home, a session `work_dir`, or a live process's cwd
 - it is not locked, not the main worktree, and not the parent of another
   registered worktree
+
+"Live" is read from the bead-status contract, not a list fixed in the reaper.
+`gc bd statuses` sorts every status into a category, and one category, `done`,
+means the work is finished and its checkout disposable. Every other status is
+live: `deferred` is frozen for later, `pinned` stays open indefinitely,
+`hooked` is on an agent's hook, and a checkout any of them names is still
+someone's. The reaper asks each store for every non-`done` status it defines,
+so a status added to `bd` or configured on a rig protects its worktrees the
+day it exists. The reap side keys on `closed` alone — the one done status with
+a defined close time — so a custom done status leaves a worktree unreaped
+rather than reaped while live. A store whose contract cannot be read is skipped
+whole, and if none can be read the pass refuses.
 
 The identity chain is `metadata.work_dir`, so the reverse lookup is exact path
 equality and no bead id is ever parsed out of a path or a branch name. The two
@@ -42,7 +54,7 @@ keeping its own directory, so `worktrees/tk-ok9t2` is checked out on
 
 Both branch questions are asked, for the same reason. The branch the checkout
 is on and the branch its beads recorded are not always the same ref, and
-either being live holds the tree. Asking the ledger for open beads on the
+either being live holds the tree. Asking the ledger for live beads on the
 branch is what covers a branch in the pre-open codex gate, which is live work
 carrying no pull request at all.
 

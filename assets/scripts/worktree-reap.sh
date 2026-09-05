@@ -16,8 +16,9 @@
 #
 # A worktree is removed when every one of these holds:
 #   - some bead names the path in metadata.work_dir, and none of the beads
-#     naming it is still open
-#   - no open bead names its branch, and no open pull request has that branch
+#     naming it is still live — live is every status but closed, so a deferred,
+#     pinned or hooked bead holds its checkout exactly as an open one does
+#   - no live bead names its branch, and no open pull request has that branch
 #     as its head — a branch in the pre-open gate carries no PR and is live
 #   - the newest close among the beads naming it is older than CLOSED_AFTER
 #   - `git status --porcelain` is empty
@@ -181,22 +182,41 @@ protected_shape() { # <path>
 }
 
 # --- the ledger ------------------------------------------------------------
-# Two questions, one read per rig. What is still open protects a path and a
-# branch; what has closed supplies the path's age and the bead the archive tag
+# Two questions, one read per store. What is still LIVE protects a path and a
+# branch; what has CLOSED supplies the path's age and the bead the archive tag
 # is named for.
+#
+# Live is the bead-status contract's, not a list kept here. `gc bd statuses`
+# categorises every status and exactly one category, `done`, means the work is
+# finished and its checkout disposable; the protector query asks for every
+# other status the store defines. A status bd gains, or one a rig adds under
+# status.custom, then protects its worktrees without a change here — where an
+# enumerated allowlist would reap the checkout of any status written after it.
+# A store whose contract will not read is skipped whole: its live statuses are
+# unknown, and a reap decided without them could take a live tree, so it
+# contributes neither protectors nor candidates and its worktrees leak instead.
+#
+# The reap side keys on `closed` alone, not the whole `done` category: it is
+# the one done status with a defined close time, so a custom done status leaves
+# a worktree unreaped (a leak) rather than reaped while live (a loss).
 declare -A OPEN_PATH=() OPEN_BRANCH=()
 declare -A CLOSED_AT=() CLOSED_BEAD=() CLOSED_BRANCHES=()
 LEDGER_READ=0
 for i in "${!REPO_PATHS[@]}"; do
     name="${REPO_NAMES[$i]}"
     RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
+
+    LIVE_STATUSES="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" statuses --json 2>/dev/null \
+        | jq -r '[.. | objects | select(has("name") and has("category"))
+                 | select(.category != "done") | .name] | unique | join(",")' 2>/dev/null || true)"
+    [ -n "$LIVE_STATUSES" ] || continue
     seen=0
 
     while IFS="$US" read -r wd br; do
         [ -n "$wd" ] && OPEN_PATH["$wd"]=1
         [ -n "$br" ] && OPEN_BRANCH["$br"]=1
         seen=1
-    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status open,in_progress,blocked --limit=0 --json 2>/dev/null \
+    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null \
         | jq -r '.[]? | (.metadata // {}) as $md
                  | select((($md.work_dir // "") != "") or (($md.branch // "") != ""))
                  | [($md.work_dir // ""), ($md.branch // "")] | join("\u001f")' 2>/dev/null || true)

@@ -40,6 +40,7 @@ export WORKTREE_REAP_CLOSED_AFTER=$((24 * HOUR))
 export STUB_BEADS="$TMP/beads.json"
 export STUB_AGENTS="$TMP/agents.json"
 export STUB_SESSIONS="$TMP/sessions.json"
+export STUB_STATUSES="$TMP/statuses.json"
 export STUB_PR_BRANCHES="$TMP/pr-branches.txt"
 export STUB_PR_RC=0
 export PATH="$BIN:$PATH"
@@ -55,6 +56,7 @@ case "${1:-} ${2:-}" in
   "agent list")   cat "${STUB_AGENTS:?}" ;;
   "session list") cat "${STUB_SESSIONS:?}" ;;
   "rig list")     echo '{"rigs":[]}' ;;
+  "bd statuses")  cat "${STUB_STATUSES:?}" ;;
   "bd list")
     want=""
     while [ $# -gt 0 ]; do
@@ -80,6 +82,25 @@ echo '{"agents":[{"work_dir":".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"}]}
 echo '{"sessions":[]}' > "$STUB_SESSIONS"
 : > "$STUB_PR_BRANCHES"
 
+# The bead-status contract the reaper reads with `gc bd statuses`. It protects
+# every status whose category is not `done`, so this fixture is what tells it
+# deferred, pinned and hooked are live and closed is not. new_repo restores it;
+# the two tests that vary it write their own.
+statuses_default() {
+    cat > "$STUB_STATUSES" <<'JSON'
+{"built_in_statuses":[
+  {"name":"open","category":"active"},
+  {"name":"in_progress","category":"wip"},
+  {"name":"blocked","category":"wip"},
+  {"name":"deferred","category":"frozen"},
+  {"name":"closed","category":"done"},
+  {"name":"pinned","category":"frozen"},
+  {"name":"hooked","category":"wip"}
+]}
+JSON
+}
+statuses_default
+
 # --- fixture ---------------------------------------------------------------
 # One repo with an origin, so the PR probe has a slug to ask about.
 new_repo() {
@@ -93,6 +114,7 @@ new_repo() {
     git -C "$REPO" commit -qm seed
     echo '[]' > "$STUB_BEADS"
     : > "$STUB_PR_BRANCHES"
+    statuses_default
 }
 
 # A worktree with one commit of its own, so its tip is not the base tip.
@@ -190,6 +212,65 @@ bead b-single closed 100 "$REPO/wt/one-branch" polecat/only
 run > /dev/null
 if exists "$REPO/wt/two-branch"; then ok "an open bead on an older bead's branch holds the path"; else bad "an open bead on an older bead's branch holds the path"; fi
 if exists "$REPO/wt/one-branch"; then bad "a path whose every recorded branch is quiet is taken"; else ok "a path whose every recorded branch is quiet is taken"; fi
+
+# --- a non-closed status is live, whatever its name ------------------------
+# The disposability line is the status contract's one done state, `closed`.
+# Every other status holds a checkout as firmly as `open` does, so a bead in it
+# keeps its worktree even when a closed bead names the same path. deferred,
+# pinned and hooked are the built-in non-open live states; a fourth tree is
+# held by a live bead on its BRANCH while the path's own bead is closed. The
+# closed-only neighbour is the take that proves the filter still discriminates.
+new_repo
+mk_wt "$REPO/wt/live-deferred" polecat/live-deferred
+mk_wt "$REPO/wt/live-pinned"   polecat/live-pinned
+mk_wt "$REPO/wt/live-hooked"   polecat/live-hooked
+mk_wt "$REPO/wt/live-branch"   polecat/live-branch
+mk_wt "$REPO/wt/closed-only"   polecat/closed-only
+bead b-def-live  deferred  "" "$REPO/wt/live-deferred" polecat/live-deferred
+bead b-def-done  closed   100 "$REPO/wt/live-deferred" polecat/live-deferred
+bead b-pin-live  pinned    "" "$REPO/wt/live-pinned"   polecat/live-pinned
+bead b-pin-done  closed   100 "$REPO/wt/live-pinned"   polecat/live-pinned
+bead b-hook-live hooked    "" "$REPO/wt/live-hooked"   polecat/live-hooked
+bead b-hook-done closed   100 "$REPO/wt/live-hooked"   polecat/live-hooked
+bead b-brn-done  closed   100 "$REPO/wt/live-branch"   polecat/live-branch
+bead b-brn-live  deferred  "" ""                       polecat/live-branch
+bead b-co-done   closed   100 "$REPO/wt/closed-only"   polecat/closed-only
+OUT="$(run)"
+if exists "$REPO/wt/live-deferred"; then ok "a deferred bead on the path holds it, though a closed bead names it too"; else bad "a deferred bead on the path holds it, though a closed bead names it too"; fi
+if exists "$REPO/wt/live-pinned"; then ok "a pinned bead on the path holds it"; else bad "a pinned bead on the path holds it"; fi
+if exists "$REPO/wt/live-hooked"; then ok "a hooked bead on the path holds it"; else bad "a hooked bead on the path holds it"; fi
+if exists "$REPO/wt/live-branch"; then ok "a deferred bead on the BRANCH holds it, though the path's own bead closed"; else bad "a deferred bead on the BRANCH holds it, though the path's own bead closed"; fi
+if exists "$REPO/wt/closed-only"; then bad "the closed-only neighbour is still taken"; else ok "the closed-only neighbour is still taken"; fi
+has "$OUT" "removed 1 of" "only the closed-only tree is reaped"
+
+# The live set is the contract's, not a list in the script: a status the reaper
+# was never written to know still protects its checkout. The contract reports a
+# custom frozen status; a bead in it, on a path a closed bead also names, is
+# held, and its closed-only neighbour is taken in the same run.
+new_repo
+mk_wt "$REPO/wt/custom-live" polecat/custom-live
+mk_wt "$REPO/wt/custom-doom" polecat/custom-doom
+cat > "$STUB_STATUSES" <<'JSON'
+{"built_in_statuses":[{"name":"open","category":"active"},{"name":"closed","category":"done"}],
+ "custom_statuses":[{"name":"on_hold","category":"frozen"}]}
+JSON
+bead b-cust-live on_hold  "" "$REPO/wt/custom-live" polecat/custom-live
+bead b-cust-done closed  100 "$REPO/wt/custom-live" polecat/custom-live
+bead b-cust-doom closed  100 "$REPO/wt/custom-doom" polecat/custom-doom
+OUT="$(run)"
+if exists "$REPO/wt/custom-live"; then ok "a custom non-done status the script never enumerates still protects its worktree"; else bad "a custom non-done status the script never enumerates still protects its worktree"; fi
+if exists "$REPO/wt/custom-doom"; then bad "its closed-only neighbour is still taken"; else ok "its closed-only neighbour is still taken"; fi
+
+# A store whose status contract will not parse is skipped whole: the reaper
+# cannot tell live from done there, so it reaps nothing rather than guess. With
+# only this store, the pass refuses, as it does for an unreadable ledger.
+new_repo
+mk_wt "$REPO/wt/no-contract" polecat/no-contract
+bead b-nc closed 100 "$REPO/wt/no-contract" polecat/no-contract
+echo 'not json' > "$STUB_STATUSES"
+OUT="$(run 2>&1)"
+if exists "$REPO/wt/no-contract"; then ok "an unreadable status contract reaps nothing"; else bad "an unreadable status contract reaps nothing"; fi
+has "$OUT" "refusing to reap" "the refusal says so"
 
 # --- the archive tag pins what nothing else reaches ------------------------
 # A detached worktree's HEAD is the only ref on its commits. Without the pin,
