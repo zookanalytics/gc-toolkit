@@ -268,22 +268,40 @@ case "$CLASS" in
         # to a pool. dead-molecule-dispose.sh de-routes the whole chain before
         # it closes anything, and refuses a chain holding a work bead.
         #
-        # The disposer reserves exit 3 for a chain left half torn down — some
-        # members de-routed or closed, some not. That is the partial-write state
-        # this script's own exit 3 names, and the witness patrol escalates it
+        # A 0 exit does not by itself mean the chain is gone. The disposer
+        # exits 0 for a real teardown (result=disposed) or an already-empty
+        # chain (result=clean), and equally for a refusal that wrote nothing:
+        # result=refused when the chain still holds a work bead, result=live_root
+        # when the root was no longer closed on re-read. Reading every 0 as a
+        # landed disposal reports a recovery that never happened and loses the
+        # reason it was refused. Discriminate on result — only disposed/clean is
+        # a landing; a refusal is a skip that carries the disposer's result and
+        # detail, leaving the bead owned to be re-examined next cycle.
+        #
+        # Exit 3 is a chain left half torn down — some members de-routed or
+        # closed, some not. The witness patrol escalates that partial write
         # (witness-partial-release) rather than retrying, so it must survive the
-        # wrapper: capture the disposer's rc and report instead of discarding
-        # them. An inner 3 becomes this script's partial and carries the member
-        # detail the disposer named; any other nonzero is a plain failed=dead-chain.
+        # wrapper as this script's own exit-3 partial carrying the member detail
+        # the disposer named. Any other nonzero is a plain failed=dead-chain.
         ACTION="dispose-dead-chain"
         DETAIL="root_closed"
         if [ "$APPLY" = "1" ]; then
             if [ -x "$DEAD_DISPOSE" ]; then
                 DEAD_OUT="$("$DEAD_DISPOSE" "$BEAD" --apply --json 2>/dev/null)"
                 DEAD_RC=$?
+                DEAD_RESULT="$(printf '%s' "$DEAD_OUT" | jq -r '.result // ""' 2>/dev/null)"
                 DEAD_DETAIL="$(printf '%s' "$DEAD_OUT" | jq -r '(.detail // .members // "") | select(. != "")' 2>/dev/null)"
                 case "$DEAD_RC" in
-                    0) note_landed dead-chain ;;
+                    0)
+                        case "$DEAD_RESULT" in
+                            disposed|clean) note_landed dead-chain ;;
+                            *)
+                                ACTION="skip"
+                                DETAIL="root_closed;not-disposed=${DEAD_RESULT:-no-result}"
+                                [ -n "$DEAD_DETAIL" ] && DETAIL="$DETAIL;$DEAD_DETAIL"
+                                ;;
+                        esac
+                        ;;
                     3)
                         note_landed dead-chain
                         note_failed dead-chain-incomplete

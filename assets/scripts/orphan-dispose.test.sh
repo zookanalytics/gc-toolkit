@@ -211,15 +211,52 @@ dead_fixture() {
 }
 
 dead_fixture
+export STUB_DEAD_OUT='{"result":"disposed","detail":"passes=1"}'
 OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+export STUB_DEAD_OUT=""
 eq "$rc" "0" "a step under a closed root exits 0"
 has "$OUT" "class=workflow-step-dead" "it is classified dead, not releasable"
 has "$OUT" "root_status=closed" "the report carries the root status it judged on"
 has "$OUT" "action=dispose-dead-chain" "the arm disposes rather than releases"
+has "$OUT" "result=disposed" "a disposed chain is reported disposed"
 has "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose tk-step --apply" "the chain disposer is invoked with --apply"
 hasnt "$(cat "$STUB_GC_LOG")" "--status=open" "the dead step is never reopened"
 hasnt "$(cat "$STUB_GC_LOG")" "--assignee" "the dead step is never returned to a pool"
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "the dead arm never calls reopen-source"
+
+echo "--- step arm: a 0-exit refusal is a skip, not a landed disposal ---"
+# dead-molecule-dispose.sh exits 0 for a refusal that wrote nothing as well as
+# for a real teardown: result=refused when the chain still holds a work bead,
+# result=live_root when the root read back live. Trusting the 0 exit reports a
+# recovery that never happened and drops the reason; the wrapper discriminates
+# on result, skips, and carries the disposer's detail.
+dead_fixture
+export STUB_DEAD_OUT='{"result":"refused","detail":"work_bead_in_chain=tk-anchor"}'
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+export STUB_DEAD_OUT=""
+eq "$rc" "0" "a refused chain still exits 0"
+has "$OUT" "result=skipped" "a refusal is not reported as a disposal"
+hasnt "$OUT" "result=disposed" "the wrapper does not claim a landing it did not make"
+hasnt "$OUT" "landed=dead-chain" "nothing is marked landed when the chain is intact"
+has "$OUT" "not-disposed=refused" "the disposer's result is named"
+has "$OUT" "work_bead_in_chain=tk-anchor" "the reason it was refused survives"
+
+dead_fixture
+export STUB_DEAD_OUT='{"result":"live_root","detail":"root_status=open"}'
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+export STUB_DEAD_OUT=""
+eq "$rc" "0" "a root that read back live exits 0"
+has "$OUT" "result=skipped" "a live root is a skip, not a disposal"
+hasnt "$OUT" "landed=dead-chain" "a live root lands nothing"
+has "$OUT" "not-disposed=live_root" "the live-root result is named"
+has "$OUT" "root_status=open" "the disposer's detail survives"
+
+dead_fixture
+export STUB_DEAD_OUT=""
+OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "an unparseable 0-exit still exits 0"
+has "$OUT" "result=skipped" "an unconfirmed disposal is a skip, never a landing"
+has "$OUT" "not-disposed=no-result" "an absent result is named, not read as disposed"
 
 dead_fixture
 OUT=$("$SCRIPT" tk-step 2>&1)
