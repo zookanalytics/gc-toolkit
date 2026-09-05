@@ -77,15 +77,34 @@ assign rolls the pour back and keeps the current wisp. Do NOT enter a
 
 ## Escalation
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+Every escalation is a visit, filed through one writer that dedups repeats on a
+situation key. Find the scripts and resolve the rig once:
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
-  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<the finding, verbatim, + recommendation>"
+ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) || ESC_RIG=""
+```
+
+A `gc doctor` finding files through `doctor-finding-escalate.sh`. It derives the
+situation key from the check name and the message from the finding's own fields,
+so hand it one `.results[]` object and compose neither yourself. A key
+transcribed by hand reorders the check-name segments differently between
+sittings, two spellings of one situation are two situations to the dedup, and
+one check then shows an operator two open visits:
+
+```bash
+[ -n "$ESC_RIG" ] && GC_RIG="$ESC_RIG" "$SCRIPTS/doctor-finding-escalate.sh" --subject <bead> --finding "$FINDING"
+```
+
+Any other systemic situation, such as a Dolt outage or an unrestorable backup,
+carries no finding object. Name a stable key yourself and write the message as
+prose:
+
+```bash
+[ -n "$ESC_RIG" ] && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <stable-situation-key> --message "<what is wrong + recommendation>"
 ```
 
 You are city-scoped, so `GC_RIG` arrives unset and escalate.sh's default
