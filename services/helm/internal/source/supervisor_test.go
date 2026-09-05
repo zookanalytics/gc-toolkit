@@ -34,8 +34,8 @@ func mockSupervisor(t *testing.T, failStatus map[string]int) *httptest.Server {
 			writeJSON(w, `{"items":[{"id":"tk-epic","title":"Big epic","status":"open","issue_type":"epic","priority":2}],"total":1}`)
 		case path == base+"/beads" && r.URL.Query().Get("type") == "decision":
 			writeJSON(w, `{"items":[{"id":"sl-dec","title":"Pick a path","status":"open","issue_type":"decision","priority":1}],"total":1}`)
-		// Gates are hidden from the bare status=open scan, so the source pages
-		// them separately (type=gate). Empty in the shared fixture; the
+		// The source pages gates separately (type=gate) as a guard against an
+		// API default that hides them. Empty in the shared fixture; the
 		// gate-demand case has its own test.
 		case path == base+"/beads" && r.URL.Query().Get("type") == "gate":
 			writeJSON(w, `{"items":[],"total":0}`)
@@ -379,11 +379,13 @@ func TestGatherRefusesNonWorkBeads(t *testing.T) {
 }
 
 // TestGatherAdmitsGateBackedHumanDemand: a human demand is now a native gate
-// (issue_type=gate, gc.routed_to=human, from gc-helm.sh `demand`), which the
-// bare status=open scan hides. The source must page it via type=gate and admit
-// it as a `human` anchor — matching the in-process backend, whose metadata-keyed
-// query has no default type exclusion. A gate WITHOUT the marker is not an
-// anchor: the type is not the key, the marker is.
+// (issue_type=gate, gc.routed_to=human, from gc-helm.sh `demand`). The live
+// API returns gates on the bare status=open scan AND on the type=gate page the
+// source adds as a guard, so the mock serves the gate rows on both: the union
+// must admit the demand as exactly ONE `human` anchor — matching the
+// in-process backend, whose metadata-keyed query has no default type
+// exclusion. A gate WITHOUT the marker is not an anchor: the type is not the
+// key, the marker is.
 func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
 	const base = "/v0/city/testcity"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -392,15 +394,17 @@ func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
 		switch {
 		case r.URL.Path == base+"/rigs":
 			writeJSON(w, `{"items":[{"name":"gc-toolkit","prefix":"tk"}]}`)
-		case r.URL.Path == base+"/beads" && q.Get("type") == "gate":
+		case r.URL.Path == base+"/beads" && (q.Get("type") == "gate" || q.Get("type") == ""):
+			// Served on the bare open scan and the gate page alike, as the
+			// live API does; the union must not double the anchor.
 			writeJSON(w, `{"items":[
 				{"id":"tk-gate-demand","title":"operator: pick the backend","status":"open","issue_type":"gate","priority":1,
 				 "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-work","gc.demand_kind":"decision"}},
 				{"id":"tk-gate-bare","title":"a gate carrying no demand marker","status":"open","issue_type":"gate"}
 			],"total":2}`)
 		default:
-			// Every other Gather leg — the typed scans, the base open scan, the
-			// convoy feed — reads empty, isolating the gate path.
+			// Every other Gather leg — the typed scans, the convoy feed — reads
+			// empty, isolating the gate path.
 			writeJSON(w, `{"items":[]}`)
 		}
 	}))
@@ -413,8 +417,8 @@ func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
 	if res.Partial {
 		t.Errorf("unexpected partial: %v", res.PartialErrors)
 	}
-	// The gate-backed demand reaches the human filter despite being hidden from
-	// the bare status=open scan — the divergence this fixes.
+	// The gate-backed demand reaches the human filter exactly once, although
+	// both pages returned it — the dedupe is what keeps the union one row.
 	if got := kindsOf(res, "tk-gate-demand"); !reflect.DeepEqual(got, []string{"human"}) {
 		t.Errorf("tk-gate-demand kinds = %v, want [human] — a gate-backed human demand must gather", got)
 	}

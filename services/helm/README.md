@@ -205,10 +205,12 @@ passes.
 
 All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
-over a paged `/beads?status=open` scan (`tk-lb3u4m`) — twice, because a human
-demand is a native gate (`issue_type=gate`) the bare scan hides the way
-`bd list` does, so a second `type=gate` page is what keeps the two backends
-agreeing on the `human` kind. The two selectors live in `source.metadataAnchor`
+over a paged `/beads?status=open` scan (`tk-lb3u4m`), plus a `type=gate` page
+unioned in by id: a human demand is a native gate (`issue_type=gate`), which
+`bd list` hides by default. The API's list path passes `--include-gates` today,
+so the bare scan already carries gates; the extra page is the guard that keeps
+the two backends agreeing on the `human` kind should that default ever change.
+The two selectors live in `source.metadataAnchor`
 — one field set, read two ways — because a bead that is an anchor on one backend
 and absent from the other is the shape of bug that cost the board its
 human-routed rows.

@@ -783,8 +783,11 @@ cmd_demand() {
 
     # --include-gates: the demand is a human gate (issue_type=gate), which
     # `bd list` hides by default; without it every re-state files a second
-    # demand instead of refreshing the one that is already open.
-    existing=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 2>/dev/null \
+    # demand instead of refreshing the one that is already open. The status
+    # set is the demand readers' (signoff, pr-facts, liveness): a gate an
+    # operator deferred or pinned still holds the work there, so a re-state
+    # must refresh it rather than file a second gate beside it.
+    existing=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit=0 2>/dev/null \
         | scrub \
         | jq -r --arg g "$gated" \
             '[ .[]? | select((.metadata["gc.demand_for"] // "") == $g) | .id ] | first // empty' 2>/dev/null || true)
@@ -821,7 +824,9 @@ cmd_demand() {
         # gated bead. `gc bd update` has no `gate` type, so the gate can only be
         # born from `gc bd gate create`; the demand metadata is stamped after,
         # and the kind is recorded in metadata rather than as the issue type.
-        demand=$(gc bd gate create --type=human --blocks "$gated" --title "$text" --json 2>/dev/null \
+        # --reason carries the body from birth, so a gate whose stamp never
+        # lands still explains itself to whoever clears it by hand.
+        demand=$(gc bd gate create --type=human --blocks "$gated" --title "$text" --reason "$body" --json 2>/dev/null \
             | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
         # A create routed to the wrong ledger returns an id rather than an
         # error, and that id can never carry an edge to $gated — so the prefix
@@ -840,7 +845,18 @@ cmd_demand() {
                --set-metadata "gc.demand_kind=$kind" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
-        if ! gc bd update "$demand" "$@" >/dev/null 2>&1; then
+        stamped=1
+        gc bd update "$demand" "$@" >/dev/null 2>&1 || stamped=0
+        # A non-zero update is not proof the stamp did not land: bd writes the
+        # row before it commits, and a commit that fails after the write exits
+        # non-zero with the metadata in place. Read the key back before treating
+        # the gate as an orphan — resolving a stamped, live gate would release
+        # $gated while a person still owes an answer.
+        if [ "$stamped" -eq 0 ] && [ "$(meta_now "$demand" gc.demand_for)" = "$gated" ]; then
+            echo "$PROG: demand: gc bd update on $demand returned non-zero but gc.demand_for reads back as $gated — the stamp landed; continuing." >&2
+            stamped=1
+        fi
+        if [ "$stamped" -eq 0 ]; then
             # `gc bd gate create` requires --blocks, so $demand was born already
             # blocking $gated. Without this stamp it carries no gc.demand_for, so
             # the existing-demand lookup above cannot find it: a re-run would file
@@ -864,10 +880,11 @@ cmd_demand() {
 
     # `dep add <gated> <demand>` reads "<gated> is blocked by <demand>", so the
     # row lands on the gated bead — the side that is waiting. `gc bd gate
-    # create` already added the primary edge on a fresh gate, so wiring $gated
-    # again is idempotent (an "already wired" warning is expected there); the
-    # loop still owns every --also-blocks target, and the read-back below is
-    # the guarantee for all of them.
+    # create` already added the primary edge on a fresh gate; re-adding a
+    # same-type edge is a silent, exit-0 no-op in beads (no warning is
+    # printed), so this pass costs one round-trip and doubles as the repair
+    # should the birth edge not have landed. The loop still owns every
+    # --also-blocks target, and the read-back below is the guarantee for all.
     for _w in $gated $also; do
         [ -n "$_w" ] || continue
         if [ "$_w" = "$demand" ]; then

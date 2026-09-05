@@ -1553,7 +1553,8 @@ case "$1 ${2:-}" in
     blk="$( { awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG"; awk -v b="$id" '$1==b {print $2}' "$D_GATE_EDGES" 2>/dev/null; } | jq -R . | jq -sc 'map(select(. != "")) | unique')"
     jq -n --arg id "$id" --arg p "$p" --arg sd "$sd" --argjson blk "$blk" \
       '[{id: $id,
-         metadata: {"gc.takeaway_settled": $sd},
+         metadata: ({"gc.takeaway_settled": $sd}
+                    + (if ($id | test("LANDED")) then {"gc.demand_for": "tk-kid"} else {} end)),
          dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
   "bd list")  cat "$D_LIST" ;;
@@ -1572,7 +1573,6 @@ case "$1 ${2:-}" in
         blocked=""
         for a in "$@"; do
           [ "$prev" = "--blocks" ] && blocked="$a"
-          case "$a" in --blocks=*) blocked="${a#--blocks=}" ;; esac
           prev="$a"
         done
         case "$gid" in *NOEDGE*) : ;; *) [ -n "$blocked" ] && printf '%s %s\n' "$blocked" "$gid" >> "$D_GATE_EDGES" ;; esac
@@ -1584,7 +1584,9 @@ case "$1 ${2:-}" in
     esac ;;
   "bd update")
     # A gate id carrying NOSTAMP models the stamp write failing after the gate
-    # was already born blocking the work — the orphan `demand` must repair.
+    # was already born blocking the work — the orphan `demand` must repair. One
+    # carrying LANDED as well models a write that landed and still exited
+    # non-zero (bd commits after it writes): `bd show` answers the stamp.
     case "$3" in *NOSTAMP*) exit 1 ;; esac
     # The multi-pair refresh never lands here, which is the dropped clear this
     # store models. The lone-pair repair does — unless the bead id says STUCK,
@@ -1837,6 +1839,20 @@ grep -q 'could not resolve it' <<< "$DERR" \
 grep -q 'gc bd gate resolve tk-NOSTAMPNORESOLVE1' <<< "$DERR" \
   && ok "(GATEREPAIRSTUCK) …and hands over the exact manual clear" \
   || bad "(GATEREPAIRSTUCK) no repair command offered: $DERR"
+
+# (GATELANDED) a non-zero stamp is not proof the stamp did not land: bd writes
+# before it commits. When gc.demand_for reads back, the gate is live and
+# stamped — resolving it would release the work while a person owes an answer.
+printf 'tk-NOSTAMPLANDED1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "0" "(GATELANDED) a stamp that reads back after a non-zero update succeeds"
+eq "$(d_gate_resolve)" "" "(GATELANDED) …and the live, stamped gate is NOT resolved"
+grep -q 'reads back as tk-kid' <<< "$DERR" \
+  && ok "(GATELANDED) …and the verb says why it continued" \
+  || bad "(GATELANDED) silent continue: $DERR"
+grep -q '^demand tk-NOSTAMPLANDED1 blocks tk-kid' <<< "$DOUT" \
+  && ok "(GATELANDED) …and the success line names the gate" \
+  || bad "(GATELANDED) no success line: $DOUT"
 printf 'tk-dem1\n' > "$D_NEXTID"
 
 echo ""

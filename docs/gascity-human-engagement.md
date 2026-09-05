@@ -442,11 +442,20 @@ The gate is the STATE; the visit is its RESOLUTION. Because the operator does
 not read the "human" mailbox, the notify order is a durable record, not the
 reach — the visit is the attention channel. `orders/gate-visit-sweep.toml`
 files one converse visit on the gated bead of every open human gate, so the
-question arrives as a conversation with framing and an owner. It is the
-default for every gate; stamping `gc.gate_visit=skip` on a gate suppresses
-its visit, which is the operator's selection point when the default is too
-much. `gc-helm.sh open` files one visit per subject, so the sweep re-offers a
-visit only while the gate is still open.
+question arrives as a conversation with framing and an owner. One visit per
+gate: the sweep records the visit it filed (or the sitting already standing
+for the gated bead) on the gate as `gc.gate_visit=<visit-id>`, and never
+re-offers a stamped gate — a sitting that ends with the gate still open (a
+benign close, a cut-short hold, an operator dismiss) must not re-spawn a
+session every cooldown; the return trip for a cut-short hold rides the
+liveness sweep, as before. Stamping `gc.gate_visit=skip` on a gate before the
+sweep reaches it suppresses its visit, which is the operator's selection
+point when the default is too much; `gc bd update <gate> --unset-metadata
+gc.gate_visit` re-offers one. A gate assigned to a person (`--kind task`) gets
+no visit — the work is theirs to perform and close, and converse's discharge
+skips assigned demands on purpose — and neither does a gate whose gated bead
+is no longer open, which the sweep names on stderr until it is resolved by
+hand.
 
 ### The shape constraint, and why it is the hard part
 

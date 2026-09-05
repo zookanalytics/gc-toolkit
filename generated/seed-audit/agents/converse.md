@@ -623,8 +623,11 @@ The loop, every visit:
                                 | select((.assignee // "") == "") | .id ] | first // empty')
    if [ -n "$DEMAND" ] && [ "$RULED" = yes ]; then
      # SETTLED — the operator ruled in this thread. Resolving the gate lifts
-     # the block and $ITEM goes back to the pool.
-     gc bd gate resolve "$DEMAND" --reason "<the ruling, in one line>"
+     # the block and $ITEM goes back to the pool. A demand filed before
+     # demands were gates (issue_type=decision) is refused by `gate resolve`
+     # ("is not a gate issue"), so it is closed on the same terms instead.
+     gc bd gate resolve "$DEMAND" --reason "<the ruling, in one line>" \
+       || gc bd close "$DEMAND" --reason "<the ruling, in one line>"
    elif [ -n "$DEMAND" ]; then
      # STILL OWED — cut short, or the question outlived the sitting. The
      # demand stays open, re-stated, so the wait stays a graph state.

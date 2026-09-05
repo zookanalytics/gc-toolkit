@@ -26,8 +26,9 @@ const defaultSupervisorPort = 8372
 // It gathers the three TYPE-keyed anchor kinds and the two metadata-keyed ones
 // ([metadataAnchors]: `human` and `parked`). `GET /beads` takes no metadata
 // predicate, so that filter runs client-side over a paged scan of the city's
-// open beads — two scans, since a human demand is now a hidden gate the bare
-// status=open page omits (see [SupervisorSource.openBeads]).
+// open beads — plus a `type=gate` page unioned in, since a human demand is now
+// a gate and only the API's own defaults decide whether the bare page carries
+// one (see [SupervisorSource.openBeads]).
 //
 // A board served from this backend is NARROWER: no `updated_at` (so stale_days
 // is 0), no visits and so no sittings, no in-flight map, and no resolved
@@ -495,14 +496,17 @@ var infraTypes = map[string]bool{
 
 // openBeads pages the whole city's open beads, GATES INCLUDED.
 //
-// `GET /beads` hides issue_type=gate the way `bd list` does: a bare
-// status=open page omits them, a type=gate page returns them. The native
-// human-demand state this backend must gather IS a gate — issue_type=gate,
-// gc.routed_to=human (assets/scripts/gc-helm.sh `demand`) — so without a
-// second, gate-keyed page it never reaches [gatherMetadataAnchors] and the
-// supervisor board silently drops every human gate the in-process backend
-// shows (whose metadata-keyed SearchIssues carries no default type exclusion).
-// The two pages are unioned by id.
+// The native human-demand state this backend must gather IS a gate —
+// issue_type=gate, gc.routed_to=human (assets/scripts/gc-helm.sh `demand`).
+// `bd list` hides issue_type=gate by default; the gascity API's list path
+// does NOT today (its bd-backed store passes --include-gates unconditionally,
+// internal/beads/bdstore.go listViaBDList), so the bare status=open page
+// already carries gates. Nothing in the API contract promises that, and a
+// default exclusion added upstream would silently drop every human gate the
+// in-process backend shows (whose metadata-keyed SearchIssues has no type
+// exclusion). The second, gate-keyed page is that guard: unioned by id, it
+// costs one short page and a dedupe while the bare page carries gates, and
+// keeps the board whole if it ever stops.
 //
 // EVERY WAY EITHER SCAN COMES BACK SHORT REPORTS ITSELF: both truncations — a
 // page that fails after earlier ones succeeded, and the page cap — return the
