@@ -123,9 +123,18 @@ else
                 val=$(env_val "$key" "$penv")
                 [ -n "$val" ] || continue
                 named=$(rig_named_by "$val")
-                [ -n "$named" ] || continue
-                [ "$named" = "$want_rig" ] && continue
-                errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.")
+                if [ -n "$named" ]; then
+                    [ "$named" = "$want_rig" ] && continue
+                    errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.")
+                elif [ -n "$want_rig" ] && { [ "$val" = "$city" ] || [ "$val" = "$city/.beads" ]; }; then
+                    # A path rig_named_by cannot place is skipped — the check
+                    # resolves no rig for it without config — EXCEPT the city
+                    # store itself, whose root and .beads path are known here. A
+                    # rig-scoped session pointed at it reads and writes the city
+                    # store, not this rig's, so its work lands where the rig's
+                    # queues cannot see it.
+                    errors+=("$sess is $scope_desc but its running process holds $key=$val, the city store, not rig $want_rig's — its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).")
+                fi
             done
             got_scope=$(env_val GC_STORE_SCOPE "$penv")
             if [ -n "$got_scope" ] && [ "$got_scope" != "$want_scope" ]; then

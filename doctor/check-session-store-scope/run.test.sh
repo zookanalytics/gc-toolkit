@@ -140,6 +140,52 @@ eq "$RC" "2" "a rig-scoped agent holding another rig's store env is an ERROR"
 has "$OUT" "GC_RIG=beta" "the wrong rig is named"
 has "$OUT" "names rig beta" "the path-valued keys resolve to the wrong rig"
 
+# --- 4b. a rig-scoped agent pointing at the CITY store -----------------------
+# rig_named_by resolves only paths under <city>/rigs/, so a rig-scoped pane
+# holding the city store — BEADS_DIR=<city>/.beads or GC_STORE_ROOT=<city> —
+# resolved to empty and was skipped, passing rc=0. The city store is another
+# store than this rig's, so it is a mismatch, not a path the check cannot place.
+healthy
+pane 200 <<EOF
+GC_AGENT=alpha/city.witness
+GC_ALIAS=alpha/city.witness
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "a rig-scoped agent whose BEADS_DIR is the city bead store is an ERROR"
+has "$OUT" "BEADS_DIR=$CITY/.beads" "the city bead store path is named"
+has "$OUT" "the city store" "the finding says the value resolves to the city store"
+has "$OUT" "gc session reset alpha/city.witness" "the finding carries the remedy"
+healthy
+pane 200 <<EOF
+GC_AGENT=alpha/city.witness
+GC_ALIAS=alpha/city.witness
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=$CITY/rigs/alpha/.beads
+GC_STORE_ROOT=$CITY
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "a rig-scoped agent whose GC_STORE_ROOT is the city store root is an ERROR"
+has "$OUT" "GC_STORE_ROOT=$CITY" "the city store root path is named"
+# The no-other-rig fallback stays: a path the check cannot place against a rig
+# without config is not a finding, only the known city store is.
+healthy
+pane 200 <<EOF
+GC_AGENT=alpha/city.witness
+GC_ALIAS=alpha/city.witness
+GC_CITY_PATH=$CITY
+GC_RIG=alpha
+GC_RIG_ROOT=$CITY/rigs/alpha
+BEADS_DIR=/opt/external/store/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "0" "an unplaceable external store path is not a finding (the no-other-rig fallback holds)"
+
 # --- 5. a rig-scoped agent that lost its scope entirely ----------------------
 healthy
 pane 200 <<EOF
