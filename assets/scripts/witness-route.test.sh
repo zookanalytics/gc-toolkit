@@ -185,7 +185,8 @@ run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "the warrant goes out on the rendered address"
 has "$OUT" "UNVERIFIED" "marked unproven"
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "and so does the bug"
+has "$LOG" '"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"' "and the bug goes out on the claimable rig-scoped pool"
+hasnt "$LOG" '"gc.routed_to":"gc-toolkit.polecat"' "not the bare form no live polecat here claims"
 unset STUB_AGENTS_FAIL
 
 echo

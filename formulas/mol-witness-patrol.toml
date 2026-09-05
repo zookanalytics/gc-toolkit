@@ -70,9 +70,14 @@ TITLE and BODY first:
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-POOL=$("$SCRIPTS/resolve-route.sh" "{{binding_prefix}}polecat") || true
+# resolve-route.sh echoes its input UNVERIFIED on an unreadable roster (exit 3)
+# and this block stamps what it prints, so the input itself must be claimable.
+# The polecat pool is rig-scoped, so hand the resolver the rig-qualified form:
+# on a readable roster it still resolves to whatever is live, and the exit-3
+# fallback is a claimable address rather than the unclaimable bare role.
+POOL=$("$SCRIPTS/resolve-route.sh" "${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat") || true
 if [ -z "$POOL" ]; then
-  echo "no live polecat identity resolves from '{{binding_prefix}}polecat'; a bug filed at a guessed address is offered to nobody, so escalate instead of filing." >&2
+  echo "no live polecat identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat'; a bug filed at a guessed address is offered to nobody, so escalate instead of filing." >&2
 else
   BUG=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata "$(jq -nc --arg p "$POOL" '{"gc.routed_to":$p}')" --json | jq -r '.id // .[0].id')
   if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
