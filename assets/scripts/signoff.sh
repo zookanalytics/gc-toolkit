@@ -153,10 +153,11 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 # last sitting instead of naming a live wait. Read as a hold, it parks an
 # anchor from its first conversation onward.
 #
-# The wait itself is a bead. `gc-helm.sh demand` files what a person owes as
-# its own bead stamped gc.demand_for=<anchor>, blocking the anchor on it, and
-# the sitting closes that bead with the ruling that answers it. A live demand
-# is a live hold; none, and the takeaway records a sitting that ended.
+# The wait itself is a human gate. `gc-helm.sh demand` files what a person
+# owes as a native gate (issue_type=gate, await_type=human) stamped
+# gc.demand_for=<anchor> and blocking the anchor on it, and a sitting resolves
+# that gate (gc bd gate resolve) with the ruling that answers it. A live
+# demand is a live hold; none, and the takeaway records a sitting that ended.
 #
 # Only demands count. Rework children and `--waiting-on` edges are work in
 # flight, which the merge already holds on, and reading `blocks` at large would
@@ -294,7 +295,7 @@ if [ "$MODE" = reset ]; then
   # it left parked, so reading its takeaway as a hold would close the last way
   # out of the park.
   if takeaway_is_holding "$ANCHOR"; then
-    warn "anchor $ANCHOR is held by a live demand: a sitting is waiting on a person here, and this ruling would hand the decision back to a pool. Nothing written — close the demand with the answer, or rule through the sitting that filed it"
+    warn "anchor $ANCHOR is held by a live demand: a sitting is waiting on a person here, and this ruling would hand the decision back to a pool. Nothing written — resolve the demand gate with the answer, or rule through the sitting that filed it"
     exit 1
   fi
 

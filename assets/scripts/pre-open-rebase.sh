@@ -90,10 +90,11 @@ bd_list() { # guarded array read; non-zero = "could not tell"
 # last sitting instead of naming a live wait. Read as a hold, it parks an
 # anchor from its first conversation onward.
 #
-# The wait itself is a bead. `gc-helm.sh demand` files what a person owes as
-# its own bead stamped gc.demand_for=<anchor>, blocking the anchor on it, and
-# the sitting closes that bead with the ruling that answers it. A live demand
-# is a live hold; none, and the takeaway records a sitting that ended.
+# The wait itself is a human gate. `gc-helm.sh demand` files what a person
+# owes as a native gate (issue_type=gate, await_type=human) stamped
+# gc.demand_for=<anchor> and blocking the anchor on it, and a sitting resolves
+# that gate (gc bd gate resolve) with the ruling that answers it. A live
+# demand is a live hold; none, and the takeaway records a sitting that ended.
 #
 # Only demands count. Rework children and `--waiting-on` edges are work in
 # flight, which the merge already holds on, and reading `blocks` at large would

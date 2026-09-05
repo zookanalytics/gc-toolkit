@@ -130,10 +130,11 @@ is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 # last sitting instead of naming a live wait. Read as a hold, it parks an
 # anchor from its first conversation onward.
 #
-# The wait itself is a bead. `gc-helm.sh demand` files what a person owes as
-# its own bead stamped gc.demand_for=<anchor>, blocking the anchor on it, and
-# the sitting closes that bead with the ruling that answers it. A live demand
-# is a live hold; none, and the takeaway records a sitting that ended.
+# The wait itself is a human gate. `gc-helm.sh demand` files what a person
+# owes as a native gate (issue_type=gate, await_type=human) stamped
+# gc.demand_for=<anchor> and blocking the anchor on it, and a sitting resolves
+# that gate (gc bd gate resolve) with the ruling that answers it. A live
+# demand is a live hold; none, and the takeaway records a sitting that ended.
 #
 # Only demands count. Rework children and `--waiting-on` edges are work in
 # flight, which the merge already holds on, and reading `blocks` at large would
@@ -612,14 +613,14 @@ GATES
       skipped=$((skipped + 1))
     else
     # A live demand is the same freeze. `gc-helm.sh demand` files what a person
-    # owes as its own bead gating this anchor, and "rebase it onto the base" is
+    # owes as a human gate on this anchor, and "rebase it onto the base" is
     # routinely one horn of the question being asked. A child dispatched under
     # one performs that horn as routine branch hygiene, which answers the
     # decision by fait accompli and leaves the person ruling on work already
     # done. The anchor's own gc.routed_to is not read here: the human route sits
-    # on the demand bead, not on what it gates, and a freeze on the anchor's
-    # route would hold the merge with nothing defined to lift it. Closing the
-    # demand lifts this one, which is what the demand's own text asks for.
+    # on the demand gate, not on what it gates, and a freeze on the anchor's
+    # route would hold the merge with nothing defined to lift it. Resolving the
+    # demand gate lifts this one, which is what the demand's own text asks for.
     if takeaway_is_holding "$id"; then
       echo "$PROG: $id — PR#$num conflicts but an open demand holds it for a person's decision; no rework dispatched"
       skipped=$((skipped + 1)); continue
