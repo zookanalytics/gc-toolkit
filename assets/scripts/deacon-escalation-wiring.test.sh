@@ -23,12 +23,13 @@ grep -q 'patrol-finding\.sh' "$TOML" \
   && ok "deacon patrol files findings through patrol-finding.sh" \
   || bad "deacon patrol never references patrol-finding.sh"
 
-# Both sweeps, not just one: each resolves the writer and calls it.
+# Every filing path resolves the writer and calls it: the Dolt backup sweep,
+# the doctor sweep's per-check findings, and the doctor sweep's FAILED path.
 N_CALLS=$(grep -c 'patrol-finding\.sh" --scope deacon-findings' "$TOML")
-if [ "$N_CALLS" -ge 2 ]; then
-  ok "both sweeps (doctor, Dolt backup) file findings ($N_CALLS call sites)"
+if [ "$N_CALLS" -ge 3 ]; then
+  ok "all three filing paths call patrol-finding.sh ($N_CALLS call sites)"
 else
-  bad "expected a filing call in both sweeps, found $N_CALLS"
+  bad "expected filing calls for the backup sweep, the per-check finding, and the failed sweep; found $N_CALLS"
 fi
 
 grep -q -- '--key' "$TOML" \
@@ -40,6 +41,15 @@ grep -q -- '--key' "$TOML" \
 grep -q -- '--key "doctor-<check-name>"' "$TOML" \
   && ok "the doctor sweep keys each finding by its check name" \
   || bad "the doctor sweep must key per check, not once for the whole sweep"
+
+# The doctor sweep's FAILED path — failed, exceeded, blocked, an unnamed state,
+# or a non-zero runner RC — carries no payload to filter, so it never reaches
+# the per-check filer above. It is the doctor-sweep-failed key the header
+# describes: routed through escalate.sh it filed a fresh visit every cycle. It
+# must file ONE deduped finding instead.
+grep -q -- 'patrol-finding\.sh" --scope deacon-findings --key doctor-sweep-failed' "$TOML" \
+  && ok "the failed doctor-sweep path files a finding under --key doctor-sweep-failed" \
+  || bad "the failed doctor-sweep path must file a finding (--key doctor-sweep-failed), not escalate a visit"
 
 grep -q -- '--key dolt-backup-<db>' "$TOML" \
   && ok "the backup sweep keys each finding by its database" \
