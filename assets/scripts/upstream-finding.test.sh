@@ -301,6 +301,59 @@ eq "$(count)" "1" "the flag-first form parks exactly one bead"
 eq "$(meta up-1 gh_verb)" "issue create" "the verb is read past the leading --repo, not left as bare gh"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the target still resolves with --repo before the verb"
 
+# ── a value flag whose value is missing or another flag is refused ────────
+# gh reads the word after --repo/--title/--body as that flag's value, whatever
+# it is, so a following flag or the end of the command leaves the flag with no
+# value. gh then rejects the pasted command ("flag needs an argument" /
+# "unknown argument"), so the parked form is not one a human can paste.
+# Presence alone — the earlier test — let all of these through.
+reset_state
+
+# --repo whose value is the next flag, missing, empty, or a bare word: no target.
+OUT=$("$SUT" --message "why" -- gh issue create --repo --title T --body B 2>&1)
+eq "$?" "2" "a --repo whose value is the next flag is refused"
+eq "$(count)" "0" "nothing is parked when --repo swallowed a flag as its target"
+has "$OUT" "[HOST/]OWNER/REPO" "the refusal names the repository form expected"
+
+OUT=$("$SUT" --message "why" -- gh issue create --title T --body B --repo 2>&1)
+eq "$?" "2" "a --repo with no value at the end of the command is refused"
+
+OUT=$("$SUT" --message "why" -- gh issue create --repo= --title T --body B 2>&1)
+eq "$?" "2" "an attached --repo= with an empty value is refused"
+
+OUT=$("$SUT" --message "why" -- gh issue create --repo notarepo --title T --body B 2>&1)
+eq "$?" "2" "a --repo value that is not owner/repo is refused"
+has "$OUT" "[HOST/]OWNER/REPO" "the bare-word refusal names the form expected"
+
+# --title whose value is the next flag, or missing: gh would prompt for it.
+OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title --body B 2>&1)
+eq "$?" "2" "a --title whose value is the next flag is refused"
+eq "$(count)" "0" "nothing is parked when --title has no value"
+has "$OUT" "--title" "the refusal names the title as missing"
+hasnt "$OUT" "--body" "the present body is not named as missing"
+
+OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --body B --title 2>&1)
+eq "$?" "2" "a --title with no value at the end is refused"
+has "$OUT" "--title" "the end-of-command title refusal names the title"
+
+# --body whose value is missing, or the next flag: gh would prompt for it.
+OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title T --body 2>&1)
+eq "$?" "2" "a --body with no value at the end is refused"
+eq "$(count)" "0" "nothing is parked when --body has no value"
+has "$OUT" "--body" "the refusal names the body as missing"
+hasnt "$OUT" "--title" "the present title is not named as missing"
+
+OUT=$("$SUT" --message "why" -- gh issue comment 5 --body --repo a/b 2>&1)
+eq "$?" "2" "a --body whose value is the next flag is refused"
+has "$OUT" "--body" "the comment body refusal names the body"
+
+# The attached --flag=value form carries its own value and still parks.
+reset_state
+"$SUT" --message "why" -- gh issue create --repo=get-convex/agent --title=T --body=B >/dev/null 2>&1
+eq "$?" "0" "the attached --flag=value form parks"
+eq "$(count)" "1" "the attached form parks exactly one bead"
+eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the attached --repo=value resolves as the target"
+
 # ── the own-origin refusal ────────────────────────────────────────────────
 reset_state
 OUT=$("$SUT" --message "why" -- gh issue create --repo zookanalytics/gc-toolkit --title T --body B 2>&1)

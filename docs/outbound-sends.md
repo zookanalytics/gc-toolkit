@@ -58,17 +58,21 @@ Four refusals keep the parked command honest, because it is pasted later, by
 a person, somewhere else:
 
 - **No `--repo`, no parking.** `gh` resolves an implicit repository against
-  the current directory, and the operator's directory is not the agent's.
+  the current directory, and the operator's directory is not the agent's. A
+  `--repo` present but naming no repository — a following flag taken as its
+  value, or a bare word that is not `owner/name` — is refused the same way,
+  because `gh` cannot resolve that either.
 - **No `--body-file`.** A path is not a body; the file is gone by the time
   anyone pastes the command.
 - **One target, named once.** A command carrying two different repositories is
   refused rather than resolved by guessing, which is the one mistake that
   sends a report to the wrong project.
 - **No interactive prompt.** A write verb that stops to prompt for a field it
-  was not given — `gh issue create` with no `--title` or `--body`, a comment
-  with no `--body` — is refused. `gh` reads the omitted field from a prompt,
-  so a parked command missing it would wait instead of carrying the prepared
-  text.
+  was not given — `gh issue create` with no `--title` or `--body` value, a
+  comment with no `--body` — is refused. `gh` reads the omitted field from a
+  prompt, so a parked command missing it would wait instead of carrying the
+  prepared text. A flag whose value is the next flag counts as missing: `gh`
+  takes that flag as the value and prompts anyway.
 
 The command is quoted with `printf %q`, which collapses a multi-line body to
 one pasteable line, and the script then re-splits what it quoted and requires

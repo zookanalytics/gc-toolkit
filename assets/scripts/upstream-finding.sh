@@ -93,6 +93,28 @@ for a in "${CMD[@]:1}"; do
 done
 [ -n "$VERB" ] || VERB="gh"
 
+# gh reads the word AFTER a value flag as that flag's value, whatever it is:
+# `gh issue create --title --body B` sets the title to `--body` and then chokes
+# on the leftover `B`, and `--repo --title` takes `--title` as the repository. A
+# usable inline value is therefore one that is present and is not itself another
+# flag; the attached `--flag=value` form carries its own value and is checked
+# where it is read. A flag whose value is missing or another flag is not carried
+# by the parked command — gh rejects it on paste with "flag needs an argument"
+# or "unknown argument".
+is_value() { case "${1-}" in ''|-*) return 1 ;; *) return 0 ;; esac; }
+
+# gh's --repo takes one [HOST/]OWNER/REPO token. A value that is another flag,
+# empty, carries whitespace (two arguments fused into one), or names no
+# owner/repo pair is not a target a human can paste.
+valid_repo() {
+  case "${1-}" in
+    ''|-*|*[[:space:]]*) return 1 ;;
+    */|/*|*//*)          return 1 ;;
+    */*)                 return 0 ;;
+    *)                   return 1 ;;
+  esac
+}
+
 # The target repo, from whole-token matches only: a `--repo` inside a --body
 # VALUE is one argv element with other text around it and never matches. Every
 # occurrence must agree, because guessing which one gh would win with is the
@@ -102,12 +124,15 @@ for i in "${!CMD[@]}"; do
   [ "$skip" = 1 ] && { skip=0; continue; }
   a="${CMD[$i]}"; v=""
   case "$a" in
-    --repo|-R) v="${CMD[$((i + 1))]:-}"; skip=1 ;;
+    --repo|-R) v="${CMD[$((i + 1))]:-}"; skip=1 ;;   # value is the next token; consume it
     --repo=*)  v="${a#--repo=}" ;;
     *) continue ;;
   esac
   REPO_SEEN=1
-  [ -n "$v" ] || { warn "\`$a\` carries no repository"; exit 2; }
+  valid_repo "$v" || {
+    warn "\`$a\` needs a repository in [HOST/]OWNER/REPO form (got '${v:-<end of command>}'); gh reads the next word as the value, so a following flag or a bare word leaves the target wrong"
+    exit 2
+  }
   if [ -n "$TARGET" ] && [ "$TARGET" != "$v" ]; then
     warn "the command names two different repositories ('$TARGET' and '$v'); name the target exactly once"
     exit 2
@@ -174,6 +199,23 @@ cmd_has_flag() {
   done
   return 1
 }
+# A required value flag counts only when it carries a value: `--flag VALUE` with
+# a VALUE that is not another flag, or `--flag=VALUE` with a non-empty VALUE.
+# `--title` at the end of the command, or `--title --body`, satisfies
+# cmd_has_flag but gh still prompts for the title — the flag is there, its value
+# is not.
+flag_has_value() {
+  local want i total="${#CMD[@]}"
+  for want in "$@"; do
+    for (( i = 0; i < total; i++ )); do
+      case "${CMD[$i]}" in
+        "$want")   is_value "${CMD[$((i + 1))]:-}" && return 0 ;;
+        "$want"=*) [ -n "${CMD[$i]#*=}" ] && return 0 ;;
+      esac
+    done
+  done
+  return 1
+}
 NEED_TITLE=0; NEED_BODY=0
 case "$VERB" in
   "issue create"|"pr create")   NEED_TITLE=1; NEED_BODY=1 ;;
@@ -185,12 +227,12 @@ if [ "$VERB" = "pr create" ] && cmd_has_flag --fill --fill-first --fill-verbose;
   NEED_TITLE=0; NEED_BODY=0
 fi
 MISSING=()
-if [ "$NEED_TITLE" = 1 ] && ! cmd_has_flag --title -t; then MISSING+=("--title"); fi
-if [ "$NEED_BODY" = 1 ] && ! cmd_has_flag --body -b; then MISSING+=("--body"); fi
+if [ "$NEED_TITLE" = 1 ] && ! flag_has_value --title -t; then MISSING+=("--title"); fi
+if [ "$NEED_BODY" = 1 ] && ! flag_has_value --body -b; then MISSING+=("--body"); fi
 if [ "${#MISSING[@]}" -gt 0 ]; then
   WANT="${MISSING[0]}"
   [ "${#MISSING[@]}" -gt 1 ] && WANT="${MISSING[0]} and ${MISSING[1]}"
-  warn "\`$VERB\` with no inline $WANT would prompt for it when pasted — gh reads $WANT from an interactive prompt when the flag is omitted, so the parked command would stop and wait instead of carrying the prepared text. Add $WANT inline (a value, not a file)."
+  warn "\`$VERB\` with no inline $WANT would prompt for it when pasted — gh reads $WANT from an interactive prompt when the flag is omitted or carries no value, so the parked command would stop and wait instead of carrying the prepared text. Add $WANT inline (a value, not a file)."
   exit 2
 fi
 
