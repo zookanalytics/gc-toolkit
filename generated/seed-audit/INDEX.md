@@ -34,12 +34,12 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,716 | 1,429 |
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
-| [`converse`](agents/converse.md) | 41,132 | 10,283 |
+| [`converse`](agents/converse.md) | 45,924 | 11,481 |
 | [`deacon`](agents/deacon.md) | 8,285 | 2,071 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
-| [`keeper`](agents/keeper.md) | 21,085 | 5,271 |
-| [`mechanik`](agents/mechanik.md) | 23,347 | 5,836 |
+| [`keeper`](agents/keeper.md) | 22,389 | 5,597 |
+| [`mechanik`](agents/mechanik.md) | 24,668 | 6,167 |
 | [`polecat`](agents/polecat.md) | 20,317 | 5,079 |
 | [`polecat-codex`](agents/polecat-codex.md) | 20,347 | 5,086 |
 | [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
@@ -73,7 +73,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` | 2,583 | 645 |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` | 4,500 | 1,125 |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` | 4,335 | 1,083 |
-| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 8,189 | 2,047 |
+| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` | 8,626 | 2,156 |
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 3,494 | 873 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
