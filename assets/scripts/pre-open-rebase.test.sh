@@ -99,6 +99,8 @@ eq "$(meta "$K" target)" "main" "the child names the target it must merge into"
 eq "$(meta "$K" prepare_mode)" "rebase" "a polecat/* branch is disposable, so the mode is rebase"
 eq "$(meta "$K" "gc.routed_to")" "$POOL" "the child is routed to the fix pool"
 eq "$(meta "$K" merge_strategy)" "mr" "the child lands through the refinery"
+eq "$(meta "$K" task_kind)" "rework" "the child carries the rework role marker"
+eq "$(meta "$K" anchor_bead)" "A1" "and names its anchor, so a metadata read tells it from the anchor it shares a branch with"
 has "$(meta "$K" rejection_reason)" "head $C1_HEAD" "the reason names the head in the phrasing pr-facts.sh dedups on"
 has "$(meta "$K" rejection_reason)" "force-with-lease" "a rebase-mode work order names the force-push it needs"
 has "$(meta "$K" rejection_reason)" "Do NOT open a PR" "the child is told the anchor opens its own PR"
@@ -152,6 +154,20 @@ reset "$(pre A9 polecat/tk-c1)" '{"id":"K1","status":"in_progress","assignee":"s
 OUT=$(run --fix-pool "$POOL")
 eq "$(newcount)" "0" "a LIVE child on the branch already owns the rewrite; no twin is filed"
 has "$OUT" "already covers this branch" "and the arm says which child covers it"
+eq "$(meta K1 task_kind)" "<absent>" "a claimed covering child is NOT re-stamped: a metadata write bypasses the claim guard, so backfilling the marker under a live holder is the stomp this refuses"
+hasnt "$OUT" "re-stamped role marker on covering rework K1" "and no restamp is attempted on it"
+
+echo "# an unclaimed covering child that predates the role marker is backfilled in place"
+# Routed (so past the stranded arm) but unclaimed and unmarked at this head: a
+# child on the anchor's own branch a metadata read cannot tell from the anchor,
+# the misread the marker exists to stop. The dup arm re-stamps it in place
+# rather than route a fresh twin.
+reset "$(pre AJ polecat/tk-c1)" "$(printf '{"id":"C2","status":"open","assignee":"","title":"covering rework","metadata":{"branch":"polecat/tk-c1","gc.routed_to":"%s","rejection_reason":"stale base at head %s: ..."}}' "$POOL" "$C1_HEAD")"
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "0" "a covering child already owns the rewrite; no twin is filed"
+has "$OUT" "re-stamped role marker on covering rework C2" "the unmarked covering child is given the role marker"
+eq "$(meta C2 task_kind)" "rework" "task_kind is backfilled onto the covering child"
+eq "$(meta C2 anchor_bead)" "AJ" "and anchor_bead names the anchor, so the two are now distinguishable"
 
 reset "$(pre AA polecat/tk-c1)" "$(printf '{"id":"S1","status":"open","assignee":"","title":"stranded","metadata":{"branch":"polecat/tk-c1","rejection_reason":"stale base at head %s: ..."}}' "$C1_HEAD")"
 OUT=$(run --fix-pool "$POOL")
@@ -191,6 +207,14 @@ export STUB_DROP_KEYS="new-2:gc.routed_to"
 OUT=$(run --fix-pool "$POOL")
 has "$OUT" "did not record gc.routed_to" "a dropped route is caught by its own read-back"
 hasnt "$OUT" "filed rebase-mode rework" "and is not counted as dispatched"
+export STUB_DROP_KEYS=""
+
+reset "$(pre AH polecat/tk-c1)"
+export STUB_DROP_KEYS="new-2:task_kind"
+OUT=$(run --fix-pool "$POOL")
+has "$OUT" "did not record task_kind=rework/anchor_bead" "a role marker that will not persist is caught before the route is stamped"
+eq "$(meta new-2 "gc.routed_to")" "<absent>" "and the child is left unrouted rather than dispatched as an anchor-lookalike"
+hasnt "$OUT" "filed rebase-mode rework" "so a child a metadata read cannot tell from its anchor is never counted as dispatched"
 export STUB_DROP_KEYS=""
 
 echo "# what this arm does not enumerate"

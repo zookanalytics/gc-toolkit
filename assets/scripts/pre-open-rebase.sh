@@ -257,6 +257,38 @@ while IFS= read -r row; do
                  or (($ls | index($st)) != null))
         | .id ] | .[0] // empty' 2>/dev/null)
   if [ -n "$dup" ]; then
+    # A covering child predating this stamp — or one whose marker write
+    # half-landed — sits on the anchor's own branch with no role marker,
+    # indistinguishable from the anchor by metadata. Re-stamp only an UNCLAIMED
+    # dup that lacks it: a metadata write ignores bd's claim guard, so writing
+    # under a live holder is what this arm refuses elsewhere, and the creation
+    # path's route read-back below refuses to route an unmarked child, so a
+    # CLAIMED one can only predate this stamp. A closed dup is dispositioned and
+    # read by no live gate; an unreadable probe re-stamps nothing.
+    dneed=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r --arg id "$id" '
+      .[0] as $x
+      | if (($x | type) != "object") then "ok"
+        elif ((($x.status // "") | ascii_downcase) == "closed") then "ok"
+        elif ((($x.assignee // "") | tostring) != "") then "ok"
+        elif ((($x.metadata.task_kind // "") == "rework") and (($x.metadata.anchor_bead // "") == $id)) then "ok"
+        else "restamp" end' 2>/dev/null)
+    if [ "$dneed" = "restamp" ]; then
+      # `gc bd update` returns 0 without writing (the claim guard is one such
+      # path), so the exit code cannot prove the marker landed. Read both keys
+      # back and re-stamp once, claiming it only when it persists; the next pass
+      # reaches this same block rather than report an unmarked child as marked.
+      gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
+      dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+      if [ "$dgot" != "rework|$id" ]; then
+        gc bd update "$dup" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
+        dgot=$(gc bd show "$dup" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+      fi
+      if [ "$dgot" = "rework|$id" ]; then
+        echo "$PROG: $id re-stamped role marker on covering rework $dup (task_kind=rework, anchor_bead=$id)"
+      else
+        echo "$PROG: WARN could not re-stamp role marker on covering rework $dup (retry next pass)" >&2
+      fi
+    fi
     echo "$PROG: $id — '$branch' conflicts with '$target'; rework $dup already covers this branch at this head, no new child${stranded:+ (unrouted sibling $stranded is redundant and holds the anchor)}"
     skipped=$((skipped + 1)); continue
   fi
@@ -298,12 +330,16 @@ while IFS= read -r row; do
   # The route is stamped separately, after prepare_mode reads back. A dropped
   # branch leaves a child nothing can act on, which is the safe side; a dropped
   # prepare_mode leaves one that is routable AND rewriting, because the resume
-  # path treats an absent mode as rebase.
+  # path treats an absent mode as rebase. task_kind and anchor_bead are the role
+  # marker: the child resumes the ANCHOR's own branch, so with no marker a
+  # metadata read cannot tell the child from the anchor.
   #
   # No pr_url/pr_number/existing_pr rides this child: there is no PR yet. The
   # anchor opens its own once the branch is current, which is why the work order
   # tells the polecat not to open one.
   gc bd update "$FIX" \
+    --set-metadata task_kind=rework \
+    --set-metadata anchor_bead="$id" \
     --set-metadata branch="$branch" \
     --set-metadata target="$target" \
     --set-metadata rejection_reason="stale base at head $head_oid: '$branch' no longer merges into '$target'. $fix_instruction Do NOT open a PR — anchor $id opens its own once the branch is current." \
@@ -315,6 +351,22 @@ while IFS= read -r row; do
   mgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata.prepare_mode // empty')
   if [ "$mgot" != "$prepare_mode" ]; then
     echo "$PROG: WARN rework $FIX did not record prepare_mode=$prepare_mode; left unrouted (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  # task_kind=rework and anchor_bead are the role marker, set in the same write
+  # as prepare_mode above. That write can half-land — the exit code does not
+  # prove it — and a child dropped to no marker on the anchor's OWN branch is the
+  # misread this stamp exists to stop, yet the route below would still dispatch
+  # it. Read both back before routing. Re-stamp once; if they still will not
+  # take, leave the child unrouted (a later pass re-stamps it) rather than route
+  # a rework a metadata read cannot tell from its anchor.
+  kgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+  if [ "$kgot" != "rework|$id" ]; then
+    gc bd update "$FIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" >/dev/null 2>&1 || true
+    kgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // ""))')
+  fi
+  if [ "$kgot" != "rework|$id" ]; then
+    echo "$PROG: WARN rework $FIX did not record task_kind=rework/anchor_bead=$id; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # `gc bd update` returns 0 without having written (the claim guard is one such
