@@ -58,7 +58,7 @@ formulas/mol-feedback-miner.toml
 formulas/mol-first-reaction.toml
 1fcff42e9f5ff66b107ab9682d8045eec1a07b4d22e86b3ab26a2cbf59175169
 formulas/mol-polecat-work.toml
-291e25b49619242fc4e1c7132e5a48e772dc21e5c800e3cc9c08b8ecdfe484c9
+cd03d4a568f1c82e6d1162a0f0436b1eaa23a3965a07ce13f8e8fa5cd77793df
 formulas/mol-refinery-patrol.toml
 5bdf7c23dd6c46b3e4af888b0f8412cb3fb8f3df5dd2382b2de50c37d6da0d0b
 formulas/mol-review.toml
@@ -112,7 +112,7 @@ template-fragments/operator-next-step-trailing.template.md
 template-fragments/operator-profile.template.md
 7be3eead2af04178ed1286f6264a4e114dcb4f6d7c451bbe74f3528491eca8ee
 template-fragments/polecat-doctrine.template.md
-a204ab01ee8fded1a22324db92247c5380ad6cb3ed7d9cb6b84f0e8cb438205b
+bf0961f874ca95294015b79b1aa49950d81bc7dd87f7622b6efa5a1d1bce17cc
 template-fragments/scratch-reclaim.template.md
 f638f14c1eb3c6f5d635feb54119979eb8038f6dbd1ee9c7f65515553060cad7
 template-fragments/watch-dispatched-work.template.md
