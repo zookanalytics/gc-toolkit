@@ -6,6 +6,12 @@
 # (delta only) on the standing per-rig unnamed-waits subject via escalate.sh.
 # Also owns the standing-subject recurrence: each task_kind=triage-subject
 # bead gets a visit iff its scope set CHANGED and no visit is live.
+# A PR-gated anchor is a named wait only while its PR MOVES: past
+# LIVENESS_SWEEP_STALE_PR_DAYS since the PR's last update it classifies
+# `stale-gate` and gets its own escalate.sh visit, named per anchor rather
+# than batched. That escalation dedups on the anchor's own
+# stale_escalated_at, so it survives a restart and re-raises once per
+# LIVENESS_SWEEP_STALE_REESCALATE_DAYS instead of once-forever or per-pass.
 # Replaces formulas/mol-liveness-sweep.toml + mol-triage-recurrence.toml.
 # Caller: orders/liveness-sweep.toml (exec), after liveness-sweep-precheck.sh
 # proves the delta non-empty; safe to run by hand.
@@ -25,6 +31,14 @@ ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
 LIST_CAP="${LIVENESS_SWEEP_LIST_CAP:-20}"
+# Days since a gating PR's last update before its anchor stops counting as a
+# named wait, and the floor between two escalations about the same anchor.
+STALE_PR_DAYS="${LIVENESS_SWEEP_STALE_PR_DAYS:-2}"
+STALE_REESCALATE_DAYS="${LIVENESS_SWEEP_STALE_REESCALATE_DAYS:-3}"
+# Both ride `jq --argjson`, where a non-numeric override is not a bad threshold
+# but a parse error that aborts the whole classification.
+case "$STALE_PR_DAYS" in ''|*[!0-9]*) STALE_PR_DAYS=2 ;; esac
+case "$STALE_REESCALATE_DAYS" in ''|*[!0-9]*) STALE_REESCALATE_DAYS=3 ;; esac
 
 DRY_RUN=0
 while [ $# -gt 0 ]; do
@@ -128,11 +142,15 @@ jq -s 'add' "$LIVE" "$WIDEN" > "$ALIVE" 2>/dev/null
 jq -e 'type=="array"' "$ALIVE" >/dev/null 2>&1 \
     || { echo "$PROG: FAIL-SAFE: alive merge unreadable — sweep aborts, nothing filed" >&2; exit 1; }
 PASS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+PASS_EPOCH=$(date -u +%s)
 
 # --- open PRs, read ONCE per pass, repo-qualified from the beads' own pr_url --
 # Three-valued liveness (none/verified/unverified): a failed read hides
 # nothing — an unread repository contributes no open PRs, so its beads are
 # reported — but the visit body owes the word.
+# updatedAt rides the SAME call the open set already costs, and it is what
+# separates a PR that is being worked from one that stopped: without it every
+# open PR is a named wait forever.
 PRURLS="$TMP/prurls"; : > "$PRURLS"
 PR_LIVENESS=none
 jq -r '[ .[] | select((.metadata.merge_result // "") == "pull_request")
@@ -142,15 +160,18 @@ while IFS= read -r R; do
     [ -n "$R" ] || continue
     if [ "$PR_LIVENESS" = "none" ]; then PR_LIVENESS=verified; fi
     # --limit is required: gh pr list defaults to 30 and truncates in silence.
-    if ROWS=$(bounded gh pr list --repo "$R" --state open --limit 1000 --json url 2>/dev/null) \
+    if ROWS=$(bounded gh pr list --repo "$R" --state open --limit 1000 --json url,updatedAt 2>/dev/null) \
        && [ -n "$ROWS" ] && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        printf '%s' "$ROWS" | jq -r '.[].url // empty' >> "$PRURLS"
+        printf '%s' "$ROWS" \
+            | jq -c '.[] | {url: ((.url // "") | tostring), updated: ((.updatedAt // "") | tostring)}
+                     | select(.url != "")' >> "$PRURLS"
     else
         PR_LIVENESS=unverified
         echo "$PROG: WARN: open-PR read FAILED for $R — its PR-parked beads are reported, never hidden" >&2
     fi
 done < "$TMP/prrepos"
-OPEN_PRS=$(jq -R . < "$PRURLS" | jq -sc 'map(select(length > 0))')
+OPEN_PRS=$(jq -sc '.' "$PRURLS" 2>/dev/null)
+printf '%s' "$OPEN_PRS" | jq -e 'type == "array"' >/dev/null 2>&1 || OPEN_PRS='[]'
 
 # --- worked-via-convoy: live molecules resolved FORWARD to their work beads --
 # A slung work bead carries no worker stamp of its own; coverage requires a
@@ -245,11 +266,17 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # repairs it, so that bead reads ready while a person owes an answer on it.
 # >>> classify
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
-      --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" '
+      --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
+      --argjson nowepoch "${PASS_EPOCH:-0}" --argjson staledays "${STALE_PR_DAYS:-2}" '
   def pr_key:
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
+  # An $openprs row {url, updated} -> whole days since GitHub last touched the
+  # PR, or null when it gave no parseable timestamp.
+  def pr_age:
+    (try (((.updated // "") | tostring) | fromdateiso8601) catch null)
+    | if . == null then null else (($nowepoch - .) / 86400 | floor) end;
   def standing_kinds: ["triage-subject", "feedback-pattern"];
   # A workflow root, a scope latch and a step-spec sidecar carry a route and no
   # executable body. The route names the run, it is not an offer. Both readers
@@ -292,7 +319,18 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
   | ([ ($live[0] // [])[]
      | select((.metadata.task_kind // "") == "visit")
      | (.metadata.stall_root // empty) | select(. != "") ]) as $rootvisits
-  | ([ ($openprs // [])[] | pr_key ] | map(select(. != ""))) as $openkeys
+  | ([ ($openprs // [])[] | (.url // "") | pr_key ] | map(select(. != ""))) as $openkeys
+  # $prages carries the age of every open PR (-1 = GitHub named no usable
+  # timestamp) so the escalation body can state it. $stalekeys is the subset
+  # past the threshold, and an ageless PR joins them: this pass reports what it
+  # cannot verify rather than holding it, the same bias as every probe above.
+  | ([ ($openprs // [])[]
+       | select(((.url // "") | pr_key) != "")
+       | {key: ((.url // "") | pr_key), value: (pr_age // -1)} ] | from_entries) as $prages
+  | ([ ($openprs // [])[]
+       | select(((.url // "") | pr_key) != "")
+       | select(pr_age as $a | $a == null or $a >= $staledays)
+       | ((.url // "") | pr_key) ] | unique) as $stalekeys
   | ([ ($alive[0] // [])[]
      | (.metadata["gc.demand_for"] // "") | select(. != "") ] | unique) as $demanded
   | (($alive[0] // []) | map({key: .id, value: true}) | from_entries) as $aliveset
@@ -312,13 +350,18 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
          elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($rootvisits | index($r)) != null)) then "conversing"
          elif (($convgroups | index($b.id)) != null) then "conversing"
          elif (((.metadata.merge_result // "") == "pull_request")
-               and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null)) then "gated"
+               and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
+              then (if (((.metadata.pr_url // "") | pr_key) as $k | ($stalekeys | index($k)) != null)
+                    then "stale-gate" else "gated" end)
          elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
          elif (($gatedparents | index($b.id)) != null) then "gated"
          elif ([ .dependencies[]? | select((.type // "") == "tracks")
                  | select(($aliveset[(.depends_on_id // "")] // false)) ] | length > 0) then "gated"
          else "unnamed" end) as $class
-      | {id, title: (.title // ""), type: (.issue_type // ""), class: $class}
+      | {id, title: (.title // ""), type: (.issue_type // ""), class: $class,
+         pr: (.metadata.pr_url // ""),
+         age: (((.metadata.pr_url // "") | pr_key) as $k | ($prages[$k] // -1)),
+         escalated_at: (.metadata.stale_escalated_at // "")}
     ]')
 printf '%s' "$CLASSIFIED" | jq -e 'type == "array"' >/dev/null 2>&1 \
     || { echo "$PROG: FAIL-SAFE: classification did not produce an array — nothing filed" >&2; exit 1; }
@@ -326,6 +369,106 @@ CANDIDATES=$(printf '%s' "$CLASSIFIED" | jq -c 'map(select(.class == "unnamed") 
 # <<< classify
 echo "$PROG: funnel: $(printf '%s' "$CLASSIFIED" | jq -r 'group_by(.class) | map("\(.[0].class) \(length)") | join(" · ")')"
 echo "$PROG: liveness: pr=$PR_LIVENESS convoy=$CONVOY_LIVENESS husk=$HUSK_LIVENESS · husk roots: $(printf '%s' "$HUSK_ROOTS" | jq -r 'join(",") | if . == "" then "(none)" else . end')"
+
+# --- stale PR gates: one escalation per anchor, bounded by its own stamp ------
+# A stale-gate anchor is escalated on its own, not batched. The batch visit's
+# dispositions are route / gate / kill / park / demand, and none of them is the
+# verb for "this PR stopped moving"; the anchor is also a durable subject, so
+# escalate.sh can dedup on it by itself.
+#
+# TWO gates, and each covers what the other cannot. A live visit tracks its
+# anchor, so while one is open the anchor reaches the `conversing` arm above
+# and never gets here at all; escalate.sh refuses a duplicate on the same
+# footing. Neither survives the visit CLOSING, which is the whole defect: the
+# PR is still stale, so the next pass re-raises, and the pass after that, and
+# every 6h forever. stale_escalated_at is what bounds that retry, and it does
+# so across a session recycle and a wiped state directory too, because it
+# lives in the bead store rather than beside the process. An anchor that lands
+# or closes leaves the ready set entirely and is never re-raised, so
+# "superseded" needs no stamp of its own.
+#
+# The stamp is written only once escalate.sh reports success, and success
+# includes "a visit is already open": either way a human now holds the
+# question and nothing is owed until the floor is up. A failure leaves the
+# anchor unstamped, so the next pass retries instead of losing the escalation.
+STALE_ROWS="$TMP/stale-rows"; : > "$STALE_ROWS"
+stale_escalations() {
+    local rows row id pr age last body out route filed=0 held=0 failed=0 age_words
+    rows=$(printf '%s' "$CLASSIFIED" | jq -c --argjson now "$PASS_EPOCH" \
+        --argjson floor "$((STALE_REESCALATE_DAYS * 86400))" '
+      [ .[] | select(.class == "stale-gate")
+        | . + {due: ((.escalated_at // "") as $e
+                     | if $e == "" then true
+                       else ((try ($e | fromdateiso8601) catch null) as $t
+                             | if $t == null then true else ($now - $t) >= $floor end)
+                       end)} ]' 2>/dev/null)
+    if ! printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "$PROG: WARN: the stale-gate rows did not read back as an array — nothing escalated, nothing stamped" >&2
+        return 0
+    fi
+    printf '%s' "$rows" | jq -c '.[]' > "$STALE_ROWS" 2>/dev/null
+    [ -s "$STALE_ROWS" ] || return 0
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        id=$(printf '%s' "$row" | jq -r '.id // ""')
+        pr=$(printf '%s' "$row" | jq -r '.pr // ""')
+        age=$(printf '%s' "$row" | jq -r '.age // -1')
+        last=$(printf '%s' "$row" | jq -r '.escalated_at // ""')
+        [ -n "$id" ] || continue
+        if [ "$(printf '%s' "$row" | jq -r '.due')" != "true" ]; then
+            held=$((held + 1))
+            echo "$PROG: $id: stale gate raised $last — inside the ${STALE_REESCALATE_DAYS}d floor, not re-raised"
+            continue
+        fi
+        # -1 is the ageless case: GitHub answered with no parseable updatedAt.
+        case "$age" in
+            ''|*[!0-9]*) age_words="GitHub reported no readable last-update time for it" ;;
+            *)           age_words="GitHub last recorded activity on it $age day(s) ago" ;;
+        esac
+        body="stale PR gate: $id is parked on a PR that stopped moving
+$pr
+$age_words, past the ${STALE_PR_DAYS}-day threshold.
+
+This anchor counts as a named wait only while its PR moves. It stopped, so
+nothing else surfaces it: the batch triage visit lists unnamed waits and this
+is not one, and merge.sh re-enumerates the anchor every cadence pass but
+cannot land it while the PR sits.
+
+Dispositions: land it (review and merge the PR) · kill it (close the PR, then
+gc bd close $id --reason \"<why>\") · park it on a real blocker (gc bd dep add
+$id <blocker> — the edge IS the park).
+
+Raised at most once every ${STALE_REESCALATE_DAYS} days per anchor, from
+${id}'s own stale_escalated_at. Closing this visit does not move the PR; the
+next pass past the floor raises it again while the PR is still stale."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            echo "$PROG: dry-run: would escalate $id on $pr [anchor-stale]"
+            filed=$((filed + 1))
+            continue
+        fi
+        if ! out=$("$ESCALATE" --subject "$id" --key anchor-stale --message "$body"); then
+            failed=$((failed + 1))
+            echo "$PROG: WARN: escalate.sh failed for $id — NOT stamped, the next pass retries" >&2
+            continue
+        fi
+        printf '%s\n' "$out"
+        filed=$((filed + 1))
+        # The route is only printed on the line that files a visit; on the
+        # already-open path that visit already carries its own, so the prior
+        # stale_escalated_to stands rather than being overwritten with a guess.
+        route=$(printf '%s' "$out" | sed -n 's/.*-> \([A-Za-z0-9._/-]*\).*/\1/p' | head -n1)
+        if [ -n "$route" ]; then
+            bd_write update "$id" --set-metadata "stale_escalated_at=$PASS_AT" \
+                --set-metadata "stale_escalated_to=$route" >/dev/null 2>&1 \
+                || echo "$PROG: WARN: could not stamp stale_escalated_at on $id — it re-escalates next pass" >&2
+        else
+            bd_write update "$id" --set-metadata "stale_escalated_at=$PASS_AT" >/dev/null 2>&1 \
+                || echo "$PROG: WARN: could not stamp stale_escalated_at on $id — it re-escalates next pass" >&2
+        fi
+    done < "$STALE_ROWS"
+    echo "$PROG: stale gates: $filed raised, $held inside the floor, $failed failed"
+}
+stale_escalations
 
 # --- the standing unnamed-waits subject (create on first run) -----------------
 SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subject")

@@ -58,20 +58,30 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
-# gh stub: only signal-loom answers, with #521/#522 open (so #520 merged and
+# gh stub: only zook/gc-toolkit answers, with #521/#522 open (so #520 merged and
 # #999 closed stay VISIBLE through the intersection). GH_FAIL = a real outage.
+# It serves $GH_PRS verbatim, which is how a test ages a PR: the sweep asks for
+# url,updatedAt and reads both, so a stub that answered only url would classify
+# every PR ageless and hide the case these tests are about.
 cat > "$TMP/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [ -n "${GH_FAIL:-}" ] && exit 1
 repo=""
 while [ $# -gt 0 ]; do case "$1" in --repo) repo="$2"; shift 2 ;; *) shift ;; esac; done
 case "$repo" in
-  */zookanalytics/signal-loom|zookanalytics/signal-loom)
-    printf '%s\n' '[{"url":"https://github.com/zookanalytics/signal-loom/pull/521"},{"url":"https://github.com/zookanalytics/signal-loom/pull/522"}]' ;;
+  */zook/gc-toolkit|zook/gc-toolkit) cat "$GH_PRS" ;;
   *) printf '[]\n' ;;
 esac
 GH
 chmod +x "$TMP/bin/gh"
+
+iso_ago() { date -u -d "-$1 days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-"$1"d +%Y-%m-%dT%H:%M:%SZ; }
+gh_prs() { # gh_prs <days-since-update:521> <days-since-update:522>
+    printf '[{"url":"https://github.com/zook/gc-toolkit/pull/521","updatedAt":"%s"},{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' \
+        "$(iso_ago "$1")" "$(iso_ago "$2")" > "$TMP/gh-prs.json"
+}
+gh_prs 0 0
+export GH_PRS="$TMP/gh-prs.json"
 
 # escalate.sh stub: records the call, answers like the real tool.
 cat > "$TMP/bin/escalate.sh" <<'ESC'
@@ -116,10 +126,10 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-takeaway-empty","title":"hold was cleared","issue_type":"task","metadata":{"gc.takeaway":""}},
   {"id":"c-demand-live","title":"a person owes an answer here","issue_type":"task","metadata":{"gc.takeaway":"holding — which of the two?"}},
   {"id":"c-demand-widen","title":"its demand is deferred, not closed","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
-  {"id":"c-pr-open","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zookanalytics/signal-loom/pull/521"}},
-  {"id":"c-pr-case","title":"same PR, different case + trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://GitHub.com/zookanalytics/signal-loom/pull/522/files"}},
-  {"id":"c-pr-merged","title":"landed — surfaces for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_url":"https://github.com/zookanalytics/signal-loom/pull/520"}},
-  {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zookanalytics/signal-loom/pull/999"}},
+  {"id":"c-pr-open","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
+  {"id":"c-pr-case","title":"same PR, different case + trailing path","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://GitHub.com/zook/gc-toolkit/pull/522/files"}},
+  {"id":"c-pr-merged","title":"landed — surfaces for close-out","issue_type":"task","metadata":{"merge_result":"merged","pr_url":"https://github.com/zook/gc-toolkit/pull/520"}},
+  {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 in another repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url","issue_type":"task","metadata":{"merge_result":"pull_request"}},
   {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
@@ -362,6 +372,87 @@ grep -q "husk=unverified" <<< "$OUT" && ok "a failed anchor read is 'unverified'
 grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
     && ok "a failed anchor read keeps the step a candidate (reported)" \
     || bad "failed anchor read hides nothing" "$(cat "$BASELINE_FILE")"
+
+echo "── a PR-gated anchor is a named wait only while its PR MOVES ──"
+# The defect: an anchor parked on a PR that stopped is invisible to every pass.
+# The PR names the wait, so it is not an unnamed wait and the batch visit skips
+# it; nothing else looks. It has to become its own escalation, on the anchor.
+gh_prs 0 0
+run_sweep "$EXPECT_SURVIVORS"
+grep -q anchor-stale "$ESC_CALLS" \
+    && bad "a moving PR stays gated" "escalated anyway: $(cat "$ESC_CALLS")" \
+    || ok "a PR updated today stays gated — nothing escalated"
+
+gh_prs 9 0
+run_sweep "$EXPECT_SURVIVORS"
+eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" "a PR idle past the threshold escalates exactly once"
+grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
+    && ok "…with the ANCHOR as subject and one stable key" || bad "stale subject/key" "$(cat "$ESC_CALLS")"
+grep -q 'c-pr-case' "$ESC_CALLS" \
+    && bad "the sibling PR that is still moving is untouched" "c-pr-case escalated too" \
+    || ok "the sibling PR that is still moving is untouched"
+grep -q 'bd update c-pr-open --set-metadata stale_escalated_at=' "$GC_CALLS" \
+    && ok "…and the anchor is stamped stale_escalated_at" || bad "stale_escalated_at stamp" "$(cat "$GC_CALLS")"
+grep -q 'stale_escalated_to=gc-toolkit.converse' "$GC_CALLS" \
+    && ok "…and stale_escalated_to records the route escalate.sh reported" \
+    || bad "stale_escalated_to stamp" "$(cat "$GC_CALLS")"
+grep -q '9 day' "$ESC_BODIES" && ok "the body states how long the PR has been idle" || bad "body age" "$(cat "$ESC_BODIES")"
+grep -q 'pull/521' "$ESC_BODIES" && ok "…and names the PR" || bad "body names the PR" "$(cat "$ESC_BODIES")"
+case ",$(cat "$BASELINE_FILE")," in
+    *",c-pr-open,"*) bad "a stale gate is never doubled into the batch" "it entered the baseline too" ;;
+    *) ok "a stale gate is escalated alone, never also batched as an unnamed wait" ;;
+esac
+
+echo "── the dedup is the anchor's own stamp, so a wiped state dir cannot lose it ──"
+# run_sweep deletes the state directory on every call, which IS the recycle the
+# /tmp marker file could not survive: here the ONLY thing that can suppress a
+# second escalation is durable bead state.
+stamp_pr_open() { jq --arg t "$1" 'map(if .id == "c-pr-open" then .metadata.stale_escalated_at = $t else . end)' \
+    "$TMP/ready.json" > "$TMP/ready-stamped.json"; }
+gh_prs 9 0
+stamp_pr_open "$(iso_ago 1)"
+FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
+grep -q anchor-stale "$ESC_CALLS" \
+    && bad "a stamped anchor inside the floor is not re-raised" "re-escalated: $(cat "$ESC_CALLS")" \
+    || ok "a stamped anchor inside the floor is not re-raised, fresh state dir and all"
+grep -q "inside the 3d floor" <<< "$OUT" && ok "…and the pass says so" || bad "floor line" "$OUT"
+
+stamp_pr_open "$(iso_ago 5)"
+FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
+eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
+   "past the floor the same anchor is raised again — bounded retry, not once-forever"
+
+stamp_pr_open "not-a-timestamp"
+FAKE_READY="$TMP/ready-stamped.json" run_sweep "$EXPECT_SURVIVORS"
+eq "$(grep -c anchor-stale "$ESC_CALLS")" "1" \
+   "an unreadable stamp re-raises rather than muting the anchor forever"
+
+echo "── an unverifiable age reports, and a failed escalation stamps nothing ──"
+printf '[{"url":"https://github.com/zook/gc-toolkit/pull/521"},{"url":"https://github.com/zook/gc-toolkit/pull/522","updatedAt":"%s"}]\n' \
+    "$(iso_ago 0)" > "$TMP/gh-prs.json"
+run_sweep "$EXPECT_SURVIVORS"
+grep -q '^c-pr-open anchor-stale$' "$ESC_CALLS" \
+    && ok "a PR GitHub gave no updatedAt for is REPORTED, never held" || bad "ageless PR" "$(cat "$ESC_CALLS")"
+grep -q 'no readable last-update time' "$ESC_BODIES" \
+    && ok "…and the body says the age is unknown instead of inventing one" || bad "ageless body" "$(cat "$ESC_BODIES")"
+
+gh_prs 9 0
+GH_FAIL=1 run_sweep "$EXPECT_SURVIVORS"
+grep -q anchor-stale "$ESC_CALLS" \
+    && bad "an unread PR set escalates no stale gate" "escalated on data it never read" \
+    || ok "an unread PR set escalates no stale gate — the bead falls to the batch instead"
+
+ESC_FAIL=1 run_sweep "$EXPECT_SURVIVORS"
+grep -q stale_escalated "$GC_CALLS" \
+    && bad "a failed escalation stamps nothing" "stamped anyway: $(grep stale_escalated "$GC_CALLS")" \
+    || ok "a failed escalation stamps nothing — the next pass retries it"
+
+rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"; : > "$GC_CALLS"; : > "$ESC_CALLS"
+bash "$SCRIPT" --dry-run >/dev/null 2>&1
+eq "$(cat "$ESC_CALLS")" "" "--dry-run escalates no stale gate"
+grep -q stale_escalated "$GC_CALLS" && bad "--dry-run stamps no anchor" "it stamped one" \
+    || ok "--dry-run stamps no anchor"
+gh_prs 0 0
 
 echo "── the standing subject is created on first run, idempotently ──"
 jq '[.[] | select(.id != "tk-subject")]' "$TMP/live.json" > "$TMP/live-nosubj.json"
