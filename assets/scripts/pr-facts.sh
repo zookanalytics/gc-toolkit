@@ -149,18 +149,33 @@ is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 # it exists to lift, so this discriminator excludes it, and only a demand a
 # converse sitting owns (any other writer) holds the anchor here.
 #
-# Fails CLOSED — a ledger that will not read answers "held", because releasing
-# an anchor a person is holding hands their decision back to a pool.
-takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an answer here
+# demand_gate_state reads the demand ledger for an anchor in three, because its
+# two callers ask opposite questions of the same rows:
+#   0  a demand a converse sitting owns (by != signoff) holds the anchor
+#   1  the ledger read cleanly and no such demand holds
+#   2  the ledger would not read — the list failed or returned a non-array
+# gc.demand_for names the demand's anchor; the cap's own demand (by=signoff) is
+# excluded, so a retire never reads the demand it filed as a live hold.
+demand_gate_state() { # <anchor-id>
   local rows
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 0
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
   rows=$(printf '%s' "$rows" | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
     '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
             | select(((.metadata["gc.takeaway_by"] // "") | tostring) != "signoff") ] | length > 0' \
-    >/dev/null 2>&1
+    >/dev/null 2>&1 && return 0
+  return 1
+}
+# Fails CLOSED — a ledger that will not read answers "held", because releasing an
+# anchor a person is holding hands their decision back to a pool. The retire path
+# needs only that boolean and collapses "unreadable" into "held"; the cap writer
+# reads demand_gate_state directly, because a park must stand on a demand it
+# proved, not on a read that did not happen.
+takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an answer here
+  local st; demand_gate_state "${1:-}"; st=$?
+  [ "$st" -ne 1 ]
 }
 # Close the demand the cap filed to gate this anchor (gc.demand_for=<anchor>,
 # gc.takeaway_by=signoff), and PROVE it closed. The park and its demand retire

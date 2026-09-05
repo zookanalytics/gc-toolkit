@@ -741,6 +741,21 @@ eq "$rc" 0 "the cap path exits 0 with a sitting's demand already present"
 eq "$(meta tk-anc merge_hold)" "signoff_cap" "…the cap still parks the anchor"
 eq "$(cat "$STUB_HELM_LOG")" "" "…but files no demand of its own over the sitting's"
 
+# takeaway_is_holding fails CLOSED to "held", which for a RELEASE is right; the
+# cap writer asks the opposite — may I stamp a park? — and reads demand_gate_state
+# directly so a ledger that will not answer is not mistaken for a demand already
+# present. Read as "held" the old boolean skipped filing AND parked anyway,
+# leaving the marker-only hold this arm exists to prevent.
+echo "# an unreadable demand ledger refuses the cap park (no marker without a proven edge)"
+reset "$ANCHOR_PR" "$(kid 1 closed '"source_review_bead":"r1"')$(kid 2 closed '"source_review_bead":"r2"')$(kid 3 open '"source_review_bead":"r3"')"
+seed_cap_deps c1 c2 c3
+out=$(STUB_LIST_FAIL=1 "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 2 "an unreadable demand ledger refuses the park"
+eq "$(meta tk-anc merge_hold)" "<absent>" "…the anchor is NOT parked when the ledger cannot say if one already holds"
+eq "$(cat "$STUB_HELM_LOG")" "" "…and no demand is filed on a read that did not happen"
+eq "$(status rv-1)" "in_progress" "…the review bead stays open for a retry"
+has "$out" "could not read the demand ledger" "…and the refusal names the unreadable ledger, not a failed file"
+
 # pr-facts.sh's retire arm reads gc.takeaway_by to tell the cap's own board
 # sentence from a sitting's decision on the anchor. A takeaway that lands
 # without its provenance reads as the sitting's, so the operator feedback meant

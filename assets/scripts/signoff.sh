@@ -172,18 +172,33 @@ is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/nu
 # it exists to lift, so this discriminator excludes it, and only a demand a
 # converse sitting owns (any other writer) holds the anchor here.
 #
-# Fails CLOSED — a ledger that will not read answers "held", because releasing
-# an anchor a person is holding hands their decision back to a pool.
-takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an answer here
+# demand_gate_state reads the demand ledger for an anchor in three, because its
+# two callers ask opposite questions of the same rows:
+#   0  a demand a converse sitting owns (by != signoff) holds the anchor
+#   1  the ledger read cleanly and no such demand holds
+#   2  the ledger would not read — the list failed or returned a non-array
+# gc.demand_for names the demand's anchor; the cap's own demand (by=signoff) is
+# excluded, so a retire never reads the demand it filed as a live hold.
+demand_gate_state() { # <anchor-id>
   local rows
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 0
+           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
   rows=$(printf '%s' "$rows" | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
     '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
             | select(((.metadata["gc.takeaway_by"] // "") | tostring) != "signoff") ] | length > 0' \
-    >/dev/null 2>&1
+    >/dev/null 2>&1 && return 0
+  return 1
+}
+# Fails CLOSED — a ledger that will not read answers "held", because releasing an
+# anchor a person is holding hands their decision back to a pool. The retire path
+# needs only that boolean and collapses "unreadable" into "held"; the cap writer
+# reads demand_gate_state directly, because a park must stand on a demand it
+# proved, not on a read that did not happen.
+takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an answer here
+  local st; demand_gate_state "${1:-}"; st=$?
+  [ "$st" -ne 1 ]
 }
 # Close the demand the cap filed to gate this anchor (gc.demand_for=<anchor>,
 # gc.takeaway_by=signoff), and PROVE it closed. The park and its demand retire
@@ -767,14 +782,23 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
   # without the edge behind them. gate-ensure suppresses redispatch under
   # merge_hold, so no later pass re-fires this arm to file a demand it left
   # unfiled — a park stamped without one holds forever with nothing to answer.
-  # A converse sitting's demand already gates the anchor (takeaway_is_holding
-  # excludes the cap's own), and refiling would overwrite that sitting's
-  # provenance, so file only when none holds. gc-helm.sh demand is idempotent on
-  # the cap's own (one per gated bead, by=signoff), reads its blocks edge back
-  # before it returns, and stamps gc.demand_for to exempt the terminal end from
-  # the same check. When it cannot land the demand, leave the anchor UNPARKED
-  # and the review open for a retry rather than record a park nothing gates.
-  if ! takeaway_is_holding "$ANCHOR" \
+  # demand_gate_state reads the ledger in three. A converse sitting's demand
+  # already gates the anchor (its own, by=signoff, is excluded): refiling would
+  # overwrite that sitting's provenance, so the cap files none and parks. None
+  # holds: the cap files its own before parking. The ledger will not read: a park
+  # stamped on a read that did not happen is the marker-without-an-edge this arm
+  # exists to prevent, so refuse it. gc-helm.sh demand is idempotent on the cap's
+  # own (one per gated bead, by=signoff), reads its blocks edge back before it
+  # returns, and stamps gc.demand_for to exempt the terminal end from the same
+  # check. When the ledger is unreadable, or the demand it says to file will not
+  # land, leave the anchor UNPARKED and the review open for a retry rather than
+  # record a park nothing gates.
+  demand_gate_state "$ANCHOR"; DEMAND_STATE=$?
+  if [ "$DEMAND_STATE" -eq 2 ]; then
+    warn "the round cap on $ANCHOR could not read the demand ledger to tell whether a person already holds it (gc bd list failed or returned no listing); a park stamped now could stand with no edge behind it, so the anchor is left UNPARKED and the review bead stays open for a retry. Re-run the verdict once the ledger reads."
+    exit 2
+  fi
+  if [ "$DEMAND_STATE" -eq 1 ] \
      && ! "$HELM" demand "$ANCHOR" "$CAP_HEADLINE" --by signoff --kind decision >/dev/null 2>&1; then
     warn "the round cap on $ANCHOR could not file the demand that gates its park (gc-helm.sh demand failed); the anchor is left UNPARKED and the review bead stays open for a retry. File it by hand, then re-run the verdict: $HELM demand $ANCHOR '<what a person owes>' --by signoff --kind decision"
     exit 2
