@@ -136,6 +136,10 @@ case "$1 $2" in
   "status --porcelain")    [ -n "${FAKE_DIRTY:-}" ] && printf '%s\n' "$FAKE_DIRTY"; exit 0 ;;
   "ls-remote origin")      [ -n "${FAKE_PUSHED:-}" ] && printf '%s\n' "$FAKE_PUSHED"; exit 0 ;;
 esac
+if [ "$1" = "checkout" ] || { [ "$1" = "branch" ] && [ "$2" = "-D" ]; }; then
+  printf 'GIT|%s\n' "$*" >> "${FAKE_LOG:-/dev/null}"
+  exit "${FAKE_GIT_RC:-0}"
+fi
 exit 0
 GIT
 
@@ -247,8 +251,10 @@ eq "$(run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}')" \
    "1|ESCALATE;HOLD;DRAIN;" \
    "rework: halts on a forked polecat/<bead-id> branch, not just any mismatch"
 
-# submit step 4 detaches HEAD before deleting the branch, so a re-run of this
-# step lands here. An empty branch name must never be treated as a match.
+# An empty branch name must never be treated as a match. The branch release
+# is ordered behind every durable write the step owes (asserted in section 7),
+# so a detached HEAD here is not a stage the recipe walks through on its way
+# to one.
 eq "$(run_gate '' '{"branch":"polecat/su-uzy9.5"}')" \
    "1|ESCALATE;HOLD;DRAIN;" \
    "detached HEAD with metadata.branch set: halts"
@@ -589,9 +595,12 @@ eq "$(run_anchor_resolve polecat/su-uzy9.5 \
    "0|tk-zzzz9" \
    "two candidates -> oldest on created_at, matching merge-push's tiebreak"
 
-# Step 4 detaches HEAD, so a re-run reaches this with no branch name. An empty
-# branch must not be sent to `--metadata-field branch=`, which matches every
-# bead recording no branch at all.
+# The branch name can be empty here. This block re-reads it in its own shell,
+# and a worktree resumed after a release arrives detached. Step 1's gate halts a
+# detached HEAD before this point, and step 8's release runs after it, so an
+# empty name is a malformed or resumed shape rather than a normal continuation.
+# It must not be sent to `--metadata-field branch=`, which matches every bead
+# recording no branch at all.
 eq "$(run_anchor_resolve '' "$ANCHOR_ROW")" "0|" \
    "detached HEAD: no lookup rather than matching branchless beads"
 
@@ -1059,7 +1068,66 @@ awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-
 eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
 
-# --- 7. Negative control. -----------------------------------------------------
+# --- 7. The branch release. ---------------------------------------------------
+# Releasing the branch destroys the shape section 1's gate asserts, so it is
+# ordered behind every durable write the step owes. Ahead of one, a session
+# that dies in the window leaves that write undone with the submit step still
+# open, and the re-offer reads an empty CURRENT_BRANCH against a set
+# metadata.branch and halts before it can reach the write. There are two such
+# writes, the handoff and the step chain's close, and each gets its assertion.
+HANDOFF_END=$(grep -n '^# <<< submit-target-consume$' "$TOML" | cut -d: -f1)
+CLOSE_END=$(grep -n '^# <<< submit-chain-close$' "$TOML" | cut -d: -f1)
+RELEASE_START=$(grep -n '^# >>> submit-branch-release$' "$TOML" | cut -d: -f1)
+if [ -n "$HANDOFF_END" ] && [ -n "$RELEASE_START" ] && [ "$RELEASE_START" -gt "$HANDOFF_END" ]; then
+  ok "branch release is ordered AFTER the atomic handoff"
+else
+  bad "branch release must follow the handoff (handoff ends ${HANDOFF_END:-?}, release starts ${RELEASE_START:-?})"
+fi
+
+if [ -n "$CLOSE_END" ] && [ -n "$RELEASE_START" ] && [ "$RELEASE_START" -gt "$CLOSE_END" ]; then
+  ok "branch release is ordered AFTER the step chain's close"
+else
+  bad "branch release must follow the chain close (close ends ${CLOSE_END:-?}, release starts ${RELEASE_START:-?})"
+fi
+
+RELEASE="$(extract submit-branch-release)"
+[ -n "$RELEASE" ] \
+  && ok "branch release extracted between submit-branch-release markers" \
+  || bad "branch-release extraction EMPTY — markers missing from $TOML"
+
+printf '%s\n' "$RELEASE" > "$TMP/release.sh"
+bash -n "$TMP/release.sh" \
+  && ok "extracted branch release is syntactically valid bash" \
+  || bad "extracted branch release failed bash -n"
+
+# run_release <current-branch> [git-rc] -> "<rc>|<git calls>"
+run_release() {
+  : > "$TMP/log"
+  printf '%s\n' "$RELEASE" > "$TMP/release.sh"
+  local rc=0
+  FAKE_BRANCH="$1" FAKE_GIT_RC="${2-0}" FAKE_LOG="$TMP/log" \
+    bash "$TMP/release.sh" > "$TMP/out" 2>&1 || rc=$?
+  printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
+}
+
+eq "$(run_release polecat/tk-work)" \
+   "0|GIT|checkout --detach;GIT|branch -D polecat/tk-work;" \
+   "on a branch: detaches, then deletes the branch it was standing on"
+
+# The name is re-read here rather than carried from section 1, so an already
+# detached worktree deletes nothing. `git branch -D ""` is the call this guard
+# exists to prevent.
+eq "$(run_release '')" \
+   "0|" \
+   "already detached: releases nothing"
+
+# The handoff is written by the time this runs, so a failure costs a held ref.
+# It must not surface as a non-zero exit that reads like a failed submit.
+eq "$(run_release polecat/tk-work 1)" \
+   "0|GIT|checkout --detach;" \
+   "a failed release still exits 0 (the handoff is already durable)"
+
+# --- 8. Negative control. -----------------------------------------------------
 # Everything above passes against the shipped snippets. That proves nothing
 # unless the same fixtures FAIL against the implementation being replaced —
 # otherwise a future reconciliation could restore base and the suite would stay
