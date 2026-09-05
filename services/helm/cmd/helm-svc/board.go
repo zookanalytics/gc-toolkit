@@ -181,6 +181,7 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 
 	now := time.Now().UTC()
 	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
+	b.PackHealth = source.GatherPackHealth(source.DiscoverCityPath(), now)
 
 	limit := opts.limit
 	if limit < 0 {
@@ -295,6 +296,9 @@ const (
 	colNM       = 7
 	colFrontier = 36
 	colNeedsMax = 140
+	// colPackName sizes the component column of the pack-build lines, which are
+	// their own two-column layout above the table rather than part of it.
+	colPackName = 10
 )
 
 // colWidth sizes an identifier column to the widest value on THIS board plus a
@@ -369,8 +373,25 @@ func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, 
 	renderLegend(w)
 }
 
-// renderTable writes the city overview: the header, the ranked table, and the
-// legend that says what the bands and the held glyph mean.
+// renderPackHealth writes one line per compiled component the pack builds out
+// of band. The rows are unconditional — an all-current build says so rather
+// than saying nothing, because a section that appears only on trouble is a
+// section nobody learns to read.
+//
+// A city with no status files at all prints nothing: that is a city whose build
+// orders have never run, and inventing a row for it would report a state
+// nobody measured.
+func renderPackHealth(w io.Writer, rows []board.PackBuild) {
+	for _, r := range rows {
+		// colHeld+4 rather than the label's own width: "PACK" fills a 4-wide
+		// cell exactly, and a cell with no gutter butts against the band.
+		fmt.Fprintf(w, "%s%s%s%s\n", rpad("PACK", colHeld+4), rpad(string(r.Severity), colSeverity),
+			rpad(r.Component, colPackName), clip(r.Detail, colNeedsMax))
+	}
+}
+
+// renderTable writes the city overview: the header, the pack-build lines, the
+// ranked table, and the legend that says what the bands and the held glyph mean.
 func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, rigCount int) {
 	fmt.Fprint(w, "gc-helm — cross-rig human-attention board\n")
 	stamp := now.Format("2006-01-02T15:04:05Z")
@@ -401,10 +422,14 @@ func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, 
 		closedSfx = fmt.Sprintf(" · %d closed", done)
 	}
 	if len(shown) < b.Total {
-		fmt.Fprintf(w, "%s · %d rigs · showing %d of %d anchors (live)%s\n\n", stamp, rigCount, shownLive, live, closedSfx)
+		fmt.Fprintf(w, "%s · %d rigs · showing %d of %d anchors (live)%s\n", stamp, rigCount, shownLive, live, closedSfx)
 	} else {
-		fmt.Fprintf(w, "%s · %d rigs · %d anchors (live)%s\n\n", stamp, rigCount, live, closedSfx)
+		fmt.Fprintf(w, "%s · %d rigs · %d anchors (live)%s\n", stamp, rigCount, live, closedSfx)
 	}
+	// Before the anchors, and before the empty-board early return: a build that
+	// failed is most worth reading on the day nothing else needs attention.
+	renderPackHealth(w, b.PackHealth)
+	fmt.Fprint(w, "\n")
 
 	if b.Total == 0 {
 		fmt.Fprint(w, "No open anchors need attention. (Nothing floats.)\n")
@@ -498,6 +523,7 @@ func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
 	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
 	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. gc-helm.sh dismiss <id> clears one now, and a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
+	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
 }
 

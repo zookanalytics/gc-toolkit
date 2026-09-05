@@ -17,6 +17,13 @@ harness_init() {
   PASS=0; FAIL=0
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
+  # Pin the merge cadence to its shell implementations. The scripts prefer a
+  # deployed `gctk` binary, resolved from the ambient GC_CITY — and these suites
+  # run from a tree INSIDE a live city, so left alone a suite would silently
+  # test whichever implementation that city last built. A suite that means to
+  # exercise the port says so by overriding this after harness_init, the way
+  # lifecycle.test.sh does for its second arm.
+  export GCTK_BIN=none
   export STUB_STORE="$TMP/beads.json"
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_GC_LOG="$TMP/gc.log"
@@ -32,6 +39,7 @@ harness_init() {
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
   export STUB_TOPLEVEL="" STUB_FETCHED_HEAD="" STUB_FETCH_RC=""
   export STUB_PR_CREATE_URL="" STUB_PR_CREATE_RC=0 STUB_PR_MERGE_RC=0 STUB_DISMISS_RC=0
+  export STUB_PR_EDIT_RC=0
   export STUB_GQL_READ_FAIL="" STUB_REACT_RC=0 STUB_REPLY_RC=0 STUB_RESOLVE_RC=0
   export STUB_DELETE_SOURCE_RC="" STUB_DELETE_SOURCE_OUT="" STUB_REOPEN_SOURCE_RC=""
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"
@@ -338,6 +346,28 @@ case "$sub" in
         [ -s "$f" ] && cat "$f" || echo '[]' ;;
       merge)   exit "${STUB_PR_MERGE_RC:-0}" ;;
       comment) exit 0 ;;
+      edit)
+        # The edit MUTATES the fixture the next `pr view` serves, so a second
+        # pass over an unchanged store is idempotent because the caller read
+        # back its own write — not because the stub forgot it. --title is
+        # recorded the same way, so a suite can assert it was never passed.
+        n="${1:-}"; shift || true
+        f="$G/pr_view_$n.json"
+        [ -s "$f" ] || { echo "gh: no such pr" >&2; exit 1; }
+        [ "${STUB_PR_EDIT_RC:-0}" = "0" ] || exit "${STUB_PR_EDIT_RC:-0}"
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --body-file)
+              shift
+              [ -f "${1:-}" ] || { echo "gh: no such body file" >&2; exit 1; }
+              t=$(mktemp)
+              jq --rawfile b "$1" '.body = $b' "$f" > "$t" && mv "$t" "$f" ;;
+            --title) shift; t=$(mktemp)
+              jq --arg v "${1:-}" '.title = $v' "$f" > "$t" && mv "$t" "$f" ;;
+          esac
+          shift || true
+        done
+        exit 0 ;;
       create)
         # The composed body reaches the log only as a temp path, so keep a copy
         # of what the reviewer would read.
@@ -494,13 +524,13 @@ case "$sub" in
       */pulls/*/reviews/*/dismissals)
         printf 'DISMISS %s\n' "$path" >> "${STUB_GH_LOG:?}"
         exit "${STUB_DISMISS_RC:-0}" ;;
-      */pulls/*/reviews*)
+      */pulls/*/reviews*|*/pulls/*/comments*)
         n="${path##*/pulls/}"; n="${n%%/*}"
-        f="$G/reviews_$n.json"
-        [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
-      */pulls/*/comments*)
-        n="${path##*/pulls/}"; n="${n%%/*}"
-        f="$G/comments_$n.json"
+        # STUB_GH_LIST_RC: the history delivered as a real gh failure. An absent
+        # fixture is an EMPTY history, which a caller cannot tell from an
+        # unreadable one on the output alone — only the exit code says which.
+        [ -z "${STUB_GH_LIST_RC:-}" ] || exit "$STUB_GH_LIST_RC"
+        case "$path" in *comments*) f="$G/comments_$n.json" ;; *) f="$G/reviews_$n.json" ;; esac
         [ -s "$f" ] && out="$(cat "$f")" || out='[]' ;;
       */rules/branches/*)
         b="${path##*/rules/branches/}"

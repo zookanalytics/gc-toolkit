@@ -18,7 +18,10 @@
  * change", not as a flaky test.
  *
  * SCOPE: the wire only. These interfaces mirror exactly the Go types reachable
- * from the `GET <mount>/helm` response body — `board.Board` and `board.Tile`.
+ * from the `GET <mount>/helm` response body: the `board.Board` envelope and the
+ * structs nested under it — `board.Tile`, `board.Sitting`, and
+ * `board.PackBuild`. Reachability from the envelope is the rule, not this list:
+ * a struct added under `board.Board` joins the contract automatically.
  * `board.Anchor` and `board.Child` carry JSON tags too, but they are the
  * gather-side input to `BuildBoard` and never cross the wire, so mirroring them
  * here would invent a contract the service does not serve. The parity test
@@ -223,8 +226,11 @@ export interface Sitting {
   status: string;
   /**
    * The one-word justification a sitting closed on (`gc.outcome`: folded,
-   * moot, benign, diagnosed, cut-short, or the word a held sitting signs off
-   * with). Empty while it is still running.
+   * moot, benign, diagnosed, cut-short, the word a held sitting signs off with,
+   * or `dismissed` when the operator ends it from the board). Normally empty
+   * while a sitting is still running, with one exception: a board dismissal
+   * that stamped the outcome but could not close the visit leaves a running
+   * sitting reading `dismissed` until it is closed or signed off over.
    */
   outcome: string;
   /** The converse session that ran it — what an operator attaches to. */
@@ -240,6 +246,48 @@ export interface Sitting {
    * subject visited three times has two sittings that did not write it.
    */
   takeaway: string;
+}
+
+/**
+ * PackBuild is one compiled component's build state, as its out-of-band build
+ * order last left it.
+ *
+ * Nothing in the running system builds these binaries — the launchers exec what
+ * a build order published — so a component can serve a binary older than its
+ * sources indefinitely. `source_rev` and `binary_rev` diverge exactly when a
+ * build failed and the last good binary kept serving; `checked_at` is the only
+ * field a quiet tick moves, so it is the only one that can say the build order
+ * itself has stopped.
+ *
+ * `severity` and `detail` are DERIVED on the Go side so this view and the
+ * `helm-svc board` CLI cannot disagree about what a row means. Render them;
+ * do not re-derive them from the raw fields.
+ */
+export interface PackBuild {
+  component: string;
+  /** RFC 3339. Omitted when no build has been recorded. */
+  built_at?: string;
+  /** The revision the last build tick saw in the sources. */
+  source_rev: string;
+  /** The revision the binary now on disk was built from. */
+  binary_rev: string;
+  /** Exit status of the last build ATTEMPT; 0 for success. */
+  last_build_rc: number;
+  /** A published binary nothing is running yet — built, but not serving. */
+  restart_pending: boolean;
+  /**
+   * What `helm-svc probe` said about this binary: "ok", "unreadable", or
+   * "unprobed" when no city was resolved to ask about. A binary that compiles
+   * but cannot read the stores it serves renders no board, which the revisions
+   * alone cannot say.
+   */
+  probe_status?: string;
+  /** The probe's one-line reason. Empty unless `probe_status` is "unreadable". */
+  probe_detail?: string;
+  /** RFC 3339. When the build order last ran at all, successful or not. */
+  checked_at?: string;
+  severity: Severity;
+  detail: string;
 }
 
 /**
@@ -272,4 +320,10 @@ export interface Board {
   /** True when one or more rigs did not answer; the board is incomplete. */
   partial?: boolean;
   partial_errors?: string[];
+  /**
+   * The build state of the pack's compiled components. Absent in a city whose
+   * build orders have never run — which is why it is optional rather than an
+   * empty array: no rows means nothing was measured, not that all is well.
+   */
+  pack_health?: PackBuild[];
 }

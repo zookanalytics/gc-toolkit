@@ -406,12 +406,15 @@ type Sitting struct {
 	// held conversation, which is why liveStatuses admits in_progress.
 	Status string `json:"status"`
 
-	// Outcome is gc.outcome, the one-word justification converse stamps on a
-	// visit before closing it (folded, moot, benign, diagnosed, cut-short, or
-	// the word a held sitting signs off with). It is stamped per VISIT and
-	// never rewritten, which is what makes it attributable to this sitting
-	// alone. Empty on a running sitting, and on a closed one whose writer did
-	// not stamp it.
+	// Outcome is gc.outcome, the one-word justification stamped on a visit
+	// before it closes — by converse (folded, moot, benign, diagnosed,
+	// cut-short, or the word a held sitting signs off with), or by `gc-helm
+	// dismiss` ("dismissed") when the operator ends the sitting themselves.
+	// It is stamped per VISIT, which is what makes it attributable to this
+	// sitting alone. Normally empty on a running sitting, and on a closed one
+	// whose writer did not stamp it; a dismiss that stamped and then could not
+	// close leaves an open visit reading "dismissed" until it is closed or the
+	// sitting signs off over it.
 	Outcome string `json:"outcome"`
 	// Session is the converse session that ran the sitting (gc.session_name),
 	// which is what an operator attaches to while it is still open.
@@ -481,4 +484,10 @@ type Board struct {
 	Sittings      []Sitting `json:"sittings"`
 	Partial       bool      `json:"partial,omitempty"`
 	PartialErrors []string  `json:"partial_errors,omitempty"`
+
+	// PackHealth is the build state of the pack's compiled components. It is
+	// not derived from the anchors and does not participate in ranking — it
+	// rides the envelope because it answers a question about the board itself:
+	// whether the binary rendering it is the one the sources describe.
+	PackHealth []PackBuild `json:"pack_health,omitempty"`
 }

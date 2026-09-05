@@ -357,6 +357,14 @@ keys = [
   "review_branch", "review_base", "reviewed_oid", "review_pool",
   "source_review_bead", "task_kind", "dispatch_count", "dispatch_backstop.<g>",
   "fix_target_pool",
+  # Which feedback a rework child answers. The two writers name it in
+  # different id spaces and cannot share a key: signoff.sh stamps
+  # source_review_bead = the review BEAD it filed the child from, and both its
+  # round cap and gate-ensure's already-answered probe count a child by that
+  # key. pr-facts.sh stamps source_review = the comma-joined GitHub review ids
+  # whose bodies its child carries verbatim, a comment batch rather than a
+  # signoff round, so it counts against no cap.
+  "source_review",
   # The review-round cap. signoff_cap = <gate> names the gate whose rounds ran
   # out, so the cap's own merge_hold park can be told from one a person made.
   # pr-facts.sh records each batch of such feedback in
@@ -370,6 +378,14 @@ keys = [
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_comment_disposition",
+  # The comment-batch disposition history: one
+  # `<disposition>|<exclusive floor>|<inclusive mark>` record per batch, oldest
+  # first, joined by ";". It outlives the single-valued pr_comment_disposition
+  # because the bead a batch routed may not have closed when the next batch
+  # arrives, and a thread an earlier batch left unresolved still sits at or below
+  # the cumulative pr_comment_watermark. pr-facts.sh writes it as it routes each
+  # batch and reconciles it in the write-back sweep.
+  "pr_comment_batch",
 ]
 
 [metadata.pr_round_trip]

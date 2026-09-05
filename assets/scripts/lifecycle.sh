@@ -34,7 +34,61 @@
 # another actor holds in_progress is refused by bd, and the refusal drops the
 # WHOLE atomic update — a caller that passes --assignee "" must hold the claim.
 # The detached-state clear reads the status for that reason and stops at open.
+#
+# THE SHELL BELOW IS THE FALLBACK. `gctk lifecycle` (services/gctk) is the
+# ported implementation and answers whenever the build order has published a
+# binary; this script runs when it has not — a fresh city, a build that failed,
+# a rig checkout ahead of the deployed binary. Both must stay correct until the
+# last port lands and the fallback drops, so lifecycle.test.sh runs its whole
+# body against both, and both mirrors of the state table are held against
+# lifecycle/lifecycle.toml.
 set -u
+
+# Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
+# GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
+# and the tmux pickers read, and GC_CITY_PATH is the one the supervisor puts in
+# an agent session — else the city `gc service list --json` reports. The
+# listing is what the merge cadence itself needs: the order runner that execs
+# refinery-reconcile.sh carries no city variable at all (docs/
+# refinery-merge-cadence.md), so an env-only chain would leave every cadence
+# transition on this fallback while the board reported the binary current.
+# Never a walk up from this file's own path — the hermetic suite runs from a
+# tree inside a live city, and a filesystem hunt would find that city's binary
+# and stop testing this script. GCTK_BIN=none forces this implementation.
+#
+# A binary the city resolved is also held to THIS checkout: `gctk version`
+# carries the tree hash of services/gctk it was built from, and a checkout
+# whose services/gctk is at another one — a rig ahead of the build order's
+# ~5m lag, or a branch that changed the port — falls back to this script,
+# which is the writer that matches its callers. A binary that cannot be
+# compared (no stamp, no git) is trusted; an explicit $GCTK_BIN is never
+# second-guessed.
+GCTK_BIN="${GCTK_BIN:-}"
+if [ -z "$GCTK_BIN" ]; then
+    _gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+    if [ -z "$_gctk_city" ]; then
+        _gctk_city="$(gc service list --json 2>/dev/null | jq -r '.city_path // empty' 2>/dev/null || true)"
+    fi
+    [ -n "$_gctk_city" ] && GCTK_BIN="$_gctk_city/.gc/services/gctk/bin/gctk"
+    if [ -n "$GCTK_BIN" ] && [ -x "$GCTK_BIN" ]; then
+        _gctk_mod="$(dirname "${BASH_SOURCE[0]}")/../../services/gctk"
+        _gctk_want="$(git -C "$_gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)"
+        _gctk_have="$("$GCTK_BIN" version 2>/dev/null | head -n 1 || true)"
+        if [ -n "$_gctk_want" ] && [ -n "$_gctk_have" ] && [ "$_gctk_have" != unknown ] \
+           && [ "$_gctk_have" != "$_gctk_want" ]; then
+            # A hand build carries the toolchain's commit stamp instead; the
+            # subtree that commit holds is the comparable identity.
+            _gctk_mapped="$(git -C "$_gctk_mod" rev-parse "${_gctk_have%-dirty}:./" 2>/dev/null || true)"
+            if [ "$_gctk_mapped" != "$_gctk_want" ]; then
+                echo "$0: deployed gctk is built from $_gctk_have, this checkout's services/gctk is at $_gctk_want; using the shell fallback" >&2
+                GCTK_BIN=""
+            fi
+        fi
+    fi
+fi
+if [ "$GCTK_BIN" != "none" ] && [ -n "$GCTK_BIN" ] && [ -x "$GCTK_BIN" ]; then
+    exec "$GCTK_BIN" lifecycle "$@"
+fi
 
 PROG="lifecycle"
 
@@ -146,6 +200,14 @@ cmd_state() { # <bead-id>
   exit 0
 }
 
+# A value-taking flag with no token after it is a malformed invocation, and it
+# must refuse: `shift 2` on one remaining argument shifts nothing, so the loop
+# below would spin forever, and the empty value it would otherwise take drops
+# --expect's compare-and-swap guard. Same refusal, same exit, as the port.
+need_value() { # <flag> <rest...>
+  [ $# -ge 2 ] || { echo "$PROG: flag $1 needs a value" >&2; exit 1; }
+}
+
 cmd_transition() {
   local id="${1:-}"; shift || true
   [ -n "$id" ] || { echo "$PROG: transition needs a bead id" >&2; exit 1; }
@@ -154,16 +216,16 @@ cmd_transition() {
   local SETS=() UNSETS=() DATED=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --to)           TO="${2:-}"; shift 2 ;;
-      --expect)       EXPECT="${2:-}"; shift 2 ;;
-      --set)          SETS+=("${2:-}"); shift 2 ;;
-      --set-dated)    DATED+=("${2:-}"); shift 2 ;;
-      --unset)        UNSETS+=("${2:-}"); shift 2 ;;
-      --assignee)     ASSIGNEE="${2-}"; ASSIGNEE_SET=1; shift 2 ;;
-      --route)        ROUTE="${2:-}"; ROUTE_SET=1; shift 2 ;;
-      --takeaway)     TAKEAWAY="${2-}"; TAKEAWAY_SET=1; shift 2 ;;
+      --to)           need_value "$@"; TO="$2"; shift 2 ;;
+      --expect)       need_value "$@"; EXPECT="$2"; shift 2 ;;
+      --set)          need_value "$@"; SETS+=("$2"); shift 2 ;;
+      --set-dated)    need_value "$@"; DATED+=("$2"); shift 2 ;;
+      --unset)        need_value "$@"; UNSETS+=("$2"); shift 2 ;;
+      --assignee)     need_value "$@"; ASSIGNEE="$2"; ASSIGNEE_SET=1; shift 2 ;;
+      --route)        need_value "$@"; ROUTE="$2"; ROUTE_SET=1; shift 2 ;;
+      --takeaway)     need_value "$@"; TAKEAWAY="$2"; TAKEAWAY_SET=1; shift 2 ;;
       --close)        CLOSE=1; shift ;;
-      --append-notes) NOTES="${2:-}"; NOTES_SET=1; shift 2 ;;
+      --append-notes) need_value "$@"; NOTES="$2"; NOTES_SET=1; shift 2 ;;
       --json)         JSON=1; shift ;;
       *) echo "$PROG: unknown argument '$1'" >&2; exit 1 ;;
     esac

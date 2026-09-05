@@ -12,16 +12,25 @@ as you reach it. Never exit the wisp from an intermediate step — continue,
 or jump to next-iteration to pour and burn.
 
 Scope: the witness recovers work whose owner died, files ONE warrant bead
-for the dog pool when an owner is alive but wedged, and watches the
-refinery queue. It does NOT manage processes (controller), write code
+for the dog pool when an owner is alive but wedged, files a bug bead for the
+polecat pool when mail reports a defect in the pack, and watches the refinery
+queue. It does NOT manage processes (controller), write code
 (polecats), merge (refinery/cadence), kill sessions directly (the dog pool
 executes warrants), or run the batch unnamed-wait triage (the
 liveness-sweep exec order owns that surface). Escalations go through
 assets/scripts/escalate.sh — one open visit per situation key.
 
-Marked blocks (host-bead-skip, liveness-map-guard, liveness-lookup, husk-guard,
-crash-loop-window, patrol-wisp-pour, refinery-queue-nudge) are extracted and
-executed by their tests; keep markers, keep them backslash-free.
+Every address this formula stamps comes from assets/scripts/resolve-route.sh.
+The agents it files to do not share a scope: the dog is city-scoped and its
+identity carries no rig segment, while the polecat and refinery pools are
+rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
+the other, and either stamp reads back clean, so a hand-written address is
+right only by luck.
+
+Marked blocks (bug-dispatch, host-bead-skip, liveness-map-guard,
+liveness-lookup, warrant-file, husk-guard, crash-loop-window,
+patrol-wisp-pour, refinery-queue-nudge) are extracted and executed by their
+tests; keep markers, keep them backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)

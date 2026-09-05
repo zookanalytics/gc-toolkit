@@ -76,12 +76,29 @@ case "${1:-} ${2:-}" in
   "bd list")
     status=all
     assignee=""   # empty = flag absent = no assignee filter
+    type=""
+    infra=0
     for a in "$@"; do
       case "$a" in
-        --status=*)   status="${a#--status=}" ;;
-        --assignee=*) assignee="${a#--assignee=}" ;;
+        --status=*)      status="${a#--status=}" ;;
+        --assignee=*)    assignee="${a#--assignee=}" ;;
+        --type=*)        type="${a#--type=}" ;;
+        --include-infra) infra=1 ;;
       esac
     done
+    # An unknown --type is REFUSED the way the CLI refuses it: the diagnostic
+    # goes to stderr, stdout stays EMPTY, and the exit is non-zero. A caller
+    # piping into `jq -r '.[0].id // empty'` reads that as "no wisp" and never
+    # sees the error, so a stub that accepted `wisp` would hide a dead path.
+    case "$type" in
+      ""|bug|feature|task|epic|chore|decision|agent|convergence|convoy|event|gate|merge-request|message|molecule|rig|role|session|spec|step) ;;
+      *) echo "Error: invalid issue type \"$type\"" >&2; exit 1 ;;
+    esac
+    # Wisps are molecule roots, which are infra: without --include-infra the
+    # real CLI returns none of them, in JSON mode as well as text mode. Every
+    # row in these fixtures is a molecule root, so hiding infra empties the
+    # whole result.
+    [ "$infra" = "1" ] || { echo '[]'; exit 0; }
     # `--assignee` is HONOURED here on purpose: it is the flag whose presence
     # caused the leak, so the stub must reproduce its filtering or a regressed
     # query would silently still pass this test.
@@ -217,9 +234,8 @@ eq "$(run_pour 1 0 1)" "1|w-new|w-new" \
    "a failed rollback burn still exits non-zero (reconcile is the backstop)"
 
 # --- Static guard: no reconcile query may re-acquire an --assignee filter. ----
-# The doctor check (doctor/check-startup-discovery) already locks in
-# --include-infra and the title scope; this locks in the assignee-blindness that
-# closes tk-fj56a, in the same place and for the same reason.
+# Staying assignee-blind keeps an orphaned patrol wisp visible; the checks below
+# hold the --include-infra and title-scope invariants on the same queries.
 WITNESS_BLOCK=$(awk '
   /^[[:space:]]*```/ {f = !f; next}
   f' "$PROMPT")
@@ -240,6 +256,77 @@ INFRA=$(printf '%s\n' "$WITNESS_BLOCK" \
   || bad "no wisp queries found in the witness block — extraction broke"
 eq "${TITLED:-0}" "${TOTAL:-0}" "every wisp query is still scoped to mol-witness-patrol"
 eq "${INFRA:-0}"  "${TOTAL:-0}" "every wisp query still carries --include-infra"
+
+# --- The refinery's current-wisp fallback. -----------------------------------
+# next-iteration resolves the wisp it is about to burn from $GC_BEAD_ID, and
+# falls back to a store query when that is unset. The fallback runs BEFORE the
+# pour, so an empty result is not ambiguity about which of two wisps is
+# current: it means the step pours and assigns NEXT, then refuses to burn, and
+# two live wisps are left behind. The query must therefore actually resolve.
+PATROL="$ROOT/formulas/mol-refinery-patrol.toml"
+CURWISP="$(extract patrol-current-wisp "$PATROL")"
+
+[ -n "$CURWISP" ] \
+  && ok "current-wisp fallback extracted between patrol-current-wisp markers" \
+  || bad "current-wisp extraction EMPTY — markers missing from $PATROL"
+
+printf '%s\n' "$CURWISP" > "$TMP/curwisp.sh"
+bash -n "$TMP/curwisp.sh" \
+  && ok "extracted current-wisp fallback is syntactically valid bash" \
+  || bad "extracted current-wisp fallback failed bash -n"
+
+# run_curwisp <fixture-json> <GC_BEAD_ID> [script] -> the resolved CURRENT_WISP
+run_curwisp() {
+  printf '%s' "$1" > "$TMP/fixture.json"
+  ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
+           GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" \
+           GC_AGENT="refinery-1" GC_BEAD_ID="$2"
+    # An agent runs this block in a plain shell, so drop this suite's -e and
+    # pipefail: under them a refused query would abort the subshell, and the
+    # controls below would pass by aborting rather than by resolving nothing.
+    set +e +o pipefail
+    # shellcheck disable=SC1091
+    . "${3:-$TMP/curwisp.sh}" 2>/dev/null
+    printf '%s' "${CURRENT_WISP:-}" )
+}
+
+# w-run is the wisp being executed; w-doc is another molecule the same agent
+# holds, which the title scope must exclude.
+REFINERY_LIVE='[
+  {"id":"w-run","status":"in_progress","title":"mol-refinery-patrol","assignee":"refinery-1"},
+  {"id":"w-doc","status":"in_progress","title":"mol-doc-keeper-drift-audit","assignee":"refinery-1"}
+]'
+
+eq "$(run_curwisp "$REFINERY_LIVE" "")" "w-run" \
+   "REGRESSION: with GC_BEAD_ID unset the fallback resolves the in_progress patrol wisp"
+eq "$(run_curwisp "$REFINERY_LIVE" "w-env")" "w-env" \
+   "GC_BEAD_ID wins when set, without consulting the store"
+eq "$(run_curwisp '[{"id":"w-doc","status":"in_progress","title":"mol-doc-keeper-drift-audit","assignee":"refinery-1"}]' "")" "" \
+   "an unrelated in_progress molecule is not mistaken for the patrol wisp"
+
+# Two controls. Each removes one half of the fix and must yield nothing against
+# the SAME fixture the assertion above resolves — if either ever returns w-run,
+# the stub has stopped modelling the CLI and the assertion proves nothing.
+sed 's/--type=molecule --include-infra/--type=wisp/' "$TMP/curwisp.sh" > "$TMP/curwisp-wisptype.sh"
+eq "$(run_curwisp "$REFINERY_LIVE" "" "$TMP/curwisp-wisptype.sh")" "" \
+   "CONTROL: --type=wisp is refused, so the fallback resolves nothing"
+sed 's/ --include-infra//' "$TMP/curwisp.sh" > "$TMP/curwisp-noinfra.sh"
+eq "$(run_curwisp "$REFINERY_LIVE" "" "$TMP/curwisp-noinfra.sh")" "" \
+   "CONTROL: dropping --include-infra hides the wisp, JSON mode included"
+
+# --- Static guard: the refused type filter must not return anywhere. ---------
+# `wisp` is not an issue type. Every use of it is a query that can only ever
+# read empty, and each one is swallowed by the `// empty` on the other side of
+# the pipe, so nothing reports it. Sweep the two trees that carry agent-run
+# shell: the formulas and the prompt templates.
+for d in formulas agents; do
+  [ -d "$ROOT/$d" ] \
+    && ok "sweep target $d/ exists" \
+    || bad "sweep target $d/ is missing — the sweep below would pass vacuously"
+done
+STRAY=$(grep -rl -- '--type=wisp' "$ROOT/formulas" "$ROOT/agents" 2>/dev/null \
+  | sed "s|^$ROOT/||" | sort | paste -sd, - || true)
+eq "${STRAY:-}" "" "no --type=wisp survives under formulas/ or agents/"
 
 echo
 echo "patrol-wisp-reconcile: $PASS passed, $FAIL failed"

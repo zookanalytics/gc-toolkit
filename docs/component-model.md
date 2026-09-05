@@ -323,15 +323,18 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
+| `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
 | `assets/scripts/boot-health.sh` | patrol | Three mechanical reads. Report-only by design ([authority-map.md](authority-map.md)). |
 | `assets/scripts/dance-probe.sh` | patrol | The mechanical half of one interrogation round; the formula judges the verdict. |
 | `assets/scripts/doctor-finding-gate.sh` | patrol | Re-asks doctor at close time, so a merge cannot silently read as a fix. Run by the deacon patrol's doctor sweep. |
 | `assets/scripts/doctor-sweep.sh` | patrol | Runs `gc doctor` detached, once per interval with one capped retry after a failed or exceeded run, in a scope that outlives both the harness ceiling a foreground call cannot exceed and the patrol session's own teardown, and turns a sweep that never finishes into a state carrying its elapsed time and the check it stopped in. |
+| `assets/scripts/gc-deacon-ledger.sh` | patrol | The deacon's rolling incident ledger: one open `deacon-ledger` bead, one comment per non-routine action, rotated so it stays skimmable. Reconstructs a shift for an operator or a recycled deacon without a transcript. |
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
 | `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
+| `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
 | `assets/scripts/escalate.sh` | shared primitive | One open visit per situation key. Every workflow's door to a human. |
 | `assets/scripts/gc-bd-watch.sh` | shared primitive | Bead-state changes as JSONL, for any agent waiting on work it dispatched. |
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |

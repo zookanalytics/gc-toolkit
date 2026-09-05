@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { Board, Sitting, Tile } from './contract';
+import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // A board carrying all six shapes the sections have to tell apart: an ordinary
 // ranked anchor, an operator-owned bead that is the DEFAULT answer, a parked
@@ -441,6 +441,42 @@ it('shows running sittings and recently closed ones with their outcome', async (
   expect(within(done).getByText(/the path was the launcher/)).toBeTruthy();
 });
 
+// A board dismissal stamps gc.outcome before it closes the visit; when the
+// close then fails, the visit stays open carrying "dismissed". The row shows
+// it — running, yet with an outcome — because that pairing is the signal the
+// sitting is stuck open and needs a manual close, not a contradiction to hide.
+it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
+  const stuck: Board = {
+    ...BOARD,
+    sittings: [
+      {
+        id: 'tk-vst09',
+        rig: 'gc-toolkit',
+        subject: 'tk-epic',
+        title: 'visit: tk-epic — the operator ended it from the board',
+        status: 'in_progress',
+        outcome: 'dismissed',
+        session: 'gc-toolkit__converse-9',
+        opened_at: '2026-08-21T18:34:00Z',
+        takeaway: '',
+      },
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(stuck), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+
+  const row = within(sittingsSection()).getByText('tk-vst09').closest('tr') as HTMLElement;
+  expect(within(row).getByText('running')).toBeTruthy();
+  // The outcome shows rather than collapsing to the em dash: a running row
+  // reading "dismissed" is the stuck-sitting signal, not an empty cell.
+  expect(within(row).getByText('dismissed')).toBeTruthy();
+});
+
 // The record is not an attention list: a sitting must not appear as a row in
 // the ranked table, where it would compete with work that needs doing.
 it('keeps sittings out of the ranked table', async () => {
@@ -707,4 +743,80 @@ it('gives the all-clear when every PR position was readable', async () => {
 
   const sub = within(owedSection()).getByRole('status');
   expect(sub.textContent).toMatch(/1 pull requests read, all with a position/);
+});
+
+// --- pack builds ---------------------------------------------------------
+//
+// The strip answers a question about the board itself: whether the binary
+// rendering this page is the one the sources describe. Nothing else on the page
+// can be trusted to say so — every anchor row looks normal under a stale
+// binary.
+
+function build(over: Partial<PackBuild> & Pick<PackBuild, 'component'>): PackBuild {
+  return {
+    source_rev: 'aaaaaaaaaaaa1111',
+    binary_rev: 'aaaaaaaaaaaa1111',
+    last_build_rc: 0,
+    restart_pending: false,
+    severity: 'NORMAL',
+    detail: 'current at aaaaaaaaaaaa',
+    ...over,
+  };
+}
+
+function serveBoard(board: Board) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify(board), { status: 200 })),
+  );
+}
+
+function packSection(): HTMLElement {
+  return screen.getByRole('region', { name: /pack builds/i });
+}
+
+it('lists every compiled component, including the healthy ones', async () => {
+  serveBoard({
+    ...BOARD,
+    pack_health: [
+      build({ component: 'gctk', severity: 'HIGH', last_build_rc: 1, detail: 'last build FAILED (rc 1); still serving bbbbbbbbbbbb' }),
+      build({ component: 'helm' }),
+    ],
+  });
+
+  render(<App />);
+  await waitFor(() => expect(packSection()).toBeTruthy());
+
+  const section = packSection();
+  expect(within(section).getByText('gctk')).toBeTruthy();
+  expect(within(section).getByText(/last build FAILED/)).toBeTruthy();
+  // The healthy row is present too: a strip that appears only on trouble is a
+  // strip nobody learns to read.
+  expect(within(section).getByText('helm')).toBeTruthy();
+  expect(within(section).getByText(/current at aaaaaaaaaaaa/)).toBeTruthy();
+});
+
+// A city whose build orders have never run has measured nothing. Rendering an
+// empty strip there would read as an all-clear nobody established.
+it('shows no pack-builds section when the city recorded no builds', async () => {
+  serveBoard({ ...BOARD, pack_health: undefined });
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+  expect(screen.queryByRole('region', { name: /pack builds/i })).toBeNull();
+});
+
+// The band is derived server-side so this view and the CLI cannot disagree.
+// Rendering it verbatim is what keeps that true.
+it('renders the severity the service assigned, not one it re-derives', async () => {
+  serveBoard({
+    ...BOARD,
+    pack_health: [
+      build({ component: 'helm', severity: 'ELEVATED', binary_rev: 'oldoldoldold', detail: 'serving oldoldoldold, sources are at aaaaaaaaaaaa' }),
+    ],
+  });
+
+  render(<App />);
+  await waitFor(() => expect(packSection()).toBeTruthy());
+  expect(within(packSection()).getByText('ELEVATED')).toBeTruthy();
 });

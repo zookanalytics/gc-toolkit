@@ -8,6 +8,8 @@
 #               [--pool <rig-qualified converse pool>]
 # Callers: patrol formulas (refinery/witness/deacon), signoff.sh peers, and any
 # script that would otherwise mail. A changed situation gets a NEW key.
+# A visit filed by the deacon also lands one entry in its incident ledger
+# (gc-deacon-ledger.sh); see the marked block at the foot of this file.
 # The route is proved against the live agent set before anything is created,
 # and an already-open visit carrying an unroutable route is repointed rather
 # than counted as a satisfied escalation. A rig-qualified --pool also selects
@@ -424,6 +426,27 @@ if [ "$GOT_ROUTE" != "$POOL" ] || [ "$GOT_KEY" != "$KEY" ]; then
   warn "visit $VISIT was created but its stamps did not read back (route='$GOT_ROUTE' key='$GOT_KEY'); repair: gc bd update $VISIT --set-metadata gc.routed_to=$POOL --set-metadata escalation_key=$KEY"
   exit 1
 fi
+
+# The deacon's shift record. Filing a visit is a non-routine action, and this
+# is the only place that holds the visit id it points at, so the entry is
+# written here rather than asked for at each call site. Gated to the deacon
+# because the ledger records what the deacon did: every other caller escalates
+# about its own work. A dedup or repoint exit above writes nothing — the
+# situation reached the ledger on the pass that filed it, and a repeat is the
+# noise a signal-only ledger exists to leave out. A ledger failure is reported
+# and never changes this exit: the visit is filed either way.
+# >>> deacon-ledger-append
+LEDGER_ROLE="${GC_AGENT:-}"; LEDGER_ROLE="${LEDGER_ROLE##*/}"; LEDGER_ROLE="${LEDGER_ROLE##*.}"
+if [ "$LEDGER_ROLE" = deacon ]; then
+  LEDGER_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/gc-deacon-ledger.sh"
+  if [ -x "$LEDGER_SH" ]; then
+    "$LEDGER_SH" append escalation "$KEY: $HEADLINE" "bead:$VISIT" >/dev/null \
+      || warn "visit $VISIT is filed, but its ledger entry was not written"
+  else
+    warn "no executable gc-deacon-ledger.sh beside this script; visit $VISIT is filed but absent from the ledger"
+  fi
+fi
+# <<< deacon-ledger-append
 
 echo "escalate: filed visit $VISIT on $SUBJECT [$KEY] -> $POOL"
 exit 0

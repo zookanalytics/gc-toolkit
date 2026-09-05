@@ -1,0 +1,19 @@
+# worktree-reap — remove the per-bead git worktrees of work that has closed.
+# Nothing else owns that teardown: the refinery merges and moves on, the
+# witness inventories but does not delete, and the polecat drains, so the
+# checkouts are a monotonic floor under the disk. Every removal pins the tip
+# with an archive tag first, which is what lets an unattended pass take a
+# destructive-looking act — nothing is destroyed and restoring is one command.
+#
+# City scope: worktrees of one rig are registered in other rigs' git dirs, and
+# each rig's ledger says which of them are still claimed, so the pass reads
+# every rig or it reads a partial answer. A pass cut short by its budget costs
+# only the reclaim the next pass takes instead.
+[order]
+description = "Remove the worktrees of closed work beads, each pinned by an archive tag first"
+trigger = "cooldown"
+interval = "1h"
+exec = "$PACK_DIR/assets/scripts/worktree-reap.sh"
+timeout = "600s"
+scope = "city"
+idempotent = true

@@ -16,6 +16,15 @@ back. An unknown `merge_result` value is an error: every reader surfaces it via
 `merge_result` is a non-closed state is repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
 
+`lifecycle.sh` remains the command every caller invokes, and the transition
+semantics below are unchanged, but the implementation behind it is being ported
+to `gctk lifecycle` (`services/gctk`): the script `exec`s the compiled binary
+when a build order has published one, and runs its own shell otherwise. The two
+carry separate mirrors of the table declared here, and
+`assets/scripts/lifecycle.test.sh` holds both against `lifecycle/lifecycle.toml`
+and runs its whole assertion body against each. The shell mirror goes when the
+fallback does.
+
 ## Scope
 
 **Mandate.** The anchor lifecycle: states, transitions, writers, the gate
@@ -118,7 +127,7 @@ reaches such a bead in any case, because every anchor enumeration is
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | gates armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
 | handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
-| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` reads `green`, and the diff is not a bead-local planning artifact aimed at the default branch |
+| pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` reads `green` |
 | pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
@@ -169,15 +178,6 @@ GitHub review, which cannot exist before the PR does and which `merge.sh`
 enforces at the merge. An empty `check_set` is not the opt-out at either
 transition: it means never normalized, and gate-ensure stamps the default
 earlier in the same pass.
-
-A green gate set is necessary, not sufficient. `pr-open.sh` also refuses to
-publish a diff that lies entirely under the planning-artifact prefixes
-(`specs/` by default, `PR_OPEN_PLANNING_PATHS`) onto the rig's default branch
-when no convoy stands above the anchor: the dispatch doctrine's shared input
-artifact belongs on an owned convoy's integration branch, and the refusal
-carries that remedy plus one deduped visit. `graduation=true`, an anchor of
-type `convoy`, and `planning_artifact_ok=true` are exempt, and an unreadable
-compare leaves the create to proceed.
 
 Each gate is a **lane**, and its marker carries one bare state word — a state
 of the lane, never a claim about a commit:
@@ -292,11 +292,12 @@ a comment stands unanswered, so a batch that stamped itself and left the park
 standing is never re-read: the watermark written in that same pass answers those
 comments, and the posture stops being `commented`.
 
-A standing `CHANGES_REQUESTED` review resets nothing. It is the strongest
-posture there is, `merge.sh` vetoes on the review itself, and the arm that
-records it deliberately keeps no watermark over its comments, so there is
-nothing there to tell a new remark from one already answered. Such an anchor is
-held by the reviewer directly rather than by the cap.
+A standing `CHANGES_REQUESTED` from the city's own reviewer resets nothing:
+every id in a batch is authored by a login other than the city's, so a codex
+veto raises no batch to reset from. A human's does, on the same terms as any
+other feedback — it is the strongest signal an operator has, and the one the cap
+least deserves to outlive. Such an anchor is held by the reviewer directly as
+well as by the cap.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -367,7 +368,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_posture` | `<posture>@<oid>@<since>` | the review posture at `<oid>`, and when it was first read there |
 | `pr_merge_state` | `<mergeStateStatus>@<oid>` | GitHub's own value, verbatim and uppercase |
 | `pr_comment_watermark` | `<id>` | highest routed `pulls/N/comments` id |
-| `pr_review_watermark` | `<id>` | highest routed COMMENTED `pulls/N/reviews` id |
+| `pr_review_watermark` | `<id>` | highest routed `pulls/N/reviews` id |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 
 The postures, in the precedence the derivation applies:
@@ -375,7 +376,7 @@ The postures, in the precedence the derivation applies:
 | Posture | When | Merge effect |
 |---|---|---|
 | `changes_requested` | GitHub reports a standing `CHANGES_REQUESTED` | holds (`merge.sh` vetoes on the review itself) |
-| `commented` | a review comment sits above its watermark | holds |
+| `commented` | a review comment sits above its watermark, and no veto stands | holds |
 | `approved` | GitHub reports `APPROVED` | none |
 | `review_required` | GitHub reports `REVIEW_REQUIRED` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
@@ -403,28 +404,42 @@ route that makes it claimable. The two spaces are never merged: a reply can land
 on an old review, so review ids cannot stand in for comment ids. They rest on
 one assumption — that ids rise with visibility.
 
-Both spaces are review spaces: the inline comments on `pulls/N/comments`, and the
-bodies of COMMENTED reviews on `pulls/N/reviews`. A plain conversation comment on
-the PR is an issue comment, carries no review, and raises no posture.
+Both spaces are review spaces: the inline comments on `pulls/N/comments`, and
+the bodies of COMMENTED and CHANGES_REQUESTED reviews on `pulls/N/reviews`. An
+empty body raises nothing in the review space — the inline comments underneath
+it are what the comment space already sees, and counting the review would leave
+a posture no comment id can answer. A plain conversation comment on the PR is an
+issue comment, carries no review, and raises no posture.
 
-Under `changes_requested` the comment ids are neither read nor watermarked,
-because `signoff.sh`'s rework loop owns the comments underneath a veto. Once the
-veto clears, a batch that loop already answered can therefore be routed a second
-time. Marking those ids answered here would be worse: a comment added after the
-review would fall below the mark, and silence is the one outcome this section
-rules out.
+A `changes_requested` posture reads and watermarks the same ids a `commented`
+one does. The veto holds the merge; it answers nothing, and the objections
+under it are exactly the feedback that most needs routing. A human's
+`CHANGES_REQUESTED` body therefore joins the review id space beside a
+COMMENTED one, and the inline comments underneath join the comment space. The
+city's own veto raises no batch, because both spaces count only ids authored by
+some other login — `signoff.sh`'s rework loop owns those, and reaches them
+through the review bead rather than through this arm. A review that is later
+dismissed leaves both `COMMENTED` and `CHANGES_REQUESTED`, so the same read
+that would have counted it drops it. The comment space asks a narrower question
+of each inline comment's parent review: whether that review was dismissed. A
+dismissal therefore retires the comments it carried along with the body, and an
+approving review's inline comments stay in the batch, because an approval
+retires nothing it carried. A comment behind no review, or behind one the review
+list does not carry, stands on its own and is counted.
 
-**An outstanding comment routes to something.** It becomes a fix-pool rework
-child, or, when a human already holds the anchor (`merge_hold`, `rebase_hold`,
-`gc.routed_to=human`, or a live demand bead stamped `gc.demand_for=<anchor>`)
-or there is nowhere to route work, one `escalate.sh` visit per batch. A
-`gc.takeaway` is not one of those conditions: it records a sitting rather than
-naming a live wait, so on its own it forces no visit. Either way the filed bead
-holds the merge until it closes — the rework child through a `blocks` edge, the
-visit through the `pr_number` stamp that `merge.sh`'s in-flight-holder probe
-reads. A visit takes no `blocks` edge: `escalate.sh` files it *depending on*
-its subject, so an edge back would be a cycle. `pr_comment_disposition` records
-which was chosen. Silence is not one of the options.
+**Outstanding feedback routes to something.** It becomes a fix-pool rework
+child carrying the review bodies and inline comments verbatim in its
+description, or, when a human already holds the anchor (`merge_hold`,
+`rebase_hold`, `gc.routed_to=human`, or a live demand bead stamped
+`gc.demand_for=<anchor>`) or there is nowhere to route work, one `escalate.sh`
+visit per batch. A `gc.takeaway` is not one of those conditions: it records a
+sitting rather than naming a live wait, so on its own it forces no visit. Either
+way the filed bead holds the merge until it closes — the rework child through a
+`blocks` edge, the visit through the `pr_number` stamp that `merge.sh`'s
+in-flight-holder probe reads. A visit takes no `blocks` edge: `escalate.sh`
+files it *depending on* its subject, so an edge back would be a cycle.
+`pr_comment_disposition` records which was chosen. Silence is not one of the
+options.
 
 ## The machine axis
 

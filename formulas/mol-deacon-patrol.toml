@@ -13,6 +13,13 @@ starts/stops agents, never recovers per-rig beads (witness), never writes
 code. Escalations go through assets/scripts/escalate.sh — one open visit
 per situation key.
 
+Every non-routine ACTION also leaves one line in the incident ledger
+(assets/scripts/gc-deacon-ledger.sh), which is how a shift is reconstructed
+without replaying a transcript. A reading that came back on-track appends
+nothing: a ledger that records every cycle records no signal. escalate.sh
+writes its own `escalation` entry, so a step that escalated owes the ledger
+only what it additionally did by hand.
+
 The marked backup-manifest-check block is extracted and executed by
 assets/scripts/dolt-backup-manifest-check.test.sh; keep the markers and
 keep it backslash-free."""
@@ -42,7 +49,19 @@ Handle what you can directly; anything needing a human becomes a visit via
 escalate.sh. A `DOG_DONE:` notice is a completed shutdown dance on a
 warrant — note the outcome (the closed warrant carries the evidence) and
 archive. Archive processed messages — inbox near-empty after this step.
-Close it and proceed."""
+
+Ledger what you ACTED on. An escalation records itself, so what is owed here
+is the message you resolved yourself and the outcome a `DOG_DONE:` reports:
+```bash
+LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+done
+"$LEDGER" append recovery "<what you resolved, and how>" "mail:<message-id>"
+"$LEDGER" append warrant "<session> <pardoned|executed> by the dog" "bead:<warrant-id>"
+```
+An inbox you only read and archived appends nothing.
+
+Close this step and proceed."""
 
 [[steps]]
 id = "orphan-process-cleanup"
@@ -53,8 +72,17 @@ Subagent processes sometimes outlive their parents and accumulate memory.
 Detect: `ps aux | grep -E 'claude|node' | grep '?'` (TTY = "?"). Judgment
 required — not every TTY=? process is orphaned; look for large RSS
 (>500MB), runtimes far beyond any live session, or multiples of the same
-command. Kill confirmed orphans with `kill <pid>`. Close this step even
-when nothing was found."""
+command. Kill confirmed orphans with `kill <pid>`.
+
+A kill is an action nothing else records, so ledger it — one entry for the
+pass, naming what made those processes orphans:
+```bash
+LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+done
+"$LEDGER" append cleanup "killed <n> orphaned subagents (<pids>; <what marked them orphaned>)" -
+```
+A pass that killed nothing appends nothing. Close this step either way."""
 
 [[steps]]
 id = "dolt-health"
@@ -229,8 +257,21 @@ Before restarting anything, collect non-fatal diagnostics first
 (`SHOW FULL PROCESSLIST`, `gc dolt logs`, bounded `gc dolt health --json`,
 `gc dolt status`) — a blind restart destroys the evidence.
 
+**4. Ledger what you did by hand.** Each escalation above already wrote its
+own entry carrying the visit id. A zombie PID you killed, or a Dolt process
+you restarted, is an action with no other durable record:
+```bash
+LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+done
+"$LEDGER" append cleanup "killed zombie dolt PIDs <pids> on <db>" -
+"$LEDGER" append recovery "restarted the Dolt server after <diagnostic finding>" -
+```
+An all-`OK` scan appends nothing — it is the on-track reading this ledger
+deliberately leaves out.
+
 **Exit criteria:** health check run, every database carrying a verdict,
-findings escalated."""
+findings escalated, hand actions ledgered."""
 
 [[steps]]
 id = "system-health"
@@ -321,6 +362,18 @@ GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject "$SUBJECT" --key "doctor-<che
 State what the dedup found — bead ids on a match, the stores and terms
 searched on a miss.
 
+A finding you FIXED yourself leaves no visit behind it, so it leaves no
+record unless you write one:
+```bash
+LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+done
+"$LEDGER" append cleanup "<check-name>: <what you cleared, and how>" -
+```
+A sweep whose findings were all already tracked, and a `state=complete` with
+nothing but `ok`, append nothing. So does a sweep that only `started` — the
+ledger records what happened, not what is pending.
+
 Two adjacent duties, run every cycle whatever the sweep is doing:
 - Closing a bead that names a doctor finding? Close it through
   `$SCRIPTS/doctor-finding-gate.sh` — it re-runs the check first, so the
@@ -336,12 +389,23 @@ Two adjacent duties, run every cycle whatever the sweep is doing:
   OPEN_WARRANT=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
   if [ -z "$OPEN_WARRANT" ]; then
     gc bd create --type=task --title="Stuck: <rig>/<role>" --metadata '{"warrant.target":"<session>","warrant.reason":"<what is stale and for how long>","warrant.requester":"deacon","gc.routed_to":"{{binding_prefix}}dog"}' --label=warrant
+    # Ledger the filing, not the skip: a warrant that already stood was
+    # recorded on the pass that opened it. Re-read the id rather than
+    # capturing the create, which can answer with an empty id although the
+    # bead landed; an id that still does not resolve leaves the ref empty and
+    # the entry defaults it to "-".
+    LEDGER=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
+    done
+    FILED=$(gc bd list --status=open,in_progress --metadata-field "warrant.target=<session>" --limit=1 --json | jq -r 'if type == "array" then (.[0].id // empty) else empty end')
+    "$LEDGER" append warrant "<session> filed for the dog: <what is stale and for how long>" "${FILED:+bead:$FILED}"
   fi
   ```
   The dog pool runs mol-dog-shutdown-dance (three bounded interrogations,
   pardon-or-execute, DOG_DONE notice back); its probe re-checks the
   quota-park surface, so a race with a fresh park still cannot execute a
-  parked session.
+  parked session. The outcome comes back as a `DOG_DONE:` notice, which
+  check-inbox ledgers next cycle.
 
 Close this step after the script has been run and its state acted on."""
 

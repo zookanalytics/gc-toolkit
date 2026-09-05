@@ -206,9 +206,10 @@ func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r ri
 	}
 }
 
-// parseStamp reads one of the RFC 3339 timestamps the city stamps in metadata.
-// Metadata is free text, so an unparseable value is an absence rather than an
-// error — every caller has a defined behaviour for "not known".
+// parseStamp reads one of the RFC 3339 timestamps the city writes — bead
+// metadata, a build order's status record. Both are free text, so an
+// unparseable value is an absence rather than an error — every caller has a
+// defined behaviour for "not known".
 func parseStamp(v string) (time.Time, bool) {
 	v = strings.TrimSpace(v)
 	if v == "" {

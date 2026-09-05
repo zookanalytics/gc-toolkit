@@ -71,8 +71,13 @@ and both halves of it exist because the alternative is something leaving on
 its own. It closes the subject's open visit, which is what holds a converse
 sitting up now that nothing idle-reaps one; and it stamps gc.dismissed_at, so
 the board drops the subject's row from the terminal DONE band a closed anchor
-otherwise keeps for GC_HELM_DONE_WINDOW (default 7d). A sitting the verb could
-not account for aborts the stamp: the row stays and the run exits 4.
+otherwise keeps for GC_HELM_DONE_WINDOW (default 7d). The close half stamps
+gc.outcome=dismissed first, so the ended sitting is still one the board can
+report, and a visit that will not take that stamp is left open rather than
+closed unreadable; the close itself falls back to --force when the visit is
+held under a session identity this actor cannot close under. A sitting the
+verb could not account for aborts the row stamp: the row stays and the run
+exits 4.
 Idempotent: a subject with no visit and no row is already dismissed and says
 so.
 EOF
@@ -1067,10 +1072,11 @@ cmd_react() {
 #   is what the gather reads to stop offering it on the operator's word. A row
 #   also ages out once it has been closed longer than GC_HELM_DONE_WINDOW.
 #
-# Order is: visit first, stamp second, and the stamp runs only if the visit
-# half accounted for every sitting. A row retired over a sitting that is still
-# up is the failure this verb exists to prevent, and it is the quiet one: the
-# operator sees a cleared row and no longer has anything to look for.
+# Order is: visit half first, row stamp second, and the row stamp runs only if
+# the visit half accounted for every sitting. Inside the visit half the outcome
+# stamp precedes the close on the same rule. A row retired over a sitting that
+# is still up is the failure this verb exists to prevent, and it is the quiet
+# one: the operator sees a cleared row and no longer has anything to look for.
 # Idempotent in both halves.
 cmd_dismiss() {
     bead=""; dismiss_reason=""
@@ -1168,6 +1174,40 @@ cmd_dismiss() {
     for _v in $visits; do
         [ -n "$_v" ] || continue
         _why="dismissed by the operator${dismiss_reason:+: $dismiss_reason}"
+        # gc.outcome is what every reader of a finished sitting looks at:
+        # services/helm/internal/source/facts.go projects it onto the board's
+        # Sitting.Outcome, so a visit closed without one is a sitting the board
+        # cannot report. It is a PRECONDITION of the close rather than a
+        # best-effort write beside it, because the lookup above reads only OPEN
+        # visits. Once the close lands, no re-run of this verb reaches that
+        # visit again, and the missing outcome is permanent. A visit that will
+        # not take the stamp therefore stays open and keeps its pane, which is
+        # the reading this verb already gives a visit that will not close. The
+        # stamp sits outside the force ladder below because a metadata update
+        # does not go through bd's close-authority guard, so it lands on a visit
+        # held by a session name this actor cannot close under. A zero exit is
+        # not proof it landed either: one --set-metadata pair can read back empty
+        # while the call still exits 0, the same store behaviour meta_now guards
+        # against on the takeaway path. So the stamp is read back and repaired
+        # once, and only a visit whose gc.outcome reads "dismissed" enters the
+        # close ladder. The close is irreversible to this verb, so a silently
+        # dropped stamp would otherwise close the visit into the unreportable
+        # state this precondition exists to prevent.
+        if ! gc bd update "$_v" --set-metadata "gc.outcome=dismissed" >/dev/null 2>&1; then
+            sitting_failed=1
+            echo "$PROG: dismiss: could not stamp gc.outcome on visit $_v; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
+            continue
+        fi
+        outcome_got=$(meta_now "$_v" gc.outcome)
+        if [ "$outcome_got" != "dismissed" ]; then
+            gc bd update "$_v" --set-metadata "gc.outcome=dismissed" >/dev/null 2>&1 || true
+            outcome_got=$(meta_now "$_v" gc.outcome)
+        fi
+        if [ "$outcome_got" != "dismissed" ]; then
+            sitting_failed=1
+            echo "$PROG: dismiss: gc.outcome on visit $_v read back as '${outcome_got:-<empty>}', not 'dismissed'; it was NOT closed, because a closed visit with no outcome is a sitting the board cannot report and no re-run can reach. Its sitting keeps the pane; re-run dismiss." >&2
+            continue
+        fi
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
             echo "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
@@ -1187,7 +1227,7 @@ cmd_dismiss() {
         # Any visit that DID close changed the board's Held marker, so the
         # cache goes even though the row half did not run.
         bust_cache
-        echo "$PROG: dismiss: $bead was NOT dismissed — the sitting is unaccounted for, so its row stays on the board. Nothing was stamped; re-run dismiss once the visit is closed." >&2
+        echo "$PROG: dismiss: $bead was NOT dismissed — the sitting is unaccounted for, so its row stays on the board. Nothing was stamped on the subject; each unfinished visit above says what it needs, and a re-run resumes from there." >&2
         exit 4
     fi
 

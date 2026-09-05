@@ -70,6 +70,51 @@ has "$out" "claimed by more than one open anchor" "the duplicate holds every anc
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "no merge under a duplicate claim"
 has "$(cat "$STUB_ESC_LOG")" "--subject M3 --key one-anchor-per-pr.12" "escalate.sh got the situation key"
 
+# The duplicate guard is repo-qualified the same way the in-flight holder
+# filter is (REPO_Q_DEF): a second anchor of this number is a duplicate unless
+# its own pr_url names a DIFFERENT repository. An absent or unparseable pr_url
+# names no repository ("?") and must still hold — matching the live PR's url
+# byte for byte would drop it and merge the same PR twice.
+echo "# one-anchor-per-PR: a same-number anchor with no pr_url still holds"
+store "[$(anchor M3c 42), $(printf '%s' "$(anchor M3d 42)" | jq -c 'del(.metadata.pr_url)')]"
+printf '%s' "$(prview 42 OPEN CLEAN)" > "$GH_DIR/pr_view_42.json"
+echo '[]' > "$GH_DIR/reviews_42.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "claimed by more than one open anchor" "an anchor of this number whose pr_url is ABSENT names no repository and still holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither anchor merged"
+
+echo "# one-anchor-per-PR: a same-number anchor with an unparseable pr_url still holds"
+store "[$(anchor M3e 43), $(printf '%s' "$(anchor M3f 43)" | jq -c '.metadata.pr_url = "TBD"')]"
+printf '%s' "$(prview 43 OPEN CLEAN)" > "$GH_DIR/pr_view_43.json"
+echo '[]' > "$GH_DIR/reviews_43.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "claimed by more than one open anchor" "an anchor of this number whose pr_url is UNPARSEABLE still holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and neither anchor merged"
+
+echo "# one-anchor-per-PR: a same-number anchor in ANOTHER repository does not hold"
+store "[$(anchor M3g 44), $(printf '%s' "$(anchor M3h 44)" | jq -c '.metadata.pr_url = "https://github.com/other/repo/pull/44"')]"
+printf '%s' "$(prview 44 OPEN CLEAN)" > "$GH_DIR/pr_view_44.json"
+echo '[]' > "$GH_DIR/reviews_44.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded M3g" "a same-number anchor whose pr_url names a DIFFERENT repository is a different PR and does not hold"
+
+# The wildcard is symmetric. When it is THIS anchor whose pr_url is absent, it
+# names no repository and must collide with every same-number anchor, including
+# one whose pr_url resolves to a DIFFERENT repository. Keying this anchor to the
+# origin remote instead of its own row would merge it while a foreign
+# same-number anchor sits unresolved.
+echo "# one-anchor-per-PR: a URL-less THIS anchor is the wildcard against a foreign same-number anchor"
+store "[$(printf '%s' "$(anchor M3i 45)" | jq -c 'del(.metadata.pr_url)'), $(printf '%s' "$(anchor M3j 45)" | jq -c '.metadata.pr_url = "https://github.com/other/repo/pull/45"')]"
+printf '%s' "$(prview 45 OPEN CLEAN)" > "$GH_DIR/pr_view_45.json"
+echo '[]' > "$GH_DIR/reviews_45.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "open anchor (M3i + M3j)" "this anchor's OWN absent pr_url makes it the wildcard that holds against a foreign same-number anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and the URL-less anchor is not merged past the unresolved foreign twin"
+
 echo "# retarget holds"
 store "[$(anchor M4 13)]"
 printf '%s' "$(prview 13 OPEN CLEAN)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_13.json"
@@ -128,6 +173,62 @@ echo '[]' > "$GH_DIR/reviews_20.json"
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M9b" "closing the visit is the release, and it performs"
 
+
+# A referencing bead is qualified by the repository ITS OWN pr_url names: bd
+# matches the bare number, and the same number in another repository is a
+# different PR. Unknown is not foreign, so only a url resolving elsewhere is
+# dropped — which is what keeps the number-only children above holding.
+kid() { # id num extra-metadata-json
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"pr_number":"%s"%s}}' "$1" "$2" "${3:-}"
+}
+: > "$STUB_DEPS"
+store "[$(anchor Q1 24), $(kid fgn-1 24 ',"pr_url":"https://github.com/other/repo/pull/24"')]"
+printf '%s' "$(prview 24 OPEN CLEAN)" > "$GH_DIR/pr_view_24.json"
+echo '[]' > "$GH_DIR/reviews_24.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded Q1" "a same-numbered bead in ANOTHER repository does not hold this merge"
+
+store "[$(anchor Q2 25), $(kid loc-1 25 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/25"')]"
+printf '%s' "$(prview 25 OPEN CLEAN)" > "$GH_DIR/pr_view_25.json"
+echo '[]' > "$GH_DIR/reviews_25.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead loc-1" "a child carrying THIS repository's pr_url still holds"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 25" "…and nothing merged"
+
+# pr-facts.sh stamps pr_url beside pr_number on every child it files, so what a
+# url compare drops is the whole in-flight probe. Both ways of naming this
+# repository without matching it byte for byte stay holders.
+store "[$(anchor Q3 26), $(kid case-1 26 ',"pr_url":"https://GitHub.com/Zook/GC-Toolkit/pull/26"')]"
+printf '%s' "$(prview 26 OPEN CLEAN)" > "$GH_DIR/pr_view_26.json"
+echo '[]' > "$GH_DIR/reviews_26.json"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead case-1" "repository identity is case-insensitive, so a differently-cased url holds"
+# …and the case can differ on the checkout's side just as well: the repository
+# a remote url names is the same repository whatever case it is written in.
+store "[$(printf '%s' "$(anchor Q3b 29)" | jq -c '.metadata.pr_url = "https://github.com/Zook/GC-Toolkit/pull/29"'), $(kid case-2 29 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/29"')]"
+printf '%s' "$(prview 29 OPEN CLEAN)" \
+  | jq -c '.url = "https://github.com/Zook/GC-Toolkit/pull/29"
+           | .headRepositoryOwner.login = "Zook" | .headRepository.name = "GC-Toolkit"' > "$GH_DIR/pr_view_29.json"
+echo '[]' > "$GH_DIR/reviews_29.json"
+out=$(STUB_ORIGIN_URL="https://github.com/Zook/GC-Toolkit" "$SUT" 2>&1)
+has "$out" "unclosed rework/review bead case-2" "…and a differently-cased ORIGIN matches the url a bead carries"
+
+store "[$(anchor Q4 27), $(kid junk-1 27 ',"pr_url":"TBD"')]"
+printf '%s' "$(prview 27 OPEN CLEAN)" > "$GH_DIR/pr_view_27.json"
+echo '[]' > "$GH_DIR/reviews_27.json"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead junk-1" "an unparseable pr_url names no repository and still holds"
+
+# The edge is the claim, and an edge is local by construction: a dep-edge holder
+# is never qualified by the url it happens to carry.
+store "[$(anchor Q5 28), $(kid dep-fgn 28 ',"pr_url":"https://github.com/other/repo/pull/28"')]"
+printf '%s' "$(prview 28 OPEN CLEAN)" > "$GH_DIR/pr_view_28.json"
+echo '[]' > "$GH_DIR/reviews_28.json"
+printf 'dep-fgn|blocks|Q5\n' > "$STUB_DEPS"
+out=$("$SUT" 2>&1)
+has "$out" "unclosed rework/review bead dep-fgn" "a dep-edge blocker holds whatever repository its url names"
+: > "$STUB_DEPS"
 echo "# approval arms"
 store "[$(anchor A1 20 ',"check_set":"codex,approval","check.codex":"green"')]"
 printf '%s' "$(prview 20 OPEN CLEAN)" > "$GH_DIR/pr_view_20.json"

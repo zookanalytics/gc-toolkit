@@ -3,7 +3,7 @@ import { CitySignals, DrillPanel } from './drill';
 
 import { TerminalTile } from './terminal/TerminalTile';
 import { resolveTerminalBase, resolveTerminalSession } from './terminal/endpoint';
-import type { Board, Sitting, Tile } from './contract';
+import type { Board, PackBuild, Sitting, Tile } from './contract';
 
 // The board shape lives in ./contract.ts — the hand-written mirror of the Go
 // structs in internal/board, guarded by the parity check in
@@ -164,6 +164,38 @@ function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
   return { rows: rows.length, gaps };
 }
 
+// The pack-build strip: what each compiled component is serving, and whether it
+// matches its sources.
+//
+// It sits above the anchors because it qualifies them. Nothing in the running
+// system builds these binaries — the launchers exec what a build order
+// published — so this very page can be rendered by a binary older than the
+// sources that describe it, and every row below would look normal while doing
+// it. Nothing else on the page can say so.
+//
+// Rows are unconditional whenever the city has any record at all: a strip that
+// appears only on trouble is a strip nobody learns to read. A city with no
+// record renders nothing rather than an invented all-clear.
+function PackHealth({ rows }: { rows: PackBuild[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="pack-health" aria-labelledby="pack-health-heading">
+      <h2 id="pack-health-heading">pack builds</h2>
+      <ul>
+        {rows.map((row) => (
+          <li key={row.component} className={`pack-health__row pack-health__row--${row.severity}`}>
+            <span className="pack-health__sev">{row.severity}</span>
+            <span className="pack-health__name">{row.component}</span>
+            {/* `detail` is derived server-side so this view and the CLI cannot
+                disagree about what a row means. Render it; never re-derive it. */}
+            <span className="pack-health__detail">{row.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 // The drill-in entry point, shared by both tables. A button rather than a
 // clickable row so it is reachable by keyboard and announced as an action.
 function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
@@ -190,8 +222,9 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
       <h2 id="sittings-heading">converse sittings</h2>
       <p className="sub">
         {running} running · {sittings.length - running} closed recently. A running sitting is a
-        conversation someone is still in; a closed one shows the outcome it closed on and, when
-        that sitting is the one that wrote it, the takeaway it left.
+        conversation someone is still in; a closed one shows the outcome it closed on, and a
+        running one shows an outcome only when a board dismissal stamped it without closing the
+        visit. The takeaway shows on the sitting that wrote it.
       </p>
       <table>
         <thead>
@@ -218,8 +251,12 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                   <DrillOpen id={s.subject} onOpen={onOpen} />
                 </td>
                 <td>{shortAge(live ? s.opened_at : s.closed_at, now)}</td>
-                {/* A running sitting has not concluded; the em dash is the
-                    absence of an outcome, not an empty one. */}
+                {/* A running sitting usually has no outcome, and the em dash is
+                    that absence rather than an empty string. The exception is a
+                    board dismissal that stamped gc.outcome but could not close
+                    the visit: it leaves a running row honestly reading
+                    "dismissed", the signal that the sitting is stuck open and
+                    needs a manual close. */}
                 <td>{s.outcome || '—'}</td>
                 <td>{s.takeaway || s.title}</td>
               </tr>
@@ -382,6 +419,8 @@ export function App() {
           </>
         )}
       </section>
+
+      <PackHealth rows={board?.pack_health ?? []} />
 
       {/* An owed row IS an anchor needing attention — it is the one the section
           above just listed — so the unqualified sentence contradicts it. */}

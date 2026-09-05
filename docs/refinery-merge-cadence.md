@@ -114,15 +114,6 @@ the cadence — the arms run whether or not any refinery session is awake.
    by the only actor that has read the diff; the anchor's description is
    dispatch text, demoted to a collapsed section and standing in as the
    summary only when the handoff carried none.
-   One shape is refused rather than published: a diff confined entirely to
-   `specs/` (the `PR_OPEN_PLANNING_PATHS` prefixes), aimed at the rig's
-   default branch, on an anchor with no convoy anywhere above it. That is a
-   bead-local planning artifact landing on its own, and the refusal names the
-   remedy — seed it on an owned convoy's integration branch and land the
-   children onto that branch — and files one deduped visit. A graduation
-   anchor, a convoy bead, and `planning_artifact_ok=true` are exempt; so is a
-   diff the compare cannot be read for, which leaves the create to proceed
-   rather than stalling the queue on an unreadable endpoint.
 3. **pr-facts.sh --posture-only** — the posture record, and nothing else.
    `merge.sh` answers "is a human waiting on this?" off the bead and never asks
    GitHub, so the value it reads has to be written in the same pass. This arm
@@ -200,10 +191,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
-   any of those arms run, and routes an unanswered review comment to a rework
-   child or a visit. The posture write is idempotent, so re-running it here
-   after arm 3 costs nothing when nothing changed. Routing lives only in this
-   arm: arm 3 records, this one decides what answers the comment. Each batch it
+   any of those arms run, and routes unanswered review feedback — under a
+   `commented` posture and equally under a human `changes_requested` — to a
+   rework child or a visit. The posture write is idempotent, so re-running it
+   here after arm 3 costs nothing when nothing changed. Routing lives only in
+   this arm: arm 3 records, this one decides what answers it. Each batch it
    routes also resets `signoff.sh`'s round cap, once per batch, retiring the
    cap's own park with it — but only while `merge_hold` still reads the
    literal `signoff_cap` with a non-empty `signoff_cap=<gate>` beside it; an
@@ -262,6 +254,25 @@ the cadence — the arms run whether or not any refinery session is awake.
    successor — is out of the population by construction. It runs after
    review-sweep so a twin that arm 4 merged or arm 5 recorded on this pass is
    disposable on the same tick.
+9. **pr-stack.sh** — the beads-on-this-branch section of an open PR's body. No
+   merge authority, and the only arm that writes no bead. A body is composed
+   once, by arm 2, out of one anchor; commits keep arriving on the branch after
+   that and none of them touch it, so a reviewer approves a scope the body does
+   not describe. For each open anchor recording a `pr_number`, this arm reads
+   the branch's bead ledger — `branch` (committed onto the branch: the anchor,
+   plus every rework and rebase hand-back), `fold_target` (folded onto it by a
+   polecat), and `merged_target` with `merge_result=merged` (landed its own PR
+   into it) — and splices the list into a delimited section at the end of the
+   body. The title is left alone: it names the anchor, and the body is where a
+   reviewer reads scope. A branch carrying one bead publishes nothing, because
+   arm 2 already named it. Idempotence is the rendered section compared against
+   the one between the markers, never the whole body, and the body is read
+   `\r`-stripped: GitHub stores a body it re-wrapped with CRLF, and a marker
+   line carrying a trailing CR would match nothing and append a second section
+   every pass. Any read that fails leaves that PR as it stands — a truncated
+   ledger published as the whole ledger is worse than last pass's section. It
+   runs last, and after arm 4, so a bead this pass landed onto another anchor's
+   branch is named on the same tick.
 
 ## Single-flight: the tracking gate and the pass lock
 

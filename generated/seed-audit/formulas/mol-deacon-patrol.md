@@ -13,6 +13,13 @@ starts/stops agents, never recovers per-rig beads (witness), never writes
 code. Escalations go through assets/scripts/escalate.sh — one open visit
 per situation key.
 
+Every non-routine ACTION also leaves one line in the incident ledger
+(assets/scripts/gc-deacon-ledger.sh), which is how a shift is reconstructed
+without replaying a transcript. A reading that came back on-track appends
+nothing: a ledger that records every cycle records no signal. escalate.sh
+writes its own `escalation` entry, so a step that escalated owes the ledger
+only what it additionally did by hand.
+
 The marked backup-manifest-check block is extracted and executed by
 assets/scripts/dolt-backup-manifest-check.test.sh; keep the markers and
 keep it backslash-free.

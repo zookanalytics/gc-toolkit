@@ -1386,6 +1386,45 @@ a mismatch.** City-scoped singletons
 *their* assignees are written bare as well, so the exact lookup hits.
 The hazard is the mismatch between the two sides, not bareness.
 
+### Stamping the wrong scope's qualifier files work nobody is offered
+
+The footgun above is the read side, where a normalizing retry recovers a
+mismatch after the fact. The write side has no retry. A pool offer and an
+assignment poll both compare raw strings, so a `gc.routed_to` or an
+`assignee` that is merely well-formed is claimed by nobody, reports success,
+and reads back clean.
+
+Which form is correct is a property of the target's `scope`, not of its name,
+and both scopes ship in one pack:
+
+| Agents | `scope` | Identity to stamp |
+| --- | --- | --- |
+| dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
+| converse, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+
+Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
+`[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read
+that field for an agent the table does not name.
+
+An author who copies a qualifier from the recipe beside the one being written
+is right only when the two agents happen to share a scope. Over-qualifying a
+city-scoped agent and under-qualifying a rig-scoped one produce the same
+outcome: an address that matches nothing.
+
+**Rule: resolve the identity, do not spell it.**
+`assets/scripts/resolve-route.sh <name>` takes any form of a name and prints
+the identity that is live. It reads `gc agent list`, keeps only the
+candidates a bead in this store can be offered to (the city-scoped ones plus
+`$GC_RIG`'s), and refuses an ambiguous name rather than picking one. An
+unreadable roster is the absence of proof rather than proof of an empty city,
+so there the name comes back unchanged on exit 3 and the caller files
+unverified rather than not at all.
+
+The witness files to both scopes and resolves at both sites. Its recipes are
+the `warrant-file` and `bug-dispatch` blocks in
+`formulas/mol-witness-patrol.toml`, which
+`assets/scripts/witness-route.test.sh` executes as extracted from the formula.
+
 ## The gascity-keeper front-door
 
 The **gascity-keeper** (`gascity/gascity-keeper.keeper`) is the
