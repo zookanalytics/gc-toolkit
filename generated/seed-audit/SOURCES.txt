@@ -69,6 +69,8 @@ formulas/mol-refinery-patrol.toml
 ce2f2609b8386a3cb0f0dabfea41ae3566e97fa75c2ffbc2ac06b2a007074147
 formulas/mol-review.toml
 69481f97e196360cdce07280515c91f3b850661f6af0f350a3a7ec88a2ae6665
+formulas/mol-validate.toml
+05b6b8762055d2f43847efbc8c48f02ed2be0a89c815d80b244eec5a1304cada
 formulas/mol-visit.toml
 ee39c6a655dd3af79d5dcfa76b637c2e94fbe529028d8efc168d86e07ed74e77
 formulas/mol-witness-patrol.toml
