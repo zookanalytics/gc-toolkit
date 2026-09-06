@@ -65,13 +65,21 @@ FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
 usage() {
   cat >&2 <<'U'
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
-                  [--notes-file <path>] [--reviewed-oid <oid>]
+                  [--notes-file <path>] [--findings-file <path>]
+                  [--reviewed-oid <oid>]
        signoff.sh reset <anchor> --reason <why> [--batch <id>]
 
   --review-bead  the dispatched review bead this verdict answers (required)
   --verdict      approve (the pass; posted as a COMMENT, never an approval)
                  or request-changes (required)
   --notes-file   the verdict body; default: the review bead's notes
+  --findings-file
+                 the structured finding set as a JSON array, one object per
+                 blocking finding, each with a rebase-stable `locus` (a file and
+                 symbol or section, never a line or oid) and a `message`; `[]` on
+                 approve. request-changes files each as a first-class finding bead
+                 beside the rework child, deduped on locus and message. Default:
+                 none filed, and the findings live only in the verdict prose.
   --reviewed-oid the commit the review read; default: the review bead's own
                  reviewed_oid (stamped at dispatch), else the live head of the
                  anchor's branch (git ls-remote origin <branch>). It names the
