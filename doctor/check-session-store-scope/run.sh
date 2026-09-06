@@ -28,12 +28,43 @@
 set -u
 
 city="${GC_CITY_PATH:-${GC_CITY:-}}"
-BOUND="${GC_DOCTOR_CHECK_TIMEOUT:-30}"
 PROC="${GC_DOCTOR_PROC_ROOT:-/proc}"
 
 errors=(); warnings=(); notes=()
 sessions_checked=0; panes_read=0
-run_bounded() { if command -v timeout >/dev/null 2>&1; then timeout "$BOUND" "$@" </dev/null; else "$@" </dev/null; fi; }
+# >>> doctor-budget
+# One deadline for the whole check, anchored at process start. `gc doctor
+# --check-timeout` (default 60s) abandons an overrunning check and discards
+# everything it had buffered, so a check that has not printed by then is never
+# heard. A per-probe constant does not hold that line: the probes below run
+# once per rig, so their ceilings sum. Each probe gets the time still left
+# instead, capped at half the budget so one wedged store cannot eat the rest,
+# and a probe that no longer fits is refused with 124 — `timeout`'s own expiry
+# code, which every caller's "this store was NOT checked" arm already handles.
+# GC_DOCTOR_CHECK_TIMEOUT overrides the default, in whole seconds. Nothing
+# exports it: the runner passes GC_CITY_PATH and GC_PACK_DIR and no budget.
+BUDGET_DEFAULT=60; BUDGET_RESERVE=5; BUDGET_MIN_PROBE=2
+budget_now() { if [ -n "${EPOCHSECONDS:-}" ]; then printf %s "$EPOCHSECONDS"; else date +%s; fi; }
+budget_init() {
+    BUDGET_TOTAL="${GC_DOCTOR_CHECK_TIMEOUT:-$BUDGET_DEFAULT}"; BUDGET_TOTAL="${BUDGET_TOTAL%s}"
+    case "$BUDGET_TOTAL" in ''|*[!0-9]*) BUDGET_TOTAL="$BUDGET_DEFAULT" ;; esac
+    BUDGET_CAP=$(( BUDGET_TOTAL / 2 ))
+    BUDGET_DEADLINE=$(( $(budget_now) - SECONDS + BUDGET_TOTAL - BUDGET_RESERVE ))
+}
+budget_slice() {
+    local left=$(( BUDGET_DEADLINE - $(budget_now) ))
+    [ "$left" -le "$BUDGET_CAP" ] || left="$BUDGET_CAP"
+    [ "$left" -ge 0 ] || left=0
+    printf %s "$left"
+}
+budget_spent() { [ "$(budget_slice)" -lt "$BUDGET_MIN_PROBE" ]; }
+run_bounded() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@" </dev/null; else "$@" </dev/null; fi; }
+# A probe fed from a pipe cannot borrow run_bounded's </dev/null.
+run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
+budget_init
+# <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 gcmux() { run_bounded tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
@@ -83,8 +114,21 @@ else
         pane_pid=""
         case "$row" in *"$TAB"*) pane_pid="${row#*"$TAB"}" ;; esac
         [ -n "$sess" ] || continue
-        # A session can end mid-scan; an unreadable one is not a finding.
-        senv=$(gcmux show-environment -t "$sess" 2>/dev/null) || continue
+        # A session can end mid-scan; an unreadable one is not a finding. But a
+        # 124 is run_bounded refusing the probe because the whole-check budget is
+        # spent, not a vanished session (tmux would run and return its own code),
+        # so this session is still listed and now UNVERIFIED. Skipping it the way
+        # a vanished one is skipped lets a budget-truncated scan reach the OK line
+        # past sessions it never read. Warn and stop — the deadline is fixed, so
+        # every session after this one is out of budget too.
+        senv=$(gcmux show-environment -t "$sess" 2>/dev/null); senv_rc=$?
+        if [ "$senv_rc" -ne 0 ]; then
+            if [ "$senv_rc" -eq 124 ]; then
+                warnings+=("store-scope scan hit the check budget before reading $sess (rc=124) — that session and any listed after it are UNVERIFIED. Not a benign skip: a still-listed session left unread can be resolving the wrong store, the exact symptom this check exists for. Raise the check budget (\`gc doctor --check-timeout\`, or GC_DOCTOR_CHECK_TIMEOUT).")
+                break
+            fi
+            continue
+        fi
         agent=$(env_val GC_AGENT "$senv")
         [ -n "$agent" ] || continue
         sess_city=$(env_val GC_CITY_PATH "$senv")
