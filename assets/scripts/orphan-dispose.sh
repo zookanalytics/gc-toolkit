@@ -2,7 +2,8 @@
 # orphan-dispose.sh — dispose of ONE bead that orphan recovery classified as
 # orphaned, by the kind of thing the bead is.
 #
-# Four kinds reach this script and only two of them are returned to the pool:
+# Four kinds reach this script and only two are returned to the pool — and a
+# source bead only when its work has not already reached a downstream court:
 #
 #   visit          release the assignee and NOTHING else. A visit's metadata
 #                  (route, continuation group, task_kind) is its identity.
@@ -18,7 +19,11 @@
 #   source         delegate to `gc workflow delete-source --apply` plus
 #                  `gc workflow reopen-source`, the contract those commands were
 #                  built for, then clear the session pins so the pooled bead
-#                  stops naming a dead owner.
+#                  stops naming a dead owner. EXCEPT when the work already reached
+#                  a downstream court — an in-flight PR (merge_result
+#                  pre_open_gate/pull_request) the refinery owns landing, or a
+#                  human gate (gc.routed_to=human) a person owns clearing:
+#                  reopening would return that work to the pool — skip it.
 #
 # `delete-source` matches workflow roots on gc.source_bead_id. A root poured
 # from an input convoy never carries that key, so it reports already_clean for
@@ -103,6 +108,7 @@ CONTRACT="$(mval gc.formula_contract)"
 STEP_REF="$(mval gc.step_ref)"
 ROOT_ID="$(mval gc.root_bead_id)"
 ROUTED="$(mval gc.routed_to)"
+MERGE_RESULT="$(mval merge_result)"
 
 # Classification order matters. A visit is the source bead of its own mol-visit
 # molecule, so it must be recognised before the source arm would claim it. Root
@@ -241,30 +247,53 @@ case "$CLASS" in
         fi
         ;;
     source)
-        ACTION="delegate-source-workflow"
-        if [ "$APPLY" = "1" ]; then
-            if gc workflow delete-source "$BEAD" --apply >/dev/null 2>&1; then
-                note_landed delete-source
-            else
-                note_failed delete-source
+        # A source work bead whose work already reached a downstream court is not
+        # lost, so delete-source + reopen-source must not return it to the pool
+        # (every cycle would re-detect and re-recover it, stamping a recovery the
+        # crash-loop signal reads as a RATE, escalating a moot visit). Two states
+        # name a downstream court, the same set mol-witness-patrol's
+        # downstream-court-skip filter drops upstream: an in-flight PR (merge_result
+        # pre_open_gate/pull_request) the refinery owns landing, or a human gate
+        # (gc.routed_to=human) a person owns clearing. This is the correctness
+        # boundary at the disposal itself, the last step before the irreversible
+        # reopen — a source bead that moves onto a human gate after that filter, or
+        # reaches this script by recovery or manual replay, is still skipped here.
+        # pr.machine is not read: a progressing stamp is written only with an anchor
+        # merge_result (which the first arm catches), and unanchoring leaves it
+        # behind, so on a repooled bead it is stale. The merge_result arm mirrors
+        # the in-flight guard in liveness-sweep.sh and gate-ensure.sh.
+        if [ "$MERGE_RESULT" = "pre_open_gate" ] || [ "$MERGE_RESULT" = "pull_request" ]; then
+            ACTION="skip"
+            DETAIL="inflight_pr(merge_result=${MERGE_RESULT:-none})"
+        elif [ "$ROUTED" = "human" ]; then
+            ACTION="skip"
+            DETAIL="human_gate(routed_to=human)"
+        else
+            ACTION="delegate-source-workflow"
+            if [ "$APPLY" = "1" ]; then
+                if gc workflow delete-source "$BEAD" --apply >/dev/null 2>&1; then
+                    note_landed delete-source
+                else
+                    note_failed delete-source
+                fi
+                case ",$FAILED," in
+                    *,delete-source,*) ;;
+                    *)
+                        if gc workflow reopen-source "$BEAD" >/dev/null 2>&1; then
+                            note_landed reopen-source
+                            # reopen-source returns the bead to the pool but leaves the
+                            # session pins its dead claim stamped, so without this the
+                            # bead keeps naming that dead session as its owner and
+                            # orphan recovery re-detects it every cycle. verify catches a
+                            # pin that reports cleared and rolled back.
+                            clear_pins
+                            verify
+                        else
+                            note_failed reopen-source
+                        fi
+                        ;;
+                esac
             fi
-            case ",$FAILED," in
-                *,delete-source,*) ;;
-                *)
-                    if gc workflow reopen-source "$BEAD" >/dev/null 2>&1; then
-                        note_landed reopen-source
-                        # reopen-source returns the bead to the pool but leaves the
-                        # session pins its dead claim stamped, so without this the
-                        # bead keeps naming that dead session as its owner and
-                        # orphan recovery re-detects it every cycle. verify catches a
-                        # pin that reports cleared and rolled back.
-                        clear_pins
-                        verify
-                    else
-                        note_failed reopen-source
-                    fi
-                    ;;
-            esac
         fi
         ;;
 esac

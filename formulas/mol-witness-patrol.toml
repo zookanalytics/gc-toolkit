@@ -27,10 +27,11 @@ rig-scoped and carry `<rig>/`. The qualifier that reaches one is invisible to
 the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
-Marked blocks (bug-dispatch, host-bead-skip, liveness-map-guard,
-liveness-lookup, warrant-file, husk-guard, owning-store-guard,
-crash-loop-window, patrol-wisp-pour, refinery-queue-nudge) are extracted and
-executed by their tests; keep markers, keep them backslash-free."""
+Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
+liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
+owning-store-guard, crash-loop-window, patrol-wisp-pour, refinery-queue-nudge)
+are extracted and executed by their tests; keep markers, keep them
+backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -139,8 +140,54 @@ jq -c '[ .[]
 A bead naming no owner in any of the three places is already in the pool's
 court, and it is the only thing this filter drops. There is no owned-bead class
 orphan recovery must skip on kind alone: a visit whose session died SHOULD
-return to the pool (cold continuity is respawn-and-reconstitute). Two
-exclusions are structural, not kind-based:
+return to the pool (cold continuity is respawn-and-reconstitute).
+
+A bead whose work has ALREADY REACHED a downstream court is dropped next, by
+state not by kind. Orphan recovery returns LOST work to the pool, but a bead in
+the refinery's landing pipeline or on a person's board is not lost: the refinery
+enumerates it by `merge_result` and owns landing it. Returning it to the pool
+re-dispatches finished work AND stamps a recovery on it, and the crash-loop
+signal downstream reads that stamp as a RATE off recovered_at/recovered_count —
+so a bead that keeps arriving here escalates a moot visit every cycle. The
+polecat handoff and the human-gate handoff both leave the dead session's
+`gc.session_id`/`gc.session_name` on the bead, which is exactly why the owner
+filter above resolves a dead owner and the liveness loop would false-orphan it.
+Read the state the bead already carries and drop it — applied to the
+host-bead-skip result — so it never enters the liveness loop and is never marked.
+Two states name work that is not the pool's to recover:
+- an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
+- a human gate — `gc.routed_to=human`, the city's "no agent will take it" marker
+  (a signoff cap, a merge gate, an operator approval).
+
+`pr.machine` is deliberately not read here. A `progressing` stamp is written only
+alongside an anchor `merge_result` (`merge.sh` and `gate-ensure.sh` gate the write
+on it), but `transition --to unanchored` clears `merge_result` and leaves
+`pr.machine` behind — so on a bead unanchored back to the pool `progressing` is a
+stale stamp, and a bead still in the machine carries the `merge_result` the first
+bullet already drops.
+```bash
+# >>> downstream-court-skip
+# Drop beads whose work already reached a downstream court, so orphan recovery
+# never returns finished work to the pool or marks it. The crash-loop signal is a
+# RATE off recovered_at/recovered_count, so a re-recovered in-flight bead
+# escalates a moot visit each cycle; dropping it here is what stops both the
+# re-dispatch and the escalation. Two states name not-the-pool's work: an
+# in-flight PR (merge_result pre_open_gate/pull_request) or a human gate
+# (gc.routed_to=human). pr.machine is not read: a progressing stamp is written
+# only with an anchor merge_result, which unanchoring clears while leaving the
+# stamp, so on a repooled bead it is stale — the in-flight-PR test already covers
+# a bead still in the machine. A bead carrying neither state is still the pool's
+# to recover. Reads the candidate array on stdin (the host-bead-skip result),
+# writes the survivors on stdout, and touches no field a survivor arrived with.
+jq -c '[ .[]
+  | (.metadata // {}) as $m
+  | ($m.merge_result // "") as $mr
+  | ($m["gc.routed_to"] // "") as $routed
+  | select($mr != "pre_open_gate" and $mr != "pull_request"
+           and $routed != "human") ]'
+# <<< downstream-court-skip
+```
+Two more exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
   configured named sessions) — the controller owns their lifecycle. Recognise
   one by the bead's live `.assignee`, not the derived `.owner`: `.owner` ranks
@@ -437,10 +484,18 @@ the bead IS:
 OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/orphan-dispose.sh" ] && { OD="$c/assets/scripts/orphan-dispose.sh"; break; }
 done
+DISPOSE_RESULT=""; DISPOSE_RC=0
 if [ -z "$OD" ]; then
   echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
 else
-  "$OD" <bead> --owner "$OWNER" --apply
+  # Capture the disposal's own verdict: it decides whether this bead was RETURNED
+  # to the pool (result=disposed) or left untouched (result=skipped — a root, or a
+  # source already in a downstream court). `|| DISPOSE_RC=$?` keeps a non-zero exit
+  # (3 partial, 1 failed) from killing the step under set -e; the JSON is printed
+  # before either exit, so DISPOSE_RESULT still reads.
+  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --apply --json) || DISPOSE_RC=$?
+  printf '%s\n' "$DISPOSE_JSON"
+  DISPOSE_RESULT=$(printf '%s' "$DISPOSE_JSON" | jq -r '.result // ""')
 fi
 ```
 
@@ -466,6 +521,25 @@ half-released, and it needs an escalation
 
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
+
+A disposal that SKIPPED changed nothing — a workflow root, or a source whose work
+already reached a downstream court — so it is not a recovery and must not be
+recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
+signal a RATE for work that was never re-dispatched, the moot escalation this
+whole filter exists to stop. Gate the record on the disposal's own verdict:
+```bash
+# >>> recovery-stamp-gate
+# STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
+# (result=disposed: a released visit or step, or a delegated source). Every other
+# verdict — skipped (a root, or a source already in a downstream court), partial,
+# failed, or an unread empty — returned nothing to the pool, so no recovery is
+# stamped and no crash-loop rate is read.
+case "${DISPOSE_RESULT:-}" in
+  disposed) STAMP_RECOVERY=1 ;;
+  *)        STAMP_RECOVERY=0 ;;
+esac
+# <<< recovery-stamp-gate
+```
 
 **6. Record the recovery. A crash loop is a RATE, not a mark.** A bare
 `recovered=true` is a flag nothing clears, so reading a repeat recovery off
@@ -518,9 +592,13 @@ esac
 # <<< crash-loop-window
 ```
 ```bash
-gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
+# Only a disposed bead is a recovery (recovery-stamp-gate above); a skip stamps
+# nothing, so the crash-loop RATE is never fed a recovery that did not happen.
+if [ "$STAMP_RECOVERY" = "1" ]; then
+  gc bd update <bead> --set-metadata recovered=true --set-metadata "recovered_at=$NOW_AT" --set-metadata "recovered_count=$COUNT"
+fi
 ```
-Escalate `--key witness-crash-loop` only when `CRASH_LOOP=1`, and say which
+Escalate `--key witness-crash-loop` only when `STAMP_RECOVERY=1` and `CRASH_LOOP=1`, and say which
 two recoveries were close together — a visit that reports only "recovered
 before" asks a human to re-derive the interval. `recovered_count` outside the
 window is a bead that keeps coming back rather than one that is looping; it is

@@ -220,6 +220,82 @@ has "$OUT" "pins" "source arm reports the pin clear in landed"
 eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead session id (reopen leaves it)"
 eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
 
+echo "--- source arm: an in-flight-PR source bead is NOT returned to the pool ---"
+# A work bead handed off with its branch pushed and its PR in flight (merge_result
+# pull_request/pre_open_gate) still names its dead session, so orphan recovery
+# classes it source and would delete-source + reopen-source it back to the pool,
+# re-dispatching finished work the refinery owns landing and stamping a recovery
+# the crash-loop signal reads as a RATE. The source arm skips it: no delete-source,
+# no reopen, bead left as-is.
+for MR in pull_request pre_open_gate; do
+  store "[{\"id\":\"tk-inflight\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"in-flight work bead\",
+           \"metadata\":{\"branch\":\"polecat/tk-inflight\",\"merge_result\":\"$MR\",
+                       \"gc.routed_to\":\"gc-toolkit/gc-toolkit.polecat\",\"gc.session_name\":\"polecat-9-pool\"}}]"
+  : > "$STUB_GC_LOG"
+  OUT=$("$SCRIPT" tk-inflight --owner polecat-9-pool --apply 2>&1); rc=$?
+  eq "$rc" "0" "in-flight source disposal ($MR) exits 0"
+  has "$OUT" "class=source"        "in-flight bead is still classed source ($MR)"
+  has "$OUT" "action=skip"         "in-flight source is skipped, not delegated ($MR)"
+  has "$OUT" "result=skipped"      "in-flight source reports skipped ($MR)"
+  has "$OUT" "detail=inflight_pr"  "in-flight skip states why ($MR)"
+  hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "in-flight source never calls delete-source ($MR)"
+  hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "in-flight source never reopens ($MR)"
+  eq "$(bstatus tk-inflight)" "open" "in-flight bead left as-is ($MR)"
+done
+
+echo "--- source arm: a stale progressing pr.machine (no anchor) is recovered ---"
+# pr.machine=progressing is written only alongside an anchor merge_result, and
+# transition --to unanchored clears merge_result while leaving pr.machine behind,
+# so a `progressing` stamp with NO merge_result is a stale leftover on a bead
+# unanchored back to the pool — genuinely lost work. It must NOT block the reopen:
+# the source arm delegates and recovers it, whatever the stamp says.
+store '[{"id":"tk-prog","status":"in_progress","assignee":"lx-dead","title":"stale-progressing work bead",
+         "metadata":{"branch":"polecat/tk-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-prog --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "stale-progressing source disposal exits 0"
+has "$OUT" "action=delegate-source-workflow" "a stale progressing stamp (no anchor) delegates, not skips"
+has "$(cat "$STUB_GC_LOG")" "delete-source" "stale-progressing source calls delete-source"
+has "$OUT" "result=disposed" "stale-progressing source is recovered"
+
+echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
+# A work bead a person owns clearing — routed to the human gate (gc.routed_to=human:
+# a signoff cap, a merge gate, an operator approval) — is not lost work, even with no
+# merge_result and no progressing machine. It still names its dead session, so orphan
+# recovery classes it source and would delete-source + reopen-source it back to the
+# pool. mol-witness-patrol's downstream-court-skip filter drops it upstream, but a bead
+# that moves onto a human gate after that filter, or reaches this script by recovery or
+# manual replay, must still be skipped here. The tk-work and tk-settled cases above
+# (routed to a pool address, no in-flight state) still delegate, so the guard is scoped
+# to the human gate, not to any route.
+store '[{"id":"tk-human","status":"open","assignee":"","title":"human-gate work bead",
+         "metadata":{"branch":"polecat/tk-human","gc.routed_to":"human","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-human --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "human-gate source disposal exits 0"
+has "$OUT" "class=source"      "human-gate bead is still classed source"
+has "$OUT" "action=skip"       "human-gate source is skipped, not delegated"
+has "$OUT" "result=skipped"    "human-gate source reports skipped"
+has "$OUT" "detail=human_gate" "human-gate skip states why"
+hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "human-gate source never calls delete-source"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "human-gate source never reopens"
+eq "$(bstatus tk-human)" "open" "human-gate bead left as-is"
+
+echo "--- source arm: a progressing pr.machine WITH an anchor still skips (on merge_result) ---"
+# The in-flight skip is the merge_result arm's alone now. A bead genuinely in the
+# machine carries an anchor merge_result, so it still skips — proving the fix
+# narrowed the skip to merge_result/human without letting in-flight work through.
+store '[{"id":"tk-anchor-prog","status":"open","assignee":"","title":"anchored progressing work bead",
+         "metadata":{"branch":"polecat/tk-anchor-prog","merge_result":"pull_request","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-anchor-prog --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "anchored-progressing source disposal exits 0"
+has "$OUT" "result=skipped" "an in-flight bead (merge_result=pull_request) still skips"
+has "$OUT" "detail=inflight_pr" "the skip is on the merge_result arm"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "anchored-progressing source never reopens"
+
 echo "--- source arm: a pin that will not clear is not a clean release ---"
 # clear_pins bypasses the claim guard, but a store that reports success and drops
 # the key is the rollback verify exists to catch. With the dead session id
