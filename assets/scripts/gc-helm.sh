@@ -1067,8 +1067,8 @@ cmd_open() {
                                    | select((.depends_on_id // "") == $s) ] | length > 0)))
                | .id ] | first // empty' 2>/dev/null || true)
     if [ -n "$existing" ]; then
-        echo "$PROG: visit $existing is already open for $bead — a converse session holds it (or will spawn/vacuum it)."
-        echo "       Attach via the sessions picker."
+        echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
+        echo "       Engage it when ready: $PROG engage $existing"
         return 0
     fi
 
@@ -1119,8 +1119,8 @@ cmd_open() {
     # <<< gate-visit
     bust_cache
 
-    echo "$PROG: visit $VISIT filed on $bead (pool $POOL) — a converse session will spawn (cold) or vacuum it (warm)."
-    echo "       Attach via the sessions picker."
+    echo "$PROG: visit $VISIT filed on $bead — parked on the helm board (gc.routed_to=$POOL); no session spawned."
+    echo "       Engage it when ready: $PROG engage $VISIT"
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
@@ -1548,13 +1548,24 @@ cmd_engage() {
     fi
     [ -n "$VISIT" ] || { echo "$PROG: engage: could not resolve a visit for '$bead'. Nothing spawned." >&2; exit 4; }
 
-    # A visit already in progress is a live sitting; engaging again would spawn a
-    # duplicate, so point the operator at the running session instead.
+    # A visit with an assignee is already engaged, or pending engagement:
+    # engage binds the visit to a spawned sitting's runtime name (below) while
+    # the visit is still `open`, and the hook promotes that `open`+assignee pair
+    # through ready_assignment. So a nonempty assignee means a sitting already
+    # holds the visit or is about to. Gating on in_progress alone would let a
+    # second engage spawn a duplicate in that window and overwrite the assignee,
+    # stranding the first sitting; treat any nonempty assignee as taken and point
+    # the operator at it instead.
     visit_row=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0] // {}) else {} end' 2>/dev/null || true)
     visit_status=$(printf '%s' "$visit_row" | jq -r '.status // ""' 2>/dev/null || true)
     visit_owner=$(printf '%s' "$visit_row" | jq -r '.assignee // ""' 2>/dev/null || true)
-    if [ "$visit_status" = "in_progress" ] && [ -n "$visit_owner" ]; then
-        echo "$PROG: engage: visit $VISIT is already engaged by '$visit_owner' — attach to it instead: gc session attach $visit_owner" >&2
+    if [ -n "$visit_owner" ]; then
+        if [ "$visit_status" = "in_progress" ]; then
+            engaged_msg="already engaged by '$visit_owner'"
+        else
+            engaged_msg="pending engagement by the spawned sitting '$visit_owner'"
+        fi
+        echo "$PROG: engage: visit $VISIT is $engaged_msg — attach to it instead: gc session attach $visit_owner" >&2
         exit 4
     fi
 
@@ -1562,7 +1573,14 @@ cmd_engage() {
     # the session's claim loop runs. Capture the runtime identity from --json:
     # a multi-session template's stored alias is a qualified form, so the visit
     # id is not assumed to equal it.
-    spawn=$(gc session new "$template" --alias "$VISIT" --no-attach --json 2>/dev/null | scrub)
+    #
+    # `gc session new` resolves a bare template through currentRigContext, which
+    # reads GC_DIR (or cwd), NOT the GC_RIG exported above. The converse
+    # templates are rig-scoped, with no city-scoped bare converse-<model>, so
+    # from the city root (where the tmux board picker runs) the bare name matches
+    # no rig and nothing spawns. Point GC_DIR at the subject's rig so the name
+    # resolves to that rig's template.
+    spawn=$(GC_DIR="$path" gc session new "$template" --alias "$VISIT" --no-attach --json 2>/dev/null | scrub)
     sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
     sname=$(printf '%s' "$spawn" | jq -r '.session_name // ""' 2>/dev/null || true)
     if [ -z "$sname" ] || [ -z "$sid" ]; then

@@ -66,6 +66,9 @@ case "$1 ${2:-}" in
     else printf '[]\n'; fi ;;
   "session new")
     printf 'session new %s\n' "$*" >> "$CALLS"
+    # Record the rig context engage supplies: `gc session new` resolves a bare
+    # template through GC_DIR/cwd, so engage must point it at the subject's rig.
+    printf 'GC_DIR=%s\n' "${GC_DIR-<unset>}" >> "$CALLS"
     if [ -n "${SPAWN_EMPTY:-}" ]; then jq -n '{ok:true}'; else
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
@@ -118,6 +121,21 @@ echo "# --model selects the tier"
 run_engage tk-vis --model codex --no-attach
 has "$CALLED" "session new converse-codex --alias tk-vis" "(MODELFLAG) --model codex spawns converse-codex"
 
+echo "# engage supplies the subject's rig context so a bare template resolves"
+# The converse templates are rig-scoped — there is no city-scoped bare
+# converse-<model>, and `gc session new` resolves the name through GC_DIR/cwd,
+# not GC_RIG. So from a non-rig cwd (the city root, where the tmux board picker
+# runs) engage must point GC_DIR at the subject's rig or nothing spawns.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+: > "$CALLS"; : > "$ASSIGNEE"
+set +e
+OUT="$(cd "$TMP" && sh "$SCRIPT" engage tk-vis --no-attach 2>"$TMP/err")"; RC=$?
+set -e
+CALLED="$(cat "$CALLS")"
+eq "$RC" 0 "(RIGCTX) engaging from a non-rig cwd exits 0"
+has "$CALLED" "GC_DIR=/nonexistent-rig" "(RIGCTX) session new runs under the subject's rig via GC_DIR, not the ambient cwd"
+
 echo "# engaging a SUBJECT resolves the one open visit tracking it"
 export BEAD_KIND=task HAVE_VISIT=1
 printf 'open' > "$VIS_STATUS"
@@ -133,6 +151,18 @@ run_engage tk-vis --no-attach
 eq "$RC" 4 "(BUSY) an in_progress visit under an owner exits 4"
 hasnt "$CALLED" "session new" "(BUSY) …and spawns no duplicate sitting"
 has "$OUT" "already engaged" "(BUSY) …and points at the running session"
+
+echo "# an OPEN visit that already carries an assignee is a pending engagement"
+# The window finding: engage binds the visit while it is still open, and the
+# hook adopts an open+assignee visit through ready_assignment. A second engage
+# before the sitting claims must NOT spawn a duplicate and overwrite the binding.
+export VIS_OWNER="gc-toolkit__converse-7"
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(PENDING) an open visit with an assignee exits 4"
+hasnt "$CALLED" "session new" "(PENDING) …and spawns no duplicate sitting"
+has "$OUT" "pending engagement" "(PENDING) …and names it a pending engagement"
+
 export VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
 

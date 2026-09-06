@@ -135,12 +135,23 @@ grep -q 'task_kind=visit' <<< "$CALLS" \
   && ok "(EXISTS) task_kind=visit stamped" || bad "(EXISTS) task_kind stamp"
 grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' <<< "$CALLS" \
   && ok "(EXISTS) tracks edge wired to the subject" || bad "(EXISTS) tracks edge (calls: $CALLS)"
+# The converse routed-pool is retired: a successful open parks the visit on the
+# board and spawns no session, so its message must report the board and the
+# engage action, not the old spawn/vacuum/attach-via-picker advice.
+grep -q 'parked on the helm board' <<< "$OUT" \
+  && ok "(EXISTS) success message reports a board-parked visit" || bad "(EXISTS) success names the board (out: $OUT)"
+grep -q 'engage tk-visit1' <<< "$OUT" \
+  && ok "(EXISTS) …and the engage action needed next" || bad "(EXISTS) success points at engage (out: $OUT)"
+grep -qE 'will spawn|vacuum|sessions picker' <<< "$OUT" \
+  && bad "(EXISTS) success still advertises the retired converse pool" || ok "(EXISTS) no retired spawn/vacuum/picker advice"
 
 # --- (HELD) an existing open visit still short-circuits ------------------------
 run_open found tk-real1 tk-visit0
 eq "$RC" "0" "(HELD) an already-held subject exits 0"
 grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
   && ok "(HELD) prints the existing visit id" || bad "(HELD) existing visit reported (out: $OUT)"
+grep -q 'engage tk-visit0' <<< "$OUT" \
+  && ok "(HELD) points the operator at engage for the existing visit" || bad "(HELD) points at engage (out: $OUT)"
 [ -z "$CALLS" ] \
   && ok "(HELD) no second visit filed" || bad "(HELD) must not file a second visit (calls: $CALLS)"
 
