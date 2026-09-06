@@ -20,7 +20,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-recovery-stamp-gate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
