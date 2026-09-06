@@ -223,6 +223,19 @@ CALLS=$(wc -l < "$ARGV_LOG")
 lt "$WIDEST" "16384" "the widest --id argument across $CALLS lookups is $WIDEST bytes, far below the 131072 cap"
 ge "$CALLS" "2" "the roots were resolved in batches, not one sweep"
 : > "$ARGV_LOG"
+# The chunk narrows the widest argument independently of the store, so a small
+# fixture shows it: at chunk=10 the widest batch is 10 ids, far under the 100-id
+# batches the chunk=100 run above built at $N molecules. Re-scanning all $N here
+# at chunk=10 is $N/10 windows of bounded work to demonstrate a bound a few
+# molecules already carry — the store-size independence is test 10's job, above.
+clear_fixtures
+NARROW=30
+jq -cn --argjson n "$NARROW" '[range(0;$n) | {id:("r-"+(.|tostring)),status:"open",closed_at:""}]' \
+    > "$TMP/stores/alpha.roots.json"
+jq -cn --argjson n "$NARROW" --arg ua "$RECENT" '[range(0;$n)
+    | {id:("s-"+(.|tostring)),status:"open",updated_at:$ua,
+       metadata:{"gc.root_bead_id":("r-"+(.|tostring))}}]' \
+    > "$TMP/stores/alpha.steps.json"
 OUT=$(BD_ARGV_LOG="$ARGV_LOG" GC_DOCTOR_ROOT_CHUNK=10 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1)
 WIDEST10=$(sort -rn "$ARGV_LOG" | head -1)
 lt "$WIDEST10" "$WIDEST" "a smaller batch size narrows the widest argument ($WIDEST10 < $WIDEST), so the bound is the batch"

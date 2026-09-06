@@ -69,7 +69,11 @@ field() { sed -n "s/^$2=//p" <<< "$1"; }
 # was attempted. The predicate is a function so each poll re-reads the state.
 await_until() { # <predicate> [arg]
   local end=$(( $(date +%s) + 20 ))
-  until "$@" >/dev/null 2>&1 || [ "$(date +%s)" -ge "$end" ]; do sleep 1; done
+  # Poll finely: these awaits wait on a DETACHED child's evidence, which lands
+  # in tens of milliseconds, so a 1s tick spent up to a second per await — and
+  # there are ~20 of them. The 20s ceiling is the real bound; the interval only
+  # sets how promptly a satisfied predicate is noticed.
+  until "$@" >/dev/null 2>&1 || [ "$(date +%s)" -ge "$end" ]; do sleep 0.05; done
 }
 # The rc file is written last, by rename, so it is the completion signal.
 have_rc()     { [ -f "$STATE/current/rc" ]; }
@@ -182,7 +186,8 @@ OUT=$(GC_DOCTOR_SWEEP_BOUND=0 "$SUT")
 has "$OUT" "state=exceeded" "a sweep past its bound reports exceeded"
 has "$OUT" "elapsed=" "  ... carrying the elapsed time the escalation needs"
 eq "$(field "$OUT" last_check)" "check-fixture-slow" "  ... and the check it was inside"
-sleep 1
+# The SUT issued the kill above; give SIGTERM a moment to land, then confirm.
+sleep 0.3
 if kill -0 "$PID" 2>/dev/null; then bad "  ... and the sweep is killed, not left running"
 else ok "  ... and the sweep is killed, not left running"; fi
 eq "$(cat "$STATE/last-outcome")" "failed" "  ... and records the exceeded run failed, so it can retry"

@@ -559,7 +559,7 @@ done
 FAKE_AGENT_NAME="gcvp.test-$$"
 INDICATOR_PATH="/tmp/gc-status-gcvp-test-$$.indicator"
 CFG_SLOW="$TMP/cfg-slow"; mkcfg "$CFG_SLOW" '#!/bin/sh
-sleep 1
+sleep 0.3
 echo "gc-visit-open: subject tk-sub04 — visit filed (x)."'
 rm -f "$INDICATOR_PATH"
 (

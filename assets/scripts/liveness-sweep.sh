@@ -99,14 +99,16 @@ DB="${LIVENESS_SWEEP_DB-${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-if command -v timeout >/dev/null 2>&1; then
-    if timeout -k 1 1 true >/dev/null 2>&1; then
-        bounded() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
-    else
-        bounded() { timeout "$CALL_TIMEOUT" "$@"; }
-    fi
-else
+if [ "$CALL_TIMEOUT" = "0" ] || ! command -v timeout >/dev/null 2>&1; then
+    # 0 disables the per-call bound (what `timeout 0` already means) and skips a
+    # timeout fork on every data read. The hermetic test sets it: the sweep makes
+    # dozens of bounded reads per pass against instant stubs, so the bound never
+    # fires and the forks are pure cost.
     bounded() { "$@"; }
+elif timeout -k 1 1 true >/dev/null 2>&1; then
+    bounded() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
+else
+    bounded() { timeout "$CALL_TIMEOUT" "$@"; }
 fi
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
