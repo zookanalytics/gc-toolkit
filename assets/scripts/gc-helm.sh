@@ -1538,7 +1538,11 @@ cmd_engage() {
         VISIT=$(engage_find_visit "$bead")
         if [ -z "$VISIT" ]; then
             echo "$PROG: engage: no open visit on $bead — filing one to park on the board, then engaging it" >&2
-            cmd_open "$bead" ${engage_reason:+--reason "$engage_reason"} >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            if [ -n "$engage_reason" ]; then
+                cmd_open "$bead" --reason "$engage_reason" >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            else
+                cmd_open "$bead" >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            fi
             VISIT=$(engage_find_visit "$bead")
         fi
     fi

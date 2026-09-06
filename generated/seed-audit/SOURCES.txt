@@ -56,7 +56,7 @@ assets/scripts/render-seed-audit.sh
 formulas/mol-deacon-patrol.toml
 30371a3f99da16a1002cf68c8f5c4035b6852822e1feefd8116f52ccffa12f95
 formulas/mol-dog-shutdown-dance.toml
-3a218bfe03da4422efe21d706bb884818dd65a1c7ad4694fd7f7c9f90bb5dec1
+54d2480953be08261f3b34b0c15f1cca35400703b7bc5f14fd3d737c88f0ea9a
 formulas/mol-feedback-distiller.toml
 19dad20c47ed6007d800c2d4ee5e5dde05b28215890573793194600e598269e2
 formulas/mol-feedback-miner.toml
