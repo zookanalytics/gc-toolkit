@@ -330,6 +330,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/boot-health.toml` | patrol | Fires the wedged-deacon detector. |
 | `orders/convoy-check.toml` | patrol | Fires the convoy sweep hourly, city-wide: closes the convoys the bead-close autoclose missed. |
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
+| `orders/pin-keepalive.toml` | patrol | Condition-triggered, city-scoped: pins standing conversational named sessions (mechanik today) so config-drift restart keeps deferring on them. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |
 | `orders/scratch-reap.toml` | patrol | Fires the scratch reaper hourly, city-wide. |
 | `orders/worktree-reap.toml` | patrol | Fires the worktree reaper hourly, city-wide. |
@@ -341,6 +342,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/liveness-recheck.sh` | patrol | Re-validates a sweep visit's census at claim time. |
 | `assets/scripts/liveness-sweep-precheck.sh` | patrol | The order's condition check: proves a pass has something to say before one runs. |
 | `assets/scripts/liveness-sweep.sh` | patrol | Classifies every open bead; unnamed waits batch into one triage visit. An anchor whose gating PR has stopped moving is escalated on its own, deduped by a stamp on the anchor. |
+| `assets/scripts/pin-keepalive-precheck.sh` | patrol | The pin-keepalive order's condition check: runs `pin-keepalive.sh --check`, read-only. |
+| `assets/scripts/pin-keepalive.sh` | patrol | The pass, and (in `--check` mode) its own condition gate on one predicate: pins every standing conversational named session (`configured_named_session`, provider `claude`) that is not already pinned. |
 | `assets/scripts/quota-park-nudge.sh` | patrol | Resumes a session parked behind a provider quota banner. |
 | `assets/scripts/scratch-reap.sh` | patrol | Removes the scratch of sessions inactive past the horizon, so the per-uid tmpfs quota has a floor the pack controls. |
 | `assets/scripts/worktree-reap.sh` | patrol | Removes the worktrees of closed work beads, each pinned by an archive tag first, so a landed bead's checkout stops being a permanent floor under the disk. |
