@@ -134,7 +134,12 @@ id = "triage-findings"
 title = "Decisions 1 and 2: rule each finding must-fix, deferred, or declined"
 needs = ["load-dispatch"]
 description = """
-Each block is its own shell, so re-derive the pins first:
+Each block is its own shell, so re-derive the pins AND re-read the batch first.
+The read is repeated here rather than carried over from `load-dispatch`: that
+step's finding ids went to a stdout a resumed pass no longer has, and a triage
+that trusted it would rule an empty set and converge while real findings stay
+unvalidated. The guarded read is the same one `load-dispatch` used — fail closed
+on an unreadable or non-array store, never treat either as an empty batch:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -142,20 +147,32 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
+[ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 [ -n "$SCRIPTS" ] || { echo "finding.sh not found in the pack" >&2; exit 1; }
+BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked --limit=0 --json) \
+  || { echo "cannot read the finding ledger for anchor $ANCHOR; refusing to treat an unreadable store as an empty batch" >&2; exit 1; }
+printf '%s' "$BATCH_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
+  || { echo "finding ledger for anchor $ANCHOR did not read back as a JSON array; refusing to proceed on malformed output" >&2; exit 1; }
+printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
+      | select((.metadata.task_kind // "") == "finding")
+      | select(((.metadata["finding.lane"] // "") ) == $lane)
+      | select((.metadata["finding.disposition"] // "") == "unvalidated")
+      | "\\(.id)\\t\\(.title)"'
 ```
 
 **The threshold ({{defer_policy}}):**
 
 {{defer_policy}}
 
-**Rule every finding in the batch.** For each unvalidated finding the batch
-carried, judge it against the threshold above and write ONE disposition through
-`finding.sh set-disposition` — the primitive owns the edge each disposition
-takes, so you never touch a dependency edge by hand:
+**Rule every finding the block above printed.** For each id in that
+reconstructed batch, read its full body (`gc bd show <id>`) for the locus, the
+objection, and the fix proposed, judge it against the threshold above, and write
+ONE disposition through `finding.sh set-disposition` (the finding id replaces
+`<F>`) — the primitive owns the edge each disposition takes, so you never touch a
+dependency edge by hand:
 
 - **must-fix** — a real objection to fix before merge. This is the default.
   `finding.sh` wires the finding `--blocks` the anchor, the hold merge.sh's
