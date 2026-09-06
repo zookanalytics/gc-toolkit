@@ -308,6 +308,16 @@ case "$verb" in
           shift || true
         done
         printf '%s|%s|%s\n' "$a" "$ty" "$b" >> "$D" ;;
+      remove|rm)
+        # gc bd dep remove <issue> <depends-on>: drop the edge with that
+        # orientation, whatever its type. Real bd prints ✓ and exits 0 even for
+        # an edge that never existed, so this never fails.
+        x="${2:-}"; y="${3:-}"
+        awk -F'|' -v x="$x" -v y="$y" '
+          { a=$1; ty=$2; b=$3
+            if (ty == "blocks") { issue=b; dep=a } else { issue=a; dep=b }
+            if (issue == x && dep == y) next
+            print }' "$D" > "$D.tmp" && mv "$D.tmp" "$D" ;;
       *)
         # gc bd dep <src> --blocks <dst>
         src="${1:-}"; shift || true

@@ -206,9 +206,20 @@ cmd_set_disposition() {
         || { warn "$finding does not block $anchor after must-fix wiring"; exit 2; }
       ;;
     deferred)
-      # Provenance only. discovered-from is neither ready-blocking nor read by
-      # merge.sh, so the finding stays open across the merge holding nothing.
-      # The finding is the dependent so the edge can never hold the anchor.
+      # Provenance only, holding nothing: discovered-from is neither
+      # ready-blocking nor read by merge.sh, so a deferred finding stays open
+      # across the merge. A must-fix -> deferred reclassification must first
+      # retract the blocks edge the earlier disposition wired — merge.sh reads
+      # blocks downward, so a surviving edge would keep a deferred finding
+      # holding the merge it must not. Fail closed if it survives rather than
+      # report a still-standing hold as cleared. Retract before adding
+      # discovered-from so the removal cannot touch the provenance edge.
+      if edge_exists "$finding" "$anchor"; then
+        gc bd dep remove "$anchor" "$finding" >/dev/null 2>&1 \
+          || gc bd dep remove "$finding" "$anchor" >/dev/null 2>&1 || true
+      fi
+      ! edge_exists "$finding" "$anchor" \
+        || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
       gc bd dep add "$finding" "$anchor" --type discovered-from >/dev/null 2>&1 \
         || warn "could not wire $finding --discovered-from $anchor (deferred records provenance only)"
       ;;

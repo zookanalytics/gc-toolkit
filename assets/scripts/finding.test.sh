@@ -71,6 +71,20 @@ hasnt "$(deps)" "$F3|blocks|tk-anc" "deferred writes no blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the deferred finding"
 
 # ---------------------------------------------------------------------------
+# set-disposition must-fix -> deferred: the reclassification retracts the blocks
+# edge, or merge.sh keeps reading the finding as a live blocker and a deferred
+# finding holds the merge it must not (regression).
+# ---------------------------------------------------------------------------
+F5=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/qux.sh:main()" --message "double-quote the array expansion")
+"$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition must-fix
+has " $(probe_blockers tk-anc) " " $F5 " "must-fix first wires the finding as a live blocker"
+"$SUT" set-disposition --finding "$F5" --anchor tk-anc --disposition deferred
+eq "$(meta "$F5" 'finding.disposition')" "deferred" "reclassified must-fix -> deferred"
+hasnt "$(deps)" "$F5|blocks|tk-anc" "must-fix -> deferred retracts the blocks edge"
+hasnt " $(probe_blockers tk-anc) " " $F5 " "merge.sh's probe no longer sees the reclassified finding"
+has "$(deps)" "$F5|discovered-from|tk-anc" "must-fix -> deferred keeps the discovered-from provenance edge"
+
+# ---------------------------------------------------------------------------
 # set-disposition declined: closed with the reason, holding nothing.
 # ---------------------------------------------------------------------------
 F4=$("$SUT" upsert --anchor tk-anc --lane codex --locus "assets/scripts/foo.sh:helper()" --message "nit: rename for clarity")
