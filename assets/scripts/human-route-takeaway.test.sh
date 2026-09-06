@@ -64,7 +64,10 @@ block_start() { # <file> <line> — first line of the enclosing fenced block, el
         NR < line && /^[[:space:]]*```/ { if (open) { open = 0 } else { open = 1; at = NR } }
         END { if (open) print at }
       ' "$1")
-      [ -n "$fence" ] && [ "$fence" -gt "$from" ] && from="$fence"
+      # The fence bounds the search to the whole block, however tall: flooring
+      # it at LOOKBACK would cut off a stamp more than LOOKBACK lines above the
+      # transition. LOOKBACK is the fallback only outside any fence.
+      [ -n "$fence" ] && from="$fence"
       ;;
   esac
   printf '%s' "$from"
