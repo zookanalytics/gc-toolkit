@@ -1,14 +1,16 @@
 description = """
 mol-visit — "I want to talk about this": file one visit on a
-subject bead, routed to the converse pool. The operator-driven trigger of
-the one entry point — all three triggers (formula-driven, event-driven,
-operator-driven) collapse into filing a visit (specs/tk-h9pq5/design-doc.md,
-Key Components §5; docs/architecture.md "How work moves").
+subject bead, parked on the helm board (gc.routed_to=human). The
+operator-driven trigger of the one entry point — all three triggers
+(formula-driven, event-driven, operator-driven) collapse into filing a visit
+(specs/tk-h9pq5/design-doc.md, Key Components §5; docs/architecture.md "How
+work moves").
 
 Contract: v1, one step — the one-step formula the architecture names. Run
 by whoever wants the conversation (operator shell, a formula step, another
-conversation); the step files the visit and exits. Pool demand does the
-spawning.
+conversation); the step files the visit and exits. The converse routed-pool is
+retired: the visit holds no session until an operator engages it off the board
+(gc-helm engage).
 
 Files no gated work; nothing to sign off.
 """
@@ -24,10 +26,6 @@ required = true
 description = "The visit prompt: what this visit needs from the operator (decision, review, catch-up). Substituted into a shell command — avoid quote characters, or put the detail in the -d body by hand."
 required = true
 
-[vars.binding_prefix]
-description = "Import binding prefix with trailing dot; combined with the rig qualifier it names the converse pool (the exact-match read side needs the qualified name — docs/gascity-routing-model.md)"
-default = "gc-toolkit."
-
 [[steps]]
 id = "file-visit"
 title = "File the visit bead in the subject's continuation group"
@@ -37,9 +35,12 @@ description = """
 # The canonical gate-visit snippet (spec: specs/2026-08-fresh-start/
 # liveness-and-triage-spec.md §1). Consumers copy this block, markers
 # included; assets/scripts/gate-visit.test.sh extracts and checks every
-# copy's load-bearing invariants (rig-qualified pool, one key per
-# --set-metadata flag, tracks edge, visit title brand).
-POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}converse"
+# copy's load-bearing invariants (human route, one key per --set-metadata
+# flag, tracks edge, visit title brand).
+# The converse routed-pool is retired: a filed visit parks on the helm board
+# (gc.routed_to=human, the board's exact gather predicate) and holds no session
+# until an operator engages it (gc-helm engage).
+POOL="human"
 VISIT=$(gc bd create -t task --title "visit: {{subject}} — {{visit}}" -d "{{visit}}" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
   || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }

@@ -121,7 +121,7 @@ has "$esc" "GC_RIG=gc-toolkit" "escalate.sh ran with GC_RIG pinned to the rig th
 hasnt "$esc" "GC_RIG=some-other-rig" "…never the GC_RIG inherited from the caller's shell"
 has "$esc" "--subject P1" "the visit names the anchor"
 has "$esc" "--key gate-park-migrated" "the visit uses the migration's dedup key"
-has "$esc" "--pool gc-toolkit/gc-toolkit.converse" "the visit routes through this rig's converse pool"
+hasnt "$esc" "--pool" "the visit parks on the board (escalate's default human route; the retired converse pool is not named)"
 unset GC_RIG
 
 echo

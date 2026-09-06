@@ -174,14 +174,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
       echo "$label $id: city-scope park needs an operator — no rig to route the visit through ($PARK_WHY); NOT parked, legacy marker left in place — file by hand" >&2
       continue
     fi
-    # GC_RIG picked explicitly, not inherited: GC_RIG outranks --pool inside
-    # escalate.sh, so an exported GC_RIG from the caller's shell (gc-helm
-    # shells and agent sessions export it) would otherwise steer the visit
-    # into the wrong rig's store, or refuse it as cross-rig, regardless of
-    # --pool. Pinning it to the rig this iteration is walking keeps the two
-    # in agreement, the same way a rig-qualified --pool alone cannot.
+    # GC_RIG picked explicitly, not inherited: it selects the store the visit
+    # lands in, and an exported GC_RIG from the caller's shell (gc-helm shells
+    # and agent sessions export it) would otherwise steer it into the wrong
+    # rig's store. Pinning it to the rig this iteration is walking parks the
+    # visit on that rig's board. The route is escalate's default (human) — the
+    # converse routed-pool it used to name is retired.
     if ! GC_RIG="$rig_name" "$ESCALATOR" --subject "$id" --key "$VISIT_KEY" \
-         --pool "$rig_name/gc-toolkit.converse" --message \
+         --message \
 "The review cap's park on $id was carried across the lane-state migration and needs a person.
 
 $PARK_WHY

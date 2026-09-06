@@ -4,9 +4,9 @@
 # THE BUG: `gc-helm open <bead-id>` resolved the id PREFIX to a rig, pointed bd
 # at that rig's ledger, and then filed a visit — never confirming the bead
 # actually resolves there. A typo or a stale id produced a REAL visit bead,
-# routed to the rig converse pool with gc.continuation_group=<the typo>. Pool
-# demand then spawns a converse session whose prime step (`gc bd show $SUBJECT`)
-# cannot resolve anything, so it holds a conversation about a bead that does not
+# parked on the helm board with gc.continuation_group=<the typo>. Engaging it
+# spawns a converse sitting whose prime step (`gc bd show $SUBJECT`) cannot
+# resolve anything, so it holds a conversation about a bead that does not
 # exist. Reproduced 2026-08-09 in signal-loom: `gc-helm open sl-nope1` filed a
 # visit and exited 0. This is the operator front door for the visit spine, so a
 # fat-fingered id manufactures junk work and an agent to hold it.
@@ -127,8 +127,8 @@ eq "$RC" "0" "(EXISTS) a resolvable subject exits 0"
 # The stub records `$*`, so quoting is flattened — match the argv words.
 grep -q 'bd create .*--title visit: tk-real1' <<< "$CALLS" \
   && ok "(EXISTS) the visit bead is created" || bad "(EXISTS) visit created (calls: $CALLS)"
-grep -q 'gc.routed_to=gc-toolkit/gc-toolkit.converse' <<< "$CALLS" \
-  && ok "(EXISTS) routed to the rig-qualified converse pool" || bad "(EXISTS) routed_to stamp (calls: $CALLS)"
+grep -q 'gc.routed_to=human' <<< "$CALLS" \
+  && ok "(EXISTS) parked on the helm board (routed_to=human)" || bad "(EXISTS) routed_to stamp (calls: $CALLS)"
 grep -q 'gc.continuation_group=tk-real1' <<< "$CALLS" \
   && ok "(EXISTS) continuation_group stamped with the subject" || bad "(EXISTS) continuation_group stamp"
 grep -q 'task_kind=visit' <<< "$CALLS" \

@@ -5,7 +5,7 @@
 # the open visit and files nothing. Replaces escalation-gate.sh and every
 # patrol `gc mail send` — escalations are visits a human can claim and close.
 #   escalate.sh --subject <bead-id> --key <situation-key> --message <text>
-#               [--pool <rig-qualified converse pool>]
+#               [--pool <rig-qualified pool>]
 # Callers: patrol formulas (refinery/witness/deacon), signoff.sh peers, and any
 # script that would otherwise mail. A changed situation gets a NEW key.
 # A visit filed by the deacon also lands one entry in its incident ledger
@@ -33,7 +33,7 @@ scrub() { tr -d '\000-\011\013-\037'; }
 usage() {
   cat >&2 <<'U'
 usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
-                   [--pool <rig-qualified converse pool>]
+                   [--pool <rig-qualified pool>]
 
   --subject  the bead the escalation is about; the visit tracks it (required).
              A durable bead also narrows the dedup to that bead; an ephemeral
@@ -49,11 +49,11 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              the key (`wedged-<target>`)
   --message  what the visit needs from a human; first line becomes the
              visit title's headline (required)
-  --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse.
-             The route must name a live agent identity that reads this rig's
-             store, so a caller with GC_RIG unset must pass this explicitly —
-             the bare default matches no rig-scoped pool. A rig-qualified pool
-             also selects the store, so the two always agree.
+  --pool     route to a specific pool instead of the board; default `human`,
+             which parks the visit on the helm board for the operator to engage
+             (the converse routed-pool is retired). A pool route must name a
+             live agent identity that reads this rig's store; a rig-qualified
+             --pool also selects the store, so route and store cannot disagree.
 
 env:
   GC_ESCALATE_VERDICT_WINDOW  seconds a `moot` or `benign` verdict suppresses
@@ -162,7 +162,9 @@ HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
 # >>> gate-visit
 # Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
 # checks this copy's invariants. escalation_key rides its own flag beside it.
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+# Default route is `human` (the retired converse pool's replacement): the visit
+# parks on the helm board. --pool overrides it to route to a live pool instead.
+POOL="human"
 [ -n "$POOL_ARG" ] && POOL="$POOL_ARG"
 
 # Idempotence: an open (or claimed) visit for this situation means the human is
