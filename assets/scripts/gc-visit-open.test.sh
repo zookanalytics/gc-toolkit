@@ -542,13 +542,17 @@ grep -q . < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&!/^[[:space:]]*#/
   && bad "(RIGWHY-EVIDENCE) the pipe-into-jq form is back — gc's exit status is discarded" \
   || ok "(RIGWHY-EVIDENCE) gc is run on its own, so its exit status survives"
 
-# --- (RIGWHY-TRAPS) enumerate_rigs leaves no trap installed on its caller -----
+# --- (RIGWHY-TRAPS) enumerate_rigs restores the caller's trap table ----------
 # A trap is process-global: one installed inside a helper and left there
 # rewrites how every later line of the caller answers a signal, and outlives
 # the file it was installed to remove. gc-helm.sh's enumerate_rigs scopes and
 # clears the same EXIT/INT/TERM/HUP traps; this asserts the sibling here does
 # too. The helper is lifted and run directly — every real call site is a
-# command substitution whose subshell would hide the residue.
+# command substitution whose subshell would hide the residue. Assert the table
+# is unchanged across the call, not that it is empty: a caller can inherit a
+# disposition the helper never touches — a parent that ignores SIGPIPE shows up
+# as `trap -- '' SIGPIPE` — and the invariant is that the helper leaves the
+# table exactly as it found it.
 ENUM="$TMP/enum-helper.sh"
 sed -n '/^enumerate_rigs() {/,/^}/p' "$SCRIPT" > "$ENUM"
 mkdir -p "$TMP/enumbin"
@@ -563,13 +567,17 @@ set -eu
 PROG=probe; RIGS=""
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-4}"; }
 . "$1"
+before="$(trap)"
 enumerate_rigs
-printf 'RIGS[%s]\nTRAPS[%s]\n' "$RIGS" "$(trap)"
+after="$(trap)"
+printf 'RIGS[%s]\n' "$RIGS"
+[ "$before" = "$after" ] && printf 'TRAPDELTA[]\n' \
+  || printf 'TRAPDELTA[before=<%s> after=<%s>]\n' "$before" "$after"
 ENUMPROBE
 ENUMTMP="$TMP/enumtmp"; mkdir -p "$ENUMTMP"
 EOUT="$(TMPDIR="$ENUMTMP" PATH="$TMP/enumbin:$PATH" bash "$TMP/enum-probe.sh" "$ENUM" 2>&1 || true)"
 has "$EOUT" "RIGS[["  "(RIGWHY-TRAPS) the helper enumerated, so the temp-file path really ran"
-has "$EOUT" "TRAPS[]" "(RIGWHY-TRAPS) …and left no trap installed on the caller"
+has "$EOUT" "TRAPDELTA[]" "(RIGWHY-TRAPS) …and left the caller's trap table as it found it"
 eq  "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l | tr -d ' ')" "0" \
     "(RIGWHY-TRAPS) …and removed its stderr capture"
 
