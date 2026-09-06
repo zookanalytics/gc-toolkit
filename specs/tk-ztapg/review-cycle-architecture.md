@@ -69,28 +69,34 @@ lane's current state, not its lifecycle; a lane still travels
 | 1 | `reviewing` | a review bead for this lane on the anchor is open |
 | 2 | `validating` | a validation pass on the anchor is open |
 | 3 | `fixing` | a must-fix finding on this lane is open |
-| 4 | `green` | a non-superseded closed approve-verdict review bead for this lane exists, rows 1–3 having excluded any in-flight review, validation pass, or must-fix |
-| 5 | `unreviewed` | none of the above: the lane names no non-superseded approve verdict and nothing is in flight |
+| 4 | `green` | a non-superseded closed review bead backs this lane (an approve verdict, or a legacy recorded no-verdict bead), rows 1–3 having excluded any in-flight review, validation pass, or must-fix |
+| 5 | `unreviewed` | none of the above: the lane has no non-superseded backing review bead and nothing is in flight |
 
 The load-bearing derivation is `green`. `green(anchor, lane)` holds when four
-conditions are all met: a `task_kind=review` bead for the pair — `anchor_bead`
-this anchor, `check_name` this lane — is closed carrying `signoff_verdict=approve`
-and is **not superseded** (`gc.outcome` is `recorded`, not `superseded`); no
+conditions are all met: a closed `task_kind=review` bead for the pair —
+`anchor_bead` this anchor, `check_name` this lane — backs the lane; no
 `must-fix` finding on this lane is open; no validation pass on the anchor is
-open; and no review bead for this lane is open. An operator's APPROVED GitHub
-review on the anchor's `pr_number` is the second way the approve half is met,
-because a human who approves on GitHub files no review bead; an approval names
-no gate, so it meets it for every lane.
+open; and no review bead for this lane is open. A closed review bead backs the
+lane the same two ways the provenance audit already accepts. It carries
+`signoff_verdict=approve` and is **not superseded** (`gc.outcome` is not
+`superseded`); or it carries no `signoff_verdict` with `gc.outcome=recorded`, a
+legacy bead closed before the verdict stamp existed, where the recorded outcome
+is the only sign left that it closed on a verdict and is itself non-superseded.
+An operator's APPROVED GitHub review on the anchor's `pr_number` is a third way
+the approve half is met, because a human who approves on GitHub files no review
+bead; an approval names no gate, so it meets it for every lane.
 
 The non-superseded clause is the term the promoted derivation adds. `signoff.sh`
 already closes a review bead it retires with `gc.outcome=superseded` — a pin that
-left the branch — while `doctor/check-gate-marker-provenance` resolves the
-approve half by selecting `signoff_verdict=approve` alone and never reads
-`gc.outcome`. That resolves correctly today only because a bead superseded today
-carries no verdict yet. The validator supersedes an approve bead that already
-carries `signoff_verdict=approve` (see "What moves a lane backwards"), so the
-shared read helper must exclude a `superseded` outcome for the supersede to
-land; keying on the verdict alone would keep a superseded approve counting.
+left the branch — while `doctor/check-gate-marker-provenance` accepts an
+`approve` verdict by the verdict alone, without excluding a superseded outcome.
+That resolves correctly today only because a bead superseded today carries no
+verdict yet. The validator supersedes an approve bead that already carries
+`signoff_verdict=approve` (see "What moves a lane backwards"), so the shared read
+helper must exclude a `superseded` outcome on the verdict branch for the
+supersede to land; accepting the verdict alone would keep a superseded approve
+counting. The legacy branch needs no such clause, because it already requires
+`gc.outcome=recorded`, which a supersede stamp removes.
 
 `green`'s positive evidence is per-lane: the approve verdict and the must-fix
 findings it reads are this lane's, so a sibling lane's open finding or open
@@ -120,12 +126,14 @@ Neither half of `green` was ever the marker's to own.
 The approve half is already computed. `doctor/check-gate-marker-provenance`
 derives it today as an audit over the stored marker: for every green lane it
 resolves a closed `task_kind=review` bead whose `anchor_bead` and `check_name`
-match the pair and whose `signoff_verdict` is `approve`, falling back to an
-APPROVED GitHub review on the `pr_number`. That resolver is the derivation this
-design promotes from an audit to the source of truth, with one addition: the
-promoted helper also excludes a superseded approve (`gc.outcome=superseded`),
-which the audit never needed because nothing superseded a recorded approve until
-the validator does. The review bead it reads
+match the pair and that either carries `signoff_verdict=approve` or, as a legacy
+bead written before that stamp, carries no `signoff_verdict` with
+`gc.outcome=recorded`, falling back to an APPROVED GitHub review on the
+`pr_number`. That resolver is the derivation this design promotes from an audit
+to the source of truth, with one addition: the promoted helper also excludes a
+superseded approve (`gc.outcome=superseded`) on the verdict branch, which the
+audit never needed because nothing superseded a recorded approve until the
+validator does. The review bead it reads
 is already a first-class, queryable bead: `gate-ensure.sh` creates it at
 dispatch with `task_kind`, `anchor_bead`, `check_name` and `reviewed_oid`, and
 `signoff.sh` closes it with `gc.outcome=recorded` and `signoff_verdict`. The
@@ -484,8 +492,9 @@ design that still stores the fact it means to derive.
   marker, that a green lane names a recorded approve verdict. With the marker
   gone the derivation is the truth and there is no marker to give provenance for,
   so this check either retires or becomes a structural check on the outcome
-  beads: an anchor with no open must-fix finding whose lanes each name a closed,
-  non-superseded approve-verdict review bead. The GitHub-approval fallback stays
+  beads: an anchor with no open must-fix finding whose lanes each name a closed
+  review bead that backs them, a non-superseded `signoff_verdict=approve` or a
+  legacy no-verdict `gc.outcome=recorded` bead. The GitHub-approval fallback stays
   as a way the approve half is met.
 
 `check_set` itself needs no new structure. It is already a list, `merge.sh`
@@ -508,12 +517,14 @@ rather than a conflict with it.
 The cutover needs no data migration, because the derivation reads the same
 evidence the provenance audit already accepts. `check-gate-marker-provenance`
 runs today as an audit that would flag any `check.<g>=green` not standing on a
-recorded approve verdict, resolving that verdict from a closed approve-verdict
-review bead or, when none exists, an APPROVED GitHub review on the anchor's
-`pr_number`. The derivation reads both sources, so it preserves the
-GitHub-approval fallback: a green marker standing on a human's GitHub approval
-with no local review bead still derives green after cutover, rather than silently
-going ungreen. Each reader switches from the marker
+recorded approve verdict, resolving that verdict from a closed
+`signoff_verdict=approve` review bead, from a legacy closed review bead carrying
+no `signoff_verdict` with `gc.outcome=recorded`, or, when neither exists, an
+APPROVED GitHub review on the anchor's `pr_number`. The derivation reads all
+three, so it preserves both the legacy backing and the GitHub-approval fallback:
+a green marker standing on a legacy no-verdict review bead, or on a human's
+GitHub approval with no local review bead, still derives green after cutover,
+rather than silently going ungreen. Each reader switches from the marker
 to the derivation in the change that removes that reader's marker read; once the
 last reader has switched, the `check.<lane>` markers are inert metadata that a
 one-shot sweep clears. `assets/scripts/migrate-lane-states.sh`, the disposable
