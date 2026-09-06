@@ -130,9 +130,9 @@ The human surface is subject / visit / takeaway on native primitives
   depends on who can answer it. Mail is the agent-to-agent pathway: a worker
   mails the witness, which unblocks what it can and promotes what needs a
   person. A visit is the human engagement: `escalate.sh` files or refreshes
-  **exactly one open visit per situation key**, routed to the converse pool.
-  There is no mayor; a situation that needs a human is a visit, same as any
-  other. Patrol formulas escalate rather than mail, because a patrol sits at
+  **exactly one open visit per situation key**, parked on the helm board
+  (`gc.routed_to=human`), where the operator engages it. There is no mayor; a
+  situation that needs a human is a visit, same as any other. Patrol formulas escalate rather than mail, because a patrol sits at
   the top of the agent tier and has no peer to mail.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
