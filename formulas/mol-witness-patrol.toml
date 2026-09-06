@@ -29,9 +29,9 @@ right only by luck.
 
 Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
 liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
-owning-store-guard, crash-loop-window, patrol-wisp-pour, refinery-queue-nudge)
-are extracted and executed by their tests; keep markers, keep them
-backslash-free."""
+owning-store-guard, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -612,48 +612,62 @@ id = "check-refinery"
 title = "Check refinery queue health"
 needs = ["recover-orphaned-beads"]
 description = """
+Escalate a refinery handoff that has gone genuinely stuck, and nothing else.
+The refinery has two drivers. Its session (mol-refinery-patrol `find-work`)
+claims open, branch-bearing work assigned to it with no `merge_result`, prepares
+the branch, and stamps the first `merge_result`; the order-driven
+refinery-reconcile cadence then owns the anchor, and its transitions clear the
+assignee (`--assignee ""`), so a gating anchor is detached from both queues
+(docs/refinery-merge-cadence.md).
+
+The beads still assigned to the refinery are its inbound queue: fresh handoffs
+and rebase/rework tasks. Both turn over on their own, a handoff within a poll
+interval and a rebase task once the fix pool claims it, so their count is
+transient churn rather than a health signal, and a nudge asserting a count goes
+stale the moment the queue drains. What a human must see is one bead that has
+sat untouched far past that turnover, which the session is failing to advance.
+Escalate only that.
 ```bash
-# >>> refinery-queue-nudge
+# >>> refinery-stuck-escalate
 REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
+# A bead assigned to the refinery clears on its own: a handoff within a poll
+# interval, a rebase/rework task within the fix pool's work time (observed under
+# ~2h). Past this bound it is not churn; the session is not advancing it.
+# Conservative on purpose: a false escalation here is the defect this step fixes.
+STUCK_SECS=14400
+NOW=$(date -u +%s)
 # Under a strict shell a plain VAR=$(...) capture exits the step at a failed
-# listing, before the arms below can tell an unreadable queue from an empty
-# one.
-if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --json --limit=0); then QUEUE_RC=0; else QUEUE_RC=$?; fi
-printf '%s' "$QUEUE" | jq -r '.[] | [.id, .updated_at, .title] | @tsv' || true
-DEPTH=$(printf '%s' "$QUEUE" | jq 'if type == "array" then length else empty end' 2>/dev/null) || DEPTH=""
-# The nudge asserts a backlog, so only a counted one may send it: an
-# unconditional send leaves a real backlog worded exactly like the
-# empty-queue ones. Anything that is not a bead array counts nothing to
-# assert — an error body is an object, whose length is its field count.
-case "${DEPTH:-}" in
-  ''|*[!0-9]*) DEPTH="" ;;
+# listing, before the arms below can tell an unreadable queue from a healthy one.
+if QUEUE=$(gc bd list --assignee="$REFINERY" --status=open --exclude-type=epic --has-metadata-key=branch --json --limit=0); then QUEUE_RC=0; else QUEUE_RC=$?; fi
+# Keep only the session's own inbound work (merge_result empty; a gating anchor
+# carries one and belongs to the cadence, and is unassigned anyway) that has sat
+# past the bound. A listing that is not an array yields nothing, so a broken read
+# asserts nothing.
+STUCK=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) | {id, updated_at} ] else empty end' 2>/dev/null) || STUCK=""
+STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty end' 2>/dev/null) || STUCK_N=""
+case "${STUCK_N:-}" in
+  ''|*[!0-9]*) STUCK_N="" ;;
 esac
-if [ "$QUEUE_RC" -ne 0 ] || [ -z "$DEPTH" ]; then
-  echo "check-refinery: queue listing unreadable (rc=$QUEUE_RC); not nudging" >&2
-elif [ "$DEPTH" -eq 0 ]; then
-  echo "check-refinery: queue empty; not nudging" >&2
+if [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
+  echo "check-refinery: refinery queue unreadable (rc=$QUEUE_RC); no escalation" >&2
+elif [ "$STUCK_N" -eq 0 ]; then
+  echo "check-refinery: no stuck handoffs; the queue is churning normally" >&2
 else
-  OLDEST=$(printf '%s' "$QUEUE" | jq -r 'sort_by(.updated_at // "") | .[0].updated_at // "unknown"')
-  gc session nudge "$REFINERY" "Merge queue: $DEPTH open bead(s) assigned to you, oldest untouched since $OLDEST."
+  SCRIPTS=""
+  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  : "${SCRIPTS:?escalate.sh not found in the pack}"
+  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
+    "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
+  done
 fi
-# <<< refinery-queue-nudge
+# <<< refinery-stuck-escalate
 ```
-Look for: **stale beads** (assigned long ago, untouched — the refinery may
-be stuck), **queue depth** (a pile means stuck or overwhelmed), **empty
-queue** (usually fine — but a near-miss assignee on a handoff is missing
-from this listing, not absent from the city; read the cadence's pass log
-before calling it healthy).
-Escalate only what a human must act on — a stuck queue, never an
-approval-gated one (a PR awaiting the operator is a resting state worth
-zero escalations):
-```bash
-SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/escalate.sh" --subject <bead> --key witness-refinery-queue --message "Observation: <what is stuck and since when>. Recommendation: <what should happen>."
-```
-One escalation per stuck bead, never a queue-wide roundup. Close this step
-and continue to next-iteration."""
+One escalate.sh call per stuck bead: escalate.sh narrows its dedup to a durable
+subject, so each stuck bead gets its own visit and a churning queue files none.
+A stuck bead reaches a human through a re-derived visit rather than a nudge whose
+count goes stale. Close this step and continue to next-iteration."""
 
 [[steps]]
 id = "next-iteration"

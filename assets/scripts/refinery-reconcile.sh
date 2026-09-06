@@ -8,7 +8,7 @@
 # anchors that have no PR yet, so it runs while they still have none),
 # pr-open, pr-facts --posture-only (the posture
 # merge reads must be written in the same pass), merge (BEADS_ACTOR projected to
-# the refinery: it closes anchors assigned to it), pr-facts (same projection),
+# the refinery so its closes and records are attributed to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
 # review-sweep (cleanup over closed anchors; no projection, no merge authority),
 # duplicate-sweep (BEADS_ACTOR projected: it closes duplicate dispatches through
@@ -216,8 +216,11 @@ if [ "$posture_rc" != 0 ]; then
   note "pr-posture rc=$posture_rc — merge.sh HELD this pass"
 fi
 
-# (3) merge: BEADS_ACTOR projected in a subshell — the anchors it closes are
-# assigned to the refinery, and bd refuses a close by a different principal.
+# (3) merge: BEADS_ACTOR projected in a subshell so its closes and records are
+# attributed to the refinery in the events log. The anchors it closes are
+# detached in a gating state and carry no assignee (mol-refinery-patrol clears
+# it), and the close is a bd update --status=closed, not the ownership-checked
+# bd close, so the projection is attribution, not permission.
 if [ "$MERGE_HELD" = 1 ]; then
   log "-- (3) merge: HELD this pass ($MERGE_HELD_WHY)"
 else

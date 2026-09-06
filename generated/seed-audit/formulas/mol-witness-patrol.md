@@ -29,9 +29,9 @@ right only by luck.
 
 Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
 liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
-owning-store-guard, crash-loop-window, patrol-wisp-pour, refinery-queue-nudge)
-are extracted and executed by their tests; keep markers, keep them
-backslash-free.
+owning-store-guard, crash-loop-window, patrol-wisp-pour,
+refinery-stuck-escalate) are extracted and executed by their tests; keep
+markers, keep them backslash-free.
 
 Variables:
   {{binding_prefix}}: Agent identity prefix, including trailing dot when bound. (default=)
