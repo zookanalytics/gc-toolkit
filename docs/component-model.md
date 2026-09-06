@@ -288,6 +288,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared gate raisable and routes the review bead. Runs as arm 1 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of gate verdicts (I7). |
+| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, wires the disposition edge (`blocks` for must-fix, `discovered-from` for deferred), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
+| `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every gate reader agrees without a stored `check.<lane>` marker. |
 | `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |

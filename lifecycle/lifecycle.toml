@@ -363,6 +363,34 @@ keys = [
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
 ]
 
+[metadata.findings]
+# A finding is a review objection with an identity of its own, so it outlives
+# the commit oid a rebase destroys and one objection cannot be filed twice.
+# task_kind=finding names the bead; anchor_bead (declared under [metadata.gates])
+# names the gating anchor. The interlock a finding places on its anchor is a
+# graph edge, not a key here: the disposition picks the edge type, so no clause
+# below is a hold marker [holds] would demand an edge for.
+keys = [
+  # The lane whose review raised the finding — a check_set member — or `human`
+  # for a finding carrying a PR comment. It names a reviewer, never a commit.
+  "finding.lane",
+  # The dedup handle: the lane's name plus a normalized locus and message,
+  # carrying neither a commit oid nor a line number so it survives a rebase.
+  # Re-raising an objection whose key already has an open finding on this anchor
+  # creates nothing; idempotency is by key, never by how often a gate is read.
+  "finding.key",
+  # One of: unvalidated | must-fix | deferred | declined. A reviewer files a
+  # finding unvalidated and the validator rules it. The disposition is the edge:
+  # must-fix wires finding --blocks anchor, the hold merge.sh's blocker probe
+  # already reads; deferred wires finding --discovered-from anchor, which is
+  # neither ready-blocking nor read by that probe, so it holds nothing; declined
+  # takes no edge and the finding closes with the reason.
+  "finding.disposition",
+  # machine:<lane> or human:<login> — who raised it. A human finding is what
+  # lets an operator's PR comment produce work the way a reviewer's finding does.
+  "finding.source",
+]
+
 [metadata.pr_posture]
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
