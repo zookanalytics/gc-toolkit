@@ -1333,7 +1333,8 @@ fi
 # visits fixture models v-HELD (converse-lx-1) -> A-PARKED, so a session under
 # that identity dismisses A-PARKED without ever naming it.
 : > "$TMP/updates"; : > "$TMP/closes"
-IOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1)" || true
+IRC=0; IOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1)" || IRC=$?
+eq "$IRC" "0" "(DISMISS-INFER) a bare dismiss on a held sitting succeeds"
 if grep -q 'inferred the current sitting' <<< "$IOUT"; then
     ok "(DISMISS-INFER) a bare dismiss resolves the subject from session state"
 else
@@ -1349,6 +1350,29 @@ if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-PARKED' "$TMP/updates
 else
     bad "(DISMISS-INFER) the inferred subject was not stamped (updates: $(grep -E '^bd update' "$TMP/updates" || true))"
 fi
+grep -q 'from the pane' <<< "$(grep -E '^bd close v-HELD' "$TMP/closes" || true)" \
+  && ok "(DISMISS-INFER) …and the --reason reaches the inferred visit's close" \
+  || bad "(DISMISS-INFER) the reason was dropped on the inferred path (closes: $(cat "$TMP/closes"))"
+
+# A listing that did not answer is a runtime fault (exit 4, the header's
+# contract), not a usage error, and never a reason to report "no sitting".
+LFRC=0; LFOUT="$(FAKE_LIST_RC=1 GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss 2>&1)" || LFRC=$?
+eq "$LFRC" "4" "(DISMISS-INFER) a failed listing is a runtime failure, not a usage error"
+grep -q "'gc bd list' failed" <<< "$LFOUT" \
+  && ok "(DISMISS-INFER) …and it names the read that failed" \
+  || bad "(DISMISS-INFER) wrong failed-listing diagnostic (got: $LFOUT)"
+# An array this verb cannot parse (a non-object element beside a real held
+# visit) is the same fault, and must not be misreported as an empty sitting.
+MFRC=0; MFOUT="$(FAKE_LIST_OUT='[{"id":"v-HELD","assignee":"gc-toolkit__converse-lx-1","metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},"junk"]' GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss 2>&1)" || MFRC=$?
+if grep -q 'no open visit is assigned' <<< "$MFOUT"; then
+    bad "(DISMISS-INFER) a malformed element was misreported as no sitting (got: $MFOUT)"
+else
+    ok "(DISMISS-INFER) a malformed listing is not reported as an empty sitting"
+fi
+grep -q 'inferred the current sitting' <<< "$MFOUT" \
+  && ok "(DISMISS-INFER) …and the held visit beside a junk sibling still infers" \
+  || { [ "$MFRC" -eq 4 ] && ok "(DISMISS-INFER) …or it fails closed as unparseable (rc 4)" \
+       || bad "(DISMISS-INFER) malformed listing neither inferred nor failed closed (rc $MFRC, got: $MFOUT)"; }
 
 # No session identity at all: nothing to infer. It fails closed with the exact
 # usage exit a missing bead-id had before inference existed — a refusal, never
@@ -1386,12 +1410,10 @@ grep -q 'dismiss <bead-id>' <<< "$AMOUT" \
   && ok "(DISMISS-INFER) …and its disambiguation hint is the runnable dismiss <bead-id>" \
   || bad "(DISMISS-INFER) ambiguity hint is not a copyable dismiss <bead-id> (got: $AMOUT)"
 eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-INFER) …and closes nothing while ambiguous"
+eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-INFER) …and stamps nothing while ambiguous"
 
-# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs. With all
-# three identities unset above, a missing bead-id has no sitting to infer and
-# stays a usage error — inference refuses rather than guessing a subject.
-ARC=0; sh "$SCRIPT" dismiss >/dev/null 2>&1 || ARC=$?
-eq "$ARC" "2" "(DISMISS-ARGS) a missing bead-id with no sitting to infer is a usage error"
+# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs. (A
+# missing bead-id with no sitting to infer is the no-identity case above.)
 ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 

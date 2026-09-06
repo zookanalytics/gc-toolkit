@@ -33,7 +33,7 @@ work_dir = ".gc/agents/converse/{{.AgentBase}}"
 nudge = ""
 # 0 disables the idle reap for this role; any positive value re-arms it. A
 # sitting then ends only when its visit closes — the agent's own sign-off, or
-# the operator's `gc-helm dismiss <subject>` — so a held visit holds a
+# the operator's bare `gc-helm dismiss` (it infers the subject) — so a held visit holds a
 # max_active_sessions slot until one of those runs. Why, and the endings this
 # does not remove: docs/gascity-human-engagement.md.
 idle_timeout = "0"

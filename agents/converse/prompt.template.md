@@ -567,7 +567,7 @@ The loop, every visit:
    runs the rest of the line, so the operator ends the sitting by typing
    one thing into the same prompt they are already reading — and a
    `$HELM` that means nothing there is a command that does not run.
-   `dismiss` takes no bead-id: it infers this sitting's subject from the
+   `dismiss` needs no bead-id: it infers this sitting's subject from the
    session it runs in, which is what lets the bare line stand and the
    same act sit behind a keystroke. The verb closes every open visit on
    the subject and stamps the outcome the board reads for a finished
