@@ -17,7 +17,8 @@ trap 'rm -rf "$TMP"' EXIT
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh"
+mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh" \
+  "$HERE/lane-state.sh" "$HERE/finding.sh"
 SUT="$SD/pr-open.sh"
 
 pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
@@ -28,6 +29,20 @@ pre() { # id branch extra-json [check_set]  (4th arg empty = no check_set key)
 prrow() { # num state branch head base [mergedAt] [headrepo]
   printf '{"number":%s,"url":"https://github.com/zook/gc-toolkit/pull/%s","state":"%s","mergedAt":%s,"baseRefName":"%s","headRefName":"%s","headRefOid":"%s","headRepository":{"name":"%s"},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":false}' \
     "$1" "$1" "$2" "${6:-null}" "$5" "$3" "$4" "${7:-gc-toolkit}" "${8:-zook}"
+}
+
+# A closed approve review bead backing <anchor>'s <lane> (default codex) — the
+# green record lane-state.sh derives, in place of the retired check.<lane>=green
+# marker. reviewed_oid is what a local backing bead must carry to green a lane.
+rev() { # anchor [lane] [oid]
+  printf '{"id":"rev-%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
+    "$1" "$1" "${2:-codex}" "${3:-sha-r}"
+}
+# An open must-fix finding on <anchor> — finding.sh open-must-fix reads it by
+# disposition, so no blocks edge is needed here (merge.sh reads the edge).
+finding() { # id anchor [disposition] [lane]
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.disposition":"%s","finding.lane":"%s","finding.key":"%s:0"}}' \
+    "$1" "$2" "${3:-must-fix}" "${4:-codex}" "${4:-codex}"
 }
 
 echo "# adopt an existing OPEN PR"
@@ -59,18 +74,18 @@ eq "$(meta A3 merge_result)" "pre_open_gate" "the anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "…and no PR is opened into the collision"
 
 echo "# holds gate the create path"
-store "[$(pre B1 polecat/b1 ',"merge_hold":"true","check.codex":"green"')]"
+store "[$(pre B1 polecat/b1 ',"merge_hold":"true"')]"
 echo "sha-b1" > "$GH_DIR/head_polecat_b1"
 out=$("$SUT" 2>&1)
 has "$out" "held (merge_hold" "merge_hold holds the create"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR published past the hold"
 
 echo "# a declared gate short of green holds"
-store "[$(pre B2 polecat/b2 ',"check.codex":"fixing"')]"
+store "[$(pre B2 polecat/b2)]"
 echo "sha-b2" > "$GH_DIR/head_polecat_b2"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "check 'codex' is 'fixing', not green" "a lane short of green holds the open"
+has "$out" "lane 'codex' does not derive green" "a lane short of green holds the open"
 eq "$(meta B2 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 # The gate check is row-only (green is a state of the lane, not the head), so
 # it is judged before the head fetch: a held anchor pays no network call.
@@ -79,7 +94,7 @@ hasnt "$(cat "$STUB_GH_LOG")" "commits/" "an ungreen gate holds before the head 
 # The whole of the 211: a green lane is green however far the branch has moved
 # since the verdict, so the head the PR opens at is not the gate's business.
 echo "# a green lane publishes at a head no verdict ever named"
-store "[$(pre B2b polecat/b2b ',"check.codex":"green"')]"
+store "[$(pre B2b polecat/b2b), $(rev B2b)]"
 echo "sha-b2b-moved-on" > "$GH_DIR/head_polecat_b2b"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/62"
 printf '%s' "$(prrow 62 OPEN polecat/b2b sha-b2b-moved-on main)" > "$GH_DIR/pr_view_62.json"
@@ -92,11 +107,11 @@ has "$(cat "$STUB_GH_LOG")" "pr create" "…and the PR is opened"
 # publishes only once that reviewer has answered, and a set naming no
 # marker-bearing gate publishes rather than waiting on a marker no arm writes.
 echo "# a second declared gate with no marker holds the publish"
-store "[$(pre B3 polecat/b3 ',"check.codex":"green"' 'codex,triage')]"
+store "[$(pre B3 polecat/b3 '' 'codex,triage'), $(rev B3)]"
 echo "sha-b3" > "$GH_DIR/head_polecat_b3"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "check 'triage' is 'unreviewed', not green" "the unmarked second gate holds"
+has "$out" "lane 'triage' does not derive green" "the unbacked second lane holds"
 eq "$(meta B3 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR is published past an unanswered gate"
 hasnt "$(cat "$STUB_GH_LOG")" "commits/" "…and the head was never fetched to decide it"
@@ -129,8 +144,8 @@ has "$out" "opened PR#62" "an approval-only set opens; merge.sh holds for the hu
 eq "$(meta B6 merge_result)" "pull_request" "anchor flipped"
 
 echo "# create the PR at the reviewed head"
-store "[$(pre C1 polecat/c1 ',"check.codex":"green"'),
-        {\"id\":\"rev-c1\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"VERDICT: COMMENT ok\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"C1\"}}]"
+store "[$(pre C1 polecat/c1),
+        {\"id\":\"rev-c1\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"VERDICT: APPROVE ok\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"C1\",\"check_name\":\"codex\",\"reviewed_oid\":\"sha-c1\",\"signoff_verdict\":\"approve\"}}]"
 echo "sha-c1" > "$GH_DIR/head_polecat_c1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/77"
 printf '%s' "$(prrow 77 OPEN polecat/c1 sha-c1 main)" > "$GH_DIR/pr_view_77.json"
@@ -152,7 +167,7 @@ echo "# the body summarizes the diff, and demotes the dispatch text"
 # anchor's description is dispatch text — what the work was asked to do — so
 # the polecat's pr_summary is the ## Summary and the description survives one
 # level down.
-store "[$(pre E1 polecat/e1 ',"check.codex":"green","pr_summary":"Compares heads instead of branch names, so a moved head is refused."')]"
+store "[$(pre E1 polecat/e1 ',"pr_summary":"Compares heads instead of branch names, so a moved head is refused."'), $(rev E1)]"
 echo "sha-e1" > "$GH_DIR/head_polecat_e1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/81"
 printf '%s' "$(prrow 81 OPEN polecat/e1 sha-e1 main)" > "$GH_DIR/pr_view_81.json"
@@ -168,7 +183,7 @@ has "$body" "## Refinery handoff" "the handoff block is unchanged"
 echo "# no carried summary keeps today's body"
 # The current text is a poor summary, not an empty one: an anchor whose handoff
 # carried nothing must still open with a body.
-store "[$(pre E2 polecat/e2 ',"check.codex":"green"')]"
+store "[$(pre E2 polecat/e2), $(rev E2)]"
 echo "sha-e2" > "$GH_DIR/head_polecat_e2"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/82"
 printf '%s' "$(prrow 82 OPEN polecat/e2 sha-e2 main)" > "$GH_DIR/pr_view_82.json"
@@ -179,7 +194,7 @@ has "$body" "## Summary"$'\n'$'\n'"d E2" "the description is the summary when no
 hasnt "$body" "<details>" "no empty demotion section when there is nothing to demote"
 
 echo "# a whitespace-only summary is the absent case"
-store "[$(pre E3 polecat/e3 ',"check.codex":"green","pr_summary":"   \n  "')]"
+store "[$(pre E3 polecat/e3 ',"pr_summary":"   \n  "'), $(rev E3)]"
 echo "sha-e3" > "$GH_DIR/head_polecat_e3"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/83"
 printf '%s' "$(prrow 83 OPEN polecat/e3 sha-e3 main)" > "$GH_DIR/pr_view_83.json"
@@ -189,7 +204,7 @@ has "$body" "## Summary"$'\n'$'\n'"d E3" "blank prose falls back rather than pub
 hasnt "$body" "<details>" "…and demotes nothing"
 
 echo "# a head that moved between gate and create refuses the stamp"
-store "[$(pre C2 polecat/c2 ',"check.codex":"green"')]"
+store "[$(pre C2 polecat/c2), $(rev C2)]"
 echo "sha-c2" > "$GH_DIR/head_polecat_c2"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/78"
 printf '%s' "$(prrow 78 OPEN polecat/c2 sha-c2-moved main)" > "$GH_DIR/pr_view_78.json"
@@ -198,7 +213,7 @@ has "$out" "not the reviewed 'sha-c2'" "the moved head is refused"
 eq "$(meta C2 merge_result)" "pre_open_gate" "nothing stamped; the anchor re-adopts next pass"
 
 echo "# closed-unmerged headstone: supersede at a NEW head"
-store "[$(pre D1 polecat/d1 ',"check.codex":"green"')]"
+store "[$(pre D1 polecat/d1), $(rev D1)]"
 printf '[%s]' "$(prrow 50 CLOSED polecat/d1 sha-d1-old main)" > "$GH_DIR/pr_list_polecat_d1.json"
 echo "sha-d1-new" > "$GH_DIR/head_polecat_d1"
 export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/51"
@@ -210,7 +225,7 @@ eq "$(meta D1 pr_number)" "51" "the fresh PR is the recorded identity"
 has "$(cat "$STUB_GH_LOG")" "pr comment 50" "the superseded PR got the pointer comment"
 
 echo "# closed-unmerged at the SAME head is a human decision"
-store "[$(pre D2 polecat/d2 ',"check.codex":"green"')]"
+store "[$(pre D2 polecat/d2), $(rev D2)]"
 printf '[%s]' "$(prrow 52 CLOSED polecat/d2 sha-d2 main)" > "$GH_DIR/pr_list_polecat_d2.json"
 echo "sha-d2" > "$GH_DIR/head_polecat_d2"
 : > "$STUB_GH_LOG"
@@ -223,15 +238,40 @@ out=$(STUB_LIST_FAIL=1 "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "an unreadable enumeration exits non-zero"
 has "$out" "false all-clear" "…and says why"
 
+echo "# an open must-fix finding holds the pre-open publish"
+# The same finding graph merge.sh's blocker probe holds on, read here through
+# the shared helper: no PR is published over work the city has ruled must change.
+store "[$(pre MF1 polecat/mf1), $(rev MF1), $(finding fnd-mf1 MF1)]"
+echo "sha-mf1" > "$GH_DIR/head_polecat_mf1"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "has an open must-fix finding (fnd-mf1)" "an unfixed must-fix finding holds the publish"
+eq "$(meta MF1 merge_result)" "pre_open_gate" "anchor stays pre_open_gate"
+hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no PR published over an open must-fix"
+hasnt "$(cat "$STUB_GH_LOG")" "commits/" "the must-fix read is row-local, judged before the head fetch"
+
+echo "# closing the must-fix finding lets the publish proceed"
+store "[$(pre MF2 polecat/mf2), $(rev MF2), $(printf '%s' "$(finding fnd-mf2 MF2)" | jq -c '.status = "closed"')]"
+echo "sha-mf2" > "$GH_DIR/head_polecat_mf2"
+export STUB_PR_CREATE_URL="https://github.com/zook/gc-toolkit/pull/95"
+printf '%s' "$(prrow 95 OPEN polecat/mf2 sha-mf2 main)" > "$GH_DIR/pr_view_95.json"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "opened PR#95" "a closed must-fix finding no longer holds the publish"
+eq "$(meta MF2 merge_result)" "pull_request" "…and the anchor publishes"
+
 echo "# the opened title carries a conventional-commit type from the bead kind"
 # A conventional-commit PR-title check requires a leading type token. The type
 # is derived from the bead's issue_type, unless the title already opens with a
 # recognized one — then it is kept, never double-prefixed. The bead id suffix
 # survives in every case.
 tanchor() { # id issue_type title  — a green pre_open_gate anchor + its head
+  # The anchor plus the closed approve bead that greens its codex lane, emitted
+  # as two array elements (the store composes them with commas).
   echo "sha-$1" > "$GH_DIR/head_polecat_$1"
-  printf '{"id":"%s","status":"open","issue_type":"%s","title":"%s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"polecat/%s","merged_target":"main","check_set":"codex","check.codex":"green"}}' \
+  printf '{"id":"%s","status":"open","issue_type":"%s","title":"%s","description":"d %s","metadata":{"merge_result":"pre_open_gate","branch":"polecat/%s","merged_target":"main","check_set":"codex"}}, ' \
     "$1" "$2" "$3" "$1" "$1"
+  rev "$1"
 }
 store "[$(tanchor ttbug  bug     'Reject a moved head'),
         $(tanchor tttask task    'Reshape the reconcile loop'),
