@@ -87,9 +87,9 @@ REPORT=""
 say() { printf '%s\n' "$*"; REPORT="$REPORT$*"$'\n'; }
 
 # >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload; strip all
-# but LF before any jq read of bd/session output. The TAB-splitting in
-# enumerate_targets splits jq's own output, emitted after this runs.
+# A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
+# LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
+# consumers downstream split jq's own @tsv, emitted after this runs.
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
 
