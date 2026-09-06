@@ -326,6 +326,28 @@ Say what you did **not** check — an honest coverage line is worth more than
 an implied "I read everything". Write it self-contained: pre-open, it is
 replayed verbatim as the opening PR comment.
 
+**6b. Emit the finding set** to `findings.json` beside `findings.md`. This is
+the structured half of the same findings your prose states: signoff.sh files
+each as a first-class bead beside the rework child, so one objection cannot be
+filed twice across rounds and each survives the rebase that destroys a
+commit-pinned reference. It is a JSON array, one object per BLOCKING (P0/P1)
+finding, each carrying a `locus` and a `message`:
+
+```bash
+cat > findings.json <<'JSON'
+[
+  {"locus": "<file>:<symbol or section>", "message": "<what is wrong, why it matters, and the fix — self-contained>"}
+]
+JSON
+```
+
+The `locus` must survive a rebase, so name a file and a symbol, function, or
+section — never a line number and never a commit oid; on the PR page it is the
+part that is wrong, as in `PR #<n> body / ## Summary`. signoff.sh dedups on a
+normalized locus and message, so a re-review of the same objection files no
+second bead. An `approve` carries no blocking finding: write `[]`. Do not put
+the out-of-scope bugs from step 5 here — those are their own beads already.
+
 **7. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `verdict-and-drain`:
 ```bash
@@ -338,7 +360,8 @@ done
 **Exit criteria:** whole diff read, tests run at the pinned commit, published
 page and work-quality standards checked, every blocking finding enumerated,
 out-of-scope findings filed or named unfiled, findings.md written in the
-verdict shape, this step bead closed.
+verdict shape, findings.json written as the structured finding set (`[]` on
+approve), this step bead closed.
 """
 
 [[steps]]
@@ -354,8 +377,9 @@ required fix.
 
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, stamping `check.<gate>` with
-read-back, filing and slinging one rework child on request-changes, enforcing
-the round cap, and refusing a pin the branch no longer carries:
+read-back, filing the finding set from `findings.json` beside one slung rework
+child on request-changes, enforcing the round cap, and refusing a pin the
+branch no longer carries:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -366,10 +390,11 @@ REVIEWED_OID=<the OID from the review step>
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
 ```
 Do not post the review yourself, do not touch `check.*`, do not file rework
-beads, and never run `gh pr review --approve`.
+beads or finding beads (signoff.sh files the findings from your
+`findings.json`), and never run `gh pr review --approve`.
 
 **2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
 is the dispatch pin and the posted artifact's audit label, never a marker, and
