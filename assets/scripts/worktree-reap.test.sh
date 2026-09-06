@@ -585,6 +585,37 @@ run > /dev/null
 if branch_exists polecat/zz-live; then ok "a deferred bead's branch is held though reachable from the default branch"; else bad "a deferred bead's branch is held though reachable from the default branch"; fi
 if branch_exists polecat/zz-done; then bad "its closed neighbour is dropped in the same run"; else ok "its closed neighbour is dropped in the same run"; fi
 
+# The bead a branch NAMES is not always the bead that HOLDS it. A rework or
+# rebase child records its predecessor's branch in metadata.branch, or an open
+# PR carries it as head, while the name-bead is closed and its content landed.
+# The closed-and-squashed proof alone would drop the ref, but the tip is that
+# live claimant's only local copy of unmerged work. That is the same
+# OPEN_BRANCH / PR_BRANCH signal the worktree pass keeps a tree on. Both are
+# held here while a closed-only neighbour no live bead claims is dropped in the
+# same run.
+new_repo
+git -C "$REPO" update-ref refs/remotes/origin/main main
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+mk_wt "$REPO/wt/childbr" polecat/zz-base
+git -C "$REPO" worktree remove --force "$REPO/wt/childbr"
+land "feat: the base (zz-base) (#7)"
+mk_wt "$REPO/wt/prbr" polecat/zz-prheld
+git -C "$REPO" worktree remove --force "$REPO/wt/prbr"
+land "feat: pr held (zz-prheld) (#8)"
+mk_wt "$REPO/wt/neighbr" polecat/zz-neigh
+git -C "$REPO" worktree remove --force "$REPO/wt/neighbr"
+land "feat: the neighbour (zz-neigh) (#9)"
+echo "polecat/zz-prheld" > "$STUB_PR_BRANCHES"
+bead zz-base   closed 100 "" polecat/zz-base
+bead zz-child  open    "" "" polecat/zz-base
+bead zz-prheld closed 100 "" polecat/zz-prheld
+bead zz-neigh  closed 100 "" polecat/zz-neigh
+OUT="$(run)"
+if branch_exists polecat/zz-base; then ok "a different live bead's claim on a closed, landed ref holds the branch"; else bad "a different live bead's claim on a closed, landed ref holds the branch"; fi
+if branch_exists polecat/zz-prheld; then ok "an open PR's head holds a closed, landed branch"; else bad "an open PR's head holds a closed, landed branch"; fi
+if branch_exists polecat/zz-neigh; then bad "a closed-only neighbour no live bead claims is dropped in the same run"; else ok "a closed-only neighbour no live bead claims is dropped in the same run"; fi
+has "$OUT" "dropped 1 stale local branches" "only the unclaimed neighbour is dropped"
+
 # A store the branch pass cannot read confirms nothing closed, so the family is
 # held — the same fail-closed the worktree pass takes on a down ledger. The stub
 # fails exactly the --id-scoped closed-lookup the branch pass makes; the live

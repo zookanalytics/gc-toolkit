@@ -483,6 +483,14 @@ for i in "${!REPO_PATHS[@]}"; do
     while IFS= read -r b; do
         [ -n "$b" ] || continue
         [ -n "${CO[$b]:-}" ] && continue
+        # A live bead can record this exact ref in metadata.branch, or an open
+        # PR can have it as head, while the bead its NAME encodes is closed and
+        # landed: a rework or rebase child stands on its predecessor's branch,
+        # and the ref is that child's only local copy of resumable work. The
+        # worktree pass already holds a tree on this same OPEN_BRANCH/PR_BRANCH
+        # signal; the ref needs it too.
+        [ -n "${OPEN_BRANCH[$b]:-}" ] && continue
+        [ -n "${PR_BRANCH[$b]:-}" ] && continue
         # The whole name after polecat/ must BE a bead id, not merely begin with
         # one: polecat/<bead-id>-arm is a different branch a different bead holds,
         # and a start-anchored match would read it as <bead-id> and drop it the

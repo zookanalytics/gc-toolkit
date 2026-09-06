@@ -72,11 +72,14 @@ It owns one family, `polecat/<bead-id>`, and the whole name after `polecat/`
 must be exactly a bead id to belong to it. Any other ref — a roadmap branch, a
 `claude/*` research branch, a design-doc trio, or a `polecat/<bead-id>-<suffix>`
 variant a different bead holds — names no bead the pass may reason about and is
-left alone. Within the family a branch is dropped only once its bead has closed
-AND its content is already on the default branch; a live bead of any status
-holds its branch, because that is resumable work, and a branch whose content is
-proven nowhere is kept, because the pass must never take the only copy of
-unmerged work.
+left alone. Within the family a branch is dropped only once the bead it names
+has closed, its content is already on the default branch, and no live bead
+records the ref and no open pull request has it as head. The bead a branch names
+is not always the bead that holds it: a rework or rebase child records its
+predecessor's branch, so a ref whose name-bead has closed can still be a live
+claimant's only copy of resumable work. That is the same signal the worktree
+pass reads to keep a tree. A branch whose content is proven nowhere is kept too,
+because the pass must never take the only copy of unmerged work.
 
 `origin/main`, not the shared checkout's own lagging `main`, is the authority
 for "on the default branch". The proof is reachability — the tip is an ancestor
