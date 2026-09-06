@@ -106,6 +106,9 @@ export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" 
 export GC_ESCALATE_TOOL="$TMP/bin/escalate.sh"
 export GC_RIG=testrig
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
+# The stubs answer instantly, so the per-call timeout only ever adds a fork.
+# 0 makes bounded() a passthrough (same no-bound behavior as `timeout 0`).
+export LIVENESS_SWEEP_CALL_TIMEOUT=0
 unset GC_RIG_ROOT GC_PACK_STATE_DIR 2>/dev/null || true
 BASELINE_FILE="$TMP/state/testrig/reported"
 

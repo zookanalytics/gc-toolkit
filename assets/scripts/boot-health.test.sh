@@ -68,6 +68,11 @@ esac
 STUB
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+# The stub answers reads instantly, so the per-call timeout only ever adds a
+# fork. 0 makes gc_call a passthrough (same no-bound behavior as `timeout 0`).
+# The one case that must see a real timeout — the hang-mail scenario below —
+# overrides this back to a 1s bound inline, so the split is still exercised.
+export BOOT_HEALTH_CALL_TIMEOUT=0
 
 NOW="$(date +%s)"
 iso() { date -u -d "@$1" '+%Y-%m-%dT%H:%M:%SZ'; }

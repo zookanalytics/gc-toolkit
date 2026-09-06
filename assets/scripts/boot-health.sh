@@ -47,8 +47,15 @@ mkdir -p "$STATE_DIR" 2>/dev/null || STATE_OK=0
 { [ -d "$STATE_DIR" ] && [ -w "$STATE_DIR" ]; } || STATE_OK=0
 
 # Bounded, exit status PRESERVED (124 timeout / 128+n killed) — the report
-# step needs the distinction.
-gc_call_rc() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
+# step needs the distinction. CALL_TIMEOUT=0 disables the bound (as `timeout 0`
+# already means no limit) and drops a timeout fork per call: the hermetic test
+# sets it for its instant-return reads and overrides it back to a short bound
+# for the one case that must observe a real timeout.
+if [ "$CALL_TIMEOUT" = "0" ]; then
+  gc_call_rc() { "$@"; }
+else
+  gc_call_rc() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
+fi
 
 # The probe form: a failed read is an empty one (no evidence). Right for
 # reads, WRONG for the mail — see the three-way split in step 5.
