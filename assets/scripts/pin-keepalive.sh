@@ -181,11 +181,20 @@ command -v jq >/dev/null 2>&1 || {
     say "$PROG exec: jq is missing — cannot pin."; DECIDED=1; exit 1
 }
 
+# Append an alias to the newline-separated TARGETS list.
+add_target() {
+    if [ -z "$TARGETS" ]; then TARGETS="$1"; else TARGETS="$TARGETS
+$1"; fi
+}
+
 # --- the predicate: standing conversational named sessions that are unpinned --
 # Sets TARGETS (newline-separated session aliases to pin) and ENUM_STATUS:
 #   ok         every read succeeded
 #   list_fail  the session roster was unreadable
-#   probe_fail the roster read, but a candidate's session bead did not
+#   probe_fail the roster read, but a candidate's session bead did not — its
+#              alias is still added to TARGETS, because a probe that cannot be
+#              read excludes nothing (fail-open); the pin is idempotent, and an
+#              under-run would leave that session exposed to a config-drift restart
 # A candidate is conversational (provider match) and named (non-empty alias, a
 # cheap pre-filter — a pool instance has no canonical alias); its session bead
 # then confirms configured_named_session=true (the authoritative "standing
@@ -209,13 +218,13 @@ enumerate_targets() {
         b="$(bounded gc bd show "$id" "${CITY_FLAG[@]}" --json 2>/dev/null | scrub)"
         if ! printf '%s' "$b" | jq -e '(if type=="array" then .[0] else . end) | type == "object"' >/dev/null 2>&1; then
             ENUM_STATUS=probe_fail
+            add_target "$alias"
             continue
         fi
         cns="$(printf '%s' "$b" | jq -r '(if type=="array" then .[0] else . end) | .metadata.configured_named_session // ""' 2>/dev/null)"
         pin="$(printf '%s' "$b" | jq -r '(if type=="array" then .[0] else . end) | .metadata.pin_awake // ""' 2>/dev/null)"
         if [ "$cns" = "true" ] && [ "$pin" != "true" ]; then
-            if [ -z "$TARGETS" ]; then TARGETS="$alias"; else TARGETS="$TARGETS
-$alias"; fi
+            add_target "$alias"
         fi
     done <<EOF
 $cand

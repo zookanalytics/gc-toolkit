@@ -358,6 +358,19 @@ OUT="$(PIN_KEEPALIVE_CITY="$TMP/city" PIN_KEEPALIVE_STATE_DIR="$STATE" STUB_SESS
 eq "$RC" "1" "an unreadable roster aborts the exec"
 has "$OUT" "ABORTED" "and says it aborted"
 
+echo "── an unreadable session bead does not drop its target — the exec pins it fail-open ──"
+# probe_fail must not read as "nothing owed": the check RUNs on it, and the exec
+# must attempt the idempotent pin for the candidate it could not confirm — else a
+# config-drift restart could take down the very session this order protects while
+# the pass records a clean no-op and spends the cooldown window.
+reset_fix; set_bead s-mech '{"configured_named_session":"true"}'
+: > "$STUB_PIN_LOG"; rm -rf "$STATE"
+OUT="$(PIN_KEEPALIVE_CITY="$TMP/city" PIN_KEEPALIVE_STATE_DIR="$STATE" STUB_SHOW_FAIL="s-mech" "$SCRIPT" 2>&1)"; RC=$?
+eq "$RC" "0" "the exec completes — probe_fail is not list_fail, so it does not abort"
+eq "$(pinlog)" "pin gc-toolkit.mechanik" "the unreadable candidate is pinned anyway (fail-open)"
+has "$OUT" "pinned 1, failed 0" "the pass reports the fail-open pin, not a clean pinned-0 no-op"
+has "$OUT" "probe_status=probe_fail" "and surfaces that a probe was unreadable"
+
 echo "── a pin failure is reported but does not abort the pass ──"
 reset_fix; set_bead s-mech '{"configured_named_session":"true"}'
 : > "$STUB_PIN_LOG"; rm -rf "$STATE"
