@@ -5,7 +5,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/escalate.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -78,7 +78,7 @@ case "${1:-}" in
       *) case "$title" in *"$STUB_CREATE_FAIL_MATCH"*) echo "bd: refused" >&2; exit 1 ;; esac ;;
     esac
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
-    tmp=$(mktemp)
+    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX")
     jq -c --arg id "vis-$n" --arg t "$title" --arg d "$body" \
       '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"metadata":{},"notes":""}]' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
@@ -90,7 +90,7 @@ case "${1:-}" in
       "") : ;;
       *) case "$*" in *"$STUB_UPD_FAIL_MATCH"*) exit 1 ;; esac ;;
     esac
-    tmp=$(mktemp); cp "$STORE" "$tmp"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-escalate-test.XXXXXX"); cp "$STORE" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"

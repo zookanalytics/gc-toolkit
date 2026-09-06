@@ -195,6 +195,11 @@ ANCHORS=$(bd_list --status=open --has-metadata-key merge_result) || {
 
 edited=0; current=0; single=0; skipped=0
 SEEN=""
+# Per-anchor scratch (rendered section, current body, spliced body) lives under
+# one trapped directory, so a signal or timeout mid-iteration takes the whole
+# tree with it rather than orphaning gctk-pr-stack.* files in /tmp.
+STACK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-stack.XXXXXX") || { echo "$PROG: cannot create a temp dir" >&2; exit 1; }
+trap 'rm -rf "$STACK_TMP"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 while IFS=$'\t' read -r id branch num; do
   [ -n "${id:-}" ] || continue
   if [ -z "$branch" ] || [ -z "$num" ] || [ -n "${num//[0-9]/}" ]; then continue; fi
@@ -231,7 +236,7 @@ while IFS=$'\t' read -r id branch num; do
   # One bead is the ordinary PR, and pr-open.sh already names it.
   if [ "$n" -lt 2 ]; then single=$((single + 1)); continue; fi
 
-  if ! { SECTION=$(mktemp) && CUR=$(mktemp) && NEW=$(mktemp); }; then
+  if ! { SECTION=$(mktemp "$STACK_TMP/section.XXXXXX") && CUR=$(mktemp "$STACK_TMP/cur.XXXXXX") && NEW=$(mktemp "$STACK_TMP/new.XXXXXX"); }; then
     echo "$PROG: cannot create a temp file" >&2; exit 1
   fi
   render_section "$branch" "$id" "$LEDGER" > "$SECTION"

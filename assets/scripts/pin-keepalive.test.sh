@@ -29,7 +29,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/pin-keepalive.sh"
 WRAP="$ROOT/assets/scripts/pin-keepalive-precheck.sh"
 ORDER="$ROOT/orders/pin-keepalive.toml"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pin-keepalive-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0

@@ -24,7 +24,8 @@
 #   * the QUIET PATH — an empty store still passes, so the guard above did not
 #     strand the ordinary no-work case;
 #   * a POSITIVE CONTROL over the shipped order file, so a passing suite cannot
-#     mean the cadence that consumes these records was quietly un-shipped.
+#     mean the cadence that consumes these records was quietly un-shipped;
+#   * SCRATCH CLEANUP — every verb that stages a temp file leaves none behind.
 #
 # No live city, Dolt, network, gc or bd — only jq, stubs, and a tmpdir.
 set -uo pipefail
@@ -32,7 +33,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SUT="$HERE/deferred-dispatch.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -121,7 +122,7 @@ case "${1:-}" in
       esac
       shift || true
     done
-    tmp="$(mktemp)"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
     cp "$STORE" "$tmp"
     for kv in ${sets[@]+"${sets[@]}"}; do
       k="${kv%%=*}"; v="${kv#*=}"
@@ -375,6 +376,20 @@ if grep -qE '^[[:space:]]*no_work_gate' "$ORDER"; then
 else
     ok "the order does not opt out of the single-flight gate"
 fi
+
+# ── scratch cleanup ─────────────────────────────────────────────────────────
+# The EXIT trap reads a registry the allocations append to. Appending from a
+# command substitution mutates a subshell's copy and the trap then removes
+# nothing, so the cleanup has to be asserted on disk rather than read off the
+# presence of a trap line.
+SCRATCH="$TMP/scratch"
+mkdir -p "$SCRATCH"
+TMPDIR="$SCRATCH" "$SUT" list                >/dev/null 2>&1
+TMPDIR="$SCRATCH" "$SUT" list --json         >/dev/null 2>&1
+TMPDIR="$SCRATCH" "$SUT" reconcile           >/dev/null 2>&1
+TMPDIR="$SCRATCH" "$SUT" reconcile --dry-run >/dev/null 2>&1
+LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l)
+eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

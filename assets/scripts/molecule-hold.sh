@@ -330,11 +330,14 @@ SIBLINGS=$(printf '%s' "$SIB_JSON" | jq -r --arg root "$ROOT" --arg self "$TARGE
 # redirection fails silently and runs the loop zero times — indistinguishable
 # from a molecule with no other steps. Route it through a checked
 # mktemp so an enumeration that could not happen says so.
-ROWS=$(mktemp 2>/dev/null) || {
+ROWS=$(mktemp "${TMPDIR:-/tmp}/gctk-molecule-hold.XXXXXX" 2>/dev/null) || {
   echo "$PROG: FATAL — could not create a temp file to enumerate sibling steps; $TARGET is held but its siblings keep the routes and claims listed above" >&2
   QUIESCE_FAILED=1
   finish
 }
+# ROWS dies with this shell; the EXIT trap removes it even when a signal or a
+# mid-loop failure ends the run before the rm at the end of the block.
+trap 'rm -f "$ROWS" 2>/dev/null' EXIT
 printf '%s\n' "$SIBLINGS" > "$ROWS" || {
   echo "$PROG: FATAL — could not write the sibling enumeration; $TARGET is held but its siblings keep the routes and claims listed above" >&2
   rm -f "$ROWS"

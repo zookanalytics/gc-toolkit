@@ -487,13 +487,17 @@ and still available for the PR push. Any other push failure stops the wisp.
 set -e
 MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
 MERGE_WT="$MERGE_PARENT/target"
-trap 'git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"' EXIT
+# $PUSH_ERR is allocated further down but torn down here: every arm that reads
+# it exits without reaching a removal of its own.
+PUSH_ERR=""
+merge_scratch_rm() { git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
+trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
 TEMP_SHA=$(git rev-parse temp)
 git worktree add --detach "$MERGE_WT" "origin/$TARGET"
 git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
 MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
-PUSH_ERR=$(mktemp)
+PUSH_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-refinery-patrol.XXXXXX")
 if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
   git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
   REMOTE=$(git rev-parse "origin/$TARGET")
@@ -511,7 +515,6 @@ else
     *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
   esac
 fi
-rm -f "$PUSH_ERR"
 ```
 After a successful direct merge: check out `$TARGET` and delete temp; if
 delete_merged_branches = "true", `git push origin --delete $BRANCH`; and if

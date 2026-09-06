@@ -142,7 +142,7 @@ echo "── the takeaway writer resolves in an IMPORTED (cross-rig) session ─
 # in precisely the cross-rig shape that produced this bug's second
 # instance (tk-bzm86 notes: signal-loom session lx-qk9v). Grepping the
 # prompt cannot catch that, so these blocks are EXTRACTED AND RUN.
-TMPD="$(mktemp -d)"
+TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-signoff-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 PACKROOT="$TMPD/city/rigs/gc-toolkit"
 FOREIGN="$TMPD/city/rigs/signal-loom" # an importing rig: no assets/ tree

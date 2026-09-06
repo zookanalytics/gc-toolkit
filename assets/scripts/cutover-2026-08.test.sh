@@ -14,7 +14,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/cutover-2026-08.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-cutover-2026-08-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
@@ -142,7 +142,7 @@ cmp -s "$STUB_STORE" "$TMP/store.after1"; eq "$?" 0 "second --apply run left the
 
 echo
 echo "# once the operator resolves the leftovers, sweep exits 0 clean"
-tmpf=$(mktemp); jq -c '
+tmpf=$(mktemp "${TMPDIR:-/tmp}/gctk-cutover-2026-08-test.XXXXXX"); jq -c '
   map(if .id == "cb-open" then .metadata.merge_result = "merged" | .metadata.merged_sha = "fixedbyhand"
       elif .id == "cb-nopr" then .metadata.merge_result = "abandoned"
       else . end)' "$STUB_STORE" > "$tmpf" && mv "$tmpf" "$STUB_STORE"

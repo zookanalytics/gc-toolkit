@@ -245,7 +245,7 @@ if [ "$MODE" = "check-merge" ]; then
         die "--check-merge: '$MERGE_HEAD' does not merge into '$MERGE_BASE' in memory — a conflict, or a git without 'merge-tree --write-tree' (2.38)"
     fi
 
-    SCRATCH="$(mktemp -d)" || die "mktemp failed"
+    SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/gctk-render-seed-audit.XXXXXX")" || die "mktemp failed"
     trap 'rm -rf "$SCRATCH"' EXIT
     # The merged tree materializes into its own subdirectory so the manifest
     # computed beside it is never mistaken for part of the tree under test.
@@ -342,7 +342,7 @@ command -v gc >/dev/null 2>&1 || die "gc is not on PATH — the render needs the
 # rendered text; a mktemp parent so concurrent runs do not collide. Deliberately
 # hand-written rather than produced by `gc init`: init reaches for the beads
 # store and, on a host with a live Dolt server, talks to it.
-TMPROOT="$(mktemp -d)" || die "mktemp failed"
+TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/gctk-render-seed-audit.XXXXXX")" || die "mktemp failed"
 CITY="$TMPROOT/seed-audit-city"
 cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT

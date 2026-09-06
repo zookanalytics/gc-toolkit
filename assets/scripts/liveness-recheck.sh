@@ -122,7 +122,7 @@ CARRIED_JSON=$(to_json_array "$CARRIED_IDS")
 # --- read 1: every listed bead in ONE call, closed ones included (--all is
 # what makes the resolved bucket possible). Into a FILE: hundreds of rows on
 # argv would meet ARG_MAX as a truncation rather than an error.
-BEADFILE=$(mktemp)
+BEADFILE=$(mktemp "${TMPDIR:-/tmp}/gctk-liveness-recheck.XXXXXX")
 trap 'rm -f "$BEADFILE"' EXIT
 gc bd list --id "$ID_CSV" --all --brief --json --limit=0 2>/dev/null | scrub > "$BEADFILE"
 if ! jq -e 'type == "array"' "$BEADFILE" >/dev/null 2>&1; then

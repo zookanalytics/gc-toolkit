@@ -110,7 +110,7 @@ fi
 # --- the observation corpus ----------------------------------------------
 # Fail closed on an unreadable store: a recurrence number computed over part
 # of the city reads as improvement.
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-learning-recurrence.XXXXXX"); trap 'rm -rf "$TMP"' EXIT
 RIGSET="$TMP/rigs"
 gc rig list --json 2>/dev/null \
   | jq -r '.rigs[]? | select((.name // "") != "") | [.name, (.path // "")] | @tsv' 2>/dev/null > "$RIGSET"
