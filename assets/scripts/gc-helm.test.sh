@@ -158,12 +158,6 @@ case "$1 ${2:-}" in
     anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
-  "session suspend")
-    # suspend acts on the session, not a bead. Record the call so a test can
-    # prove the CURRENT session was the target and nothing on the visit moved.
-    # A session id containing FAILSUSPEND models a runtime that will not stop.
-    printf '%s\n' "$*" >> "$FAKE_SUSPENDS"
-    case "$3" in *FAILSUSPEND*) exit 1 ;; esac ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
     # A store that rejects the write. NOPIN stands for every reason the route
@@ -226,7 +220,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_SUSPENDS="$TMP/suspends"
+       FAKE_OUTCOME_DIR="$TMP/outcomes"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -1384,37 +1378,6 @@ grep -q 'more than one open visit' <<< "$AMOUT" \
   || bad "(DISMISS-INFER) wrong ambiguity refusal (got: $AMOUT)"
 eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-INFER) …and closes nothing while ambiguous"
 
-# (SUSPEND) suspend is dismiss's save-for-later sibling: it suspends THIS
-# session and leaves the visit OPEN. Same inference, but the act is on the
-# session, and NOTHING on the visit or subject is written.
-: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/suspends"
-SUOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" suspend 2>&1)" || true
-grep -q 'inferred the current sitting' <<< "$SUOUT" \
-  && ok "(SUSPEND) a bare suspend resolves the sitting from session state" \
-  || bad "(SUSPEND) no inference (got: $SUOUT)"
-grep -qE '^session suspend gc-toolkit__converse-lx-1' "$TMP/suspends" \
-  && ok "(SUSPEND) …and suspends THIS session by its id" \
-  || bad "(SUSPEND) gc session suspend not called on the current session (got: $(cat "$TMP/suspends" 2>/dev/null))"
-eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(SUSPEND) the visit is left OPEN — nothing is closed"
-eq "$(grep -c 'gc.dismissed_at=' "$TMP/updates" || true)" "0" "(SUSPEND) …and no DONE-row stamp is written"
-grep -q 'visit stays open' <<< "$SUOUT" \
-  && ok "(SUSPEND) …and says the sitting resumes" \
-  || bad "(SUSPEND) unclear save message (got: $SUOUT)"
-
-# suspend fails closed the same way: no session identity is nothing to save.
-SNRC=0; sh "$SCRIPT" suspend >/dev/null 2>&1 || SNRC=$?
-eq "$SNRC" "2" "(SUSPEND) no session identity is a usage error"
-
-# A runtime that will not stop is a failure, not a silent success: the sitting
-# keeps its pane and the operator is told. Here the bead is explicit, so this
-# also proves suspend acts even when the subject is named rather than inferred.
-: > "$TMP/suspends"
-SFRC=0; SFOUT="$(GC_SESSION_ID=gc-FAILSUSPEND sh "$SCRIPT" suspend A-PARKED 2>&1)" || SFRC=$?
-eq "$SFRC" "4" "(SUSPEND) a failed 'gc session suspend' is a runtime failure"
-grep -q 'keeps its pane' <<< "$SFOUT" \
-  && ok "(SUSPEND) …and says the sitting was not saved" \
-  || bad "(SUSPEND) unclear suspend failure (got: $SFOUT)"
-
 # (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs. With all
 # three identities unset above, a missing bead-id has no sitting to infer and
 # stays a usage error — inference refuses rather than guessing a subject.
@@ -2033,5 +1996,5 @@ grep -q 'tk-a, tk-b' <<< "$DERR" \
 printf '[]\n' > "$D_LIST"
 
 echo ""
-echo "gc-helm takeaway + demand + dismiss + suspend (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference): $PASS passed, $FAIL failed"
+echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

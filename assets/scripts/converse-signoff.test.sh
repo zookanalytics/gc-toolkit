@@ -629,11 +629,6 @@ have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
 have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
 have "dismiss also clears the board row" 'gc.dismissed_at=' "$HELM"
-# The save-for-later lever is the other half of the operator's control: it
-# frees the runtime and leaves the visit open, so the prompt can offer a pause
-# that is not an ending.
-have "gc-helm carries the operator's suspend verb" 'cmd_suspend()' "$HELM"
-have "suspend leaves the visit open rather than closing it" 'visit stays open' "$HELM"
 have "the engagement doc records the switch-off" 'off the idle ladder' "$ENGAGE"
 
 echo "── the verified mechanism is recorded centrally ──"
@@ -1850,8 +1845,6 @@ have "…written with the resolved path, not a variable the operator never set" 
      'Write the resolved path' "$PROMPT"
 have "…and the close-out needs no bead-id: it infers the sitting's subject" \
      'takes no bead-id' "$PROMPT"
-have "…and offers suspend as the save-for-later sibling" \
-     'save-for-later sibling' "$PROMPT"
 have "…and it is framed as a control, not a chore" 'a control, not a chore' "$PROMPT"
 # The verb has to do what the prompt promises of it, or the offered line is the
 # hand-written close under another name.

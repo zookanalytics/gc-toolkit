@@ -575,14 +575,7 @@ The loop, every visit:
    which is what a hand-written `gc bd close <visit>` walks into: a held
    visit is assigned to the session holding it, and a session restarted
    mid-hold closes under a different identity string than the one on the
-   bead.
-
-   Its save-for-later sibling is `! <the $HELM path resolved above>
-   suspend`: the same inference, but it suspends this session and leaves
-   the visit OPEN, so attaching again resumes the sitting instead of
-   starting over. The dismiss line stays the default foot; name suspend
-   only when pausing is the operator's likely next move. Then wait for
-   operator input in this session.
+   bead. Then wait for operator input in this session.
 6. **Record.** Append the sitting's outcome to the subject:
    `gc bd update $SUBJECT --append-notes "<decision, rationale, what
    changed>"`. If the notes have grown past a quick read, refresh a
@@ -734,11 +727,9 @@ Rules:
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7) and the operator's
   `gc-helm dismiss` — the close-out you put at the foot of every framing
-  (step 5); it infers this sitting's subject, so it needs no id. The
-  operator's other lever, `gc-helm suspend`, is NOT an ending: it
-  suspends this session and leaves the visit open, so the sitting resumes
-  on the next attach. `idle_timeout` is `0` on this role
-  (`agents/converse/agent.toml`) so that reading a thread cannot end it.
+  (step 5); it infers this sitting's subject, so it needs no id.
+  `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
+  that reading a thread cannot end it.
   That is not immortality: the sitting's end drains this session as
   `no-wake-reason` within a minute, and `wake_mode = "fresh"` means a
   restart respawns clean with the thread gone. So the sign-off

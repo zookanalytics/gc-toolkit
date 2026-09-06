@@ -1,6 +1,5 @@
 #!/bin/sh
-# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, suspend, open,
-# react.
+# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, react.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
 # Contract:
@@ -9,7 +8,6 @@
 #   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
 #   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
 #   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting and clear the row (subject inferred from the current sitting when omitted)
-#   gc-helm suspend  [<bead-id>]                              suspend this session, leaving the visit OPEN to resume (save for later)
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -41,7 +39,6 @@ Usage:
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row (subject inferred from the current sitting when omitted)
-  gc-helm suspend  [<bead-id>]  save the current sitting for later: suspend this session, leaving its visit OPEN to resume (subject inferred when omitted)
 
 The board is `helm-svc board` (services/helm). This script carries only the
 write verbs. open files a visit in the picked bead's continuation group (pool
@@ -84,19 +81,13 @@ exits 4.
 Idempotent: a subject with no visit and no row is already dismissed and says
 so.
 
-suspend is dismiss's save-for-later sibling: it suspends THIS session (freeing
-the runtime) but leaves the visit OPEN, so `gc session attach` resumes the same
-sitting. It writes nothing on the visit or the subject — leaving the visit open
-IS the save — and closes nothing, so no row is retired.
-
-dismiss and suspend both take the subject as an OPTIONAL argument. Omit it and
-they infer the current sitting from session state: the one open visit assigned
-to this session (GC_SESSION_NAME / GC_SESSION_ID / GC_ALIAS), whose subject is
-its gc.continuation_group or tracks edge. That is what lets a bare
-`gc-helm dismiss` end the sitting the operator is reading. Inference fails
-CLOSED — no identity, no held visit, more than one, or an unreadable listing
-each refuse rather than guess a subject, and name the explicit-id form as the
-fix.
+dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
+current sitting from session state: the one open visit assigned to this session
+(GC_SESSION_NAME / GC_SESSION_ID / GC_ALIAS), whose subject is its
+gc.continuation_group or tracks edge. That is what lets a bare `gc-helm dismiss`
+end the sitting the operator is reading. Inference fails CLOSED — no identity,
+no held visit, more than one, or an unreadable listing each refuse rather than
+guess a subject, and name the explicit-id form as the fix.
 EOF
 }
 
@@ -1153,9 +1144,9 @@ cmd_react() {
 }
 
 # ── The current sitting, inferred from session state ─────────────────
-# The subject of the OPEN visit this session is sitting on. dismiss and
-# suspend both act on "the sitting I am in", so when no bead is named they
-# resolve it here instead of making the operator paste an id the session
+# The subject of the OPEN visit this session is sitting on. dismiss acts on
+# "the sitting I am in", so when no bead is named it resolves it here instead
+# of making the operator paste an id the session
 # already knows — which is what lets a bare `gc-helm dismiss` map to a
 # keystroke. A converse session is the ASSIGNEE of the one visit it holds; the
 # subject is that visit's gc.continuation_group stamp, or its tracks edge when
@@ -1167,9 +1158,9 @@ cmd_react() {
 # Echoes the subject id on success. On no identity, a listing that did not
 # answer a JSON array, no held visit, or more than one, it writes a diagnostic
 # naming the fix and returns non-zero: an argument-free verb that guessed the
-# wrong subject would end the wrong sitting, which is the one failure these
-# verbs exist to prevent. An empty read is not proof of no sitting, so it fails
-# closed rather than reporting "nothing to do".
+# wrong subject would end the wrong sitting, which is the one failure this
+# inference exists to prevent. An empty read is not proof of no sitting, so it
+# fails closed rather than reporting "nothing to do".
 current_sitting_subject() {
     _me=$(printf '%s\n%s\n%s\n' \
         "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
@@ -1404,48 +1395,6 @@ cmd_dismiss() {
     return 0
 }
 
-# ── Verb: suspend ────────────────────────────────────────────────────
-# The operator's "save this for later". dismiss ENDS a sitting — it closes the
-# visit and stamps the row done; suspend only frees the runtime and leaves the
-# visit OPEN, so the same sitting resumes on `gc session attach`. It writes
-# nothing on the visit or the subject: leaving the visit open IS the save.
-#
-# Argument-free like dismiss, and it acts on THIS session — `gc session
-# suspend` takes a session id or alias, which GC_SESSION_ID / GC_ALIAS carry.
-# The subject is inferred only to prove there is a sitting to save and to name
-# it back; a session with no held visit has nothing to save for later, so the
-# inference failing is a fail-closed refusal, not a fallback to a bare suspend.
-cmd_suspend() {
-    bead=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            -h|--help)  usage; exit 0 ;;
-            -*) echo "$PROG: suspend: unknown flag '$1'" >&2; exit 2 ;;
-            *) [ -z "$bead" ] || { echo "$PROG: suspend takes at most one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
-        esac
-    done
-    if [ -z "$bead" ]; then
-        bead=$(current_sitting_subject) || exit 2
-        echo "$PROG: suspend: no bead named; inferred the current sitting's subject $bead from session state" >&2
-    fi
-
-    # The session to suspend is THIS one; its id (gc-NN) or alias is what `gc
-    # session suspend` takes, never the session NAME.
-    _sess="${GC_SESSION_ID:-${GC_ALIAS:-}}"
-    if [ -z "$_sess" ]; then
-        echo "$PROG: suspend: no session id in the environment (GC_SESSION_ID, GC_ALIAS unset); cannot suspend the current session." >&2
-        exit 2
-    fi
-
-    if gc session suspend "$_sess" >/dev/null 2>&1; then
-        echo "$PROG: suspend: session $_sess suspended; the sitting on $bead is saved — its visit stays open and resumes on 'gc session attach $_sess'."
-        bust_cache
-        return 0
-    fi
-    echo "$PROG: suspend: 'gc session suspend $_sess' failed; nothing was changed, and the sitting keeps its pane." >&2
-    exit 4
-}
-
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
@@ -1453,8 +1402,7 @@ case "${1:-}" in
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
-    suspend)       shift; cmd_suspend "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, react, takeaway, demand, dismiss, suspend, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, react, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac
