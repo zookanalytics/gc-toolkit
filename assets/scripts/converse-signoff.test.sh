@@ -279,9 +279,9 @@ echo "── the sitting ends out loud (deliberate-close path) ──"
 have "the sign-off is a hand-back headed by the subject" '<subject-id> — <short human label>' "$PROMPT"
 have "the sign-off's open decision leads with the recommendation" 'lead with the recommendation' "$PROMPT"
 lacks "the rote Ended (<outcome>) sign-off tag is gone" 'Ended (<one-word-outcome>):' "$PROMPT" \
-    "the sign-off is a plain-language wrap-up now, not a fixed two-line tag (tk-9vb3j1)"
+    "the sign-off is a plain-language wrap-up, not a fixed two-line tag"
 lacks "the rote Look at: <subject-id> pointer is gone" 'Look at: <subject-id>' "$PROMPT" \
-    "a converse names another bead only where the substance leads there, as prose (tk-9vb3j1)"
+    "a converse names another bead only where the substance leads there, as prose"
 have "the outcome stamp is still verified before the close" \
     "jq -e '.[0].metadata[\"gc.outcome\"] // empty'" "$PROMPT"
 have "close step still closes only the visit" 'gc bd close "$VISIT"' "$PROMPT"
@@ -1820,14 +1820,14 @@ have "the omission is stated as legal" \
      'nothing for the operator to decide is legal' "$PROMPT"
 have "…and doubt still leaves the sitting open" \
      'the sitting stays open' "$PROMPT"
-# converse defines its hand-back shape inline (steps 5 and 7) and no longer
-# injects the shared operator-next-step-trailing fragment. Re-injecting it would
-# render the old `Next (yours):` shape below the inline hand-back and contradict
-# it; the fragment itself stays for witness and mechanik, whose output this bead
-# must not change (tk-9vb3j1).
+# converse defines its hand-back shape inline (steps 5 and 7) and does not
+# inject the shared operator-next-step-trailing fragment. Injecting it would
+# render a `Next (yours):` shape below the inline hand-back and contradict
+# it; the fragment stays for witness and mechanik, whose output does not
+# change.
 if grep -q '{{ template "operator-next-step-trailing" \. }}' "$PROMPT"; then
     bad "converse does not inject the shared trailing-decision fragment" \
-        "the injection is back; it renders the Next (yours): shape below the inline hand-back and the two contradict each other (tk-9vb3j1)"
+        "the injection is back; it renders the Next (yours): shape below the inline hand-back and the two contradict each other"
 else
     ok "converse does not inject the shared trailing-decision fragment"
 fi
@@ -1871,15 +1871,15 @@ else
         "without the fallback the offered command fails on exactly the sittings a restart touched, which is the normal case for a long hold"
 fi
 
-# converse stops injecting the shared fragment, but it must stay intact for
-# witness and mechanik, whose output this bead does not change. If the fragment
-# lost its own placement rule, those two roles' endings would shift (tk-9vb3j1).
+# converse does not inject the shared fragment, but it must stay intact for
+# witness and mechanik, whose output does not change. If the fragment lost its
+# own placement rule, those two roles' endings would shift.
 FRAG="$REPO/template-fragments/operator-next-step-trailing.template.md"
 if grep -qF -- 'sits below it' "$FRAG"; then
     ok "the shared fragment is intact for witness and mechanik"
 else
     bad "the shared fragment is intact for witness and mechanik" \
-        "the fragment lost 'sits below it'; witness and mechanik output would change under a converse-only bead (tk-9vb3j1)"
+        "the fragment lost 'sits below it'; witness and mechanik output would change"
 fi
 
 echo
