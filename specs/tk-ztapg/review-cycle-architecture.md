@@ -1,12 +1,14 @@
 ---
 name: Review-cycle architecture
-description: The ruled design for the PR review cycle — per-reviewer lane states that survive new commits, a validator that judges convergence, a quiescence predicate held by one authority, and the component-by-component change list that carries it. Ruled by the operator 2026-09-01 on visit tk-hrapej; implementation is carved under epic tk-bw184o.
+description: The ruled design for the PR review cycle — per-reviewer lane state DERIVED from the finding and review-outcome graph (the design carries no stored gate marker), a validator that judges convergence, a quiescence predicate held by one authority, and the component-by-component change list that carries it. Ruled by the operator 2026-09-01 on visit tk-hrapej and refined 2026-09-04 on visit tk-yfq42d; implementation is carved under epic tk-bw184o.
 ---
 
 # Review-cycle architecture
 
 A gate closes when new findings stop arriving, and a validator judges that.
-Convergence is judged, not pinned to a commit and not counted in rounds.
+Convergence is judged, not pinned to a commit and not counted in rounds. A
+lane's state is read from the finding and review-outcome graph, never stored on
+the anchor as a gate marker.
 
 ## Scope
 
@@ -33,14 +35,15 @@ spent on 98 anchors in the 8 days after the gc-toolkit rewrite landed.
 | 211 | re-read a new head, because the branch grew a commit |
 | 83 | re-read a head already reviewed, because two actors disagreed about what was in flight |
 
-Both surpluses come from the same decision: the unit of review state is a
-commit oid. `signoff.sh` writes `check.<gate>=green@<oid>`, `merge.sh` holds
-until every declared gate reads `green@<live head>`, so every push invalidates
-every gate at once and buys a fresh whole-diff review. That accounts for the
-211. The 83 are the oid race: a review pinned to a commit the branch has since
-rewritten, arriving as a finding against a commit that no longer exists.
+Both surpluses came from the same decision: the unit of review state was a
+commit oid. `signoff.sh` wrote `check.<gate>=green@<oid>` and `merge.sh` held
+until every declared gate read `green@<live head>`, so every push invalidated
+every gate at once and bought a fresh whole-diff review. That accounts for the
+211. The 83 are the oid race: a review pinned to a commit the branch had since
+rewritten, arriving as a finding against a commit that no longer existed.
 
-Removing the pin retires the 211. One authority plus quiescence retires the 83.
+Removing the pin retires the 211, and deriving the lane state from the graph is
+what removes it. One authority plus quiescence retires the 83.
 
 ## Lane states
 
@@ -48,26 +51,104 @@ A **lane** is one reviewer, named by one entry in the anchor's `check_set`. An
 anchor with `check_set=codex,arch` has two lanes and merges when both are
 green.
 
-A lane's state is a state of the lane itself, never a claim about a commit:
+A lane's state is **derived from the finding and review-outcome graph**, never
+stored on the anchor. It is a state of the lane itself, never a claim about a
+commit, and it is read by asking which beads exist, not by reading a marker.
 
-| State | Means |
-|---|---|
-| `unreviewed` | this lane owes a full review |
-| `reviewing` | a full review is in flight |
-| `validating` | a finding set is in hand and a validation pass is in flight |
-| `fixing` | must-fix findings from this lane are open and work is out on them |
-| `green` | converged |
+The five states are mutually exclusive, and one shared read helper derives them
+so every reader — `merge.sh`, `pr-open.sh`, `liveness-sweep.sh`, the board —
+agrees. A lane derives exactly one state: read the rows below in precedence
+order and take the first whose condition holds. This is the read order for the
+lane's current state, not its lifecycle; a lane still travels
+`unreviewed` to `reviewing` to `green` over time. The order is what keeps
+`green` from co-existing with an in-flight review, validation pass, or open fix
+— an approve verdict does not settle a lane while the anchor is still worked.
 
-**Green survives new commits.** This is the load-bearing rule and the one
-reversal from the current design. A push does not move a lane out of `green`,
-does not stale it, and does not buy a review. A green lane returns to
-`unreviewed` only when the validator rules a fresh whole-diff review warranted,
-which is a judgement rather than a trigger.
+| Precedence | State | Derives from |
+|---|---|---|
+| 1 | `reviewing` | a review bead for this lane on the anchor is open |
+| 2 | `validating` | a validation pass on the anchor is open |
+| 3 | `fixing` | a must-fix finding on this lane is open |
+| 4 | `green` | a non-superseded closed review bead backs this lane (an approve verdict, or a legacy recorded no-verdict bead), rows 1–3 having excluded any in-flight review, validation pass, or must-fix |
+| 5 | `unreviewed` | none of the above: the lane has no non-superseded backing review bead and nothing is in flight |
 
-The state lives on the anchor under the same key the marker uses today,
-`check.<lane>`, with a new grammar: one bare state word, no `@<oid>` suffix.
-`check_set` continues to declare which lanes exist, and `none` continues to
-mean an anchor gated by no lane.
+The load-bearing derivation is `green`. `green(anchor, lane)` holds when four
+conditions are all met: a closed `task_kind=review` bead for the pair —
+`anchor_bead` this anchor, `check_name` this lane — backs the lane; no
+`must-fix` finding on this lane is open; no validation pass on the anchor is
+open; and no review bead for this lane is open. A closed review bead backs the
+lane the same two ways the provenance audit already accepts. It carries
+`signoff_verdict=approve` and is **not superseded** (`gc.outcome` is not
+`superseded`); or it carries no `signoff_verdict` with `gc.outcome=recorded`, a
+legacy bead closed before the verdict stamp existed, where the recorded outcome
+is the only sign left that it closed on a verdict and is itself non-superseded.
+An operator's APPROVED GitHub review on the anchor's `pr_number` is a third way
+the approve half is met, because a human who approves on GitHub files no review
+bead; an approval names no gate, so it meets it for every lane.
+
+The non-superseded clause is the term the promoted derivation adds. `signoff.sh`
+already closes a review bead it retires with `gc.outcome=superseded` — a pin that
+left the branch — while `doctor/check-gate-marker-provenance` accepts an
+`approve` verdict by the verdict alone, without excluding a superseded outcome.
+That resolves correctly today only because a bead superseded today carries no
+verdict yet. The validator supersedes an approve bead that already carries
+`signoff_verdict=approve` (see "What moves a lane backwards"), so the shared read
+helper must exclude a `superseded` outcome on the verdict branch for the
+supersede to land; accepting the verdict alone would keep a superseded approve
+counting. The legacy branch needs no such clause, because it already requires
+`gc.outcome=recorded`, which a supersede stamp removes.
+
+`green`'s positive evidence is per-lane: the approve verdict and the must-fix
+findings it reads are this lane's, so a sibling lane's open finding or open
+review does not by itself move this lane. The one anchor-wide term inside `green`
+is the open validation pass: a pass rules on the whole diff, so an open one holds
+every lane on the anchor out of `green` at once and each derives `validating` —
+the same behaviour the human-feedback path below states. The other anchor-wide
+rule — no open must-fix finding anywhere on the anchor — stays a separate
+condition the merge predicate holds on, not a term in any lane's `green`.
+
+**Green survives new commits.** A push creates and closes no bead in the set the
+derivation reads, so it does not move a lane out of `green`, does not stale it,
+and does not buy a review. A lane returns to `unreviewed` only when the
+validator rules a fresh whole-diff review warranted, which is a judgement rather
+than a trigger.
+
+`check_set` continues to declare which lanes exist, and `none` continues to mean
+an anchor gated by no lane. What the design removes is the stored `check.<lane>`
+marker: the state it held is exactly what the derivation above reads from the
+graph, so the marker is a cache of a computed fact, and the design keeps only
+the fact.
+
+### Where green already lives
+
+Neither half of `green` was ever the marker's to own.
+
+The approve half is already computed. `doctor/check-gate-marker-provenance`
+derives it today as an audit over the stored marker: for every green lane it
+resolves a closed `task_kind=review` bead whose `anchor_bead` and `check_name`
+match the pair and that either carries `signoff_verdict=approve` or, as a legacy
+bead written before that stamp, carries no `signoff_verdict` with
+`gc.outcome=recorded`, falling back to an APPROVED GitHub review on the
+`pr_number`. That resolver is the derivation this design promotes from an audit
+to the source of truth, with one addition: the promoted helper also excludes a
+superseded approve (`gc.outcome=superseded`) on the verdict branch, which the
+audit never needed because nothing superseded a recorded approve until the
+validator does. The review bead it reads
+is already a first-class, queryable bead: `gate-ensure.sh` creates it at
+dispatch with `task_kind`, `anchor_bead`, `check_name` and `reviewed_oid`, and
+`signoff.sh` closes it with `gc.outcome=recorded` and `signoff_verdict`. The
+`reviewed_oid` it carries is a dispatch pin, read by no gate as a claim about a
+commit.
+
+The must-fix half is already structural. A must-fix finding holds its anchor by
+a `blocks` edge, and `merge.sh` already reads every live `blocks` blocker of the
+anchor into its hold. The marker never carried this fact; the graph did. A lane's
+`green` reads only the must-fix findings on that lane; the anchor-wide check —
+every open must-fix finding, on any lane — is the separate merge condition below,
+which that same `blocks` probe already enforces. The one gap the design closes is
+that the provenance audit computes only the approve half, and this design
+promotes that resolver from an audit to the source of truth a shared read helper
+computes.
 
 ### Two ways a lane goes green
 
@@ -190,7 +271,7 @@ out: a fix unit in flight is a live bead blocking a finding on this anchor.
 Closing runs the edges backwards. When the fix unit closes, the findings it
 blocked become unblocked, and `gate-ensure.sh`, which already owns lane state
 and computes quiescence, closes each finding whose blockers have all closed.
-The lane leaves `fixing` when the anchor carries no open must-fix finding.
+The lane leaves `fixing` when no must-fix finding on this lane is open.
 
 Today's rework child is already a fix unit in this shape. `signoff.sh` writes
 it a `blocks` edge onto the anchor and routes it to the fix-target pool, while
@@ -258,6 +339,9 @@ Concretely, a lane may not be dispatched while any of these hold:
 - a validation pass on this anchor is in flight
 - a full review on this lane is in flight
 
+Every clause is an open-bead query. Quiescence reads no lane marker, so dropping
+the marker leaves it unchanged — it was graph-native already.
+
 The fourth clause is what retires the 83: two actors disagreeing about whether
 a review was already out is exactly how the same head got read twice, and one
 computer of the set cannot disagree with itself.
@@ -299,18 +383,22 @@ what is missing is the predicate, not fewer dispatchers.
 Two things move a lane backwards, and nothing else does. A commit does not, a
 rebase does not, a force-push does not, and a sibling lane's finding does not.
 
-**A human feedback batch moves every lane on the anchor to `validating`.** The
-batch does not itself buy a full re-review. It is a finding set like a
-reviewer's, so it enters the lane where a reviewer's findings enter it, and the
-validator's three decisions apply to it unchanged. A comment reporting a
-misspelling becomes a must-fix finding, the lane goes to `fixing`, and it
-returns to `green` when the fix lands without a whole-diff read being spent on
-it. A comment that overturns an assumption the diff rests on is what decision 3
-answers yes to.
+**A human feedback batch opens a validation pass on the anchor**, which is what
+makes every lane derive `validating`. The batch does not itself buy a full
+re-review. It is a finding set like a reviewer's, so it enters the lane where a
+reviewer's findings enter it, and the validator's three decisions apply to it
+unchanged. A comment reporting a misspelling becomes a must-fix finding, the
+lane derives `fixing`, and it derives `green` again when the fix lands without a
+whole-diff read being spent on it. A comment that overturns an assumption the
+diff rests on is what decision 3 answers yes to.
 
 **The validator ruling a fresh whole-diff review warranted returns that lane to
-`unreviewed`.** It is the only path back to `unreviewed`, for human input and
-machine input alike, which is the judged-convergence ruling applied to both.
+`unreviewed`.** It marks the lane's already-closed approve-review bead
+`gc.outcome=superseded` — the same stamp `signoff.sh` writes to retire a review
+whose pin left the branch — so the approve half of the derivation no longer holds
+and the lane owes a full review again. It is the only path back to `unreviewed`,
+for human input and machine input alike, which is the judged-convergence ruling
+applied to both.
 
 The signal already exists and is already deduped. `pr-facts.sh` records a
 `commented` posture against `pr_comment_watermark` and `pr_review_watermark`,
@@ -321,27 +409,54 @@ reconcile every two minutes therefore sees one batch once.
 Today that detection resets `signoff.sh`'s review-round cap, by writing
 `signoff_rounds_reset=<max_review>.<max_comment>` and letting the next verdict
 re-baseline `signoff_round_floor`. The detection is right and the thing it
-resets is wrong. **Re-point the same write at the lane states**: set every
-`check.<lane>` on the anchor to `validating`, keyed on the same batch id, in
-the same single `lifecycle.sh transition` call. The comments in the batch
-become findings on the same pass, since a lane sent to `validating` with no
-finding set to rule on would stall there.
+resets is wrong. **Re-point the same detection at the graph**: file the batch's
+comments as findings and open one validation pass on the anchor, keyed on the
+same batch id. No lane marker is written, because there is none — `validating`
+derives from the open validation pass. The findings and the validation pass are
+one behaviour, since a validation pass with no finding set to rule on would
+stall.
 
 Open must-fix findings are unaffected by a batch. They were true before it
 arrived and they still hold the merge.
 
 ## Merge predicate
 
-`merge.sh`'s `hold_gate` becomes two conditions:
+`merge.sh`'s `hold_gate` holds on two conditions:
 
-1. every lane declared in `check_set` reads `green`
+1. every lane declared in `check_set` **derives** `green`
 2. no `must-fix` finding on the anchor is open
 
-Condition 1 loses its head comparison, which is the whole of the 211. Condition
-2 is not new code. A must-fix finding blocks the anchor by a `blocks` edge and
-the in-flight probe already holds the merge on any live blocker, so the graph
-enforces it rather than `hold_gate`. It is what makes target 4 true: a PR is
-not mergeable until every finding ruled fix-needed has been fixed.
+Condition 1 no longer reads a `check.<lane>` marker. `hold_gate` derives each
+declared lane's state through the shared read helper and holds unless it is
+`green`, so an open validation pass or an in-flight review on a lane — which the
+precedence ranks above `green` — holds the merge exactly as an open must-fix
+does, and a superseded approve does not satisfy it. A lane's own must-fix half is
+subsumed by condition 2, which holds on every open must-fix finding anywhere on
+the anchor, so `hold_gate` derives the lane state per lane and reads the
+anchor-wide must-fix once. The head comparison is already gone with the pin, so
+what this step removes is the marker read itself, not a stale-head test.
+Condition 2 is not new code for `merge.sh`: a must-fix finding blocks the anchor
+by a `blocks` edge and the
+in-flight probe already holds the merge on any live blocker, so the graph
+enforces it rather than `hold_gate`. It is what makes target 4 true: a PR is not
+mergeable until every finding ruled fix-needed has been fixed.
+
+## Read cost
+
+Deriving `green` replaces one O(1) marker read with a graph query on every hot
+path that reads a lane: `merge.sh`, `pr-open.sh`, `liveness-sweep.sh` and the
+board. The query is affordable. On the per-anchor paths the derived read costs
+the same order as the `bd` reads the caller already makes, and the must-fix half
+is the `blocks`-blocker probe `merge.sh` already runs, so it adds nothing. The
+board derives every anchor at once from two batched queries — all closed review
+beads and all open findings, grouped in memory — not one query per anchor. The
+marker is dropped outright.
+
+A write-through cache is the sanctioned fallback if a much larger store ever
+regresses a board render: keep `check.<lane>` as a marker rewritten whenever the
+underlying beads change, a derived cache rather than a source of truth.
+Marker-as-cache is sound; marker-as-truth is what this design removes. Nothing at
+the current store size warrants building it.
 
 ## Component map
 
@@ -350,28 +465,37 @@ Six components carry the design. For each, what it does today and what changes.
 | Component | Today | Changes to |
 |---|---|---|
 | **Reviewer lane** — `formulas/mol-review.toml` | Three steps: pin the dispatch, read the diff, hand one verdict to `signoff.sh`. The verdict decides the gate. | Emits findings as beads and stops deciding green. `approve` becomes "I found nothing", which is path A; anything else is a finding set handed to the validator. `mol-review-quorum` (city `.beads/formulas/`) is the already-built two-lane fan-out for the composability target. |
-| **Validator** — new | Does not exist. | New formula and new dispatch. One pass per review batch, the three decisions above, writes `finding.disposition` on each finding and the lane's next state on the anchor. |
-| **Gate authority** — `assets/scripts/gate-ensure.sh` | Canonicalizes `check_set`, classifies each `check.<g>` against the live head, dispatches a review per unsettled gate, and backstops runaway dispatch with `GC_MAX_REVIEW_DISPATCHES`. | Reads lane state instead of comparing markers to a head. Enforces quiescence before any dispatch. Drops `live_head_for` from the gate classification, drops `already_answered` (a prior verdict at a commit is no longer the question), and drops the dispatch ceiling, whose only job was to proxy convergence. |
-| **Verdict writer** — `assets/scripts/signoff.sh` | The single audited writer of `check.<g>=<verb>@<oid>`. Also files the rework child, counts rounds, and stamps `exception@` at the cap. | Stays the single writer, of lane state and validator dispositions. The round cap, `signoff_round_floor`, `signoff_rounds_reset`, `signoff_cap` and the `reset` verb all retire with judged convergence. The oid-length guard and the moved-head refusal retire with the pin. |
-| **Merge predicate** — `assets/scripts/merge.sh` `hold_gate` | First declared gate not `green@<head>`, else merge. | Every lane `green`. The must-fix half takes no change: the existing blocker probe already holds on the finding's `blocks` edge. |
-| **Feedback detector** — `assets/scripts/pr-facts.sh` | Detects a human feedback batch by watermark, routes the comments, and resets the round cap once per batch. | Same detection, same watermarks, same once-per-batch dedup. Files the batch's comments as findings and moves every lane to `validating` instead. |
+| **Validator** — new | Does not exist. | New formula and new dispatch. One pass per review batch, the three decisions above. It writes `finding.disposition` on each finding and manages the review-outcome beads the derivation reads: closing an approve-review bead makes a lane green, superseding one (stamping it `gc.outcome=superseded`) returns a lane to `unreviewed`. It writes no lane marker. |
+| **Gate authority** — `assets/scripts/gate-ensure.sh` | Canonicalizes `check_set`, classifies each `check.<g>` marker (already no longer against a head), dispatches a review per unsettled gate, and backstops runaway dispatch with `GC_MAX_REVIEW_DISPATCHES`. | Derives lane state from the graph instead of reading the `check.<g>` marker. Enforces quiescence before any dispatch. Drops the dispatch ceiling, `dispatch_count` and the `dispatch_backstop` stamps, whose only job was to proxy convergence. |
+| **Verdict writer** — `assets/scripts/signoff.sh` | Stamps `check.<g>=green` on approve and clears it on request-changes, files the rework child, closes the review bead with `signoff_verdict`, counts rounds, and parks under `signoff_cap` at the cap. | Stops writing `check.<g>`: the closed approve-verdict review bead it already files is the green record. It files findings beside the rework child. The round cap, `signoff_round_floor`, `signoff_rounds_reset`, `signoff_cap`, the `exception@` terminal park and the `reset` verb all retire with judged convergence. |
+| **Merge predicate** — `assets/scripts/merge.sh` `hold_gate` | First declared gate whose `check.<g>` is not `green`, else merge. | Every lane derives `green` through the shared helper. The must-fix half takes no change: the existing blocker probe already holds on the finding's `blocks` edge. |
+| **Feedback detector** — `assets/scripts/pr-facts.sh` | Detects a human feedback batch by watermark, routes the comments, and resets the round cap once per batch. | Same detection, same watermarks, same once-per-batch dedup. Files the batch's comments as findings and opens one validation pass on the anchor instead, from which every lane derives `validating`. |
 
 ### Beyond the six
 
-Three more places read the marker grammar, and a carve that misses them ships
-a design that fails its own integrity checks on the first pass.
+More places read the `check.<lane>` marker, and a carve that misses one ships a
+design that still stores the fact it means to derive.
 
-- **`assets/scripts/pr-open.sh`** holds a pre-open anchor until
-  `check.<g> == green@<head_oid>` for every declared gate, by direct string
-  comparison. It takes the same grammar change as `merge.sh`.
-- **`doctor/check-gate-integrity`** asserts the marker grammar is
-  `green|fixable|exception@<40-hex>`. Its surface clause changes to the lane
-  vocabulary.
-- **`doctor/check-gate-marker-provenance`** asserts that a green marker names a
-  commit some recorded verdict covers. Its entire premise is the oid binding.
-  Under this design a green lane names no commit, so the check becomes: a green
-  lane names a recorded verdict, and either that verdict found nothing or a
-  validator disposition closed its findings.
+- **`assets/scripts/pr-open.sh`** holds a pre-open anchor until `check.<g>` reads
+  `green` for every declared gate, by direct string comparison, and reads no
+  dependency edges. It derives `green` through the same helper as `merge.sh`, and
+  gains the anchor's must-fix blocker read `merge.sh` already runs: a pre-open
+  gate that opens a PR with an unfixed must-fix finding publishes work the city
+  has already ruled must change.
+- **`assets/scripts/liveness-sweep.sh`** treats an anchor as landed when every
+  declared gate reads `green`. It derives `green` through the same helper.
+- **`doctor/check-gate-integrity`** asserts the marker grammar is one of
+  `unreviewed|reviewing|validating|fixing|green`. With no stored marker the
+  grammar clause has nothing to assert and retires; its `check_set` declaration
+  clause stays, because `check_set` is still stored.
+- **`doctor/check-gate-marker-provenance`** derives, as an audit over the stored
+  marker, that a green lane names a recorded approve verdict. With the marker
+  gone the derivation is the truth and there is no marker to give provenance for,
+  so this check either retires or becomes a structural check on the outcome
+  beads: an anchor with no open must-fix finding whose lanes each name a closed
+  review bead that backs them, a non-superseded `signoff_verdict=approve` or a
+  legacy no-verdict `gc.outcome=recorded` bead. The GitHub-approval fallback stays
+  as a way the approve half is met.
 
 `check_set` itself needs no new structure. It is already a list, `merge.sh`
 already holds until every entry is green, and the reason it is always one
@@ -385,18 +509,27 @@ widening is orthogonal to how a lane converges.
 
 ## Migration
 
-Existing anchors carry the old grammar. The mapping:
+The bare-word `check.<lane>` marker is already on main — `tk-uqolwg` (PR#614,
+commit `98241e0f`) landed it, replacing the `<verb>@<oid>` grammar. This design
+removes that marker layer, as the completion of the same ruling `tk-uqolwg` began
+rather than a conflict with it.
 
-| Existing marker | Becomes |
-|---|---|
-| `green@<oid>` | `green` |
-| `fixable@<oid>` | `fixing` |
-| absent | `unreviewed` |
-| `exception@<oid>` | `merge_hold` plus a visit carrying the park's reason |
-
-Nothing writes `fixable@` any more — the only writer was
-`reconcile-gate-verdicts.sh`, and `gate-ensure.sh` merely reads it — so that
-row exists for residue, not for a live path.
+The cutover needs no data migration, because the derivation reads the same
+evidence the provenance audit already accepts. `check-gate-marker-provenance`
+runs today as an audit that would flag any `check.<g>=green` not standing on a
+recorded approve verdict, resolving that verdict from a closed
+`signoff_verdict=approve` review bead, from a legacy closed review bead carrying
+no `signoff_verdict` with `gc.outcome=recorded`, or, when neither exists, an
+APPROVED GitHub review on the anchor's `pr_number`. The derivation reads all
+three, so it preserves both the legacy backing and the GitHub-approval fallback:
+a green marker standing on a legacy no-verdict review bead, or on a human's
+GitHub approval with no local review bead, still derives green after cutover,
+rather than silently going ungreen. Each reader switches from the marker
+to the derivation in the change that removes that reader's marker read; once the
+last reader has switched, the `check.<lane>` markers are inert metadata that a
+one-shot sweep clears. `assets/scripts/migrate-lane-states.sh`, the disposable
+one-shot that mapped the old grammar to the new, then has nothing left to map and
+is deleted with the marker.
 
 Existing rework children stay direct blockers of their anchors. Such a child
 already satisfies the shape law and already holds the merge, and the objections
@@ -407,8 +540,13 @@ children in flight at the cutover drain as they are.
 
 ## What this retires
 
-Both measured failure modes, and the apparatus built to compensate for them.
+Both measured failure modes, the apparatus built to compensate for them, and the
+stored lane marker itself.
 
+- The stored `check.<lane>` marker, its writers in `signoff.sh`, and
+  `migrate-lane-states.sh`. Lane state is read from the graph, so the fact the
+  marker cached has no source of truth left to cache. `check-gate-integrity`'s
+  grammar clause and `check-gate-marker-provenance`'s marker audit go with it.
 - The 211 re-reviews on a new head go, because a commit no longer invalidates
   a lane.
 - The 83 same-head duplicates go, because one authority dispatches and
