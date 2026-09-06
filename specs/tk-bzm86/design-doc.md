@@ -1,6 +1,6 @@
 ---
 name: Design — The converse thread's ending is an event, not an absence
-description: Fixes a converse thread vanishing mid-attention with no operator-facing completion signal (tk-bzm86). Corrects the filed diagnosis — wisp_ttl GCs closed wisp beads and never reaps a live sitting; the real clock is the pack's own idle_timeout, measured from terminal OUTPUT, capped by core's assigned-work defer backstop, and its kill clears the scrollback under wake_mode=fresh. Resolves the bead's three scope items into a sign-off block, a takeaway stamped when the hold begins, and a recorded decision not to buy longevity — plus the one fix that belongs upstream.
+description: Fixes a converse thread vanishing mid-attention with no operator-facing completion signal (tk-bzm86). Corrects the filed diagnosis — wisp_ttl GCs closed wisp beads and never reaps a live sitting; the real clock is the pack's own idle_timeout, measured from terminal OUTPUT, capped by core's assigned-work defer backstop, and its kill clears the scrollback under wake_mode=fresh. Resolves the bead's three scope items into a sign-off hand-back, a takeaway stamped when the hold begins, and a recorded decision not to buy longevity — plus the one fix that belongs upstream.
 ---
 
 # Design: the converse thread's ending is an event, not an absence
@@ -77,21 +77,24 @@ ending on the path where we *are* still running.
 
 Two halves, because the operator and the record need different things.
 
-**In-thread (the human):** the sitting ends with a **sign-off block**,
-posted as the thread's last word — two lines, nothing below them:
+**In-thread (the human):** the sitting ends with a **sign-off**, posted
+as the thread's last word — a plain-language hand-back the operator can
+act on from its last few lines:
 
 ```
-Ended (<one-word-outcome>): <what this sitting settled, in one line>
-Look at: <subject-id> — <the one thing to read or do next>
+<subject-id> — <short human label>
+
+<2-4 plain sentences at executive altitude: what this sitting settled
+and the consequence that mattered; if a decision is still open, lead
+with its recommendation.>
 ```
 
-This is not decoration. The converse contract already requires that
-every message posted *while holding* end with `Next (yours): …` — so
-before this change, the last line of a thread that ended was always an
-unanswered **question**. A question, then silence, reads as a crash. The
-sign-off and the hold line are mutually exclusive and both terminal:
-every message ends with one or the other, so "which state is this thread
-in?" is answerable from the last line alone.
+This is not decoration. Every converse message that returns a decision
+wears this hand-back shape — the mid-conversation hold and this close
+both — so the last few lines of any message carry either what is still
+owed or what was settled. A decision that then falls to silence reads as
+a crash; the sign-off is the wrap-up that marks the ending as
+deliberate.
 
 **Durable (the record):** the same content is stamped on the subject via
 `assets/scripts/gc-helm.sh takeaway "$SUBJECT" … --by converse` before
@@ -119,18 +122,21 @@ untraced. A missing writer is now announced in-thread rather than
 swallowed, because a stamp that silently does not happen is the original
 bug one level down.
 
-Order matters and is fixed: **durable stamp → close the visit → post the
-sign-off.** The writes go first so a session that dies mid-sequence has
-still left the trace; the human-visible line goes last so it is what
-remains on screen.
+Order matters and is fixed: **post the sign-off → stamp the outcome →
+close the visit.** The sign-off goes first so the human-visible wrap-up
+is the thread's last line and is never written into a pane the drain is
+already taking. The `gc.outcome` stamp lands next, as the last write
+before the close, so the one interruption that stays recoverable — an
+open visit already carrying `gc.outcome` — is one whose sign-off has
+already posted and whose only remaining write is the close.
 
 ### 2. Make a reap recoverable — **built, via the "persist" arm**
 
 The bead offered two arms: warn before the reap, or persist the takeaway
 so the reap is recoverable. The warn arm is unavailable (above), so:
 **the takeaway is stamped when the hold BEGINS**, not only at close —
-`"holding — <the one decision or input needed>"`, the same line as
-`Next (yours):`.
+`"holding — <the one decision or input needed>"`, the durable twin of
+the need the hold's hand-back puts to the operator.
 
 That single extra write per sitting converts the failure from *reaped =
 nothing* into *reaped = the subject says what it was waiting for, and
@@ -196,9 +202,10 @@ against the gascity rig as **`gc-rjtk1`** rather than approximated here.
 
 `assets/scripts/converse-signoff.test.sh` (hermetic; reads the repo
 only) pins both halves of the contract: the hold-time stamp, the
-sign-off block's two lines, the cut-short path signing off too, the
-absence of `--release`, the corrected agent.toml comment, and the
-central mechanism record. A prompt is prose, and the stamp is exactly
+sign-off hand-back's subject header and recommendation-led decision, the
+sign-off-then-outcome-stamp-then-close order, the cut-short path signing
+off too, the absence of `--release`, the corrected agent.toml comment,
+and the central mechanism record. A prompt is prose, and the stamp is exactly
 the kind of line a tidy-up edit drops with nothing downstream noticing.
 
 Writer resolution is the one part that is **executed** rather than
