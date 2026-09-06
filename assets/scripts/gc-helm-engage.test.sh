@@ -18,6 +18,9 @@
 #   (CLOSED)  a closed explicit visit is refused before spawning (exit 4)
 #   (BLOCKED) a blocked explicit visit is refused before spawning (exit 4)
 #   (NOSPAWN) a session new that returns no identity aborts without assigning
+#   (RACE)    a bind whose --if-assignee guard is rejected (a concurrent engage
+#             won in the spawn window) does not overwrite the winner, suspends the
+#             loser sitting, and exits 4
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
 set -euo pipefail
 
@@ -76,9 +79,24 @@ case "$1 ${2:-}" in
     fi ;;
   "session attach")
     printf 'session attach %s\n' "$*" >> "$CALLS" ;;
+  "session suspend")
+    printf 'session suspend %s\n' "$*" >> "$CALLS" ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$CALLS"
-    _a="$*"; case "$_a" in *" --assignee "*) _a="${_a##* --assignee }"; printf '%s' "${_a%% *}" > "$ASSIGNEE" ;; esac ;;
+    _a="$*"
+    # Model the real `bd update --if-assignee/--if-status` guard: on a mismatch
+    # it writes nothing and exits 13 (vs 1 for other failures). $RACE_LOST forces
+    # the guarded bind to lose — a concurrent engage took the visit in the spawn
+    # window — and records the winner so the read-back `bd show` reports who holds
+    # it. An unconditional update (no --if-assignee) always writes, as before.
+    case "$_a" in
+      *" --if-assignee "*)
+        if [ -n "${RACE_LOST:-}" ]; then
+          printf '%s' "${RACE_WINNER:-gc-toolkit__converse-9}" > "$ASSIGNEE"
+          exit 13
+        fi ;;
+    esac
+    case "$_a" in *" --assignee "*) _a="${_a##* --assignee }"; printf '%s' "${_a%% *}" > "$ASSIGNEE" ;; esac ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$CALLS"; jq -n '{id:"tk-vis"}' ;;
   "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
@@ -124,7 +142,9 @@ run_engage tk-vis --no-attach
 eq "$RC" 0 "(VISIT) engaging an open visit exits 0"
 has "$CALLED" "session new converse-opus --alias tk-vis --no-attach --json" "(VISIT) spawns converse-opus --alias <visit> --no-attach"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(BIND) the visit is assigned to the session's runtime name"
-has "$CALLED" "bd update tk-vis --assignee gc-toolkit__converse-1" "(BIND) …by name, the identity the claim adopts"
+has "$CALLED" "bd update tk-vis --if-assignee" "(BIND) …conditionally, on the open+unassigned state the guards read"
+has "$CALLED" "--if-status open" "(BIND) …and on the open status, so a lost race writes nothing"
+has "$CALLED" "--assignee gc-toolkit__converse-1" "(BIND) …by name, the identity the claim adopts"
 
 echo "# --model selects the tier"
 run_engage tk-vis --model codex --no-attach
@@ -201,6 +221,25 @@ run_engage tk-vis --no-attach
 eq "$RC" 4 "(NOSPAWN) a session with no identity exits 4"
 eq "$(cat "$ASSIGNEE")" "" "(NOSPAWN) …and the visit is not assigned"
 unset SPAWN_EMPTY
+printf 'open' > "$VIS_STATUS"
+
+echo "# a lost bind race: the visit was taken in the spawn window — do not overwrite"
+# `gc session new` takes real time, so a second engage can pass the same
+# open/unassigned/unblocked guards and reach the bind before this one does. The
+# bind is conditional (--if-assignee "" --if-status open), so the loser's update
+# writes nothing and exits 13. It must NOT overwrite the winner, must suspend the
+# sitting it spawned (which holds nothing), and must point the operator at the
+# winner. The stub rejects the guarded update and records the winner as the owner.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+export RACE_LOST=1 RACE_WINNER="gc-toolkit__converse-8"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(RACE) a lost bind race exits 4"
+has "$CALLED" "session new" "(RACE) …the sitting did spawn — the race is in the bind window, past the pre-spawn guards"
+has "$CALLED" "bd update tk-vis --if-assignee" "(RACE) …the bind is conditional, so the store rejects the loser (exit 13)"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(RACE) …the assignee stays the winner, never the loser"
+has "$CALLED" "session suspend gc-77" "(RACE) …the stranded loser sitting is suspended"
+has "$OUT" "not overwriting" "(RACE) …and the operator is told the winner was not overwritten"
+unset RACE_LOST RACE_WINNER
 
 echo "# attach behaviour: default attaches, --no-attach does not"
 run_engage tk-vis --no-attach

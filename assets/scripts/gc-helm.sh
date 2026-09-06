@@ -1618,9 +1618,25 @@ cmd_engage() {
 
     # Bind the visit to the sitting: its assignee is the session's runtime name,
     # the identity a pool claim would have stamped, so the session's own
-    # `gc hook --claim` adopts it with no pool routing. Verify the write landed —
-    # an unbound visit is a sitting with nothing to hold.
-    if ! gc bd update "$VISIT" --assignee "$sname" >/dev/null 2>&1; then
+    # `gc hook --claim` adopts it with no pool routing. The bind is CONDITIONAL
+    # on the open+unassigned state the guards above read. `gc session new` takes
+    # real time, so a second engage of the same row can pass those same guards
+    # and spawn its own sitting in the window before this write — an
+    # unconditional update would let the later engage overwrite the first
+    # sitting's binding, stranding it (the finding). --if-assignee "" --if-status
+    # open writes only while the visit is still the one the guards saw; a mismatch
+    # writes nothing and exits 13. This engage is then the loser: it must not
+    # overwrite the owner that won, and the sitting it spawned holds nothing, so
+    # it is suspended and the operator is pointed at the winner.
+    bind_rc=0
+    gc bd update "$VISIT" --if-assignee "" --if-status open --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
+    if [ "$bind_rc" -eq 13 ]; then
+        winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+        gc session suspend "$sid" >/dev/null 2>&1 || true
+        echo "$PROG: engage: visit $VISIT was engaged by '${winner:-another sitting}' while this sitting spawned — not overwriting. The sitting $sname this engage spawned holds nothing and was suspended; attach to the one that won: gc session attach ${winner:-<owner>}" >&2
+        exit 4
+    fi
+    if [ "$bind_rc" -ne 0 ]; then
         echo "$PROG: engage: spawned $sname but could NOT assign visit $VISIT to it. Assign by hand: gc bd update $VISIT --assignee $sname" >&2
         exit 4
     fi
