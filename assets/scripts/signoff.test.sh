@@ -264,11 +264,35 @@ printf '%s\n' "$*" >> "${STUB_HELM_LOG:?}"
 [ -n "${STUB_HELM_FAIL:-}" ] && exit 4
 exit 0
 STUB
-chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/gc-helm"
+cat > "$BIN/finding" <<'STUB'
+#!/usr/bin/env bash
+# Stub for finding.sh: records signoff's calls and mints a stable id per
+# objection. finding.sh's own suite (finding.test.sh) proves the key, the dedup
+# and the edges; here we need only that signoff reaches for it with the right
+# shape — files each objection, wires the fix unit to what it filed, and closes
+# the lane's unvalidated findings on approve.
+set -u
+verb="${1:-}"; shift || true
+printf '%s %s\n' "$verb" "$*" >> "${STUB_FINDING_LOG:?}"
+case "$verb" in
+  upsert)
+    anchor=""; locus=""; message=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --anchor) anchor="${2:-}"; shift 2 ;; --locus) locus="${2:-}"; shift 2 ;;
+      --message) message="${2:-}"; shift 2 ;; --lane|--source) shift 2 ;; *) shift ;;
+    esac; done
+    printf 'fnd-%s\n' "$(printf '%s\037%s\037%s' "$anchor" "$locus" "$message" | sha1sum | cut -c1-8)" ;;
+esac
+exit 0
+STUB
+chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/gc-helm" "$BIN/finding"
 export PATH="$BIN:$PATH"
 # The cap files its park as a demand through gc-helm.sh; point signoff at the
 # stub so the real verb never runs here.
 export GC_HELM_TOOL="$BIN/gc-helm" STUB_HELM_LOG="$TMP/helm.log"
+# request-changes files findings and approve closes them through finding.sh;
+# point signoff at the stub so the real primitive never runs here.
+export GC_FINDING_TOOL="$BIN/finding" STUB_FINDING_LOG="$TMP/finding.log"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
 export STUB_GH_LOG="$TMP/gh.log" STUB_GH_BODY="$TMP/gh.body" STUB_CREATED="$TMP/created"
 export STUB_SEQ="$TMP/seq" STUB_UPD_FAIL="$TMP/updfail" STUB_GH_ALL="$TMP/gh.all"
@@ -299,6 +323,7 @@ reset() { # $1 = anchor json, extra beads appended via $2
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_GH_BODY"
   : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; : > "$STUB_UNSET_NOOP"; printf '0' > "$STUB_SEQ"
   : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"; : > "$STUB_HELM_LOG"
+  : > "$STUB_FINDING_LOG"
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 status() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
@@ -1242,6 +1267,50 @@ reset "$ANCHOR_PR"
 STUB_AUTOMERGE_JSON='{"autoMergeRequest":{"enabledAt":"x"}}' "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "armed auto-merge blocks the dismissal"
 unset STUB_PR_HEAD STUB_REVIEWS
+
+# --- request-changes files the objections as findings and wires the fix unit ----
+echo "# request-changes files findings beside the fix unit"
+reset "$ANCHOR_PR"
+FF="$TMP/findings.json"
+cat > "$FF" <<'JSON'
+[
+  {"locus":"assets/scripts/foo.sh:bar()","message":"unquoted expansion in the loop","severity":"P1"},
+  {"locus":"docs/x.md","message":"stale reference to a retired script","severity":"P2"}
+]
+JSON
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$FF" 2>&1); rc=$?
+eq "$rc" 0 "request-changes with --findings-file exits 0"
+has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane codex --locus assets/scripts/foo.sh:bar() --message unquoted expansion in the loop" "signoff files the first objection as a finding on the reviewed lane"
+has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane codex --locus docs/x.md --message stale reference to a retired script" "signoff files the second objection as a finding"
+FIX=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
+has "$(cat "$STUB_FINDING_LOG")" "wire-fix-unit --fix-unit $FIX --anchor tk-anc --findings fnd-" "signoff wires the fix unit to the findings it filed"
+has "$(cat "$STUB_DEPS")" "tk-anc|$FIX|blocks" "the fix unit still blocks the anchor (the merge is held)"
+has "$(meta "$FIX" rejection_reason)" "address the 2 finding(s) this bead blocks" "rejection_reason points the worker at the findings, not the objection prose"
+
+# --- request-changes WITHOUT --findings-file is unchanged (backward compat) ------
+echo "# request-changes without findings-file"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "request-changes without findings exits 0"
+hasnt "$(cat "$STUB_FINDING_LOG")" "upsert" "no findings are filed when no --findings-file is passed"
+FIX2=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
+has "$(meta "$FIX2" rejection_reason)" "signoff requested changes (round 1):" "rejection_reason keeps its one-line prose summary"
+hasnt "$(meta "$FIX2" rejection_reason)" "finding(s) this bead blocks" "…and names no findings when none were filed"
+
+# --- a malformed findings file never costs the rework dispatch ------------------
+echo "# a malformed findings file is best-effort"
+reset "$ANCHOR_PR"
+printf 'not json' > "$TMP/bad.json"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$TMP/bad.json" 2>&1); rc=$?
+eq "$rc" 0 "a malformed findings file still lands the verdict"
+has "$(cat "$STUB_CREATED")" "Rework PR#42" "…and still files the rework child that holds the merge"
+
+# --- approve closes the lane's still-unruled findings ---------------------------
+echo "# approve closes the lane's unvalidated findings"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "approve exits 0"
+has "$(cat "$STUB_FINDING_LOG")" "close-unvalidated --anchor tk-anc --lane codex" "approve closes the lane's still-unruled findings"
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then

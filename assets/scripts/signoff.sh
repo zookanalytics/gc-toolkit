@@ -56,6 +56,11 @@ scrub() { tr -d '\000-\011\013-\037'; }
 # test can stand in for it without a live store.
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
+# The finding-bead primitive. request-changes files the reviewer's objections
+# through it as beads beside the fix unit, and approve closes the lane's
+# still-unruled findings through it. Overridable so the hermetic test can stand
+# in for it without a live store.
+FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
 
 usage() {
   cat >&2 <<'U'
@@ -107,12 +112,13 @@ if [ "${1:-}" = "reset" ]; then
   esac
 fi
 
-REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""
+REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
     --verdict)      VERDICT="${2:-}";         shift 2 || { usage; exit 1; } ;;
     --notes-file)   NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
+    --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
     --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --reason)       RESET_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
     --batch)        RESET_BATCH_ARG="${2:-}"; shift 2 || { usage; exit 1; } ;;
@@ -123,7 +129,7 @@ done
 if [ "$MODE" = reset ]; then
   # The ruling is the whole audit trail for a retirement no dispatch justifies.
   [ -n "$RESET_REASON" ] || { warn "reset needs --reason: a cap retired with nothing recorded leaves the anchor unable to say who released it or why"; usage; exit 1; }
-  if [ -n "$REVIEW_BEAD$VERDICT$NOTES_FILE$OID_OVERRIDE" ]; then
+  if [ -n "$REVIEW_BEAD$VERDICT$NOTES_FILE$FINDINGS_FILE$OID_OVERRIDE" ]; then
     warn "reset records no verdict and answers no review bead; drop the verdict flags"; usage; exit 1
   fi
 else
@@ -138,6 +144,9 @@ else
   if [ -n "$NOTES_FILE" ] && [ ! -r "$NOTES_FILE" ]; then
     warn "--notes-file '$NOTES_FILE' is not readable; nothing written"; exit 1
   fi
+  if [ -n "$FINDINGS_FILE" ] && [ ! -r "$FINDINGS_FILE" ]; then
+    warn "--findings-file '$FINDINGS_FILE' is not readable; nothing written"; exit 1
+  fi
 fi
 
 # bd JSON with the C0 set stripped: a raw control byte in notes breaks jq.
@@ -145,6 +154,33 @@ bd_json()   { gc bd "$@" --json 2>/dev/null | scrub; }
 row_meta()  { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
+
+# Read the reviewer's structured findings — a JSON array of {locus, message} —
+# and file each as a finding bead through the finding primitive, deduped by
+# finding.key. Prints the finding ids, one per line. Best-effort: a store that
+# will not take a finding costs that finding, never the rework dispatch the
+# merge is held by, so a failure warns and the caller proceeds. The reviewer's
+# prose verdict is still the fix unit's rejection_reason and the review bead's
+# notes; the beads are the queryable record the validator and gate readers use.
+file_findings() { # <anchor> <lane> <findings-file>
+  local anchor="$1" lane="$2" ff="$3" obj locus message fid
+  [ -n "$ff" ] && [ -r "$ff" ] || return 0
+  if ! jq -e 'type == "array"' "$ff" >/dev/null 2>&1; then
+    warn "findings file is not a JSON array; no findings filed (the rework child still holds the merge)"
+    return 0
+  fi
+  while IFS= read -r obj; do
+    [ -n "$obj" ] || continue
+    locus=$(printf '%s' "$obj" | jq -r '.locus // ""' 2>/dev/null)
+    message=$(printf '%s' "$obj" | jq -r '.message // ""' 2>/dev/null)
+    [ -n "$locus" ] && [ -n "$message" ] || continue
+    if fid=$("$FINDING" upsert --anchor "$anchor" --lane "$lane" --locus "$locus" --message "$message" 2>/dev/null) && [ -n "$fid" ]; then
+      printf '%s\n' "$fid"
+    else
+      warn "could not file finding for locus '$locus'; it is left to the verdict prose"
+    fi
+  done < <(jq -c '.[]?' "$ff" 2>/dev/null)
+}
 
 # >>> takeaway-hold-discriminator
 # Whether a person still owes an answer on this anchor. `gc.takeaway` cannot
@@ -694,6 +730,11 @@ if [ "$VERDICT" = "approve" ]; then
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
   close_review
+  # The lane found nothing this round, so its still-unruled findings from
+  # earlier rounds are answered: close them. Validated findings (the validator's)
+  # and any a fix unit still blocks are left alone. Best-effort — this is
+  # cleanup, never a gate the verdict depends on.
+  "$FINDING" close-unvalidated --anchor "$ANCHOR" --lane "$CHECK_NAME" --reason "lane green at $REVIEWED_OID" >/dev/null 2>&1 || true
   echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID; review $REVIEW_BEAD closed"
   exit 0
 fi
@@ -849,6 +890,19 @@ if [ -n "$GOT" ]; then
   exit 2
 fi
 
+# File the reviewer's objections as findings beside the fix unit, deduped by
+# finding.key, so one objection cannot be filed twice across rounds and each
+# survives the rebase that would destroy a commit-pinned reference. Filed before
+# the fix unit so its work order can name them. Best-effort by construction (see
+# file_findings): the fix unit's own blocks edge onto the anchor holds the merge,
+# so a store that will not take a finding costs the finding, never the hold.
+FINDING_IDS=""
+if [ -n "$FINDINGS_FILE" ]; then
+  FINDING_IDS=$(file_findings "$ANCHOR" "$CHECK_NAME" "$FINDINGS_FILE" | paste -sd, -)
+fi
+FINDING_COUNT=0
+[ -n "$FINDING_IDS" ] && FINDING_COUNT=$(printf '%s' "$FINDING_IDS" | tr ',' '\n' | grep -c '[^[:space:]]')
+
 FIX_POOL=$(row_meta "$REVIEW_ROW" fix_target_pool)
 [ -n "$FIX_POOL" ] || FIX_POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
 FIX_TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
@@ -859,6 +913,14 @@ if [ -z "$FIX_TARGET" ]; then
   exit 2
 fi
 REASON_HEAD=$(head -n 1 "$BODY_FILE" | cut -c1-200)
+# The objections themselves are now the findings this child blocks; the
+# rejection_reason carries the one-line summary and points the resumed worker at
+# the beads, rather than being the whole record.
+if [ "$FINDING_COUNT" -gt 0 ]; then
+  REJECTION_REASON="signoff requested changes (round $((ROUNDS + 1))): address the $FINDING_COUNT finding(s) this bead blocks. $REASON_HEAD"
+else
+  REJECTION_REASON="signoff requested changes (round $((ROUNDS + 1))): $REASON_HEAD"
+fi
 if [ -n "$POST_OPEN" ]; then
   TITLE="Rework PR#$PR_NUMBER: address signoff findings"
 else
@@ -876,7 +938,7 @@ fi
 META=(
   --set-metadata "branch=$BRANCH"
   --set-metadata "target=$FIX_TARGET"
-  --set-metadata "rejection_reason=signoff requested changes (round $((ROUNDS + 1))): $REASON_HEAD"
+  --set-metadata "rejection_reason=$REJECTION_REASON"
   --set-metadata "source_review_bead=$REVIEW_BEAD"
   --set-metadata "merge_strategy=mr"
 )
@@ -889,6 +951,15 @@ gc bd update "$FIX_BEAD" "${META[@]}" >/dev/null 2>&1 || true
 # anchor that closes only once the rework lands, so nothing ever claims it, and
 # count_rounds, which walks the anchor's dependencies, cannot see it either.
 gc bd dep "$FIX_BEAD" --blocks "$ANCHOR" >/dev/null 2>&1 || true
+
+# Point the fix unit at every finding it answers: the many-to-one relation and
+# the close ordering (bd refuses to close a blocked issue, so no finding closes
+# before its work does). The anchor edge above already holds the merge, so a
+# missing finding edge costs the finding's later auto-close, never the hold.
+if [ -n "$FINDING_IDS" ]; then
+  "$FINDING" wire-fix-unit --fix-unit "$FIX_BEAD" --anchor "$ANCHOR" --findings "$FINDING_IDS" >/dev/null 2>&1 \
+    || warn "could not wire fix unit $FIX_BEAD to all findings ($FINDING_IDS); the anchor edge still holds the merge"
+fi
 
 # Verify the work order — every field the resumed workflow reads — and the
 # blocks edge BEFORE the pour, so a claimed rework can never run against absent
