@@ -560,20 +560,22 @@ The loop, every visit:
    to use it.
 
    ```
-   ! <the $HELM path resolved above> dismiss <the subject's id> --reason "<why this is done>"
+   ! <the $HELM path resolved above> dismiss --reason "<why this is done>"
    ```
 
-   Write the resolved path and the real id, not the variables. The
-   leading `!` is what runs the rest of the line, so the operator ends
-   the sitting by typing one thing into the same prompt they are already
-   reading — and a `$HELM` that means nothing there is a command that
-   does not run. The verb closes every open visit on the subject and
-   stamps the outcome the board reads for a finished sitting. It falls
-   back to `--force` when the plain close is refused, which is what a
-   hand-written `gc bd close <visit>` walks into: a held visit is
-   assigned to the session holding it, and a session restarted mid-hold
-   closes under a different identity string than the one on the bead.
-   Then wait for operator input in this session.
+   Write the resolved path, not the variable. The leading `!` is what
+   runs the rest of the line, so the operator ends the sitting by typing
+   one thing into the same prompt they are already reading — and a
+   `$HELM` that means nothing there is a command that does not run.
+   `dismiss` needs no bead-id: it infers this sitting's subject from the
+   session it runs in, which is what lets the bare line stand and the
+   same act sit behind a keystroke. The verb closes every open visit on
+   the subject and stamps the outcome the board reads for a finished
+   sitting. It falls back to `--force` when the plain close is refused,
+   which is what a hand-written `gc bd close <visit>` walks into: a held
+   visit is assigned to the session holding it, and a session restarted
+   mid-hold closes under a different identity string than the one on the
+   bead. Then wait for operator input in this session.
 6. **Record.** Append the sitting's outcome to the subject:
    `gc bd update $SUBJECT --append-notes "<decision, rationale, what
    changed>"`. If the notes have grown past a quick read, refresh a
@@ -724,9 +726,10 @@ Rules:
 - **How this thread ends — a closed visit, and nothing else on a clock.**
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7) and the operator's
-  `gc-helm dismiss <subject>` — the close-out you put at the foot of
-  every framing (step 5). `idle_timeout` is `0` on this role
-  (`agents/converse/agent.toml`) so that reading a thread cannot end it.
+  `gc-helm dismiss` — the close-out you put at the foot of every framing
+  (step 5); it infers this sitting's subject, so it needs no id.
+  `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
+  that reading a thread cannot end it.
   That is not immortality: the sitting's end drains this session as
   `no-wake-reason` within a minute, and `wake_mode = "fresh"` means a
   restart respawns clean with the thread gone. So the sign-off

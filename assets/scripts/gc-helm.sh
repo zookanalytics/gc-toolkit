@@ -7,7 +7,7 @@
 #   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
 #   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
 #   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
-#   gc-helm dismiss  <bead-id> [--reason "..."]               end the sitting and clear the row
+#   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting and clear the row (subject inferred from the current sitting when omitted)
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -38,7 +38,7 @@ Usage:
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
-  gc-helm dismiss  <bead-id> [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row
+  gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row (subject inferred from the current sitting when omitted)
 
 The board is `helm-svc board` (services/helm). This script carries only the
 write verbs. open files a visit in the picked bead's continuation group (pool
@@ -80,6 +80,14 @@ verb could not account for aborts the row stamp: the row stays and the run
 exits 4.
 Idempotent: a subject with no visit and no row is already dismissed and says
 so.
+
+dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
+current sitting from session state: the one open visit assigned to this session
+(GC_SESSION_NAME / GC_SESSION_ID / GC_ALIAS), whose subject is its
+gc.continuation_group or tracks edge. That is what lets a bare `gc-helm dismiss`
+end the sitting the operator is reading. Inference fails CLOSED — no identity,
+no held visit, more than one, or an unreadable listing each refuse rather than
+guess a subject, and name the explicit-id form as the fix.
 EOF
 }
 
@@ -143,6 +151,13 @@ CACHE_DIR="${TMPDIR:-/tmp}/gc-helm-cache.$(id -u 2>/dev/null || echo 0)"
 _city_key=$(printf '%s' "${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-default}}}" | cksum | cut -d' ' -f1)
 CACHE_FILE="$CACHE_DIR/board2-$_city_key.ndjson"
 bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
+
+# The spellings a bead's assignee can carry for THIS session, one per line —
+# the same three step-close.sh tries as the assignee, and the same set the
+# claim hook matches when a respawn adopts a hold. Empty when none is set.
+session_identities() {
+    printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true
+}
 
 # ── Rig enumeration ──────────────────────────────────────────────────
 # Sets RIGS (JSON array of {name,path,prefix}); exits 3 with a per-cause
@@ -256,9 +271,7 @@ quiesce_release_molecule_steps() (
     set +e
     _anchor="$1"; _db="$2"
 
-    # The spellings a bead's assignee can carry for THIS session — the same
-    # three step-close.sh tries as the assignee.
-    _me=$(printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
+    _me=$(session_identities)
 
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
     _steps=$(gc bd list --status=open,in_progress ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
@@ -1135,6 +1148,73 @@ cmd_react() {
     if [ -z "$dry" ]; then bust_cache; fi
 }
 
+# ── The current sitting, inferred from session state ─────────────────
+# The subject of the OPEN visit this session is sitting on. dismiss acts on
+# "the sitting I am in", so when no bead is named it resolves it here instead
+# of making the operator paste an id the session already knows. A converse
+# session is the ASSIGNEE of the visit it holds; the subject is that visit's
+# gc.continuation_group stamp, or its tracks edge when the stamp landed empty
+# (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
+# one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
+# Read from this session's own rig ledger: a visit is filed in its subject's
+# rig and claimed by that rig's converse pool, so the caller's store is the
+# one the visit sits in. The scrubbed listing is left in SITTING_LISTING (with
+# the BEADS_DIR it was read under) so dismiss can skip a second identical read.
+#
+# Sets SITTING_SUBJECT on success (called directly, not in a subshell, so the
+# listing handoff survives). It fails CLOSED, naming the explicit-id
+# form as the fix: no identity, no held visit, or more than one exit 2 (the
+# operator must say which); a listing that failed, did not answer a JSON
+# array, or would not parse exits 4 — a read that did not answer is a runtime
+# fault, not a usage error, and never proof of no sitting. An argument-free
+# verb that guessed the wrong subject would end the wrong sitting, which is
+# the one failure this inference exists to prevent.
+SITTING_SUBJECT=""; SITTING_LISTING=""; SITTING_LISTING_DIR=""
+current_sitting_subject() {
+    _me=$(session_identities)
+    if [ -z "$_me" ]; then
+        echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset); there is no sitting to infer. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 2
+    fi
+    if ! _vjson=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+        echo "$PROG: could not read this session's visits — 'gc bd list' failed. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 4
+    fi
+    _vjson=$(printf '%s' "$_vjson" | scrub)
+    if ! printf '%s' "$_vjson" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "$PROG: could not read this session's visits — 'gc bd list' did not answer a JSON array. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 4
+    fi
+    # One jq pass: the held visits, each reduced to its subject, deduplicated.
+    # A jq failure here is a listing this verb cannot read (an element that is
+    # not an object, metadata that is not a map), not an empty sitting.
+    _subjects=$(printf '%s' "$_vjson" | jq -r --arg ids "$_me" '
+        ($ids | split("\n") | map(select(. != ""))) as $me
+        | [ .[] | objects | . as $v
+            | select((($v.metadata // {}) | objects | .task_kind // "") == "visit")
+            | select(($me | index($v.assignee // "")) != null)
+            | (($v.metadata["gc.continuation_group"] // "") as $g
+               | if $g != "" then $g
+                 else ([ ($v.dependencies // [])[] | objects
+                         | select((.type // "") == "tracks")
+                         | (.depends_on_id // "") ] | map(select(. != "")) | first // "")
+                 end) ]
+        | map(select(. != "")) | unique | .[]' 2>/dev/null) || {
+        echo "$PROG: could not read this session's visits — 'gc bd list' answered nothing this verb could parse. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 4
+    }
+    if [ -z "$_subjects" ]; then
+        echo "$PROG: no open visit is assigned to this session ($(printf '%s' "$_me" | tr '\n' ' ')); there is no current sitting. Name the subject: $PROG dismiss <bead-id>." >&2
+        return 2
+    fi
+    if [ "$(printf '%s\n' "$_subjects" | wc -l | tr -d ' ')" -gt 1 ]; then
+        echo "$PROG: this session holds more than one open visit (subjects: $(printf '%s' "$_subjects" | tr '\n' ' ')); refusing to guess which sitting. Name one: $PROG dismiss <bead-id>." >&2
+        return 2
+    fi
+    SITTING_SUBJECT="$_subjects"
+    SITTING_LISTING="$_vjson"; SITTING_LISTING_DIR="${BEADS_DIR:-}"
+}
+
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "I am done with this". Two writes, because two
 # surfaces hold the subject in view and neither lets go on its own:
@@ -1165,7 +1245,11 @@ cmd_dismiss() {
             *) [ -z "$bead" ] || { echo "$PROG: dismiss takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
         esac
     done
-    [ -n "$bead" ] || { echo "$PROG: dismiss needs <bead-id>" >&2; usage; exit 2; }
+    if [ -z "$bead" ]; then
+        current_sitting_subject || exit $?
+        bead="$SITTING_SUBJECT"
+        echo "$PROG: dismiss: no bead named; inferred the current sitting's subject $bead from session state" >&2
+    fi
 
     path=$(rig_path_for_bead "$bead")
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
@@ -1212,9 +1296,20 @@ cmd_dismiss() {
     # filter below exiting 0 with no visits, which is indistinguishable from a
     # subject that has none. Only a JSON ARRAY is an answer, and an empty one is
     # the honest "no visits".
+    #
+    # An inferred subject arrives with the listing that named it, read under
+    # the store the pin above resolves to (the visit and its sitting share a
+    # rig), so that read is reused rather than repeated; a pin that moved the
+    # store — only possible with an explicit id from another rig — re-reads.
     sitting_failed=0
     visits=""
-    if visits_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+    listed=0
+    if [ -n "$SITTING_LISTING" ] && { [ -z "$db" ] || [ "$db" = "$SITTING_LISTING_DIR" ]; }; then
+        visits_json="$SITTING_LISTING"; listed=1
+    elif visits_json=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
+        visits_json=$(printf '%s' "$visits_json" | scrub); listed=1
+    fi
+    if [ "$listed" -eq 1 ]; then
         if printf '%s' "$visits_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
             visits=$(printf '%s' "$visits_json" \
                 | jq -r --arg s "$bead" \

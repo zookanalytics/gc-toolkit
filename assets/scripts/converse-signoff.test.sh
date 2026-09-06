@@ -1837,10 +1837,14 @@ echo "── every framing hands over the switch that ends the sitting ──"
 # ending a conversation meant remembering a command. It goes at the foot of the
 # framing, and it has to be a command that RUNS: a held visit is assigned to
 # the session holding it, and a session restarted mid-hold closes under a
-# different identity string, which bd refuses outright.
-have "the framing ends with a copyable close-out" 'dismiss <the subject' "$PROMPT"
+# different identity string, which bd refuses outright. It needs no bead-id —
+# the subject is inferred from the session the command runs in — so the bare
+# line stands and the same act can sit behind a keystroke.
+have "the framing ends with a copyable close-out" 'dismiss --reason' "$PROMPT"
 have "…written with the resolved path, not a variable the operator never set" \
-     'Write the resolved path and the real id' "$PROMPT"
+     'Write the resolved path' "$PROMPT"
+have "…and the close-out needs no bead-id: it infers the sitting's subject" \
+     'needs no bead-id' "$PROMPT"
 have "…and it is framed as a control, not a chore" 'a control, not a chore' "$PROMPT"
 # The verb has to do what the prompt promises of it, or the offered line is the
 # hand-written close under another name.
