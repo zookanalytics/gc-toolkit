@@ -27,6 +27,13 @@ if [ "${1:-}" = "agent" ] && [ "${2:-}" = "list" ]; then
   printf '%s\n' "${STUB_AGENTS:-}"
   exit 0
 fi
+# The city's rig set, by id prefix. escalate.sh reads this to pin the store to
+# the subject's own rig when the route defaults to the board and GC_RIG is unset.
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+  [ -n "${STUB_RIG_LIST_FAIL:-}" ] && { echo "gc: rig list unavailable" >&2; exit 1; }
+  printf '%s\n' "${STUB_RIGS:-}"
+  exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 shift
 case "${1:-}" in
@@ -109,12 +116,15 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
-      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS 2>/dev/null || true
+      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
   {"qualified_name":"myrig/gc-toolkit.converse"},{"qualified_name":"other/rig.converse"},
   {"qualified_name":"gc-toolkit.dog"}]}'
+# The city's rigs, keyed by id prefix. The subject in these cases is tk-a, so a
+# rig-less board-route caller derives its store from prefix 'tk' -> gc-toolkit.
+export STUB_RIGS='{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/nonexistent-rig"}]}'
 # Most cases below are a rig-bound caller; the rig-less ones drop GC_RIG themselves.
 export GC_RIG=gc-toolkit
 
@@ -155,15 +165,37 @@ reset
 GC_RIG=other "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
 
-echo "# a rig-less caller reaches the board, but an unroutable --pool still refuses"
-# The board route needs no store agreement, so a rig-less default files. A --pool
-# that names no live agent is still refused BEFORE anything is created: a visit
-# that exists and routes nowhere reads to the caller as "a human was asked".
+echo "# a rig-less board-route caller pins the store to the subject's own rig"
+# The board route ('human') names no store, so a rig-less caller cannot let the
+# create fall to the ambient store — the visit would land on the wrong board and
+# its tracks edge would miss the subject. escalate derives the store from the
+# subject's id prefix (tk -> gc-toolkit) and files there.
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "a rig-less caller's default files — the board route needs no rig"
+eq "$rc" 0 "a rig-less board-route caller files once it derives the subject's rig"
 eq "$(visits)" "1" "the visit exists"
 eq "$(meta vis-1 gc.routed_to)" "human" "routed to the board"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "the create runs under the derived rig, not the ambient store"
+has "$out" "deriving rig 'gc-toolkit'" "and says which store it pinned"
+
+echo "# a rig-less board-route caller whose subject resolves to no rig REFUSES"
+# Fail before filing: a visit written to the ambient store lands on the wrong
+# board and severs the tracks edge — the silent mute escalate exists to end.
+reset
+out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "resolves to no rig" "and says the store could not be proven"
+
+echo "# a rig-less board-route caller REFUSES when the rig set is unreadable"
+reset
+out=$(env -u GC_RIG STUB_RIG_LIST_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
+eq "$(visits)" "0" "and files nothing"
+
+echo "# an unroutable --pool is refused before anything is created"
+# A --pool that names no live agent is refused BEFORE anything is created: a
+# visit that exists and routes nowhere reads to the caller as "a human was asked".
 
 reset
 out=$("$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/nonexistent.pool 2>&1); rc=$?
