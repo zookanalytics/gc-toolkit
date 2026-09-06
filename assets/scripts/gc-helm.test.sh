@@ -12,6 +12,8 @@
 #   the retired board verb refuses and names helm-svc board
 #   the dismiss verb: both halves of the operator's explicit clear
 #   the rig-enumeration helper leaving no trap installed on its caller
+#   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
+#     own no-op code (5), distinct from a dispatch (0) and a real failure (4)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -2062,5 +2064,40 @@ eq "$(find "$ENUMTMP" -name 'gctk-rig-enum.*' | wc -l)" "0" \
    "(ENUM) …and removed its stderr capture"
 
 echo ""
-echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference): $PASS passed, $FAIL failed"
+echo "── react: an already-reacted skip is a distinct exit, not a silent dispatch ──"
+# react is a thin wrapper over tools/gc-proactive.sh `sling`. That tool exits
+# RC_ALREADY_REACTED (3) when its guard skips a bead that already carries a
+# first reaction — a no-op that dispatched nothing. react must re-raise that as
+# its OWN no-op code (5), distinct from a dispatch (0) and a real failure (4),
+# so an intake caller (gc-visit-open) files its own visit instead of waiting for
+# a reaction that never ran. Drive the REAL react over a fake sling whose exit
+# code is the one thing under test (rig resolution uses the gc `rig list` stub).
+cat > "$TMP/bin/gc-proactive.sh" <<'PRO'
+#!/usr/bin/env bash
+exit "${FAKE_SLING_RC:-0}"
+PRO
+chmod +x "$TMP/bin/gc-proactive.sh"
+export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+
+rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
+eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
+grep -q "already carries a first reaction" "$TMP/rerr" \
+  && ok "(REACT) …and names the no-op cause" \
+  || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
+grep -q "failed" "$TMP/rerr" \
+  && bad "(REACT) a no-op must not be reported as a failure" \
+  || ok "(REACT) …and is not reported as a failure"
+
+rrc=0; FAKE_SLING_RC=0 sh "$SCRIPT" react tk-react1 >/dev/null 2>&1 || rrc=$?
+eq "$rrc" "0" "(REACT) a dispatched sling (exit 0) exits 0"
+
+rrc=0; FAKE_SLING_RC=4 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr2" || rrc=$?
+eq "$rrc" "4" "(REACT) a real sling failure (exit 4) stays a failure (exit 4)"
+grep -q "failed" "$TMP/rerr2" \
+  && ok "(REACT) …and is reported as a failure" \
+  || bad "(REACT) react failure message missing: $(cat "$TMP/rerr2")"
+unset GC_PROACTIVE_TOOL FAKE_SLING_RC
+
+echo ""
+echo "gc-helm takeaway + demand + dismiss + react (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference, react no-op exit): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

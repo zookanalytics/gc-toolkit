@@ -385,12 +385,21 @@ JSON
 REACTED_OUT="$(P sling px-reacted --dry-run 2>&1 || true)"
 absent "a reacted bead is NOT re-slung (no sling command emitted)" "gc sling" "$REACTED_OUT"
 has    "…and the skip names the cause"                             "already carries a first reaction" "$REACTED_OUT"
+# The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so
+# a cross-process caller (gc-helm react, gc-visit-open) can tell it from a
+# dispatch and file its own visit rather than wait for a reaction that never
+# ran. In-process (cmd_scan --sling) the same skip stays a return-0 no-op that
+# does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-reacted --dry-run >/dev/null 2>&1 || rec=$?
-eq     "…and the skip is an idempotent no-op (exit 0)"             "0" "$rec"
+eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
 absent "a released bead (gc.proactive_reaction=1) is NOT re-slung" "gc sling" \
        "$(P sling px-released --dry-run 2>&1 || true)"
+rel=0; P sling px-released --dry-run >/dev/null 2>&1 || rel=$?
+eq     "…and a released bead's skip exits RC_ALREADY_REACTED (3) too"    "3" "$rel"
 has    "an un-reacted bead still slings mol-first-reaction"        "--on mol-first-reaction" \
        "$(P sling px-fresh --dry-run 2>&1 || true)"
+fec=0; P sling px-fresh --dry-run >/dev/null 2>&1 || fec=$?
+eq     "…and a dispatched (un-reacted) sling exits 0"              "0" "$fec"
 has    "a bead absent from the store reads as un-reacted, slings"  "--on mol-first-reaction" \
        "$(P sling px-1 --dry-run 2>&1 || true)"
 rm -f "$FXDIR/beads.json"

@@ -10,9 +10,12 @@
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
 # PREFERRED slings mol-first-reaction (framing card, reaction files the
-# visit); FALLBACK files the visit directly — taken on --no-react or whenever
+# visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
-# a sling into a downed pool fails invisibly; today's tool always says yes).
+# a sling into a downed pool fails invisibly; today's tool always says yes),
+# and when the subject already carries a first reaction so the sling is a no-op
+# that dispatches nothing (gc-helm react exit 5): nothing would file the visit,
+# so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy, tk-lzdty) · 4 runtime failure.
 set -u
@@ -273,11 +276,22 @@ if [ -n "$REACT" ]; then
         printf '       The reaction writes a framing card and files the visit; it is not filed yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
+    else
+        REACT_RC=$?
     fi
-    # Sling failed outright: fall through — a conversation beats a bead
-    # nobody is coming to.
-    note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
-    REACT_WHY="no: the first-reaction sling failed"
+    # No reaction was dispatched, so nothing downstream will file the visit —
+    # fall through and file it directly; a conversation beats a bead nobody is
+    # coming to. gc-helm react exit 5 is the already-reacted no-op (the guard
+    # slung nothing because a first reaction happens once), distinct from a real
+    # sling failure: name the actual cause so the visit body the converse
+    # session reads is accurate.
+    if [ "$REACT_RC" -eq 5 ]; then
+        note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
+        REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+    else
+        note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
+        REACT_WHY="no: the first-reaction sling failed"
+    fi
 fi
 
 # Direct path: gc-helm.sh open owns the gates; --reason/--body carry what

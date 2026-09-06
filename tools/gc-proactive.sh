@@ -34,8 +34,15 @@ SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
 # Set by cmd_sling to 1 when it skips an already-reacted bead as a no-op, else
-# empty. cmd_scan's --sling loop reads it to keep a skip from spending the cap.
+# empty. cmd_scan's --sling loop reads it in-process to keep a skip from
+# spending the cap; the `sling` CLI verb in main() translates it to
+# RC_ALREADY_REACTED so a cross-process caller (gc-helm react, gc-visit-open)
+# can tell the no-op from a dispatch and file its own visit rather than wait for
+# a reaction that never ran.
 SLING_SKIPPED=""
+# Exit code the `sling` CLI verb uses for that skip — distinct from a dispatch
+# (0) and an error (1), so a caller that needs a NEW reaction can branch on it.
+RC_ALREADY_REACTED=3
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes
@@ -142,7 +149,9 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
-                                      direct (the security invariant).
+                                      direct (the security invariant). Exit 0
+                                      slung, $RC_ALREADY_REACTED already reacted
+                                      (no-op, nothing slung), 1 error.
        $PROG deliverable [<pool-target>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
@@ -455,11 +464,15 @@ cmd_sling() {
 
     # A first reaction happens once. Re-slinging one destroys the route the
     # first disposition set (see sling_first_reaction_guard), so skip it as an
-    # idempotent no-op (return 0) rather than clobber a live dispatch. The skip
-    # is flagged out-of-band in SLING_SKIPPED so cmd_scan's --sling loop can tell
-    # a skip from a dispatch and not spend a cap slot on it. A non-zero return
-    # cannot carry that signal: as a bare CLI call it would trip the fail-closed
-    # exit, and caught in a condition it would disable set -e for this function.
+    # idempotent no-op rather than clobber a live dispatch. cmd_sling returns 0
+    # either way and flags the skip out-of-band in SLING_SKIPPED: the in-process
+    # cmd_scan --sling loop reads that flag to tell a skip from a dispatch and
+    # not spend a cap slot on it, and the `sling` CLI verb in main() reads it to
+    # exit RC_ALREADY_REACTED, the signal a cross-process caller needs. The
+    # return stays 0 because a non-zero one cannot carry the distinction here:
+    # caught in the loop's condition it would disable set -e for this function,
+    # and returned to main it would read as the generic fail-closed error, not
+    # the specific no-op.
     SLING_SKIPPED=""
     if ! sling_first_reaction_guard "$bead"; then
         SLING_SKIPPED=1
@@ -510,7 +523,13 @@ main() {
         -h|--help|help) usage; exit 0 ;;
         demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
-        sling)  cmd_sling "$@" ;;
+        sling)
+            cmd_sling "$@"
+            # A skipped already-reacted bead is a no-op, not a dispatch: surface
+            # it to a cross-process caller as RC_ALREADY_REACTED so it files its
+            # own visit instead of waiting for a reaction that never ran.
+            if [ -n "$SLING_SKIPPED" ]; then exit "$RC_ALREADY_REACTED"; fi
+            ;;
         deliverable) cmd_deliverable "$@" ;;
         *) die "unknown verb '$verb' (demand|scan|sling|deliverable; --help)" ;;
     esac

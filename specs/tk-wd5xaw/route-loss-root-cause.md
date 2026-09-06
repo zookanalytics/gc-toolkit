@@ -65,11 +65,19 @@ chokepoint, and it is where the invariant belongs.
 
 `sling_first_reaction_guard` refuses to sling `mol-first-reaction` at a bead that
 already carries a completed reaction — `gc.first_reaction` (stamped by the
-dispose) or `gc.proactive_reaction=1` (stamped by the release). The skip is an
-idempotent no-op (exit 0), not an error: the reaction already happened, so the
-caller has what it asked for, and callers like `gc-visit-open` do not fall back
-to double-filing a visit. Because the guard lives in `cmd_sling`, it covers the
-direct-sling, `react`, and `gc-visit-open` paths a scan-time filter cannot see.
+dispose) or `gc.proactive_reaction=1` (stamped by the release). Because the guard
+lives in `cmd_sling`, it covers the direct-sling, `react`, and `gc-visit-open`
+paths a scan-time filter cannot see.
+
+The skip is a no-op, not an error — the reaction already happened — but it
+dispatches nothing, so a caller that needs a FRESH reaction must be able to tell
+it from a dispatch. In-process, `cmd_scan`'s `--sling` loop reads `SLING_SKIPPED`.
+Across a process boundary the `sling` CLI verb exits `RC_ALREADY_REACTED` (3),
+`gc-helm react` re-raises that as exit 5, and `gc-visit-open` — which relies on
+the reaction to file its visit — reads exit 5 and files the visit directly
+instead. A bare exit 0 there is the trap: `gc-visit-open` would report the visit
+as slung-and-pending while nothing files it, leaving an operator-requested
+conversation with neither a running reaction nor a filed visit.
 
 The proactive scan carries the same invariant on both of its surfaces.
 `scan_precision_filter` drops a candidate that carries either reaction marker —
