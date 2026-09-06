@@ -27,6 +27,11 @@ case "${1:-}" in
           cat "$STUB_DIR/global.env" 2>/dev/null; exit 0
       fi
       [ "${2:-}" = "-t" ] || exit 1
+      # A designated session reads slowly, so a probe run against the time still
+      # left in the check budget is killed with 124 — the mid-scan exhaustion case.
+      if [ -n "${STUB_SLOW_SESSION:-}" ] && [ "$3" = "$STUB_SLOW_SESSION" ]; then
+          sleep "${STUB_SLOW_SECS:-30}"
+      fi
       [ -f "$STUB_DIR/sessions/$3.env" ] || exit 1
       cat "$STUB_DIR/sessions/$3.env" ;;
   *) exit 1 ;;
@@ -305,6 +310,32 @@ OUT=$(PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" STUB_GLOBAL_RC=9 GC_DOCTOR_PROC_ROOT
 eq "$RC" "1" "an unreadable tmux global environment warns, never passes"
 has "$OUT" "warm-respawn inheritance UNVERIFIED" "the warning names the arm it could not verify"
 hasnt "$OUT" "agree with their own store scope" "a failed global probe cannot reach the OK line"
+
+# --- 14. fail-CLOSED: a budget-truncated scan warns, never passes ------------
+# run_bounded returns 124 once the whole-check budget is spent. The per-session
+# read used to route every nonzero the way it routes a vanished session — a
+# silent `continue` — so a scan that ran out of budget mid-list fell through to
+# the OK line past sessions it never read. Here the first session reads fine and
+# the second is still listed but its read is truncated by the budget; that second
+# session is misconfigured (GC_RIG names beta on an alpha session), so the
+# pre-fix check reached `exit 0` "OK: 1 agent session(s) agree" with a bad
+# session unexamined. An unread still-listed session is UNVERIFIED, not clean.
+healthy
+cat > "$TMP/sessions/alpha--city__witness.env" <<EOF
+GC_AGENT=alpha/city.witness
+GC_ALIAS=alpha/city.witness
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+GC_RIG_ROOT=$CITY/rigs/beta
+BEADS_DIR=$CITY/rigs/beta/.beads
+EOF
+OUT=$(PATH="$TMP/bin:$PATH" STUB_DIR="$TMP" STUB_SLOW_SESSION=alpha--city__witness STUB_SLOW_SECS=30 \
+    GC_DOCTOR_CHECK_TIMEOUT=8 GC_DOCTOR_PROC_ROOT="$TMP/proc" GC_CITY_PATH="$CITY" GC_CITY="" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "1" "a scan truncated by the check budget warns, never passes"
+has "$OUT" "UNVERIFIED" "the warning says the truncated scan left a session unverified"
+has "$OUT" "budget" "the warning names the check budget as the cause"
+has "$OUT" "alpha--city__witness" "the warning names the still-listed session it could not read"
+hasnt "$OUT" "OK:" "a budget-truncated scan cannot reach the OK line"
 
 echo
 echo "check-session-store-scope: $PASS passed, $FAIL failed"

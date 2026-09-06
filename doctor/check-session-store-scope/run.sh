@@ -114,8 +114,21 @@ else
         pane_pid=""
         case "$row" in *"$TAB"*) pane_pid="${row#*"$TAB"}" ;; esac
         [ -n "$sess" ] || continue
-        # A session can end mid-scan; an unreadable one is not a finding.
-        senv=$(gcmux show-environment -t "$sess" 2>/dev/null) || continue
+        # A session can end mid-scan; an unreadable one is not a finding. But a
+        # 124 is run_bounded refusing the probe because the whole-check budget is
+        # spent, not a vanished session (tmux would run and return its own code),
+        # so this session is still listed and now UNVERIFIED. Skipping it the way
+        # a vanished one is skipped lets a budget-truncated scan reach the OK line
+        # past sessions it never read. Warn and stop — the deadline is fixed, so
+        # every session after this one is out of budget too.
+        senv=$(gcmux show-environment -t "$sess" 2>/dev/null); senv_rc=$?
+        if [ "$senv_rc" -ne 0 ]; then
+            if [ "$senv_rc" -eq 124 ]; then
+                warnings+=("store-scope scan hit the check budget before reading $sess (rc=124) — that session and any listed after it are UNVERIFIED. Not a benign skip: a still-listed session left unread can be resolving the wrong store, the exact symptom this check exists for. Raise the check budget (\`gc doctor --check-timeout\`, or GC_DOCTOR_CHECK_TIMEOUT).")
+                break
+            fi
+            continue
+        fi
         agent=$(env_val GC_AGENT "$senv")
         [ -n "$agent" ] || continue
         sess_city=$(env_val GC_CITY_PATH "$senv")
