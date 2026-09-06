@@ -12,11 +12,14 @@
 # fail-closed defense; the structural check is doctor's); non-empty check_set
 # (empty is never the 'none' opt-out — an unnormalized anchor holds);
 # base == merged_target;
-# every check_set gate green; approval (armed by the check_set
+# every declared lane DERIVES green through lane-state.sh (no stored marker; a
+# lane with no local review bead is backed by an operator's GitHub approval on
+# the PR, the shared fallback); approval (armed by the check_set
 # member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
 # by a latest APPROVED from another account at the live head; a standing
 # CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
-# child (metadata keys naming this PR AND dependency edges; unreadable holds);
+# child or open must-fix finding (metadata keys naming this PR AND dependency
+# edges, the finding held by its own blocks edge; unreadable holds);
 # mergeStateStatus CLEAN (UNSTABLE decided on required contexts only);
 # generated/seed-audit current at the MERGE RESULT (its inputs re-hashed in the
 # tree `git merge-tree` writes, so a render clobbered by a base that moved holds
@@ -55,6 +58,10 @@ ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # same repair count against one budget.
 RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 RENDERER="$SCRIPTS_DIR/render-seed-audit.sh"
+# The one shared helper every reader derives a lane's green state through, so
+# merge and publish never drift on which lane is green (a second implementation
+# of the predicate is how two actors come to disagree about one anchor).
+LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 # The repository this pass merges into, resolved through git so a run with no
 # checkout under it simply has no committed artifact to keep current.
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -132,16 +139,16 @@ anchor_row() { # live {status, meta}; empty = unreadable, never an all-default r
              | {status: (.status // ""), meta: .metadata}' 2>/dev/null
 }
 
-# The "first declared gate not green" predicate (none/off/approval dropped),
-# shared between hold_gate() and the terminal re-read below so the two jq
-# filters can never drift on which gate is red. Takes check_set as $cs and a
-# metadata object as $m.
-FIRST_RED_GATE_DEF='
-  def first_red_gate($cs; $m):
-    (($cs // "") | split(",") | map(gsub("[[:space:]]"; "")) | map(select(length > 0))
-       | map(select((. | ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))) as $gates
-    | (first($gates[] | select((($m["check." + .]) // "") != "green"))) // "";
-'
+# The declared lanes a check_set names, one per line, dropping the non-lane
+# tokens: none/off is gateless by choice, and approval is met by an external
+# GitHub review, not a lane derivation. The same drop list pr-open.sh applies,
+# so publishing and merging judge one anchor by one rule. The drop is
+# case-insensitive; what survives keeps its case, addressing a metadata key.
+lanes_of() { # <check_set>
+  printf '%s' "${1:-}" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' \
+    | grep -Eiv '^(none|off|approval)$'
+  return 0
+}
 
 # The repository an anchor's pr_url names, case-folded, "?" when the url is
 # absent or unparseable (mirrors url_repo_q). Shared between the duplicate-
@@ -155,15 +162,30 @@ REPO_Q_DEF='
     | .[0] | if . == null then "?" else (.h + "/" + .o) end;
 '
 
-# First declared gate NOT green; non-zero = markers unreadable, which the
-# caller must hold on, never read as all-green. The lane is compared to no
-# head: green is a state of the lane, and a commit landing on the branch
-# neither clears it nor buys a review.
-hold_gate() { # <check_set> <row>
-  printf '%s' "${2:-}" | jq -re --arg cs "${1:-}" \
-    "$FIRST_RED_GATE_DEF"'
-    (.meta // {}) as $m
-    | first_red_gate($cs; $m)' 2>/dev/null
+# The first declared lane that does not DERIVE green, through lane-state.sh.
+# Prints that lane; empty stdout with a zero exit means every declared lane is
+# green. A non-zero exit is a lane the store would not read, which the caller
+# holds on and never reads as all-green. The derivation is the shared one every
+# reader uses: a lane greens from its own local approve-review bead, or, when it
+# has none, from an operator's GitHub approval on the anchor's PR (an approval
+# names no gate, so it backs every lane). The lane is compared to no head: green
+# is a state of the lane, and a commit landing on the branch neither clears it
+# nor buys a review. The head-bound human approval the merge separately requires
+# is the approval gate below, armed only for the check_sets that name it.
+first_notgreen_lane() { # <anchor-id> <check_set>
+  local anchor="$1" cs="$2" lane
+  while IFS= read -r lane; do
+    [ -n "$lane" ] || continue
+    "$LANE_STATE" green --anchor "$anchor" --lane "$lane"
+    case $? in
+      0) ;;                                   # green; next lane
+      1) printf '%s\n' "$lane"; return 0 ;;   # not green; hold, name it
+      *) return 2 ;;                          # unreadable; the caller holds
+    esac
+  done <<LANES
+$(lanes_of "$cs")
+LANES
+  return 0
 }
 
 # Which status checks actually gate <branch>: rulesets + classic protection via
@@ -385,16 +407,15 @@ while IFS= read -r row; do
     echo "$PROG: PR#$num base '$base' != merged_target '$target' (retargeted); merge held (anchor $id, pr-facts escalates)"
     held=$((held + 1)); continue
   fi
-  if ! hg=$(hold_gate "$checkset" "$fresh"); then
-    echo "$PROG: PR#$num check-set markers unreadable on anchor $id; merge held"
+  if ! ng=$(first_notgreen_lane "$id" "$checkset"); then
+    echo "$PROG: PR#$num lane state unreadable on anchor $id; merge held"
     held=$((held + 1)); continue
   fi
-  if [ -n "$hg" ]; then
-    have=$(printf '%s' "$fresh" | jq -r --arg k "check.$hg" '.meta[$k] // "unreviewed"')
+  if [ -n "$ng" ]; then
     # A lane short of green is one a review is due to raise. The cap's park is
     # not reached here: it holds above, on merge_hold.
     record_machine "$id" "progressing" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num check '$hg' is '$have', not green; merge held (anchor $id)"
+    echo "$PROG: PR#$num lane '$ng' does not derive green; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 
@@ -431,7 +452,11 @@ while IFS= read -r row; do
         | (.metadata.pr_url | repo_q) as $rq
         | select(.via == "dep" or ($mr == "" and ((["","false","0","null"] | index($t)) != null)
                                    and ($rq == "?" or $rq == $ours)))
-        | "\(.id) (\($st))" ]
+        | ((.metadata.task_kind // "") | tostring) as $tk
+        | ((.metadata["finding.disposition"] // "") | tostring) as $fd
+        | (if $tk == "finding" then (if $fd != "" then "\($fd) finding" else "finding" end)
+           else "unclosed rework/review bead" end) as $kind
+        | "\($kind) \(.id) (\($st))" ]
     | .[0] // empty' 2>/dev/null); then
     echo "$PROG: PR#$num in-flight holder filter unreadable; merge held (anchor $id)"
     held=$((held + 1)); continue
@@ -449,7 +474,7 @@ while IFS= read -r row; do
           | select($r != "" and $r != "human")
           | .id ] | .[0] // empty' 2>/dev/null)
     [ -n "$pool_holder" ] && record_machine "$id" "progressing" "$head_oid" "$aroute"
-    echo "$PROG: PR#$num has unclosed rework/review bead $inflight; merge held (anchor $id)"
+    echo "$PROG: PR#$num held by $inflight; merge held (anchor $id)"
     held=$((held + 1)); continue
   fi
 
@@ -646,8 +671,7 @@ $sa_out" >/dev/null 2>&1 || true
     held=$((held + 1)); continue
   fi
   freason=$(printf '%s' "$final" | jq -r --arg num "$num" \
-    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" \
-    "$FIRST_RED_GATE_DEF"'
+    --arg base "$base" --arg url "$live_url" --arg ref "$head_ref" --arg dis "$dismissed" '
     (.meta // {}) as $m
     | (.status | ascii_downcase) as $st
     | ((($m.merge_result // "") | tostring)) as $mr
@@ -658,7 +682,6 @@ $sa_out" >/dev/null 2>&1 || true
     | ((($m.pr_url // "") | tostring | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p))) as $pu
     | ((($m.branch // "") | tostring)) as $br
     | ((($m.check_set // "") | tostring)) as $fcs
-    | first_red_gate($fcs; $m) as $red
     | if $st != "open" then "status is now \($st)"
       elif $mr != "pull_request" then "merge_result is now \($mr)"
       elif $pn != $num then "anchor now claims PR#\($pn)"
@@ -669,8 +692,20 @@ $sa_out" >/dev/null 2>&1 || true
       elif ($pu != "" and $pu != $url) then "pr_url changed after validation"
       elif ($br != "" and $br != $ref) then "branch changed after validation"
       elif ($fcs | gsub("[[:space:],]"; "")) == "" then "check_set emptied after validation"
-      elif $red != "" then "check \($red) is no longer green"
       else "OK" end' 2>/dev/null); frc=$?
+  # The lane term the marker read used to carry, now derived: no declared lane
+  # may have left green between validation and the merge. A lane's backing bead
+  # can change without moving the head, so this re-derivation is the one guard
+  # --match-head-commit does not already provide. It runs only when every stored
+  # field above still reads OK, so a field mismatch keeps its own reason.
+  if [ "$frc" -eq 0 ] && [ "$freason" = "OK" ]; then
+    fcs=$(printf '%s' "$final" | jq -r '.meta.check_set // ""' 2>/dev/null)
+    if ! rg=$(first_notgreen_lane "$id" "$fcs"); then
+      freason="lane state unreadable before the merge"
+    elif [ -n "$rg" ]; then
+      freason="lane $rg is no longer green"
+    fi
+  fi
   # Explicit sentinel: "OK" is the only authorization. An empty result or a
   # non-zero jq means the comparison itself failed — hold, never merge blind.
   if [ "$frc" -ne 0 ] || [ -z "$freason" ]; then
