@@ -1571,6 +1571,32 @@ cmd_engage() {
         exit 4
     fi
 
+    # The spawned sitting adopts the visit only through its own hook claim, whose
+    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity-agents.md), and
+    # `bd ready` yields a bead only while it is open and unblocked. A closed,
+    # in-progress-orphaned, or blocked visit assigned to the sitting never becomes
+    # its claim, so the sitting would wake holding nothing while this command
+    # reports success. The owner check above settled the already-taken case; an
+    # empty owner must still prove open and ready before anything spawns.
+    if [ "$visit_status" != "open" ]; then
+        echo "$PROG: engage: visit $VISIT is '${visit_status:-unknown}', not open — a spawned sitting adopts only ready (open, unblocked) assigned work, so it would hold nothing. Nothing spawned." >&2
+        exit 4
+    fi
+    engage_probe=1
+    visit_blockers=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
+        | jq -er 'if type == "array" then
+               [ .[] | select((.dependency_type // "") == "blocks")
+                     | select((.status // "") != "closed") | .id ] | join(" ")
+             else error("not an edge array") end' 2>/dev/null) || engage_probe=""
+    if [ -z "$engage_probe" ]; then
+        echo "$PROG: engage: could not read the blockers on visit $VISIT ('gc bd dep list' failed or did not answer with an edge array), so its claimable state is UNPROVEN — refusing to spawn a sitting that may hold nothing. Nothing spawned; retry once the store answers." >&2
+        exit 4
+    fi
+    if [ -n "$visit_blockers" ]; then
+        echo "$PROG: engage: visit $VISIT is blocked by $visit_blockers — a blocked bead is not in 'bd ready', so a spawned sitting could not adopt it and would hold nothing. Nothing spawned; engage it once its blockers clear." >&2
+        exit 4
+    fi
+
     # Spawn the manual sitting WITHOUT attaching, so the visit is assigned before
     # the session's claim loop runs. Capture the runtime identity from --json:
     # a multi-session template's stored alias is a qualified form, so the visit

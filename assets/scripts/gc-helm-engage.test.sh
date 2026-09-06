@@ -15,6 +15,8 @@
 #   (SUBJECT) engaging a subject resolves the one open visit tracking it
 #   (MODELFLAG) --model codex spawns converse-codex
 #   (BUSY)    a visit already in_progress under an owner is not re-spawned (exit 4)
+#   (CLOSED)  a closed explicit visit is refused before spawning (exit 4)
+#   (BLOCKED) a blocked explicit visit is refused before spawning (exit 4)
 #   (NOSPAWN) a session new that returns no identity aborts without assigning
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
 set -euo pipefail
@@ -79,7 +81,14 @@ case "$1 ${2:-}" in
     _a="$*"; case "$_a" in *" --assignee "*) _a="${_a##* --assignee }"; printf '%s' "${_a%% *}" > "$ASSIGNEE" ;; esac ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$CALLS"; jq -n '{id:"tk-vis"}' ;;
-  "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
+  "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
+              # engage probes the visit's blockers (dep list --direction=down)
+              # before spawning: default no blockers, $VIS_BLOCKERS injects open
+              # "blocks" edges so a blocked visit can be exercised.
+              if [ -n "${VIS_BLOCKERS:-}" ]; then
+                jq -n --arg ids "$VIS_BLOCKERS" \
+                  '[$ids | split(" ")[] | {id:., dependency_type:"blocks", status:"open"}]'
+              else printf '[]\n'; fi ;;
 esac
 exit 0
 GC
@@ -164,6 +173,26 @@ hasnt "$CALLED" "session new" "(PENDING) …and spawns no duplicate sitting"
 has "$OUT" "pending engagement" "(PENDING) …and names it a pending engagement"
 
 export VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+
+echo "# a closed explicit visit is not claimable — refuse without spawning"
+# The spawned sitting only ever holds the visit if its own hook claim finds it
+# in `bd ready --assignee` (open and unblocked). A closed visit assigned to the
+# sitting never becomes a claim, so engage must refuse it before anything spawns.
+printf 'closed' > "$VIS_STATUS"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(CLOSED) engaging a closed visit exits 4"
+hasnt "$CALLED" "session new" "(CLOSED) …and spawns nothing"
+has "$OUT" "not open" "(CLOSED) …because a closed visit is not adoptable as a claim"
+
+echo "# a blocked explicit visit is not in bd ready — refuse without spawning"
+printf 'open' > "$VIS_STATUS"
+export VIS_BLOCKERS="tk-blk"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(BLOCKED) engaging a blocked visit exits 4"
+hasnt "$CALLED" "session new" "(BLOCKED) …and spawns nothing"
+has "$OUT" "blocked by tk-blk" "(BLOCKED) …and names the blocker holding it out of bd ready"
+unset VIS_BLOCKERS
 printf 'open' > "$VIS_STATUS"
 
 echo "# a spawn that yields no identity aborts without assigning"
