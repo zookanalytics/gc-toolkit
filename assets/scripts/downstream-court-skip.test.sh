@@ -14,14 +14,17 @@
 # moot visit every cycle. Dropping such beads from the candidate set before the
 # liveness loop is what stops both the re-dispatch and the escalation.
 #
-# Three states name work that is not the pool's to recover:
+# Two states name work that is not the pool's to recover:
 #   * an in-flight PR      — merge_result is pre_open_gate or pull_request;
-#   * a progressing machine — pr.machine (a state@oid@ts stamp) whose state
-#     segment is `progressing`;
 #   * a human gate         — gc.routed_to=human.
+# pr.machine is NOT one of them: a progressing stamp is written only alongside an
+# anchor merge_result, and unanchoring back to the pool clears merge_result while
+# leaving pr.machine behind, so on a repooled bead it is stale — reading it strands
+# the lost work this recovers. A bead still in the machine carries the merge_result
+# the first exclusion drops.
 # It is a state exclusion, not a kind exclusion: host-bead-skip keeps every owned
 # bead (no class exempt), and this runs on its result to remove the ones already
-# downstream. A bead carrying none of the three is still the pool's to recover.
+# downstream. A bead carrying neither state is still the pool's to recover.
 #
 # This test EXECUTES the real filters extracted verbatim from the formula
 # (between the `downstream-court-skip` and `host-bead-skip` markers), so it cannot
@@ -88,37 +91,39 @@ pipeline() {
     | jq -r 'sort_by(.id) | map(.id) | join(",")'
 }
 
-# --- Each state, dropped. ----------------------------------------------------
+# --- Each state, dropped or kept. --------------------------------------------
 # d1  merge_result pre_open_gate           -> DROP (in-flight, pre-open codex gate)
 # d2  merge_result pull_request            -> DROP (in-flight, open PR)
-# d3  pr.machine progressing@oid@ts        -> DROP (merge machine advancing)
 # d4  gc.routed_to human                   -> DROP (a person owns it)
 # k1  merge_result merged                  -> KEEP (landed; step 4 closes it)
 # k2  merge_result empty                   -> KEEP (no PR — the pool's to recover)
 # k3  no metadata key                      -> KEEP (robust to absent metadata)
+# k4  pr.machine progressing, no anchor    -> KEEP (stale stamp; the pool's to recover)
 FIX='[
   {"id":"d1","metadata":{"merge_result":"pre_open_gate"}},
   {"id":"d2","metadata":{"merge_result":"pull_request"}},
-  {"id":"d3","metadata":{"pr.machine":"progressing@abc123@2026-09-05T00:00:00Z"}},
   {"id":"d4","metadata":{"gc.routed_to":"human"}},
   {"id":"k1","metadata":{"merge_result":"merged"}},
   {"id":"k2","metadata":{"merge_result":""}},
-  {"id":"k3","assignee":"gc-toolkit/gc-toolkit.rictus"}
+  {"id":"k3","assignee":"gc-toolkit/gc-toolkit.rictus"},
+  {"id":"k4","metadata":{"pr.machine":"progressing@abc123@2026-09-05T00:00:00Z"}}
 ]'
-eq "$(keep "$FIX")" "k1,k2,k3" \
-   "drops in-flight PR (pre_open_gate/pull_request), progressing machine, and human gate; keeps merged/empty/absent"
+eq "$(keep "$FIX")" "k1,k2,k3,k4" \
+   "drops in-flight PR (pre_open_gate/pull_request) and human gate; keeps merged/empty/absent and a stale progressing stamp"
 
-# pr.machine is a state@oid@ts stamp: only the `progressing` state segment drops.
-# `settled` (landed) and `wedged-exception` (already caught by merge_result/human
-# on live beads) are not `progressing`, and a bare state without @ still parses.
+# pr.machine is not consulted now, whatever its state segment: only an anchor
+# merge_result or a human gate drops a bead. A `progressing` stamp with no anchor
+# is a stale leftover of an unanchored hand-back and the bead is recovered; a bead
+# genuinely in the machine drops on its merge_result, and a human-gated one on its
+# gate.
 FIX2='[
   {"id":"p1","metadata":{"pr.machine":"progressing@oid@ts"}},
-  {"id":"p2","metadata":{"pr.machine":"settled@oid@ts"}},
-  {"id":"p3","metadata":{"pr.machine":"wedged-exception@oid@ts"}},
-  {"id":"p4","metadata":{"pr.machine":"progressing"}}
+  {"id":"p2","metadata":{"pr.machine":"progressing@oid@ts","merge_result":"pull_request"}},
+  {"id":"p3","metadata":{"pr.machine":"progressing@oid@ts","gc.routed_to":"human"}},
+  {"id":"p4","metadata":{"pr.machine":"settled@oid@ts"}}
 ]'
-eq "$(keep "$FIX2")" "p2,p3" \
-   "drops on the progressing state segment only (with or without @oid@ts); keeps settled and wedged-exception"
+eq "$(keep "$FIX2")" "p1,p4" \
+   "pr.machine is never the reason for a drop: a stale progressing (no anchor) and a settled stamp are kept; an anchored or human-gated bead drops on merge_result/gate"
 
 # Exact match on merge_result and gc.routed_to: a resembling value survives, so a
 # later substring loosening cannot start dropping work it should recover.
@@ -166,6 +171,18 @@ FIX5='[
 ]'
 eq "$(pipeline "$FIX5")" "tk-lost" \
    "host-bead-skip | downstream-court-skip drops the in-flight orphans (owned PR + pre-open gate), keeps the genuine dead-session orphan (tk-lost)"
+
+# The stale-progressing orphan the OLD filter dropped: a bead unanchored back to
+# the pool (transition --to unanchored cleared merge_result and left
+# pr.machine=progressing), its resumed polecat dead (gc.session_id names it), no
+# PR, routed to the pool — genuinely lost work. host-bead-skip keeps it (an owner
+# to liveness-check) and downstream-court-skip must NOT drop it: pr.machine is a
+# stale stamp, not a live court, so the bead survives to be recovered.
+FIX6='[
+  {"id":"tk-stale-prog","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","branch":"polecat/tk-stale-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z"}}
+]'
+eq "$(pipeline "$FIX6")" "tk-stale-prog" \
+   "a stale pr.machine=progressing on an unanchored, pool-routed dead-session bead is KEPT for recovery (not a live court)"
 
 echo
 echo "downstream-court-skip: $PASS passed, $FAIL failed"

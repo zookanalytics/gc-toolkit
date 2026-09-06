@@ -243,18 +243,21 @@ for MR in pull_request pre_open_gate; do
   eq "$(bstatus tk-inflight)" "open" "in-flight bead left as-is ($MR)"
 done
 
-echo "--- source arm: a progressing pr.machine also blocks the reopen ---"
-# merge_result may be transiently unset while the merge machine advances; a
-# pr.machine state of `progressing` (the stamp is state@oid@ts) is the same
-# in-flight fact and must block the reopen too.
-store '[{"id":"tk-prog","status":"open","assignee":"","title":"progressing work bead",
+echo "--- source arm: a stale progressing pr.machine (no anchor) is recovered ---"
+# pr.machine=progressing is written only alongside an anchor merge_result, and
+# transition --to unanchored clears merge_result while leaving pr.machine behind,
+# so a `progressing` stamp with NO merge_result is a stale leftover on a bead
+# unanchored back to the pool — genuinely lost work. It must NOT block the reopen:
+# the source arm delegates and recovers it, whatever the stamp says.
+store '[{"id":"tk-prog","status":"in_progress","assignee":"lx-dead","title":"stale-progressing work bead",
          "metadata":{"branch":"polecat/tk-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_name":"polecat-9-pool"}}]'
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-prog --owner polecat-9-pool --apply 2>&1); rc=$?
-eq "$rc" "0" "progressing-machine source disposal exits 0"
-has "$OUT" "result=skipped" "progressing-machine source is skipped"
-hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "progressing-machine source never reopens"
+OUT=$("$SCRIPT" tk-prog --owner lx-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "stale-progressing source disposal exits 0"
+has "$OUT" "action=delegate-source-workflow" "a stale progressing stamp (no anchor) delegates, not skips"
+has "$(cat "$STUB_GC_LOG")" "delete-source" "stale-progressing source calls delete-source"
+has "$OUT" "result=disposed" "stale-progressing source is recovered"
 
 echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
 # A work bead a person owns clearing — routed to the human gate (gc.routed_to=human:
@@ -279,17 +282,19 @@ hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "human-gate source never calls del
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "human-gate source never reopens"
 eq "$(bstatus tk-human)" "open" "human-gate bead left as-is"
 
-echo "--- source arm: a non-progressing pr.machine still delegates ---"
-# The guard is scoped to the progressing state, not any pr.machine stamp: a
-# settled machine with no in-flight merge_result is terminal and must delegate,
-# proving the state@oid@ts split reads `settled`, not `progressing`.
-store '[{"id":"tk-settled","status":"in_progress","assignee":"lx-dead","title":"settled work bead",
-         "metadata":{"branch":"polecat/tk-settled","pr.machine":"settled@abc@2026-09-05T00:00:00Z",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+echo "--- source arm: a progressing pr.machine WITH an anchor still skips (on merge_result) ---"
+# The in-flight skip is the merge_result arm's alone now. A bead genuinely in the
+# machine carries an anchor merge_result, so it still skips — proving the fix
+# narrowed the skip to merge_result/human without letting in-flight work through.
+store '[{"id":"tk-anchor-prog","status":"open","assignee":"","title":"anchored progressing work bead",
+         "metadata":{"branch":"polecat/tk-anchor-prog","merge_result":"pull_request","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_name":"polecat-9-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-settled --owner lx-dead --apply 2>&1)
-has "$OUT" "action=delegate-source-workflow" "a settled machine (no in-flight merge_result) still delegates"
-has "$(cat "$STUB_GC_LOG")" "delete-source" "settled source still calls delete-source"
+OUT=$("$SCRIPT" tk-anchor-prog --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "anchored-progressing source disposal exits 0"
+has "$OUT" "result=skipped" "an in-flight bead (merge_result=pull_request) still skips"
+has "$OUT" "detail=inflight_pr" "the skip is on the merge_result arm"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "anchored-progressing source never reopens"
 
 echo "--- source arm: a pin that will not clear is not a clean release ---"
 # clear_pins bypasses the claim guard, but a store that reports success and drops
