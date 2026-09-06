@@ -1550,15 +1550,63 @@ case "$1 ${2:-}" in
     # <bead>|<value> in D_SETTLED: the disposition a bead already carries, which
     # a refresh has to clear off it.
     sd="$(awk -F'|' -v b="$id" '$1==b{print $2; exit}' "$D_SETTLED" 2>/dev/null || true)"
-    blk="$(awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG" | jq -R . | jq -sc .)"
+    blk="$( { awk -v b="$id" '$1=="bd" && $2=="dep" && $3=="add" && $4==b {print $5}' "$D_LOG"; awk -v b="$id" '$1==b {print $2}' "$D_GATE_EDGES" 2>/dev/null; } | jq -R . | jq -sc 'map(select(. != "")) | unique')"
     jq -n --arg id "$id" --arg p "$p" --arg sd "$sd" --argjson blk "$blk" \
       '[{id: $id,
-         metadata: {"gc.takeaway_settled": $sd},
+         metadata: ({"gc.takeaway_settled": $sd}
+                    + (if ($id | test("LANDED")) then {"gc.demand_for": "tk-kid"} else {} end)),
          dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
-  "bd list")  cat "$D_LIST" ;;
+  "bd list")
+    # Even a valid-looking response must not count if the command failed.
+    if [ -f "$D_LIST_FAIL" ]; then cat "$D_LIST"; exit 1; fi
+    cat "$D_LIST" ;;
   "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
+  "bd gate")
+    # `gc bd gate create --type=human --blocks <gated> --title <t> --json`
+    # returns the new gate's id AND, like the real command, wires the block edge
+    # on the gated bead at birth — recorded in D_GATE_EDGES, which `bd show`
+    # unions in. A gate id carrying NOEDGE models a create whose edge did not
+    # land (wrong ledger, a cycle). `gc bd gate resolve <id>` closes the gate and
+    # drops its edge; that is how `demand` repairs a gate it could not stamp, and
+    # a gate id carrying NORESOLVE models a resolve that itself fails.
+    gid="$(cat "$D_NEXTID")"; prev=""
+    case "${3:-}" in
+      create)
+        [ "${D_CREATE_MODE:-}" != "no-write" ] || exit 1
+        blocked=""; marker=""
+        for a in "$@"; do
+          [ "$prev" = "--blocks" ] && blocked="$a"
+          case "$a" in --await-id=*) marker="${a#--await-id=}" ;; esac
+          prev="$a"
+        done
+        case "$gid" in *NOEDGE*) : ;; *) [ -n "$blocked" ] && printf '%s %s\n' "$blocked" "$gid" >> "$D_GATE_EDGES" ;; esac
+        if [ -n "${D_CREATE_MODE:-}" ]; then
+          jq -n --arg id "$gid" --arg marker "$marker" \
+            '[{id:$id, issue_type:"gate", await_type:"human", await_id:$marker, metadata:{}}]' > "$D_LIST"
+          [ "$D_CREATE_MODE" != "lookup-fail" ] || touch "$D_LIST_FAIL"
+          printf '{"error":"failed to commit"}\n'
+          exit 1
+        fi
+        printf '{"id":"%s"}\n' "$gid" ;;
+      resolve)
+        rid="${4:-}"
+        case "$rid" in *NORESOLVE*) exit 1 ;; esac
+        [ -n "$rid" ] && sed -i "/ $rid\$/d" "$D_GATE_EDGES" 2>/dev/null || true ;;
+    esac ;;
   "bd update")
+    # A gate id carrying NOSTAMP models the stamp write failing after the gate
+    # was already born blocking the work — the orphan `demand` must repair. One
+    # carrying LANDED as well models a write that landed and still exited
+    # non-zero (bd commits after it writes): `bd show` answers the stamp.
+    case "$3" in *NOSTAMP*) exit 1 ;; esac
+    for a in "$@"; do
+      case "$a" in gc.demand_for=*)
+        jq --arg id "$3" --arg g "${a#gc.demand_for=}" \
+          'map(if .id == $id then .metadata["gc.demand_for"] = $g else . end)' \
+          "$D_LIST" > "$D_LIST.tmp" && mv "$D_LIST.tmp" "$D_LIST" ;;
+      esac
+    done
     # The multi-pair refresh never lands here, which is the dropped clear this
     # store models. The lone-pair repair does — unless the bead id says STUCK,
     # the store that will not take that write either.
@@ -1582,8 +1630,10 @@ GC2
 chmod +x "$TMP/bin2/gc"
 
 export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
-       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled"
+       D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled" \
+       D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail"
 : > "$TMP/dsettled"
+: > "$TMP/dgateedges"
 printf 'tk-kid|tk-mum\n' > "$D_PARENTS"   # tk-kid has a parent; tk-solo has none
 printf 'tk-gone\n'        > "$D_MISSING"
 printf '[]\n'             > "$D_LIST"
@@ -1592,7 +1642,7 @@ printf 'tk-dem1\n'        > "$D_NEXTID"
 # demand_run <gated> [args...] — fresh log, returns the verb's exit status in DRC
 DRC=0
 demand_run() {
-    : > "$D_LOG"; : > "$TMP/derr"
+    : > "$D_LOG"; : > "$TMP/derr"; : > "$D_GATE_EDGES"
     DRC=0
     DOUT="$(PATH="$TMP/bin2:$PATH" sh "$SCRIPT" demand "$@" 2>"$TMP/derr")" || DRC=$?
     DERR="$(cat "$TMP/derr")"
@@ -1601,23 +1651,29 @@ demand_run() {
 d_create() { grep -E '^bd create ' "$D_LOG" || true; }
 d_update() { grep -E '^bd update ' "$D_LOG" || true; }
 d_deps()   { grep -E '^bd dep add ' "$D_LOG" || true; }
+d_gate()   { grep -E '^bd gate create ' "$D_LOG" || true; }
+d_gate_resolve() { grep -E '^bd gate resolve ' "$D_LOG" || true; }
 
-# (SIBLING) the demand inherits the GATED bead's parent — never becomes its
-# child, which beads would refuse to let it block.
+# (GATE) the demand is a native human gate that blocks the gated bead, born
+# from `gc bd gate create` — the only verb that sets issue_type=gate.
 demand_run tk-kid "operator: pick the storage backend" --by converse
-eq "$DRC" "0" "(SIBLING) a demand on a parented bead succeeds"
-grep -q -- '--parent tk-mum' <<< "$(d_create)" \
-  && ok "(SIBLING) the demand is filed under the gated bead's own parent" \
-  || bad "(SIBLING) no --parent tk-mum in: $(d_create)"
-grep -q -- '--parent tk-kid' <<< "$(d_create)" \
-  && bad "(SIBLING) the demand was filed as a CHILD of the bead it gates" \
+eq "$DRC" "0" "(GATE) a demand on a parented bead succeeds"
+grep -q -- '--type=human' <<< "$(d_gate)" \
+  && ok "(GATE) the demand is a human gate" || bad "(GATE) not --type=human: $(d_gate)"
+grep -q -- '--blocks tk-kid' <<< "$(d_gate)" \
+  && ok "(GATE) …blocking the gated bead" || bad "(GATE) not --blocks tk-kid: $(d_gate)"
+grep -q -- '--title operator: pick the storage backend' <<< "$(d_gate)" \
+  && ok "(GATE) the authored headline is the gate title" \
+  || bad "(GATE) headline is not the title: $(d_gate)"
+eq "$(d_create)" "" "(GATE) no plain bd create — the demand is a gate, not a bare bead"
+# (SIBLING) the gate is grouped under the GATED bead's own parent — never its
+# child, which beads would refuse to let it block.
+grep -q -- '--parent tk-mum' <<< "$(d_update)" \
+  && ok "(SIBLING) the gate is re-homed under the gated bead's own parent" \
+  || bad "(SIBLING) no --parent tk-mum in: $(d_update)"
+grep -q -- '--parent tk-kid' <<< "$(d_update)$(d_gate)" \
+  && bad "(SIBLING) the gate was filed as a CHILD of the bead it gates" \
   || ok "(SIBLING) …and not as a child of the bead it gates"
-grep -q -- '-t decision' <<< "$(d_create)" \
-  && ok "(SIBLING) a ruling is issue_type=decision (a typed board anchor)" \
-  || bad "(SIBLING) not -t decision: $(d_create)"
-grep -q -- '--title operator: pick the storage backend' <<< "$(d_create)" \
-  && ok "(SIBLING) the authored headline is the demand's TITLE" \
-  || bad "(SIBLING) headline is not the title: $(d_create)"
 
 # (EDGE) the wait is an edge on the GATED bead: "tk-kid is blocked by tk-dem1".
 eq "$(d_deps)" "bd dep add tk-kid tk-dem1 -t blocks" \
@@ -1638,31 +1694,32 @@ grep -q 'gc.takeaway_by=converse' <<< "$U" \
 eq "$(awk '/^demand /{print $2; exit}' <<< "$DOUT")" "tk-dem1" \
    "(OUT) the demand id is the second field of the 'demand …' line"
 
-# (SIBLINGNONE) a parentless gated bead gets a parentless demand: still a
-# sibling, and still able to carry the edge.
+# (SIBLINGNONE) a parentless gated bead gets a parentless gate: no re-home,
+# and still able to carry the edge.
 demand_run tk-solo "operator: ratify the cutover" --by converse
 eq "$DRC" "0" "(SIBLINGNONE) a demand on a parentless bead succeeds"
-grep -q -- '--parent' <<< "$(d_create)" \
-  && bad "(SIBLINGNONE) invented a parent: $(d_create)" \
+grep -q -- '--parent' <<< "$(d_gate)$(d_update)" \
+  && bad "(SIBLINGNONE) invented a parent: $(d_gate) / $(d_update)" \
   || ok "(SIBLINGNONE) no parent is invented for a parentless subject"
 
-# (KIND) work only a person can do is a task assigned to that person.
+# (KIND) work only a person can do is recorded as gc.demand_kind=task and
+# assigned to that person; the issue type stays gate.
 demand_run tk-solo "sign the vendor contract" --kind task --assignee zook
 eq "$DRC" "0" "(KIND) --kind task is accepted"
-grep -q -- '-t task' <<< "$(d_create)" \
-  && ok "(KIND) …filed as a task" || bad "(KIND) not -t task: $(d_create)"
+grep -q -- 'gc.demand_kind=task' <<< "$(d_update)" \
+  && ok "(KIND) …recorded as a task demand" || bad "(KIND) no gc.demand_kind=task: $(d_update)"
 grep -q -- '--assignee zook' <<< "$(d_update)" \
   && ok "(KIND) …assigned to the person who owes it" || bad "(KIND) no assignee: $(d_update)"
 
 # (KINDBAD) any other kind is a usage error, and files nothing.
 demand_run tk-solo "whatever" --kind epic
 eq "$DRC" "2" "(KINDBAD) an unsupported --kind is a usage error"
-eq "$(d_create)" "" "(KINDBAD) …and nothing is filed"
+eq "$(d_gate)" "" "(KINDBAD) …and nothing is filed"
 
 # (CAP) the ≤140 gate is SHARED with takeaway: the title is the same headline.
 demand_run tk-solo "$T141"
 eq "$DRC" "2" "(CAP) a 141-char demand headline is a usage error"
-eq "$(d_create)" "" "(CAP) …and nothing is filed"
+eq "$(d_gate)" "" "(CAP) …and nothing is filed"
 grep -q 'cap is 140' <<< "$DERR" \
   && ok "(CAP) …and the refusal names the cap" || bad "(CAP) refusal is silent: $DERR"
 demand_run tk-solo "$T140"
@@ -1672,7 +1729,7 @@ eq "$DRC" "0" "(CAP) exactly 140 chars is accepted — one boundary, both verbs"
 # still reads on the board as a question someone owes an answer to.
 demand_run tk-gone "operator: decide"
 eq "$DRC" "4" "(RESOLVE) an unresolvable gated bead is a runtime failure"
-eq "$(d_create)" "" "(RESOLVE) …and no demand is filed"
+eq "$(d_gate)" "" "(RESOLVE) …and no demand is filed"
 grep -q 'does not resolve' <<< "$DERR" \
   && ok "(RESOLVE) …and the refusal says why" || bad "(RESOLVE) refusal is silent: $DERR"
 
@@ -1681,7 +1738,7 @@ grep -q 'does not resolve' <<< "$DERR" \
 printf '[{"id":"tk-old1","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
 demand_run tk-kid "operator: pick the storage backend (still)" --by converse
 eq "$DRC" "0" "(IDEM) a re-stated demand succeeds"
-eq "$(d_create)" "" "(IDEM) …without filing a second bead"
+eq "$(d_gate)" "" "(IDEM) …without filing a second bead"
 grep -q '^bd update tk-old1 ' <<< "$(d_update)" \
   && ok "(IDEM) …refreshing the open one instead" || bad "(IDEM) the open demand was not refreshed: $(d_update)"
 grep -q -- '--title operator: pick the storage backend (still)' <<< "$(d_update)" \
@@ -1768,6 +1825,122 @@ grep -q 'tk-kid is NOT blocked by' <<< "$DERR" \
 grep -q '^demand tk-dem1 blocks tk-kid' <<< "$DOUT" \
   && bad "(ALSOCLOSED) success was printed while a requested edge was missing: $DOUT" \
   || ok "(ALSOCLOSED) …and no success line is printed"
+
+# (GATEREPAIR) `bd gate create` requires --blocks, so the gate is born already
+# blocking the work; a stamp that fails after it leaves a gate that blocks
+# $gated but carries no gc.demand_for — invisible to the re-run's existing-demand
+# lookup, which would then file a SECOND gate. The verb resolves that orphan
+# before returning, so the board is left with nothing blocking the work.
+printf 'tk-NOSTAMP1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "4" "(GATEREPAIR) a stamp that did not land is a runtime failure"
+grep -q '^bd gate resolve tk-NOSTAMP1' <<< "$(cat "$D_LOG")" \
+  && ok "(GATEREPAIR) …and the unstamped gate is resolved, not left blocking" \
+  || bad "(GATEREPAIR) the orphan gate was not resolved: $(d_gate_resolve)"
+grep -q 'resolved the orphan' <<< "$DERR" \
+  && ok "(GATEREPAIR) …and the message says the block was cleared" \
+  || bad "(GATEREPAIR) the repair was silent: $DERR"
+eq "$(awk '$1=="tk-kid"{print $2}' "$D_GATE_EDGES")" "" \
+   "(GATEREPAIR) …so tk-kid is left blocked by no orphan gate"
+grep -q '^demand ' <<< "$DOUT" \
+  && bad "(GATEREPAIR) a success line was printed despite the failed stamp: $DOUT" \
+  || ok "(GATEREPAIR) …and no success line is printed"
+
+# (GATEREPAIRSTUCK) when the orphan cannot even be resolved, the verb says the
+# gate still blocks the work and hands over the manual clear, rather than
+# reporting a demand it did not finish filing.
+printf 'tk-NOSTAMPNORESOLVE1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "4" "(GATEREPAIRSTUCK) a stamp and a resolve that both fail is a runtime failure"
+grep -q 'could not resolve it' <<< "$DERR" \
+  && ok "(GATEREPAIRSTUCK) …and the message says the gate still blocks the work" \
+  || bad "(GATEREPAIRSTUCK) the stuck orphan was silent: $DERR"
+grep -q 'gc bd gate resolve tk-NOSTAMPNORESOLVE1' <<< "$DERR" \
+  && ok "(GATEREPAIRSTUCK) …and hands over the exact manual clear" \
+  || bad "(GATEREPAIRSTUCK) no repair command offered: $DERR"
+
+# (GATELANDED) a non-zero stamp is not proof the stamp did not land: bd writes
+# before it commits. When gc.demand_for reads back, the gate is live and
+# stamped — resolving it would release the work while a person owes an answer.
+printf 'tk-NOSTAMPLANDED1\n' > "$D_NEXTID"
+demand_run tk-kid "operator: pick the backend"
+eq "$DRC" "0" "(GATELANDED) a stamp that reads back after a non-zero update succeeds"
+eq "$(d_gate_resolve)" "" "(GATELANDED) …and the live, stamped gate is NOT resolved"
+grep -q 'reads back as tk-kid' <<< "$DERR" \
+  && ok "(GATELANDED) …and the verb says why it continued" \
+  || bad "(GATELANDED) silent continue: $DERR"
+grep -q '^demand tk-NOSTAMPLANDED1 blocks tk-kid' <<< "$DOUT" \
+  && ok "(GATELANDED) …and the success line names the gate" \
+  || bad "(GATELANDED) no success line: $DOUT"
+printf 'tk-dem1\n' > "$D_NEXTID"
+
+# Creation can write the row and edge, then fail before returning its id.
+export D_CREATE_MODE=post-write
+printf 'tk-recovered\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recover the interrupted demand"
+eq "$DRC" "0" "(CREATELOST) a post-write create failure recovers successfully"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(CREATELOST) the recovered row receives discoverable demand metadata"
+eq "$(awk '$1=="tk-kid"{print $2}' "$D_GATE_EDGES")" "tk-recovered" \
+   "(CREATELOST) the original blocker remains in place"
+eq "$(d_gate_resolve)" "" "(CREATELOST) the recovered live gate is not resolved"
+eq "$(awk '/^demand /{print $2}' <<< "$DOUT")" "tk-recovered" \
+   "(CREATELOST) success returns the recovered id"
+demand_run tk-kid "operator: restate the demand"
+eq "$DRC" "0" "(CREATERETRY) the stamped demand can be refreshed"
+eq "$(d_gate)" "" "(CREATERETRY) retry creates no second gate"
+
+# Recovery still goes through the existing orphan cleanup if stamping fails.
+printf '[]\n' > "$D_LIST"
+printf 'tk-NOSTAMP-recovered\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recovered but unstamped"
+eq "$DRC" "4" "(RECOVERYCLEANUP) failed stamp after recovery reports failure"
+eq "$(d_gate_resolve)" "bd gate resolve tk-NOSTAMP-recovered" \
+   "(RECOVERYCLEANUP) recovered orphan is resolved by the existing cleanup"
+eq "$(cat "$D_GATE_EDGES")" "" "(RECOVERYCLEANUP) orphan no longer blocks work"
+printf 'tk-recovered\n' > "$D_NEXTID"
+
+# If immediate recovery is unreadable, the stable marker survives for a retry.
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=lookup-fail
+demand_run tk-kid "operator: recover later"
+eq "$DRC" "4" "(RECOVERYREAD) failed recovery reports failure"
+grep -q 'creation on tk-kid is uncertain' <<< "$DERR" \
+  && ok "(RECOVERYREAD) reports uncertainty rather than claiming nothing was filed" \
+  || bad "(RECOVERYREAD) wrong diagnostic: $DERR"
+eq "$(jq -r '.[0].await_id' "$D_LIST")" "gc-demand:tk-kid" \
+   "(RECOVERYREAD) the unstamped row retains the recovery marker"
+demand_run tk-kid "operator: still unreadable"
+eq "$DRC" "4" "(LOOKUPREAD) an unreadable initial lookup fails closed"
+eq "$(d_gate)" "" "(LOOKUPREAD) no create while the ledger is unreadable"
+rm "$D_LIST_FAIL"
+demand_run tk-kid "operator: recover later"
+eq "$DRC" "0" "(RECOVERYRETRY) a later retry adopts the unstamped gate"
+eq "$(d_gate)" "" "(RECOVERYRETRY) adoption creates no second gate"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(RECOVERYRETRY) adoption completes the stamp"
+
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=no-write
+demand_run tk-kid "operator: no write landed"
+eq "$DRC" "4" "(CREATEEMPTY) creation with no surviving row fails"
+eq "$(d_update)$(d_gate_resolve)" "" "(CREATEEMPTY) no invented gate is stamped or resolved"
+eq "$(grep -c '^bd gate create ' "$D_LOG")" "1" "(CREATEEMPTY) no blind create retry"
+unset D_CREATE_MODE
+
+printf '{"error":"unreadable"}\n' > "$D_LIST"
+demand_run tk-kid "operator: invalid lookup"
+eq "$DRC" "4" "(LOOKUPINVALID) malformed list shape fails closed"
+eq "$(d_gate)" "" "(LOOKUPINVALID) no create after an invalid lookup"
+
+printf '[{"id":"tk-a","issue_type":"gate","await_type":"human","await_id":"gc-demand:tk-kid"},{"id":"tk-b","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: ambiguous demand"
+eq "$DRC" "4" "(LOOKUPMULTIPLE) multiple matching demands require reconciliation"
+eq "$(d_gate)$(d_update)$(d_gate_resolve)" "" "(LOOKUPMULTIPLE) neither gate is changed or duplicated"
+grep -q 'tk-a, tk-b' <<< "$DERR" \
+  && ok "(LOOKUPMULTIPLE) diagnostic identifies both gates" \
+  || bad "(LOOKUPMULTIPLE) missing conflicting ids: $DERR"
+printf '[]\n' > "$D_LIST"
 
 echo ""
 echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape): $PASS passed, $FAIL failed"

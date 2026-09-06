@@ -90,10 +90,11 @@ bd_list() { # guarded array read; non-zero = "could not tell"
 # last sitting instead of naming a live wait. Read as a hold, it parks an
 # anchor from its first conversation onward.
 #
-# The wait itself is a bead. `gc-helm.sh demand` files what a person owes as
-# its own bead stamped gc.demand_for=<anchor>, blocking the anchor on it, and
-# the sitting closes that bead with the ruling that answers it. A live demand
-# is a live hold; none, and the takeaway records a sitting that ended.
+# The wait itself is a human gate. `gc-helm.sh demand` files what a person
+# owes as a native gate (issue_type=gate, await_type=human) stamped
+# gc.demand_for=<anchor> and blocking the anchor on it, and a sitting resolves
+# that gate (gc bd gate resolve) with the ruling that answers it. A live
+# demand is a live hold; none, and the takeaway records a sitting that ended.
 #
 # Only demands count. Rework children and `--waiting-on` edges are work in
 # flight, which the merge already holds on, and reading `blocks` at large would
@@ -118,8 +119,10 @@ bd_list() { # guarded array read; non-zero = "could not tell"
 # excluded, so a retire never reads the demand it filed as a live hold.
 demand_gate_state() { # <anchor-id>
   local rows
+  # --include-gates: the demand is a human gate (issue_type=gate), which
+  # `bd list` hides by default; without it a held anchor reads released.
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
+           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null) || return 2
   rows=$(printf '%s' "$rows" | scrub)
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
   printf '%s' "$rows" | jq -e --arg a "${1:-}" \
@@ -149,7 +152,7 @@ takeaway_is_holding() { # <anchor-id>; 0 = a person other than the cap owes an a
 close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = one may
   local rows id live
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   for id in $(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
         '.[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)
@@ -162,7 +165,7 @@ close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = 
   # live, and the status filter above already drops closed, so any signoff-owned
   # row that still answers is one that did not retire.
   rows=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
+           --include-gates --metadata-field "gc.demand_for=${1:-}" --limit=0 --json 2>/dev/null | scrub) || return 1
   printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   live=$(printf '%s' "$rows" | jq -r --arg a "${1:-}" \
         '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a)

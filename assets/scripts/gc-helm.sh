@@ -694,16 +694,18 @@ cmd_takeaway() {
 }
 
 # ── Verb: demand ─────────────────────────────────────────────────────
-# What a person owes, filed as a bead the work is blocked by — the replacement
-# for parking a subject on prose. A bead is either ready and therefore moving,
-# or blocked on a named bead by an edge; there is no third state a person has
-# to return and hand-clear.
+# What a person owes, filed as a NATIVE human gate (issue_type=gate,
+# await_type=human) the work is blocked by — the replacement for parking a
+# subject on prose. A bead is either ready and therefore moving, or blocked on
+# a named gate by an edge; there is no third state a person has to return and
+# hand-clear. The gate keeps gc.demand_for so every reader of the demand
+# convention keeps working; those readers pass --include-gates because
+# `bd list` hides gate beads by default.
 #
-# The demand is filed as a SIBLING of <gated-bead>: same parent, or parentless
-# when the gated bead has none. That placement is not tidiness. beads REFUSES a
-# `blocks` edge from a parent to its own descendant, because blocked status
-# cascades and the descendant would inherit the block it is meant to lift, so a
-# demand filed as a CHILD could never gate the thing it is about.
+# The gate is grouped as a SIBLING of <gated-bead> — same parent, or parentless
+# when the gated bead has none — so it reads beside the work on the board. The
+# `blocks` edge then runs sibling->sibling; beads REFUSES one from a parent to
+# its own descendant, which is what a demand filed as a CHILD would be.
 #
 # The edge is the record here, not a garnish on it. `takeaway --waiting-on`
 # writes its edge beside prose a human reads, so a rejected edge only warns;
@@ -715,6 +717,22 @@ cmd_takeaway() {
 #
 # One open demand per gated bead: a resumed sitting re-states the same question
 # and gets the existing demand refreshed, never a second blocker for one wait.
+# Find both stamped demands and gates whose creation outlived its response.
+# Keep lookup errors distinct from an empty result: either a failed read or
+# ambiguous matches must prevent another create. Use a subshell for scratch vars.
+demand_lookup() (
+    raw=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit=0 2>/dev/null) || return 1
+    printf '%s' "$raw" | scrub | jq -ce --arg g "$1" '
+        if type != "array" then error("invalid demand list") else
+          [ .[] | select((.metadata["gc.demand_for"] // "") == $g or
+              (.issue_type == "gate" and .await_type == "human" and
+               .await_id == ("gc-demand:" + $g))) ]
+          | if length > 1 then
+              error("multiple demand gates; reconcile before retrying: " + (map(.id) | join(", ")))
+            else .[0] // {} end
+        end'
+)
+
 cmd_demand() {
     gated=""; text=""; by="host"; kind="decision"; who=""; body=""; also=""; npos=0
     while [ $# -gt 0 ]; do
@@ -750,7 +768,7 @@ cmd_demand() {
         *) echo "$PROG: demand: --kind is 'decision' (a ruling) or 'task' (work only a person can do); got '$kind'" >&2; exit 2 ;;
     esac
     [ -n "$by" ] || by="host"
-    [ -n "$body" ] || body="What a person owes, filed as a bead so the wait is a graph state rather than a comment. Closing this makes $gated ready, and the pool claims it."
+    [ -n "$body" ] || body="What a person owes, filed as a human gate so the wait is a graph state rather than a comment. Resolving this gate makes $gated ready, and the pool claims it."
 
     path=$(rig_path_for_bead "$gated")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
@@ -779,10 +797,16 @@ cmd_demand() {
          | map(select(. != "")) | .[0] // ""' 2>/dev/null || true)
     # <<< demand-sibling-shape
 
-    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
-        | scrub \
-        | jq -r --arg g "$gated" \
-            '[ .[]? | select((.metadata["gc.demand_for"] // "") == $g) | .id ] | first // empty' 2>/dev/null || true)
+    # --include-gates: the demand is a human gate (issue_type=gate), which
+    # `bd list` hides by default; without it every re-state files a second
+    # demand instead of refreshing the one that is already open. The status
+    # set is the demand readers' (signoff, pr-facts, liveness): a gate an
+    # operator deferred or pinned still holds the work there, so a re-state
+    # must refresh it rather than file a second gate beside it.
+    candidate=$(demand_lookup "$gated") \
+        || { echo "$PROG: demand: could not establish a unique demand on $gated — stopped before creating another gate." >&2; exit 4; }
+    existing=$(printf '%s' "$candidate" | jq -r --arg g "$gated" \
+        'select((.metadata["gc.demand_for"] // "") == $g) | .id // empty')
 
     if [ -n "$existing" ]; then
         demand="$existing"
@@ -811,31 +835,83 @@ cmd_demand() {
         fi
         echo "$PROG: demand: refreshed the open demand $demand on $gated; no second bead filed" >&2
     else
-        set -- -t "$kind" --title "$text" -d "$body"
-        [ -n "$parent" ] && set -- "$@" --parent "$parent"
-        demand=$(gc bd create "$@" --json 2>/dev/null \
-            | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+        # File the demand as a NATIVE human gate — issue_type=gate,
+        # await_type=human, the pack's human-escalation state — that blocks the
+        # gated bead. `gc bd update` has no `gate` type, so the gate can only be
+        # born from `gc bd gate create`; the demand metadata is stamped after,
+        # and the kind is recorded in metadata rather than as the issue type.
+        # --reason carries the body from birth, so a gate whose stamp never
+        # lands still explains itself to whoever clears it by hand.
+        # await_id is stored with the initial row, before the commit that can
+        # fail without returning an id. It lets this call and later retries
+        # recover the same unstamped gate, even if the first recovery read fails.
+        demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
+        if [ -z "$demand" ]; then
+            demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="gc-demand:$gated" --title "$text" --reason "$body" --json 2>/dev/null \
+                | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+            if [ -z "$demand" ] || [ "$demand" = null ]; then
+                candidate=$(demand_lookup "$gated") \
+                    || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: gc-demand:$gated." >&2; exit 4; }
+                demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
+            fi
+        fi
         # A create routed to the wrong ledger returns an id rather than an
         # error, and that id can never carry an edge to $gated — so the prefix
         # is checked, not assumed.
         case "$demand" in
-            ""|null)     echo "$PROG: demand: bd create returned no id — nothing filed on $gated." >&2; exit 4 ;;
+            ""|null)     echo "$PROG: demand: gc bd gate create returned no id and no recoverable demand was found on $gated; creation was not confirmed." >&2; exit 4 ;;
             "$prefix"-*) : ;;
-            *)           echo "$PROG: demand: bd create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Close it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
+            *)           echo "$PROG: demand: gc bd gate create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Resolve it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
         esac
-        set -- --set-metadata "gc.takeaway=$text" \
+        set -- --title "$text" -d "$body" \
+               --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
+               --set-metadata "gc.demand_kind=$kind" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
-        gc bd update "$demand" "$@" >/dev/null 2>&1 \
-            || { echo "$PROG: demand: filed $demand but could not stamp it — it is not on the operator's queue yet. Re-run this command." >&2; exit 4; }
+        stamped=1
+        gc bd update "$demand" "$@" >/dev/null 2>&1 || stamped=0
+        # A non-zero update is not proof the stamp did not land: bd writes the
+        # row before it commits, and a commit that fails after the write exits
+        # non-zero with the metadata in place. Read the key back before treating
+        # the gate as an orphan — resolving a stamped, live gate would release
+        # $gated while a person still owes an answer.
+        if [ "$stamped" -eq 0 ] && [ "$(meta_now "$demand" gc.demand_for)" = "$gated" ]; then
+            echo "$PROG: demand: gc bd update on $demand returned non-zero but gc.demand_for reads back as $gated — the stamp landed; continuing." >&2
+            stamped=1
+        fi
+        if [ "$stamped" -eq 0 ]; then
+            # `gc bd gate create` requires --blocks, so $demand was born already
+            # blocking $gated. Without this stamp it carries no gc.demand_for, so
+            # the existing-demand lookup above cannot find it: a re-run would file
+            # a SECOND gate while this unstamped one keeps $gated blocked, unseen
+            # by every reader that discovers demands by gc.demand_for. Resolve the
+            # orphan before returning so the board is clean and the re-run starts
+            # from no demand at all.
+            if gc bd gate resolve "$demand" >/dev/null 2>&1; then
+                echo "$PROG: demand: filed gate $demand but could not stamp it; resolved the orphan so it no longer blocks $gated. Re-run this command." >&2
+            else
+                echo "$PROG: demand: filed gate $demand but could not stamp it, and could not resolve it — it still blocks $gated with no demand metadata. Clear it by hand, then re-run: gc bd gate resolve $demand" >&2
+            fi
+            exit 4
+        fi
+        # Re-home the gate as the gated bead's SIBLING (best-effort): it is born
+        # parentless, and grouping it under the gated bead's own parent keeps
+        # the board tidy. Non-fatal — a parentless gate blocks exactly as hard,
+        # and the blocks edge runs sibling->sibling either way.
+        [ -n "$parent" ] && gc bd update "$demand" --parent "$parent" >/dev/null 2>&1 || true
     fi
 
     # `dep add <gated> <demand>` reads "<gated> is blocked by <demand>", so the
-    # row lands on the gated bead — the side that is waiting.
+    # row lands on the gated bead — the side that is waiting. `gc bd gate
+    # create` already added the primary edge on a fresh gate; re-adding a
+    # same-type edge is a silent, exit-0 no-op in beads (no warning is
+    # printed), so this pass costs one round-trip and doubles as the repair
+    # should the birth edge not have landed. The loop still owns every
+    # --also-blocks target, and the read-back below is the guarantee for all.
     for _w in $gated $also; do
         [ -n "$_w" ] || continue
         if [ "$_w" = "$demand" ]; then
