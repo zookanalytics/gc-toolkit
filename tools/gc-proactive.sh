@@ -33,6 +33,16 @@ SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
+# Set by cmd_sling to 1 when it skips an already-reacted bead as a no-op, else
+# empty. cmd_scan's --sling loop reads it in-process to keep a skip from
+# spending the cap; the `sling` CLI verb in main() translates it to
+# RC_ALREADY_REACTED so a cross-process caller (gc-helm react, gc-visit-open)
+# can tell the no-op from a dispatch and file its own visit rather than wait for
+# a reaction that never ran.
+SLING_SKIPPED=""
+# Exit code the `sling` CLI verb uses for that skip — distinct from a dispatch
+# (0) and an error (1), so a caller that needs a NEW reaction can branch on it.
+RC_ALREADY_REACTED=3
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes
@@ -76,6 +86,38 @@ rig_beads_db() {
     return 0
 }
 
+# sling_first_reaction_guard — a first reaction happens once, so refuse to
+# re-start mol-first-reaction on a bead that already carries one. A workflow
+# start retires the subject's pool claim route (gascity's
+# retireInputConvoyClaimRoutes), on the premise the started workflow will drive
+# that bead as work. mol-first-reaction does not: it reacts to the subject and,
+# on an already-reacted one, first-reaction-dispose.sh refuses the second
+# dispose. So a re-sling destroys the route the first disposition set and puts
+# nothing in its place, leaving the bead disposed-looking but offered to no
+# pool. gc.first_reaction is stamped by the dispose before it acts,
+# gc.proactive_reaction by the release; either proves a completed reaction. The
+# subject is read from the fixture under test, live otherwise; an unreadable
+# bead is not proof of a reaction, so it proceeds. Returns non-zero when the
+# bead is already reacted, so the caller skips the sling.
+sling_first_reaction_guard() {
+    local bead="$1" meta fr pr detail
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/beads.json" ] || return 0
+        meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
+    else
+        local db; db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null \
+            | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
+    fi
+    fr="$(printf '%s' "$meta" | jq -r '."gc.first_reaction" // ""' 2>/dev/null || printf '')"
+    pr="$(printf '%s' "$meta" | jq -r '."gc.proactive_reaction" // ""' 2>/dev/null || printf '')"
+    [ -n "$fr" ] || [ "$pr" = "1" ] || return 0
+    detail="gc.first_reaction=${fr:-<unset>}, gc.proactive_reaction=${pr:-<unset>}"
+    log "$PROG: sling: $bead already carries a first reaction ($detail) — not re-slinging. A first reaction happens once; re-slinging retires its route and drives nothing, leaving the bead offered to no pool. Clear the reaction marker to re-react."
+    return 1
+}
+
 # board_rank — re-rank (stdin JSON array) by the board's priority weight
 # (prio_w = max(0, 4-p), null->1), oldest-first within a band. Mirrored
 # inline in agents/proactive/agent.toml's work_query; keep the two in sync.
@@ -107,7 +149,9 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
        $PROG sling <bead> [--nudge] [-n|--dry-run]
                                       Sling mol-first-reaction at <bead> on the
                                       codex-gated mr path. Refuses --merge
-                                      direct (the security invariant).
+                                      direct (the security invariant). Exit 0
+                                      slung, $RC_ALREADY_REACTED already reacted
+                                      (no-op, nothing slung), 1 error.
        $PROG deliverable [<pool-target>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
@@ -253,8 +297,11 @@ cmd_demand() {
 #   - top-level only — a parent-child CHILD carries the edge in its own
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
 #     catches parented beads, not every convoy member.
-# Plus the state predicate shared with the live queries (not already reacted,
-# not routed, has a description). Deduped by id.
+# Plus a state predicate: not already reacted, not routed, has a description;
+# deduped by id. "Not already reacted" drops EITHER marker a completed reaction
+# leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
+# dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
+# is dropped here and never reaches the sling loop to spend a cap slot.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -265,6 +312,7 @@ scan_precision_filter() {
     jq --argjson types "$types_json" --argjson markers "$markers_json" '
         map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
+            and ((.metadata["gc.first_reaction"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
@@ -357,7 +405,7 @@ cmd_scan() {
     # many downstream sessions as the scan found candidates. What it skips is
     # named, not silently dropped — the next sweep sees the same beads, since
     # a candidate only leaves the scan once a reaction has advanced it.
-    local slung=0 skipped=0
+    local slung=0 skipped=0 reacted=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
@@ -366,14 +414,26 @@ cmd_scan() {
             skipped=$(( skipped + 1 ))
             continue
         fi
+        # Only a genuine dispatch spends the cap. cmd_sling skips an
+        # already-reacted bead as a no-op and flags it in SLING_SKIPPED — a
+        # reaction that landed after the scan selected it, since
+        # scan_precision_filter drops the rest. Counting that skip is the
+        # cap-starvation bug: stale reacted records would spend the whole cap
+        # every sweep while no new reaction is slung.
         if cmd_sling "$id"; then
-            slung=$(( slung + 1 ))
+            if [ -n "$SLING_SKIPPED" ]; then
+                reacted=$(( reacted + 1 ))
+            else
+                slung=$(( slung + 1 ))
+            fi
         fi
     done
+    local note=""
+    if [ "$reacted" -gt 0 ]; then note=" ($reacted already reacted, not counted)"; fi
     if [ "$skipped" -gt 0 ]; then
-        log "scan --sling: slung $slung first reaction(s); $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
+        log "scan --sling: slung $slung first reaction(s)$note; $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
     else
-        log "scan --sling: slung $slung first reaction(s)"
+        log "scan --sling: slung $slung first reaction(s)$note"
     fi
 }
 
@@ -401,6 +461,23 @@ cmd_sling() {
         mr|local) : ;;
         *) die "sling: unknown merge strategy '$MERGE' (mr|local)" ;;
     esac
+
+    # A first reaction happens once. Re-slinging one destroys the route the
+    # first disposition set (see sling_first_reaction_guard), so skip it as an
+    # idempotent no-op rather than clobber a live dispatch. cmd_sling returns 0
+    # either way and flags the skip out-of-band in SLING_SKIPPED: the in-process
+    # cmd_scan --sling loop reads that flag to tell a skip from a dispatch and
+    # not spend a cap slot on it, and the `sling` CLI verb in main() reads it to
+    # exit RC_ALREADY_REACTED, the signal a cross-process caller needs. The
+    # return stays 0 because a non-zero one cannot carry the distinction here:
+    # caught in the loop's condition it would disable set -e for this function,
+    # and returned to main it would read as the generic fail-closed error, not
+    # the specific no-op.
+    SLING_SKIPPED=""
+    if ! sling_first_reaction_guard "$bead"; then
+        SLING_SKIPPED=1
+        return 0
+    fi
 
     local target
     target="$(resolve_pool_target)"
@@ -446,7 +523,13 @@ main() {
         -h|--help|help) usage; exit 0 ;;
         demand) cmd_demand "$@" ;;
         scan)   cmd_scan "$@" ;;
-        sling)  cmd_sling "$@" ;;
+        sling)
+            cmd_sling "$@"
+            # A skipped already-reacted bead is a no-op, not a dispatch: surface
+            # it to a cross-process caller as RC_ALREADY_REACTED so it files its
+            # own visit instead of waiting for a reaction that never ran.
+            if [ -n "$SLING_SKIPPED" ]; then exit "$RC_ALREADY_REACTED"; fi
+            ;;
         deliverable) cmd_deliverable "$@" ;;
         *) die "unknown verb '$verb' (demand|scan|sling|deliverable; --help)" ;;
     esac

@@ -139,9 +139,15 @@ GC
 
 # --- gc-helm.sh stub ----------------------------------------------------------
 # Records the verb and argv; $FAKE_HELM_RC drives the failure cases.
+# $FAKE_HELM_REACT_RC, when set, drives the `react` verb ALONE — so a test can
+# model react returning its already-reacted no-op code (5) while `open` still
+# succeeds, the way the real tools behave for an already-reacted subject.
 cat > "$TMP/bin/gc-helm.sh" <<'HELM'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "$FAKE_CALLS"
+if [ "$1" = react ] && [ -n "${FAKE_HELM_REACT_RC:-}" ]; then
+  exit "$FAKE_HELM_REACT_RC"
+fi
 exit "${FAKE_HELM_RC:-0}"
 HELM
 
@@ -232,6 +238,21 @@ has "$CALLS" "helm open tk-newsub" "(RECOVER) a failed react falls through to fi
 has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
 eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
 unset FAKE_HELM_RC
+
+# --- (REACTED) an already-reacted subject files the visit directly ------------
+# react returns its no-op code (5) when the subject already carries a first
+# reaction: the guard slung nothing, so no reaction will file the visit.
+# gc-visit-open must NOT trust the skip as a dispatch (the bug this fixes) — it
+# falls through and files the visit itself, naming the real cause so the visit
+# body is accurate rather than reporting a sling failure that did not happen.
+FAKE_HELM_REACT_RC=5 run yes "a topic on an already-reacted subject"
+eq "$RC" "0" "(REACTED) exits 0 — the visit is filed"
+has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the visit"
+has "$OUT" "visit filed" "(REACTED) the summary reports a filed visit"
+has "$ERR" "already carries a first reaction" "(REACTED) the reason names the no-op skip"
+hasnt "$ERR" "sling FAILED" "(REACTED) it is NOT reported as a sling failure"
+unset FAKE_HELM_REACT_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
 run no "some cross-cutting topic"

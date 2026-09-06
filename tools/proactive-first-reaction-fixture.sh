@@ -364,6 +364,46 @@ has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proact
     "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" GC_PROACTIVE_POOL=altrig/gc-toolkit.proactive \
         "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
 
+echo "── a first reaction happens once: a reacted bead is not re-slung ──"
+# The actionable exit releases its subject on a bare gc.routed_to — a legitimate
+# pool claim a worker picks up directly. A SECOND sling of mol-first-reaction
+# retires that route at workflow-start (gascity retireInputConvoyClaimRoutes)
+# and drives nothing in its place, stranding the bead disposed-looking but
+# offered to no pool. So the sling skips a bead that already carries a reaction,
+# keyed on either marker a completed one leaves: gc.first_reaction (stamped by
+# the dispose) or gc.proactive_reaction (stamped by the release). A bead with
+# neither still slings. beads.json feeds the guard the subject state the way
+# agents.json feeds the deliverable probe; it lists only these beads, so every
+# other sling test above (px-1) reads as un-reacted and is unaffected.
+cat > "$FXDIR/beads.json" <<'JSON'
+{
+  "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+  "px-released": {"metadata": {"gc.proactive_reaction": "1"}},
+  "px-fresh":    {"metadata": {}}
+}
+JSON
+REACTED_OUT="$(P sling px-reacted --dry-run 2>&1 || true)"
+absent "a reacted bead is NOT re-slung (no sling command emitted)" "gc sling" "$REACTED_OUT"
+has    "…and the skip names the cause"                             "already carries a first reaction" "$REACTED_OUT"
+# The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so
+# a cross-process caller (gc-helm react, gc-visit-open) can tell it from a
+# dispatch and file its own visit rather than wait for a reaction that never
+# ran. In-process (cmd_scan --sling) the same skip stays a return-0 no-op that
+# does not spend the cap — proved by the sweep tests below.
+rec=0; P sling px-reacted --dry-run >/dev/null 2>&1 || rec=$?
+eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
+absent "a released bead (gc.proactive_reaction=1) is NOT re-slung" "gc sling" \
+       "$(P sling px-released --dry-run 2>&1 || true)"
+rel=0; P sling px-released --dry-run >/dev/null 2>&1 || rel=$?
+eq     "…and a released bead's skip exits RC_ALREADY_REACTED (3) too"    "3" "$rel"
+has    "an un-reacted bead still slings mol-first-reaction"        "--on mol-first-reaction" \
+       "$(P sling px-fresh --dry-run 2>&1 || true)"
+fec=0; P sling px-fresh --dry-run >/dev/null 2>&1 || fec=$?
+eq     "…and a dispatched (un-reacted) sling exits 0"              "0" "$fec"
+has    "a bead absent from the store reads as un-reacted, slings"  "--on mol-first-reaction" \
+       "$(P sling px-1 --dry-run 2>&1 || true)"
+rm -f "$FXDIR/beads.json"
+
 echo "── the process-scan trigger (movable-forward beads, board-ranked) ──"
 eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --json | jq -r '.[0].id')"
 eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
@@ -410,6 +450,48 @@ absent "…and a sweep inside the cap reports nothing left" "left for the next s
 ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
 eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
+
+echo "── a reacted bead never spends the sling cap (filter + loop) ──"
+# The bug: scan_precision_filter kept a bead carrying gc.first_reaction but no
+# gc.proactive_reaction, so it reached the loop; cmd_sling's guard skipped it
+# but returned success, and the loop counted the skip against the cap. Enough
+# stale first_reaction-only records could spend the whole cap every sweep while
+# no new reaction was slung. Two layers close it: the filter drops a reacted
+# bead (common case), and the loop refuses to count a guard-skip (the race).
+cat > "$FXDIR/scan.json" <<'JSON'
+[
+  {"id":"px-fr-only","title":"reacted: gc.first_reaction stamped, release pending","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable"}},
+  {"id":"px-clean","title":"an un-reacted input","description":"has a body","priority":1,"created_at":"2026-05-01T00:00:00Z","issue_type":"task"}
+]
+JSON
+FR_SCAN="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+absent "the precision filter drops a gc.first_reaction-only candidate" "px-fr-only" "$FR_SCAN"
+has    "…and keeps the un-reacted input"                               "px-clean"   "$FR_SCAN"
+
+# The race the filter cannot close: a candidate is clean when the scan selects
+# it (scan.json) but has reacted by the time the sling runs (beads.json feeds
+# the guard). cmd_sling skips it, returning success and flagging SLING_SKIPPED,
+# and the loop must not spend a cap slot on that skip. With cap 1 and the
+# reacted bead ranked first (older), the fresh bead must still be the one slung.
+cat > "$FXDIR/scan.json" <<'JSON'
+[
+  {"id":"px-race","title":"clean at selection, reacted before the sling","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
+  {"id":"px-fresh2","title":"a genuinely fresh input","description":"has a body","priority":0,"created_at":"2026-06-01T00:00:00Z","issue_type":"task"}
+]
+JSON
+cat > "$FXDIR/beads.json" <<'JSON'
+{
+  "px-race":   {"metadata": {"gc.first_reaction": "actionable"}},
+  "px-fresh2": {"metadata": {}}
+}
+JSON
+RACE_SLINGS="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>/dev/null || true)"
+RACE_LOG="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>&1 >/dev/null || true)"
+absent "a raced (reacted-at-guard) candidate emits no sling"         "px-race"   "$RACE_SLINGS"
+has    "…and the fresh candidate is slung instead"                   "px-fresh2" "$RACE_SLINGS"
+eq     "exactly one real sling under cap 1 (the skip did not count)" "1" "$(printf '%s\n' "$RACE_SLINGS" | grep -c '^gc sling')"
+has    "the loop names the uncounted reacted skip"                   "already reacted" "$RACE_LOG"
+rm -f "$FXDIR/beads.json"
 
 echo "── scan filters BEFORE the page bound (live path), and 0 = unbounded ──"
 # The bug this locks out: scan_candidates paged each `gc bd ready` to its first

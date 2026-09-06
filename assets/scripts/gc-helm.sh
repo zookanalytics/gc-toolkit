@@ -16,7 +16,10 @@
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move, tk-lzdty),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
-# a --route or a takeaway disposition that will not stamp).
+# a --route or a takeaway disposition that will not stamp),
+# 5 react no-op: the subject already carries a first reaction, so nothing was
+# slung (a first reaction happens once) — distinct from 4 so an intake caller
+# files its own visit instead of reading a skip as a dispatched reaction.
 
 set -eu
 
@@ -1150,7 +1153,22 @@ cmd_react() {
     set -- sling "$bead"
     [ -n "$nudge" ] && set -- "$@" --nudge
     [ -n "$dry" ] && set -- "$@" --dry-run
-    "$tool" "$@" || { echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2; exit 4; }
+    # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its first-reaction
+    # guard skipped an already-reacted bead: a no-op, not a failure, and NO
+    # reaction was dispatched. Re-raise that as exit 5 so an intake caller
+    # (gc-visit-open) files its own visit instead of waiting for a reaction that
+    # never ran; any other non-zero is a real failure.
+    if "$tool" "$@"; then
+        :
+    else
+        sling_rc=$?
+        if [ "$sling_rc" -eq 3 ]; then
+            echo "$PROG: react: $bead already carries a first reaction — nothing slung (a first reaction happens once). Clear the reaction marker to re-react, or file the visit directly." >&2
+            exit 5
+        fi
+        echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
+        exit 4
+    fi
 
     # The reaction lands async in the slung session; just clear the cache.
     if [ -z "$dry" ]; then bust_cache; fi
