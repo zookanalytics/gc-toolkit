@@ -76,6 +76,38 @@ rig_beads_db() {
     return 0
 }
 
+# sling_first_reaction_guard — a first reaction happens once, so refuse to
+# re-start mol-first-reaction on a bead that already carries one. A workflow
+# start retires the subject's pool claim route (gascity's
+# retireInputConvoyClaimRoutes), on the premise the started workflow will drive
+# that bead as work. mol-first-reaction does not: it reacts to the subject and,
+# on an already-reacted one, first-reaction-dispose.sh refuses the second
+# dispose. So a re-sling destroys the route the first disposition set and puts
+# nothing in its place, leaving the bead disposed-looking but offered to no
+# pool. gc.first_reaction is stamped by the dispose before it acts,
+# gc.proactive_reaction by the release; either proves a completed reaction. The
+# subject is read from the fixture under test, live otherwise; an unreadable
+# bead is not proof of a reaction, so it proceeds. Returns non-zero when the
+# bead is already reacted, so the caller skips the sling.
+sling_first_reaction_guard() {
+    local bead="$1" meta fr pr detail
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/beads.json" ] || return 0
+        meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
+    else
+        local db; db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null \
+            | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
+    fi
+    fr="$(printf '%s' "$meta" | jq -r '."gc.first_reaction" // ""' 2>/dev/null || printf '')"
+    pr="$(printf '%s' "$meta" | jq -r '."gc.proactive_reaction" // ""' 2>/dev/null || printf '')"
+    [ -n "$fr" ] || [ "$pr" = "1" ] || return 0
+    detail="gc.first_reaction=${fr:-<unset>}, gc.proactive_reaction=${pr:-<unset>}"
+    log "$PROG: sling: $bead already carries a first reaction ($detail) — not re-slinging. A first reaction happens once; re-slinging retires its route and drives nothing, leaving the bead offered to no pool. Clear the reaction marker to re-react."
+    return 1
+}
+
 # board_rank — re-rank (stdin JSON array) by the board's priority weight
 # (prio_w = max(0, 4-p), null->1), oldest-first within a band. Mirrored
 # inline in agents/proactive/agent.toml's work_query; keep the two in sync.
@@ -401,6 +433,11 @@ cmd_sling() {
         mr|local) : ;;
         *) die "sling: unknown merge strategy '$MERGE' (mr|local)" ;;
     esac
+
+    # A first reaction happens once. Re-slinging one destroys the route the
+    # first disposition set (see sling_first_reaction_guard), so skip it as an
+    # idempotent no-op rather than clobber a live dispatch.
+    sling_first_reaction_guard "$bead" || return 0
 
     local target
     target="$(resolve_pool_target)"

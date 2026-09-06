@@ -364,6 +364,37 @@ has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proact
     "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" GC_PROACTIVE_POOL=altrig/gc-toolkit.proactive \
         "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
 
+echo "── a first reaction happens once: a reacted bead is not re-slung ──"
+# The actionable exit releases its subject on a bare gc.routed_to — a legitimate
+# pool claim a worker picks up directly. A SECOND sling of mol-first-reaction
+# retires that route at workflow-start (gascity retireInputConvoyClaimRoutes)
+# and drives nothing in its place, stranding the bead disposed-looking but
+# offered to no pool. So the sling skips a bead that already carries a reaction,
+# keyed on either marker a completed one leaves: gc.first_reaction (stamped by
+# the dispose) or gc.proactive_reaction (stamped by the release). A bead with
+# neither still slings. beads.json feeds the guard the subject state the way
+# agents.json feeds the deliverable probe; it lists only these beads, so every
+# other sling test above (px-1) reads as un-reacted and is unaffected.
+cat > "$FXDIR/beads.json" <<'JSON'
+{
+  "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+  "px-released": {"metadata": {"gc.proactive_reaction": "1"}},
+  "px-fresh":    {"metadata": {}}
+}
+JSON
+REACTED_OUT="$(P sling px-reacted --dry-run 2>&1 || true)"
+absent "a reacted bead is NOT re-slung (no sling command emitted)" "gc sling" "$REACTED_OUT"
+has    "…and the skip names the cause"                             "already carries a first reaction" "$REACTED_OUT"
+rec=0; P sling px-reacted --dry-run >/dev/null 2>&1 || rec=$?
+eq     "…and the skip is an idempotent no-op (exit 0)"             "0" "$rec"
+absent "a released bead (gc.proactive_reaction=1) is NOT re-slung" "gc sling" \
+       "$(P sling px-released --dry-run 2>&1 || true)"
+has    "an un-reacted bead still slings mol-first-reaction"        "--on mol-first-reaction" \
+       "$(P sling px-fresh --dry-run 2>&1 || true)"
+has    "a bead absent from the store reads as un-reacted, slings"  "--on mol-first-reaction" \
+       "$(P sling px-1 --dry-run 2>&1 || true)"
+rm -f "$FXDIR/beads.json"
+
 echo "── the process-scan trigger (movable-forward beads, board-ranked) ──"
 eq  "scan --json ranks the high-priority candidate first" "px-hi" "$(P scan --json | jq -r '.[0].id')"
 eq  "scan --json ranks the low-priority candidate last"   "px-lo" "$(P scan --json | jq -r '.[1].id')"
