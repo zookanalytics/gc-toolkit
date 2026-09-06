@@ -221,12 +221,12 @@ eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead sessio
 eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
 
 echo "--- source arm: an in-flight-PR source bead is NOT returned to the pool ---"
-# The recurring false-positive this guard fixes: a work bead handed off, its
-# branch pushed and PR in flight (merge_result pull_request/pre_open_gate), still
-# names its dead session, so orphan recovery classes it source and would
-# delete-source + reopen-source it back to the pool — re-dispatching finished work
-# the refinery owns landing, and stamping a recovery the crash-loop signal reads
-# as a RATE. The guard skips it: no delete-source, no reopen, bead left as-is.
+# A work bead handed off with its branch pushed and its PR in flight (merge_result
+# pull_request/pre_open_gate) still names its dead session, so orphan recovery
+# classes it source and would delete-source + reopen-source it back to the pool,
+# re-dispatching finished work the refinery owns landing and stamping a recovery
+# the crash-loop signal reads as a RATE. The source arm skips it: no delete-source,
+# no reopen, bead left as-is.
 for MR in pull_request pre_open_gate; do
   store "[{\"id\":\"tk-inflight\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"in-flight work bead\",
            \"metadata\":{\"branch\":\"polecat/tk-inflight\",\"merge_result\":\"$MR\",

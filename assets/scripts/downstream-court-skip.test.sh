@@ -11,8 +11,7 @@
 # Returning it to the pool re-dispatches finished work AND stamps a recovery, and
 # the downstream crash-loop signal reads that stamp as a RATE off
 # recovered_at/recovered_count, so a bead that keeps arriving here escalates a
-# moot visit every cycle (live: 25 beads re-recovered in one cycle,
-# recovered_count up to 11). Dropping such beads from the candidate set before the
+# moot visit every cycle. Dropping such beads from the candidate set before the
 # liveness loop is what stops both the re-dispatch and the escalation.
 #
 # Three states name work that is not the pool's to recover:
@@ -151,21 +150,22 @@ eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"merge_result":"merged
       | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "lx-9" \
    "a survivor keeps its fields (including the .owner host-bead-skip stamped)"
 
-# --- The live instances, through the real pipeline. --------------------------
-# The shapes actually recovered in the loop: OWNED beads (a dead session pin) that
-# reached an in-flight PR. tk-k80q5m carried merge_result=pull_request +
-# gc.routed_to=human (recovered_count 11); tk-w0gk2p merge_result=pre_open_gate
-# (7). host-bead-skip keeps them (they name an owner via gc.session_name);
-# downstream-court-skip must then drop them, so the composed candidate set never
-# offers them to the loop. The genuine orphan beside them — a dead session, a
-# pushed branch, but NO PR — must still survive to be recovered.
-LIVE='[
-  {"id":"tk-k80q5m","assignee":null,"metadata":{"gc.session_name":"polecat-1-pool","merge_result":"pull_request","gc.routed_to":"human","pr.machine":"wedged-exception@c142@ts"}},
-  {"id":"tk-w0gk2p","assignee":null,"metadata":{"gc.session_name":"polecat-2-pool","merge_result":"pre_open_gate","gc.routed_to":"human"}},
+# --- The composed pipeline: host-bead-skip then downstream-court-skip. --------
+# The shape that reaches the loop as a false orphan: an OWNED bead (a dead-session
+# pin in gc.session_name) whose work already reached an in-flight PR.
+# host-bead-skip keeps it because it names an owner, so downstream-court-skip is
+# what must drop it, leaving the composed candidate set with nothing to offer the
+# loop. Two in-flight shapes drop: an open PR (merge_result pull_request, on a
+# human gate, its merge machine wedged) and a pre-open gate (merge_result
+# pre_open_gate). The genuine orphan beside them (a dead session, a pushed branch,
+# but NO PR) survives to be recovered.
+FIX5='[
+  {"id":"tk-owned-pr","assignee":null,"metadata":{"gc.session_name":"polecat-1-pool","merge_result":"pull_request","gc.routed_to":"human","pr.machine":"wedged-exception@c142@ts"}},
+  {"id":"tk-owned-gate","assignee":null,"metadata":{"gc.session_name":"polecat-2-pool","merge_result":"pre_open_gate","gc.routed_to":"human"}},
   {"id":"tk-lost","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","branch":"polecat/tk-lost"}}
 ]'
-eq "$(pipeline "$LIVE")" "tk-lost" \
-   "host-bead-skip | downstream-court-skip drops the in-flight orphans (tk-k80q5m, tk-w0gk2p), keeps the genuine dead-session orphan (tk-lost)"
+eq "$(pipeline "$FIX5")" "tk-lost" \
+   "host-bead-skip | downstream-court-skip drops the in-flight orphans (owned PR + pre-open gate), keeps the genuine dead-session orphan (tk-lost)"
 
 echo
 echo "downstream-court-skip: $PASS passed, $FAIL failed"
