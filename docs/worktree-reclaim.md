@@ -19,7 +19,9 @@ presents as a city with no work rather than as a disk alarm.
 `scope = "city"`, no LLM and no agent. It enumerates `git worktree list` over
 every rig repo and the town repo, because a worktree living under one rig's
 tree can be registered in another repo's git dir and only the registry knows
-which.
+which. It runs two passes in one budget: it removes the worktrees of closed
+beads, then drops the `polecat/<bead-id>` branches those worktrees leave
+behind.
 
 A worktree is removed when all of these hold:
 
@@ -46,17 +48,51 @@ a defined close time — so a custom done status leaves a worktree unreaped
 rather than reaped while live. A store whose contract cannot be read is skipped
 whole, and if none can be read the pass refuses.
 
-The identity chain is `metadata.work_dir`, so the reverse lookup is exact path
-equality and no bead id is ever parsed out of a path or a branch name. The two
-disagree in practice: a rework child stands on its predecessor's branch while
-keeping its own directory, so `worktrees/tk-ok9t2` is checked out on
-`polecat/tk-z4aka`, and either name alone resolves to the wrong bead.
+For worktree removal the identity chain is `metadata.work_dir`, so the reverse
+lookup is exact path equality and no bead id is parsed out of a path. Path and
+branch disagree in practice: a rework child stands on its predecessor's branch
+while keeping its own directory, so `worktrees/tk-ok9t2` is checked out on
+`polecat/tk-z4aka`, and either name alone resolves to the wrong bead. The branch
+pass is the exception — it has no `work_dir` and keys on the ref's bead id, as
+"Dropping the branch" below describes.
 
 Both branch questions are asked, for the same reason. The branch the checkout
 is on and the branch its beads recorded are not always the same ref, and
 either being live holds the tree. Asking the ledger for live beads on the
 branch is what covers a branch in the pre-open codex gate, which is live work
 carrying no pull request at all.
+
+## Dropping the branch
+
+`git worktree remove` deletes the checkout and leaves the branch, so a
+`polecat/<bead-id>` ref outlives every worktree the pass takes and accretes one
+per work item. The branch pass drops those refs. Unlike the worktree pass it
+parses the bead id out of the branch name: a branch carries no `work_dir`, and
+the name is its only link to a bead.
+
+It owns one family, `polecat/<bead-id>`, and the whole name after `polecat/`
+must be exactly a bead id to belong to it. Any other ref — a roadmap branch, a
+`claude/*` research branch, a design-doc trio, or a `polecat/<bead-id>-<suffix>`
+variant a different bead holds — names no bead the pass may reason about and is
+left alone. Within the family a branch is dropped only once the bead it names
+has closed, its content is already on the default branch, and no live bead
+records the ref and no open pull request has it as head. The bead a branch names
+is not always the bead that holds it: a rework or rebase child records its
+predecessor's branch, so a ref whose name-bead has closed can still be a live
+claimant's only copy of resumable work. That is the same signal the worktree
+pass reads to keep a tree. A branch whose content is proven nowhere is kept too,
+because the pass must never take the only copy of unmerged work.
+
+`origin/main`, not the shared checkout's own lagging `main`, is the authority
+for "on the default branch". The proof is reachability — the tip is an ancestor
+of it — or the squash signal, the bead id on one of its commit subjects, since a
+squash tip is a new sha and never an ancestor. A branch whose origin counterpart
+was deleted (`[gone]` upstream, the usual post-merge cleanup) is offered to `git
+branch -d` first, whose own merged-check is a second gate; every squash-merged
+tip it declines falls to `git branch -D`, safe because the proof already showed
+the content landed. A closed-lookup that fails or answers empty confirms
+nothing, so the family is held — the same fail-closed the worktree pass takes on
+an unreadable ledger.
 
 ## Removal is reversible, not gated
 
@@ -164,7 +200,10 @@ git -C <repo> worktree add <path> archive/worktree/<bead>@<sha>
 
 ## What it does not touch
 
-The reaper removes checkouts, not refs. A branch is left as it stands, which
-is what makes an attached worktree restorable without consulting a tag at all.
-Harness scratch is `scratch-reap`'s (docs/scratch-reclaim.md); the two are
-separate tenants of separate roots and neither reclaims the other's.
+The reaper takes worktrees, and the `polecat/<bead-id>` refs of closed work
+whose content has landed. It leaves every other ref: one outside that family,
+one whose bead is still live, one whose content is on no default branch, and the
+branch of any worktree still on disk — a checked-out branch is never a
+candidate, which is what keeps an attached worktree restorable without
+consulting a tag. Harness scratch is `scratch-reap`'s (docs/scratch-reclaim.md);
+the two are separate tenants of separate roots and neither reclaims the other's.

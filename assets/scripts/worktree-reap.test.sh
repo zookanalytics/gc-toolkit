@@ -43,6 +43,7 @@ export STUB_SESSIONS="$TMP/sessions.json"
 export STUB_STATUSES="$TMP/statuses.json"
 export STUB_PR_BRANCHES="$TMP/pr-branches.txt"
 export STUB_PR_RC=0
+export STUB_BD_ID_RC=0
 export PATH="$BIN:$PATH"
 
 # --- stubs -----------------------------------------------------------------
@@ -52,21 +53,38 @@ export PATH="$BIN:$PATH"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
+# A --rig <name> travels right after the top-level command group. Strip it,
+# keeping the group as $1 so the case key stays "<group> <sub>"; the captured
+# name lets bd statuses/list read a per-rig fixture (statuses.<rig>.json,
+# beads.<rig>.json) where a multi-store test writes one, and fall back to the
+# shared file otherwise. Single-store tests never pass --rig, so nothing here
+# changes for them.
+grp="${1:-}"; rig=""
+if [ "${2:-}" = "--rig" ]; then rig="${3:-}"; set -- "$grp" "${@:4}"; fi
 case "${1:-} ${2:-}" in
   "agent list")   cat "${STUB_AGENTS:?}" ;;
   "session list") cat "${STUB_SESSIONS:?}" ;;
-  "rig list")     echo '{"rigs":[]}' ;;
-  "bd statuses")  cat "${STUB_STATUSES:?}" ;;
+  "rig list")     if [ -n "${STUB_RIGS:-}" ]; then cat "$STUB_RIGS"; else echo '{"rigs":[]}'; fi ;;
+  "bd statuses")
+    sf="${STUB_STATUSES:?}"
+    [ -n "$rig" ] && [ -f "${STUB_STATUSES%.json}.$rig.json" ] && sf="${STUB_STATUSES%.json}.$rig.json"
+    cat "$sf" ;;
   "bd list")
-    want=""
+    want=""; has_id=0
     while [ $# -gt 0 ]; do
-      case "$1" in --status) want="$2"; shift ;; --status=*) want="${1#--status=}" ;; esac
+      case "$1" in --status) want="$2"; shift ;; --status=*) want="${1#--status=}" ;; --id|--id=*) has_id=1 ;; esac
       shift
     done
+    # The branch pass alone scopes its closed-lookup with --id; STUB_BD_ID_RC
+    # lets a test fail exactly that read while the unscoped worktree-side ledger
+    # reads keep answering.
+    [ "$has_id" = "1" ] && [ "${STUB_BD_ID_RC:-0}" != "0" ] && { echo "gc: simulated ledger failure" >&2; exit "${STUB_BD_ID_RC}"; }
+    bf="${STUB_BEADS:?}"
+    [ -n "$rig" ] && [ -f "${STUB_BEADS%.json}.$rig.json" ] && bf="${STUB_BEADS%.json}.$rig.json"
     # Bind the row before testing it: the argument to `contains` is evaluated
     # against the string being searched, so a bare `.status` in there reads the
     # status field of $want.
-    jq -c --arg want ",$want," '[ .[] | . as $b | select($want | contains("," + $b.status + ",")) ]' "${STUB_BEADS:?}"
+    jq -c --arg want ",$want," '[ .[] | . as $b | select($want | contains("," + $b.status + ",")) ]' "$bf"
     ;;
   *) exit 0 ;;
 esac
@@ -131,15 +149,19 @@ mk_wt() { # <path> <branch|--detach>
 }
 
 # A bead row as `bd list --json` returns one.
-bead() { # <id> <status> <hours-since-close> <work_dir> <branch>
-    local id="$1" st="$2" hrs="$3" wd="$4" br="$5"
+bead_to() { # <file> <id> <status> <hours-since-close> <work_dir> <branch>
+    local f="$1" id="$2" st="$3" hrs="$4" wd="$5" br="$6"
     local at; at="$(date -u -d "@$((NOW - hrs * HOUR))" +%Y-%m-%dT%H:%M:%SZ)"
+    [ -s "$f" ] || echo '[]' > "$f"
     jq -c --arg id "$id" --arg st "$st" --arg at "$at" --arg wd "$wd" --arg br "$br" \
         '. += [{id: $id, status: $st, closed_at: $at, updated_at: $at,
                 metadata: ({} | if $wd == "" then . else .work_dir = $wd end
                               | if $br == "" then . else .branch  = $br end)}]' \
-        "$STUB_BEADS" > "$STUB_BEADS.n" && mv "$STUB_BEADS.n" "$STUB_BEADS"
+        "$f" > "$f.n" && mv "$f.n" "$f"
 }
+# The default store the single-repo tests write. bead_to on a named file is the
+# multi-store form, where one rig stays readable while another cannot be read.
+bead() { bead_to "$STUB_BEADS" "$@"; }
 
 run() { bash "$SUT" "$@" 2>&1; }
 exists() { [ -e "$1" ]; }
@@ -476,6 +498,221 @@ OUT="$(WORKTREE_REAP_CLOSED_AFTER=notanumber run)"; RC=$?
 eq "$RC" 2 "a non-numeric horizon is refused"
 OUT="$(run --wat)"; RC=$?
 eq "$RC" 2 "an unknown argument is refused"
+
+# --- the branch pass drops what the worktree pass leaves behind -------------
+# `git worktree remove` leaves the branch, so a polecat/<bead-id> ref outlives
+# its checkout. The pass drops one once its bead has CLOSED and its content is
+# on the default branch — by reachability, or by the squash signal of its bead
+# id on a commit subject. origin/main is the authority, built here with plumbing
+# so the working tree and local main stay put. Every take is asserted beside a
+# keep in one run: an open bead, a still-unmerged tip, a ref naming no bead, and
+# a ref outside the polecat family are all held while the merged, closed
+# neighbours go — and a dry run over the same fixture takes none of them.
+land() { # <subject> — append a commit to origin/main, working tree untouched
+    local parent tree c
+    parent="$(git -C "$REPO" rev-parse -q --verify refs/remotes/origin/main)"
+    tree="$(git -C "$REPO" rev-parse "${parent}^{tree}")"
+    c="$(git -C "$REPO" commit-tree "$tree" -p "$parent" -m "$1")"
+    git -C "$REPO" update-ref refs/remotes/origin/main "$c"
+}
+gone_upstream() { # <branch> — an origin upstream configured but never fetched
+    git -C "$REPO" config "branch.$1.remote" origin
+    git -C "$REPO" config "branch.$1.merge" "refs/heads/$1"
+}
+branch_exists() { git -C "$REPO" show-ref --verify --quiet "refs/heads/$1"; }
+
+new_repo
+# origin/main starts at the reachable branch's tip, so that branch is an
+# ancestor of it; the squash subjects land on top.
+mk_wt "$REPO/wt/reach" polecat/zz-reach
+REACH="$(git -C "$REPO" rev-parse polecat/zz-reach)"
+git -C "$REPO" worktree remove --force "$REPO/wt/reach"
+git -C "$REPO" update-ref refs/remotes/origin/main "$REACH"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+
+# squash-landed: closed bead, its id on a default-branch subject, worktree gone
+mk_wt "$REPO/wt/drop" polecat/zz-drop
+git -C "$REPO" worktree remove --force "$REPO/wt/drop"
+land "feat: the drop (zz-drop) (#1)"
+# open bead: landed all the same, but a live bead holds its branch
+mk_wt "$REPO/wt/open" polecat/zz-open
+git -C "$REPO" worktree remove --force "$REPO/wt/open"
+land "feat: the open (zz-open) (#2)"
+# unmerged: closed, but its content reached the default branch nowhere
+mk_wt "$REPO/wt/unmgd" polecat/zz-unmgd
+git -C "$REPO" worktree remove --force "$REPO/wt/unmgd"
+# gone upstream, at the default-branch base: git's own -d takes it
+git -C "$REPO" branch polecat/zz-gone main
+gone_upstream polecat/zz-gone
+# gone upstream, squash-merged: -d declines the unmerged tip, -D takes it
+mk_wt "$REPO/wt/gsq" polecat/zz-gsq
+git -C "$REPO" worktree remove --force "$REPO/wt/gsq"
+gone_upstream polecat/zz-gsq
+land "feat: gone and squashed (zz-gsq) (#3)"
+# names no bead, and a ref outside the family: both left alone
+git -C "$REPO" branch polecat/roadmap main
+git -C "$REPO" branch claude/research main
+# a suffix ref: its bead-looking prefix zz-drop is a closed, landed bead, but
+# its whole name is not a bead id — it is a different branch a live bead holds
+# (zz-armowner), with an unmerged tip. Reading the whole ref, not a prefix,
+# names no bead, so the pass leaves it alone; a prefix match would read it as
+# zz-drop and force-delete the live work.
+mk_wt "$REPO/wt/arm" polecat/zz-drop-arm
+git -C "$REPO" worktree remove --force "$REPO/wt/arm"
+
+bead zz-reach closed 100 "" polecat/zz-reach
+bead zz-drop  closed 100 "" polecat/zz-drop
+bead zz-open  open    "" "" polecat/zz-open
+bead zz-unmgd closed 100 "" polecat/zz-unmgd
+bead zz-gone  closed 100 "" polecat/zz-gone
+bead zz-gsq   closed 100 "" polecat/zz-gsq
+bead zz-armowner open "" "" polecat/zz-drop-arm
+
+DRY="$(run --dry-run)"
+has "$DRY" "would drop 4 stale local branches" "--dry-run reports the branch plan"
+has "$DRY" "zz-gsq" "--dry-run names a branch it would drop"
+if branch_exists polecat/zz-reach && branch_exists polecat/zz-gsq; then ok "--dry-run drops no branch"; else bad "--dry-run drops no branch"; fi
+
+OUT="$(run)"
+if branch_exists polecat/zz-reach; then bad "a closed bead's branch reachable from the default branch is dropped"; else ok "a closed bead's branch reachable from the default branch is dropped"; fi
+if branch_exists polecat/zz-drop; then bad "a closed bead's branch squash-landed on the default branch is dropped"; else ok "a closed bead's branch squash-landed on the default branch is dropped"; fi
+if branch_exists polecat/zz-gone; then bad "a gone-upstream branch at the default-branch base is dropped by git branch -d"; else ok "a gone-upstream branch at the default-branch base is dropped by git branch -d"; fi
+if branch_exists polecat/zz-gsq; then bad "a gone-upstream squash-merged branch falls from -d through to -D"; else ok "a gone-upstream squash-merged branch falls from -d through to -D"; fi
+if branch_exists polecat/zz-open; then ok "an OPEN bead holds its branch, though its id landed on the default branch"; else bad "an OPEN bead holds its branch, though its id landed on the default branch"; fi
+if branch_exists polecat/zz-unmgd; then ok "a closed bead whose content reached no default branch keeps its branch"; else bad "a closed bead whose content reached no default branch keeps its branch"; fi
+if branch_exists polecat/roadmap; then ok "a polecat ref naming no bead is left alone"; else bad "a polecat ref naming no bead is left alone"; fi
+if branch_exists claude/research; then ok "a ref outside the polecat family is never a candidate"; else bad "a ref outside the polecat family is never a candidate"; fi
+if branch_exists polecat/zz-drop-arm; then ok "a suffix ref whose bead-looking prefix is a closed landed bead is left alone"; else bad "a suffix ref whose bead-looking prefix is a closed landed bead is left alone"; fi
+has "$OUT" "dropped 4 stale local branches (1 via git branch -d, 3 via -D)" "the summary counts the drops and splits them by delete verb"
+
+# A live bead on the branch holds it even when its content is on the default
+# branch: the ref is a resumable claim, not disposable cruft, until it closes.
+new_repo
+mk_wt "$REPO/wt/live" polecat/zz-live
+LIVE_TIP="$(git -C "$REPO" rev-parse polecat/zz-live)"
+git -C "$REPO" worktree remove --force "$REPO/wt/live"
+git -C "$REPO" update-ref refs/remotes/origin/main "$LIVE_TIP"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+mk_wt "$REPO/wt/donebr" polecat/zz-done
+git -C "$REPO" worktree remove --force "$REPO/wt/donebr"
+land "feat: done (zz-done) (#9)"
+bead zz-live deferred "" "" polecat/zz-live
+bead zz-done closed  100 "" polecat/zz-done
+run > /dev/null
+if branch_exists polecat/zz-live; then ok "a deferred bead's branch is held though reachable from the default branch"; else bad "a deferred bead's branch is held though reachable from the default branch"; fi
+if branch_exists polecat/zz-done; then bad "its closed neighbour is dropped in the same run"; else ok "its closed neighbour is dropped in the same run"; fi
+
+# The bead a branch NAMES is not always the bead that HOLDS it. A rework or
+# rebase child records its predecessor's branch in metadata.branch, or an open
+# PR carries it as head, while the name-bead is closed and its content landed.
+# The closed-and-squashed proof alone would drop the ref, but the tip is that
+# live claimant's only local copy of unmerged work. That is the same
+# OPEN_BRANCH / PR_BRANCH signal the worktree pass keeps a tree on. Both are
+# held here while a closed-only neighbour no live bead claims is dropped in the
+# same run.
+new_repo
+git -C "$REPO" update-ref refs/remotes/origin/main main
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+mk_wt "$REPO/wt/childbr" polecat/zz-base
+git -C "$REPO" worktree remove --force "$REPO/wt/childbr"
+land "feat: the base (zz-base) (#7)"
+mk_wt "$REPO/wt/prbr" polecat/zz-prheld
+git -C "$REPO" worktree remove --force "$REPO/wt/prbr"
+land "feat: pr held (zz-prheld) (#8)"
+mk_wt "$REPO/wt/neighbr" polecat/zz-neigh
+git -C "$REPO" worktree remove --force "$REPO/wt/neighbr"
+land "feat: the neighbour (zz-neigh) (#9)"
+echo "polecat/zz-prheld" > "$STUB_PR_BRANCHES"
+bead zz-base   closed 100 "" polecat/zz-base
+bead zz-child  open    "" "" polecat/zz-base
+bead zz-prheld closed 100 "" polecat/zz-prheld
+bead zz-neigh  closed 100 "" polecat/zz-neigh
+OUT="$(run)"
+if branch_exists polecat/zz-base; then ok "a different live bead's claim on a closed, landed ref holds the branch"; else bad "a different live bead's claim on a closed, landed ref holds the branch"; fi
+if branch_exists polecat/zz-prheld; then ok "an open PR's head holds a closed, landed branch"; else bad "an open PR's head holds a closed, landed branch"; fi
+if branch_exists polecat/zz-neigh; then bad "a closed-only neighbour no live bead claims is dropped in the same run"; else ok "a closed-only neighbour no live bead claims is dropped in the same run"; fi
+has "$OUT" "dropped 1 stale local branches" "only the unclaimed neighbour is dropped"
+
+# A store the branch pass cannot read confirms nothing closed, so the family is
+# held — the same fail-closed the worktree pass takes on a down ledger. The stub
+# fails exactly the --id-scoped closed-lookup the branch pass makes; the live
+# bead keeps the worktree-side ledger answering, so the pass reaches that step.
+new_repo
+mk_wt "$REPO/wt/held-br" polecat/zz-held
+HELD_TIP="$(git -C "$REPO" rev-parse polecat/zz-held)"
+git -C "$REPO" worktree remove --force "$REPO/wt/held-br"
+git -C "$REPO" update-ref refs/remotes/origin/main "$HELD_TIP"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+bead zz-anchor open "" "" polecat/zz-anchor
+bead zz-held closed 100 "" polecat/zz-held
+STUB_BD_ID_RC=1 run > /dev/null
+if branch_exists polecat/zz-held; then ok "a branch pass whose closed-lookup fails drops nothing"; else bad "a branch pass whose closed-lookup fails drops nothing"; fi
+
+# A repo whose open-PR listing fails holds its whole BRANCH family, not just its
+# worktrees. An empty PR_BRANCH map then means "unread", not "no open PR heads
+# this ref", so a closed, landed branch an unseen PR could still head is kept.
+# The keep is the PR-unreadable run; the take is a readable run over the same
+# branch, which drops it — proving the hold, not another gate, is what saved it.
+new_repo
+mk_wt "$REPO/wt/heldpr" polecat/zz-heldpr
+HELDPR_TIP="$(git -C "$REPO" rev-parse polecat/zz-heldpr)"
+git -C "$REPO" worktree remove --force "$REPO/wt/heldpr"
+git -C "$REPO" update-ref refs/remotes/origin/main "$HELDPR_TIP"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+bead zz-anchor open   ""  "" polecat/zz-anchor    # keeps the ledger answering
+bead zz-heldpr closed 100 "" polecat/zz-heldpr    # closed, landed: droppable but for the hold
+: > "$STUB_PR_BRANCHES"                            # no PR names it once the listing works
+OUT="$(STUB_PR_RC=1 run)"
+if branch_exists polecat/zz-heldpr; then ok "a repo whose PR listing fails holds its closed, landed branch"; else bad "a repo whose PR listing fails holds its closed, landed branch"; fi
+has "$OUT" "held $REPO" "the branch-family hold is the repo hold already reported"
+run > /dev/null                                    # PRs readable and empty: the same branch is a valid drop
+if branch_exists polecat/zz-heldpr; then bad "with the PR listing readable the branch is dropped"; else ok "with the PR listing readable the branch is dropped"; fi
+
+# A store whose live contract will not read holds its whole branch family, even
+# while another store keeps the global ledger answering so the pass does not
+# refuse outright. The unreadable store's live rows are skipped, so OPEN_BRANCH
+# never learns a live claimant there; an independent closed-lookup must not then
+# be trusted to drop its refs. The healthy store's own closed, landed branch is
+# dropped in the same run — the take that proves the pass ran and discriminated.
+new_repo                                   # $REPO is rig "demo": healthy
+REPO2="$CITY/rigs/broken"                  # rig "broken": its status contract will not parse
+git init -q -b main "$REPO2"
+git -C "$REPO2" config user.email t@example.com
+git -C "$REPO2" config user.name Test
+git -C "$REPO2" config commit.gpgsign false
+git -C "$REPO2" remote add origin https://github.com/zook/broken.git
+echo seed > "$REPO2/seed"; git -C "$REPO2" add seed; git -C "$REPO2" commit -qm seed
+# Rig mode: both stores come from `gc rig list`, named, so --rig is passed.
+jq -n --arg r1 "$REPO" --arg r2 "$REPO2" \
+    '{rigs:[{name:"demo",path:$r1,hq:false},{name:"broken",path:$r2,hq:false}]}' > "$TMP/rigs.json"
+export STUB_RIGS="$TMP/rigs.json"
+# demo: a live bead keeps its ledger answering, and a closed, landed branch is the take.
+: > "$TMP/beads.demo.json"
+bead_to "$TMP/beads.demo.json" d-live     open   ""  "" polecat/d-live
+bead_to "$TMP/beads.demo.json" zz-healthy closed 100 "" polecat/zz-healthy
+mk_wt "$REPO/wt/healthy" polecat/zz-healthy
+HEALTHY_TIP="$(git -C "$REPO" rev-parse polecat/zz-healthy)"
+git -C "$REPO" worktree remove --force "$REPO/wt/healthy"
+git -C "$REPO" update-ref refs/remotes/origin/main "$HEALTHY_TIP"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+# broken: statuses will not parse, so its live rows are never read. Its closed,
+# landed name-bead zz-bad would fall to the independent closed-lookup; a live
+# child records polecat/zz-bad, the claimant the skipped live read cannot see.
+# The family is held because the STORE is unreadable, not because the child was seen.
+echo 'not json' > "$TMP/statuses.broken.json"
+: > "$TMP/beads.broken.json"
+bead_to "$TMP/beads.broken.json" zz-bad   closed 100 "" polecat/zz-bad
+bead_to "$TMP/beads.broken.json" zz-child open   ""  "" polecat/zz-bad
+BAD_TREE="$(git -C "$REPO2" rev-parse main^{tree})"
+BAD_TIP="$(git -C "$REPO2" commit-tree "$BAD_TREE" -p "$(git -C "$REPO2" rev-parse main)" -m 'work in zz-bad')"
+git -C "$REPO2" branch polecat/zz-bad "$BAD_TIP"
+git -C "$REPO2" update-ref refs/remotes/origin/main "$BAD_TIP"
+git -C "$REPO2" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+OUT="$(WORKTREE_REAP_REPOS= run)"
+if git -C "$REPO2" show-ref --verify --quiet refs/heads/polecat/zz-bad; then ok "an unreadable store's branch family is held though its name-bead is closed and landed"; else bad "an unreadable store's branch family is held though its name-bead is closed and landed"; fi
+if git -C "$REPO" show-ref --verify --quiet refs/heads/polecat/zz-healthy; then bad "the healthy store's closed, landed branch is dropped in the same run"; else ok "the healthy store's closed, landed branch is dropped in the same run"; fi
+has "$OUT" "dropped 1 stale local branches" "only the healthy store's branch is dropped"
+unset STUB_RIGS
 
 echo
 echo "worktree-reap.test.sh: $PASS passed, $FAIL failed"

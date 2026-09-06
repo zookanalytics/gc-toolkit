@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# worktree-reap.sh — remove the git worktrees of work beads that have closed.
+# worktree-reap.sh — remove the worktrees, and drop the local branches, of work
+# beads that have closed.
 #
 # A polecat creates a worktree per bead and records the path in
 # metadata.work_dir. Nothing removes it when the bead closes: the refinery
@@ -8,11 +9,21 @@
 # disk, one full working tree each, and the only reclaim is an operator
 # noticing the pressure.
 #
-# The disposability chain is the bead ledger, not the filesystem. A worktree
-# is named by metadata.work_dir, so the reverse lookup is exact path equality
-# and no bead id is ever parsed out of a path or a branch name — the two
-# disagree in practice, since a rework child stands on its predecessor's
-# branch while keeping its own directory.
+# The branch outlives the checkout: `git worktree remove` deletes the working
+# tree and leaves the ref, so a polecat/<bead-id> branch accretes per work item
+# with no ceiling. A second pass drops those refs once their bead has closed and
+# their content is proven on the default branch. Its rules are its own — the
+# disposability signal is the branch name's bead and the ref graph, not
+# metadata.work_dir — so it is documented at the pass itself.
+#
+# The disposability chain is the bead ledger, not the filesystem. For worktree
+# removal the identity is metadata.work_dir: the reverse lookup is exact path
+# equality and no bead id is parsed out of a path. Path and branch disagree in
+# practice, since a rework child stands on its predecessor's branch while
+# keeping its own directory, so the worktree pass keys on the path and never on
+# a branch name. The branch pass is the exception — it has no work_dir, so it
+# parses the bead id out of the polecat/<bead-id> ref name, under rules
+# documented at the pass.
 #
 # A worktree is removed when every one of these holds:
 #   - some bead names the path in metadata.work_dir, and none of the beads
@@ -201,9 +212,15 @@ protected_shape() { # <path>
 # a worktree unreaped (a leak) rather than reaped while live (a loss).
 declare -A OPEN_PATH=() OPEN_BRANCH=()
 declare -A CLOSED_AT=() CLOSED_BEAD=() CLOSED_BRANCHES=()
+# A store is ledger-ready only when its live rows actually read. The branch pass
+# gates on this: a repo whose live statuses or live rows did not read contributes
+# no OPEN_BRANCH protectors, so it cannot be told that a closed, landed ref is
+# still some live claimant's branch, and its whole family is held for the next
+# pass — the same fail-closed the worktree pass takes when it cannot read a store.
+declare -A LEDGER_OK=()
 LEDGER_READ=0
 for i in "${!REPO_PATHS[@]}"; do
-    name="${REPO_NAMES[$i]}"
+    name="${REPO_NAMES[$i]}"; repo="${REPO_PATHS[$i]}"
     RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
 
     LIVE_STATUSES="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" statuses --json 2>/dev/null \
@@ -212,11 +229,18 @@ for i in "${!REPO_PATHS[@]}"; do
     [ -n "$LIVE_STATUSES" ] || continue
     seen=0
 
+    # Capture the live-rows read's own exit status, not just its output: an empty
+    # result is "no live beads" and still ready, a failed query is "unknown" and
+    # is not. Only a read that succeeded marks the repo ledger-ready, so an empty
+    # OPEN_BRANCH reads as knowledge and not as a store that never answered.
+    LIVE_ROWS="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)" \
+        && LEDGER_OK["$repo"]=1 || LIVE_ROWS=""
+
     while IFS="$US" read -r wd br; do
         [ -n "$wd" ] && OPEN_PATH["$wd"]=1
         [ -n "$br" ] && OPEN_BRANCH["$br"]=1
         seen=1
-    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null \
+    done < <(printf '%s' "$LIVE_ROWS" \
         | jq -r '.[]? | (.metadata // {}) as $md
                  | select((($md.work_dir // "") != "") or (($md.branch // "") != ""))
                  | [($md.work_dir // ""), ($md.branch // "")] | join("\u001f")' 2>/dev/null || true)
@@ -410,6 +434,151 @@ Restore: git -C $repo worktree add $path $tag" </dev/null >/dev/null 2>&1; then
     REMOVED["$repo"]=$(( ${REMOVED[$repo]:-0} + 1 )); removed=$((removed + 1))
 done < "$WORK/wt"
 
+# --- branch pass: drop the local refs the worktree pass leaves behind -------
+# `git worktree remove` deletes a checkout but never its branch, so every
+# reaped worktree — and every polecat worktree ever removed by hand — leaves a
+# polecat/<bead-id> ref behind. They accrete with no ceiling, one per work item
+# forever. A ref is disposable exactly when the work it named has closed AND its
+# content already sits on the default branch, so deleting the ref discards
+# nothing.
+#
+# One family only: polecat/<bead-id>. Any other ref names no bead this pass may
+# reason about — a roadmap branch, a claude/* research branch, a design-doc
+# trio — and is left alone whatever its state. Within the family a live bead
+# (any status but closed) holds its branch, because that is resumable work; only
+# a closed bead's ref is a candidate, and only once its content is proven on the
+# default branch. A branch that fails the proof is kept: the reap must never
+# take the only copy of unmerged work.
+#
+# origin/main, not the rig checkout's own main, is the authority for that proof
+# — the shared checkout's local main lags behind the ref that work lands on. The
+# proof is reachability (the tip is an ancestor of the default branch) or the
+# squash signal (the bead id rode a commit subject onto it — a squash tip is a
+# new sha and never an ancestor). A branch whose origin counterpart was deleted
+# (`[gone]` upstream, the usual post-merge cleanup) is offered to `git branch
+# -d` first, whose own merged-check is a second gate; anything it declines,
+# every squash-merged tip among them, falls to `git branch -D` — safe, because
+# the proof already showed the content landed.
+BR_DROPPED=0; BR_D=0; BR_BIGD=0; br_stopped=""
+: > "$WORK/brplan"
+BEAD_RE='[a-z][a-z]-[a-z0-9]+(\.[0-9]+)*'
+
+# Branches the worktree pass took (or, in a dry run, would take) are no longer
+# held by a checkout. A real pass already dropped them from the registry;
+# reading the plan lets a dry run predict the same branches a real pass, which
+# removes first, would then be free to drop.
+declare -A FREED=()
+while IFS="$US" read -r _ ppath _; do
+    [ -n "$ppath" ] || continue
+    fb="$(awk -F"$US" -v p="$ppath" '$2 == p { print $3; exit }' "$WORK/wt")"
+    [ -n "$fb" ] && FREED["$fb"]=1
+done < "$WORK/plan"
+
+for i in "${!REPO_PATHS[@]}"; do
+    if over_budget; then br_stopped="budget"; break; fi
+    repo="${REPO_PATHS[$i]}"; name="${REPO_NAMES[$i]}"
+    RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
+
+    # Hold the whole family on the two signals that also hold a worktree. An
+    # unreadable PR listing (REPO_HELD) means an open PR could head a ref
+    # unseen; a live ledger that did not read (no LEDGER_OK) means a live
+    # claimant's branch is unknown. Under either, an empty PR_BRANCH / OPEN_BRANCH
+    # is absence of knowledge, not proof a closed, landed ref is disposable.
+    [ -n "${REPO_HELD[$repo]:-}" ] && continue
+    [ -n "${LEDGER_OK[$repo]:-}" ] || continue
+
+    # The default branch is the landing target and the merge authority. No
+    # readable one means no proof is possible here, so the whole family is held.
+    default_ref="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    [ -n "$default_ref" ] || default_ref="origin/main"
+    git -C "$repo" rev-parse --verify --quiet "$default_ref" >/dev/null 2>&1 || continue
+
+    # Still checked out in a surviving worktree -> off limits. git refuses to
+    # delete such a branch anyway; skipping keeps the pass quiet. This reads the
+    # registry as it stands now, after the worktree removals above.
+    unset CO; declare -A CO=()
+    while IFS= read -r b; do
+        [ -n "$b" ] && [ -z "${FREED[$b]:-}" ] && CO["$b"]=1
+    done < <(git -C "$repo" worktree list --porcelain 2>/dev/null \
+             | awk '/^branch /{ sub(/^branch refs\/heads\//, ""); print }')
+
+    # Candidate refs and the bead ids they name, in one walk of the family.
+    CANDS=(); unset CAND_BEAD; declare -A CAND_BEAD=(); ids=""
+    while IFS= read -r b; do
+        [ -n "$b" ] || continue
+        [ -n "${CO[$b]:-}" ] && continue
+        # A live bead can record this exact ref in metadata.branch, or an open
+        # PR can have it as head, while the bead its NAME encodes is closed and
+        # landed: a rework or rebase child stands on its predecessor's branch,
+        # and the ref is that child's only local copy of resumable work. The
+        # worktree pass already holds a tree on this same OPEN_BRANCH/PR_BRANCH
+        # signal; the ref needs it too.
+        [ -n "${OPEN_BRANCH[$b]:-}" ] && continue
+        [ -n "${PR_BRANCH[$b]:-}" ] && continue
+        # The whole name after polecat/ must BE a bead id, not merely begin with
+        # one: polecat/<bead-id>-arm is a different branch a different bead holds,
+        # and a start-anchored match would read it as <bead-id> and drop it the
+        # moment that bead closed and landed. Anchor both ends, so such a variant
+        # names no bead and falls to the skip below with the out-of-family refs.
+        bead="$(grep -oE "^$BEAD_RE$" <<< "${b#polecat/}")" || continue
+        [ -n "$bead" ] || continue
+        CANDS+=("$b"); CAND_BEAD["$b"]="$bead"; ids="$ids,$bead"
+    done < <(git -C "$repo" for-each-ref --format='%(refname:short)' refs/heads/polecat 2>/dev/null)
+    [ "${#CANDS[@]}" -gt 0 ] || continue
+
+    # Which of those beads are closed. A missing id falls out of the answer, so a
+    # branch naming a bead that no longer exists is never confirmed-closed and is
+    # left alone. A ledger read that fails or comes back empty confirms nothing,
+    # and the family is held for the next pass — the same fail-closed a down
+    # store already forces on the worktree side.
+    unset CLOSED_ID; declare -A CLOSED_ID=()
+    while IFS= read -r id; do
+        [ -n "$id" ] && CLOSED_ID["$id"]=1
+    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status closed --id "${ids#,}" --limit 0 --json 2>/dev/null \
+             | jq -r '.[]?.id // empty' 2>/dev/null || true)
+
+    landed_built=0
+    for b in "${CANDS[@]}"; do
+        bead="${CAND_BEAD[$b]}"
+        [ -n "${CLOSED_ID[$bead]:-}" ] || continue
+        if over_budget; then br_stopped="budget"; break; fi
+
+        # The proof that dropping loses nothing: the tip is reachable from the
+        # default branch, or the bead id rode a commit subject onto it.
+        reason=""
+        if git -C "$repo" merge-base --is-ancestor "refs/heads/$b" "$default_ref" 2>/dev/null; then
+            reason="reachable"
+        else
+            if [ "$landed_built" -eq 0 ]; then
+                git -C "$repo" log "$default_ref" --format='%s' 2>/dev/null \
+                    | grep -oE "\($BEAD_RE\)" | tr -d '()' | sort -u > "$WORK/landed" 2>/dev/null || : > "$WORK/landed"
+                landed_built=1
+            fi
+            if grep -qxF "$bead" "$WORK/landed" 2>/dev/null; then reason="squashed"; fi
+        fi
+        [ -n "$reason" ] || continue
+
+        printf '%s%s%s%s%s\n' "$bead" "$US" "$b" "$US" "$reason" >> "$WORK/brplan"
+        [ "$DRY_RUN" -eq 1 ] && continue
+
+        # Gone-origin branches go through git's own merged-check first, a second
+        # gate over the proof above; a squash tip it cannot see as merged falls
+        # to the force delete, which the proof has already made safe.
+        dropped=""
+        if [ "$(git -C "$repo" for-each-ref --format='%(upstream:track)' "refs/heads/$b" 2>/dev/null)" = "[gone]" ]; then
+            git -C "$repo" branch -d "$b" >/dev/null 2>&1 || true
+            git -C "$repo" show-ref --verify --quiet "refs/heads/$b" || dropped="-d"
+        fi
+        if [ -z "$dropped" ]; then
+            git -C "$repo" branch -D "$b" >/dev/null 2>&1 || true
+            git -C "$repo" show-ref --verify --quiet "refs/heads/$b" && continue
+            dropped="-D"
+        fi
+        BR_DROPPED=$((BR_DROPPED + 1))
+        if [ "$dropped" = "-d" ]; then BR_D=$((BR_D + 1)); else BR_BIGD=$((BR_BIGD + 1)); fi
+    done
+done
+
 gib() { awk -v k="$1" 'BEGIN { printf "%.2f", k / 1048576 }'; }
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -418,6 +587,11 @@ if [ "$DRY_RUN" -eq 1 ]; then
     # The whole plan, not a sample: --dry-run is the operator's review surface,
     # and a truncated list is not something anyone can approve.
     awk -F"$US" '{ printf "    %s  %s\n", $1, $2 }' "$WORK/plan"
+    if [ -s "$WORK/brplan" ]; then
+        brc=$(wc -l < "$WORK/brplan"); brc=$((brc))
+        echo "  would drop $brc stale local branches, each naming a closed bead whose content is already on the default branch"
+        awk -F"$US" '{ printf "    %s  %s  (%s)\n", $1, $2, $3 }' "$WORK/brplan"
+    fi
     for repo in "${!REPO_HELD[@]}"; do echo "  held $repo: ${REPO_HELD[$repo]}"; done
     exit 0
 fi
@@ -428,10 +602,12 @@ printf '%s: removed %d of %d registered worktrees in %ss — free space on %s: %
 for repo in "${!REMOVED[@]}"; do
     printf '%s:   %s — removed %d\n' "$PROG" "$repo" "${REMOVED[$repo]}"
 done
+[ "$BR_DROPPED" -gt 0 ] && printf '%s: dropped %d stale local branches (%d via git branch -d, %d via -D); no content lost — each was already on the default branch\n' "$PROG" "$BR_DROPPED" "$BR_D" "$BR_BIGD"
 [ "$refused" -gt 0 ] && echo "$PROG: $refused removals refused (dirty tree, or the tip could not be pinned) — left for the next pass"
 [ "$survived" -gt 0 ] && echo "$PROG: $survived removals reported success and left the directory standing — investigate, they freed nothing"
 for repo in "${!REPO_HELD[@]}"; do
-    echo "$PROG: held $repo — ${REPO_HELD[$repo]}; its worktrees are the next pass's"
+    echo "$PROG: held $repo — ${REPO_HELD[$repo]}; its worktrees and branches are the next pass's"
 done
 [ -n "$stopped" ] && echo "$PROG: yielded — ${BUDGET}s budget spent with $((planned - removed - refused - survived)) planned removals untaken; the next pass takes them"
+[ -n "$br_stopped" ] && echo "$PROG: branch pass yielded on the ${BUDGET}s budget; the next pass drops the rest"
 exit 0
