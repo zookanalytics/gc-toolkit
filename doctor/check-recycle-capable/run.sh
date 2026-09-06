@@ -106,10 +106,13 @@ fi
 # against its threshold and acts on nothing. GC_AGENT is cleared so a script
 # predating --measure self-gates out and returns empty rather than recycling
 # whatever agent runs the doctor.
-probe=$(mktemp -d 2>/dev/null || printf '')
+probe=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-recycle-capable.XXXXXX" 2>/dev/null || printf '')
 if [ -z "$probe" ]; then
     warnings+=("could not create a temp dir — the hook's measurement was not exercised, so a hook that measures nothing would not be visible")
 else
+    # probe dies with this check; the EXIT trap removes it even if a later arm
+    # or a signal ends the run before the rm below.
+    trap 'rm -rf "$probe"' EXIT
     t="$probe/transcript.jsonl"
     # A first line the 2MiB tail cut mid-record, an all-zero usage entry, an
     # older real one, then the newest — which is the live context size.

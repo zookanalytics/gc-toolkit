@@ -286,6 +286,45 @@ runm "$TMP/option-args-templated.sh"
 eq "$RC" 0 "a template beside the option argument is still a chosen name"
 eq "$OUT" "" "a clean file prints nothing"
 
+echo "── mktemp-untemplated: redirects and inline comments end the operands ──"
+
+# A redirect and an inline comment are not templates. A redirect's fd number
+# sits BEFORE its `<`/`>`, so a scan that dropped only the operator left the
+# digit behind (`2` from `2>/dev/null`) and it read as a phantom operand — the
+# bare call passed. A `#` opens a comment through end of line the same way.
+# Both spellings appear on the real call sites this rule guards.
+mk "$TMP/redirects-comments.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(@MKT@ 2>/dev/null)
+B=$(@MKT@ -q -d 2>err)
+C=$(@MKT@ 2>&1)
+D=$(@MKT@ -d 3</dev/null)
+E=$(@MKT@ >/tmp/out)
+F=$(@MKT@ -d 2>/dev/null || printf '')
+G=$(@MKT@ -p /var/tmp 2>/dev/null)
+@MKT@ # trailing comment
+FIX
+runm "$TMP/redirects-comments.sh"
+eq "$RC" 1 "a redirect or an inline comment does not stand in for a template"
+for n in 2 3 4 5 6 7 8 9; do
+    has "$OUT" "redirects-comments.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 8 "and nothing else is"
+
+# The same redirects and comments beside a chosen name stay clean: the fd
+# number and the comment are stripped, and the template that survives is seen.
+mk "$TMP/redirects-comments-templated.sh" <<'FIX'
+#!/usr/bin/env bash
+A=$(@MKT@ "${TMPDIR:-/tmp}/gctk-thing.XXXXXX" 2>/dev/null)
+B=$(@MKT@ -d "${TMPDIR:-/tmp}/gctk-thing.XXXXXX" 2>/dev/null || printf '')
+C=$(@MKT@ -t gctk-thing.XXXXXX 2>&1)
+D=$(@MKT@ "${TMPDIR:-/tmp}/gctk-thing.XXXXXX" >/tmp/out)
+@MKT@ "${TMPDIR:-/tmp}/gctk-thing.XXXXXX"  # trailing comment
+FIX
+runm "$TMP/redirects-comments-templated.sh"
+eq "$RC" 0 "a chosen name beside a redirect or a comment is clean"
+eq "$OUT" "" "a clean file prints nothing"
+
 echo "── mktemp-untemplated: an assignment prefix is still a command ──"
 
 # `VAR=val mktemp` runs mktemp with VAR set for that one command. It is a

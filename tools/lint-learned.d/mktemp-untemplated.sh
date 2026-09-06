@@ -63,9 +63,15 @@ is_comment() { # whole-line comments only; `cmd  # note` is code
 # the template. `$1` is the text AFTER `mktemp`, already isolated to one command.
 is_bare_args() {
     local rest word short="" after="" skip=0
-    # Stop at the end of the command: a closing paren, pipe, redirect,
-    # separator or logical operator ends the argument list.
-    rest="$(printf '%s' "$1" | sed -E 's/[)|;&<>].*//')"
+    # Stop at the end of the command: a closing paren, pipe, separator, logical
+    # operator, inline comment, or redirect ends the argument list. A redirect
+    # carries an optional fd number before the operator (`2>`, `2>&1`, `3<`), so
+    # the digits are stripped with it — left behind they read as a bogus
+    # template operand and the bare call passes. An unquoted `#` opens a comment
+    # that runs to end of line, so it ends the operands too.
+    rest="$(printf '%s' "$1" \
+        | sed -E 's/(^|[[:space:]])#.*$//' \
+        | sed -E 's/([)|;&]|[0-9]*[<>]).*//')"
     for word in $rest; do
         if [ "$skip" = 1 ]; then skip=0; continue; fi   # an option's own argument
         case "$word" in
