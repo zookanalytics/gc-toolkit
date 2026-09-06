@@ -1358,6 +1358,9 @@ eq "$NIRC" "2" "(DISMISS-INFER) no identity and no bead is a usage error"
 grep -q 'no session identity' <<< "$NIOUT" \
   && ok "(DISMISS-INFER) …and says the environment named no session" \
   || bad "(DISMISS-INFER) wrong no-identity refusal (got: $NIOUT)"
+grep -q 'dismiss <bead-id>' <<< "$NIOUT" \
+  && ok "(DISMISS-INFER) …and its recovery hint is the runnable dismiss form, not a placeholder" \
+  || bad "(DISMISS-INFER) no-identity hint is not a copyable dismiss <bead-id> (got: $NIOUT)"
 
 # A session that holds NO visit has no current sitting; refuse and name the
 # explicit-id form rather than dismiss whatever the store happens to return.
@@ -1366,6 +1369,9 @@ eq "$NVRC" "2" "(DISMISS-INFER) a session holding no visit refuses to guess"
 grep -q 'no open visit is assigned to this session' <<< "$NVOUT" \
   && ok "(DISMISS-INFER) …and points at the explicit-id form" \
   || bad "(DISMISS-INFER) wrong empty-sitting refusal (got: $NVOUT)"
+grep -q 'dismiss <bead-id>' <<< "$NVOUT" \
+  && ok "(DISMISS-INFER) …and that explicit-id form is the runnable dismiss <bead-id>" \
+  || bad "(DISMISS-INFER) empty-sitting hint is not a copyable dismiss <bead-id> (got: $NVOUT)"
 
 # More than one held visit is ambiguous: dismissing either would be a guess, so
 # it refuses and names both subjects. Nothing is closed or stamped.
@@ -1376,6 +1382,9 @@ eq "$AMRC" "2" "(DISMISS-INFER) more than one held visit refuses to guess"
 grep -q 'more than one open visit' <<< "$AMOUT" \
   && ok "(DISMISS-INFER) …and names the ambiguity" \
   || bad "(DISMISS-INFER) wrong ambiguity refusal (got: $AMOUT)"
+grep -q 'dismiss <bead-id>' <<< "$AMOUT" \
+  && ok "(DISMISS-INFER) …and its disambiguation hint is the runnable dismiss <bead-id>" \
+  || bad "(DISMISS-INFER) ambiguity hint is not a copyable dismiss <bead-id> (got: $AMOUT)"
 eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-INFER) …and closes nothing while ambiguous"
 
 # (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs. With all

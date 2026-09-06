@@ -1165,12 +1165,12 @@ current_sitting_subject() {
     _me=$(printf '%s\n%s\n%s\n' \
         "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true)
     if [ -z "$_me" ]; then
-        echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset); there is no sitting to infer. Name the subject: $PROG <verb> <bead-id>." >&2
+        echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset); there is no sitting to infer. Name the subject: $PROG dismiss <bead-id>." >&2
         return 2
     fi
     _vjson=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub)
     if ! printf '%s' "$_vjson" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        echo "$PROG: could not read this session's visits — 'gc bd list' did not answer a JSON array. Name the subject: $PROG <verb> <bead-id>." >&2
+        echo "$PROG: could not read this session's visits — 'gc bd list' did not answer a JSON array. Name the subject: $PROG dismiss <bead-id>." >&2
         return 2
     fi
     _subjects=$(printf '%s' "$_vjson" | jq -r --arg ids "$_me" '
@@ -1187,11 +1187,11 @@ current_sitting_subject() {
         | map(select(. != "")) | unique | .[]' 2>/dev/null || true)
     _n=$(printf '%s\n' "$_subjects" | awk 'NF' | wc -l | tr -d ' ')
     if [ "$_n" -eq 0 ]; then
-        echo "$PROG: no open visit is assigned to this session ($(printf '%s' "$_me" | tr '\n' ' ')); there is no current sitting. Name the subject: $PROG <verb> <bead-id>." >&2
+        echo "$PROG: no open visit is assigned to this session ($(printf '%s' "$_me" | tr '\n' ' ')); there is no current sitting. Name the subject: $PROG dismiss <bead-id>." >&2
         return 2
     fi
     if [ "$_n" -gt 1 ]; then
-        echo "$PROG: this session holds more than one open visit (subjects: $(printf '%s' "$_subjects" | awk 'NF' | tr '\n' ' ')); refusing to guess which sitting. Name one: $PROG <verb> <bead-id>." >&2
+        echo "$PROG: this session holds more than one open visit (subjects: $(printf '%s' "$_subjects" | awk 'NF' | tr '\n' ' ')); refusing to guess which sitting. Name one: $PROG dismiss <bead-id>." >&2
         return 2
     fi
     printf '%s\n' "$_subjects" | awk 'NF' | head -n 1
