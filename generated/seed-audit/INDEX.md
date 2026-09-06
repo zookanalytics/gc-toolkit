@@ -8,7 +8,7 @@ at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
 - `gc` version: `1.4.1`
-- agents: 14 · formulas: 22
+- agents: 17 · formulas: 22
 - input manifest: `SOURCES.txt`
 
 ## Scope
@@ -35,6 +35,9 @@ covers that dimension.
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
 | [`converse`](agents/converse.md) | 53,183 | 13,295 |
+| [`converse-codex`](agents/converse-codex.md) | 53,183 | 13,295 |
+| [`converse-fable`](agents/converse-fable.md) | 53,183 | 13,295 |
+| [`converse-opus`](agents/converse-opus.md) | 53,183 | 13,295 |
 | [`deacon`](agents/deacon.md) | 10,001 | 2,500 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
@@ -99,6 +102,9 @@ runs to re-prime after compaction.
 | codex | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | control-dispatcher | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | deacon | `city` | 1 | _none_ |
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |

@@ -1,0 +1,18 @@
+# converse-codex — a converse sitting on the codex provider. One of the
+# per-model converse templates (converse-*), which share the converse role and
+# prompt and differ only in provider and model. Open one with
+# `gc session new converse-codex <visit>`: that is an origin=manual session,
+# which is not pool_managed, so the pool execution backstop never governs it and
+# a pane held open for a conversation is not reaped by a no-nudge drain. The
+# field rationale is documented on converse-opus.
+scope = "rig"
+provider = "codex"
+option_defaults = { model = "gpt-5.3-codex" }
+prompt_template = "agents/converse/prompt.template.md"
+work_dir = ".gc/agents/converse-codex/{{.AgentBase}}"
+wake_mode = "resume"
+attach = true
+min_active_sessions = 0
+max_active_sessions = 8
+max_session_age = "5h"
+max_session_age_jitter = "15m"
