@@ -24,9 +24,9 @@
 # line in two places, and BOTH are load-bearing:
 #   • the durable trace is stamped when the hold BEGINS, not only at
 #     close — that is the only thing that survives an interruption; and
-#   • a deliberate close ends with a sign-off block naming the outcome
-#     and the subject to look at next, so the last line the operator
-#     sees is an ending rather than an unanswered question.
+#   • a deliberate close ends with a sign-off — a plain-language wrap-up
+#     of what the sitting settled — so the last line the operator sees is
+#     an ending rather than an unanswered question.
 #
 # Neither ending is a clock. `idle_timeout = "0"` keeps converse off the
 # idle ladder, so a held sitting ends when its visit closes. That
@@ -276,9 +276,12 @@ else
 fi
 
 echo "── the sitting ends out loud (deliberate-close path) ──"
-have "sign-off block is named in the close step" 'sign-off block' "$PROMPT"
-have "sign-off line 1: Ended (<outcome>)" 'Ended (<one-word-outcome>):' "$PROMPT"
-have "sign-off line 2 points at the subject" 'Look at: <subject-id>' "$PROMPT"
+have "the sign-off is a hand-back headed by the subject" '<subject-id> — <short human label>' "$PROMPT"
+have "the sign-off's open decision leads with the recommendation" 'lead with the recommendation' "$PROMPT"
+lacks "the rote Ended (<outcome>) sign-off tag is gone" 'Ended (<one-word-outcome>):' "$PROMPT" \
+    "the sign-off is a plain-language wrap-up now, not a fixed two-line tag (tk-9vb3j1)"
+lacks "the rote Look at: <subject-id> pointer is gone" 'Look at: <subject-id>' "$PROMPT" \
+    "a converse names another bead only where the substance leads there, as prose (tk-9vb3j1)"
 have "the outcome stamp is still verified before the close" \
     "jq -e '.[0].metadata[\"gc.outcome\"] // empty'" "$PROMPT"
 have "close step still closes only the visit" 'gc bd close "$VISIT"' "$PROMPT"
@@ -300,7 +303,7 @@ else
     ok "step 7 is still extractable"
     # A close that is missing entirely reports close@none and fails here too:
     # deleting the close is not a way to satisfy an ordering check.
-    s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF 'Ended (<one-word-outcome>):' | head -1 | cut -d: -f1)
+    s7_signoff=$(printf '%s\n' "$STEP7" | grep -nF '<subject-id> — <short human label>' | head -1 | cut -d: -f1)
     s7_stamp=$(printf '%s\n' "$STEP7" | grep -nF 'gc.outcome=<one-word-outcome>' | head -1 | cut -d: -f1)
     s7_close=$(printf '%s\n' "$STEP7" | grep -nF 'gc bd close "$VISIT"' | head -1 | cut -d: -f1)
     if [ -n "$s7_signoff" ] && [ -n "$s7_close" ] && [ "$s7_signoff" -lt "$s7_close" ]; then
@@ -1817,18 +1820,16 @@ have "the omission is stated as legal" \
      'nothing for the operator to decide is legal' "$PROMPT"
 have "…and doubt still leaves the sitting open" \
      'the sitting stays open' "$PROMPT"
-# The fragment injection: the prompt claimed it did not inject the fragment and
-# restated it for that reason, while the template ends with the injection. Both
-# copies of a rule drift apart the moment one of them describes the other
-# wrongly.
+# converse defines its hand-back shape inline (steps 5 and 7) and no longer
+# injects the shared operator-next-step-trailing fragment. Re-injecting it would
+# render the old `Next (yours):` shape below the inline hand-back and contradict
+# it; the fragment itself stays for witness and mechanik, whose output this bead
+# must not change (tk-9vb3j1).
 if grep -q '{{ template "operator-next-step-trailing" \. }}' "$PROMPT"; then
-    ok "the prompt injects the trailing-decision fragment"
-    lacks "…and does not claim it goes uninjected" \
-          'converse does not inject that fragment' "$PROMPT" \
-          "the template ends with the injection; a prompt that says otherwise sends the next editor to keep a copy that is not a copy"
+    bad "converse does not inject the shared trailing-decision fragment" \
+        "the injection is back; it renders the Next (yours): shape below the inline hand-back and the two contradict each other (tk-9vb3j1)"
 else
-    bad "the prompt injects the trailing-decision fragment" \
-        "the injection is gone; the restated rule in step 5 is now the only copy and the reference to the fragment is dead"
+    ok "converse does not inject the shared trailing-decision fragment"
 fi
 
 echo "── every framing hands over the switch that ends the sitting ──"
@@ -1870,18 +1871,15 @@ else
         "without the fallback the offered command fails on exactly the sittings a restart touched, which is the normal case for a long hold"
 fi
 
-# The injected fragment ends a reply at the operator's decision and keeps
-# standing-by notes off the bottom. The close-out sits below it, so the
-# override has to be named where it happens: two copies of a placement rule
-# that disagree in silence leave the next reader to guess which one is wrong.
+# converse stops injecting the shared fragment, but it must stay intact for
+# witness and mechanik, whose output this bead does not change. If the fragment
+# lost its own placement rule, those two roles' endings would shift (tk-9vb3j1).
 FRAG="$REPO/template-fragments/operator-next-step-trailing.template.md"
 if grep -qF -- 'sits below it' "$FRAG"; then
-    ok "the fragment still ends a reply at the operator's decision"
-    have "…so the close-out below it is named as the deliberate override" \
-         'deliberately overridden' "$PROMPT"
+    ok "the shared fragment is intact for witness and mechanik"
 else
-    bad "the fragment still ends a reply at the operator's decision" \
-        "the rule moved in $FRAG; step 5's 'deliberately overridden' now names nothing and the two copies are out of step"
+    bad "the shared fragment is intact for witness and mechanik" \
+        "the fragment lost 'sits below it'; witness and mechanik output would change under a converse-only bead (tk-9vb3j1)"
 fi
 
 echo

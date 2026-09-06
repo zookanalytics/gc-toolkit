@@ -183,8 +183,8 @@ against the gascity rig as **`gc-rjtk1`** rather than approximated here.
   visit on a subject you already know to name" is `tk-j2kpp` (P2,
   blocked on this bead). This design makes the *ending* legible and the
   trace *exist*; making it *findable without knowing the subject id* is
-  that bead's scope, and the sign-off's `Look at: <subject-id>` line is
-  what it will have to work with.
+  that bead's scope, and it reads the tracked graph state — the `tracks`
+  edges and the stall census — not the thread's chat prose.
 - **It does not put non-anchor subjects on the board.** A plain task
   subject with a `gc.takeaway` is durable but still not a board row — the
   board collects epics, floating owned convoys, and decisions. That is
