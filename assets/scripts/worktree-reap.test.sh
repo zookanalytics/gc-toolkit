@@ -53,11 +53,22 @@ export PATH="$BIN:$PATH"
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
+# A --rig <name> travels right after the top-level command group. Strip it,
+# keeping the group as $1 so the case key stays "<group> <sub>"; the captured
+# name lets bd statuses/list read a per-rig fixture (statuses.<rig>.json,
+# beads.<rig>.json) where a multi-store test writes one, and fall back to the
+# shared file otherwise. Single-store tests never pass --rig, so nothing here
+# changes for them.
+grp="${1:-}"; rig=""
+if [ "${2:-}" = "--rig" ]; then rig="${3:-}"; set -- "$grp" "${@:4}"; fi
 case "${1:-} ${2:-}" in
   "agent list")   cat "${STUB_AGENTS:?}" ;;
   "session list") cat "${STUB_SESSIONS:?}" ;;
-  "rig list")     echo '{"rigs":[]}' ;;
-  "bd statuses")  cat "${STUB_STATUSES:?}" ;;
+  "rig list")     if [ -n "${STUB_RIGS:-}" ]; then cat "$STUB_RIGS"; else echo '{"rigs":[]}'; fi ;;
+  "bd statuses")
+    sf="${STUB_STATUSES:?}"
+    [ -n "$rig" ] && [ -f "${STUB_STATUSES%.json}.$rig.json" ] && sf="${STUB_STATUSES%.json}.$rig.json"
+    cat "$sf" ;;
   "bd list")
     want=""; has_id=0
     while [ $# -gt 0 ]; do
@@ -68,10 +79,12 @@ case "${1:-} ${2:-}" in
     # lets a test fail exactly that read while the unscoped worktree-side ledger
     # reads keep answering.
     [ "$has_id" = "1" ] && [ "${STUB_BD_ID_RC:-0}" != "0" ] && { echo "gc: simulated ledger failure" >&2; exit "${STUB_BD_ID_RC}"; }
+    bf="${STUB_BEADS:?}"
+    [ -n "$rig" ] && [ -f "${STUB_BEADS%.json}.$rig.json" ] && bf="${STUB_BEADS%.json}.$rig.json"
     # Bind the row before testing it: the argument to `contains` is evaluated
     # against the string being searched, so a bare `.status` in there reads the
     # status field of $want.
-    jq -c --arg want ",$want," '[ .[] | . as $b | select($want | contains("," + $b.status + ",")) ]' "${STUB_BEADS:?}"
+    jq -c --arg want ",$want," '[ .[] | . as $b | select($want | contains("," + $b.status + ",")) ]' "$bf"
     ;;
   *) exit 0 ;;
 esac
@@ -136,15 +149,19 @@ mk_wt() { # <path> <branch|--detach>
 }
 
 # A bead row as `bd list --json` returns one.
-bead() { # <id> <status> <hours-since-close> <work_dir> <branch>
-    local id="$1" st="$2" hrs="$3" wd="$4" br="$5"
+bead_to() { # <file> <id> <status> <hours-since-close> <work_dir> <branch>
+    local f="$1" id="$2" st="$3" hrs="$4" wd="$5" br="$6"
     local at; at="$(date -u -d "@$((NOW - hrs * HOUR))" +%Y-%m-%dT%H:%M:%SZ)"
+    [ -s "$f" ] || echo '[]' > "$f"
     jq -c --arg id "$id" --arg st "$st" --arg at "$at" --arg wd "$wd" --arg br "$br" \
         '. += [{id: $id, status: $st, closed_at: $at, updated_at: $at,
                 metadata: ({} | if $wd == "" then . else .work_dir = $wd end
                               | if $br == "" then . else .branch  = $br end)}]' \
-        "$STUB_BEADS" > "$STUB_BEADS.n" && mv "$STUB_BEADS.n" "$STUB_BEADS"
+        "$f" > "$f.n" && mv "$f.n" "$f"
 }
+# The default store the single-repo tests write. bead_to on a named file is the
+# multi-store form, where one rig stays readable while another cannot be read.
+bead() { bead_to "$STUB_BEADS" "$@"; }
 
 run() { bash "$SUT" "$@" 2>&1; }
 exists() { [ -e "$1" ]; }
@@ -630,6 +647,72 @@ bead zz-anchor open "" "" polecat/zz-anchor
 bead zz-held closed 100 "" polecat/zz-held
 STUB_BD_ID_RC=1 run > /dev/null
 if branch_exists polecat/zz-held; then ok "a branch pass whose closed-lookup fails drops nothing"; else bad "a branch pass whose closed-lookup fails drops nothing"; fi
+
+# A repo whose open-PR listing fails holds its whole BRANCH family, not just its
+# worktrees. An empty PR_BRANCH map then means "unread", not "no open PR heads
+# this ref", so a closed, landed branch an unseen PR could still head is kept.
+# The keep is the PR-unreadable run; the take is a readable run over the same
+# branch, which drops it — proving the hold, not another gate, is what saved it.
+new_repo
+mk_wt "$REPO/wt/heldpr" polecat/zz-heldpr
+HELDPR_TIP="$(git -C "$REPO" rev-parse polecat/zz-heldpr)"
+git -C "$REPO" worktree remove --force "$REPO/wt/heldpr"
+git -C "$REPO" update-ref refs/remotes/origin/main "$HELDPR_TIP"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+bead zz-anchor open   ""  "" polecat/zz-anchor    # keeps the ledger answering
+bead zz-heldpr closed 100 "" polecat/zz-heldpr    # closed, landed: droppable but for the hold
+: > "$STUB_PR_BRANCHES"                            # no PR names it once the listing works
+OUT="$(STUB_PR_RC=1 run)"
+if branch_exists polecat/zz-heldpr; then ok "a repo whose PR listing fails holds its closed, landed branch"; else bad "a repo whose PR listing fails holds its closed, landed branch"; fi
+has "$OUT" "held $REPO" "the branch-family hold is the repo hold already reported"
+run > /dev/null                                    # PRs readable and empty: the same branch is a valid drop
+if branch_exists polecat/zz-heldpr; then bad "with the PR listing readable the branch is dropped"; else ok "with the PR listing readable the branch is dropped"; fi
+
+# A store whose live contract will not read holds its whole branch family, even
+# while another store keeps the global ledger answering so the pass does not
+# refuse outright. The unreadable store's live rows are skipped, so OPEN_BRANCH
+# never learns a live claimant there; an independent closed-lookup must not then
+# be trusted to drop its refs. The healthy store's own closed, landed branch is
+# dropped in the same run — the take that proves the pass ran and discriminated.
+new_repo                                   # $REPO is rig "demo": healthy
+REPO2="$CITY/rigs/broken"                  # rig "broken": its status contract will not parse
+git init -q -b main "$REPO2"
+git -C "$REPO2" config user.email t@example.com
+git -C "$REPO2" config user.name Test
+git -C "$REPO2" config commit.gpgsign false
+git -C "$REPO2" remote add origin https://github.com/zook/broken.git
+echo seed > "$REPO2/seed"; git -C "$REPO2" add seed; git -C "$REPO2" commit -qm seed
+# Rig mode: both stores come from `gc rig list`, named, so --rig is passed.
+jq -n --arg r1 "$REPO" --arg r2 "$REPO2" \
+    '{rigs:[{name:"demo",path:$r1,hq:false},{name:"broken",path:$r2,hq:false}]}' > "$TMP/rigs.json"
+export STUB_RIGS="$TMP/rigs.json"
+# demo: a live bead keeps its ledger answering, and a closed, landed branch is the take.
+: > "$TMP/beads.demo.json"
+bead_to "$TMP/beads.demo.json" d-live     open   ""  "" polecat/d-live
+bead_to "$TMP/beads.demo.json" zz-healthy closed 100 "" polecat/zz-healthy
+mk_wt "$REPO/wt/healthy" polecat/zz-healthy
+HEALTHY_TIP="$(git -C "$REPO" rev-parse polecat/zz-healthy)"
+git -C "$REPO" worktree remove --force "$REPO/wt/healthy"
+git -C "$REPO" update-ref refs/remotes/origin/main "$HEALTHY_TIP"
+git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+# broken: statuses will not parse, so its live rows are never read. Its closed,
+# landed name-bead zz-bad would fall to the independent closed-lookup; a live
+# child records polecat/zz-bad, the claimant the skipped live read cannot see.
+# The family is held because the STORE is unreadable, not because the child was seen.
+echo 'not json' > "$TMP/statuses.broken.json"
+: > "$TMP/beads.broken.json"
+bead_to "$TMP/beads.broken.json" zz-bad   closed 100 "" polecat/zz-bad
+bead_to "$TMP/beads.broken.json" zz-child open   ""  "" polecat/zz-bad
+BAD_TREE="$(git -C "$REPO2" rev-parse main^{tree})"
+BAD_TIP="$(git -C "$REPO2" commit-tree "$BAD_TREE" -p "$(git -C "$REPO2" rev-parse main)" -m 'work in zz-bad')"
+git -C "$REPO2" branch polecat/zz-bad "$BAD_TIP"
+git -C "$REPO2" update-ref refs/remotes/origin/main "$BAD_TIP"
+git -C "$REPO2" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+OUT="$(WORKTREE_REAP_REPOS= run)"
+if git -C "$REPO2" show-ref --verify --quiet refs/heads/polecat/zz-bad; then ok "an unreadable store's branch family is held though its name-bead is closed and landed"; else bad "an unreadable store's branch family is held though its name-bead is closed and landed"; fi
+if git -C "$REPO" show-ref --verify --quiet refs/heads/polecat/zz-healthy; then bad "the healthy store's closed, landed branch is dropped in the same run"; else ok "the healthy store's closed, landed branch is dropped in the same run"; fi
+has "$OUT" "dropped 1 stale local branches" "only the healthy store's branch is dropped"
+unset STUB_RIGS
 
 echo
 echo "worktree-reap.test.sh: $PASS passed, $FAIL failed"

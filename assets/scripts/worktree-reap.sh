@@ -16,11 +16,14 @@
 # disposability signal is the branch name's bead and the ref graph, not
 # metadata.work_dir — so it is documented at the pass itself.
 #
-# The disposability chain is the bead ledger, not the filesystem. A worktree
-# is named by metadata.work_dir, so the reverse lookup is exact path equality
-# and no bead id is ever parsed out of a path or a branch name — the two
-# disagree in practice, since a rework child stands on its predecessor's
-# branch while keeping its own directory.
+# The disposability chain is the bead ledger, not the filesystem. For worktree
+# removal the identity is metadata.work_dir: the reverse lookup is exact path
+# equality and no bead id is parsed out of a path. Path and branch disagree in
+# practice, since a rework child stands on its predecessor's branch while
+# keeping its own directory, so the worktree pass keys on the path and never on
+# a branch name. The branch pass is the exception — it has no work_dir, so it
+# parses the bead id out of the polecat/<bead-id> ref name, under rules
+# documented at the pass.
 #
 # A worktree is removed when every one of these holds:
 #   - some bead names the path in metadata.work_dir, and none of the beads
@@ -209,9 +212,15 @@ protected_shape() { # <path>
 # a worktree unreaped (a leak) rather than reaped while live (a loss).
 declare -A OPEN_PATH=() OPEN_BRANCH=()
 declare -A CLOSED_AT=() CLOSED_BEAD=() CLOSED_BRANCHES=()
+# A store is ledger-ready only when its live rows actually read. The branch pass
+# gates on this: a repo whose live statuses or live rows did not read contributes
+# no OPEN_BRANCH protectors, so it cannot be told that a closed, landed ref is
+# still some live claimant's branch, and its whole family is held for the next
+# pass — the same fail-closed the worktree pass takes when it cannot read a store.
+declare -A LEDGER_OK=()
 LEDGER_READ=0
 for i in "${!REPO_PATHS[@]}"; do
-    name="${REPO_NAMES[$i]}"
+    name="${REPO_NAMES[$i]}"; repo="${REPO_PATHS[$i]}"
     RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
 
     LIVE_STATUSES="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" statuses --json 2>/dev/null \
@@ -220,11 +229,18 @@ for i in "${!REPO_PATHS[@]}"; do
     [ -n "$LIVE_STATUSES" ] || continue
     seen=0
 
+    # Capture the live-rows read's own exit status, not just its output: an empty
+    # result is "no live beads" and still ready, a failed query is "unknown" and
+    # is not. Only a read that succeeded marks the repo ledger-ready, so an empty
+    # OPEN_BRANCH reads as knowledge and not as a store that never answered.
+    LIVE_ROWS="$(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null)" \
+        && LEDGER_OK["$repo"]=1 || LIVE_ROWS=""
+
     while IFS="$US" read -r wd br; do
         [ -n "$wd" ] && OPEN_PATH["$wd"]=1
         [ -n "$br" ] && OPEN_BRANCH["$br"]=1
         seen=1
-    done < <(gc bd "${RIG_ARG[@]+${RIG_ARG[@]}}" list --status "$LIVE_STATUSES" --limit=0 --json 2>/dev/null \
+    done < <(printf '%s' "$LIVE_ROWS" \
         | jq -r '.[]? | (.metadata // {}) as $md
                  | select((($md.work_dir // "") != "") or (($md.branch // "") != ""))
                  | [($md.work_dir // ""), ($md.branch // "")] | join("\u001f")' 2>/dev/null || true)
@@ -463,6 +479,14 @@ for i in "${!REPO_PATHS[@]}"; do
     repo="${REPO_PATHS[$i]}"; name="${REPO_NAMES[$i]}"
     RIG_ARG=(); [ -n "$name" ] && RIG_ARG=(--rig "$name")
 
+    # Hold the whole family on the two signals that also hold a worktree. An
+    # unreadable PR listing (REPO_HELD) means an open PR could head a ref
+    # unseen; a live ledger that did not read (no LEDGER_OK) means a live
+    # claimant's branch is unknown. Under either, an empty PR_BRANCH / OPEN_BRANCH
+    # is absence of knowledge, not proof a closed, landed ref is disposable.
+    [ -n "${REPO_HELD[$repo]:-}" ] && continue
+    [ -n "${LEDGER_OK[$repo]:-}" ] || continue
+
     # The default branch is the landing target and the merge authority. No
     # readable one means no proof is possible here, so the whole family is held.
     default_ref="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
@@ -582,7 +606,7 @@ done
 [ "$refused" -gt 0 ] && echo "$PROG: $refused removals refused (dirty tree, or the tip could not be pinned) — left for the next pass"
 [ "$survived" -gt 0 ] && echo "$PROG: $survived removals reported success and left the directory standing — investigate, they freed nothing"
 for repo in "${!REPO_HELD[@]}"; do
-    echo "$PROG: held $repo — ${REPO_HELD[$repo]}; its worktrees are the next pass's"
+    echo "$PROG: held $repo — ${REPO_HELD[$repo]}; its worktrees and branches are the next pass's"
 done
 [ -n "$stopped" ] && echo "$PROG: yielded — ${BUDGET}s budget spent with $((planned - removed - refused - survived)) planned removals untaken; the next pass takes them"
 [ -n "$br_stopped" ] && echo "$PROG: branch pass yielded on the ${BUDGET}s budget; the next pass drops the rest"

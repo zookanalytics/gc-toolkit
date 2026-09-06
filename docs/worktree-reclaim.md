@@ -48,11 +48,13 @@ a defined close time — so a custom done status leaves a worktree unreaped
 rather than reaped while live. A store whose contract cannot be read is skipped
 whole, and if none can be read the pass refuses.
 
-The identity chain is `metadata.work_dir`, so the reverse lookup is exact path
-equality and no bead id is ever parsed out of a path or a branch name. The two
-disagree in practice: a rework child stands on its predecessor's branch while
-keeping its own directory, so `worktrees/tk-ok9t2` is checked out on
-`polecat/tk-z4aka`, and either name alone resolves to the wrong bead.
+For worktree removal the identity chain is `metadata.work_dir`, so the reverse
+lookup is exact path equality and no bead id is parsed out of a path. Path and
+branch disagree in practice: a rework child stands on its predecessor's branch
+while keeping its own directory, so `worktrees/tk-ok9t2` is checked out on
+`polecat/tk-z4aka`, and either name alone resolves to the wrong bead. The branch
+pass is the exception — it has no `work_dir` and keys on the ref's bead id, as
+"Dropping the branch" below describes.
 
 Both branch questions are asked, for the same reason. The branch the checkout
 is on and the branch its beads recorded are not always the same ref, and
