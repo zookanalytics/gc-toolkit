@@ -68,9 +68,17 @@ already carries a completed reaction — `gc.first_reaction` (stamped by the
 dispose) or `gc.proactive_reaction=1` (stamped by the release). The skip is an
 idempotent no-op (exit 0), not an error: the reaction already happened, so the
 caller has what it asked for, and callers like `gc-visit-open` do not fall back
-to double-filing a visit. The proactive scan already excluded reacted beads in
-`scan_precision_filter`; this closes the direct-sling, `react`, and
-`gc-visit-open` paths the scan filter never covered.
+to double-filing a visit. Because the guard lives in `cmd_sling`, it covers the
+direct-sling, `react`, and `gc-visit-open` paths a scan-time filter cannot see.
+
+The proactive scan carries the same invariant on both of its surfaces.
+`scan_precision_filter` drops a candidate that carries either reaction marker —
+the pair the guard refuses — so a reacted bead never becomes a scan candidate.
+For the window where a bead is clean when the scan selects it but reacts before
+the sling, the `--sling` loop counts only a genuine dispatch against
+`GC_PROACTIVE_SLING_CAP`: a guard-skip is a no-op that must not spend a cap slot,
+or stale reacted records could exhaust the cap every sweep while nothing new is
+slung.
 
 This is the right layer because the bare route is a legitimate dispatch that
 must survive, and the only thing that destroys it is a second workflow start on

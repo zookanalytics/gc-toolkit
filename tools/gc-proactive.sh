@@ -33,6 +33,9 @@ SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 FORMULA="mol-first-reaction"
+# Set by cmd_sling to 1 when it skips an already-reacted bead as a no-op, else
+# empty. cmd_scan's --sling loop reads it to keep a skip from spending the cap.
+SLING_SKIPPED=""
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes
@@ -285,8 +288,11 @@ cmd_demand() {
 #   - top-level only — a parent-child CHILD carries the edge in its own
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
 #     catches parented beads, not every convoy member.
-# Plus the state predicate shared with the live queries (not already reacted,
-# not routed, has a description). Deduped by id.
+# Plus a state predicate: not already reacted, not routed, has a description;
+# deduped by id. "Not already reacted" drops EITHER marker a completed reaction
+# leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
+# dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
+# is dropped here and never reaches the sling loop to spend a cap slot.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -297,6 +303,7 @@ scan_precision_filter() {
     jq --argjson types "$types_json" --argjson markers "$markers_json" '
         map(select(
             ((.metadata["gc.proactive_reaction"] // "") == "")
+            and ((.metadata["gc.first_reaction"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
@@ -389,7 +396,7 @@ cmd_scan() {
     # many downstream sessions as the scan found candidates. What it skips is
     # named, not silently dropped — the next sweep sees the same beads, since
     # a candidate only leaves the scan once a reaction has advanced it.
-    local slung=0 skipped=0
+    local slung=0 skipped=0 reacted=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
@@ -398,14 +405,26 @@ cmd_scan() {
             skipped=$(( skipped + 1 ))
             continue
         fi
+        # Only a genuine dispatch spends the cap. cmd_sling skips an
+        # already-reacted bead as a no-op and flags it in SLING_SKIPPED — a
+        # reaction that landed after the scan selected it, since
+        # scan_precision_filter drops the rest. Counting that skip is the
+        # cap-starvation bug: stale reacted records would spend the whole cap
+        # every sweep while no new reaction is slung.
         if cmd_sling "$id"; then
-            slung=$(( slung + 1 ))
+            if [ -n "$SLING_SKIPPED" ]; then
+                reacted=$(( reacted + 1 ))
+            else
+                slung=$(( slung + 1 ))
+            fi
         fi
     done
+    local note=""
+    if [ "$reacted" -gt 0 ]; then note=" ($reacted already reacted, not counted)"; fi
     if [ "$skipped" -gt 0 ]; then
-        log "scan --sling: slung $slung first reaction(s); $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
+        log "scan --sling: slung $slung first reaction(s)$note; $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
     else
-        log "scan --sling: slung $slung first reaction(s)"
+        log "scan --sling: slung $slung first reaction(s)$note"
     fi
 }
 
@@ -436,8 +455,16 @@ cmd_sling() {
 
     # A first reaction happens once. Re-slinging one destroys the route the
     # first disposition set (see sling_first_reaction_guard), so skip it as an
-    # idempotent no-op rather than clobber a live dispatch.
-    sling_first_reaction_guard "$bead" || return 0
+    # idempotent no-op (return 0) rather than clobber a live dispatch. The skip
+    # is flagged out-of-band in SLING_SKIPPED so cmd_scan's --sling loop can tell
+    # a skip from a dispatch and not spend a cap slot on it. A non-zero return
+    # cannot carry that signal: as a bare CLI call it would trip the fail-closed
+    # exit, and caught in a condition it would disable set -e for this function.
+    SLING_SKIPPED=""
+    if ! sling_first_reaction_guard "$bead"; then
+        SLING_SKIPPED=1
+        return 0
+    fi
 
     local target
     target="$(resolve_pool_target)"

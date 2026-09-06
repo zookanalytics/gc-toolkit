@@ -442,6 +442,48 @@ ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
 eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
 
+echo "── a reacted bead never spends the sling cap (filter + loop) ──"
+# The bug: scan_precision_filter kept a bead carrying gc.first_reaction but no
+# gc.proactive_reaction, so it reached the loop; cmd_sling's guard skipped it
+# but returned success, and the loop counted the skip against the cap. Enough
+# stale first_reaction-only records could spend the whole cap every sweep while
+# no new reaction was slung. Two layers close it: the filter drops a reacted
+# bead (common case), and the loop refuses to count a guard-skip (the race).
+cat > "$FXDIR/scan.json" <<'JSON'
+[
+  {"id":"px-fr-only","title":"reacted: gc.first_reaction stamped, release pending","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable"}},
+  {"id":"px-clean","title":"an un-reacted input","description":"has a body","priority":1,"created_at":"2026-05-01T00:00:00Z","issue_type":"task"}
+]
+JSON
+FR_SCAN="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
+absent "the precision filter drops a gc.first_reaction-only candidate" "px-fr-only" "$FR_SCAN"
+has    "…and keeps the un-reacted input"                               "px-clean"   "$FR_SCAN"
+
+# The race the filter cannot close: a candidate is clean when the scan selects
+# it (scan.json) but has reacted by the time the sling runs (beads.json feeds
+# the guard). cmd_sling skips it, returning success and flagging SLING_SKIPPED,
+# and the loop must not spend a cap slot on that skip. With cap 1 and the
+# reacted bead ranked first (older), the fresh bead must still be the one slung.
+cat > "$FXDIR/scan.json" <<'JSON'
+[
+  {"id":"px-race","title":"clean at selection, reacted before the sling","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
+  {"id":"px-fresh2","title":"a genuinely fresh input","description":"has a body","priority":0,"created_at":"2026-06-01T00:00:00Z","issue_type":"task"}
+]
+JSON
+cat > "$FXDIR/beads.json" <<'JSON'
+{
+  "px-race":   {"metadata": {"gc.first_reaction": "actionable"}},
+  "px-fresh2": {"metadata": {}}
+}
+JSON
+RACE_SLINGS="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>/dev/null || true)"
+RACE_LOG="$(GC_PROACTIVE_SLING_CAP=1 P scan --sling 2>&1 >/dev/null || true)"
+absent "a raced (reacted-at-guard) candidate emits no sling"         "px-race"   "$RACE_SLINGS"
+has    "…and the fresh candidate is slung instead"                   "px-fresh2" "$RACE_SLINGS"
+eq     "exactly one real sling under cap 1 (the skip did not count)" "1" "$(printf '%s\n' "$RACE_SLINGS" | grep -c '^gc sling')"
+has    "the loop names the uncounted reacted skip"                   "already reacted" "$RACE_LOG"
+rm -f "$FXDIR/beads.json"
+
 echo "── scan filters BEFORE the page bound (live path), and 0 = unbounded ──"
 # The bug this locks out: scan_candidates paged each `gc bd ready` to its first
 # SCAN_LIMIT rows and THEN ran scan_precision_filter. When more than a page of
