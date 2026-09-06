@@ -12,9 +12,9 @@
 # fail-closed defense; the structural check is doctor's); non-empty check_set
 # (empty is never the 'none' opt-out — an unnormalized anchor holds);
 # base == merged_target;
-# every declared lane DERIVES green through lane-state.sh (no stored marker;
-# --no-remote, so an operator's GitHub approval is the approval gate below, not
-# a lane's green); approval (armed by the check_set
+# every declared lane DERIVES green through lane-state.sh (no stored marker; a
+# lane with no local review bead is backed by an operator's GitHub approval on
+# the PR, the shared fallback); approval (armed by the check_set
 # member, signoff_dismissed, or a DISMISSED review of our own — satisfied only
 # by a latest APPROVED from another account at the live head; a standing
 # CHANGES_REQUESTED from any other account vetoes); no unclosed rework/review
@@ -165,17 +165,18 @@ REPO_Q_DEF='
 # The first declared lane that does not DERIVE green, through lane-state.sh.
 # Prints that lane; empty stdout with a zero exit means every declared lane is
 # green. A non-zero exit is a lane the store would not read, which the caller
-# holds on and never reads as all-green. --no-remote keeps the derivation to the
-# local codex verdict: an operator's GitHub approval is this script's own
-# head-bound approval gate below, not a term in a lane's green, so a stale
-# non-head-bound approval cannot green a lane here. The lane is compared to no
-# head: green is a state of the lane, and a commit landing on the branch neither
-# clears it nor buys a review.
+# holds on and never reads as all-green. The derivation is the shared one every
+# reader uses: a lane greens from its own local approve-review bead, or, when it
+# has none, from an operator's GitHub approval on the anchor's PR (an approval
+# names no gate, so it backs every lane). The lane is compared to no head: green
+# is a state of the lane, and a commit landing on the branch neither clears it
+# nor buys a review. The head-bound human approval the merge separately requires
+# is the approval gate below, armed only for the check_sets that name it.
 first_notgreen_lane() { # <anchor-id> <check_set>
   local anchor="$1" cs="$2" lane
   while IFS= read -r lane; do
     [ -n "$lane" ] || continue
-    "$LANE_STATE" green --anchor "$anchor" --lane "$lane" --no-remote
+    "$LANE_STATE" green --anchor "$anchor" --lane "$lane"
     case $? in
       0) ;;                                   # green; next lane
       1) printf '%s\n' "$lane"; return 0 ;;   # not green; hold, name it

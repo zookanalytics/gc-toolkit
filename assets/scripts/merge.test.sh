@@ -153,6 +153,16 @@ echo '[]' > "$GH_DIR/reviews_15.json"
 out=$("$SUT" 2>&1)
 has "$out" "lane 'codex' does not derive green" "a fixing lane holds the merge"
 
+echo "# a codex lane with no local review bead derives green from an operator's GitHub approval"
+# The fallback-backed anchor: no review-outcome bead, but a human APPROVED the
+# PR. The shared derivation backs the lane off that approval, so a codex-only
+# anchor is not stranded on lane state — it merges without a local review bead.
+store "[$(anchor M5c 47)]"
+printf '%s' "$(prview 47 OPEN CLEAN)" > "$GH_DIR/pr_view_47.json"
+printf '[{"user":{"login":"human1"},"state":"APPROVED","commit_id":"sha-47","submitted_at":"2026-08-20T01:00:00Z","id":1}]' > "$GH_DIR/reviews_47.json"
+out=$("$SUT" 2>&1)
+has "$out" "merged + recorded M5c" "an operator's GitHub approval backs the codex lane green when no local review bead exists"
+
 echo "# unclosed children hold: metadata key, dep edge, tracking_only opt-out"
 store "[$(anchor M6 16), $(rev M6), {\"id\":\"rw-1\",\"status\":\"blocked\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"16\"}}]"
 printf '%s' "$(prview 16 OPEN CLEAN)" > "$GH_DIR/pr_view_16.json"
