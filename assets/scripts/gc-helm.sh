@@ -989,7 +989,7 @@ cmd_demand() {
 
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
-# continuation group, routed to the rig-qualified converse pool (the
+# continuation group, parked on the helm board via `gc.routed_to=human` (the
 # canonical gate-visit lines, formulas/mol-visit.toml). One open visit per
 # subject; the subject must RESOLVE first so a typo cannot manufacture a
 # visit (tk-ujwvt). --reason is the short title tail, --body the brief the
@@ -1013,7 +1013,8 @@ cmd_open() {
     case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
 
     # Pin bd at the bead's rig (cross-rig filing) and export its rig as GC_RIG
-    # so the gate-visit POOL line rig-qualifies the converse pool.
+    # so the visit is filed in the subject's rig store and the board gathers it
+    # there.
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     rig=$(rig_name_for_bead "$bead")
@@ -1194,9 +1195,10 @@ cmd_react() {
 # (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
 # one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
 # Read from this session's own rig ledger: a visit is filed in its subject's
-# rig and claimed by that rig's converse pool, so the caller's store is the
-# one the visit sits in. The scrubbed listing is left in SITTING_LISTING (with
-# the BEADS_DIR it was read under) so dismiss can skip a second identical read.
+# rig and adopted by the converse sitting engaged on it, so the caller's store
+# is the one the visit sits in. The scrubbed listing is left in SITTING_LISTING
+# (with the BEADS_DIR it was read under) so dismiss can skip a second identical
+# read.
 #
 # Sets SITTING_SUBJECT on success (called directly, not in a subshell, so the
 # listing handoff survives). It fails CLOSED, naming the explicit-id

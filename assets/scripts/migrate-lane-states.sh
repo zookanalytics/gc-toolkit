@@ -155,7 +155,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$PARK_WHY" ] || PARK_WHY="the review cap parked this anchor ($key was \"$was\")"
     if [ "$APPLY" -eq 0 ]; then
       if [ -z "$rig_name" ]; then
-        echo "$label $id: would need an operator to file the visit by hand (city scope has no rig-qualified converse pool); would NOT clear $key or park automatically" >&2
+        echo "$label $id: would need an operator to file the visit by hand (no rig to select the store the visit lands in); would NOT clear $key or park automatically" >&2
         attention=$((attention + 1)); continue
       fi
       echo "$label $id: would file visit [$VISIT_KEY], then clear $key=\"$was\" and set merge_hold=signoff_cap signoff_cap=$gate"
@@ -167,9 +167,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
       continue
     fi
     if [ -z "$rig_name" ]; then
-      # No rig-qualified pool exists at city scope, and GC_RIG has nothing to
-      # be set to here. Rather than guess a store, leave the legacy marker
-      # standing and ask a person to file the visit and park by hand.
+      # No rig resolves at city scope, and GC_RIG has nothing to be set to
+      # here. Rather than guess a store, leave the legacy marker standing and
+      # ask a person to file the visit and park by hand.
       attention=$((attention + 1))
       echo "$label $id: city-scope park needs an operator — no rig to route the visit through ($PARK_WHY); NOT parked, legacy marker left in place — file by hand" >&2
       continue

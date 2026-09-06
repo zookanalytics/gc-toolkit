@@ -123,14 +123,17 @@ Each entry: the upstream fact, its verification status, and the seam.
   escalation recipient (source-verified 2026-08-06; **source-only** — the
   public docs do not cover the human-gate primitive, hold labels, or the
   renudge orders as of 2026-08-08). By contrast
-  `gc.routed_to=human` **parks** — no core machinery claims it, the nudge
-  order fails silently on it (same verification). The sanctioned hold
-  taxonomy is `hold:mayor` / `hold:external` only; a bare `human` hold
-  label has no sanctioned upstream meaning. *Seam:* a human question is a bead whose
-  canonical form is a visit — the visit is the
-  dialogue-carrying refinement of the human gate, never a competitor
-  to it; an open human gate is a legitimate named wait. The raw
-  `routed_to=human` lane is a trap, not a feature.
+  `gc.routed_to=human` is bare in upstream core — no core machinery claims
+  it, and the core nudge order fails silently on it (same verification). The
+  sanctioned upstream hold taxonomy is `hold:mayor` / `hold:external` only; a
+  bare `human` hold label has no sanctioned upstream meaning. *Seam:* the pack
+  supplies the attention channel core leaves out. A filed visit parks on the
+  helm board under `gc.routed_to=human` — the board's exact gather predicate —
+  and holds no session; the operator draws it off the board and `gc-helm
+  engage` spawns a `converse-<model>` sitting on demand. So `routed_to=human`
+  is the pack's deliberate board lane: a human question's canonical form is a
+  visit, the dialogue-carrying refinement of the human gate, never a
+  competitor to it, and an open human gate is a legitimate named wait.
 
 - **Questions gate work natively — blocking dependencies.**
   `bd dep <blocker> --blocks <blocked>` creates a blocking edge, and
