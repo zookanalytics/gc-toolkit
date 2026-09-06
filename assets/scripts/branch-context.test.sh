@@ -82,7 +82,11 @@ gitq "$TOWN" branch -M main
 gitq "$TOWN" push -q -u origin main
 
 # A SHALLOW gascity checkout: grafted boundary; local geometry cannot be trusted.
-git clone -q --depth 1 "file://$CITY/remotes/gascity.git" "$CITY/rigs/gascity-shallow" 2>/dev/null
+# Name the branch: setup_rig never repoints the bare origin's HEAD to main, so an
+# unqualified --depth 1 clone follows a HEAD that dangles at the init default
+# branch wherever init.defaultBranch is not "main", cloning nothing and yielding
+# an empty, non-shallow checkout.
+git clone -q --depth 1 --branch main "file://$CITY/remotes/gascity.git" "$CITY/rigs/gascity-shallow" 2>/dev/null
 
 # Stub gh for the compare-API path. git stays REAL.
 BIN="$TMP/bin"; mkdir -p "$BIN"
