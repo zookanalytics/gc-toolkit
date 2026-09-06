@@ -165,8 +165,11 @@ case "$MODE" in
 esac
 
 ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-bead-store.XXXXXX")
+trap 'rm -f "$ERR_FILE" 2>/dev/null' EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 PAYLOAD=$(bounded gc bd --db "$DB" show "$BEAD" --json 2>"$ERR_FILE" | scrub)
 STORE_ERR=$(scrub <"$ERR_FILE"); rm -f "$ERR_FILE"
+trap - EXIT INT TERM HUP
 
 # The payload and the store's own stderr decide, never the exit code: a store
 # that cannot be opened exits the same 1 as a genuine miss and prints nothing at
