@@ -220,6 +220,54 @@ has "$OUT" "pins" "source arm reports the pin clear in landed"
 eq "$(meta tk-work gc.session_id)" "<absent>" "source arm clears the dead session id (reopen leaves it)"
 eq "$(meta tk-work gc.session_name)" "<absent>" "source arm clears the dead session name (reopen leaves it)"
 
+echo "--- source arm: an in-flight-PR source bead is NOT returned to the pool ---"
+# The recurring false-positive this guard fixes: a work bead handed off, its
+# branch pushed and PR in flight (merge_result pull_request/pre_open_gate), still
+# names its dead session, so orphan recovery classes it source and would
+# delete-source + reopen-source it back to the pool — re-dispatching finished work
+# the refinery owns landing, and stamping a recovery the crash-loop signal reads
+# as a RATE. The guard skips it: no delete-source, no reopen, bead left as-is.
+for MR in pull_request pre_open_gate; do
+  store "[{\"id\":\"tk-inflight\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"in-flight work bead\",
+           \"metadata\":{\"branch\":\"polecat/tk-inflight\",\"merge_result\":\"$MR\",
+                       \"gc.routed_to\":\"gc-toolkit/gc-toolkit.polecat\",\"gc.session_name\":\"polecat-9-pool\"}}]"
+  : > "$STUB_GC_LOG"
+  OUT=$("$SCRIPT" tk-inflight --owner polecat-9-pool --apply 2>&1); rc=$?
+  eq "$rc" "0" "in-flight source disposal ($MR) exits 0"
+  has "$OUT" "class=source"        "in-flight bead is still classed source ($MR)"
+  has "$OUT" "action=skip"         "in-flight source is skipped, not delegated ($MR)"
+  has "$OUT" "result=skipped"      "in-flight source reports skipped ($MR)"
+  has "$OUT" "detail=inflight_pr"  "in-flight skip states why ($MR)"
+  hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "in-flight source never calls delete-source ($MR)"
+  hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "in-flight source never reopens ($MR)"
+  eq "$(bstatus tk-inflight)" "open" "in-flight bead left as-is ($MR)"
+done
+
+echo "--- source arm: a progressing pr.machine also blocks the reopen ---"
+# merge_result may be transiently unset while the merge machine advances; a
+# pr.machine state of `progressing` (the stamp is state@oid@ts) is the same
+# in-flight fact and must block the reopen too.
+store '[{"id":"tk-prog","status":"open","assignee":"","title":"progressing work bead",
+         "metadata":{"branch":"polecat/tk-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-prog --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "progressing-machine source disposal exits 0"
+has "$OUT" "result=skipped" "progressing-machine source is skipped"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "progressing-machine source never reopens"
+
+echo "--- source arm: a non-progressing pr.machine still delegates ---"
+# The guard is scoped to the progressing state, not any pr.machine stamp: a
+# settled machine with no in-flight merge_result is terminal and must delegate,
+# proving the state@oid@ts split reads `settled`, not `progressing`.
+store '[{"id":"tk-settled","status":"in_progress","assignee":"lx-dead","title":"settled work bead",
+         "metadata":{"branch":"polecat/tk-settled","pr.machine":"settled@abc@2026-09-05T00:00:00Z",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-settled --owner lx-dead --apply 2>&1)
+has "$OUT" "action=delegate-source-workflow" "a settled machine (no in-flight merge_result) still delegates"
+has "$(cat "$STUB_GC_LOG")" "delete-source" "settled source still calls delete-source"
+
 echo "--- source arm: a pin that will not clear is not a clean release ---"
 # clear_pins bypasses the claim guard, but a store that reports success and drops
 # the key is the rollback verify exists to catch. With the dead session id
