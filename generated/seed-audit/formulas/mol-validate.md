@@ -1,6 +1,6 @@
 Formula: mol-validate
 Description: Validation pass — claim -> pin the batch -> rule each finding's disposition ->
-rule convergence -> release the lane -> drain. Attached at dispatch
+rule convergence -> close the pass -> drain. Attached at dispatch
 (gc sling --on mol-validate) to a validation-pass bead:
 metadata.task_kind=validation, anchor_bead (the gating anchor), check_name (the
 lane whose review batch this pass rules), and the dispatch-pinned reviewed_oid.
@@ -37,7 +37,7 @@ input convoy (each step re-derives VALIDATION_PASS in its own shell), and each
 step closes its own bead through assets/scripts/step-close.sh, which resolves by
 (gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
 track the current step. The terminal step closes the validation-pass bead
-itself, which is what releases the lane from `validating`.
+itself, the validator's own working bead that no other writer disposes of.
 
 
 Variables:
@@ -59,5 +59,5 @@ Steps (5):
   ├── mol-validate.load-dispatch: Read the dispatch and pin the batch you are validating
   ├── mol-validate.triage-findings: Decisions 1 and 2: rule each finding must-fix, deferred, or declined [needs: mol-validate.load-dispatch]
   ├── mol-validate.rule-convergence: Decision 3: rule whether a fresh whole-diff review is warranted [needs: mol-validate.triage-findings]
-  ├── mol-validate.finalize-and-drain: Release the lane, close the step chain, and drain [needs: mol-validate.rule-convergence]
+  ├── mol-validate.finalize-and-drain: Close the validation pass, close the step chain, and drain [needs: mol-validate.rule-convergence]
   └── mol-validate.workflow-finalize: Finalize workflow [needs: mol-validate.finalize-and-drain]

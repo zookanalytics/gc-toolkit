@@ -1,6 +1,6 @@
 description = """
 Validation pass — claim -> pin the batch -> rule each finding's disposition ->
-rule convergence -> release the lane -> drain. Attached at dispatch
+rule convergence -> close the pass -> drain. Attached at dispatch
 (gc sling --on mol-validate) to a validation-pass bead:
 metadata.task_kind=validation, anchor_bead (the gating anchor), check_name (the
 lane whose review batch this pass rules), and the dispatch-pinned reviewed_oid.
@@ -37,7 +37,7 @@ input convoy (each step re-derives VALIDATION_PASS in its own shell), and each
 step closes its own bead through assets/scripts/step-close.sh, which resolves by
 (gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
 track the current step. The terminal step closes the validation-pass bead
-itself, which is what releases the lane from `validating`.
+itself, the validator's own working bead that no other writer disposes of.
 """
 formula = "mol-validate"
 
@@ -92,10 +92,18 @@ gate-ensure.sh use, so a pass dispatched without one rules the codex lane.
 
 **3. Read the batch.** The findings to rule are the open `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition
-still `unvalidated`:
+still `unvalidated`. Read into a variable and prove BOTH that the list command
+succeeded AND that it returned a JSON array before you read it: a bare
+`gc bd list ... | jq` pipeline exits 0 with empty stdout when the store cannot be
+read, and an empty batch reads as "no findings" — the same shape a converged
+lane has — so an unreadable ledger would green the lane without ruling the
+findings it holds. Fail closed instead:
 ```bash
-gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked --limit=0 --json \
-  | jq -r --arg lane "$LANE" '.[]
+BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked --limit=0 --json) \
+  || { echo "cannot read the finding ledger for anchor $ANCHOR; refusing to treat an unreadable store as an empty batch" >&2; exit 1; }
+printf '%s' "$BATCH_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
+  || { echo "finding ledger for anchor $ANCHOR did not read back as a JSON array; refusing to proceed on malformed output" >&2; exit 1; }
+printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | select((.metadata.task_kind // "") == "finding")
       | select(((.metadata["finding.lane"] // "") ) == $lane)
       | select((.metadata["finding.disposition"] // "") == "unvalidated")
@@ -257,7 +265,7 @@ closed.
 
 [[steps]]
 id = "finalize-and-drain"
-title = "Release the lane, close the step chain, and drain"
+title = "Close the validation pass, close the step chain, and drain"
 needs = ["rule-convergence"]
 description = """
 Re-derive the validation-pass bead:
@@ -267,13 +275,13 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 [ -n "$VALIDATION_PASS" ] || { echo "mol-validate needs an input convoy with exactly one tracked member" >&2; exit 1; }
 ```
 
-**1. Close the validation-pass bead.** This bead is the validator's own: while it
-is open the lane derives `validating`, which holds every lane on the anchor out
-of green, so closing it is what releases the lane to the state the pass just
-ruled — `fixing` while must-fix findings stand, `green` once they close and the
-lane is backed, `unreviewed` when the pass superseded it. It is neither the
-refinery's work bead nor a reviewer's review bead, so no other writer disposes of
-it; the pass that owns it closes it here.
+**1. Close the validation-pass bead.** This bead is the validator's own. It is
+neither the refinery's work bead nor a reviewer's review bead, so no other writer
+disposes of it, and leaving it open strands it. The pass that owns it closes it
+here. What the pass ruled stands on the beads the earlier steps wrote, not on
+this one: a must-fix finding holds the anchor's merge through the `blocks` edge
+`finding.sh` set, and the approve outcome `review-outcome.sh` wrote or superseded
+is what `lane-state.sh` reads to derive the lane's green.
 ```bash
 gc bd update "$VALIDATION_PASS" --status=closed --set-metadata gc.outcome=recorded --append-notes "Validation pass complete: findings ruled and lane convergence recorded."
 ```
@@ -300,6 +308,6 @@ gc runtime drain-ack
 
 **Never** close or route the anchor, and never approve on GitHub. Done means gone.
 
-**Exit criteria:** validation-pass bead closed (the lane released from
-validating), step chain closed forward, drain acknowledged.
+**Exit criteria:** validation-pass bead closed, step chain closed forward, drain
+acknowledged.
 """

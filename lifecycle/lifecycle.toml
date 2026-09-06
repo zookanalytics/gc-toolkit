@@ -366,9 +366,8 @@ keys = [
 # dispatch, and equally the approve outcome that backs a lane green (the shape
 # lane-state.sh reads: signoff_verdict=approve, non-superseded, carrying a
 # reviewed_oid); `finding` a review objection ([metadata.findings]); and
-# `validation` a validation pass the validator works (formulas/mol-validate.toml).
-# A validation pass open on an anchor derives the `validating` lane state, and
-# the validator closes it to release the lane. review-outcome.sh writes and
+# `validation` a validation pass the validator works and closes
+# (formulas/mol-validate.toml). review-outcome.sh writes and
 # supersedes the approve outcome; it introduces no key of its own — the outcome
 # reuses the review keys above.
 

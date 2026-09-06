@@ -59,8 +59,8 @@ anchor), `check_name` (the lane whose batch this pass rules), and `reviewed_oid`
 further review is warranted, supersede-lane when one is — decision 3). It
 never stamps a `check.<lane>` marker, never closes or routes the anchor, and
 never runs `gh pr review --approve` — the city does not approve PRs. Closing the
-validation-pass bead is the terminal step and is what releases the lane from
-`validating`.
+validation-pass bead is the terminal step; the dispositions and approve outcome
+above are what carry the lane's state.
 H
 
 if [ -n "$NOTE" ]; then
