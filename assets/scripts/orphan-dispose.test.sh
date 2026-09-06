@@ -256,6 +256,29 @@ eq "$rc" "0" "progressing-machine source disposal exits 0"
 has "$OUT" "result=skipped" "progressing-machine source is skipped"
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "progressing-machine source never reopens"
 
+echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
+# A work bead a person owns clearing — routed to the human gate (gc.routed_to=human:
+# a signoff cap, a merge gate, an operator approval) — is not lost work, even with no
+# merge_result and no progressing machine. It still names its dead session, so orphan
+# recovery classes it source and would delete-source + reopen-source it back to the
+# pool. mol-witness-patrol's downstream-court-skip filter drops it upstream, but a bead
+# that moves onto a human gate after that filter, or reaches this script by recovery or
+# manual replay, must still be skipped here. The tk-work and tk-settled cases above
+# (routed to a pool address, no in-flight state) still delegate, so the guard is scoped
+# to the human gate, not to any route.
+store '[{"id":"tk-human","status":"open","assignee":"","title":"human-gate work bead",
+         "metadata":{"branch":"polecat/tk-human","gc.routed_to":"human","gc.session_name":"polecat-9-pool"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-human --owner polecat-9-pool --apply 2>&1); rc=$?
+eq "$rc" "0" "human-gate source disposal exits 0"
+has "$OUT" "class=source"      "human-gate bead is still classed source"
+has "$OUT" "action=skip"       "human-gate source is skipped, not delegated"
+has "$OUT" "result=skipped"    "human-gate source reports skipped"
+has "$OUT" "detail=human_gate" "human-gate skip states why"
+hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "human-gate source never calls delete-source"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "human-gate source never reopens"
+eq "$(bstatus tk-human)" "open" "human-gate bead left as-is"
+
 echo "--- source arm: a non-progressing pr.machine still delegates ---"
 # The guard is scoped to the progressing state, not any pr.machine stamp: a
 # settled machine with no in-flight merge_result is terminal and must delegate,

@@ -3,7 +3,7 @@
 # orphaned, by the kind of thing the bead is.
 #
 # Four kinds reach this script and only two are returned to the pool — and a
-# source bead only when its work has not already reached an in-flight PR:
+# source bead only when its work has not already reached a downstream court:
 #
 #   visit          release the assignee and NOTHING else. A visit's metadata
 #                  (route, continuation group, task_kind) is its identity.
@@ -20,9 +20,11 @@
 #                  `gc workflow reopen-source`, the contract those commands were
 #                  built for, then clear the session pins so the pooled bead
 #                  stops naming a dead owner. EXCEPT when the work already reached
-#                  an in-flight PR (merge_result pre_open_gate/pull_request, or a
-#                  progressing pr.machine): the refinery owns landing it, so
-#                  reopening would return finished work to the pool — skip it.
+#                  a downstream court — an in-flight PR (merge_result
+#                  pre_open_gate/pull_request, or a progressing pr.machine) the
+#                  refinery owns landing, or a human gate (gc.routed_to=human) a
+#                  person owns clearing: reopening would return that work to the
+#                  pool — skip it.
 #
 # `delete-source` matches workflow roots on gc.source_bead_id. A root poured
 # from an input convoy never carries that key, so it reports already_clean for
@@ -249,17 +251,25 @@ case "$CLASS" in
         fi
         ;;
     source)
-        # A source work bead whose work already reached an in-flight PR is not
-        # lost: the refinery enumerates it by merge_result and owns landing it,
-        # so delete-source + reopen-source would return finished work to the pool
-        # (and every cycle re-detects and re-recovers it, stamping a recovery the
-        # crash-loop signal reads as a RATE). This mirrors the in-flight guard in
-        # liveness-sweep.sh and gate-ensure.sh. The witness candidate filter drops
-        # these upstream; this is the correctness boundary at the disposal itself,
-        # the last step before the irreversible reopen.
+        # A source work bead whose work already reached a downstream court is not
+        # lost, so delete-source + reopen-source must not return it to the pool
+        # (every cycle would re-detect and re-recover it, stamping a recovery the
+        # crash-loop signal reads as a RATE, escalating a moot visit). Three states
+        # name a downstream court, the same set mol-witness-patrol's
+        # downstream-court-skip filter drops upstream: an in-flight PR (merge_result
+        # pre_open_gate/pull_request, or a progressing pr.machine) the refinery owns
+        # landing, or a human gate (gc.routed_to=human) a person owns clearing. This
+        # is the correctness boundary at the disposal itself, the last step before
+        # the irreversible reopen — a source bead that moves onto a human gate after
+        # that filter, or reaches this script by recovery or manual replay, is still
+        # skipped here. The merge_result arm mirrors the in-flight guard in
+        # liveness-sweep.sh and gate-ensure.sh.
         if [ "$MERGE_RESULT" = "pre_open_gate" ] || [ "$MERGE_RESULT" = "pull_request" ] || [ "$PR_MACHINE_STATE" = "progressing" ]; then
             ACTION="skip"
             DETAIL="inflight_pr(merge_result=${MERGE_RESULT:-none})"
+        elif [ "$ROUTED" = "human" ]; then
+            ACTION="skip"
+            DETAIL="human_gate(routed_to=human)"
         else
             ACTION="delegate-source-workflow"
             if [ "$APPLY" = "1" ]; then
