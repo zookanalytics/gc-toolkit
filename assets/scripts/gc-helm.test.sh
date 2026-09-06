@@ -158,6 +158,12 @@ case "$1 ${2:-}" in
     anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
     if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
     else printf '{"children":[]}\n'; fi ;;
+  "session suspend")
+    # suspend acts on the session, not a bead. Record the call so a test can
+    # prove the CURRENT session was the target and nothing on the visit moved.
+    # A session id containing FAILSUSPEND models a runtime that will not stop.
+    printf '%s\n' "$*" >> "$FAKE_SUSPENDS"
+    case "$3" in *FAILSUSPEND*) exit 1 ;; esac ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
     # A store that rejects the write. NOPIN stands for every reason the route
@@ -220,7 +226,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes"
+       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_SUSPENDS="$TMP/suspends"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -1327,9 +1333,93 @@ else
         "read: $(cat "$TMP/lists")"
 fi
 
-# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs.
+# (DISMISS-INFER) with no bead named, dismiss resolves "the sitting I am in":
+# the one open visit assigned to this session, and its continuation_group
+# subject. This is what lets a bare `gc-helm dismiss` map to a keystroke. The
+# visits fixture models v-HELD (converse-lx-1) -> A-PARKED, so a session under
+# that identity dismisses A-PARKED without ever naming it.
+: > "$TMP/updates"; : > "$TMP/closes"
+IOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1)" || true
+if grep -q 'inferred the current sitting' <<< "$IOUT"; then
+    ok "(DISMISS-INFER) a bare dismiss resolves the subject from session state"
+else
+    bad "(DISMISS-INFER) no inference happened (got: $IOUT)"
+fi
+if grep -q 'closed visit v-HELD' <<< "$IOUT"; then
+    ok "(DISMISS-INFER) …and dismisses the inferred subject's visit"
+else
+    bad "(DISMISS-INFER) the inferred subject's visit was not closed (got: $IOUT)"
+fi
+if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)"; then
+    ok "(DISMISS-INFER) …and stamps the inferred subject's row, not some other bead"
+else
+    bad "(DISMISS-INFER) the inferred subject was not stamped (updates: $(grep -E '^bd update' "$TMP/updates" || true))"
+fi
+
+# No session identity at all: nothing to infer. It fails closed with the exact
+# usage exit a missing bead-id had before inference existed — a refusal, never
+# a guess.
+NIRC=0; NIOUT="$(sh "$SCRIPT" dismiss 2>&1)" || NIRC=$?
+eq "$NIRC" "2" "(DISMISS-INFER) no identity and no bead is a usage error"
+grep -q 'no session identity' <<< "$NIOUT" \
+  && ok "(DISMISS-INFER) …and says the environment named no session" \
+  || bad "(DISMISS-INFER) wrong no-identity refusal (got: $NIOUT)"
+
+# A session that holds NO visit has no current sitting; refuse and name the
+# explicit-id form rather than dismiss whatever the store happens to return.
+NVRC=0; NVOUT="$(GC_SESSION_ID=gc-toolkit__converse-nobody sh "$SCRIPT" dismiss 2>&1)" || NVRC=$?
+eq "$NVRC" "2" "(DISMISS-INFER) a session holding no visit refuses to guess"
+grep -q 'no open visit is assigned to this session' <<< "$NVOUT" \
+  && ok "(DISMISS-INFER) …and points at the explicit-id form" \
+  || bad "(DISMISS-INFER) wrong empty-sitting refusal (got: $NVOUT)"
+
+# More than one held visit is ambiguous: dismissing either would be a guess, so
+# it refuses and names both subjects. Nothing is closed or stamped.
+: > "$TMP/updates"; : > "$TMP/closes"
+TWO='[{"id":"v-A","assignee":"gc-conv-multi","metadata":{"task_kind":"visit","gc.continuation_group":"A-PARKED"}},{"id":"v-B","assignee":"gc-conv-multi","metadata":{"task_kind":"visit","gc.continuation_group":"A-OTHER"}}]'
+AMRC=0; AMOUT="$(FAKE_LIST_OUT="$TWO" GC_SESSION_ID=gc-conv-multi sh "$SCRIPT" dismiss 2>&1)" || AMRC=$?
+eq "$AMRC" "2" "(DISMISS-INFER) more than one held visit refuses to guess"
+grep -q 'more than one open visit' <<< "$AMOUT" \
+  && ok "(DISMISS-INFER) …and names the ambiguity" \
+  || bad "(DISMISS-INFER) wrong ambiguity refusal (got: $AMOUT)"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(DISMISS-INFER) …and closes nothing while ambiguous"
+
+# (SUSPEND) suspend is dismiss's save-for-later sibling: it suspends THIS
+# session and leaves the visit OPEN. Same inference, but the act is on the
+# session, and NOTHING on the visit or subject is written.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/suspends"
+SUOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" suspend 2>&1)" || true
+grep -q 'inferred the current sitting' <<< "$SUOUT" \
+  && ok "(SUSPEND) a bare suspend resolves the sitting from session state" \
+  || bad "(SUSPEND) no inference (got: $SUOUT)"
+grep -qE '^session suspend gc-toolkit__converse-lx-1' "$TMP/suspends" \
+  && ok "(SUSPEND) …and suspends THIS session by its id" \
+  || bad "(SUSPEND) gc session suspend not called on the current session (got: $(cat "$TMP/suspends" 2>/dev/null))"
+eq "$(grep -c '^bd close' "$TMP/closes" || true)" "0" "(SUSPEND) the visit is left OPEN — nothing is closed"
+eq "$(grep -c 'gc.dismissed_at=' "$TMP/updates" || true)" "0" "(SUSPEND) …and no DONE-row stamp is written"
+grep -q 'visit stays open' <<< "$SUOUT" \
+  && ok "(SUSPEND) …and says the sitting resumes" \
+  || bad "(SUSPEND) unclear save message (got: $SUOUT)"
+
+# suspend fails closed the same way: no session identity is nothing to save.
+SNRC=0; sh "$SCRIPT" suspend >/dev/null 2>&1 || SNRC=$?
+eq "$SNRC" "2" "(SUSPEND) no session identity is a usage error"
+
+# A runtime that will not stop is a failure, not a silent success: the sitting
+# keeps its pane and the operator is told. Here the bead is explicit, so this
+# also proves suspend acts even when the subject is named rather than inferred.
+: > "$TMP/suspends"
+SFRC=0; SFOUT="$(GC_SESSION_ID=gc-FAILSUSPEND sh "$SCRIPT" suspend A-PARKED 2>&1)" || SFRC=$?
+eq "$SFRC" "4" "(SUSPEND) a failed 'gc session suspend' is a runtime failure"
+grep -q 'keeps its pane' <<< "$SFOUT" \
+  && ok "(SUSPEND) …and says the sitting was not saved" \
+  || bad "(SUSPEND) unclear suspend failure (got: $SFOUT)"
+
+# (DISMISS-ARGS) the fail-closed arg checks, matching the other verbs. With all
+# three identities unset above, a missing bead-id has no sitting to infer and
+# stays a usage error — inference refuses rather than guessing a subject.
 ARC=0; sh "$SCRIPT" dismiss >/dev/null 2>&1 || ARC=$?
-eq "$ARC" "2" "(DISMISS-ARGS) a missing bead-id is a usage error"
+eq "$ARC" "2" "(DISMISS-ARGS) a missing bead-id with no sitting to infer is a usage error"
 ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 
@@ -1943,5 +2033,5 @@ grep -q 'tk-a, tk-b' <<< "$DERR" \
 printf '[]\n' > "$D_LIST"
 
 echo ""
-echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape): $PASS passed, $FAIL failed"
+echo "gc-helm takeaway + demand + dismiss + suspend (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
