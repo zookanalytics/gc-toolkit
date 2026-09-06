@@ -45,6 +45,28 @@ store "[$ANCHOR,$(review closed '' superseded)]"
 if green --anchor tk-anc --lane codex --no-remote; then bad "a superseded legacy bead still derived green"; else ok "a superseded legacy bead does not derive green"; fi
 
 # ---------------------------------------------------------------------------
+# A closed review carrying no reviewed_oid is not local backing. This derivation
+# reads the same evidence doctor/check-gate-marker-provenance resolves a marker
+# against — the review bead's reviewed_oid — so a recorded verdict naming no
+# reviewed commit is a stale or legacy row that cannot green the lane on its own,
+# whether it carries an approve verdict or the legacy recorded stamp. The
+# GitHub-approval fallback is still free to supply independent evidence.
+# ---------------------------------------------------------------------------
+NO_OID_LEGACY='{"id":"rv-1","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc","gc.outcome":"recorded"}}'
+store "[$ANCHOR,$NO_OID_LEGACY]"
+if green --anchor tk-anc --lane codex --no-remote; then bad "a legacy recorded review with no reviewed_oid derived green from local backing"; else ok "a legacy recorded review with no reviewed_oid is not local backing"; fi
+
+NO_OID_APPROVE='{"id":"rv-1","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc","signoff_verdict":"approve","gc.outcome":"recorded"}}'
+store "[$ANCHOR,$NO_OID_APPROVE]"
+if green --anchor tk-anc --lane codex --no-remote; then bad "an approve verdict with no reviewed_oid derived green from local backing"; else ok "an approve verdict with no reviewed_oid is not local backing"; fi
+
+# The same row still greens when the operator's GitHub approval supplies the
+# evidence: the reviewed_oid guard scopes the local backing, never the fallback.
+printf '[{"state":"APPROVED","id":9}]' > "$GH_DIR/reviews_42.json"
+if green --anchor tk-anc --lane codex; then ok "the GitHub-approval fallback greens a lane whose only local row lacks reviewed_oid"; else bad "a no-reviewed_oid row blocked the GitHub-approval fallback"; fi
+rm -f "$GH_DIR/reviews_42.json"
+
+# ---------------------------------------------------------------------------
 # request-changes is not an approval.
 # ---------------------------------------------------------------------------
 store "[$ANCHOR,$(review closed request-changes recorded)]"
@@ -59,7 +81,7 @@ if green --anchor tk-anc --lane codex --no-remote; then bad "green while a revie
 # ---------------------------------------------------------------------------
 # check_name defaults to codex, and a codex backing does not green another lane.
 # ---------------------------------------------------------------------------
-store "[$ANCHOR,{\"id\":\"rv-1\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"r\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"tk-anc\",\"signoff_verdict\":\"approve\",\"gc.outcome\":\"recorded\"}}]"
+store "[$ANCHOR,{\"id\":\"rv-1\",\"status\":\"closed\",\"assignee\":\"\",\"title\":\"r\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"tk-anc\",\"reviewed_oid\":\"deadbeef\",\"signoff_verdict\":\"approve\",\"gc.outcome\":\"recorded\"}}]"
 if green --anchor tk-anc --lane codex --no-remote; then ok "an absent check_name backs the codex lane"; else bad "absent check_name did not back codex"; fi
 if green --anchor tk-anc --lane arch --no-remote; then bad "a codex backing greened the arch lane"; else ok "green is per-lane: codex backing leaves arch not green"; fi
 

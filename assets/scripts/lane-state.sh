@@ -13,13 +13,19 @@
 # green(anchor, lane) holds when a closed review bead backs the lane and no
 # review for the lane is in flight:
 #
-#   backing   a closed task_kind=review bead whose anchor_bead is this anchor and
-#             whose check_name is this lane (absent check_name resolves to codex)
-#             carries signoff_verdict=approve and is not superseded (gc.outcome is
-#             not superseded); OR, for a legacy bead written before the verdict
-#             stamp, carries no signoff_verdict with gc.outcome=recorded; OR the
-#             anchor's pr_number has an APPROVED GitHub review (an approval names
-#             no gate, so it backs every lane).
+#   backing   a closed task_kind=review bead whose anchor_bead is this anchor,
+#             carrying a reviewed_oid, and whose check_name is this lane (absent
+#             check_name resolves to codex): it carries signoff_verdict=approve
+#             and is not superseded (gc.outcome is not superseded); OR, for a
+#             legacy bead written before the verdict stamp, carries no
+#             signoff_verdict with gc.outcome=recorded; OR the anchor's pr_number
+#             has an APPROVED GitHub review (an approval names no gate, so it
+#             backs every lane).
+#             The reviewed_oid clause is what doctor/check-gate-marker-provenance
+#             requires of a local backing bead — a recorded verdict naming no
+#             reviewed commit is a stale or legacy row, so it cannot green a lane
+#             on its own. The GitHub-approval fallback is independent evidence and
+#             needs no such pin.
 #   in flight an open review bead for this lane holds the lane out of green — the
 #             precedence that keeps green from co-existing with a live review.
 #
@@ -106,6 +112,7 @@ cmd_green() {
           | select(((($m.task_kind // "") | tostring)) == "review")
           | select(((($m.check_name // "") | tostring) | if . == "" then "codex" else . end) == $lane)
           | select(((.status // "") | tostring | ascii_downcase) == "closed")
+          | select(((($m.reviewed_oid // "") | tostring)) != "")
           | (($m.signoff_verdict // "") | tostring) as $sv
           | ((($m["gc.outcome"] // "") | tostring)) as $oc
           | select(($sv == "approve" and $oc != "superseded") or ($sv == "" and $oc == "recorded")) ]
