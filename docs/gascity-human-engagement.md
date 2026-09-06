@@ -79,8 +79,9 @@ Each entry: the upstream fact, its verification status, and the seam.
   direct stamps must be rig-qualified; and under a `default_sling_formula`
   a bare sling is a formula attach that stamps nothing — stamp-don't-sling
   or `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
-  *Seam:* a visit is ordinary routed work; pool demand spawns the
-  conversation session with no operator keystroke.
+  *Seam:* a visit parks on the helm board (`gc.routed_to=human`) and holds
+  no session; `gc-helm engage` spawns the conversation session when an
+  operator draws it off the board.
 
 - **The worker-role contract — upstream now owns the idiom.** The
   `gc-roles` pack ships a shared `gc-role-worker` contract fragment used
@@ -1060,8 +1061,9 @@ definition first, because everything below uses it:
 > subject's dialogue, stored as a bead linked to the subject by a
 > `tracks` edge and never as its child, whose body says what that
 > sitting would be for ("ratify this plan", "review posted — decision
-> needed"), whose metadata routes it to the converse pool and names
-> the subject's continuation group, whose `gc.outcome` records how it
+> needed"), whose metadata routes it to the operator
+> (`gc.routed_to=human`, the helm board) and names the subject's
+> continuation group, whose `gc.outcome` records how it
 > resolved, and which closes when it does (the subject never closes
 > this way). A visit that is *held* becomes the sitting it asked for,
 > and ends out loud, with a sign-off naming the outcome and the

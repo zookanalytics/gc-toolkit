@@ -10,8 +10,8 @@
 # formulas-only; gc-helm.sh's `open` verb carries the copy the operator front
 # doors actually reach — and asserts the load-bearing invariants each stamp
 # carries (each has a silent-failure trap the pack has paid for):
-#   - the pool is the rig-qualified exact-match form (bare names sit
-#     silently forever on the exact-string read side)
+#   - the visit parks on the board: POOL="human", the literal the board's
+#     gather matches (gc.routed_to == "human") on the exact-string read side
 #   - the three metadata stamps ride one --set-metadata flag each
 #     (comma-joined pairs become one garbage value)
 #   - the visit is wired to its subject with a tracks edge (parent-child

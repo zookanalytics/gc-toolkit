@@ -74,9 +74,10 @@ fi
 ```
 
 The visit bead's body is the visit prompt; extend the `-d` body if {{visit}}
-alone under-specifies it. Stamp-don't-sling, one key per flag, and the POOL
-must be the rig-qualified exact-match form (docs/gascity-routing-model.md).
-Warm, the live group session vacuums the visit; cold, pool demand spawns
-one. `task_kind=visit` is the structural marker that makes a visit legible
-as engagement.
+alone under-specifies it. Stamp-don't-sling, one key per flag. The visit is
+routed to `human` (gc.routed_to=human, the helm board's exact gather
+predicate): it parks on the board and holds no session until an operator draws
+it off with `gc-helm engage`, which spawns the sitting on demand.
+`task_kind=visit` is the structural marker that makes a visit legible as
+engagement.
 """
