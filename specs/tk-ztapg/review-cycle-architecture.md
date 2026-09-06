@@ -61,15 +61,21 @@ commit, and it is read by asking which beads exist, not by reading a marker:
 | `reviewing` | a review bead for this lane on the anchor is open |
 | `validating` | a validation pass on the anchor is open |
 | `fixing` | a must-fix finding on this lane is open |
-| `green` | a closed approve-verdict review bead for this lane exists **and** no must-fix finding on the anchor is open |
+| `green` | a closed approve-verdict review bead for this lane exists **and** no must-fix finding on this lane is open |
 
 The load-bearing derivation is `green`. `green(anchor, lane)` holds when a
 `task_kind=review` bead for the pair — `anchor_bead` this anchor, `check_name`
 this lane — is closed carrying `signoff_verdict=approve`, and no `must-fix`
-finding on the anchor is open. An operator's APPROVED GitHub review on the
+finding on this lane is open. An operator's APPROVED GitHub review on the
 anchor's `pr_number` is the second way the approve half is met, because a human
 who approves on GitHub files no review bead; an approval names no gate, so it
 meets it for every lane.
+
+`green` is a per-lane predicate: it reads only this lane's approve verdict and
+this lane's must-fix findings, so a sibling lane's open finding does not change
+it. The anchor-wide rule — no open must-fix finding anywhere on the anchor — is
+a separate condition the merge predicate holds on, not a term in any lane's
+`green`.
 
 **Green survives new commits.** A push creates and closes no bead in the set the
 derivation reads, so it does not move a lane out of `green`, does not stale it,
@@ -101,10 +107,13 @@ commit.
 
 The must-fix half is already structural. A must-fix finding holds its anchor by
 a `blocks` edge, and `merge.sh` already reads every live `blocks` blocker of the
-anchor into its hold. The marker never carried this fact; the graph did. The one
-gap the design closes is that the provenance audit checks only the approve half,
-so the two halves are joined for the first time here, in one predicate a shared
-read helper computes.
+anchor into its hold. The marker never carried this fact; the graph did. A lane's
+`green` reads only the must-fix findings on that lane; the anchor-wide check —
+every open must-fix finding, on any lane — is the separate merge condition below,
+which that same `blocks` probe already enforces. The one gap the design closes is
+that the provenance audit computes only the approve half, and this design
+promotes that resolver from an audit to the source of truth a shared read helper
+computes.
 
 ### Two ways a lane goes green
 
@@ -227,7 +236,7 @@ out: a fix unit in flight is a live bead blocking a finding on this anchor.
 Closing runs the edges backwards. When the fix unit closes, the findings it
 blocked become unblocked, and `gate-ensure.sh`, which already owns lane state
 and computes quiescence, closes each finding whose blockers have all closed.
-The lane leaves `fixing` when the anchor carries no open must-fix finding.
+The lane leaves `fixing` when no must-fix finding on this lane is open.
 
 Today's rework child is already a fix unit in this shape. `signoff.sh` writes
 it a `blocks` edge onto the anchor and routes it to the fix-target pool, while
@@ -380,9 +389,12 @@ arrived and they still hold the merge.
 1. every lane declared in `check_set` **derives** `green`
 2. no `must-fix` finding on the anchor is open
 
-Condition 1 no longer reads a `check.<lane>` marker. `hold_gate` computes
-`green(anchor, lane)` for each declared lane through the shared read helper — the
-closed approve-verdict review bead, or the operator's APPROVED GitHub review. The
+Condition 1 no longer reads a `check.<lane>` marker. `hold_gate` computes each
+declared lane's approve half through the shared read helper — the closed
+approve-verdict review bead, or the operator's APPROVED GitHub review. A lane's
+own must-fix half is subsumed by condition 2, which holds on every open must-fix
+finding anywhere on the anchor, so `hold_gate` reads the approve half per lane
+and the must-fix once, anchor-wide. The
 head comparison is already gone with the pin, so what this step removes is the
 marker read itself, not a stale-head test. Condition 2 is not new code for
 `merge.sh`: a must-fix finding blocks the anchor by a `blocks` edge and the
@@ -462,10 +474,15 @@ commit `98241e0f`) landed it, replacing the `<verb>@<oid>` grammar. This design
 removes that marker layer, as the completion of the same ruling `tk-uqolwg` began
 rather than a conflict with it.
 
-The cutover needs no data migration, because the graph already backs every green
-marker. `check-gate-marker-provenance` runs today as an audit that would flag any
-`check.<g>=green` not standing on a recorded approve verdict, so a green marker
-and its approve-review bead already agree. Each reader switches from the marker
+The cutover needs no data migration, because the derivation reads the same
+evidence the provenance audit already accepts. `check-gate-marker-provenance`
+runs today as an audit that would flag any `check.<g>=green` not standing on a
+recorded approve verdict, resolving that verdict from a closed approve-verdict
+review bead or, when none exists, an APPROVED GitHub review on the anchor's
+`pr_number`. The derivation reads both sources, so it preserves the
+GitHub-approval fallback: a green marker standing on a human's GitHub approval
+with no local review bead still derives green after cutover, rather than silently
+going ungreen. Each reader switches from the marker
 to the derivation in the change that removes that reader's marker read; once the
 last reader has switched, the `check.<lane>` markers are inert metadata that a
 one-shot sweep clears. `assets/scripts/migrate-lane-states.sh`, the disposable
