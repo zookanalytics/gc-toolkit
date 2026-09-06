@@ -201,13 +201,32 @@ if ! gc bd update $WORK --set-metadata prepare_mode="$PREPARE_MODE" >/dev/null 2
   exit 1
 fi
 git fetch --prune origin
-git checkout -b temp "origin/$BRANCH"
+# Stage the branch under prep in a dedicated worktree, never the session's cwd.
+# The refinery often runs in the rig canonical checkout, and a checkout there
+# survives any interrupt before cleanup (a suspend mid-flow), stranding the rig
+# root off its branch. The prep worktree is rig-scoped, lives inside the shared
+# git dir (no working tree sees it), and is checked out DETACHED: it creates no
+# local branch, so it cannot collide with a rig root already stranded on `temp`
+# (the exact state this flow must survive), and the root's HEAD never moves.
+# Every step that touches the prepared head resolves this same path; a leftover
+# from an interrupted iteration is cleared first.
+RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+git -C "$RIG_ROOT" worktree remove --force "$PREP_WT" 2>/dev/null || true
+# Check the add result before any conflict path can run: a failed staging is
+# prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
+# work with the refinery to retry instead of repooling it with a false rejection.
+if ! git -C "$RIG_ROOT" worktree add -f --detach "$PREP_WT" "origin/$BRANCH"; then
+  echo "could not stage the prep worktree at $PREP_WT — NOT preparing the branch; leaving it with the refinery to retry (prep-setup failure, not an origin/$TARGET conflict)"
+  gc runtime drain-ack
+  exit 1
+fi
 PREPARE_FAILED=
 if [ "$PREPARE_MODE" = "rebase" ]; then
-  git rebase "origin/$TARGET" || { git rebase --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
+  git -C "$PREP_WT" rebase "origin/$TARGET" || { git -C "$PREP_WT" rebase --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
 else
   echo "$BRANCH is not a disposable per-bead branch (graduation=${GRADUATION:-false}) — merging origin/$TARGET IN, not rebasing"
-  git merge --no-edit "origin/$TARGET" || { git merge --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
+  git -C "$PREP_WT" merge --no-edit "origin/$TARGET" || { git -C "$PREP_WT" merge --abort >/dev/null 2>&1 || true; PREPARE_FAILED=1; }
 fi
 # <<< shared-branch-merge-mode
 ```
@@ -245,8 +264,12 @@ PR_URL=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.pr_url // empty')
 # <<< mr-aware-rejection
 ```
 
-Do NOT delete the branch (the resuming polecat needs it). Clean up:
-`git checkout {{target_branch}} && git branch -D temp`.
+Do NOT delete `origin/$BRANCH` (the resuming polecat needs it). Tear down the
+prep worktree (`git -C "$RIG_ROOT" worktree remove --force "$PREP_WT"`,
+re-resolving `RIG_ROOT`/`PREP_WT` as the rebase step did); the prep worktree is
+detached and holds no branch, so nothing else has to be deleted, the rig root's
+HEAD was never moved, and an interrupted teardown is cleared by the next
+iteration's rebase step.
 Then jump to next-iteration (pour before burn) — the rejection ends this
 cycle."""
 
@@ -257,16 +280,22 @@ needs = ["rebase"]
 description = """
 **Config: run_tests = {{run_tests}}**
 
-Run each configured check in order, skipping empty ones:
+The branch under test is staged in the prep worktree (the rebase step), so run
+every check THERE — the rig root's checkout is never touched. Resolve the same
+path and enter it first, then run each configured check in order, skipping
+empty ones:
 ```bash
+RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+cd "$PREP_WT"
 {{setup_command}}
 {{typecheck_command}}
 {{lint_command}}
 {{build_command}}
 ```
-If run_tests = "true": `{{test_command}}`. When the rig ships no commands at
-all, run the quality gates documented in the rig's CLAUDE.md instead —
-never silently skip the gates.
+If run_tests = "true": `{{test_command}}` (in the same `$PREP_WT`). When the
+rig ships no commands at all, run the quality gates documented in the rig's
+CLAUDE.md instead — never silently skip the gates.
 
 Track which checks ran and what failed. Close this step when all checks
 complete (pass or fail)."""
@@ -333,7 +362,10 @@ else
 fi
 # <<< rejection-branch-keep
 ```
-Clean up temp, jump to next-iteration.
+Tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove --force
+"$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the rebase step did); it is
+detached and holds no branch, so nothing else has to be deleted. Then jump to
+next-iteration.
 
 **Pre-existing on target:** dedup FIRST, file only if none, then proceed
 with the merge. One block, one shell — a probe result that does not survive
@@ -462,9 +494,14 @@ branch_has_real_change() {
 ```
 
 **0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
-branch that merges to a no-op is a false completion. Never silently retry:
+branch that merges to a no-op is a false completion. Never silently retry. The
+prepared head is the detached prep worktree's HEAD (the rebase step staged it
+there), so resolve that path and read its commit rather than a `temp` branch:
 ```bash
-if ! branch_has_real_change "origin/$TARGET" temp; then
+RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
+if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
   "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
   SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
@@ -481,10 +518,13 @@ worktree), push, verify the remote ref, then record + close through ONE
 lifecycle call. A push rejected for branch protection (GH006/GH013/
 "protected branch"/"Changes must be made through a pull request"/"approving
 review"/"Cannot update this protected ref") auto-promotes the bead to
-`merge_strategy=pr` and falls through to the mr block — temp is untouched
-and still available for the PR push. Any other push failure stops the wisp.
+`merge_strategy=pr` and falls through to the mr block — the prep worktree is
+untouched and still holds the prepared head for the PR push. Any other push
+failure stops the wisp.
 ```bash
 set -e
+RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
 MERGE_WT="$MERGE_PARENT/target"
 # $PUSH_ERR is allocated further down but torn down here: every arm that reads
@@ -493,7 +533,7 @@ PUSH_ERR=""
 merge_scratch_rm() { git worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
 trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 git fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-TEMP_SHA=$(git rev-parse temp)
+TEMP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
 git worktree add --detach "$MERGE_WT" "origin/$TARGET"
 git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
 MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
@@ -516,7 +556,9 @@ else
   esac
 fi
 ```
-After a successful direct merge: check out `$TARGET` and delete temp; if
+After a successful direct merge: tear down the prep worktree (`git -C
+"$RIG_ROOT" worktree remove --force "$PREP_WT"` — it is detached and holds no
+branch, and the rig root's HEAD was never moved, so nothing is restored); if
 delete_merged_branches = "true", `git push origin --delete $BRANCH`; and if
 auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
 (`$GC_RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on
@@ -530,18 +572,22 @@ PR, merge.sh lands it. Gate dispatch does NOT happen here.
 1. Push the prepared branch. Force ONLY when the push actually rewrites
 history — derived from ancestry, not the branch name:
 ```bash
-git checkout temp
 # >>> shared-branch-push-mode
+# The prepared head is the detached prep worktree's HEAD (the rebase step staged
+# it there), never a branch in the rig root; push it from there so the root's
+# HEAD is never moved to it.
+RIG_ROOT="${GC_RIG_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 # Deliberately NO fetch here. `--force-with-lease` with no explicit expected
 # value compares against the LOCAL remote-tracking ref, so a fetch immediately
 # before the push refreshes the very ref the lease is checked against and
 # quietly degrades it to a plain --force. The rebase step's fetch is the
 # snapshot both the ancestry test and the lease are taken against, which is
 # what makes "the branch moved under us" detectable at all.
-if git merge-base --is-ancestor "origin/$BRANCH" temp; then
-  git push origin "HEAD:$BRANCH"
+if git -C "$PREP_WT" merge-base --is-ancestor "origin/$BRANCH" HEAD; then
+  git -C "$PREP_WT" push origin "HEAD:$BRANCH"
 else
-  git push origin "HEAD:$BRANCH" --force-with-lease
+  git -C "$PREP_WT" push origin "HEAD:$BRANCH" --force-with-lease
 fi
 # <<< shared-branch-push-mode
 ```
@@ -661,7 +707,7 @@ GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
 if [ -n "$EXISTING_ANCHOR" ]; then
-  REWORK_SHA=$(git rev-parse --short temp 2>/dev/null || echo "")
+  REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short HEAD 2>/dev/null || echo "")
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
     if ! gc bd update "$WORK" --status=closed --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
@@ -686,10 +732,12 @@ later, on a verified merge, via the cadence — never here. A failed
 transition leaves $WORK assigned and open; the next patrol retries
 idempotently (push and anchor resolution are both re-runnable).
 
-6. Cleanup: `git checkout "$TARGET" && git branch -d temp`. Never delete
-`$BRANCH` in mr mode — the PR needs it. Leave the checkout ON `$TARGET`: a
-detached rig root advances HEAD on later fast-forwards and strands the
-`$TARGET` ref behind it.
+6. Cleanup: tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove
+--force "$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the push block did; an
+interrupted teardown is cleared by the next iteration's rebase step). The prep
+worktree is detached and holds no branch, so nothing else has to be deleted.
+Never delete `$BRANCH` in mr mode — the PR needs it. The rig root's HEAD was
+never moved, so nothing has to be restored here.
 
 **Unsupported strategies (e.g. `local`):** transition nothing; escalate
 via escalate.sh (`--subject $WORK --key refinery-unsupported-strategy`) and
