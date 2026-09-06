@@ -3,6 +3,12 @@
 # and compared against a fresh hashing of the same files by its --check-merge and
 # by doctor/check-seed-audit-current. The path line between two hashes is the
 # unchanged line git needs to merge two branches that moved different inputs.
+agents/converse-codex/agent.toml
+1524c70134fa65623d07ed636d183368e28b5b6db489e82a72f46a1bc0718382
+agents/converse-fable/agent.toml
+1eac0fa5929099e7df6b4f8cc24ff04be747916b9f4bf63050181c5f394a067e
+agents/converse-opus/agent.toml
+2f1ae84a7f41fd606362070bb94cbe802903a2a13562ce3fbd32acbe6da1d9d8
 agents/converse/PROVENANCE.md
 1af991e9ca79182636678088a28f7cba74286989e6938f4e476f1bd914c2f07f
 agents/converse/agent.toml

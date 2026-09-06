@@ -1,0 +1,28 @@
+# converse-opus — a converse sitting on the Opus work tier, and the default of
+# the per-model converse templates (converse-*). They share the converse role
+# and prompt and differ only in provider and model; this one carries the longer
+# per-field documentation the others point back to. Open one with
+# `gc session new converse-opus <visit>`: that is an origin=manual session,
+# which is not pool_managed, so the pool execution backstop never governs it and
+# a pane held open for a conversation is not reaped by a no-nudge drain.
+scope = "rig"
+provider = "claude"
+option_defaults = { model = "opus" }
+# Share the converse role's prompt rather than carry a copy; a variant differs
+# from its siblings only in provider and model.
+prompt_template = "agents/converse/prompt.template.md"
+work_dir = ".gc/agents/converse-opus/{{.AgentBase}}"
+# resume carries the conversation across suspend, pin, and every wake; a fresh
+# session per visit is what makes each sitting new, so the thread lives here.
+wake_mode = "resume"
+# The operator attaches to the sitting.
+attach = true
+# Sittings are opened by hand, never spawned by demand: min 0 starts nothing,
+# and max is only a ceiling on how many run at once.
+min_active_sessions = 0
+max_active_sessions = 8
+# A bounded lifetime refreshes the provider's cached credential before it can
+# wedge on token expiry; with wake_mode=resume that restart resumes the sitting
+# rather than losing its history.
+max_session_age = "5h"
+max_session_age_jitter = "15m"
