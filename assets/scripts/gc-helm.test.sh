@@ -1557,7 +1557,10 @@ case "$1 ${2:-}" in
                     + (if ($id | test("LANDED")) then {"gc.demand_for": "tk-kid"} else {} end)),
          dependencies: ((if $p != "" then [{id: $p, dependency_type: "parent-child"}] else [] end)
                         + ($blk | map({id: ., dependency_type: "blocks"})))}]' ;;
-  "bd list")  cat "$D_LIST" ;;
+  "bd list")
+    # Even a valid-looking response must not count if the command failed.
+    if [ -f "$D_LIST_FAIL" ]; then cat "$D_LIST"; exit 1; fi
+    cat "$D_LIST" ;;
   "bd create") printf '{"id":"%s"}\n' "$(cat "$D_NEXTID")" ;;
   "bd gate")
     # `gc bd gate create --type=human --blocks <gated> --title <t> --json`
@@ -1570,12 +1573,21 @@ case "$1 ${2:-}" in
     gid="$(cat "$D_NEXTID")"; prev=""
     case "${3:-}" in
       create)
-        blocked=""
+        [ "${D_CREATE_MODE:-}" != "no-write" ] || exit 1
+        blocked=""; marker=""
         for a in "$@"; do
           [ "$prev" = "--blocks" ] && blocked="$a"
+          case "$a" in --await-id=*) marker="${a#--await-id=}" ;; esac
           prev="$a"
         done
         case "$gid" in *NOEDGE*) : ;; *) [ -n "$blocked" ] && printf '%s %s\n' "$blocked" "$gid" >> "$D_GATE_EDGES" ;; esac
+        if [ -n "${D_CREATE_MODE:-}" ]; then
+          jq -n --arg id "$gid" --arg marker "$marker" \
+            '[{id:$id, issue_type:"gate", await_type:"human", await_id:$marker, metadata:{}}]' > "$D_LIST"
+          [ "$D_CREATE_MODE" != "lookup-fail" ] || touch "$D_LIST_FAIL"
+          printf '{"error":"failed to commit"}\n'
+          exit 1
+        fi
         printf '{"id":"%s"}\n' "$gid" ;;
       resolve)
         rid="${4:-}"
@@ -1588,6 +1600,13 @@ case "$1 ${2:-}" in
     # carrying LANDED as well models a write that landed and still exited
     # non-zero (bd commits after it writes): `bd show` answers the stamp.
     case "$3" in *NOSTAMP*) exit 1 ;; esac
+    for a in "$@"; do
+      case "$a" in gc.demand_for=*)
+        jq --arg id "$3" --arg g "${a#gc.demand_for=}" \
+          'map(if .id == $id then .metadata["gc.demand_for"] = $g else . end)' \
+          "$D_LIST" > "$D_LIST.tmp" && mv "$D_LIST.tmp" "$D_LIST" ;;
+      esac
+    done
     # The multi-pair refresh never lands here, which is the dropped clear this
     # store models. The lone-pair repair does — unless the bead id says STUCK,
     # the store that will not take that write either.
@@ -1612,7 +1631,7 @@ chmod +x "$TMP/bin2/gc"
 
 export D_LOG="$TMP/dlog" D_PARENTS="$TMP/dparents" D_LIST="$TMP/dlist" \
        D_NEXTID="$TMP/dnextid" D_MISSING="$TMP/dmissing" D_SETTLED="$TMP/dsettled" \
-       D_GATE_EDGES="$TMP/dgateedges"
+       D_GATE_EDGES="$TMP/dgateedges" D_LIST_FAIL="$TMP/dlistfail"
 : > "$TMP/dsettled"
 : > "$TMP/dgateedges"
 printf 'tk-kid|tk-mum\n' > "$D_PARENTS"   # tk-kid has a parent; tk-solo has none
@@ -1854,6 +1873,74 @@ grep -q '^demand tk-NOSTAMPLANDED1 blocks tk-kid' <<< "$DOUT" \
   && ok "(GATELANDED) …and the success line names the gate" \
   || bad "(GATELANDED) no success line: $DOUT"
 printf 'tk-dem1\n' > "$D_NEXTID"
+
+# Creation can write the row and edge, then fail before returning its id.
+export D_CREATE_MODE=post-write
+printf 'tk-recovered\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recover the interrupted demand"
+eq "$DRC" "0" "(CREATELOST) a post-write create failure recovers successfully"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(CREATELOST) the recovered row receives discoverable demand metadata"
+eq "$(awk '$1=="tk-kid"{print $2}' "$D_GATE_EDGES")" "tk-recovered" \
+   "(CREATELOST) the original blocker remains in place"
+eq "$(d_gate_resolve)" "" "(CREATELOST) the recovered live gate is not resolved"
+eq "$(awk '/^demand /{print $2}' <<< "$DOUT")" "tk-recovered" \
+   "(CREATELOST) success returns the recovered id"
+demand_run tk-kid "operator: restate the demand"
+eq "$DRC" "0" "(CREATERETRY) the stamped demand can be refreshed"
+eq "$(d_gate)" "" "(CREATERETRY) retry creates no second gate"
+
+# Recovery still goes through the existing orphan cleanup if stamping fails.
+printf '[]\n' > "$D_LIST"
+printf 'tk-NOSTAMP-recovered\n' > "$D_NEXTID"
+demand_run tk-kid "operator: recovered but unstamped"
+eq "$DRC" "4" "(RECOVERYCLEANUP) failed stamp after recovery reports failure"
+eq "$(d_gate_resolve)" "bd gate resolve tk-NOSTAMP-recovered" \
+   "(RECOVERYCLEANUP) recovered orphan is resolved by the existing cleanup"
+eq "$(cat "$D_GATE_EDGES")" "" "(RECOVERYCLEANUP) orphan no longer blocks work"
+printf 'tk-recovered\n' > "$D_NEXTID"
+
+# If immediate recovery is unreadable, the stable marker survives for a retry.
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=lookup-fail
+demand_run tk-kid "operator: recover later"
+eq "$DRC" "4" "(RECOVERYREAD) failed recovery reports failure"
+grep -q 'creation on tk-kid is uncertain' <<< "$DERR" \
+  && ok "(RECOVERYREAD) reports uncertainty rather than claiming nothing was filed" \
+  || bad "(RECOVERYREAD) wrong diagnostic: $DERR"
+eq "$(jq -r '.[0].await_id' "$D_LIST")" "gc-demand:tk-kid" \
+   "(RECOVERYREAD) the unstamped row retains the recovery marker"
+demand_run tk-kid "operator: still unreadable"
+eq "$DRC" "4" "(LOOKUPREAD) an unreadable initial lookup fails closed"
+eq "$(d_gate)" "" "(LOOKUPREAD) no create while the ledger is unreadable"
+rm "$D_LIST_FAIL"
+demand_run tk-kid "operator: recover later"
+eq "$DRC" "0" "(RECOVERYRETRY) a later retry adopts the unstamped gate"
+eq "$(d_gate)" "" "(RECOVERYRETRY) adoption creates no second gate"
+eq "$(jq -r '.[0].metadata["gc.demand_for"]' "$D_LIST")" "tk-kid" \
+   "(RECOVERYRETRY) adoption completes the stamp"
+
+printf '[]\n' > "$D_LIST"
+export D_CREATE_MODE=no-write
+demand_run tk-kid "operator: no write landed"
+eq "$DRC" "4" "(CREATEEMPTY) creation with no surviving row fails"
+eq "$(d_update)$(d_gate_resolve)" "" "(CREATEEMPTY) no invented gate is stamped or resolved"
+eq "$(grep -c '^bd gate create ' "$D_LOG")" "1" "(CREATEEMPTY) no blind create retry"
+unset D_CREATE_MODE
+
+printf '{"error":"unreadable"}\n' > "$D_LIST"
+demand_run tk-kid "operator: invalid lookup"
+eq "$DRC" "4" "(LOOKUPINVALID) malformed list shape fails closed"
+eq "$(d_gate)" "" "(LOOKUPINVALID) no create after an invalid lookup"
+
+printf '[{"id":"tk-a","issue_type":"gate","await_type":"human","await_id":"gc-demand:tk-kid"},{"id":"tk-b","metadata":{"gc.demand_for":"tk-kid"}}]\n' > "$D_LIST"
+demand_run tk-kid "operator: ambiguous demand"
+eq "$DRC" "4" "(LOOKUPMULTIPLE) multiple matching demands require reconciliation"
+eq "$(d_gate)$(d_update)$(d_gate_resolve)" "" "(LOOKUPMULTIPLE) neither gate is changed or duplicated"
+grep -q 'tk-a, tk-b' <<< "$DERR" \
+  && ok "(LOOKUPMULTIPLE) diagnostic identifies both gates" \
+  || bad "(LOOKUPMULTIPLE) missing conflicting ids: $DERR"
+printf '[]\n' > "$D_LIST"
 
 echo ""
 echo "gc-helm takeaway + demand + dismiss (release quiesce, waiting-on edges, length gate, demand shape): $PASS passed, $FAIL failed"

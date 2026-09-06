@@ -717,6 +717,22 @@ cmd_takeaway() {
 #
 # One open demand per gated bead: a resumed sitting re-states the same question
 # and gets the existing demand refreshed, never a second blocker for one wait.
+# Find both stamped demands and gates whose creation outlived its response.
+# Keep lookup errors distinct from an empty result: either a failed read or
+# ambiguous matches must prevent another create. Use a subshell for scratch vars.
+demand_lookup() (
+    raw=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit=0 2>/dev/null) || return 1
+    printf '%s' "$raw" | scrub | jq -ce --arg g "$1" '
+        if type != "array" then error("invalid demand list") else
+          [ .[] | select((.metadata["gc.demand_for"] // "") == $g or
+              (.issue_type == "gate" and .await_type == "human" and
+               .await_id == ("gc-demand:" + $g))) ]
+          | if length > 1 then
+              error("multiple demand gates; reconcile before retrying: " + (map(.id) | join(", ")))
+            else .[0] // {} end
+        end'
+)
+
 cmd_demand() {
     gated=""; text=""; by="host"; kind="decision"; who=""; body=""; also=""; npos=0
     while [ $# -gt 0 ]; do
@@ -787,10 +803,10 @@ cmd_demand() {
     # set is the demand readers' (signoff, pr-facts, liveness): a gate an
     # operator deferred or pinned still holds the work there, so a re-state
     # must refresh it rather than file a second gate beside it.
-    existing=$(gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --include-gates --json --limit=0 2>/dev/null \
-        | scrub \
-        | jq -r --arg g "$gated" \
-            '[ .[]? | select((.metadata["gc.demand_for"] // "") == $g) | .id ] | first // empty' 2>/dev/null || true)
+    candidate=$(demand_lookup "$gated") \
+        || { echo "$PROG: demand: could not establish a unique demand on $gated — stopped before creating another gate." >&2; exit 4; }
+    existing=$(printf '%s' "$candidate" | jq -r --arg g "$gated" \
+        'select((.metadata["gc.demand_for"] // "") == $g) | .id // empty')
 
     if [ -n "$existing" ]; then
         demand="$existing"
@@ -826,17 +842,28 @@ cmd_demand() {
         # and the kind is recorded in metadata rather than as the issue type.
         # --reason carries the body from birth, so a gate whose stamp never
         # lands still explains itself to whoever clears it by hand.
-        demand=$(gc bd gate create --type=human --blocks "$gated" --title "$text" --reason "$body" --json 2>/dev/null \
-            | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+        # await_id is stored with the initial row, before the commit that can
+        # fail without returning an id. It lets this call and later retries
+        # recover the same unstamped gate, even if the first recovery read fails.
+        demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
+        if [ -z "$demand" ]; then
+            demand=$(gc bd gate create --type=human --blocks "$gated" --await-id="gc-demand:$gated" --title "$text" --reason "$body" --json 2>/dev/null \
+                | scrub | jq -r '.id // .[0].id // empty' 2>/dev/null || true)
+            if [ -z "$demand" ] || [ "$demand" = null ]; then
+                candidate=$(demand_lookup "$gated") \
+                    || { echo "$PROG: demand: gate creation on $gated is uncertain and recovery lookup failed. Retry after the ledger is readable and any duplicate demands are reconciled; marker: gc-demand:$gated." >&2; exit 4; }
+                demand=$(printf '%s' "$candidate" | jq -r '.id // empty')
+            fi
+        fi
         # A create routed to the wrong ledger returns an id rather than an
         # error, and that id can never carry an edge to $gated — so the prefix
         # is checked, not assumed.
         case "$demand" in
-            ""|null)     echo "$PROG: demand: gc bd gate create returned no id — nothing filed on $gated." >&2; exit 4 ;;
+            ""|null)     echo "$PROG: demand: gc bd gate create returned no id and no recoverable demand was found on $gated; creation was not confirmed." >&2; exit 4 ;;
             "$prefix"-*) : ;;
             *)           echo "$PROG: demand: gc bd gate create filed $demand, whose prefix is not '$prefix' — it landed in another rig's ledger and can never gate $gated. Resolve it by hand and re-run from the rig that owns $gated." >&2; exit 4 ;;
         esac
-        set -- -d "$body" \
+        set -- --title "$text" -d "$body" \
                --set-metadata "gc.takeaway=$text" \
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
