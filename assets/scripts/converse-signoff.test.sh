@@ -629,6 +629,11 @@ have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
 have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
 have "dismiss also clears the board row" 'gc.dismissed_at=' "$HELM"
+# The save-for-later lever is the other half of the operator's control: it
+# frees the runtime and leaves the visit open, so the prompt can offer a pause
+# that is not an ending.
+have "gc-helm carries the operator's suspend verb" 'cmd_suspend()' "$HELM"
+have "suspend leaves the visit open rather than closing it" 'visit stays open' "$HELM"
 have "the engagement doc records the switch-off" 'off the idle ladder' "$ENGAGE"
 
 echo "── the verified mechanism is recorded centrally ──"
@@ -1837,10 +1842,16 @@ echo "── every framing hands over the switch that ends the sitting ──"
 # ending a conversation meant remembering a command. It goes at the foot of the
 # framing, and it has to be a command that RUNS: a held visit is assigned to
 # the session holding it, and a session restarted mid-hold closes under a
-# different identity string, which bd refuses outright.
-have "the framing ends with a copyable close-out" 'dismiss <the subject' "$PROMPT"
+# different identity string, which bd refuses outright. It takes no bead-id —
+# the subject is inferred from the session the command runs in — so the bare
+# line stands and the same act sits behind a keystroke.
+have "the framing ends with a copyable close-out" 'dismiss --reason' "$PROMPT"
 have "…written with the resolved path, not a variable the operator never set" \
-     'Write the resolved path and the real id' "$PROMPT"
+     'Write the resolved path' "$PROMPT"
+have "…and the close-out needs no bead-id: it infers the sitting's subject" \
+     'takes no bead-id' "$PROMPT"
+have "…and offers suspend as the save-for-later sibling" \
+     'save-for-later sibling' "$PROMPT"
 have "…and it is framed as a control, not a chore" 'a control, not a chore' "$PROMPT"
 # The verb has to do what the prompt promises of it, or the offered line is the
 # hand-written close under another name.
