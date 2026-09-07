@@ -66,18 +66,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    can still be coming, and the arm escalates through `escalate.sh` under the
    `review-wedge` key rather than holding the anchor in silence. It escalates
    on the second consecutive sighting, because `mol-review`'s failure arm
-   closes its chain before it restores the bead's route. One dispatch is
-   refused outright: a head that a closed request-changes verdict already
-   judged, whose rework child is still open, can only be answered the same
-   way, so the gate stays armed and the merge held until that rework moves the
-   head. Behind that sits a ceiling on DISPATCHES —
-   `GC_MAX_REVIEW_DISPATCHES`, default 5, and not `signoff.sh`'s round cap —
-   for the reviews neither refusal can see: one that ends writing no marker
-   and leaving no open rework child returns the anchor to the state that
-   triggered the dispatch, so the next pass repeats it at the same head. At
-   the ceiling the gate holds, the anchor carries `dispatch_backstop.<gate>`
-   and a note saying why, and one visit is filed under the `dispatch-runaway`
-   key. **rc=3 is the designed interlock**: it holds `merge.sh` for this
+   closes its chain before it restores the bead's route. No dispatch goes out
+   while anything is acting on the anchor — an open `must-fix` finding on any
+   lane, a fix unit in flight, a validation pass in flight, or a full review
+   already in flight on the lane — which is the QUIESCENCE predicate one
+   authority computes so it cannot disagree with itself about whether a review
+   was already out. A review that read a mid-change diff would raise only the
+   no-op rework the declination texts are full of. There is no dispatch
+   ceiling: quiescence forbids the redundant round a ceiling would have bounded,
+   and the runaway shapes left — a reviewer that dies after claim, a fix unit
+   filed with its edge reversed — stop the PR moving and are caught by
+   `liveness-sweep.sh`'s stale-gate pass, not a count on the gate.
+   **rc=3 is the designed interlock**: it holds `merge.sh` for this
    pass — an anchor whose gates are not yet satisfiable must not be mergeable
    on the same tick — and is reported without failing the order.
 
