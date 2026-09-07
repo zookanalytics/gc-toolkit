@@ -100,6 +100,18 @@ case "$1 ${2:-}" in
     jq -n --arg sl "$FAKE_SL_PATH" \
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
                {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
+  "session list")
+    # The no-id dismiss resolves the session's own rig from its record, because
+    # a converse sitting defaults its store to the CITY ledger. converse-lx-1's
+    # record names rig signal-loom (the rig whose path HAS a .beads dir), so the
+    # pin it drives is visible in FAKE_LISTS; other identities match no record
+    # and the lookup falls back to the caller store.
+    jq -n '{sessions:[
+      {id:"gc-toolkit__converse-lx-1",
+       session_name:"gc-toolkit__converse-lx-1",
+       alias:"gc-toolkit/gc-toolkit.converse-lx-1",
+       rig:"signal-loom"}
+    ]}' ;;
   "bd list")
     # Record the store this list actually read, so a lookup that searched the
     # caller's rig instead of the subject's is visible rather than silent.
@@ -290,7 +302,10 @@ w-same|gc-toolkit/gc-toolkit.refinery
 w-pend|gc-toolkit/gc-toolkit.polecat-3
 ASG
 unset GC_HELM_FIXTURE || true
-unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS || true
+# GC_RIG and BEADS_DIR too: the current-sitting lookup resolves the session's
+# rig, and an ambient value from the runner's own agent env would pin a store
+# the fixtures never set up.
+unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release 2>"$TMP/err" || true)"
@@ -1446,6 +1461,24 @@ grep -q 'no open visit is assigned to this session' <<< "$NVOUT" \
 grep -q 'dismiss <bead-id>' <<< "$NVOUT" \
   && ok "(DISMISS-INFER) …and that explicit-id form is the runnable dismiss <bead-id>" \
   || bad "(DISMISS-INFER) empty-sitting hint is not a copyable dismiss <bead-id> (got: $NVOUT)"
+
+# (DISMISS-INFER-RIG) a converse sitting defaults its store to the CITY ledger,
+# but its visit is filed in its SUBJECT's rig. So the no-id lookup must resolve
+# the session's own rig (converse-lx-1's record names signal-loom) and read
+# THERE; unpinned it reads the caller store, finds nothing, and reports no open
+# sitting while its pane is still up. The read store is recorded in FAKE_LISTS,
+# so a lookup that ran against the caller store is visible rather than silent.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/lists"
+RGOUT="$(GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss --reason "from the pane" 2>&1 || true)"
+if grep -qF "$TMP/signal-loom/.beads" "$TMP/lists"; then
+    ok "(DISMISS-INFER-RIG) the current-sitting lookup is pinned at the session's rig, not the caller store"
+else
+    bad "(DISMISS-INFER-RIG) the inference read the caller store, not the session's rig" \
+        "read: $(cat "$TMP/lists")"
+fi
+grep -q 'closed visit v-HELD' <<< "$RGOUT" \
+  && ok "(DISMISS-INFER-RIG) …and finds the visit the caller store would have missed" \
+  || bad "(DISMISS-INFER-RIG) the session-rig visit was not found (got: $RGOUT)"
 
 # More than one held visit is ambiguous: dismissing either would be a guess, so
 # it refuses and names both subjects. Nothing is closed or stamped.

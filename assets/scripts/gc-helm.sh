@@ -258,6 +258,36 @@ rig_name_for_bead() {
     printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1
 }
 
+# rig_db_for_session — the .beads dir of THIS session's rig, or empty when it
+# cannot be resolved. Where the resolvers above key off a bead id, this one
+# keys off the session itself: a converse sitting's visit is filed in its
+# SUBJECT's rig, but the session runs with GC_RIG and BEADS_DIR unset and so
+# defaults to the CITY store, where that rig-filed visit is absent. Take the
+# rig name from the environment when it names one, else from this session's own
+# runtime record (.rig, matched on any identity form), and map it to a repo
+# path. Best-effort: an unresolved rig yields empty and the caller keeps its
+# default store rather than failing.
+rig_db_for_session() {
+    _srig="${GC_RIG:-}"
+    if [ -z "$_srig" ]; then
+        _sids=$(session_identities)
+        [ -n "$_sids" ] || return 0
+        _srig=$(gc session list --state all --json 2>/dev/null | scrub \
+            | jq -r --arg ids "$_sids" '
+                ($ids | split("\n") | map(select(. != ""))) as $me
+                | [ .sessions[]? | objects | . as $s
+                    | ([ $s.id, $s.session_name, $s.alias, $s.name, $s.agent_name ]
+                       | map(select(. != null and . != ""))) as $sig
+                    | select([ $sig[] | select(. as $x | $me | index($x)) ] | length > 0)
+                    | ($s.rig // "") ]
+                | map(select(. != "")) | first // ""' 2>/dev/null || true)
+    fi
+    [ -n "$_srig" ] || return 0
+    _spath=$(gc rig list --json 2>/dev/null | scrub \
+        | jq -r --arg n "$_srig" '.rigs[]? | objects | select(.name == $n) | .path' 2>/dev/null | head -n1)
+    [ -n "$_spath" ] && [ -d "$_spath/.beads" ] && printf '%s' "$_spath/.beads"
+}
+
 # ── Release helper: quiesce a released molecule ──────────────────────
 # A molecule whose anchor is out of play — parked by a stand-down, or closed by
 # a fold that landed after the pour — keeps re-attracting the pins
@@ -1197,10 +1227,13 @@ cmd_react() {
 # (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
 # one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
 # Read from this session's own rig ledger: a visit is filed in its subject's
-# rig and adopted by the converse sitting engaged on it, so the caller's store
-# is the one the visit sits in. The scrubbed listing is left in SITTING_LISTING
-# (with the BEADS_DIR it was read under) so dismiss can skip a second identical
-# read.
+# rig and adopted by the converse sitting engaged on it, so the store to read
+# is this session's rig. A converse session runs with GC_RIG and BEADS_DIR
+# unset and so defaults to the city ledger, where the rig-filed visit is absent;
+# rig_db_for_session resolves the rig and the pin below reads it. The scrubbed
+# listing is left in SITTING_LISTING (with the BEADS_DIR it was read under) so
+# dismiss, which re-pins the same rig from the subject id, can skip a second
+# identical read.
 #
 # Sets SITTING_SUBJECT on success (called directly, not in a subshell, so the
 # listing handoff survives). It fails CLOSED, naming the explicit-id
@@ -1217,6 +1250,10 @@ current_sitting_subject() {
         echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset); there is no sitting to infer. Name the subject: $PROG dismiss <bead-id>." >&2
         return 2
     fi
+    # Pin the visit lookup at THIS session's rig store. An unresolved rig leaves
+    # the caller default in place, so this never fails the inference outright.
+    _vdb=$(rig_db_for_session)
+    [ -n "$_vdb" ] && export BEADS_DIR="$_vdb"
     if ! _vjson=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null); then
         echo "$PROG: could not read this session's visits — 'gc bd list' failed. Name the subject: $PROG dismiss <bead-id>." >&2
         return 4
