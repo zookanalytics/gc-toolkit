@@ -25,7 +25,7 @@ grep -q -- '--key' "$TOML" \
 
 # Every per-bead finding shares one key across beads, so --about is what keeps
 # two stuck beads two findings instead of collapsing them into one.
-for k in witness-salvage-refused witness-partial-release witness-refinery-queue \
+for k in witness-salvage-refused witness-partial-release \
          witness-crash-loop polecat-help; do
   if grep -A2 -- "--key $k" "$TOML" | grep -q -- '--about'; then
     ok "$k is scoped by --about, so two beads are two findings"
@@ -33,6 +33,18 @@ for k in witness-salvage-refused witness-partial-release witness-refinery-queue 
     bad "$k names no --about; every bead with that key would be one finding"
   fi
 done
+
+# witness-refinery-queue is the deliberate exception. check-refinery's
+# refinery-stuck-escalate block files it through escalate.sh, not
+# patrol-finding.sh: a handoff still assigned and unprepared past the stuck
+# bound is a session a human must look at now — the escalate.sh emergency, not a
+# routine observation the reaction triages. escalate.sh dedups per --subject, so
+# two stuck handoffs are still two visits.
+if grep -Eq 'escalate\.sh.*--key witness-refinery-queue' "$TOML"; then
+  ok "witness-refinery-queue is an escalate.sh stuck-handoff visit, not a finding"
+else
+  bad "witness-refinery-queue is no longer wired to escalate.sh"
+fi
 
 # The emergency exit stays: a crash or a data loss is not a disposition.
 grep -q 'escalate\.sh' "$TOML" \
