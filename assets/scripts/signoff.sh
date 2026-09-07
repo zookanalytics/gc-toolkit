@@ -442,10 +442,10 @@ TALLY
       [ -z "$(row_meta "$AFTER" gc.takeaway_at)" ] || BAD="$BAD gc.takeaway_at"
       [ -z "$(row_meta "$AFTER" gc.takeaway_by)" ] || BAD="$BAD gc.takeaway_by"
     fi
-    # The tally is verified key by key: gate-ensure.sh holds dispatches at the
-    # backstop while dispatch_count stands, so a tally unset that was denied or
-    # lost while the rest of the write landed leaves the anchor undispatchable
-    # under a release that reported success.
+    # The tally is verified key by key: dispatch_count and dispatch_backstop.<g>
+    # gate no dispatch now, but this reset reports them retired, so an unset
+    # denied or lost while the rest of the write landed would leave that report
+    # contradicted by inert residue the store still holds.
     for K in ${TALLY_KEYS[@]+"${TALLY_KEYS[@]}"}; do
       [ -z "$(row_meta "$AFTER" "$K")" ] || BAD="$BAD $K"
     done

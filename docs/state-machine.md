@@ -277,9 +277,10 @@ re-derive it — and retires the park in the same call, under the same
 `signoff_cap` agreement and live-demand guard the feedback reset uses. It reads
 no PR and touches no review bead, records the ruling on the anchor, and
 verifies every key it wrote, the retired tally keys included: `gate-ensure.sh`
-holds dispatches while `dispatch_count` stands, so an unset that was denied or
-lost leaves an anchor nobody may dispatch under a release that reported
-success. Because the floor comes from the rework ledger rather than from a batch
+no longer reads `dispatch_count` or `dispatch_backstop.<g>` now that it derives
+quiescence, so a leftover holds no dispatch, but the release clears the keys so a
+release that reported success leaves the anchor carrying no stale marker.
+Because the floor comes from the rework ledger rather than from a batch
 someone else recorded, the count is read strictly — a walk that does not parse,
 or one naming no round at all, refuses the whole verb before it writes. Reading
 such a walk as zero rounds would write a floor of 0 and let the next pass count
@@ -513,23 +514,21 @@ sequenceDiagram
   a verdict. `pr-facts.sh` and `gate-ensure.sh` also clear a marker, each under
   a condition [authority-map.md](authority-map.md) states, but a clear
   withdraws evidence and cannot assert it. gate-ensure bounds nothing per
-  round: a dispatch-side refusal there fires the cap early and withholds the
-  very review whose verdict settles the gate, so its `dispatch_count` is a
-  separate number. The park cannot self-feed: the cap arm files no rework
+  round: a dispatch-side refusal per round would fire the cap early and
+  withhold the very review whose verdict settles the gate. The park cannot
+  self-feed: the cap arm files no rework
   child, and nothing inside the cadence lifts a `merge_hold`.
-- **Dispatch backstop** (`gate-ensure.sh`): `dispatch_count` bounds
-  DISPATCHES at `GC_MAX_REVIEW_DISPATCHES` (default 5). It is not the round
-  cap and counts a different thing; it exists for the reviews the round cap
-  never sees. A review that ends writing no marker and leaving no open rework
-  child returns the anchor to exactly the state that triggered the dispatch,
-  so the next reconcile pass dispatches again at the same head, without end —
-  a polecat standing down without a verdict, a rework child filed with its
-  dependency edge reversed and so invisible to the walk, or a death after
-  claim. At the ceiling the gate holds, the anchor is stamped
-  `dispatch_backstop.<g>=<count>@<head>` with a note, and one visit is filed
-  under the `dispatch-runaway` key; a moved head restates the situation and
-  files again. Only an operator clears it, by fixing the cause and clearing
-  `dispatch_count`.
+- **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
+  acting on the anchor — an open `must-fix` finding on any lane, a fix unit in
+  flight, a validation pass in flight, or a full review already in flight on
+  the lane. One authority computes the set, so it cannot disagree with itself
+  about whether a review was already out, and a review that read a mid-change
+  diff would raise only the no-op rework the declination texts are full of.
+  There is no dispatch ceiling: quiescence forbids the redundant round a ceiling
+  would have bounded, and the runaway shapes it used to catch — a reviewer that
+  dies after claim, a rework child filed with its dependency edge reversed —
+  stop the PR moving rather than spin the dispatcher, so `liveness-sweep.sh`'s
+  stale-gate pass catches them, not a count on the gate.
 - **External rework** (`pr-facts.sh`): a CONFLICTING PR gets one rework child
   per head. Idempotent per head — re-runs never duplicate children. A
   hold (`merge_hold`, `rebase_hold`) or a live demand bead

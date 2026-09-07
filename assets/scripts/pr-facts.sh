@@ -804,11 +804,12 @@ GATES
     if [ "$(printf '%s' "$row" | jq -r '(.metadata.signoff_rounds_reset // "") | tostring')" != "$reset_key" ]; then
       RSET=(--set "signoff_rounds_reset=$reset_key")
       undo=""; unparked=0; park_note=""
-      # The dispatch tally bounds a runaway: reviews that dispatch and leave no
-      # verdict. New operator feedback is the evidence this anchor is not that,
-      # and the released rounds cannot be dispatched at all while the tally
-      # stands at gate-ensure's ceiling. Its backstop stamp goes with it, since
-      # it dedups the escalation for a ceiling that no longer stands.
+      # dispatch_count and dispatch_backstop.<g> are inert residue: gate-ensure
+      # keeps no dispatch tally and holds no review behind a ceiling, so an
+      # anchor still carrying them from before that retirement gates nothing on
+      # them. Clearing them here leaves this anchor with no stale tally, the
+      # backstop stamp included — it only ever deduped the retired ceiling's
+      # escalation.
       while IFS= read -r k; do
         [ -n "${k:-}" ] || continue
         RSET+=(--unset "$k"); undo="${undo:+$undo, }$k"
