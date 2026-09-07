@@ -126,16 +126,20 @@ cmd_arm() {
     [ -n "$json" ] || { echo "$PROG: arm: $bead does not resolve in this store" >&2; return 1; }
 
     # Arming already-dispatched work would queue a second pour behind the first.
-    local status assignee routed exec_routed
+    # gc.execution_routed_to is not such a dispatch: it is execution provenance
+    # stamped on a workflow-driven bead, and no worker or pool-demand pass reads
+    # it (they read gc.routed_to). A blocked bead carrying only it is the shape
+    # doctor/check-blocked-work-armed flags and points at arming to fix, so
+    # refusing on it would turn that remedy into a dead end.
+    local status assignee routed
     status="$(printf '%s' "$json" | jq -r '.status // ""')"
     assignee="$(printf '%s' "$json" | jq -r '.assignee // ""')"
     routed="$(meta_of "$json" gc.routed_to)"
-    exec_routed="$(meta_of "$json" gc.execution_routed_to)"
     if [ "$status" = "closed" ]; then
         echo "$PROG: arm: $bead is closed — nothing to dispatch" >&2; return 1
     fi
-    if [ "$status" = "in_progress" ] || [ -n "$routed" ] || [ -n "$exec_routed" ]; then
-        echo "$PROG: arm: $bead is already dispatched (status=$status routed_to='$routed' execution_routed_to='$exec_routed') — disarm-then-rearm only if you mean to re-dispatch it" >&2
+    if [ "$status" = "in_progress" ] || [ -n "$routed" ]; then
+        echo "$PROG: arm: $bead is already dispatched (status=$status routed_to='$routed') — disarm-then-rearm only if you mean to re-dispatch it" >&2
         return 1
     fi
 
@@ -297,7 +301,7 @@ cmd_reconcile() {
     local expected processed=0 dispatched=0 retired=0 waiting=0 held=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
-    local id status ready json target args_json assignee routed exec_routed rc
+    local id status ready json target args_json assignee routed rc
     while IFS=$'\t' read -r id status ready; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -325,7 +329,6 @@ cmd_reconcile() {
         args_json="$(meta_of "$json" "$K_ARGS")"
         assignee="$(printf '%s' "$json" | jq -r '.assignee // ""')"
         routed="$(meta_of "$json" gc.routed_to)"
-        exec_routed="$(meta_of "$json" gc.execution_routed_to)"
         [ -n "$args_json" ] || args_json="[]"
 
         if [ -z "$target" ]; then
@@ -333,12 +336,20 @@ cmd_reconcile() {
             failed=$((failed + 1)); continue
         fi
 
-        # Already routed (a pass died between sling and disarm, or a hand
-        # sling): retire the arm rather than pour a second workflow.
-        if [ -n "$routed" ] || [ -n "$exec_routed" ]; then
+        # Already routed (a pass died between sling and disarm, or a hand sling):
+        # retire the arm rather than pour a second dispatch. Keyed on
+        # gc.routed_to, the live pool queue pool-demand reads, not on
+        # gc.execution_routed_to, which a stranded bead keeps as provenance after
+        # its workflow is gone. Retiring on that stale marker is what would make
+        # the arm remedy doctor/check-blocked-work-armed names a dead end: the arm
+        # lands, then the next ready pass retires it without slinging. The one
+        # shape this no longer guards is a bead armed and slung via --on into a
+        # still-live workflow; no first-class caller arms with --on, and a second
+        # pour there is a redundant molecule the city reaps.
+        if [ -n "$routed" ]; then
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would retire arm on already-dispatched $id"
-            elif disarm_bead "$id" "already dispatched (routed_to='$routed' execution_routed_to='$exec_routed'); arm retired without a second sling"; then
+            elif disarm_bead "$id" "already dispatched (routed_to='$routed'); arm retired without a second sling"; then
                 echo "$PROG: retired arm on already-dispatched $id"
             else
                 echo "$PROG: WARN could not retire arm on already-dispatched $id" >&2; failed=$((failed + 1)); continue

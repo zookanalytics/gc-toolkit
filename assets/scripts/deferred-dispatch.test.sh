@@ -10,7 +10,10 @@
 # What is exercised:
 #   * arm writes the record and APPENDS to notes (a replacing write here would
 #     destroy the dispatch note the arm is supposed to make legible);
-#   * arm's fail-closed refusals — already dispatched, closed, no target;
+#   * arm's fail-closed refusals — already routed, closed, no target;
+#   * arm ACCEPTS a bead carrying only gc.execution_routed_to (execution
+#     provenance, not a live queue): the shape doctor/check-blocked-work-armed
+#     flags and names arming as the fix for, so refusing would be a dead end;
 #   * the dispatch arm: ready + armed -> exactly one `gc sling` with the
 #     recorded target and pass-through args, then the record cleared;
 #   * every arm that must NOT sling: still blocked, already routed (the
@@ -201,11 +204,23 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_rea
 out="$("$SUT" arm b-1 --target rig/pool 2>&1)"
 hasnt "$out" "no open blocker right now" "arm on a BLOCKED bead does not claim it will dispatch immediately"
 
-echo "# arm refusals"
-store '[{"id":"b-2","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"notes":"","_ready":true}]'
+echo "# arm accepts the doctor-flagged shape"
+# gc.execution_routed_to is provenance, not a live queue, so a blocked bead
+# carrying only it is the exact shape doctor/check-blocked-work-armed flags and
+# names arming as the fix for. arm must accept it, or that remedy is a dead end.
+store '[{"id":"b-2","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"notes":"","_ready":false}]'
 out="$("$SUT" arm b-2 --target rig/pool 2>&1)"; rc=$?
-eq "$rc" 1 "arm refuses a bead already dispatched"
-eq "$(meta b-2 gc.dispatch_when_ready)" "<absent>" "refused arm writes nothing"
+eq "$rc" 0 "arm accepts a blocked bead carrying only gc.execution_routed_to"
+eq "$(meta b-2 gc.dispatch_when_ready)" "rig/pool" "arming the exec-routed-only bead records the dispatch"
+has "$out" "armed b-2 -> rig/pool" "arm says what it did"
+
+echo "# arm refusals"
+# A real active route (gc.routed_to, what a pool queue consumes) still blocks
+# arming: a second dispatch would queue behind the live one.
+store '[{"id":"b-2r","status":"open","assignee":"","metadata":{"gc.routed_to":"rig/pool"},"notes":"","_ready":true}]'
+out="$("$SUT" arm b-2r --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 1 "arm refuses a bead already routed (gc.routed_to)"
+eq "$(meta b-2r gc.dispatch_when_ready)" "<absent>" "refused arm writes nothing"
 has "$out" "already dispatched" "refusal names the reason"
 
 store '[{"id":"b-3","status":"closed","assignee":"","metadata":{},"notes":"","_ready":false}]'
@@ -264,6 +279,17 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an already-routed bead is NOT slung a second time"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the stale record is retired instead"
 has "$out" "already-dispatched" "the retire names the reason"
+
+# The contrast: gc.execution_routed_to is provenance, not a live route. A bead
+# armed while carrying only it (its workflow gone) is the doctor-flagged shape,
+# and the arm remedy only works if reconcile SLINGS it when ready rather than
+# mistaking the stale marker for an active dispatch and retiring it unslung.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/old","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "an armed bead carrying only gc.execution_routed_to is slung, not retired"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1" "the exec-routed-only bead reaches sling with its recorded target"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the record is cleared after the dispatch"
+has "$out" "1 dispatched" "summary counts the dispatch, not a retire"
 
 store '[{"id":"b-1","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
