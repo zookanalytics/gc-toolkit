@@ -4,15 +4,17 @@
 # to resolve. Both run against ONE stubbed bead store, so the join is the real
 # thing and not two fixtures asserted to agree.
 #
-# The doctor check clears a green marker two ways: a task_kind=review bead
-# carrying anchor_bead + reviewed_oid + check_name, or an APPROVED GitHub review
-# at the same commit. signoff.sh never approves, so the GitHub reviews served
-# here are empty and the bead is the only resolver left. That makes the check a
-# direct test of the record signoff writes.
+# signoff.sh closes an approve review with signoff_verdict=approve and
+# gc.outcome=recorded; the doctor check reads exactly that pair to tell a
+# well-formed approve backing (the shape lane-state.sh derives green from) from
+# one whose outcome no writer produces. So the join under test is signoff's close
+# shape against the check's accept shape: if signoff stopped recording the
+# outcome, or recorded a value the check does not accept, this catches it.
 #
-# The fixture is the shape that leaves a marker unbacked: a post-open anchor
-# whose review bead carries no dispatch pin, so the verdict binds to the live
-# head and the bead is the only place that head can be recorded.
+# The fixture is a post-open anchor mid-gate whose review bead signoff closes on
+# approve, then the same store with that outcome stripped — the shape a
+# hand-closed or mis-migrated bead leaves, which still derives green and which
+# the check must flag.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -104,9 +106,8 @@ case "\${1:-}" in
 esac
 GC
 
-# signoff posts its artifact and probes the head; the doctor asks the same repo
-# for its APPROVED reviews. Serving none is the point: resolver B must not be
-# what clears these markers.
+# signoff posts its artifact and probes the head through gh; the check consults
+# no GitHub review at all, so the reviews served here matter only to signoff.
 cat > "$BIN/gh" <<'GH'
 #!/usr/bin/env bash
 set -u
@@ -165,27 +166,28 @@ echo "# signoff's own output satisfies the provenance check"
 seed
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "the post-open approve records a verdict"
-eq "$(meta tk-anc check.codex)" "green" "…stamping the marker merge-skill.sh reads"
+eq "$(meta tk-anc check.codex)" "green" "…still stamping the green marker signoff writes"
 eq "$(meta rv-1 reviewed_oid)" "$HEAD_OID" "…and recording the same commit on the review bead"
 OUT=$(bash "$CHECK" 2>&1); RC=$?
 eq "$RC" 0 "the provenance check passes on the store signoff just wrote"
 has "$OUT" "OK:" "…with the OK line, not a gap or a finding"
 
 echo "# the check is what makes that pass mean something"
-# Strip the one field signoff writes back, leaving the store the pre-fix script
-# produced. A check that cleared this marker anyway would clear anything.
-jq -c 'map(if .id == "rv-1" then (.metadata |= del(.reviewed_oid)) else . end)' \
+# Strip the outcome signoff recorded, leaving an approve that still derives green
+# (lane-state.sh excludes only superseded) but records nothing. A check that
+# passed this would pass anything.
+jq -c 'map(if .id == "rv-1" then (.metadata |= del(."gc.outcome")) else . end)' \
   "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 OUT=$(bash "$CHECK" 2>&1); RC=$?
-eq "$RC" 2 "the same marker without that record is an error"
-has "$OUT" "records a passed gate nothing reviewed" "…named as a gate standing on no verdict"
-has "$OUT" "tk-anc" "…on the anchor that carries it"
+eq "$RC" 2 "the same approve with its outcome stripped is an error"
+has "$OUT" "not recorded or superseded" "…named as an approve on an outcome no writer produces"
+has "$OUT" "tk-anc" "…on the anchor it would land"
 
-echo "# no GitHub approval is ever what clears it"
+echo "# no GitHub approval is ever what the city writes"
 if grep -q -- '--approve' "$STUB_GH_LOG"; then
   bad "the suite posted an approval"
 else
-  ok "nothing in this suite approves a PR; only the bead record clears the marker"
+  ok "nothing in this suite approves a PR; the check reads only signoff's recorded outcome"
 fi
 
 echo

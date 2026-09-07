@@ -21,19 +21,18 @@
 #             signoff_verdict with gc.outcome=recorded; OR the anchor's pr_number
 #             has an APPROVED GitHub review (an approval names no gate, so it
 #             backs every lane).
-#             The reviewed_oid clause is what doctor/check-gate-marker-provenance
-#             requires of a local backing bead — a recorded verdict naming no
-#             reviewed commit is a stale or legacy row, so it cannot green a lane
-#             on its own. The GitHub-approval fallback is independent evidence and
-#             needs no such pin.
+#             The reviewed_oid clause guards a local backing bead: a recorded
+#             verdict naming no reviewed commit is a stale or legacy row, so it
+#             cannot green a lane on its own. The GitHub-approval fallback is
+#             independent evidence and needs no such pin.
 #   in flight an open review bead for this lane holds the lane out of green — the
 #             precedence that keeps green from co-existing with a live review.
 #
-# The non-superseded clause is what this adds over doctor/check-gate-marker-
-# provenance's resolver: the validator supersedes an approve bead to send a lane
-# back to unreviewed (stamping gc.outcome=superseded), so a superseded approve
-# must stop backing the lane. The legacy branch needs no such clause — a
-# supersede stamp removes the gc.outcome=recorded it requires.
+# The non-superseded clause is why an approve does not back a lane forever: the
+# validator supersedes an approve bead to send a lane back to unreviewed
+# (stamping gc.outcome=superseded), so a superseded approve must stop backing the
+# lane. The legacy branch needs no such clause — a supersede stamp removes the
+# gc.outcome=recorded it requires.
 #
 # Two conditions the full derivation names are deliberately NOT read here: an
 # open must-fix finding (anchor-wide, subsumed by the merge predicate's own
