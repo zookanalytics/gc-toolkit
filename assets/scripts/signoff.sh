@@ -5,9 +5,9 @@
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
 #              [--notes-file <path>] [--reviewed-oid <oid>]
 # Both verdicts first record reviewed_oid on the review bead. A lane state names
-# no commit and the city never posts an APPROVED GitHub review, so that record
-# is the only evidence doctor/check-gate-marker-provenance can resolve a marker
-# written here against.
+# no commit, but lane-state.sh derives green only from a local backing bead that
+# carries a reviewed_oid, so recording it here is what lets an approve close back
+# the lane.
 # approve: post the artifact (gh pr review --comment post-open; review-bead
 # notes pre-open), stamp check.<name>=green on the anchor, and dismiss the
 # city's own superseded CHANGES_REQUESTED review. request-changes: clear the
@@ -628,10 +628,11 @@ printf '\nAnchor: %s — check.%s @ %s\n' "$ANCHOR" "$CHECK_NAME" "$REVIEWED_OID
 # The commit a verdict bound to is recorded on the review bead first, and only
 # then does the artifact go where its findings are read. That record is the
 # only evidence a city verdict leaves: a lane state names no commit and nothing
-# here ever posts an APPROVED GitHub review, so doctor/check-gate-marker-
-# provenance can resolve a marker written here only against a review bead
-# carrying anchor_bead, reviewed_oid and check_name, closed with the
-# signoff_verdict close_review() stamps below. Where the artifact was posted says where the findings are
+# here ever posts an APPROVED GitHub review, so a closed review bead carrying
+# anchor_bead, reviewed_oid, check_name and the signoff_verdict close_review()
+# stamps below is what lane-state.sh derives a local backing's green from — and
+# what doctor/check-gate-marker-provenance's marker arm resolves a green marker
+# against. Where the artifact was posted says where the findings are
 # read, never which commit was judged, so the record does not vary with it.
 # request-changes records it too: it leaves no marker, but the round it spent
 # is part of the same ledger. Because the record is written first, a store that

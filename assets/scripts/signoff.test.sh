@@ -393,12 +393,11 @@ printf 'P2: nit at foo.sh:3\n' > "$TMP/notes"
 has "$(cat "$STUB_GH_BODY")" "P2: nit at foo.sh:3" "--notes-file body reaches the artifact"
 
 # --- the bead-side record of what was judged -------------------------------------
-# The lane state names no commit, so check-gate-marker-provenance resolves a
-# green lane only against a closed review bead that carries anchor_bead,
-# reviewed_oid, check_name and signoff_verdict=approve. Nothing here ever posts
-# an APPROVED GitHub review, so that bead is the only resolver a city verdict
-# can reach: a marker stamped without the record is one merge.sh honours and
-# nothing can account for.
+# The lane state names no commit, so lane-state.sh derives a lane green only
+# from a closed review bead that carries anchor_bead, reviewed_oid, check_name
+# and signoff_verdict=approve. Nothing here ever posts an APPROVED GitHub
+# review, so that bead is the only backing a city verdict leaves: an approve
+# closed without the record derives no green and cannot land.
 seed_marker() { # <value>: give the anchor a marker a refusal must not touch
   jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata["check.codex"] = $v else . end)' \
     "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"

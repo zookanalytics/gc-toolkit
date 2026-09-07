@@ -320,8 +320,8 @@ Whichever source wins, `signoff.sh` writes that commit back to the review bead
 as `reviewed_oid` before it stamps anything, on both verdicts and whether or
 not the PR is open. The lane state itself names no commit, so that record is
 the whole of what a city verdict leaves behind: the city posts no APPROVED
-GitHub review, and `doctor/check-gate-marker-provenance` resolves a
-city-written marker only against a review bead carrying it. A store that will
+GitHub review, and `lane-state.sh` derives a lane's green only against a
+review bead carrying it. A store that will
 not take the record costs a re-run: signoff exits 2 with nothing posted and no
 marker stamped.
 

@@ -45,12 +45,11 @@ store "[$ANCHOR,$(review closed '' superseded)]"
 if green --anchor tk-anc --lane codex --no-remote; then bad "a superseded legacy bead still derived green"; else ok "a superseded legacy bead does not derive green"; fi
 
 # ---------------------------------------------------------------------------
-# A closed review carrying no reviewed_oid is not local backing. This derivation
-# reads the same evidence doctor/check-gate-marker-provenance resolves a marker
-# against — the review bead's reviewed_oid — so a recorded verdict naming no
-# reviewed commit is a stale or legacy row that cannot green the lane on its own,
-# whether it carries an approve verdict or the legacy recorded stamp. The
-# GitHub-approval fallback is still free to supply independent evidence.
+# A closed review carrying no reviewed_oid is not local backing. A recorded
+# verdict naming no reviewed commit is a stale or legacy row that cannot green
+# the lane on its own, whether it carries an approve verdict or the legacy
+# recorded stamp. The GitHub-approval fallback is still free to supply
+# independent evidence.
 # ---------------------------------------------------------------------------
 NO_OID_LEGACY='{"id":"rv-1","status":"closed","assignee":"","title":"r","notes":"","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc","gc.outcome":"recorded"}}'
 store "[$ANCHOR,$NO_OID_LEGACY]"
