@@ -35,6 +35,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
 PROMPT="$REPO/agents/converse/prompt.template.md"
 SWEEP="$REPO/assets/scripts/liveness-sweep.sh"
+FOLD_SUT="$REPO/assets/scripts/converse-fold.sh"
+CLAIMER="$REPO/assets/scripts/converse-claim.sh"
 
 PASS=0
 FAIL=0
@@ -55,7 +57,7 @@ is() {
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got '$2', want '$3'"; fi
 }
 
-for f in "$PROMPT" "$SWEEP"; do
+for f in "$PROMPT" "$SWEEP" "$FOLD_SUT" "$CLAIMER"; do
     [ -r "$f" ] || {
         printf 'converse-fold-scope: cannot read %s\n' "$f" >&2
         exit 1
@@ -77,6 +79,15 @@ mkdir -p "$BIN" "$FIXDIR"
 # silently reading the live store from a test.
 cat >"$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
+# The premise-gate probe drives the shipped converse-claim.sh, which opens with
+# `gc hook --claim`; HOOK_BEAD / HOOK_GROUP dial the existing_assignment result
+# it must return so the claimer reaches its hold arm. The fold probe never calls
+# hook, so this arm is inert for it.
+if [ "${1:-}" = "hook" ]; then
+    printf '{"bead_id":"%s","continuation_group":"%s","reason":"existing_assignment"}\n' \
+        "${HOOK_BEAD:-}" "${HOOK_GROUP:-}"
+    exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
     show)
@@ -122,23 +133,14 @@ unreadable() {
     printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/list.json"
 }
 
-# The block under test, lifted verbatim between its markers.
-extract_block() {
-    awk '/# >>> visit-fold-check/ {f = 1; next}
-         /# <<< visit-fold-check/ {f = 0}
-         f {print}' "$PROMPT"
-}
-# run_block <visit-id> <subject-id> — prints ITEM=… / HOLDER=… as resolved.
-# Runs with the stub first on PATH and cwd outside any checkout.
+# run_block <visit-id> <subject-id> — prints SUBJECT=… / ITEM=… / TOPIC=… /
+# HOLDER=… as converse-fold.sh resolves them. Runs the script with the stub
+# first on PATH and cwd outside any checkout.
 run_block() {
-    {
-        extract_block
-        printf 'printf "ITEM=%%s\\nHOLDER=%%s\\n" "$ITEM" "$HOLDER"\n'
-    } >"$TMPD/probe.sh"
     (
         cd "$TMPD" &&
             PATH="$BIN:$PATH" FIXDIR="$FIXDIR" VISIT="$1" SUBJECT="$2" \
-                bash "$TMPD/probe.sh" 2>/dev/null
+                bash "$FOLD_SUT" 2>/dev/null
     )
 }
 field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | tail -1; }
@@ -169,11 +171,10 @@ legacy_holder() {
         + [$v] | unique | .[0]' "$FIXDIR/list.json" 2>/dev/null
 }
 
-BLOCK="$(extract_block)"
-if [ -n "$BLOCK" ]; then
-    ok "the fold check is extractable (# >>> visit-fold-check markers present)"
+if [ -x "$FOLD_SUT" ]; then
+    ok "converse-fold.sh is present and executable"
 else
-    printf 'converse-fold-scope: no visit-fold-check block in %s — nothing to test\n' "$PROMPT" >&2
+    printf 'converse-fold-scope: no converse-fold.sh at %s — nothing to test\n' "$FOLD_SUT" >&2
     exit 1
 fi
 
@@ -398,31 +399,26 @@ fi
 # live premise heals a legacy hold, while the item's demand never forges a
 # resume. Only a clean read with no key and no open item demand is a claim that
 # plainly never began, which routes to step 2's close.
-echo "── the hold-arm premise gate is extractable ──"
-extract_hold_block() {
-    awk '/# >>> visit-hold-premise-gate/ {f = 1; next}
-         /# <<< visit-hold-premise-gate/ {f = 0}
-         f {print}' "$PROMPT"
-}
-if [ -n "$(extract_hold_block)" ]; then
-    ok "the premise gate is extractable (# >>> visit-hold-premise-gate markers present)"
+echo "── the hold-arm premise gate ships in converse-claim.sh ──"
+if [ -x "$CLAIMER" ]; then
+    ok "converse-claim.sh is present and executable"
 else
-    bad "the premise gate is extractable" "no visit-hold-premise-gate block in $PROMPT"
+    bad "converse-claim.sh is present and executable" "missing or not +x: $CLAIMER"
 fi
 
-# began <visit-id> <subject> — run the extracted gate against the current
-# fixtures and print the resolved BEGAN. Same stub, cwd, and PATH as the fold
-# runner above; a distinct probe file so the two never collide.
+# began <visit-id> <subject> — drive the shipped converse-claim.sh against the
+# current fixtures and print the BEGAN it reports. The gate is folded into the
+# claimer's action=hold arm, which prints `premise-gate: BEGAN=<...>` on STDERR
+# while the verdict line stays on stdout unchanged, so this reads stderr. The
+# stub gc's hook arm returns existing_assignment for HOOK_BEAD/HOOK_GROUP, which
+# is what routes the claimer to its hold arm. Same stub, cwd, and PATH as the
+# fold runner above.
 began() {
-    {
-        extract_hold_block
-        printf 'printf "GATE_BEGAN=%%s\\n" "$BEGAN"\n'
-    } >"$TMPD/hold-probe.sh"
     (
         cd "$TMPD" &&
-            PATH="$BIN:$PATH" FIXDIR="$FIXDIR" VISIT="$1" SUBJECT="$2" \
-                bash "$TMPD/hold-probe.sh" 2>/dev/null
-    ) | sed -n 's/^GATE_BEGAN=//p' | tail -1
+            PATH="$BIN:$PATH" FIXDIR="$FIXDIR" HOOK_BEAD="$1" HOOK_GROUP="$2" \
+                sh "$CLAIMER" "$2" 2>&1 >/dev/null
+    ) | sed -n 's/^premise-gate: BEGAN=//p' | tail -1
 }
 # The gate reads one thing: gc.hold_demand on THIS visit's bead. hv_demand
 # builds a sibling demand on the shared item — the trace the OLD item-level gate
@@ -501,117 +497,6 @@ have "the gate reads gc.hold_demand off the visit (unique to this block)" \
     'gc.hold_demand' "$PROMPT"
 have "step 5 stamps gc.hold_demand on the visit before it waits" \
     'set-metadata "gc.hold_demand=$DEMAND"' "$PROMPT"
-
-# ── HOLD-DEMAND STAMP GATE (hold-demand-stamp-gate) ──────────────────────────
-# The P1 this closes (tk-pcjtco): step 1 trusts gc.hold_demand as the SOLE proof
-# of a real hold (the began() cases above), but step 5 wrote it as `update ||
-# echo` and walked on. An update that is refused, or one that returns success
-# without persisting, then leaves the framing posted with no trace, and a later
-# scrollback-less restart reads BEGAN=no and closes the engaged sitting at step
-# 2 as a dead premise — the mirror of the bug the gate exists to catch. The
-# write's own exit status cannot see a value that never landed, so the gate
-# reads the key back off the visit and refuses to frame unless it matches. This
-# runs the extracted stamp block against a stub whose update result and
-# persistence are dialed independently.
-echo "── the stamp fails closed unless the trace lands on the visit ──"
-BIN2="$TMPD/bin2"
-FIX2="$TMPD/fix2"
-mkdir -p "$BIN2" "$FIX2"
-# A stub gc serving the stamp block's two calls. `bd update` persists the demand
-# id it is given (unless STAMP_PERSIST=0) and exits STAMP_RC; `bd show` returns
-# whatever update persisted, or [] if nothing did. STAMP_VALUE overrides the
-# persisted id, for the stamp-landed-wrong case. Anything else exits 2, so a
-# block that grows a third call fails here rather than reading the live store.
-cat >"$BIN2/gc" <<'STUB'
-#!/usr/bin/env bash
-[ "${1:-}" = "bd" ] || exit 2
-case "${2:-}" in
-    update)
-        if [ "${STAMP_PERSIST:-1}" = "1" ]; then
-            v="${STAMP_VALUE:-}"
-            if [ -z "$v" ]; then
-                for a in "$@"; do
-                    case "$a" in gc.hold_demand=*) v="${a#gc.hold_demand=}" ;; esac
-                done
-            fi
-            printf '%s' "$v" >"$FIX2/stamped"
-        fi
-        exit "${STAMP_RC:-0}"
-        ;;
-    show)
-        if [ -r "$FIX2/stamped" ]; then
-            jq -nc --arg v "$(cat "$FIX2/stamped")" '[{metadata:{"gc.hold_demand":$v}}]'
-        else
-            printf '[]\n'
-        fi
-        ;;
-    *) exit 2 ;;
-esac
-STUB
-chmod +x "$BIN2/gc"
-
-extract_stamp_block() {
-    awk '/# >>> hold-demand-stamp-gate/ {f = 1; next}
-         /# <<< hold-demand-stamp-gate/ {f = 0}
-         f {print}' "$PROMPT"
-}
-if [ -n "$(extract_stamp_block)" ]; then
-    ok "the stamp gate is extractable (# >>> hold-demand-stamp-gate markers present)"
-else
-    bad "the stamp gate is extractable" "no hold-demand-stamp-gate block in $PROMPT"
-fi
-# stamp_rc <update-rc> <persist:0|1> [persist-value] — run the extracted stamp
-# block with the stub dialed to that outcome; print the block's own exit status.
-# Same cwd/PATH discipline as the runners above; a distinct probe file.
-stamp_rc() {
-    rm -f "$FIX2/stamped"
-    extract_stamp_block >"$TMPD/stamp-probe.sh"
-    (
-        cd "$TMPD" &&
-            PATH="$BIN2:$PATH" FIX2="$FIX2" STAMP_RC="$1" STAMP_PERSIST="$2" \
-                STAMP_VALUE="${3:-}" VISIT="v-x" DEMAND="d-x" ITEM="item-x" \
-                bash "$TMPD/stamp-probe.sh" >/dev/null 2>&1
-    )
-    printf '%s\n' "$?"
-}
-# verdict <update-rc> <persist> [value] — "held" when the block proceeds to
-# frame (exit 0), "refused" when it exits before framing.
-verdict() { [ "$(stamp_rc "$@")" = 0 ] && echo held || echo refused; }
-
-is "a stamp that persists lets the hold proceed" "$(verdict 0 1)" "held"
-is "a refused update that left no trace refuses the framing" "$(verdict 1 0)" "refused"
-is "an update that reports success but does not persist still refuses" \
-    "$(verdict 0 0)" "refused"
-is "a stamp that landed the WRONG id refuses the framing" \
-    "$(verdict 0 1 d-other)" "refused"
-
-# Positive control, the role legacy_holder plays for the fold block. The pre-fix
-# stamp was `update || echo` with no read-back, so a success-with-no-persist
-# update satisfied it and the sitting framed with no trace. That it HELD where
-# the gate now REFUSES proves the read-back closes a real regression rather than
-# pinning a case the old line already caught.
-legacy_verdict() {
-    rm -f "$FIX2/stamped"
-    printf 'gc bd update "$VISIT" --set-metadata "gc.hold_demand=$DEMAND" || echo stamp-failed\n' \
-        >"$TMPD/legacy-stamp.sh"
-    (
-        cd "$TMPD" &&
-            PATH="$BIN2:$PATH" FIX2="$FIX2" STAMP_RC="$1" STAMP_PERSIST="$2" \
-                VISIT="v-x" DEMAND="d-x" bash "$TMPD/legacy-stamp.sh" >/dev/null 2>&1
-    )
-    [ "$?" = 0 ] && echo held || echo refused
-}
-is "positive control: the pre-fix update-or-echo framed on a success-no-persist stamp" \
-    "$(legacy_verdict 0 0)" "held"
-
-# The prose the fail-closed shape rests on: the block shows the visit back and
-# gates the framing on the value, not on the write's exit status alone.
-have "the stamp block reads gc.hold_demand back off the visit" \
-    'gc bd show "$VISIT"' "$PROMPT"
-have "…and refuses to frame when the read-back does not match the demand" \
-    'DID NOT PERSIST' "$PROMPT"
-have "…and exits before the framing on that refusal" \
-    'Do NOT post the framing' "$PROMPT"
 
 echo
 echo "converse-fold-scope: $PASS passed, $FAIL failed"

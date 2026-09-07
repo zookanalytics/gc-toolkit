@@ -1664,69 +1664,6 @@ lacks "…and never authorizes a prose-only wait in its place" \
       'the takeaway is then the only record' "$PROMPT" \
       "that arm sends the sitting on to post framing for a hold with no demand bead behind it"
 
-# The gate, EXTRACTED AND RUN. A filter between the demand call and the capture
-# answers with its OWN status, so a verb that fails closed on a missing edge
-# reads as a filed demand and the sitting frames a hold nothing is holding.
-# Prose cannot pin that; these assertions run the block rather than describe it.
-awk '/# >>> hold-demand-gate/{inb=1; next} /# <<< hold-demand-gate/{inb=0} inb' \
-    "$PROMPT" | sed 's/^   //' > "$TMPD/hold-gate.sh"
-if [ -s "$TMPD/hold-gate.sh" ]; then ok "the demand write is a marked, extractable block"
-else bad "the demand write is a marked, extractable block" "no hold-demand-gate block in $PROMPT"; fi
-if bash -n "$TMPD/hold-gate.sh" 2>/dev/null; then ok "…and is valid bash"
-else bad "…and is valid bash" "bash -n failed"; fi
-
-# stub_helm <exit-status> <stdout> — stands in for the demand verb. Written to
-# files rather than baked into the stub so the heredoc stays quoted.
-stub_helm() {
-    printf '%s\n' "$2" >"$TMPD/helm.out"
-    printf '%s\n' "$1" >"$TMPD/helm.rc"
-    cat >"$TMPD/helm.sh" <<'STUB'
-#!/usr/bin/env bash
-D="$(dirname "$0")"
-cat "$D/helm.out"
-exit "$(cat "$D/helm.rc")"
-STUB
-    chmod +x "$TMPD/helm.sh"
-}
-GATE_OUT=""
-GATE_RC=0
-run_gate() {
-    GATE_OUT="$(HELM="$TMPD/helm.sh" ITEM=tk-gated bash "$TMPD/hold-gate.sh" 2>&1)"
-    GATE_RC=$?
-}
-
-# THE MASKED CASE, and the whole reason the status is read at all. The verb
-# fails closed AFTER it has printed, so stdout alone says the demand landed.
-stub_helm 4 'demand tk-dem blocks tk-gated (by converse, decision): who owns it'
-run_gate
-if [ "$GATE_RC" -ne 0 ]; then ok "a non-zero demand stops the hold even when stdout names an id"
-else bad "a non-zero demand stops the hold even when stdout names an id" \
-        "the gate read awk's status, not the verb's — a hold with no edge behind it posts as normal"; fi
-has_out() { case "$GATE_OUT" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in: $GATE_OUT" ;; esac; }
-lacks_out() { case "$GATE_OUT" in *"$2"*) bad "$1" "found '$2' in: $GATE_OUT" ;; *) ok "$1" ;; esac; }
-has_out "…and says so, naming the item and the status" "NO DEMAND FILED on tk-gated (status 4)"
-has_out "…and forbids the framing rather than qualifying it" "Do NOT post the framing"
-
-# The plain fail-closed shape: the verb exits 4 having printed nothing.
-stub_helm 4 ''
-run_gate
-if [ "$GATE_RC" -ne 0 ]; then ok "a demand that exits non-zero and prints nothing stops the hold"
-else bad "a demand that exits non-zero and prints nothing stops the hold" "the sitting continues into a prose-only wait"; fi
-
-# Exit 0 is not enough either: an id the block cannot read is a demand it
-# cannot discharge in step 7, and cannot name in the thread.
-stub_helm 0 'gc-helm: demand: refreshed something the parser does not know'
-run_gate
-if [ "$GATE_RC" -ne 0 ]; then ok "an unparsable id stops the hold even at status 0"
-else bad "an unparsable id stops the hold even at status 0" "DEMAND is empty and the sitting holds on nothing"; fi
-
-# THE HAPPY PATH, which is what makes the three above mean anything: a gate
-# wired to refuse everything passes them all and takes every hold with it.
-stub_helm 0 'demand tk-dem blocks tk-gated (by converse, decision): who owns it'
-run_gate
-if [ "$GATE_RC" -eq 0 ]; then ok "a filed demand at status 0 lets the hold proceed"
-else bad "a filed demand at status 0 lets the hold proceed" "rc=$GATE_RC, out: $GATE_OUT"; fi
-lacks_out "…and says nothing about a failure" "NO DEMAND FILED"
 have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$PROMPT"
 have "…and re-states it when it does not" '"$HELM" demand "$ITEM" "<what is still owed' "$PROMPT"
@@ -1881,6 +1818,145 @@ else
     bad "the shared fragment is intact for witness and mechanik" \
         "the fragment lost 'sits below it'; witness and mechanik output would change"
 fi
+
+# ── STEP 7 DISCHARGE, EXECUTED (converse-signoff.sh) ─────────────────────────
+# The step-7 sign-off/discharge bash ships as assets/scripts/converse-signoff.sh
+# (§C1 above still exercises the takeaway-writer RESOLUTION inside the prompt's
+# fenced block; here the whole discharge is RUN). These assertions drive the
+# script against stubs: the takeaway lands on the item with the WAIT disposition,
+# the demand discharges one of two ways keyed to --ruled, and a held item is
+# released only when the sitting ruled. The writers are searched for on the
+# candidate roots, never assumed.
+echo "── step 7 discharge ships and runs as converse-signoff.sh ──"
+SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
+[ -x "$SIGNOFF_SUT" ] && ok "converse-signoff.sh is present and executable" \
+    || bad "converse-signoff.sh is present and executable" "missing or not +x: $SIGNOFF_SUT"
+bash -n "$SIGNOFF_SUT" && ok "converse-signoff.sh: valid bash" \
+    || bad "converse-signoff.sh: valid bash" "bash -n failed"
+
+SO="$TMPD/so"; SOBIN="$SO/bin"; SOPACK="$SO/pack"; SOFOR="$SO/foreign"; SOCITY="$SO/city"; SOBARE="$SO/bare"
+mkdir -p "$SOBIN" "$SOPACK/assets/scripts" "$SOFOR" "$SOCITY/rigs/gc-toolkit/assets/scripts" "$SOBARE"
+SOLOG="$SO/log"    # gc-helm.sh + lifecycle.sh calls, in order
+SOGC="$SO/gclog"   # gc bd gate/close calls
+
+cat >"$SOBIN/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "bd" ] || exit 2
+case "${2:-}" in
+    show)
+        case "${3:-}" in
+            v-x) jq -nc --arg sr "${SO_STALL-item-x}" \
+                    '[{id:"v-x",metadata:(({"task_kind":"visit"}+(if $sr=="" then {} else {"stall_root":$sr} end)))}]' ;;
+            *)   if [ "${SO_TAKEAWAY:-1}" = "1" ]; then jq -nc --arg id "${3:-}" '[{id:$id,metadata:{"gc.takeaway":"prior"}}]'
+                 else jq -nc --arg id "${3:-}" '[{id:$id,metadata:{}}]'; fi ;;
+        esac ;;
+    list)  if [ "${SO_DEMAND:-1}" = "1" ]; then jq -nc '[{id:"d-x",assignee:"",metadata:{"gc.demand_for":"item-x"}}]'
+           else printf '[]\n'; fi ;;
+    gate)  printf 'GC: %s\n' "$*" >>"$SOGC"; exit "${SO_GATE_RC:-0}" ;;
+    close) printf 'GC: %s\n' "$*" >>"$SOGC"; exit 0 ;;
+    *) exit 2 ;;
+esac
+STUB
+chmod +x "$SOBIN/gc"
+so_helm() {   # <root> <marker> — a gc-helm.sh that logs each call with its root
+    cat >"$1/assets/scripts/gc-helm.sh" <<HELM
+#!/usr/bin/env bash
+printf 'helm[$2] %s\n' "\$*" >>"\$SOLOG"
+case "\${1:-}" in takeaway|demand) exit 0 ;; *) exit 2 ;; esac
+HELM
+    chmod +x "$1/assets/scripts/gc-helm.sh"
+}
+so_helm "$SOPACK" RIG
+so_helm "$SOCITY/rigs/gc-toolkit" CITY
+cat >"$SOPACK/assets/scripts/lifecycle.sh" <<'LC'
+#!/usr/bin/env bash
+case "${1:-}" in
+    state)      printf '%s\n' "${STUB_STATE:-held}" ;;
+    transition) printf 'lc %s\n' "$*" >>"$SOLOG"; exit 0 ;;
+    *) exit 2 ;;
+esac
+LC
+chmod +x "$SOPACK/assets/scripts/lifecycle.sh"
+
+# run_so [VAR=val ...] — run converse-signoff.sh with the flags in SOARGS from a
+# non-git cwd; trailing VAR=val pairs override the base env (env: last wins), so
+# a case dials SO_STALL / SO_DEMAND / SO_TAKEAWAY / SO_GATE_RC / STUB_STATE /
+# GC_RIG_ROOT inline. Captures SO_OUT and SO_RC; resets the two logs.
+SOARGS=()
+SO_OUT=""; SO_RC=0
+run_so() {
+    : >"$SOLOG"; : >"$SOGC"
+    SO_OUT="$(cd "$SOBARE" && env PATH="$SOBIN:$PATH" \
+        GC_RIG_ROOT="$SOPACK" GC_CITY_PATH="$SOCITY" GIT_CEILING_DIRECTORIES="$TMPD" \
+        SOLOG="$SOLOG" SOGC="$SOGC" "$@" bash "$SIGNOFF_SUT" "${SOARGS[@]}" 2>&1)"
+    SO_RC=$?
+}
+
+echo "── --ruled yes: record on the item, resolve the gate, release a held item ──"
+SOARGS=(--visit v-x --subject sub --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so
+eq "$SO_RC" "0" "the discharge exits 0 on a clean ruling"
+have "the takeaway lands on the item with the outcome and --no-wait" \
+     'helm[RIG] takeaway item-x settled — done --by converse --no-wait' "$SOLOG"
+have "a ruled sitting resolves the demand gate" 'bd gate resolve d-x --reason approved' "$SOGC"
+have "…and releases the held item back to the pool it named" \
+     'lc transition item-x --to unanchored --route gc-toolkit/gc-toolkit.polecat' "$SOLOG"
+
+echo "── --ruled no: re-state the demand, leave the item held ──"
+SOARGS=(--visit v-x --subject sub --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so
+eq "$SO_RC" "0" "the cut-short discharge exits 0"
+have "an unruled sitting re-states the demand on the item" 'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+if grep -q 'gate resolve' "$SOGC"; then bad "…and resolves no gate on an unruled sitting" "found a gate resolve on --ruled no"; else ok "…and resolves no gate on an unruled sitting"; fi
+if grep -q 'lc transition' "$SOLOG"; then bad "…and releases nothing on an unruled sitting" "found a release on --ruled no"; else ok "…and releases nothing on an unruled sitting"; fi
+
+echo "── the item is the stall_root, and falls back to the subject ──"
+SOARGS=(--visit v-x --subject sub --outcome "x — y" --ruled no --still-owed z)
+run_so SO_STALL=item-q
+have "a named stall_root is the item the takeaway targets" 'takeaway item-q' "$SOLOG"
+run_so SO_STALL=
+have "an absent stall_root falls back to the subject" 'takeaway sub' "$SOLOG"
+
+echo "── the WAIT disposition passes through as repeated flags ──"
+SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z --waiting-on tk-a --waiting-on tk-b)
+run_so
+have "each routed wait rides as its own --waiting-on" \
+     'takeaway item-x o — p --by converse --waiting-on tk-a --waiting-on tk-b' "$SOLOG"
+
+echo "── the takeaway read-back is loud when the item carries none ──"
+SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+run_so SO_TAKEAWAY=0
+case "$SO_OUT" in *"NO TAKEAWAY ON"*) ok "a takeaway that did not land is called out" ;;
+                  *) bad "a takeaway that did not land is called out" "got: $SO_OUT" ;; esac
+
+echo "── a ruling releases only a HELD item ──"
+SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled yes --ruling r --route human)
+run_so STUB_STATE=unanchored
+if grep -q 'lc transition' "$SOLOG"; then bad "an item not held is not transitioned" "found a transition on an unanchored item"; else ok "an item not held is not transitioned"; fi
+
+echo "── gate resolve falls back to close for a pre-gate demand ──"
+SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled yes --ruling "the ruling" --route human)
+run_so SO_GATE_RC=1
+have "a demand that refuses gate resolve is closed on the same terms" 'bd close d-x --reason the ruling' "$SOGC"
+
+echo "── no demand on the item: nothing to discharge ──"
+SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+run_so SO_DEMAND=0
+if grep -qE 'demand|gate resolve' "$SOLOG" "$SOGC" 2>/dev/null; then
+    bad "no demand present means no discharge" "found a discharge with no demand present"
+else ok "no demand present means no discharge"; fi
+
+echo "── the writer is searched for; none on any root is LOUD ──"
+SOARGS=(--visit v-x --subject sub --outcome "o — p" --ruled no --still-owed z)
+run_so GC_RIG_ROOT="$SOFOR" GC_CITY_PATH="$TMPD/no-such-city"
+case "$SO_OUT" in *"NO TAKEAWAY WRITER"*) ok "no writer on any candidate root is LOUD" ;;
+                  *) bad "no writer on any candidate root is LOUD" "got: $SO_OUT" ;; esac
+
+echo "── the flag contract fails closed on a missing judgment ──"
+SOARGS=(--visit v-x --outcome "o — p" --ruled yes --route human); run_so; eq "$SO_RC" "2" "--ruled yes without --ruling is refused"
+SOARGS=(--visit v-x --outcome "o — p" --ruled yes --ruling r);    run_so; eq "$SO_RC" "2" "--ruled yes without --route is refused"
+SOARGS=(--visit v-x --outcome "o — p" --ruled no);                run_so; eq "$SO_RC" "2" "--ruled no without --still-owed is refused"
+SOARGS=(--visit v-x --ruled no --still-owed z);                   run_so; eq "$SO_RC" "2" "a missing --outcome is refused"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

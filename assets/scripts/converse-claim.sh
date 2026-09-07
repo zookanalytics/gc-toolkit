@@ -13,6 +13,12 @@
 #   action=finish bead=<id> group=<g> reason=outcome-stamped [adopted=<ids>] exit 4
 #   action=drain  reason=no-work                               exit 1
 #   action=drain  reason=out-of-group bead=<id> group=<g>      exit 1
+# On the HOLD verdict it ALSO prints, to stderr, a premise-gate diagnostic
+# `premise-gate: BEGAN=<yes|unknown|recheck|no>`: existing_assignment cannot
+# tell a sitting that reached its hold from a claim that died before step 2 ever
+# re-checked the premise, so the mechanism that reads the trace a real hold
+# leaves (gc.hold_demand on the visit) lives here. The stdout verdict is
+# unchanged; BEGAN is the diagnostic the caller reads to pick its step-1 rule.
 # The RELEASE is the load-bearing half: never drain on a turn not put back
 # (a held visit waits for witness patrol otherwise), release the WHOLE claim
 # (the vacuumed continuation_assigned siblings too), and when part of the set
@@ -174,6 +180,34 @@ if [ "$REASON" = "existing_assignment" ]; then
         echo "action=finish bead=$BEAD group=$GROUP reason=outcome-stamped${ADOPTED:+ adopted=$ADOPTED}"
         exit 4
     fi
+    # A hold covers two claim shapes existing_assignment cannot tell apart: a
+    # sitting that reached its hold, and a claim that died before step 2 ever
+    # re-checked the premise. The trace only a real hold leaves is gc.hold_demand,
+    # which step 5 stamps on THIS visit before it waits; it is attributable
+    # because it lives on the visit, so a sibling holding the same item cannot
+    # forge it. Absence is three answers, not one: a visit bead that will not read
+    # is UNKNOWN and must not license a close; no key but an open demand still on
+    # the item is a hold that predates the key or a sibling's on the shared item
+    # (RECHECK); only a clean read with no key and no open item demand is a claim
+    # that plainly never began (NO). The yes/unknown/recheck/no RULES are the
+    # caller's; this reports the reading.
+    if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and ((.[0].id // "") != "")' >/dev/null 2>&1; then
+        BEGAN=unknown
+    elif printf '%s' "$BEAD_JSON" | jq -e '(.[0].metadata["gc.hold_demand"] // "") != ""' >/dev/null 2>&1; then
+        BEGAN=yes
+    else
+        HD_ITEM=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.stall_root // ""' 2>/dev/null || printf '')
+        HD_ITEM="${HD_ITEM:-$GROUP}"
+        HD_LIST=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub)
+        if printf '%s' "$HD_LIST" | jq -e --arg i "$HD_ITEM" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") == $i)' >/dev/null 2>&1; then
+            BEGAN=recheck
+        elif printf '%s' "$HD_LIST" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            BEGAN=no
+        else
+            BEGAN=recheck
+        fi
+    fi
+    echo "premise-gate: BEGAN=$BEGAN" >&2
     echo "action=hold bead=$BEAD group=$GROUP reason=already-underway${ADOPTED:+ adopted=$ADOPTED}"
     exit 3
 fi

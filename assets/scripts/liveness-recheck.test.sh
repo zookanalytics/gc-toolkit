@@ -314,21 +314,21 @@ has "the corrected census supersedes the body" "supersedes the body's lists" "$P
 
 # The seam between the two files is where this fix can rot without either side
 # looking wrong, so the hook is EXECUTED rather than grepped: the stamp key the
-# sweep writes and the key the prompt reads have to be the same string, and a
+# sweep writes and the key the sitting reads have to be the same string, and a
 # text assertion on each file separately would not notice them drifting apart.
-extract() { awk -v m="$1" '$0 ~ ("# >>> " m) {inb=1; next} $0 ~ ("# <<< " m) {inb=0} inb' "$2"; }
-extract visit-recheck-hook "$PROMPT" | sed 's/^   //' > "$TMP/hook.sh"
-[ -s "$TMP/hook.sh" ] && ok "visit-recheck-hook block present in the converse prompt" \
-    || bad "visit-recheck-hook block present in the converse prompt" "no marked block in $PROMPT"
-bash -n "$TMP/hook.sh" && ok "visit-recheck-hook: valid bash" \
-    || bad "visit-recheck-hook: valid bash" "bash -n failed"
+# The hook now ships as converse-recheck-hook.sh; the converse prompt calls it.
+RECHECK_SUT="$ROOT/assets/scripts/converse-recheck-hook.sh"
+[ -x "$RECHECK_SUT" ] && ok "converse-recheck-hook.sh is present and executable" \
+    || bad "converse-recheck-hook.sh is present and executable" "missing or not +x: $RECHECK_SUT"
+bash -n "$RECHECK_SUT" && ok "converse-recheck-hook: valid bash" \
+    || bad "converse-recheck-hook: valid bash" "bash -n failed"
 
 # The one string that has to agree across the two files, read out of each side
 # rather than asserted against a literal here: if this test spelled the key
 # itself, a rename in the formula plus a matching rename in the test would pass
 # while the converse hook silently read a key nobody writes any more.
 STAMP_KEY=$(sed -n 's/.*"\(visit\.[a-z_]*\)=.*/\1/p' "$SWEEP" | head -1)
-HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$TMP/hook.sh" | head -1)
+HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$RECHECK_SUT" | head -1)
 [ -n "$STAMP_KEY" ] && ok "the sweep writes a visit.* key" \
     || bad "the sweep writes a visit.* key" "found none in liveness-sweep.sh"
 eq "$HOOK_KEY" "$STAMP_KEY" "the key the sweep stamps is the key the sitting reads"
@@ -346,19 +346,19 @@ printf 'invoked with: %s\n' "$*"
 RC
 chmod +x "$TMP/fake-recheck"
 jq -nc --arg p "$TMP/fake-recheck" '[{metadata: {"visit.recheck": $p}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
+OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 eq "$OUT" "invoked with: tk-visit" "the hook runs the stamped path with the visit id as its only argument"
 
 echo "── the hook is loud, not silent, when the stamped path is not executable ──"
 jq -nc --arg p "$TMP/not-there" '[{metadata: {"visit.recheck": $p}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
+OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 printf '%s' "$OUT" | grep -q "UNVERIFIED" \
     && ok "an unrunnable stamp says the body is UNVERIFIED" \
     || bad "an unrunnable stamp says the body is UNVERIFIED" "got: $OUT"
 
 echo "── a visit with no stamp runs nothing and says nothing ──"
 jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$TMP/hook.sh" 2>&1)"
+OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
 eq "$OUT" "" "an unstamped visit produces no hook output (the ordinary case, not an error)"
 
 echo "── the standing-record list agrees across the sweep and the re-check ──"
