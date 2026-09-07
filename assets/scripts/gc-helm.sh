@@ -1754,6 +1754,25 @@ cmd_engage() {
     bust_cache
 
     echo "$PROG: engage: sitting $sname ($template) holds visit $VISIT on $bead"
+
+    # Kick the sitting's first turn. A manual (origin=manual) converse session
+    # is not driven by the pool dispatcher, and the converse role does not act
+    # on a loaded system prompt alone — it holds until a user turn arrives, then
+    # runs its opening contract (claim the visit, re-check the premise, prep,
+    # post its framing, hold). Without this turn the operator attaches to a blank
+    # pane and the sitting never starts. The kick must read as a START directive:
+    # a bare poke is taken for a connectivity check and does not begin the loop,
+    # so it names the action. `gc session nudge` delivers the text as the
+    # session's input, the same path as typing into the pane, and its wait-idle
+    # default lands the turn once the fresh session is ready to take it. Ordered
+    # bind -> kick -> attach so the operator lands on a live, framed sitting; on
+    # the --no-attach board-picker path the kick still starts the sitting for
+    # whoever attaches later. A failed kick is not fatal: the visit is bound, so
+    # report it and let the operator start it by hand.
+    kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
+    gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
+        || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
+
     if [ "$engage_attach" = "1" ]; then
         gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
     else
