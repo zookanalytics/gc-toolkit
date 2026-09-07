@@ -306,7 +306,7 @@ done
 # read, so the hook lives in the prep step — before any prep, not after.
 echo "── the converse loop runs the re-check at claim time ──"
 has "the prep step reads visit.recheck"      'visit.recheck'            "$PROMPT"
-has "an -x guard, so a missing copy is loud" '[ -x "$RECHECK" ]'        "$PROMPT"
+has "the prep step runs the re-check hook"   'converse-recheck-hook.sh' "$PROMPT"
 grep -qE 'eval +"?\$RECHECK' "$PROMPT" \
     && bad "the hook never evals a metadata string" "found an eval of \$RECHECK — the stamp is a path, so read-then-run is available" \
     || ok "the hook never evals a metadata string"

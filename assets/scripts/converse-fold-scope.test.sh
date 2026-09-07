@@ -337,8 +337,8 @@ is "…and siblings about different items still do not fold" "$(field "$out" HOL
 fixture "$(visit v-two '' '' sess-2)" "$(visit v-one '' '' sess-1)"
 is "with no stamp and no edge the block refuses to fold at all" \
     "$(holder v-two '')" "v-two"
-have "the prompt says an unresolvable subject holds" \
-    'You are the holder.' "$PROMPT"
+have "the prompt holds when it is the holder (an unresolvable subject resolves so)" \
+    'you are the holder' "$PROMPT"
 
 echo "── an unreadable listing never folds ──"
 # Fail-safe direction. A listing that did not read cannot prove another
@@ -359,15 +359,19 @@ have "the liveness sweep still folds on the stall_root key" \
 have "the fold is conditioned on the holder being ANOTHER visit" \
     'Fold only when `$HOLDER` is another' "$PROMPT"
 # The takeaway target is the other half of the same defect: one field on a
-# shared bucket cannot hold N sittings, and the readers look at the item.
-n_item_stamp=$(grep -c 'takeaway "\$ITEM"' "$PROMPT")
+# shared bucket cannot hold N sittings, and the readers look at the item. The
+# stamp moved out of the prompt into the two scripts that write it — the hold
+# and the sign-off — so they are what carry the item-not-bucket contract now.
+HOLD_SUT="$REPO/assets/scripts/converse-hold.sh"
+SIGNOFF_SUT="$REPO/assets/scripts/converse-signoff.sh"
+n_item_stamp=$(cat "$HOLD_SUT" "$SIGNOFF_SUT" | grep -c 'takeaway "\$ITEM"')
 if [ "$n_item_stamp" -ge 2 ]; then
     ok "both takeaway stamps target the item ($n_item_stamp)"
 else
     bad "both takeaway stamps target the item" \
         "$n_item_stamp block(s) stamp \$ITEM — a stamp on the shared bucket is overwritten by the next sibling"
 fi
-if grep -q 'takeaway "\$SUBJECT"' "$PROMPT"; then
+if grep -q 'takeaway "\$SUBJECT"' "$HOLD_SUT" "$SIGNOFF_SUT"; then
     bad "no takeaway stamps the shared bucket" \
         "a takeaway on \$SUBJECT clobbers siblings and is invisible to the readers that look at the item"
 else
@@ -496,7 +500,7 @@ have "the arm keeps the fold check skipped on every branch" \
 have "the gate reads gc.hold_demand off the visit (unique to this block)" \
     'gc.hold_demand' "$PROMPT"
 have "step 5 stamps gc.hold_demand on the visit before it waits" \
-    'set-metadata "gc.hold_demand=$DEMAND"' "$PROMPT"
+    'set-metadata "gc.hold_demand=$DEMAND"' "$REPO/assets/scripts/converse-hold.sh"
 
 echo
 echo "converse-fold-scope: $PASS passed, $FAIL failed"
