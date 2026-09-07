@@ -1,14 +1,26 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
 # LIVE, unassigned bead that is plainly work (not a review, step, workflow-
-# topology, or demand bead) and is held out of `bd ready` by an open `blocks`
-# edge must ALSO carry a way to be dispatched once that edge clears: either
-# `gc.routed_to`/`gc.execution_routed_to` (the pool already owns it, and bd's
-# readiness gates the offer until the blocker closes) or `gc.dispatch_when_ready`
-# (armed, so the deferred-dispatch reconcile order slings it the moment bd
-# reports it ready). A blocked work bead with NEITHER is the "unrouted-and-
-# remember" anti-pattern: when its blocker closes it becomes ready and no queue
-# is offered it, so it waits on a person to notice and route it by hand.
+# topology, or demand bead, and not a merge anchor) and is held out of
+# `bd ready` by an open `blocks` edge must ALSO carry a way to be dispatched
+# once that edge clears: either `gc.routed_to` (a pool queue consumes it, and
+# bd's readiness gates the offer until the blocker closes) or
+# `gc.dispatch_when_ready` (armed, so the deferred-dispatch reconcile order
+# slings it the moment bd reports it ready). A blocked work bead with NEITHER
+# is the "unrouted-and-remember" anti-pattern: when its blocker closes it
+# becomes ready and no queue is offered it, so it waits on a person to notice
+# and route it by hand.
+#
+# `gc.execution_routed_to` is NOT a dispatch path: it is execution provenance
+# for workflow/control-dispatch flows, not a queue a worker or the pool-demand
+# reconciler consumes (those read `gc.routed_to`; gascity's route-recovery lane
+# restores `gc.routed_to` from the carried route only once a live workflow no
+# longer drives the bead). A blocked bead carrying only it, with no real route
+# and no arm, is flagged. The workflow-driven state that legitimately rests
+# unrouted and unassigned is the merge anchor: a bead carrying a `merge_result`
+# is driven by the merge cadence and offered by no pool queue
+# (lifecycle/lifecycle.toml — the anchor state is status x merge_result), so it
+# is exempt on that marker.
 #
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
@@ -101,8 +113,8 @@ while IFS=$'\037' read -r rig_name rig_path; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/step/workflow-topology/demand; not an infra type),
-    # AND carrying no route of either kind, AND not armed.
+    # (unassigned; not review/step/workflow-topology/demand; not a merge anchor;
+    # not an infra type), AND carrying no route, AND not armed.
     cand=$(printf '%s' "$raw" | scrub | jq -r --arg ex "$READY_EXCLUDES" '
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
@@ -112,9 +124,9 @@ while IFS=$'\037' read -r rig_name rig_path; do
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
         | select(($m["gc.demand_for"] // "") == "")
+        | select(($m["merge_result"] // "") == "")
         | select($ex | contains(" " + (($b.issue_type // "") | tostring) + " ") | not)
         | select(($m["gc.routed_to"] // "") == "")
-        | select(($m["gc.execution_routed_to"] // "") == "")
         | select(($m["gc.dispatch_when_ready"] // "") == "")
         | [ $id,
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-blocked-work-armed. Stub gc/bd only; no live
 # city, Dolt, or network. Covers: the finding (blocked plainly-work bead with
-# neither route nor arm), every exemption (routed, exec-routed, armed, assigned,
-# review/step/workflow/demand metadata, decision/epic/infra types), the
-# per-rig labelling, the remedy string, the fail-closed probes (unreadable
-# blocked listing, unreadable rig list), and the quiet paths (empty store,
-# all-armed store).
+# neither route nor arm, including one carrying only gc.execution_routed_to —
+# provenance, not a dispatch path), every exemption (routed, armed, assigned,
+# merge anchor, review/step/workflow/demand metadata, decision/epic/infra
+# types), the per-rig labelling, the remedy string, the fail-closed probes
+# (unreadable blocked listing, unreadable rig list), and the quiet paths (empty
+# store, all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -72,6 +73,14 @@ has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
 has "$OUT" "deferred-dispatch.sh arm a-1" "the finding names the arm remedy for that bead"
 clear_stores
 
+# gc.execution_routed_to is execution provenance, not a dispatch path: a bead
+# carrying only it still strands when its blocker clears — a FINDING.
+blocked_store alpha "$(bexec a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked task carrying only gc.execution_routed_to is flagged"
+has "$OUT" "alpha bead a-1" "the exec-routed-only bead is named as a finding"
+clear_stores
+
 # --- 2. exemptions: each must NOT be flagged --------------------------------
 blocked_store alpha "$(brouted a-1)"
 OUT=$(run_check); RC=$?
@@ -79,8 +88,11 @@ eq "$RC" "0" "a blocked bead already routed (gc.routed_to) is not flagged"
 has "$OUT" "OK:" "clean run prints the OK line"
 clear_stores
 
-blocked_store alpha "$(bexec a-1)"
-eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead with gc.execution_routed_to is not flagged"
+# A merge anchor (merge_result set) is driven by the merge cadence and offered
+# by no pool queue (lifecycle.toml: anchor state = status x merge_result), so
+# blocked-and-unrouted is not the anti-pattern for it — not flagged.
+blocked_store alpha "$(bmeta a-1 merge_result pre_open_gate)"
+eq "$(run_check >/dev/null; echo $?)" "0" "a blocked merge anchor (merge_result) is not flagged"
 clear_stores
 
 blocked_store alpha "$(barmed a-1)"
