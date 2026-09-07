@@ -1,9 +1,11 @@
 #!/bin/sh
-# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, react.
+# gc-helm.sh — the helm WRITE verbs: takeaway, demand, dismiss, open, engage,
+# react.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
 # Contract:
-#   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit (one open visit per subject)
+#   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit, parked on the board (one open visit per subject)
+#   gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]   spawn a converse sitting for a parked visit and attach
 #   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
 #   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
 #   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
@@ -37,18 +39,26 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead (a converse session holds the conversation)
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead, parked on the helm board for the operator to engage
+  gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row (subject inferred from the current sitting when omitted)
 
 The board is `helm-svc board` (services/helm). This script carries only the
-write verbs. open files a visit in the picked bead's continuation group (pool
-demand spawns/vacuums a converse session); its --reason is the short title
-tail and --body the brief the converse session reads at claim time. react
-slings a proactive first reaction via tools/gc-proactive.sh (its --reason is
-log-only operator intent). takeaway stamps gc.takeaway (+_at/+_by) in one
+write verbs. open files a visit in the picked bead's continuation group and
+parks it on the board (gc.routed_to=human); its --reason is the short title
+tail and --body the brief the sitting reads at claim time. engage draws a
+parked visit off the board: it spawns a manual converse-<model> sitting
+(origin=manual, backstop-exempt), assigns the visit to the session's runtime
+name so the session's own claim adopts it with no pool routing, and attaches;
+--model picks the tier (opus default), --no-attach spawns without attaching,
+and --reason is the title tail of the visit engage files when the subject has
+none parked (passed through to open).
+dismiss ends the sitting. react slings a proactive first reaction via
+tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
+stamps gc.takeaway (+_at/+_by) in one
 update; --release also reopens/unassigns/clears the route and quiesces the
 released molecule's step beads and workflow root. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
@@ -981,7 +991,7 @@ cmd_demand() {
 
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
-# continuation group, routed to the rig-qualified converse pool (the
+# continuation group, parked on the helm board via `gc.routed_to=human` (the
 # canonical gate-visit lines, formulas/mol-visit.toml). One open visit per
 # subject; the subject must RESOLVE first so a typo cannot manufacture a
 # visit (tk-ujwvt). --reason is the short title tail, --body the brief the
@@ -1005,7 +1015,8 @@ cmd_open() {
     case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
 
     # Pin bd at the bead's rig (cross-rig filing) and export its rig as GC_RIG
-    # so the gate-visit POOL line rig-qualifies the converse pool.
+    # so the visit is filed in the subject's rig store and the board gathers it
+    # there.
     path=$(rig_path_for_bead "$bead")
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     rig=$(rig_name_for_bead "$bead")
@@ -1059,8 +1070,8 @@ cmd_open() {
                                    | select((.depends_on_id // "") == $s) ] | length > 0)))
                | .id ] | first // empty' 2>/dev/null || true)
     if [ -n "$existing" ]; then
-        echo "$PROG: visit $existing is already open for $bead — a converse session holds it (or will spawn/vacuum it)."
-        echo "       Attach via the sessions picker."
+        echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
+        echo "       Engage it when ready: $PROG engage $existing"
         return 0
     fi
 
@@ -1076,8 +1087,11 @@ cmd_open() {
     fi
 
     # File the visit — the canonical gate-visit lines (formulas/mol-visit.toml).
+    # The converse routed-pool is retired: a filed visit parks on the helm board
+    # (gc.routed_to=human) and holds no session until an operator engages it
+    # with `gc-helm engage`. `human` is the board's exact gather predicate.
     # >>> gate-visit
-    POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+    POOL="human"
     VISIT=$(gc bd create -t task --title "visit: $bead — $visit_tail" \
         -d "$visit_body" \
         --json | jq -r '.id // .[0].id')
@@ -1108,8 +1122,8 @@ cmd_open() {
     # <<< gate-visit
     bust_cache
 
-    echo "$PROG: visit $VISIT filed on $bead (pool $POOL) — a converse session will spawn (cold) or vacuum it (warm)."
-    echo "       Attach via the sessions picker."
+    echo "$PROG: visit $VISIT filed on $bead — parked on the helm board (gc.routed_to=$POOL); no session spawned."
+    echo "       Engage it when ready: $PROG engage $VISIT"
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
@@ -1183,9 +1197,10 @@ cmd_react() {
 # (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
 # one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
 # Read from this session's own rig ledger: a visit is filed in its subject's
-# rig and claimed by that rig's converse pool, so the caller's store is the
-# one the visit sits in. The scrubbed listing is left in SITTING_LISTING (with
-# the BEADS_DIR it was read under) so dismiss can skip a second identical read.
+# rig and adopted by the converse sitting engaged on it, so the caller's store
+# is the one the visit sits in. The scrubbed listing is left in SITTING_LISTING
+# (with the BEADS_DIR it was read under) so dismiss can skip a second identical
+# read.
 #
 # Sets SITTING_SUBJECT on success (called directly, not in a subshell, so the
 # listing handoff survives). It fails CLOSED, naming the explicit-id
@@ -1299,6 +1314,44 @@ cmd_dismiss() {
              then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
              else empty end' 2>/dev/null || true)
 
+    # A VISIT id names its own sitting. The board lists a parked visit as a row
+    # of its own, and engage accepts the visit id straight off that row, so
+    # dismiss must resolve the same union: a visit dismisses the subject it
+    # tracks (its gc.continuation_group stamp, else its tracks edge), the way
+    # the no-argument path resolves the current sitting's subject.
+    subject_kind=$(printf '%s' "$subject_clean" \
+        | jq -r --arg b "$bead" \
+            'if type == "array"
+             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.metadata.task_kind // "")
+             else empty end' 2>/dev/null || true)
+    if [ "$subject_kind" = "visit" ]; then
+        visit_of=$(printf '%s' "$subject_clean" \
+            | jq -r --arg b "$bead" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                      | (.metadata["gc.continuation_group"] // "") | select(. != "")
+                 else empty end' 2>/dev/null || true)
+        if [ -z "$visit_of" ]; then
+            visit_of=$(printf '%s' "$subject_clean" \
+                | jq -r --arg b "$bead" \
+                    'if type == "array"
+                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first
+                          | [ .dependencies[]? | select((.type // "") == "tracks") | (.depends_on_id // "") ] | map(select(. != "")) | first // empty
+                     else empty end' 2>/dev/null || true)
+        fi
+        if [ -z "$visit_of" ]; then
+            echo "$PROG: dismiss: $bead is a visit that names no subject (no gc.continuation_group stamp and no tracks edge) — nothing to dismiss it under. Nothing was written." >&2
+            exit 4
+        fi
+        echo "$PROG: dismiss: $bead is a visit on $visit_of — dismissing that subject's sitting" >&2
+        bead="$visit_of"
+        subject_status=$(gc bd show "$bead" --json 2>/dev/null | scrub \
+            | jq -r --arg b "$bead" \
+                'if type == "array"
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
+                 else empty end' 2>/dev/null || true)
+    fi
+
     # Pin bd at the SUBJECT's rig for the visit lookup and close, the way
     # `open` does. `bd list` reads whatever BEADS_DIR names, which in an agent
     # session is that agent's own rig — so an unpinned lookup on a cross-rig
@@ -1367,6 +1420,16 @@ cmd_dismiss() {
     # the forced case is a line the operator can see. (`gc bd close` accepts
     # --force; `gc bd update` does not.)
     closed_n=0
+    # A closed visit is a DONE row of its own on the board (it carries the
+    # gc.routed_to=human anchor stamp), and the board retires a DONE row on
+    # gc.dismissed_at — stamped on the subject below. Stamp each visit this
+    # dismiss closes too, or its row outlives the dismissal for the whole DONE
+    # window. Best-effort: the close already landed, and a missed stamp only
+    # leaves a row that ages out.
+    dismiss_stamp_visit() {
+        gc bd update "$1" --set-metadata "gc.dismissed_at=$(iso_now)" \
+            --set-metadata "gc.dismissed_by=${GC_SESSION_NAME:-operator}" >/dev/null 2>&1 || true
+    }
     for _v in $visits; do
         [ -n "$_v" ] || continue
         _why="dismissed by the operator${dismiss_reason:+: $dismiss_reason}"
@@ -1407,9 +1470,11 @@ cmd_dismiss() {
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
             echo "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
+            dismiss_stamp_visit "$_v"
         elif gc bd close "$_v" --reason "$_why" --force >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
             echo "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
+            dismiss_stamp_visit "$_v"
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not close visit $_v; its sitting keeps the pane. Close it by hand: gc bd close $_v --force" >&2
@@ -1451,14 +1516,261 @@ cmd_dismiss() {
     return 0
 }
 
+# ── Verb: engage ─────────────────────────────────────────────────────
+# The operator's "I want to talk about this now" — the spawn-on-engagement
+# entry point. The converse routed-pool is retired: a filed visit PARKS on the
+# helm board (gc.routed_to=human) and holds no session until the operator draws
+# it off the board. engage is that draw. It spawns a manual converse-<model>
+# sitting (origin=manual, which the pool execution backstop never governs),
+# assigns the picked visit to that session's runtime name so the session's own
+# `gc hook --claim` adopts it (ready_assignment) with no pool routing, and
+# attaches. dismiss ends the sitting.
+#
+# The argument is the bead the operator picked off the board. An open visit IS
+# the sitting's visit; a subject resolves to the one open visit tracking it (the
+# union open/dismiss match), and a subject with none gets one filed (parked to
+# the board) so a picked subject still engages.
+#
+# --model selects the tier (opus default, else fable or codex). --no-attach
+# spawns and assigns without attaching — the board picker uses it, then the
+# operator attaches from the session picker, the way a pool sitting was reached
+# before. Attached (the default), the operator lands in the sitting directly.
+cmd_engage() {
+    bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --model=*)   engage_model="${1#--model=}"; shift ;;
+            --model)     shift; [ $# -gt 0 ] || { echo "$PROG: engage: --model requires a value" >&2; exit 2; }
+                         engage_model="$1"; shift ;;
+            --reason=*)  engage_reason="${1#--reason=}"; shift ;;
+            --reason)    shift; [ $# -gt 0 ] || { echo "$PROG: engage: --reason requires a value" >&2; exit 2; }
+                         engage_reason="$1"; shift ;;
+            --no-attach) engage_attach=0; shift ;;
+            -h|--help)   usage; exit 0 ;;
+            -*) echo "$PROG: engage: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: engage takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    case "$bead" in "") echo "$PROG: engage needs <bead-id> (a parked visit, or a subject to converse about)" >&2; usage; exit 2 ;; esac
+    case "$engage_model" in
+        opus|fable|codex) ;;
+        *) echo "$PROG: engage: --model must be opus, fable, or codex (got '$engage_model')" >&2; exit 2 ;;
+    esac
+    template="converse-$engage_model"
+
+    # Pin bd at the subject's rig, as open/dismiss do, so the visit lookup and
+    # assignment read and write the ledger the picked bead lives in. A prefix
+    # no rig carries is refused here: the converse templates are rig-scoped, so
+    # with no rig there is nowhere to resolve "$template" and nothing to spawn.
+    path=$(rig_path_for_bead "$bead")
+    if [ -z "$path" ]; then
+        echo "$PROG: engage: '$bead' — its id prefix '${bead%%-*}' matches no rig in 'gc rig list', so there is no rig to resolve $template in. Nothing spawned." >&2
+        exit 4
+    fi
+    [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
+    rig=$(rig_name_for_bead "$bead")
+    [ -n "$rig" ] && export GC_RIG="$rig"
+
+    # The bead must resolve before anything spawns — fail closed, as open does.
+    bead_row=$(gc bd show "$bead" --json 2>/dev/null | scrub \
+        | jq -r --arg b "$bead" \
+            'if type == "array" then ([ .[] | select(type=="object" and (.id // "")==$b) ] | first) else empty end' 2>/dev/null || true)
+    if [ -z "$bead_row" ] || [ "$bead_row" = "null" ]; then
+        echo "$PROG: engage: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing spawned." >&2
+        exit 4
+    fi
+    bead_kind=$(printf '%s' "$bead_row" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
+
+    # Resolve the sitting's visit. A visit picked off the board is itself the
+    # visit; a subject resolves to the open visits tracking it (the union
+    # open/dismiss match), and a subject with none gets one filed (open parks it
+    # to the board). A subject can carry several open visits — escalate.sh files
+    # one per (subject, key) — so the parked (open, unassigned) ones are
+    # preferred over one a sitting already holds, oldest first; more than one
+    # parked visit is an ambiguity the operator settles by naming the visit id.
+    # Emits "<id>\t<status>\t<assignee>" per candidate, parked first.
+    engage_find_visits() {
+        gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub \
+            | jq -r --arg s "$1" \
+                '[ .[]? | select((.metadata.task_kind // "")=="visit")
+                   | select($s != "" and (((.metadata["gc.continuation_group"] // "")==$s)
+                        or ([ .dependencies[]? | select((.type // "")=="tracks") | select((.depends_on_id // "")==$s) ] | length > 0))) ]
+                 | sort_by(((.assignee // "") != ""), ((.status // "") != "open"), (.created_at // ""))
+                 | .[] | [.id, (.status // ""), (.assignee // "")] | @tsv' 2>/dev/null || true
+    }
+    visit_row=""
+    if [ "$bead_kind" = "visit" ]; then
+        VISIT="$bead"
+        visit_row="$bead_row"
+    else
+        VISIT=""
+        candidates=$(engage_find_visits "$bead")
+        if [ -z "$candidates" ]; then
+            echo "$PROG: engage: no open visit on $bead — filing one to park on the board, then engaging it" >&2
+            set -- "$bead"
+            [ -n "$engage_reason" ] && set -- "$@" --reason "$engage_reason"
+            # cmd_open runs in this shell and leaves the new id in VISIT.
+            cmd_open "$@" >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
+            [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
+        fi
+        if [ -z "$VISIT" ] && [ -n "$candidates" ]; then
+            parked=$(printf '%s\n' "$candidates" | awk -F'\t' '$2=="open" && $3=="" {print $1}')
+            parked_n=$(printf '%s\n' "$parked" | grep -c . || true)
+            if [ "$parked_n" -gt 1 ]; then
+                echo "$PROG: engage: $bead has $parked_n parked visits ($(printf '%s\n' "$parked" | tr '\n' ' ' | sed 's/ *$//')) — name the one to engage: $PROG engage <visit-id>" >&2
+                exit 4
+            fi
+            if [ "$parked_n" -eq 1 ]; then
+                VISIT="$parked"
+            else
+                # Nothing parked: every open visit on the subject is held or
+                # pending. Report the first so the guard below names its holder.
+                VISIT="${candidates%%	*}"
+            fi
+        fi
+    fi
+    [ -n "$VISIT" ] || { echo "$PROG: engage: could not resolve a visit for '$bead'. Nothing spawned." >&2; exit 4; }
+    if [ -z "$visit_row" ]; then
+        visit_row=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0] // {}) else {} end' 2>/dev/null || true)
+    fi
+    visit_status=$(printf '%s' "$visit_row" | jq -r '.status // ""' 2>/dev/null || true)
+    visit_owner=$(printf '%s' "$visit_row" | jq -r '.assignee // ""' 2>/dev/null || true)
+
+    # The spawned sitting adopts the visit only through its own hook claim, whose
+    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity-agents.md), and
+    # `bd ready` yields a bead only while it is open and unblocked. A closed or
+    # blocked visit assigned to the sitting never becomes its claim, so the
+    # sitting would wake holding nothing while this command reports success.
+    #
+    # A visit with an assignee is already engaged, or pending engagement:
+    # engage binds the visit to a spawned sitting's runtime name (below) while
+    # the visit is still `open`, and the hook promotes that `open`+assignee pair
+    # through ready_assignment. So a nonempty assignee on a LIVE visit means a
+    # sitting already holds it or is about to; treat it as taken and point the
+    # operator at it rather than spawn a duplicate that overwrites the binding.
+    # A closed visit keeps its last assignee (bd close never clears it), so the
+    # status is settled first — that holder is a sitting that has ended, and an
+    # attach hint at it would be wrong.
+    case "$visit_status" in
+        open)
+            if [ -n "$visit_owner" ]; then
+                echo "$PROG: engage: visit $VISIT is pending engagement by the spawned sitting '$visit_owner' — attach to it instead: gc session attach $visit_owner" >&2
+                exit 4
+            fi ;;
+        in_progress)
+            echo "$PROG: engage: visit $VISIT is already engaged by '${visit_owner:-an unnamed holder}' — attach to it instead: gc session attach ${visit_owner:-<holder>}" >&2
+            exit 4 ;;
+        *)
+            echo "$PROG: engage: visit $VISIT is '${visit_status:-unknown}', not open${visit_owner:+ (last held by '$visit_owner')} — a spawned sitting adopts only ready (open, unblocked) assigned work, so it would hold nothing. Nothing spawned." >&2
+            exit 4 ;;
+    esac
+    if ! visit_blockers=$(gc bd dep list "$VISIT" --direction=down --json 2>/dev/null | scrub \
+        | jq -er 'if type == "array" then
+               [ .[] | select((.dependency_type // "") == "blocks")
+                     | select((.status // "") != "closed") | .id ] | join(" ")
+             else error("not an edge array") end' 2>/dev/null); then
+        echo "$PROG: engage: could not read the blockers on visit $VISIT ('gc bd dep list' failed or did not answer with an edge array), so its claimable state is UNPROVEN — refusing to spawn a sitting that may hold nothing. Nothing spawned; retry once the store answers." >&2
+        exit 4
+    fi
+    if [ -n "$visit_blockers" ]; then
+        echo "$PROG: engage: visit $VISIT is blocked by $visit_blockers — a blocked bead is not in 'bd ready', so a spawned sitting could not adopt it and would hold nothing. Nothing spawned; engage it once its blockers clear." >&2
+        exit 4
+    fi
+
+    # Spawn the manual sitting WITHOUT attaching, so the visit is assigned before
+    # the session's claim loop runs. Capture the runtime identity from --json:
+    # a multi-session template's stored alias is a qualified form, so the visit
+    # id is not assumed to equal it.
+    #
+    # `gc session new` resolves a bare template through currentRigContext, which
+    # reads GC_DIR (or cwd), NOT the GC_RIG exported above. The converse
+    # templates are rig-scoped, with no city-scoped bare converse-<model>, so
+    # from the city root (where the tmux board picker runs) the bare name matches
+    # no rig and nothing spawns. Point GC_DIR at the subject's rig so the name
+    # resolves to that rig's template.
+    #
+    # gc says WHY a spawn failed only on stderr (template not found in this rig,
+    # alias already held, transport down), so it is kept for the message.
+    spawn_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-engage-spawn.XXXXXX" 2>/dev/null || printf '')
+    if [ -n "$spawn_errf" ]; then
+        spawn=$(GC_DIR="$path" gc session new "$template" --alias "$VISIT" --no-attach --json 2>"$spawn_errf" | scrub)
+        spawn_why=$(tr '\n' ' ' < "$spawn_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+        rm -f "$spawn_errf" 2>/dev/null || true
+    else
+        spawn=$(GC_DIR="$path" gc session new "$template" --alias "$VISIT" --no-attach --json 2>/dev/null | scrub)
+        spawn_why=""
+    fi
+    sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
+    sname=$(printf '%s' "$spawn" | jq -r '.session_name // ""' 2>/dev/null || true)
+    if [ -z "$sname" ] || [ -z "$sid" ]; then
+        spawn_hint=""
+        case "$spawn_why" in
+            *"not found"*) spawn_hint=" The converse templates are rig-scoped: rig '${rig:-?}' ($path) does not carry $template, so a visit on a bead there cannot be engaged from that rig." ;;
+            *"alias already"*) spawn_hint=" A session still holds the alias '$VISIT' — a sitting from an earlier engage that never bound; close it (gc session close <id>) and re-run." ;;
+        esac
+        echo "$PROG: engage: 'gc session new $template' did not return a session identity — nothing assigned.${spawn_why:+ gc said: $spawn_why.}$spawn_hint Output: ${spawn:-<empty>}" >&2
+        exit 4
+    fi
+
+    # Bind the visit to the sitting: its assignee is the session's runtime name,
+    # the identity a pool claim would have stamped, so the session's own
+    # `gc hook --claim` adopts it with no pool routing. The bind is CONDITIONAL
+    # on the open+unassigned state the guards above read. `gc session new` takes
+    # real time, so a second engage of the same row can pass those same guards
+    # and spawn its own sitting in the window before this write — an
+    # unconditional update would let the later engage overwrite the first
+    # sitting's binding, stranding it. --if-assignee "" --if-status
+    # open writes only while the visit is still the one the guards saw; a mismatch
+    # writes nothing and exits 13. This engage is then the loser: it must not
+    # overwrite the owner that won.
+    #
+    # Every post-spawn failure CLOSES the sitting it just spawned before it
+    # exits: a converse slot sets nudge="" and idle_timeout=0, so a sitting that
+    # never binds a visit has no idle-claim rescue and would linger holding
+    # nothing. Closed, not suspended — a suspended session bead stays open and
+    # keeps its alias reserved, so the advertised re-run would be refused at
+    # `gc session new --alias` for as long as it lingered.
+    engage_abort() {
+        gc session close "$1" >/dev/null 2>&1 || true
+        echo "$PROG: engage: $2" >&2
+        exit 4
+    }
+    bind_rc=0
+    gc bd update "$VISIT" --if-assignee "" --if-status open --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
+    if [ "$bind_rc" -eq 13 ]; then
+        winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+        engage_abort "$sid" "visit $VISIT was engaged by '${winner:-another sitting}' while this sitting spawned — not overwriting. The sitting $sname this engage spawned holds nothing and was closed; attach to the one that won: gc session attach ${winner:-<owner>}"
+    fi
+    if [ "$bind_rc" -ne 0 ]; then
+        engage_abort "$sid" "spawned $sname but the bind of visit $VISIT failed (rc $bind_rc). The sitting holds nothing and was closed; the visit is unchanged — re-run: $PROG engage $bead"
+    fi
+    assigned=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+    if [ "$assigned" != "$sname" ]; then
+        if [ -n "$assigned" ]; then
+            engage_abort "$sid" "visit $VISIT is held by '$assigned', not the sitting '$sname' this engage spawned — another writer took it after the bind. The sitting holds nothing and was closed; attach to the holder: gc session attach $assigned"
+        fi
+        engage_abort "$sid" "visit $VISIT read back with no assignee after binding it to '$sname' — the bind did not persist. The sitting holds nothing and was closed; the visit is unchanged — re-run: $PROG engage $bead"
+    fi
+    bust_cache
+
+    echo "$PROG: engage: sitting $sname ($template) holds visit $VISIT on $bead"
+    if [ "$engage_attach" = "1" ]; then
+        gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+    else
+        echo "$PROG: engage: spawned --no-attach; attach when ready: gc session attach $sid"
+    fi
+    return 0
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
+    engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm); this script keeps only the write verbs" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, react, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, takeaway, demand, dismiss, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

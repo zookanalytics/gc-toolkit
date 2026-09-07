@@ -4,9 +4,11 @@
 # Usage: tmux-pick-helm.sh [--city-path <path>] [--all]
 #
 # Renders `helm-svc board --json` (the Go board, services/helm) as a tmux
-# display-menu; picking a row runs `gc-helm.sh open <bead>`, which files a VISIT
-# on that bead so a converse session holds it. Bound as the sibling of the
-# live-session picker (prefix+S = "what's running"; this = "what needs me").
+# display-menu; picking a row runs `gc-helm.sh engage <bead> --no-attach`, which
+# spawns a converse sitting on demand for that visit (the converse routed-pool
+# is retired; a sitting holds only while an operator engages one). Bound as the
+# sibling of the live-session picker (prefix+S = "what's running"; this = "what
+# needs me").
 #
 # TWO MENUS, ONE SCRIPT. Bare, this renders the operator's QUEUE — what is owed
 # by a person, oldest first, each row headlined by the demand itself. --all
@@ -76,8 +78,8 @@ BOARD_ERR="$(mktemp "${TMPDIR:-/tmp}/gc-helm-pick.XXXXXX" 2>/dev/null || printf 
 if [ -n "$BOARD_ERR" ]; then trap 'rm -f "$BOARD_ERR"' EXIT; fi
 BOARD_RC=0
 # The DONE band keeps an answered row in a view the operator leaves open.
-# Neither menu here is that, and the one action either of them offers is `open`,
-# so a closed row would spend a hotkey on something already answered.
+# Neither menu here is that, and the one action either of them offers is
+# `engage`, so a closed row would spend a hotkey on something already answered.
 BOARD=$(GC_HELM_DONE_WINDOW=0 "$HELM_SVC" board --json --limit=36 ${ALL:+--all} 2>"${BOARD_ERR:-/dev/null}") || BOARD_RC=$?
 
 if [ "$BOARD_RC" -ne 0 ]; then
@@ -138,9 +140,14 @@ while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
         label=$(printf '  %s %-8s %-11s [%s] %s — %s  ' "$glyph" "$sev" "$id" "$rig" "$needs" "$title")
     fi
 
-    # Background the open: a cold visit-file plus converse spawn takes
-    # seconds and must never freeze the tmux server.
-    cmd="run-shell -b \"${CMD_PREFIX}${SQ_ATTN} open ${id}\""
+    # Background the engage: spawning a converse sitting takes seconds and
+    # must never freeze the tmux server. --no-attach spawns and binds the
+    # visit; the operator attaches from the session picker (prefix+S), the way
+    # a pool sitting was reached before. run-shell drops the job's stderr and
+    # shows only stdout plus "returned N" in its view window, and every engage
+    # refusal (already engaged, blocked, lost race, no template in this rig)
+    # is a stderr line — fold it into stdout so the reason reaches the operator.
+    cmd="run-shell -b \"${CMD_PREFIX}${SQ_ATTN} engage ${id} --no-attach 2>&1\""
 
     if [ "$i" -le ${#HOTKEYS} ]; then
         key=$(printf '%s' "$HOTKEYS" | cut -c"$i")

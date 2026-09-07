@@ -5,7 +5,7 @@
 # the open visit and files nothing. Replaces escalation-gate.sh and every
 # patrol `gc mail send` — escalations are visits a human can claim and close.
 #   escalate.sh --subject <bead-id> --key <situation-key> --message <text>
-#               [--pool <rig-qualified converse pool>]
+#               [--pool <rig-qualified pool>]
 # Callers: patrol formulas (refinery/witness/deacon), signoff.sh peers, and any
 # script that would otherwise mail. A changed situation gets a NEW key.
 # A visit filed by the deacon also lands one entry in its incident ledger
@@ -33,7 +33,7 @@ scrub() { tr -d '\000-\011\013-\037'; }
 usage() {
   cat >&2 <<'U'
 usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
-                   [--pool <rig-qualified converse pool>]
+                   [--pool <rig-qualified pool>]
 
   --subject  the bead the escalation is about; the visit tracks it (required).
              A durable bead also narrows the dedup to that bead; an ephemeral
@@ -49,11 +49,11 @@ usage: escalate.sh --subject <bead-id> --key <situation-key> --message <text>
              the key (`wedged-<target>`)
   --message  what the visit needs from a human; first line becomes the
              visit title's headline (required)
-  --pool     converse pool to route to; default ${GC_RIG:+$GC_RIG/}gc-toolkit.converse.
-             The route must name a live agent identity that reads this rig's
-             store, so a caller with GC_RIG unset must pass this explicitly —
-             the bare default matches no rig-scoped pool. A rig-qualified pool
-             also selects the store, so the two always agree.
+  --pool     route to a specific pool instead of the board; default `human`,
+             which parks the visit on the helm board for the operator to engage
+             (the converse routed-pool is retired). A pool route must name a
+             live agent identity that reads this rig's store; a rig-qualified
+             --pool also selects the store, so route and store cannot disagree.
 
 env:
   GC_ESCALATE_VERDICT_WINDOW  seconds a `moot` or `benign` verdict suppresses
@@ -94,6 +94,48 @@ POOL_RIG="${POOL_ARG%%/*}"
 if [ -z "${GC_RIG:-}" ] && [ -n "$POOL_ARG" ] && [ "$POOL_RIG" != "$POOL_ARG" ]; then
   export GC_RIG="$POOL_RIG"
   warn "GC_RIG unset; adopting rig '$POOL_RIG' from --pool so the visit lands in the store that pool reads"
+fi
+
+# The default route is `human` (the retired converse pool's replacement; set in
+# the gate-visit block below): the visit parks on the helm board, which is not a
+# pool name that selects a store. So unlike a rig-qualified --pool, the default
+# cannot prove which rig's ledger `gc bd create` writes to — and `gc bd` itself
+# only WARNS on a GC_RIG that names no bound rig, then answers from the ambient
+# store. Either way the visit — and its tracks edge to the subject — would land
+# in a store the subject's board never reads, invisible to the operator and
+# severed from the subject: the silent mute this script exists to end.
+#
+# So on the board route the store is proven from the subject itself, through
+# escalation-rig.sh (bead-store.sh): the one prefix->rig derivation the
+# destructive gates and the deacon's own escalations already use, which refuses
+# a prefix no rig carries, one two rigs carry, and an unreadable rig set, each
+# with its own reason on stderr. GC_RIG unset: bind the derived rig. GC_RIG set:
+# it must be the subject's rig, or the caller's pin is the wrong store (a stale
+# export, a typo) and nothing is filed. A subject whose store cannot be derived
+# (an ephemeral id with no rig prefix) is filed under the caller's GC_RIG as
+# before — there is nothing to disprove it with.
+if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
+  ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
+  subj_rig=""
+  if [ -x "$ESC_RIG_SH" ]; then
+    subj_rig=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$") || subj_rig=""
+    subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+    rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
+  else
+    subj_rig_why="cannot execute $ESC_RIG_SH"
+  fi
+  if [ -z "${GC_RIG:-}" ]; then
+    if [ -n "$subj_rig" ]; then
+      export GC_RIG="$subj_rig"
+      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$subj_rig' from subject '$SUBJECT' so the visit lands in the store the subject lives in, not the caller's ambient store"
+    else
+      warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
+      exit 1
+    fi
+  elif [ -n "$subj_rig" ] && [ "$subj_rig" != "$GC_RIG" ]; then
+    warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$subj_rig' — nothing filed. On the board route the visit must land in the subject's own store or its board never shows it and its tracks edge never reaches the subject; 'gc bd' would not refuse an unbound GC_RIG, only warn and file elsewhere. Re-run with GC_RIG=$subj_rig (or unset, to derive it)."
+    exit 1
+  fi
 fi
 
 bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
@@ -162,7 +204,9 @@ HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
 # >>> gate-visit
 # Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
 # checks this copy's invariants. escalation_key rides its own flag beside it.
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+# Default route is `human` (the retired converse pool's replacement): the visit
+# parks on the helm board. --pool overrides it to route to a live pool instead.
+POOL="human"
 [ -n "$POOL_ARG" ] && POOL="$POOL_ARG"
 
 # Idempotence: an open (or claimed) visit for this situation means the human is

@@ -27,6 +27,13 @@ if [ "${1:-}" = "agent" ] && [ "${2:-}" = "list" ]; then
   printf '%s\n' "${STUB_AGENTS:-}"
   exit 0
 fi
+# The city's rig set, by id prefix. escalate.sh reads this to pin the store to
+# the subject's own rig when the route defaults to the board and GC_RIG is unset.
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+  [ -n "${STUB_RIG_LIST_FAIL:-}" ] && { echo "gc: rig list unavailable" >&2; exit 1; }
+  printf '%s\n' "${STUB_RIGS:-}"
+  exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 shift
 case "${1:-}" in
@@ -109,12 +116,15 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
 unset GC_RIG STUB_LIST_FAIL STUB_CREATE_FAIL STUB_UPD_FAIL STUB_AGENTS_FAIL \
-      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS 2>/dev/null || true
+      STUB_CREATE_FAIL_MATCH STUB_UPD_FAIL_MATCH STUB_LIST_IGNORE_FIELDS STUB_RIG_LIST_FAIL 2>/dev/null || true
 # The live agent set the route is matched against. converse exists ONLY
 # rig-scoped, which is what makes the bare name unroutable.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
   {"qualified_name":"myrig/gc-toolkit.converse"},{"qualified_name":"other/rig.converse"},
   {"qualified_name":"gc-toolkit.dog"}]}'
+# The city's rigs, keyed by id prefix. The subject in these cases is tk-a, so a
+# rig-less board-route caller derives its store from prefix 'tk' -> gc-toolkit.
+export STUB_RIGS='{"rigs":[{"name":"gc-toolkit","prefix":"tk","path":"/nonexistent-rig"}]}'
 # Most cases below are a rig-bound caller; the rig-less ones drop GC_RIG themselves.
 export GC_RIG=gc-toolkit
 
@@ -137,7 +147,7 @@ out=$("$SUT" --subject tk-stuck --key merge-conflict --message "PR#7 is CONFLICT
 eq "$rc" 0 "filing exits 0"
 eq "$(visits)" "1" "exactly one visit filed"
 has "$(field vis-1 title)" "visit: tk-stuck — PR#7 is CONFLICTING" "title carries the visit brand, subject and headline"
-eq "$(meta vis-1 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "routed to the rig-qualified converse pool"
+eq "$(meta vis-1 gc.routed_to)" "human" "parked on the board (the default route, since the converse pool is retired)"
 eq "$(meta vis-1 gc.continuation_group)" "tk-stuck" "continuation group is the subject"
 eq "$(meta vis-1 task_kind)" "visit" "task_kind=visit stamped"
 eq "$(meta vis-1 escalation_key)" "merge-conflict" "escalation_key stamped"
@@ -145,29 +155,76 @@ has "$(cat "$STUB_DEPS")" "vis-1|tk-stuck|tracks" "visit tracks the subject (nev
 hasnt "$(cat "$STUB_DEPS")" "parent-child" "no parent-child edge"
 has "$out" "filed visit vis-1" "reports what it filed"
 
-echo "# rig qualification and --pool override"
+echo "# the default route is human, and --pool overrides it"
+# The converse routed-pool is retired: the default is the board (human), which
+# needs no live-agent match. --pool still routes to a pool.
 reset
-GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-1 gc.routed_to)" "myrig/gc-toolkit.converse" "GC_RIG qualifies the default pool"
+GC_RIG=gc-toolkit "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(meta vis-1 gc.routed_to)" "human" "the default route is the board"
 reset
 GC_RIG=other "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
 
-echo "# an unroutable route refuses BEFORE anything is created"
-# Nothing filed is the point: a visit that exists and routes nowhere is worse
-# than a loud refusal, because the caller reads exit 0 as "a human was asked".
+echo "# a board-route caller whose GC_RIG is not the subject's rig REFUSES"
+# The old converse default was verified against the live agent set, which also
+# proved GC_RIG named a real rig. `human` needs no agent match, and `gc bd`
+# only WARNS on a GC_RIG that names no bound rig before filing into the ambient
+# store — so a stale or misspelled export would file the visit on a board the
+# subject never reaches, exit 0. The subject's own rig (tk -> gc-toolkit) is
+# the store the visit must land in; a pin that disagrees is refused.
+reset
+out=$(GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "GC_RIG naming a rig other than the subject's exits 1"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "lives in rig 'gc-toolkit'" "and names the rig the subject lives in"
+echo "# a rig-less board-route caller pins the store to the subject's own rig"
+# The board route ('human') names no store, so a rig-less caller cannot let the
+# create fall to the ambient store — the visit would land on the wrong board and
+# its tracks edge would miss the subject. escalate derives the store from the
+# subject's id prefix (tk -> gc-toolkit) and files there.
 reset
 out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "a rig-less caller's bare default exits 1"
-eq "$(visits)" "0" "and files NOTHING — the refusal precedes the create"
-has "$out" "matches no live agent identity" "says the route names no agent"
-has "$out" "gc-toolkit/gc-toolkit.converse" "names the live rig-qualified forms"
-has "$out" "repair:" "and prints the repair"
+eq "$rc" 0 "a rig-less board-route caller files once it derives the subject's rig"
+eq "$(visits)" "1" "the visit exists"
+eq "$(meta vis-1 gc.routed_to)" "human" "routed to the board"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd create" "the create runs under the derived rig, not the ambient store"
+has "$out" "deriving rig 'gc-toolkit'" "and says which store it pinned"
+
+echo "# a rig-less board-route caller whose subject resolves to no rig REFUSES"
+# Fail before filing: a visit written to the ambient store lands on the wrong
+# board and severs the tracks edge — the silent mute escalate exists to end.
+reset
+out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "could not be proven" "and says the store could not be proven"
+has "$out" "no rig carries the prefix 'zz'" "with escalation-rig's reason (an unknown prefix, not an unreadable rig set)"
+
+echo "# a rig-less board-route caller REFUSES when the rig set is unreadable"
+reset
+out=$(env -u GC_RIG STUB_RIG_LIST_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "could not read" "and says the rig set was unreadable, not that the prefix is unknown"
+
+echo "# a board-route caller whose subject has no rig prefix keeps its own GC_RIG"
+# An ephemeral or prefix-less subject cannot disprove the caller's pin, so the
+# pinned store files as before.
+reset
+out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a prefix-less subject under a pinned GC_RIG still files"
+eq "$(visits)" "1" "the visit exists"
+
+echo "# an unroutable --pool is refused before anything is created"
+# A --pool that names no live agent is refused BEFORE anything is created: a
+# visit that exists and routes nowhere reads to the caller as "a human was asked".
 
 reset
-out=$("$SUT" --subject tk-a --key k1 --message m --pool no/such.pool 2>&1); rc=$?
-eq "$rc" 1 "an unknown --pool exits 1"
+out=$("$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/nonexistent.pool 2>&1); rc=$?
+eq "$rc" 1 "an unknown --pool (this rig, no such agent) exits 1"
 eq "$(visits)" "0" "and files nothing"
+has "$out" "matches no live agent identity" "says the route names no agent"
+has "$out" "repair:" "and prints the repair"
 
 echo "# a live pool that does not read this rig's store is refused too"
 # GC_RIG picks the store `gc bd create` writes to as well as the route, so a
@@ -204,22 +261,25 @@ out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit
 eq "$rc" 0 "a bare pool a city agent holds still files"
 has "$(cat "$STUB_GC_LOG")" "[<unset>] bd create" "and keeps the ambient store — there is no rig to adopt"
 
-echo "# an unreadable agent set is not proof — it files, loudly unverified"
+echo "# an unreadable agent set is not proof — a --pool route files, loudly unverified"
+# The board default needs no live-agent match, so the verify path is exercised
+# by an explicit --pool: an unreadable agent set cannot disprove it, so it files
+# and says so rather than muting a human.
 reset
-out=$(STUB_AGENTS_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "an unreadable agent set still files"
+out=$(STUB_AGENTS_FAIL=1 "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "an unreadable agent set still files a --pool route"
 eq "$(visits)" "1" "the visit exists"
 has "$out" "UNVERIFIED" "and says the route was never verified"
 
-echo "# a control byte in the agent set does not silently mute the check"
+echo "# a control byte in the agent set does not silently mute the --pool check"
 # A raw C0 byte anywhere in the payload aborts jq on the WHOLE document, which
-# reads here as an empty identity set — the fail-open arm above, so the route
-# would file UNVERIFIED and the check that just refused it would be gone. The
-# scrub is what keeps the refusal reachable; without it this case files.
+# reads as an empty identity set — the fail-open arm above, so an unroutable
+# --pool would file UNVERIFIED and the check that should refuse it would be
+# gone. The scrub is what keeps the refusal reachable; without it this files.
 reset
 out=$(STUB_AGENTS="$(printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse","work_query":"a\002b"}]}')" \
-  env -u GC_RIG "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
-eq "$rc" 1 "the bare default is still refused past a control byte"
+  "$SUT" --subject tk-a --key k1 --message m --pool gc-toolkit/nonexistent.pool 2>&1); rc=$?
+eq "$rc" 1 "an unroutable --pool is still refused past a control byte"
 eq "$(visits)" "0" "and nothing is filed"
 has "$out" "matches no live agent identity" "the route was actually checked, not skipped"
 
@@ -242,17 +302,17 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"
 out=$("$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a repointed situation exits 0"
 eq "$(visits)" "0" "no second visit filed"
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "the stale route is repaired in place"
+eq "$(meta vis-0 gc.routed_to)" "human" "the stale route is repaired in place — repointed to the board"
 has "$out" "repointing it at" "and the repoint is announced"
 
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "a visit with NO route is repointed too"
+eq "$(meta vis-0 gc.routed_to)" "human" "a visit with NO route is repointed too — to the board"
 eq "$(visits)" "0" "and still files nothing"
 
 reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"other/rig.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "a cross-rig route is repointed at this store's pool"
+eq "$(meta vis-0 gc.routed_to)" "human" "a cross-rig route is repointed to the board"
 
 echo "# a visit parked on the operator is left where it is"
 # gc.routed_to=human is the city's "no agent will take it" marker, not a pool
@@ -359,7 +419,7 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key"
 out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message m 2>&1); rc=$?
 eq "$rc" 0 "an unroutable visit matched by key alone exits 0"
 eq "$(visits)" "0" "and no duplicate is filed"
-eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "the key-only match is repointed too"
+eq "$(meta vis-0 gc.routed_to)" "human" "the key-only match is repointed too — to the board"
 has "$out" "repointed" "and says so"
 
 echo "# an ephemeral subject is filed on a durable standing subject"

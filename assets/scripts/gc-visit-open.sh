@@ -43,8 +43,9 @@ Usage:
   gc-visit-open <bead-id>  [--no-react]
 
 Opens a durable conversation in one step. A topic string becomes a subject
-bead; an existing bead id is used as the subject as-is. Either way a visit is
-queued for the rig-qualified converse pool, which holds the conversation.
+bead; an existing bead id is used as the subject as-is. Either way the visit
+parks on the helm board (`gc.routed_to=human`); the operator draws it off the
+board and `gc-helm engage` spawns a converse sitting on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
                  override with GC_VISIT_DEFAULT_RIG). Ignored for a bead id —

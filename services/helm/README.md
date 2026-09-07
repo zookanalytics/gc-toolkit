@@ -142,8 +142,8 @@ behind — a failed gather is never rendered as an empty "nothing needs you".
 
 `tmux-pick-helm.sh` asks for no `DONE` band at all (`GC_HELM_DONE_WINDOW=0`).
 Neither menu it renders is a view an operator leaves open, and the one action
-either of them offers is `open`; a closed row there would spend a hotkey on
-filing a conversation about something that is finished.
+either of them offers is `engage`; a closed row there would spend a hotkey on
+engaging a conversation about something that is finished.
 
 It runs the gather **in-process and uncached**: no daemon, no dependency on the
 sidecar being up, which is most of the point of having a CLI. Measured on the

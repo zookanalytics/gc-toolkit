@@ -10,8 +10,8 @@
 # formulas-only; gc-helm.sh's `open` verb carries the copy the operator front
 # doors actually reach — and asserts the load-bearing invariants each stamp
 # carries (each has a silent-failure trap the pack has paid for):
-#   - the pool is the rig-qualified exact-match form (bare names sit
-#     silently forever on the exact-string read side)
+#   - the visit parks on the board: POOL="human", the literal the board's
+#     gather matches (gc.routed_to == "human") on the exact-string read side
 #   - the three metadata stamps ride one --set-metadata flag each
 #     (comma-joined pairs become one garbage value)
 #   - the visit is wired to its subject with a tracks edge (parent-child
@@ -70,10 +70,14 @@ check_file() {
         # Leading whitespace tolerated: a copy living inside a shell function
         # (gc-helm.sh's cmd_open) is legitimately indented, and an assertion
         # anchored at column 0 would report a correct POOL line as "absent".
-        pool_line="$(grep -E '^[[:space:]]*POOL=' "$tmp" || true)"
+        # The converse routed-pool is retired: a filed visit parks on the helm
+        # board, whose gather matches gc.routed_to == "human" exactly. Every
+        # copy's default route is that literal. (escalate.sh reassigns POOL from
+        # --pool on the NEXT line; grep anchors on POOL= so it reads this one.)
+        pool_line="$(grep -E '^[[:space:]]*POOL=' "$tmp" | head -n1 || true)"
         case "$pool_line" in
-            *'${GC_RIG:+$GC_RIG/}'*converse\") ok "$name: rig-qualified converse pool" ;;
-            *) bad "$name: rig-qualified converse pool" "POOL line: ${pool_line:-absent}" ;;
+            *'POOL="human"') ok "$name: parks the visit on the board (POOL=human)" ;;
+            *) bad "$name: parks the visit on the board (POOL=human)" "POOL line: ${pool_line:-absent}" ;;
         esac
         printf '%s' "$block" | grep -qE 'gc bd create -t task --title "visit: ' \
             && ok "$name: visit title brand" || bad "$name: visit title brand" 'no `--title "visit: …"` create'

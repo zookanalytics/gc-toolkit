@@ -31,8 +31,9 @@ gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --cit
 
 # Helm — the sibling of prefix+S. prefix+S answers "what's running";
 # prefix+b answers "what needs me": the operator's own queue, oldest first,
-# rendered from `helm-svc board --json`. Pick a row and it files a VISIT on that
-# bead, which a converse session holds for you. See tmux-pick-helm.sh.
+# rendered from `helm-svc board --json`. Pick a row and it engages that bead —
+# `gc-helm engage` spawns a converse sitting on demand, which you attach from
+# prefix+S. See tmux-pick-helm.sh.
 gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
 
 # prefix+B is the city overview — every anchor ranked together. It is a separate

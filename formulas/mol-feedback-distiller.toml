@@ -501,7 +501,8 @@ subject). NOTE: this block reassigns POOL — run it after all filing above.
 ```bash
 SUBJECT="$PATTERN"
 # >>> gate-visit
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+# Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
+POOL="human"
 VISIT=$(gc bd create -t task --title "visit: $SUBJECT — contested rule: <rule summary>" \
   -d "<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" --json | jq -r '.id // .[0].id')
 [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \

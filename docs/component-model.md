@@ -306,12 +306,12 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/review-sweep.sh` | merge | Arm 6: closes a dispatched review with no reviewable surface left. No merge authority. |
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 7: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
-| `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, routed to the converse pool. |
+| `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
 | `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of three dispositions: route the bead to a pool, hold it on an edge, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
 | `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
-| `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, react. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand. |
 | `assets/scripts/gc-helm-build.sh` | visit | Builds `helm-svc`, out of band from the launcher. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |

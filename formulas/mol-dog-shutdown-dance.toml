@@ -60,11 +60,11 @@ SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/
   [ -x "$c/assets/scripts/dance-probe.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 # Every escalate.sh call below is rig-bound because this pool is city-scoped:
-# with GC_RIG unset the script's default converse pool renders bare, an
-# address no rig-scoped pool holds, and it refuses before filing anything.
-# The rig is the warrant's OWN store — where the visit must land for its
-# tracks edge to reach the warrant. The warrant's route cannot supply it:
-# warrants are routed to a bare identity, which carries no rig segment.
+# with GC_RIG unset escalate's default board route (human) still files, but into
+# whatever store the ambient environment resolves, not the warrant's. The rig is
+# the warrant's OWN store — where the visit must land for its tracks edge to
+# reach the warrant. The warrant's route cannot supply it: warrants are routed to
+# a bare identity, which carries no rig segment.
 # >>> escalation-rig
 ESC_RIG="$("$SCRIPTS/escalation-rig.sh" "$warrant_id")" || ESC_RIG=""
 # <<< escalation-rig

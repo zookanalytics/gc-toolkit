@@ -98,7 +98,8 @@ exit
    # ruling — only the operator can answer. File the visit, then record it.
    # This is the minority case: if you can name the work, take actionable.
    # >>> gate-visit
-   POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.converse"
+   # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
+   POOL="human"
    VISIT=$(gc bd create -t task --title "visit: <id> — first reaction ready: accept or redirect" \
      -d "First reaction ready on <id> — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
    [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \

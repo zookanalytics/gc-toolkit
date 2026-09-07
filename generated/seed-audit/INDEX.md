@@ -45,7 +45,7 @@ covers that dimension.
 | [`mechanik`](agents/mechanik.md) | 25,840 | 6,460 |
 | [`polecat`](agents/polecat.md) | 22,098 | 5,524 |
 | [`polecat-codex`](agents/polecat-codex.md) | 22,128 | 5,532 |
-| [`proactive`](agents/proactive.md) | 12,467 | 3,116 |
+| [`proactive`](agents/proactive.md) | 12,518 | 3,129 |
 | [`refinery`](agents/refinery.md) | 8,682 | 2,170 |
 | [`witness`](agents/witness.md) | 12,186 | 3,046 |
 
@@ -80,7 +80,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` | 3,494 | 873 |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,867 | 966 |
-| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,327 | 331 |
+| [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,685 | 671 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
