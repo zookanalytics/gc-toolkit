@@ -198,7 +198,11 @@ if [ "$REASON" = "existing_assignment" ]; then
     else
         HD_ITEM=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.stall_root // ""' 2>/dev/null || printf '')
         HD_ITEM="${HD_ITEM:-$GROUP}"
-        HD_LIST=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null | scrub)
+        # --include-gates: a demand can be a human gate (issue_type=gate), which
+        # `bd list` hides by default; without it an open gate-demand on the item
+        # reads as absent, and a hold with no gc.hold_demand is then misjudged NO
+        # (a dead pre-step-2 claim) when it is a live wait the caller must RECHECK.
+        HD_LIST=$(gc bd list --status=open,in_progress --include-gates --json --limit=0 2>/dev/null | scrub)
         if printf '%s' "$HD_LIST" | jq -e --arg i "$HD_ITEM" 'type == "array" and any(.[]?; (.metadata["gc.demand_for"] // "") == $i)' >/dev/null 2>&1; then
             BEGAN=recheck
         elif printf '%s' "$HD_LIST" | jq -e 'type == "array"' >/dev/null 2>&1; then
