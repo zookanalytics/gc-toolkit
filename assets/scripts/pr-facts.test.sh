@@ -86,6 +86,34 @@ ESC
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
+# bead-rehome.sh, the sanctioned terminal close pr-facts consummates a
+# pre-recorded disposition through. The contract that matters here: on success
+# it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
+# refusals it reports without closing (4 transient, 5/6 a human is needed).
+cat > "$SD/bead-rehome.sh" <<'REHOME'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "${STUB_REHOME_LOG:?}"
+origin=""; succ=""; store=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --origin)          shift; origin="${1:-}" ;;
+    --successor)       shift; succ="${1:-}" ;;
+    --successor-store) shift; store="${1:-}" ;;
+  esac
+  shift || true
+done
+rc="${STUB_REHOME_RC:-0}"
+if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
+if [ -n "$store" ]; then
+  gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" --set-metadata "gc.superseded_by_store=$store" >/dev/null 2>&1 || exit 5
+else
+  gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" >/dev/null 2>&1 || exit 5
+fi
+exit 0
+REHOME
+chmod +x "$SD/bead-rehome.sh"
+export STUB_REHOME_LOG="$TMP/rehome.log"; : > "$STUB_REHOME_LOG"
 SUT="$SD/pr-facts.sh"
 FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
 run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
@@ -190,6 +218,62 @@ eq "$(bstatus F2)" "open" "the anchor stays OPEN (work did not land)"
 eq "$(meta F2 'gc.routed_to')" "human" "routed to human"
 eq "$(bassignee F2)" "" "assignee cleared"
 has "$(cat "$STUB_ESC_LOG")" "--subject F2 --key pr-abandoned.11" "escalate.sh got the situation key"
+
+# The default above is preserved: an out-of-band close with no recorded
+# disposition still abandons and files the visit. The cases below cover a close
+# whose disposition WAS pre-recorded (assets/scripts/pr-dispose.sh) — pr-facts
+# consummates it through bead-rehome.sh instead of re-asking the decision.
+echo "# closed-unmerged + pre-recorded disposition -> auto-dispose, no visit"
+store "[$(anchor F2a 21 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-succ"')]"
+printf '%s' "$(prview 21 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_21.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+has "$out" "auto-disposed (duplicate -> tk-succ)" "the disposition is consummated, not abandoned"
+has "$(cat "$STUB_REHOME_LOG")" "--origin F2a --successor tk-succ --kind duplicate" "bead-rehome got the recorded disposition"
+eq "$(bstatus F2a)" "closed" "the anchor is closed via the sanctioned terminal path"
+eq "$(meta F2a 'gc.superseded_by')" "tk-succ" "gc.superseded_by is stamped (the terminal state I5 accepts)"
+eq "$(meta F2a merge_result)" "pull_request" "merge_result is NOT flipped to abandoned"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and NO rework-or-close visit is filed"
+
+echo "# a pre-recorded disposition retires a stale rework-or-close visit"
+store "[$(anchor F2b 22 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vis"'), {\"id\":\"V22\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.22\",\"gc.continuation_group\":\"F2b\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+printf '%s' "$(prview 22 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_22.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus F2b)" "closed" "the anchor is disposed"
+eq "$(bstatus V22)" "closed" "the stale visit is retired"
+eq "$(meta V22 'gc.outcome')" "moot" "…closed moot — the question it asked is answered"
+has "$out" "retired stale visit V22" "the retirement is reported"
+
+echo "# a disposition bead-rehome refused (human needed) -> distinct escalation, anchor left open"
+store "[$(anchor F2c 23 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-c"')]"
+printf '%s' "$(prview 23 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_23.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_REHOME_RC=5 run)
+eq "$(bstatus F2c)" "open" "the anchor is left OPEN for repair"
+eq "$(meta F2c merge_result)" "pull_request" "…still enumerable, so the next pass retries"
+eq "$(meta F2c 'gc.superseded_by')" "<absent>" "nothing was disposed"
+has "$(cat "$STUB_ESC_LOG")" "--subject F2c --key pr-dispose-failed.23" "escalated under a DISTINCT key"
+hasnt "$(cat "$STUB_ESC_LOG")" "pr-abandoned.23" "…never the generic rework-or-close visit"
+
+echo "# a disposition whose pointer would not stick (transient) -> skip, retry, no escalation"
+store "[$(anchor F2d 24 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-d"')]"
+printf '%s' "$(prview 24 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_24.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_REHOME_RC=4 run)
+eq "$(bstatus F2d)" "open" "the anchor is left OPEN"
+eq "$(meta F2d merge_result)" "pull_request" "…still enumerable for the retry"
+eq "$(cat "$STUB_ESC_LOG")" "" "a transient failure escalates nothing"
+has "$out" "retry next pass" "the transient skip is reported"
+
+echo "# a malformed disposition (kind set, successor missing) falls through to the default"
+store "[$(anchor F2e 25 ',"gc.pr_close_disposition_kind":"duplicate"')]"
+printf '%s' "$(prview 25 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_25.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(cat "$STUB_REHOME_LOG")" "" "bead-rehome is not called on a malformed marker"
+eq "$(meta F2e merge_result)" "abandoned" "the default abandon still runs"
+has "$(cat "$STUB_ESC_LOG")" "--subject F2e --key pr-abandoned.25" "…and the rework-or-close visit is filed"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"
