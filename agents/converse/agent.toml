@@ -38,10 +38,12 @@ pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.Wo
 # length; fixes go in the prompt or a script.
 nudge = ""
 # 0 disables the idle reap for this role; any positive value re-arms it. A
-# sitting then ends only when its visit closes — the agent's own sign-off, or
-# the operator's bare `gc-helm dismiss` (it infers the subject) — so a held visit holds a
-# max_active_sessions slot until one of those runs. Why, and the endings this
-# does not remove: docs/gascity-human-engagement.md.
+# sitting ends when its visit closes — the agent's own sign-off, or the
+# operator's bare `gc-helm dismiss` (it infers the subject) — and the
+# `converse-reap` order then closes the settled, unattached session, so the
+# max_active_sessions slot is freed once the visit closes rather than leaking.
+# Why, and the ending this does not reach (an OPEN visit the operator walked
+# away from, tk-20rfkt): docs/gascity-human-engagement.md.
 idle_timeout = "0"
 min_active_sessions = 0
 # Bounds concurrently LIVE sittings only; open visits queue at zero cost. A

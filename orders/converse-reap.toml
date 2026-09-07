@@ -1,0 +1,24 @@
+# converse-reap — end a converse sitting once its visit has closed.
+#
+# Converse is spawn-on-engagement: a manual converse session is bound to a visit
+# and exempt from every pool backstop, so nothing in the runtime cycles it. The
+# agent's sign-off and the operator's `gc-helm dismiss` both close the VISIT on
+# the belief that closing the visit ends the sitting, but the manual session
+# outlives its closed visit — holding a max_active_sessions slot, and leaving a
+# closed visit beside a live pane when the operator has walked away. This is the
+# reap those two endings assume: a converse session whose visit reads closed (or
+# gone) is settled, so it is closed. An ATTACHED session is left alone — the pack
+# cannot see typed text in the composer, and draining a pane that has some is the
+# operator's one hard no — so this reaps only the unattached, settled sittings.
+#
+# City scope: converse sessions span rigs and `gc bd show` resolves a visit
+# across ledgers, so one pass reads the whole city. A pass skipped or cut short
+# costs only the reap the next pass takes instead; the reap is idempotent.
+[order]
+description = "Close converse sittings whose visit has closed or gone (unattached only); frees the max_active_sessions slots they leak"
+trigger = "cooldown"
+interval = "5m"
+exec = "$PACK_DIR/assets/scripts/converse-reap.sh"
+timeout = "120s"
+scope = "city"
+idempotent = true
