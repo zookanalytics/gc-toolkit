@@ -1623,7 +1623,7 @@ cmd_engage() {
     # real time, so a second engage of the same row can pass those same guards
     # and spawn its own sitting in the window before this write — an
     # unconditional update would let the later engage overwrite the first
-    # sitting's binding, stranding it (the finding). --if-assignee "" --if-status
+    # sitting's binding, stranding it. --if-assignee "" --if-status
     # open writes only while the visit is still the one the guards saw; a mismatch
     # writes nothing and exits 13. This engage is then the loser: it must not
     # overwrite the owner that won, and the sitting it spawned holds nothing, so
