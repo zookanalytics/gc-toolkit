@@ -281,6 +281,15 @@ fi
 # abandoned) is work the sweep holds as "not a no-op", so parking it here would
 # strand it — stamped duplicate_of with no reader that will ever close it.
 if [ "$DISPOSITION" = "superseded" ]; then
+    # The no-work checks below read ABSENT metadata as "did no work" — proof
+    # only when the subject was actually read. A malformed or unresolved
+    # `bd show` yields the same empty reads as a genuine no-op, so this accept
+    # gate fails CLOSED on an unreadable subject, unlike the already-reacted and
+    # operator-origin refusals above, which fail OPEN because they only ever ADD
+    # a refusal and an unreadable bead is not evidence for one.
+    SUBJECT_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r 'if type == "array" then (.[0].id // "") else "" end' 2>/dev/null || printf '')
+    [ "$SUBJECT_ID" = "$BEAD" ] \
+        || usage_die "$BEAD did not resolve to a readable bead row, so superseded cannot prove it did no work — an unreadable subject reads as empty metadata, the very no-op this exit would then wrongly park. Re-run when its store is readable, or take --disposition ruling."
     _outcome=$(subject_meta "gc.work_outcome")
     [ -n "$_outcome" ] || _outcome=$(subject_meta "work_outcome")
     case "$_outcome" in

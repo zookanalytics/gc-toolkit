@@ -621,6 +621,11 @@ has "the blocked exit names an existing wait"      "--waiting-on"             "$
 has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
 has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
 has "every exit records WHY it was chosen"         "--reason"                 "$F"
+# The reason prose must not re-hardcode the exit COUNT: with four exits, "not
+# the other two" is a three-exit cardinality that drifts the formula out of step
+# with the prompt (agents/proactive/prompt.template.md says "not the others").
+# The seed-audit does not catch this, so guard the stale phrase here.
+absent "the reason prose does not hardcode the stale three-exit cardinality" "not the other two" "$F"
 # The exits must be distinguishable to the reader, not one exit with several
 # labels: the actionable exit routes to the pool that does the work.
 has "the actionable exit names the pool that works it" "polecat pool"         "$F"

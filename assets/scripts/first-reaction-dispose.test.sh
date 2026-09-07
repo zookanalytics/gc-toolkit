@@ -48,7 +48,8 @@ case "$1 ${2:-}" in
       if [ -n "${FAKE_SUCC_JSON+set}" ]; then printf '%s\n' "$FAKE_SUCC_JSON"
       else printf '[{"id":"%s","status":"closed","metadata":{}}]\n' "$3"; fi
     else
-      printf '%s\n' "${FAKE_SHOW_JSON:-[{\"id\":\"tk-sub\",\"metadata\":{}}]}"
+      if [ -n "${FAKE_SHOW_JSON+set}" ]; then printf '%s\n' "$FAKE_SHOW_JSON"
+      else printf '[{"id":"tk-sub","metadata":{}}]\n'; fi
     fi ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
@@ -334,6 +335,16 @@ run tk-sub --disposition superseded --reason "the twin already landed it" \
     --takeaway "superseded: the twin landed" --successor tk-succ
 eq "$RC" "0" "(SUPGUARD) a no-op subject is accepted even with a twin's branch key"
 has "duplicate_of=tk-succ" "$LOG" "(SUPGUARD) …and parked for the sweep to close"
+# An UNREADABLE subject read is not proof of no-work: a malformed `bd show`
+# yields the same empty metadata as a genuine no-op, so the accept gate must
+# fail closed rather than park (and stamp duplicate_of on) a bead that may have
+# shipped. The successor still resolves closed, so only the subject read fails.
+export FAKE_SUCC_ID=tk-succ FAKE_SHOW_JSON='not json'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ
+eq "$RC" "2" "(SUPGUARD) an unreadable subject row is refused, not read as a no-op"
+has "did not resolve to a readable bead row" "$ERR" "(SUPGUARD) …naming the missing no-work proof"
+hasnt "UPDATE" "$LOG" "(SUPGUARD) …and no disposition record was written"
+hasnt "HELM" "$LOG" "(SUPGUARD) …and nothing was parked or released"
 unset FAKE_SHOW_JSON FAKE_SUCC_ID
 
 # ── ruling: the visit stays the exit for a question only a human answers ─────

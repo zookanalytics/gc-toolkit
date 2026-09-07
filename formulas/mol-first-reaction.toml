@@ -267,7 +267,7 @@ shell, because that is the only thing a block can rely on.
 The **takeaway** in every exit below is your card's one-line headline, derived
 from **## Decision needed**, ≤140 chars on ONE line — the wrapper rejects a
 longer one rather than truncating it. The **reason** is why this disposition
-and not the other two; it is required, because a classification nobody can
+and not the others; it is required, because a classification nobody can
 second-guess is one nobody can correct.
 
 **1a. ACTIONABLE — the bead is work, so hand it to the pool that does that
