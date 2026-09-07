@@ -166,13 +166,27 @@ is in front of you. It is one of exactly three:
   to the pool that does that work.
 - **blocked** — the bead cannot move until something else does. Name that
   something. The exit records it as an edge.
-- **ruling** — the next move is a judgment only the operator can make. The
-  exit files the visit.
+- **ruling** — the operator's judgment is the next move, in one of two shapes.
+  One is a question whose answer changes what gets built. The other is a
+  conclusion that there is nothing to do: you verified the thing is already
+  fixed with nothing left to merge, or the bead should not exist. Both file a
+  visit; the second is a recommend-close (step 1c).
 
-Prefer **actionable** when you can state the done condition, and **ruling**
-only when you cannot name the work without an answer first. "The operator
-would probably want to see this" is not a ruling; a ruling is a question whose
-answer changes what gets built.
+Prefer **actionable** when you can state the done condition. Take **ruling**
+when you cannot name the work without an answer first, or when the honest
+conclusion is that there is no work. A first reaction that verifies nothing is
+broken, or that the bead should not exist, does not route to a pool and does
+not write a `specs/<bead-id>` record: it recommends closing the bead, routed to
+the operator. Its card gives them what they need to disagree — why no work is
+needed, the counter-case for keeping the bead open, and that the decision to
+close is theirs — and its takeaway reads `recommend close: <why>`, so the board
+carries the recommendation at a glance. A high-confidence "nothing to do" files
+the same visit rather than closing the bead: a reaction never closes a work
+bead, and confirming the recommendation costs the operator one glance.
+
+"The operator would probably want to see this" is still not a ruling. A ruling
+is a question whose answer changes what gets built, or a recommend-close the
+operator only has to confirm.
 
 Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
 on a snapshot that may have moved by the time the human reads it (design Risk
@@ -297,9 +311,13 @@ lifts: it arms the deferred dispatch, so the blocker closing is what sends the
 bead to that pool, and nobody has to remember.
 
 **1c. NEEDS A RULING — the next move is the operator's judgment, so file the
-visit.** This is the exit for a question whose answer changes what gets built.
-It should be the minority case: if you can name the work, take 1a instead. The
-visit form is mol-visit's, spelled inline:
+visit.** Two shapes reach here: a question whose answer changes what gets built,
+and a recommend-close (you verified there is nothing to do, or the bead should
+not exist). It should be the minority case: if you can name the work, take 1a
+instead. The visit is the same for both; a recommend-close differs only in the
+dispose call below — a `--takeaway` that reads `recommend close: <why>` and a
+`--reason` that names the counter-case, over the card you wrote in
+`first-reaction`. The visit form is mol-visit's, spelled inline:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -340,7 +358,7 @@ if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
   fi
 fi
 # <<< gate-visit
-"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer>" --takeaway "<the ≤140-char headline>" --visit "$VISIT"
+"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer, or for a recommend-close why there is no work and the counter-case>" --takeaway "<the ≤140-char headline; a recommend-close reads 'recommend close: <why>'>" --visit "$VISIT"
 ```
 
 **2. Close THIS step bead, then drain.** Run this only after the exit block
