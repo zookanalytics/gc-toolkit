@@ -139,7 +139,7 @@ The human surface is subject / visit / takeaway on native primitives
   ([lifecycle-composition.md](lifecycle-composition.md)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger; `gc-helm.sh` keeps only the write verbs —
-  takeaway, open, react. Everything works without the board: it spends no
+  open, engage, react, takeaway, demand, dismiss. Everything works without the board: it spends no
   state, so it can never be wrong for longer than one render.
 
 The discipline throughout is *agents earn every interaction*: prep done before

@@ -641,14 +641,15 @@ costs against a singleton).
 
 ### Conversations are visits, not per-bead host sessions
 
-A conversation about a bead is ordinary routed work — there is no
-per-bead host session. File a **visit** — a small child bead with
-`task_kind=visit` and `gc.continuation_group=<subject-id>`, routed to the
-rig-qualified `converse` pool (`agents/converse/`; canonical filing lines
-in `formulas/mol-visit.toml`). Pool demand spawns a converse session that
-rebuilds the subject's slice and holds for the operator; warm, the live
-group session vacuums the next visit. See docs/architecture.md, "How
-agents exist and converse".
+A conversation about a bead is a **visit** — a small child bead with
+`task_kind=visit` and `gc.continuation_group=<subject-id>`, routed to
+`human` (`gc.routed_to=human`; canonical filing lines in
+`formulas/mol-visit.toml`). A filed visit parks on the helm board and holds
+no session. The operator draws one off the board and `gc-helm engage`
+spawns a manual `converse-<model>` sitting on demand, binds the visit to
+the session's runtime name so the session's own `gc hook --claim` adopts it
+with no pool routing, and attaches; `gc-helm dismiss` ends it. See
+docs/architecture.md, "How agents exist and converse".
 
 ## Variant D — Patrol agents (overlay)
 
