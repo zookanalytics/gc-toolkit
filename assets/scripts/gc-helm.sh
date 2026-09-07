@@ -1626,8 +1626,13 @@ cmd_engage() {
     # sitting's binding, stranding it. --if-assignee "" --if-status
     # open writes only while the visit is still the one the guards saw; a mismatch
     # writes nothing and exits 13. This engage is then the loser: it must not
-    # overwrite the owner that won, and the sitting it spawned holds nothing, so
-    # it is suspended and the operator is pointed at the winner.
+    # overwrite the owner that won.
+    #
+    # Every post-spawn failure suspends the sitting it just spawned before it
+    # exits: a converse slot sets nudge="" and idle_timeout=0, so a sitting that
+    # never binds a visit has no idle-claim rescue and would linger holding
+    # nothing. That covers all three arms below — the lost race, a failed bind,
+    # and a bind that did not stick.
     bind_rc=0
     gc bd update "$VISIT" --if-assignee "" --if-status open --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
     if [ "$bind_rc" -eq 13 ]; then
@@ -1637,12 +1642,18 @@ cmd_engage() {
         exit 4
     fi
     if [ "$bind_rc" -ne 0 ]; then
-        echo "$PROG: engage: spawned $sname but could NOT assign visit $VISIT to it. Assign by hand: gc bd update $VISIT --assignee $sname" >&2
+        gc session suspend "$sid" >/dev/null 2>&1 || true
+        echo "$PROG: engage: spawned $sname but the bind of visit $VISIT failed (rc $bind_rc). The sitting holds nothing and was suspended; the visit is unchanged — re-run: $PROG engage $bead" >&2
         exit 4
     fi
     assigned=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
     if [ "$assigned" != "$sname" ]; then
-        echo "$PROG: engage: visit $VISIT assignee read back as '${assigned:-<empty>}', not '$sname' — the sitting may not adopt it. Repair: gc bd update $VISIT --assignee $sname" >&2
+        gc session suspend "$sid" >/dev/null 2>&1 || true
+        if [ -n "$assigned" ]; then
+            echo "$PROG: engage: visit $VISIT is held by '$assigned', not the sitting '$sname' this engage spawned — another writer took it after the bind. The sitting holds nothing and was suspended; attach to the holder: gc session attach $assigned" >&2
+        else
+            echo "$PROG: engage: visit $VISIT read back with no assignee after binding it to '$sname' — the bind did not persist. The sitting holds nothing and was suspended; the visit is unchanged — re-run: $PROG engage $bead" >&2
+        fi
         exit 4
     fi
     bust_cache

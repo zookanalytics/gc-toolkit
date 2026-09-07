@@ -94,9 +94,20 @@ case "$1 ${2:-}" in
         if [ -n "${RACE_LOST:-}" ]; then
           printf '%s' "${RACE_WINNER:-gc-toolkit__converse-9}" > "$ASSIGNEE"
           exit 13
-        fi ;;
+        fi
+        # $BIND_FAIL: the guarded bind fails for a reason other than the race
+        # (a transient store error) — exit non-zero and non-13, writing nothing.
+        if [ -n "${BIND_FAIL:-}" ]; then exit 1; fi
+        # $BIND_NOPERSIST: the bind returns success but does not stick, so the
+        # read-back finds the visit still unassigned.
+        if [ -n "${BIND_NOPERSIST:-}" ]; then exit 0; fi ;;
     esac
-    case "$_a" in *" --assignee "*) _a="${_a##* --assignee }"; printf '%s' "${_a%% *}" > "$ASSIGNEE" ;; esac ;;
+    case "$_a" in *" --assignee "*)
+      _a="${_a##* --assignee }"; printf '%s' "${_a%% *}" > "$ASSIGNEE"
+      # $BIND_STOMP: a concurrent writer overwrites the just-written binding in
+      # the window before the read-back, so the visit ends up held by another.
+      [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ASSIGNEE" ;;
+    esac ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$CALLS"; jq -n '{id:"tk-vis"}' ;;
   "bd dep")   printf 'bd dep %s\n' "$*" >> "$CALLS"
@@ -240,6 +251,43 @@ eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(RACE) …the assignee stays t
 has "$CALLED" "session suspend gc-77" "(RACE) …the stranded loser sitting is suspended"
 has "$OUT" "not overwriting" "(RACE) …and the operator is told the winner was not overwritten"
 unset RACE_LOST RACE_WINNER
+
+echo "# a failed bind (not the race): the sitting spawned but nothing holds the visit"
+# A non-13 bd-update failure (a transient store error, not the guarded-race
+# rejection) leaves the visit open and unassigned, but the sitting has already
+# spawned. It must be suspended — a converse slot sets nudge=\"\"/idle_timeout=0
+# and has no idle-claim rescue — and the operator told to re-run, not to
+# hand-assign a visit to a suspended sitting.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+export BIND_FAIL=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
+has "$CALLED" "session new" "(BIND-FAIL) …the sitting did spawn"
+has "$CALLED" "session suspend gc-77" "(BIND-FAIL) …the spawned sitting is suspended, not left orphaned"
+eq "$(cat "$ASSIGNEE")" "" "(BIND-FAIL) …the visit stays unassigned"
+hasnt "$OUT" "Assign by hand" "(BIND-FAIL) …the operator is not told to hand-assign to a suspended sitting"
+unset BIND_FAIL
+
+echo "# a bind another writer stomps: read-back shows a different holder"
+# The guarded bind succeeds, but a concurrent engage overwrites the assignee in
+# the window before the read-back. This sitting holds nothing; suspend it and
+# point the operator at the holder that won.
+export BIND_STOMP="gc-toolkit__converse-8"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(STOMP) a stomped bind exits 4"
+has "$CALLED" "session suspend gc-77" "(STOMP) …the stranded sitting is suspended"
+has "$OUT" "gc-toolkit__converse-8" "(STOMP) …and the operator is pointed at the holder that won"
+unset BIND_STOMP
+
+echo "# a bind that does not persist: read-back finds the visit still unassigned"
+# The bind returns success but nothing sticks. The sitting spawned and holds
+# nothing, so suspend it and tell the operator to re-run — the visit is unchanged.
+export BIND_NOPERSIST=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
+has "$CALLED" "session suspend gc-77" "(NOPERSIST) …the spawned sitting is suspended"
+has "$OUT" "did not persist" "(NOPERSIST) …and the operator is told the bind did not persist"
+unset BIND_NOPERSIST
 
 echo "# attach behaviour: default attaches, --no-attach does not"
 run_engage tk-vis --no-attach
