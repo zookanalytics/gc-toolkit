@@ -12,6 +12,9 @@
 #   (NOARG)   a missing bead-id is refused (exit 2)
 #   (VISIT)   engaging an OPEN visit spawns converse-opus --alias <visit>
 #             --no-attach and binds the visit to the session's runtime name
+#   (KICK)    a bound sitting is sent its START-directive opening turn — a manual
+#             converse session holds until a user turn — and (KICK-ORDER) that
+#             turn precedes the attach; a lost/failed bind never kicks
 #   (SUBJECT) engaging a subject resolves the one open visit tracking it
 #   (MODELFLAG) --model codex spawns converse-codex
 #   (BUSY)    a visit already in_progress under an owner is not re-spawned (exit 4)
@@ -91,6 +94,8 @@ case "$1 ${2:-}" in
     printf 'session suspend %s\n' "$*" >> "$CALLS" ;;
   "session close")
     printf 'session close %s\n' "$*" >> "$CALLS" ;;
+  "session nudge")
+    printf 'session nudge %s\n' "$*" >> "$CALLS" ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$CALLS"
     _a="$*"
@@ -166,6 +171,12 @@ eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(BIND) the visit is assigned t
 has "$CALLED" "bd update tk-vis --if-assignee" "(BIND) …conditionally, on the open+unassigned state the guards read"
 has "$CALLED" "--if-status open" "(BIND) …and on the open status, so a lost race writes nothing"
 has "$CALLED" "--assignee gc-toolkit__converse-1" "(BIND) …by name, the identity the claim adopts"
+# A manual converse sitting holds until it receives a user turn, so a bound
+# visit alone leaves the operator on a blank pane. engage sends the sitting its
+# opening turn after the bind — on the --no-attach (board picker) path too, so
+# the sitting starts for whoever attaches later.
+has "$CALLED" "session nudge gc-77" "(KICK) the bound sitting is sent its opening turn"
+has "$CALLED" "Begin now" "(KICK) …as a START directive, not a bare poke the agent reads as a connectivity check"
 
 echo "# --model selects the tier"
 run_engage tk-vis --model codex --no-attach
@@ -260,6 +271,7 @@ has "$CALLED" "bd update tk-vis --if-assignee" "(RACE) …the bind is conditiona
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(RACE) …the assignee stays the winner, never the loser"
 has "$CALLED" "session close gc-77" "(RACE) …the stranded loser sitting is closed"
 has "$OUT" "not overwriting" "(RACE) …and the operator is told the winner was not overwritten"
+hasnt "$CALLED" "session nudge" "(RACE) …and the loser sitting is never kicked — the kick is past the bind"
 unset RACE_LOST RACE_WINNER
 
 echo "# a failed bind (not the race): the sitting spawned but nothing holds the visit"
@@ -276,6 +288,7 @@ has "$CALLED" "session new" "(BIND-FAIL) …the sitting did spawn"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(cat "$ASSIGNEE")" "" "(BIND-FAIL) …the visit stays unassigned"
 hasnt "$OUT" "Assign by hand" "(BIND-FAIL) …the operator is not told to hand-assign to a suspended sitting"
+hasnt "$CALLED" "session nudge" "(BIND-FAIL) …and the closed sitting is never kicked into a turn it cannot serve"
 unset BIND_FAIL
 
 echo "# a bind another writer stomps: read-back shows a different holder"
@@ -350,6 +363,16 @@ run_engage tk-vis --no-attach
 hasnt "$CALLED" "session attach" "(ATTACH) --no-attach does not attach"
 run_engage tk-vis
 has "$CALLED" "session attach gc-77" "(ATTACH) the default attaches to the captured session id"
+# attach is a foreground handoff to the pane — nothing after it in cmd_engage
+# runs until the operator detaches — so the opening turn must be sent first for
+# the operator to land on a live, framed sitting rather than a blank one.
+nudge_line=$(printf '%s\n' "$CALLED" | grep -n "session nudge" | head -1 | cut -d: -f1)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n "session attach" | head -1 | cut -d: -f1)
+if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
+  ok "(KICK-ORDER) the opening turn is sent before the attach"
+else
+  bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
+fi
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"
