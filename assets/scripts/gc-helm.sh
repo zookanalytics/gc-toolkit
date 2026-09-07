@@ -630,8 +630,15 @@ cmd_takeaway() {
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=$no_wait"
+    # --release retires the pour's routing on the anchor: gc.routed_to takes the
+    # new route (empty when none) and gc.execution_routed_to — the stamp a pour
+    # leaves naming the pool it dispatched to — is dropped. Left set, it reads to
+    # deferred-dispatch's arm and reconcile guards as a bead already out, which
+    # refuse to route it; a release means that pour is over, so the stamp goes
+    # with the route.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
-               --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
+               --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
+               --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }

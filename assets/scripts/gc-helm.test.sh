@@ -310,6 +310,12 @@ grep -q 'gc.proactive_reaction=1' <<< "$A" \
   && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
+# The pour that dispatched this bead stamped gc.execution_routed_to; a release
+# ends that pour, so the stamp is retired in the same write. Left set, it reads
+# as a live dispatch to deferred-dispatch's arm and reconcile guards, which then
+# refuse to route the bead when its blocker lifts.
+grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
+  && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
@@ -723,6 +729,10 @@ esac
 case "$RLINE" in
   *"--status=open"*"--assignee="*) ok "(ROUTE) …in the same write that reopens and unassigns" ;;
   *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
+esac
+case "$RLINE" in
+  *"--unset-metadata gc.execution_routed_to"*) ok "(ROUTE) …and the prior pour stamp is retired, not carried into the new route" ;;
+  *) bad "(ROUTE) the release-to-pool write kept gc.execution_routed_to: ${RLINE:-<none>}" ;;
 esac
 case "$RLINE" in
   *"--set-metadata gc.takeaway=actionable — routed to the polecat pool"*) ok "(ROUTE) …and the headline still rides it" ;;
