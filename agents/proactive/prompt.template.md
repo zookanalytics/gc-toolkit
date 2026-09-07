@@ -95,9 +95,12 @@ exit
    # blocked — the bead is waiting. The wait is an EDGE, never prose: an
    # unheld bead is still ready and still claimed by the next worker. The
    # blocker must live in the same store. --blocker files it when it is not a
-   # bead yet, and --blocker-key keeps one bead per recurring cause;
-   # --then-route arms the dispatch for when the wait lifts.
-   "$DISPOSE" <id> --disposition blocked --by proactive --reason "<what it waits on>" --takeaway "<headline>" --waiting-on <blocker-id>
+   # bead yet, and --blocker-key keeps one bead per recurring cause. When the
+   # bead is plainly work once the wait lifts, ALWAYS --then-route it: that arms
+   # the deferred dispatch so the blocker closing sends it to the pool, with
+   # nothing left to remember. A blocked work bead left unrouted is the debt
+   # doctor/check-blocked-work-armed flags.
+   "$DISPOSE" <id> --disposition blocked --by proactive --reason "<what it waits on>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<agent>
 
    # ruling — the operator's call: a question only they can answer, or a
    # recommend-close (you verified nothing to do / the bead should not exist).

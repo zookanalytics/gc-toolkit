@@ -67,6 +67,13 @@ has *no* open blocker is legal and says so — the next pass dispatches it,
 which is what makes `arm` a safe universal substitute for a hand-held
 sling.
 
+Arming is the default move for a blocked follow-up you file or hold by
+hand: arm it rather than leave it unrouted for someone to route once its
+blocker lands, so a sitting can queue everything and drain. A blocked bead
+that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
+is silent manual-follow-up debt — the exact miss
+`doctor/check-blocked-work-armed` reports.
+
 To see what is owed, in this rig's store:
 
 ```bash

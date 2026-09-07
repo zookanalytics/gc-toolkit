@@ -7,7 +7,15 @@
 # cooldown, scope="rig") performs the sling once `bd list --ready` — beads' own
 # readiness predicate, never re-implemented here — reports the bead ready.
 # `list` answers "what dispatches are owed?"; `disarm` withdraws one.
-# Callers: agents sequencing dependent work; the deferred-dispatch order.
+#
+# `arm` is the default move for a blocked follow-up you file or hold by hand:
+# arm it instead of leaving it unrouted for someone to route once its blocker
+# lands, and the reconcile pass routes it the moment bd reports it ready — so a
+# sitting can queue everything and drain, with nothing left to remember. The
+# bead resolves by id, so the arm lands from any seat, rig-scoped or not.
+# Callers: agents sequencing dependent work; first-reaction-dispose.sh
+# --then-route; the deferred-dispatch order. doctor/check-blocked-work-armed
+# flags a blocked work bead that was never armed and carries no route.
 #
 # Per-bead best-effort (one bad bead never skips the rest; the next cooldown
 # retries), but a failure to ENUMERATE exits non-zero — an unreadable queue
@@ -65,8 +73,10 @@ Usage:
 
 Verbs:
   arm        Record a pending dispatch on <bead>. The sling happens later, from
-             reconcile, once bd reports the bead ready. Use this instead of
-             holding the dispatch in your context.
+             reconcile, once bd reports the bead ready. This is the move for a
+             blocked follow-up you file or hold by hand: arm it instead of
+             leaving it unrouted for someone to route once its blocker lands,
+             so you can queue everything and drain with nothing to remember.
   disarm     Remove a pending dispatch. The bead is left otherwise untouched.
   list       Show every armed bead in this store and whether it is waiting,
              dispatchable now, or closed with a dispatch still owed.
