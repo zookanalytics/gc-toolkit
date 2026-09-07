@@ -8,7 +8,13 @@
 # Demand is the default routed-pool predicate; a filed visit IS the demand.
 scope = "rig"
 wake_mode = "fresh"
-work_dir = ".gc/agents/converse/{{.AgentBase}}"
+# A rig worktree, not a plain dir under the city tree: the sitting shells gh/git
+# to inspect the rig's PRs and branches, and those tools resolve the repo from
+# the working directory. Under .gc/agents/ that resolves to the city repo the
+# .gc tree sits in, not the rig this agent serves. worktree-setup.sh cuts the
+# checkout from the rig root, as the polecat/proactive/refinery pools already do.
+work_dir = ".gc/worktrees/{{.Rig}}/converse/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 # Empty on purpose. All three claim backstops resolve their re-delivery text
 # from this field, and each skips a session whose text is empty before it
 # reserves an attempt. Neither the re-delivered claim nudge nor the attempt-cap

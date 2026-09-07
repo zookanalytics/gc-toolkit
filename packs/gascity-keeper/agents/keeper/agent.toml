@@ -1,5 +1,8 @@
 scope = "rig"
 wake_mode = "fresh"
+# worktree-exempt: keeper never resolves git/gh from its cwd — it targets the
+# upstream repo explicitly (gh --repo gastownhall/gascity, git -C "$RIG_PATH"),
+# so a rig worktree would be the wrong repo. See agent-worktree-wiring.test.sh.
 work_dir = ".gc/agents/gascity-keeper"
 nudge = "Check for PR-prep handback beads, then engage the operator."
 idle_timeout = "2h"

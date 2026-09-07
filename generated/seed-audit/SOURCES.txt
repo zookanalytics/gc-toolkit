@@ -4,15 +4,15 @@
 # by doctor/check-seed-audit-current. The path line between two hashes is the
 # unchanged line git needs to merge two branches that moved different inputs.
 agents/converse-codex/agent.toml
-1524c70134fa65623d07ed636d183368e28b5b6db489e82a72f46a1bc0718382
+a1d9e20792a7fdf99c9d8ae392ef57d54d5062dc95bba46a01f8723ec0882226
 agents/converse-fable/agent.toml
-1eac0fa5929099e7df6b4f8cc24ff04be747916b9f4bf63050181c5f394a067e
+938ad22125da7613277131b891e163c347b812d84b11a46b8829f23e20a272fa
 agents/converse-opus/agent.toml
-2f1ae84a7f41fd606362070bb94cbe802903a2a13562ce3fbd32acbe6da1d9d8
+ebef4902cffba8ae3c49fcce8f68c4abef7b8abe6c3082bd358bd665ae0648cd
 agents/converse/PROVENANCE.md
 1af991e9ca79182636678088a28f7cba74286989e6938f4e476f1bd914c2f07f
 agents/converse/agent.toml
-baa5c9990d96e2f1a6745d8f13e5004a41163d4a4e30a0157931c64897633338
+eb38cb3a37ce12597617f483e552ff7fc24cf98ea0b04a29ffa44250c8941766
 agents/converse/prompt.template.md
 4e271bcfea4249f58896798de3d8da697b88082b8558948a444028e9eed3e726
 agents/deacon/agent.toml
@@ -48,7 +48,7 @@ ccf0fa8747e70a0e268b6041cd5d883cb858295fff27918e85ab64b503aea324
 agents/refinery/prompt.template.md
 87512568d8a4cff4b355be9abdfda8858b3e67111c4b0d43ccc858121cb2f71e
 agents/witness/agent.toml
-2ac4c3a4b8a391b8910cc14c17e0952b17dc310bfd5fec852527e54a5779b848
+817cc81bfc025563709cb02ebaa11d70a5a74ac525d1f5972e7bf2f4483719f7
 agents/witness/prompt.template.md
 9c1adf853eda03911071342f631583bb8fa2688b2a76945c4a9d63df7e9a11f0
 assets/scripts/render-seed-audit.sh
@@ -80,7 +80,7 @@ pack.toml
 packs/gascity-keeper/agents/keeper/PROVENANCE.md
 43a3d5c2b9275a95c607ac32f4361c592867e3ebb903500d44fe7febd78b1ed0
 packs/gascity-keeper/agents/keeper/agent.toml
-41c070acc52109c9d6a628d51c547797dc8d41ea3b2a497089c3685d3617dabd
+e03ff8554313e0215b60392d145a521f1ec991ba32fd2e7ad100aff2eaab8f96
 packs/gascity-keeper/agents/keeper/prompt.template.md
 441a037b4763ce32343388369113fa07c1c83fae582b7259b54dfd1d855b0ab6
 packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml

@@ -9,7 +9,8 @@ scope = "rig"
 provider = "codex"
 option_defaults = { model = "gpt-5.3-codex" }
 prompt_template = "agents/converse/prompt.template.md"
-work_dir = ".gc/agents/converse-codex/{{.AgentBase}}"
+work_dir = ".gc/worktrees/{{.Rig}}/converse-codex/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 wake_mode = "resume"
 attach = true
 min_active_sessions = 0

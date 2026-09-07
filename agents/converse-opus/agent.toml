@@ -11,7 +11,10 @@ option_defaults = { model = "opus" }
 # Share the converse role's prompt rather than carry a copy; a variant differs
 # from its siblings only in provider and model.
 prompt_template = "agents/converse/prompt.template.md"
-work_dir = ".gc/agents/converse-opus/{{.AgentBase}}"
+# A rig worktree so the sitting's gh/git resolve to the rig it serves, not the
+# city repo the .gc tree sits in (as base converse documents).
+work_dir = ".gc/worktrees/{{.Rig}}/converse-opus/{{.AgentBase}}"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 # resume carries the conversation across suspend, pin, and every wake; a fresh
 # session per visit is what makes each sitting new, so the thread lives here.
 wake_mode = "resume"
