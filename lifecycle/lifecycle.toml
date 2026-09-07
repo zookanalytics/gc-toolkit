@@ -362,6 +362,14 @@ keys = [
   # longer count (docs/state-machine.md).
   "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
 ]
+# task_kind names the bead's role in the review workflow: `review` is a review
+# dispatch, and equally the approve outcome that backs a lane green (the shape
+# lane-state.sh reads: signoff_verdict=approve, non-superseded, carrying a
+# reviewed_oid); `finding` a review objection ([metadata.findings]); and
+# `validation` a validation pass the validator works and closes
+# (formulas/mol-validate.toml). review-outcome.sh writes and
+# supersedes the approve outcome; it introduces no key of its own — the outcome
+# reuses the review keys above.
 
 [metadata.findings]
 # A finding is a review objection with an identity of its own, so it outlives

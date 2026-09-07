@@ -290,6 +290,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/signoff.sh` | review | The single writer of gate verdicts (I7). |
 | `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, wires the disposition edge (`blocks` for must-fix, `discovered-from` for deferred), wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
 | `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every gate reader agrees without a stored `check.<lane>` marker. |
+| `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker and never touches the anchor. |
+| `assets/scripts/validate-dispatch-body.sh` | review | Emits the dispatch note a validation-pass bead carries. |
+| `assets/scripts/review-outcome.sh` | review | The write side of a lane's approve outcome, the bead lane-state.sh reads: `back-lane` files the closed approve outcome that greens a lane, `supersede-lane` stamps it superseded to return the lane to `unreviewed`. |
 | `orders/refinery-reconcile.toml` | merge | The merge cadence: one pass per rig, every 60s. |
 | `orders/reconcile-rig-checkouts.toml` | merge | Landed is not live until the `rigs/*` checkout syncs; this fast-forwards it. |
 | `formulas/mol-refinery-patrol.toml` | merge | The cadence's judgment half. The cadence itself is the order. |

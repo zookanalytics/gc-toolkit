@@ -20,7 +20,8 @@
 # metadata string):
 #
 #   must-fix   finding --blocks anchor            holds the merge and the close
-#   deferred   finding --discovered-from anchor   records provenance, holds nothing
+#   deferred   finding --discovered-from anchor   records provenance + the
+#                                                 deferral reason, holds nothing
 #   declined   no edge                            closed with the reason
 #
 # `blocks` is the type must-fix uses, and not because it is the only edge that
@@ -222,6 +223,15 @@ cmd_set_disposition() {
         || { warn "$finding still blocks $anchor after deferred reclassification"; exit 2; }
       gc bd dep add "$finding" "$anchor" --type discovered-from >/dev/null 2>&1 \
         || warn "could not wire $finding --discovered-from $anchor (deferred records provenance only)"
+      # The deferral REASON is the whole justification for not fixing now, and
+      # a deferred finding holds nothing — the bead is the only place whoever
+      # picks it up after the merge can read why it was left. Record it the way
+      # declined does, or the policy's "deferral needs a reason" is unenforced
+      # prose: the caller passes one and nothing keeps it.
+      local dnote="deferred"
+      [ -n "$reason" ] && dnote="deferred: $reason"
+      gc bd update "$finding" --append-notes "$dnote" >/dev/null 2>&1 \
+        || warn "could not record the deferral reason on $finding"
       ;;
     declined)
       # No objection to answer: close it with the reason. A declined finding
