@@ -43,11 +43,17 @@ before it closes.
 
 The exit refuses unless the two facts `duplicate-sweep.sh` itself checks already
 hold: the successor resolves and is closed or records `work_outcome=shipped`,
-and the subject carries no work-product key of its own
-(`branch`, `work_dir`, `gc.work_dir`, `pr_number`, `pr_url`, `merge_result`,
-`gc.work_commit`). Checking them here, at stamp time, is what keeps the exit
-non-stranding: a bead it parks is one the next sweep disposes, not one it
-silently leaves open forever. The two refusals also name the exit that fits
+and the subject did no work of its own. That second fact is proved the way the
+sweep's no-work gate proves it, so the exit accepts exactly what the sweep will
+close: `work_outcome=no-op` (the polecat's own statement that nothing was
+pushed, which holds even when a work-product key names a rework or rebase twin's
+branch), or no `work_outcome` and none of the work-product keys (`branch`,
+`work_dir`, `gc.work_dir`, `pr_number`, `pr_url`, `merge_result`,
+`gc.work_commit`); any other outcome (`blocked`, `shipped`, `abandoned`) is work
+the sweep holds as not a no-op, so the exit refuses it rather than parking a bead
+the sweep would never close. Checking them here, at stamp time, is what keeps
+the exit non-stranding: a bead it parks is one the next sweep disposes, not one
+it silently leaves open forever. The two refusals also name the exit that fits
 instead — a successor not yet resolved is a `blocked` wait, and a subject that
 did work is a re-home a person makes through `ruling`. Same-store is required
 for the same reason: the sweep skips a successor it cannot read in the subject's

@@ -28,12 +28,13 @@ one and why on the bead (`gc.first_reaction`, `_reason`, `_target`, `_at`)
 before it acts, so a wrong call is legible afterwards rather than silent. None
 of the four closes the work bead.
 
-## Why the exits are these three
+## Why these exits
 
-They are the three states a bead can be in when someone competent has just
-read it: it can be worked, it is waiting, or it needs an answer first. Two of
-them already had a primitive in the pack and neither was reachable from this
-formula.
+They are the states a bead can be in when someone competent has just read it:
+it can be worked, it is waiting, it was already resolved by a later bead, or it
+needs an answer first. The `superseded` rationale is
+`specs/tk-fwcdtl/superseded-disposition.md`; of the other three, two already had
+a primitive in the pack and neither was reachable from this formula.
 
 **Actionable is a route, not a sling.** A routed, unassigned, open bead is
 exactly what a pool's find-work offers, and the pool's own prompt supplies the

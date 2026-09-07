@@ -304,12 +304,36 @@ eq "$RC" "2" "(SUPGUARD) a successor that does not resolve is refused"
 has "does not resolve" "$ERR" "(SUPGUARD) …because the pointer would hold nothing"
 unset FAKE_SUCC_JSON
 
-# The subject must be a no-op: a bead that did work of its own is a re-home.
+# The subject must be a no-op, proved the way duplicate-sweep.sh's no-work gate
+# proves it — this exit parks a bead FOR that sweep, so it must accept exactly
+# what the sweep will close, or the bead is stamped duplicate_of and then sat on
+# forever. A work-product KEY with no work_outcome is work of its own.
 export FAKE_SUCC_ID=tk-succ FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"branch":"polecat/tk-sub"}}]'
 run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ
 eq "$RC" "2" "(SUPGUARD) a subject carrying a work-product key is refused"
 has "did work of its own" "$ERR" "(SUPGUARD) …and names it a re-home for --disposition ruling"
 hasnt "HELM" "$LOG" "(SUPGUARD) …and nothing was released"
+# A non-no-op work_outcome with NO work-product key is the gap the KEY-only
+# guard missed: duplicate-sweep.sh holds it as "not a no-op", so parking it here
+# strands it. It must be refused for the same reason.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.work_outcome":"blocked"}}]'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ
+eq "$RC" "2" "(SUPGUARD) a subject recording work_outcome=blocked (a non-no-op) is refused"
+has "not a no-op" "$ERR" "(SUPGUARD) …because duplicate-sweep.sh would never close it"
+hasnt "HELM" "$LOG" "(SUPGUARD) …and nothing was parked"
+# The legacy work_outcome key is read too (gc.work_outcome falls back to it).
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"work_outcome":"abandoned"}}]'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ
+eq "$RC" "2" "(SUPGUARD) …the legacy work_outcome key is honored the same way"
+has "work_outcome=abandoned" "$ERR" "(SUPGUARD) …naming the outcome that would strand it"
+# work_outcome=no-op is the polecat's own statement that nothing was pushed, so
+# it is accepted even with a work-product key set — on a rework dispatch that key
+# names the TWIN's branch, and this is exactly what duplicate-sweep.sh closes.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.work_outcome":"no-op","branch":"polecat/tk-twin"}}]'
+run tk-sub --disposition superseded --reason "the twin already landed it" \
+    --takeaway "superseded: the twin landed" --successor tk-succ
+eq "$RC" "0" "(SUPGUARD) a no-op subject is accepted even with a twin's branch key"
+has "duplicate_of=tk-succ" "$LOG" "(SUPGUARD) …and parked for the sweep to close"
 unset FAKE_SHOW_JSON FAKE_SUCC_ID
 
 # ── ruling: the visit stays the exit for a question only a human answers ─────

@@ -3,8 +3,9 @@
 # v1 design specs/bead-universe/design-doc.md, still governing this tool).
 # "Proactive" is NOT a resident loop: it is mol-first-reaction slung at a
 # bead (read body → write a first-reaction CARD → dispose: route it to a pool,
-# hold it on an edge, or file a visit) so the human arrives at advanced work,
-# and at fewer beads. This tool is the trigger layer:
+# hold it on an edge, hand an already-resolved one to the close sweep, or file a
+# visit) so the human arrives at advanced work, and at fewer beads. This tool is
+# the trigger layer:
 #   demand [<pool>]      pool work_query — routed beads, board-ranked
 #   scan [--json|--sling] find movable-forward / opt-in beads; --sling reacts,
 #                        bounded by GC_PROACTIVE_SLING_CAP per sweep

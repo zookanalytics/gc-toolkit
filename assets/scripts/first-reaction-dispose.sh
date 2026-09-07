@@ -267,16 +267,35 @@ fi
 # closed or shipped and the subject did no work of its own. Checking the same
 # two facts HERE means a bead this exit parks is one that pass will take,
 # rather than one it silently leaves open forever. A successor still open is
-# not a resolution — that is a `blocked` wait — and a subject that carries a
-# work product is a re-home a person makes through `ruling`. Positive finding:
+# not a resolution — that is a `blocked` wait — and a subject that did work of
+# its own is a re-home a person makes through `ruling`. Positive finding:
 # a successor that does not resolve refuses, because "already resolved" is a
 # claim this exit must be able to check.
+#
+# "Did no work" is proved the way duplicate-sweep.sh's no-work gate proves it,
+# because this exit must accept exactly what that sweep will close. A
+# work_outcome of no-op is the polecat's own statement that nothing was pushed,
+# and passes even with a work-product key set (on a rebase or rework dispatch
+# that key names the TWIN's branch); an ABSENT outcome passes only when no
+# work-product key is set either; any other outcome (blocked, shipped,
+# abandoned) is work the sweep holds as "not a no-op", so parking it here would
+# strand it — stamped duplicate_of with no reader that will ever close it.
 if [ "$DISPOSITION" = "superseded" ]; then
-    for _k in branch work_dir gc.work_dir pr_number pr_url merge_result gc.work_commit; do
-        _v=$(subject_meta "$_k")
-        [ -z "$_v" ] \
-            || usage_die "$BEAD carries $_k=$_v — it did work of its own, so it is not the no-op duplicate-sweep.sh will close. A worked bead a successor resolved is re-homed by a person through --disposition ruling, not superseded here."
-    done
+    _outcome=$(subject_meta "gc.work_outcome")
+    [ -n "$_outcome" ] || _outcome=$(subject_meta "work_outcome")
+    case "$_outcome" in
+        no-op) : ;;
+        "")
+            for _k in branch work_dir gc.work_dir pr_number pr_url merge_result gc.work_commit; do
+                _v=$(subject_meta "$_k")
+                [ -z "$_v" ] \
+                    || usage_die "$BEAD carries $_k=$_v and records no work_outcome — it did work of its own, so it is not the no-op duplicate-sweep.sh will close. A worked bead a successor resolved is re-homed by a person through --disposition ruling, not superseded here."
+            done
+            ;;
+        *)
+            usage_die "$BEAD records work_outcome=$_outcome, which duplicate-sweep.sh holds as not a no-op — superseding here would park it with duplicate_of and nothing would ever close it. A worked bead a successor resolved is re-homed by a person through --disposition ruling, not superseded here."
+            ;;
+    esac
     SUCC_JSON=$(gc_bd show "$SUCCESSOR" --json 2>/dev/null | scrub || printf '')
     SUCC_STATUS=$(printf '%s' "$SUCC_JSON" | jq -r 'if type == "array" then ((.[0].status // "") | ascii_downcase) else "" end' 2>/dev/null || printf '')
     SUCC_OUTCOME=$(printf '%s' "$SUCC_JSON" | jq -r 'if type == "array" then (((.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"]) // "") | ascii_downcase) else "" end' 2>/dev/null || printf '')

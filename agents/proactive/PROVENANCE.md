@@ -11,7 +11,8 @@ of the Bead-Universe Operating Model (specs/bead-universe/design-doc.md — Key
 Components 5-6). A proactive worker takes one bead, gives it a cheap first
 reaction (read the body, write a first-reaction card to the notes, then
 dispose: route the bead to the pool that does that work, hold it on the bead it
-waits for, or file a visit), and drains. It is the city's first-level triage:
+waits for, hand an already-resolved one to the close sweep, or file a visit),
+and drains. It is the city's first-level triage:
 it makes the human arrive at *advanced* work — a bead that already moved one
 step — and it keeps the beads it can schedule out of the human's queue
 entirely.

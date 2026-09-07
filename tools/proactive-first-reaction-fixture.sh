@@ -678,6 +678,21 @@ AF="$(flat "$AGENT_TOML")"
 has "the pool config states the routing exit, not the visit alone" "route the bead to a pool" "$AF"
 has "…and the holding exit"                                        "hold it on a" "$AF"
 
+# The opening summary of every enumerating surface must name ALL FOUR exits.
+# first-reaction-dispose.sh performs the superseded exit, but a summary that
+# still lists three teaches a reader the set is three. The generated seed-audit
+# does not catch that drift: it does not track tools/gc-proactive.sh at all, and
+# for agent.toml and PROVENANCE.md it only asserts the render is current, never
+# that the prose names four exits — so it stays green either way. This grep is
+# the guard: each surface must name the close-sweep (superseded) exit and still
+# name the visit.
+for surface in "agents/proactive/agent.toml" "tools/gc-proactive.sh" \
+               "agents/proactive/PROVENANCE.md"; do
+    S4="$(flat "$ROOT/$surface")"
+    has "$surface names the superseded (close-sweep) exit" "the close sweep" "$S4"
+    has "$surface still names the visit exit"              "file a visit"    "$S4"
+done
+
 echo "── the worker prompt names the contract ──"
 PM="$(cat "$PROMPT_MD")"
 has "prompt names the formula"                  "mol-first-reaction"     "$PM"
