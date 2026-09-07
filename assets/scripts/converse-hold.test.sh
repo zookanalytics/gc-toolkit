@@ -32,7 +32,7 @@ TMPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-hold-test.XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; PACK="$TMPD/pack"; FOREIGN="$TMPD/foreign"; CITY="$TMPD/city"; BARE="$TMPD/bare"
 mkdir -p "$BIN" "$PACK/assets/scripts" "$FOREIGN" "$CITY/rigs/gc-toolkit/assets/scripts" "$BARE"
-PERSIST="$TMPD/persist"   # what `bd update` has stamped for gc.hold_demand
+PERSIST="$TMPD/persist"   # what `gc bd update` has stamped for gc.hold_demand
 HLOG="$TMPD/hlog"         # every gc-helm.sh / lifecycle.sh invocation, in order
 
 echo "── the script is shipped executable and syntactically valid ──"
