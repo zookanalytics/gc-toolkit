@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic tests for first-reaction-dispose.sh — the three exits
+# Hermetic tests for first-reaction-dispose.sh — the four exits
 # mol-first-reaction's terminal step chooses between. Runs the REAL script
 # with a stubbed `gc`, a stubbed gc-helm.sh and a stubbed deferred-dispatch.sh
 # (both reached through the tool-override env vars), so no live city, Dolt or
@@ -40,7 +40,16 @@ case "$1 ${2:-}" in
     printf '{"rigs":[{"name":"gc-toolkit","path":"%s","prefix":"tk"}]}\n' "${FAKE_RIG_PATH:-/nonexistent-rig}" ;;
   "bd show")
     printf 'SHOW %s\n' "$*" >> "$FAKE_LOG"
-    printf '%s\n' "${FAKE_SHOW_JSON:-[{\"id\":\"tk-sub\",\"metadata\":{}}]}" ;;
+    # The superseded exit reads the SUCCESSOR too; key that read on its id so a
+    # test can give the subject and the successor different states in one run.
+    # The default is built with printf, not a brace-carrying ${:-} default,
+    # which bash's brace tracking mangles.
+    if [ "$3" = "${FAKE_SUCC_ID:-__nosucc__}" ]; then
+      if [ -n "${FAKE_SUCC_JSON+set}" ]; then printf '%s\n' "$FAKE_SUCC_JSON"
+      else printf '[{"id":"%s","status":"closed","metadata":{}}]\n' "$3"; fi
+    else
+      printf '%s\n' "${FAKE_SHOW_JSON:-[{\"id\":\"tk-sub\",\"metadata\":{}}]}"
+    fi ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
@@ -233,6 +242,76 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" \
     "(BLKARM) --then-route arms the dispatch for when the wait lifts"
 
+# ── superseded: a later bead already resolved it, so route to the sweep ──────
+#   (SUP)       the record names the choice and the successor it points at
+#   (SUPMARK)   the duplicate_of + kind marker duplicate-sweep.sh reads is stamped
+#   (SUPPARK)   the release parks the bead at rest — no route, --no-wait, no close
+#   (SUPORDER)  record, then marker, then the park
+#   (SUPKIND)   --kind defaults to fixed-upstream; duplicate is allowed
+#   (SUPGUARD)  the successor must resolve and be closed/shipped; the subject no-op
+export FAKE_SUCC_ID=tk-succ
+run tk-sub --disposition superseded --reason "the check was retired and merged" \
+    --takeaway "superseded: the check is gone" --successor tk-succ
+eq "$RC" "0" "(SUP) a superseded disposition succeeds"
+has "gc.first_reaction=superseded" "$LOG" "(SUP) the choice is recorded"
+has "gc.first_reaction_target=tk-succ" "$LOG" "(SUP) …naming the successor it points at"
+has "duplicate_of=tk-succ" "$LOG" "(SUPMARK) the successor marker duplicate-sweep reads is stamped"
+has "gc.disposition_kind=fixed-upstream" "$LOG" "(SUPMARK) …with the kind the close reason should carry"
+has "HELM takeaway tk-sub superseded: the check is gone --by proactive --release --no-wait" "$LOG" \
+    "(SUPPARK) the bead is parked at rest — released, and settled"
+hasnt "--route" "$LOG" "(SUPPARK) …not routed to a pool a worker cannot close from"
+hasnt "--waiting-on" "$LOG" "(SUPPARK) …and not held on an edge"
+hasnt "CLOSE" "$LOG" "(SUPPARK) …and nothing closes the bead — the sweep does that"
+# record, then the marker, then the park: a run that dies part-way is auditable
+# and has not released a bead the sweep cannot yet see the marker on.
+REC_LINE=$(grep -n -m1 'gc.first_reaction=superseded' "$FAKE_LOG" | cut -d: -f1)
+MARK_LINE=$(grep -n -m1 'duplicate_of=tk-succ' "$FAKE_LOG" | cut -d: -f1)
+HELM_LINE=$(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1)
+{ [ "$REC_LINE" -lt "$MARK_LINE" ] && [ "$MARK_LINE" -lt "$HELM_LINE" ]; } \
+  && ok "(SUPORDER) record before marker before park" \
+  || bad "(SUPORDER) order was record=$REC_LINE marker=$MARK_LINE park=$HELM_LINE"
+
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ --kind duplicate
+eq "$RC" "0" "(SUPKIND) --kind duplicate is allowed"
+has "gc.disposition_kind=duplicate" "$LOG" "(SUPKIND) …and rides to the sweep"
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ --kind not-needed
+eq "$RC" "2" "(SUPKIND) a kind this exit does not stamp is refused"
+has "person makes through --disposition ruling" "$ERR" "(SUPKIND) …and names the exit that owns it"
+
+run tk-sub --disposition superseded --reason "r" --takeaway "t"
+eq "$RC" "2" "(SUP) superseded with no --successor is refused"
+has "needs --successor" "$ERR" "(SUP) …and says why"
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-sub
+eq "$RC" "2" "(SUP) a bead cannot supersede itself"
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor sl-foreign
+eq "$RC" "2" "(SUP) a cross-store successor is refused"
+has "another store" "$ERR" "(SUP) …because the sweep cannot read it there"
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "2" "(SUP) superseded refuses the other exits' flags"
+
+# The successor must actually carry the resolution.
+export FAKE_SUCC_ID=tk-open FAKE_SUCC_JSON='[{"id":"tk-open","status":"open","metadata":{}}]'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-open
+eq "$RC" "2" "(SUPGUARD) a successor still open (not shipped) is refused"
+has "Take --disposition blocked --waiting-on tk-open" "$ERR" "(SUPGUARD) …and points at the wait that fits"
+hasnt "HELM" "$LOG" "(SUPGUARD) …and the bead is not parked"
+export FAKE_SUCC_ID=tk-open FAKE_SUCC_JSON='[{"id":"tk-open","status":"in_progress","metadata":{"gc.work_outcome":"shipped"}}]'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-open
+eq "$RC" "0" "(SUPGUARD) an open successor that records work_outcome=shipped is accepted"
+export FAKE_SUCC_ID=tk-ghost FAKE_SUCC_JSON='not json'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-ghost
+eq "$RC" "2" "(SUPGUARD) a successor that does not resolve is refused"
+has "does not resolve" "$ERR" "(SUPGUARD) …because the pointer would hold nothing"
+unset FAKE_SUCC_JSON
+
+# The subject must be a no-op: a bead that did work of its own is a re-home.
+export FAKE_SUCC_ID=tk-succ FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"branch":"polecat/tk-sub"}}]'
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ
+eq "$RC" "2" "(SUPGUARD) a subject carrying a work-product key is refused"
+has "did work of its own" "$ERR" "(SUPGUARD) …and names it a re-home for --disposition ruling"
+hasnt "HELM" "$LOG" "(SUPGUARD) …and nothing was released"
+unset FAKE_SHOW_JSON FAKE_SUCC_ID
+
 # ── ruling: the visit stays the exit for a question only a human answers ─────
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
     --takeaway "needs a ruling: which default" --visit tk-visit1
@@ -262,6 +341,9 @@ has "the visit IS the answer" "$ERR" "(ORIGIN) …and the refusal names the cont
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1
 eq "$RC" "2" "(ORIGIN) …and the blocked exit too"
+
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-succ
+eq "$RC" "2" "(ORIGIN) …and the superseded exit too — a commissioned topic is not auto-disposed"
 
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "0" "(ORIGIN) …while the ruling exit is exactly what it wants"
@@ -338,5 +420,5 @@ hasnt "disposed as actionable" "$OUT" "(HELMFAIL) …and nothing reports a dispo
 unset FAKE_HELM_FAILS
 
 echo ""
-echo "first-reaction-dispose (three exits, one record): $PASS passed, $FAIL failed"
+echo "first-reaction-dispose (four exits, one record): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

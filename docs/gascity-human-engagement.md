@@ -276,12 +276,12 @@ conversation with a first-reaction card already written, not a blank one. The
 script files nothing on that path; a second visit would split one conversation
 into two sittings of the same subject.
 
-That step has three dispositions, and only one of them files a visit — but a
+That step has four dispositions, and only one of them files a visit — but a
 subject this intake creates always gets it. `gc.origin=operator`, stamped here,
-is what `first-reaction-dispose.sh` reads to refuse the routing and holding
-exits: the operator typed a topic because they want the conversation, so
-answering it with a dispatch would leave them with a topic that looks filed and
-is silently forgotten. Beads that reach the reaction any other way are triaged
+is what `first-reaction-dispose.sh` reads to refuse the routing, holding, and
+superseding exits: the operator typed a topic because they want the
+conversation, so answering it with a dispatch or an automated close would leave
+them with a topic that looks filed and is silently forgotten. Beads that reach the reaction any other way are triaged
 on their merits.
 
 The fallback path (`--no-react`, or automatically) files the visit

@@ -1,7 +1,8 @@
 # proactive — the dedicated, small, always-on pool that runs slung first
 # reactions (mol-first-reaction): read the bead, write a card to its notes,
-# then dispose — route the bead to a pool, hold it on a `blocks` edge, or file
-# a visit. NOT a resident loop — triggered per bead by
+# then dispose — route the bead to a pool, hold it on a `blocks` edge, hand an
+# already-resolved one to the close sweep, or file a visit. NOT a resident loop
+# — triggered per bead by
 # `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction` or
 # `tools/gc-proactive.sh scan --sling`. max_active_sessions = 2 is this pool's
 # only throttle: routed beads queue at zero cost until a slot frees, so the

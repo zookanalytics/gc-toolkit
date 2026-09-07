@@ -1,6 +1,6 @@
 ---
 name: First reaction as first-level triage (tk-diqxx9)
-description: Why mol-first-reaction's terminal step has three exits instead of one hardcoded visit, what each one writes, and the placement evidence carried over from tk-j81t84 — read before changing the disposition set or the proactive pool's placement.
+description: Why mol-first-reaction's terminal step has more than one exit instead of a hardcoded visit, what each one writes, and the placement evidence carried over from tk-j81t84 — read before changing the disposition set or the proactive pool's placement. The superseded exit (the fourth) is in specs/tk-fwcdtl.
 ---
 
 # First reaction as first-level triage (tk-diqxx9)
@@ -12,18 +12,21 @@ visit, leave the bead open, and drain", and its body hardcoded a `gate-visit`
 block routed to the converse pool, so every bead a reaction touched became a
 request for the operator's attention whatever the bead actually needed.
 
-It now has three, chosen from the `## Disposition` line the card ends with:
+It now has four, chosen from the `## Disposition` line the card ends with. The
+first three are this bead's work; `superseded` was added by tk-fwcdtl (its
+rationale is `specs/tk-fwcdtl/superseded-disposition.md`):
 
 | Disposition | The exit | What it leaves behind |
 |---|---|---|
 | actionable | release the bead TO a pool | a routed, unassigned, open bead a worker claims |
 | blocked | write the wait as a `blocks` edge | a bead held by a named bead, in the same store |
+| superseded | stamp the successor pointer and park the bead | an at-rest bead `duplicate-sweep.sh` closes through `bead-rehome.sh` |
 | ruling | file the visit | a held conversation the operator lands in |
 
-`assets/scripts/first-reaction-dispose.sh` performs all three and records which
+`assets/scripts/first-reaction-dispose.sh` performs all four and records which
 one and why on the bead (`gc.first_reaction`, `_reason`, `_target`, `_at`)
 before it acts, so a wrong call is legible afterwards rather than silent. None
-of the three closes the work bead.
+of the four closes the work bead.
 
 ## Why the exits are these three
 
@@ -64,7 +67,7 @@ what gets built, rather than the only thing the formula could do.
 
 A subject carrying `gc.origin=operator` was created by `gc-visit-open` from a
 topic a human typed and is waiting to talk about. The dispose script refuses
-the routing and holding exits on it. Answering a commissioned topic with a
+every exit but `ruling` on it — routing, holding, and superseding alike. Answering a commissioned topic with a
 dispatch would leave the operator with a topic that looks filed and is silently
 forgotten, which is the outcome that intake path exists to prevent
 (`docs/gascity-human-engagement.md`).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # first-reaction-dispose.sh — the disposition a first reaction ends in.
-# mol-first-reaction's terminal step chooses one of three exits from the card
+# mol-first-reaction's terminal step chooses one of four exits from the card
 # it just wrote, and this script performs it. Each exit advances the subject
 # and records what was chosen and why; none of them closes it.
 #
@@ -10,12 +10,24 @@
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts.
+#   superseded  a later bead already resolved it -> stamp the `duplicate_of`
+#               successor pointer duplicate-sweep.sh reads, plus the kind the
+#               close reason should carry, and park the bead at rest. The
+#               cadence's one close-with-successor actuator (bead-rehome.sh,
+#               via duplicate-sweep.sh) disposes it. This exit still does not
+#               close: it routes to the reader that does, which re-establishes
+#               the same facts first. Its guards mirror that reader's, so a
+#               bead it parks is one the sweep will take: the successor is
+#               already closed or shipped, and the subject carries no work of
+#               its own. A subject still needing work is a `blocked` wait; a
+#               successor not yet resolved, or a call only a person can make,
+#               is a `ruling`.
 #   ruling      only the operator can answer -> the visit its caller filed.
 #
-# The route/edge/visit is the act; gc.first_reaction* is the record of it, and
-# is written FIRST so a disposition that dies half-way is still auditable.
-# Callers: formulas/mol-first-reaction.toml (advance-and-drain), operators by
-# hand. Exit: 0 disposed · 2 usage · 4 runtime failure.
+# The route/edge/marker/visit is the act; gc.first_reaction* is the record of
+# it, and is written FIRST so a disposition that dies half-way is still
+# auditable. Callers: formulas/mol-first-reaction.toml (advance-and-drain),
+# operators by hand. Exit: 0 disposed · 2 usage · 4 runtime failure.
 set -u
 
 PROG="first-reaction-dispose"
@@ -44,6 +56,8 @@ Usage:
   first-reaction-dispose.sh <bead> --disposition blocked --reason "<why>" --takeaway "<headline>"
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent>]
+  first-reaction-dispose.sh <bead> --disposition superseded --reason "<why>" --takeaway "<headline>"
+                            --successor <bead-id> [--kind fixed-upstream|duplicate]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
                             --visit <visit-bead-id>
   common: [--by <who>] [--db <path>] [--dry-run]
@@ -58,11 +72,16 @@ Usage:
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh).
+  --successor names the bead that already resolved this one (superseded only);
+  it must be in the same store and already closed or shipped. --kind is the
+  close reason bead-rehome.sh will carry (default fixed-upstream); use
+  duplicate when the subject merely repeats the successor's own request.
 EOF
 }
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
+SUCCESSOR=""; KIND=""
 DB=""; DRY=""
 WAITING=""          # space-separated bead ids
 
@@ -88,6 +107,10 @@ while [ $# -gt 0 ]; do
         --blocker-key=*) BLOCKER_KEY="${1#--blocker-key=}"; shift ;;
         --visit)    shift; [ $# -gt 0 ] || usage_die "--visit needs a bead id"; VISIT="$1"; shift ;;
         --visit=*)  VISIT="${1#--visit=}"; shift ;;
+        --successor)   shift; [ $# -gt 0 ] || usage_die "--successor needs a bead id"; SUCCESSOR="$1"; shift ;;
+        --successor=*) SUCCESSOR="${1#--successor=}"; shift ;;
+        --kind)     shift; [ $# -gt 0 ] || usage_die "--kind needs a value"; KIND="$1"; shift ;;
+        --kind=*)   KIND="${1#--kind=}"; shift ;;
         --db)       shift; [ $# -gt 0 ] || usage_die "--db needs a path"; DB="$1"; shift ;;
         --db=*)     DB="${1#--db=}"; shift ;;
         --dry-run|-n) DRY=1; shift ;;
@@ -100,9 +123,9 @@ done
 # ── Validation: refuse before writing anything ───────────────────────
 [ -n "$BEAD" ] || usage_die "needs <bead-id>"
 case "$DISPOSITION" in
-    actionable|blocked|ruling) : ;;
-    "") usage_die "needs --disposition actionable|blocked|ruling" ;;
-    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|ruling)" ;;
+    actionable|blocked|superseded|ruling) : ;;
+    "") usage_die "needs --disposition actionable|blocked|superseded|ruling" ;;
+    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|superseded|ruling)" ;;
 esac
 [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
 [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
@@ -114,8 +137,8 @@ same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
 
 case "$DISPOSITION" in
     actionable)
-        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE" ] \
-            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$SUCCESSOR$KIND" ] \
+            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit/--successor/--kind belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
@@ -123,7 +146,7 @@ case "$DISPOSITION" in
         esac
         ;;
     blocked)
-        [ -z "$ROUTE$VISIT" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route and --visit belong to the other exits)"
+        [ -z "$ROUTE$VISIT$SUCCESSOR$KIND" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route/--visit/--successor/--kind belong to the other exits)"
         [ -n "$WAITING" ] || [ -n "$BLOCKER_TITLE" ] \
             || usage_die "blocked needs --waiting-on <bead-id> or --blocker \"<title>\": the wait IS the edge, and prose about it holds nothing"
         if [ -n "$BLOCKER_TITLE" ]; then
@@ -142,8 +165,25 @@ case "$DISPOSITION" in
             case "$THEN_ROUTE" in */*) : ;; *) usage_die "--then-route '$THEN_ROUTE' is not rig-qualified (<rig>/<agent>)" ;; esac
         fi
         ;;
+    superseded)
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$VISIT" ] \
+            || usage_die "superseded takes --successor/--kind only (--route/--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
+        [ -n "$SUCCESSOR" ] \
+            || usage_die "superseded needs --successor <bead-id>: the bead that already resolved this one. 'Already resolved' with no referent is a claim nothing can check, and there is no pointer to close against."
+        [ "$SUCCESSOR" != "$BEAD" ] || usage_die "--successor $SUCCESSOR is the bead itself"
+        # The pointer duplicate-sweep.sh reads must resolve in THIS store: its
+        # cross-store arm skips a successor it cannot read, so a cross-store
+        # superseded parks a bead nothing will ever sweep. Same-store keeps the
+        # exit non-stranding, the way blocked's edge is.
+        same_store "$SUCCESSOR" "$BEAD" \
+            || usage_die "--successor $SUCCESSOR is in another store than $BEAD; duplicate-sweep.sh skips a successor it cannot read in the subject's store, so the parked bead would never close. Take --disposition ruling and let a person re-home across stores."
+        case "${KIND:=fixed-upstream}" in
+            fixed-upstream|duplicate) : ;;
+            *) usage_die "--kind '$KIND' is not one this exit stamps (fixed-upstream|duplicate). The relocation and judgement kinds — re-homed, folded, not-needed — are calls a person makes through --disposition ruling." ;;
+        esac
+        ;;
     ruling)
-        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE" ] || usage_die "ruling takes --visit only"
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$SUCCESSOR$KIND" ] || usage_die "ruling takes --visit only"
         [ -n "$VISIT" ] || usage_die "ruling needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
         ;;
 esac
@@ -222,11 +262,37 @@ if [ "$DISPOSITION" != "ruling" ]; then
     fi
 fi
 
+# ── superseded: the sweep's own accept gates, checked before the stamp ───
+# duplicate-sweep.sh closes a parked bead only when the successor is already
+# closed or shipped and the subject did no work of its own. Checking the same
+# two facts HERE means a bead this exit parks is one that pass will take,
+# rather than one it silently leaves open forever. A successor still open is
+# not a resolution — that is a `blocked` wait — and a subject that carries a
+# work product is a re-home a person makes through `ruling`. Positive finding:
+# a successor that does not resolve refuses, because "already resolved" is a
+# claim this exit must be able to check.
+if [ "$DISPOSITION" = "superseded" ]; then
+    for _k in branch work_dir gc.work_dir pr_number pr_url merge_result gc.work_commit; do
+        _v=$(subject_meta "$_k")
+        [ -z "$_v" ] \
+            || usage_die "$BEAD carries $_k=$_v — it did work of its own, so it is not the no-op duplicate-sweep.sh will close. A worked bead a successor resolved is re-homed by a person through --disposition ruling, not superseded here."
+    done
+    SUCC_JSON=$(gc_bd show "$SUCCESSOR" --json 2>/dev/null | scrub || printf '')
+    SUCC_STATUS=$(printf '%s' "$SUCC_JSON" | jq -r 'if type == "array" then ((.[0].status // "") | ascii_downcase) else "" end' 2>/dev/null || printf '')
+    SUCC_OUTCOME=$(printf '%s' "$SUCC_JSON" | jq -r 'if type == "array" then (((.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"]) // "") | ascii_downcase) else "" end' 2>/dev/null || printf '')
+    [ -n "$SUCC_STATUS" ] \
+        || usage_die "--successor $SUCCESSOR does not resolve in $BEAD's store — a pointer to a bead that resolves to nothing reads as a disposition and holds none. Name the bead that carries the resolution, or take --disposition ruling."
+    if [ "$SUCC_STATUS" != "closed" ] && [ "$SUCC_OUTCOME" != "shipped" ]; then
+        usage_die "--successor $SUCCESSOR is $SUCC_STATUS and has not shipped, so $BEAD is not resolved — it is WAITING on it. Take --disposition blocked --waiting-on $SUCCESSOR, which becomes work again if the successor bounces."
+    fi
+fi
+
 if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
         actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
+        superseded) printf 'would supersede %s by %s (kind %s) and park it for duplicate-sweep.sh\n' "$BEAD" "$SUCCESSOR" "$KIND" ;;
         ruling)     printf 'would record visit %s on %s\n' "$VISIT" "$BEAD" ;;
     esac
     exit 0
@@ -271,6 +337,7 @@ TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="$ROUTE" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
+    superseded) TARGET="$SUCCESSOR" ;;
     ruling)     TARGET="$VISIT" ;;
 esac
 gc_bd update "$BEAD" \
@@ -280,6 +347,19 @@ gc_bd update "$BEAD" \
     --set-metadata "gc.first_reaction_at=$(now_utc)" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
 
+# ── superseded: the marker the reader disposes on ────────────────────
+# duplicate-sweep.sh enumerates `duplicate_of` and closes through
+# bead-rehome.sh; gc.disposition_kind is the close reason it carries, so a
+# subject fixed upstream is disposed as that, not filed as a plain "duplicate
+# of". Stamped after the gc.first_reaction* record and before the park, so a
+# run that dies here has recorded the choice and not yet released the bead.
+if [ "$DISPOSITION" = "superseded" ]; then
+    gc_bd update "$BEAD" \
+        --set-metadata "duplicate_of=$SUCCESSOR" \
+        --set-metadata "gc.disposition_kind=$KIND" >/dev/null 2>&1 \
+        || die "could not stamp the successor marker on $BEAD (duplicate_of=$SUCCESSOR) — the disposition record stands, but the bead is not yet routed to the sweep; re-run this command"
+fi
+
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
 # --route releases the bead to a pool instead of back to the human.
@@ -287,13 +367,17 @@ gc_bd update "$BEAD" \
 # Each disposition also answers the headline's own question — is anything still
 # waiting on this bead? An actionable one is not: it is moving, and the pool its
 # route names will claim it, so --no-wait says so. A blocked one names its wait
-# as an edge. A ruling says neither, because it IS a bead waiting on a person
-# with no edge to carry that wait, which is what doctor/check-wait-is-an-edge
-# reports and what the visit is filed to end.
+# as an edge. A superseded one is not waiting either: it is already resolved and
+# only awaits the sweep's close, so --release with no route parks it at rest
+# (reopened, unassigned, route cleared) and --no-wait settles the headline. A
+# ruling says neither, because it IS a bead waiting on a person with no edge to
+# carry that wait, which is what doctor/check-wait-is-an-edge reports and what
+# the visit is filed to end.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable) set -- "$@" --route "$ROUTE" --no-wait ;;
     blocked)    for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
+    superseded) set -- "$@" --no-wait ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."
 
@@ -327,3 +411,7 @@ if [ "$DISPOSITION" = "blocked" ]; then
 fi
 
 printf '%s: %s disposed as %s (%s)\n' "$PROG" "$BEAD" "$DISPOSITION" "${TARGET:-no target}"
+if [ "$DISPOSITION" = "superseded" ]; then
+    printf '%s: parked with duplicate_of=%s (kind %s); the next duplicate-sweep pass closes it through bead-rehome.sh\n' \
+        "$PROG" "$SUCCESSOR" "$KIND"
+fi

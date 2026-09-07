@@ -14,10 +14,11 @@ reaction, and drains.
 2. **Write a CARD**, not prose: `Understanding · Found (freshness-stamped)
    · Proposal · Decision needed · Disposition` — the shape the board lands the
    human on, ending in the one line the terminal step acts on.
-3. **Dispose, don't close.** The reaction ends in ONE of three exits — route
-   the bead to a pool, hold it on an edge, or file a visit — chosen from the
-   card. The work bead stays OPEN either way; closing it would claim the work
-   is done.
+3. **Dispose, don't close.** The reaction ends in ONE of four exits — route
+   the bead to a pool, hold it on an edge, hand an already-resolved one to the
+   sweep that closes it, or file a visit — chosen from the card. The reaction
+   never closes the bead itself; even the superseded exit only routes it to the
+   cadence that does, which re-checks the facts first.
 4. **mr-only for code.** A reaction is notes-only by default; code it
    produces takes the gated `mr` path, never `direct`, never a push to main.
 
@@ -153,36 +154,44 @@ gc bd update "$WORK_BEAD_ID" --append-notes "$(cat <<'EOF'
  for a bead you are routing or holding, "none — <what happens next>">
 
 ## Disposition
-<actionable | blocked | ruling> — <one line: why this one>
+<actionable | blocked | superseded | ruling> — <one line: why this one>
 EOF
 )"
 ```
 
 **Disposition** is the line step 3 acts on, so decide it here, while the bead
-is in front of you. It is one of exactly three:
+is in front of you. It is one of exactly four:
 
 - **actionable** — the bead names work someone can pick up: a done condition
   you can state, and no unanswered question in front of it. The exit routes it
   to the pool that does that work.
 - **blocked** — the bead cannot move until something else does. Name that
   something. The exit records it as an edge.
+- **superseded** — a later bead already resolved this one, provably: you can
+  name a successor that is already closed or shipped, and this bead did no work
+  of its own. The exit stamps the successor pointer and parks the bead for the
+  duplicate-sweep cadence, which closes it through bead-rehome.sh — no operator
+  glance required, because the resolution is a fact, not a judgment (step 1c).
 - **ruling** — the operator's judgment is the next move, in one of two shapes.
   One is a question whose answer changes what gets built. The other is a
-  conclusion that there is nothing to do: you verified the thing is already
-  fixed with nothing left to merge, or the bead should not exist. Both file a
-  visit; the second is a recommend-close (step 1c).
+  recommend-close where the conclusion is a judgment, not a proof: the bead
+  should not exist, or you believe it is resolved but cannot name a shipped
+  successor. Both file a visit (step 1d); a resolution you CAN prove is
+  `superseded`, not a ruling.
 
-Prefer **actionable** when you can state the done condition. Take **ruling**
-when you cannot name the work without an answer first, or when the honest
-conclusion is that there is no work. A first reaction that verifies nothing is
-broken, or that the bead should not exist, does not route to a pool and does
-not write a `specs/<bead-id>` record: it recommends closing the bead, routed to
-the operator. Its card gives them what they need to disagree — why no work is
-needed, the counter-case for keeping the bead open, and that the decision to
-close is theirs — and its takeaway reads `recommend close: <why>`, so the board
-carries the recommendation at a glance. A high-confidence "nothing to do" files
-the same visit rather than closing the bead: a reaction never closes a work
-bead, and confirming the recommendation costs the operator one glance.
+Prefer **actionable** when you can state the done condition. When the honest
+conclusion is that there is no work, which exit you take turns on whether you
+can PROVE it. A resolution you can prove — a named successor already closed or
+shipped, and this bead did none of the work — is **superseded**: it disposes
+without an operator glance, because a fact needs no confirmation, and it does
+not write a `specs/<bead-id>` record. A conclusion that is a judgment — the
+bead should not exist, or you believe it is resolved but cannot name a shipped
+successor — is a **ruling**: it files a recommend-close visit whose card gives
+the operator what they need to disagree (why no work is needed, the counter-case
+for keeping the bead open, and that the decision is theirs), with a takeaway
+that reads `recommend close: <why>`. Take **ruling** too when you cannot name
+the work without an answer first. Under either exit a reaction never closes the
+work bead itself.
 
 "The operator would probably want to see this" is still not a ruling. A ruling
 is a question whose answer changes what gets built, or a recommend-close the
@@ -234,20 +243,21 @@ title = "Perform the card's disposition, leave the bead open, and drain"
 needs = ["first-reaction"]
 description = """
 The reaction is on the bead. Now perform the **## Disposition** line your card
-ends with. There are three exits and you take exactly one. Do NOT close the
+ends with. There are four exits and you take exactly one. Do NOT close the
 work bead — every exit advances it; none of them finishes it.
 
 | Disposition | The exit | What it leaves behind |
 |---|---|---|
 | actionable | release the bead TO a pool | a routed, unassigned, open bead a worker claims |
 | blocked | write the wait as a `blocks` edge | a bead held by a named bead, in the same store |
+| superseded | stamp the successor pointer and park the bead | an at-rest bead duplicate-sweep.sh closes through bead-rehome.sh |
 | ruling | file the visit | a held conversation the operator lands in |
 
 One subject is not yours to classify: a bead carrying `gc.origin=operator` is
 a topic a human typed into `gc-visit-open` and is waiting to talk about, so the
-visit is the answer and the script refuses the other two exits on it.
+visit is the answer and the script refuses the other three exits on it.
 
-`assets/scripts/first-reaction-dispose.sh` performs all three. It records what
+`assets/scripts/first-reaction-dispose.sh` performs all four. It records what
 you chose and why on the bead (`gc.first_reaction*`) before it acts, and folds
 the board takeaway and the release into one `gc-helm.sh takeaway … --release`
 write, which also stamps `gc.proactive_reaction=1` so the scan does not
@@ -310,14 +320,41 @@ Add `--then-route <rig>/<agent>` when the bead is plainly work once the wait
 lifts: it arms the deferred dispatch, so the blocker closing is what sends the
 bead to that pool, and nobody has to remember.
 
-**1c. NEEDS A RULING — the next move is the operator's judgment, so file the
+**1c. SUPERSEDED — a later bead already resolved this one, so route it to the
+sweep that closes it.** This is the automated recommend-close: not a visit a
+human confirms, but a disposition the cadence performs, because the resolution
+is provable rather than a judgment. It fits only when both facts hold — a
+successor already closed or shipped, and a subject that did no work of its own —
+and the script refuses otherwise, naming `blocked` (the successor has not
+resolved, so this is a wait) or `ruling` (the subject did work, so a person
+re-homes it) instead. It stamps the `duplicate_of` pointer and the kind the
+close reason should carry, parks the bead at rest, and leaves it for
+`duplicate-sweep.sh` (merge cadence arm 7) to close through `bead-rehome.sh`,
+the one close-with-successor actuator. `--kind` defaults to `fixed-upstream`
+(the successor retired or fixed the thing this bead named); pass `duplicate`
+when this bead merely repeats the successor's own request.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$WORK_BEAD_ID" ] || { echo "mol-first-reaction needs an input convoy with exactly one tracked member" >&2; exit 1; }
+DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
+done
+[ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
+"$DISPOSE" "$WORK_BEAD_ID" --disposition superseded --by proactive --reason "<what already resolved this and why nothing is left>" --takeaway "<the ≤140-char headline>" --successor <successor-bead-id> --kind fixed-upstream
+```
+
+**1d. NEEDS A RULING — the next move is the operator's judgment, so file the
 visit.** Two shapes reach here: a question whose answer changes what gets built,
-and a recommend-close (you verified there is nothing to do, or the bead should
-not exist). It should be the minority case: if you can name the work, take 1a
-instead. The visit is the same for both; a recommend-close differs only in the
-dispose call below — a `--takeaway` that reads `recommend close: <why>` and a
-`--reason` that names the counter-case, over the card you wrote in
-`first-reaction`. The visit form is mol-visit's, spelled inline:
+and a recommend-close where the conclusion is a judgment — the bead should not
+exist, or you believe it is resolved but cannot name a shipped successor to
+prove it (a resolution you CAN prove is `superseded`, 1c, not a ruling). It
+should be the minority case: if you can name the work, take 1a instead. The
+visit is the same for both; a recommend-close differs only in the dispose call
+below — a `--takeaway` that reads `recommend close: <why>` and a `--reason`
+that names the counter-case, over the card you wrote in `first-reaction`. The
+visit form is mol-visit's, spelled inline:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -394,5 +431,7 @@ gc runtime drain-ack
 exception is the code case from step 2: if you produced code and handed it to
 the refinery, the refinery closes the bead after the merge — you still do not
 close it yourself. Every disposition here leaves the bead open: routed to a
-pool, held on an edge, or waiting on the operator with its visit filed.
+pool, held on an edge, parked for the sweep, or waiting on the operator with
+its visit filed. The superseded exit is no exception — the sweep closes the
+bead, never you.
 """

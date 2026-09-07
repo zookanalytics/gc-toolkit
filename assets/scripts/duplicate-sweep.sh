@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # duplicate-sweep — arm 7 of the merge cadence; caller: refinery-reconcile.sh.
-# Gives `duplicate_of` a reader. A polecat that diagnoses a duplicate dispatch
-# stamps the marker and parks the bead, because polecats never close work
-# beads; without a reader the bead sits open until a human rules on it, one at
-# a time. This arm disposes of the ones that are provably safe and leaves the
-# rest exactly where they are.
-# Disposal goes through bead-rehome.sh --kind duplicate, which is the one
-# writer for a successor pointer: it stamps gc.superseded_by + _store, reads
-# them back, and closes only if they stuck. Nothing here writes a close.
+# Gives `duplicate_of` a reader. A polecat that diagnoses a duplicate dispatch,
+# or a first reaction that finds a bead already resolved elsewhere
+# (first-reaction-dispose.sh --disposition superseded), stamps the marker and
+# parks the bead, because neither may close a work bead; without a reader the
+# bead sits open until a human rules on it, one at a time. This arm disposes of
+# the ones that are provably safe and leaves the rest exactly where they are.
+# Disposal goes through bead-rehome.sh, the one writer for a successor pointer:
+# it stamps gc.superseded_by + _store, reads them back, and closes only if they
+# stuck. Nothing here writes a close. The close reason's KIND is the marker's
+# own gc.disposition_kind (a bead fixed upstream is disposed as that, not filed
+# as a plain "duplicate of"); absent, it defaults to duplicate, the historical
+# shape and the one this arm's gates were written for.
 # The stamp alone never justifies a close — it records a diagnosis that may be
 # hours old — so every gate below re-establishes a fact rather than trusting
 # one, and an untested condition is never a satisfied one:
@@ -105,7 +109,8 @@ CANDS=$(printf '%s' "$ROWS" | jq -r '
       (if (($m["gc.step_ref"] // $m["gc.step_id"] // "") | tostring) != "" or (($m["gc.kind"] // "") | tostring) == "workflow"
          then "step" else "-" end),
       (($m["gc.superseded_by"] // $m["superseded_by"]) | p),
-      (if (($m["hold_reason"] // "") | tostring) != "" then "held" else "-" end) ]
+      (if (($m["hold_reason"] // "") | tostring) != "" then "held" else "-" end),
+      ($m["gc.disposition_kind"] | p) ]
   | @tsv' 2>/dev/null)
 [ -n "$CANDS" ] || { echo "$PROG: no live duplicate-marked beads"; exit 0; }
 
@@ -114,7 +119,7 @@ disposed=0; held=0; stuck=0
 # counters this touches are the ones reported at the end.
 hold() { held=$((held + 1)); echo "$PROG: leaving $id alone — $1"; }
 
-while IFS=$'\t' read -r id dup_of dup_store outcome workkeys assignee task_kind is_step prior held_flag; do
+while IFS=$'\t' read -r id dup_of dup_store outcome workkeys assignee task_kind is_step prior held_flag dkind; do
   [ -n "${id:-}" ] && [ "$id" != "-" ] || continue
   [ "$dup_of" != "-" ] || { hold "duplicate_of is present but names no successor"; continue; }
   [ "$dup_of" != "$id" ] || { hold "duplicate_of names the bead itself"; continue; }
@@ -154,9 +159,19 @@ while IFS=$'\t' read -r id dup_of dup_store outcome workkeys assignee task_kind 
     hold "its successor $dup_of is $SSTATUS and has not shipped"; continue
   fi
 
+  # The kind the close reason carries. The marker began as a duplicate-only
+  # signal; whoever stamps it for a bead resolved another way (a first reaction
+  # superseding a bead fixed upstream) sets gc.disposition_kind so the disposal
+  # reads as that. Absent or unrecognised falls back to duplicate — the shape
+  # this arm's gates were written to prove — and bead-rehome validates it again.
+  KIND=duplicate
+  case "$dkind" in
+    fixed-upstream|duplicate|folded|re-homed|not-needed) KIND="$dkind" ;;
+  esac
+
   NOTE="verified by $PROG: $SWHY, and $WHY"
   [ "$held_flag" = "held" ] && NOTE="$NOTE; it was parked under a hold_reason, which stays on the bead"
-  "$REHOME" --origin "$id" --successor "$dup_of" --kind duplicate \
+  "$REHOME" --origin "$id" --successor "$dup_of" --kind "$KIND" \
     --note "$NOTE" </dev/null >/dev/null 2>&1 || true
 
   # bead-rehome gates its own close on the pointer read-back; this is the
@@ -172,7 +187,7 @@ while IFS=$'\t' read -r id dup_of dup_store outcome workkeys assignee task_kind 
     stuck=$((stuck + 1)); continue
   fi
   disposed=$((disposed + 1))
-  echo "$PROG: closed $id as a duplicate of $dup_of — $SWHY, and $WHY"
+  echo "$PROG: closed $id ($KIND $dup_of) — $SWHY, and $WHY"
 done <<CANDS_EOF
 $CANDS
 CANDS_EOF

@@ -8,9 +8,10 @@
 # bead, a foreign prior pointer, a cross-store successor, a non-no-op outcome,
 # a missing outcome with work-product metadata, an unresolvable successor);
 # in_progress excluded from the population; non-duplicates untouched;
-# idempotence across passes; the args handed to bead-rehome; a disposal that
-# does not read back; and the two ways the arm does nothing — an unreadable
-# listing (exit 1, loud) and an absent disposal writer.
+# idempotence across passes; the args handed to bead-rehome, including the
+# gc.disposition_kind that sets the close kind and its fallback to duplicate; a
+# disposal that does not read back; and the two ways the arm does nothing — an
+# unreadable listing (exit 1, loud) and an absent disposal writer.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,7 +83,7 @@ eq "$rc" 0 "a completed pass exits 0"
 eq "$(bstatus D1)" "closed" "the verified no-op duplicate is closed"
 eq "$(meta D1 gc.superseded_by)" "T1" "…pointed at its twin"
 eq "$(meta D1 gc.superseded_by_store)" "rig:gc-toolkit" "…with the store recorded"
-has "$out" "closed D1 as a duplicate of T1" "…and the pass names what it disposed"
+has "$out" "closed D1 (duplicate T1)" "…and the pass names what it disposed"
 has "$out" "1 duplicate(s) disposed" "…and counts it"
 a=$(rehome_args)
 has "$a" "--kind duplicate" "the disposal goes through bead-rehome as a duplicate"
@@ -91,6 +92,23 @@ has "$a" "--successor T1" "…and the successor"
 has "$a" "merge_result=merged" "the reason says how the twin ended"
 has "$a" "work_outcome=no-op" "…and which proof of no-work ran"
 eq "$(bstatus T1)" "closed" "the twin is untouched"
+
+echo "# a gc.disposition_kind hint sets the close reason's kind"
+store "[$(dup DFU TFU open '{"work_outcome":"no-op","gc.disposition_kind":"fixed-upstream"}'),$(twin TFU closed '{"merge_result":"merged"}')]"
+: > "$REHOME_LOG"
+out=$(run)
+eq "$(bstatus DFU)" "closed" "a superseded no-op disposes like any other"
+a=$(rehome_args)
+has "$a" "--kind fixed-upstream" "…and the disposal carries the marked kind, not a plain duplicate"
+hasnt "$a" "--kind duplicate" "…and not the default kind"
+has "$out" "closed DFU (fixed-upstream TFU)" "…and the pass names the kind it disposed"
+
+echo "# an unrecognised disposition_kind falls back to duplicate, not a bead-rehome failure"
+store "[$(dup DBK TBK open '{"work_outcome":"no-op","gc.disposition_kind":"nonsense"}'),$(twin TBK closed '{"merge_result":"merged"}')]"
+: > "$REHOME_LOG"
+out=$(run)
+eq "$(bstatus DBK)" "closed" "an unknown kind still disposes"
+has "$(rehome_args)" "--kind duplicate" "…by falling back to the historical default"
 
 echo "# proof A holds even when the duplicate carries the TWIN's branch"
 store "[$(dup D2 T2 open '{"work_outcome":"no-op","branch":"polecat/T2","target":"main","merge_result":"merged","pr_number":"7"}'),$(twin T2 closed)]"

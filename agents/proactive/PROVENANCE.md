@@ -69,8 +69,9 @@ Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
 (process-scan). NOT a resident loop either way.
 
 The first reaction NEVER closes the target work bead — every disposition
-advances it and leaves it open. `assets/scripts/first-reaction-dispose.sh`
-performs the three and records which one and why (`gc.first_reaction*`), so a
+advances it and leaves it open, the superseded exit included (the close sweep
+disposes it, not the reaction). `assets/scripts/first-reaction-dispose.sh`
+performs the four and records which one and why (`gc.first_reaction*`), so a
 wrong call is visible rather than silent. The `gc.proactive_reaction` marker
 stops the scan from re-reacting. The card shape (Understanding · Found ·
 Proposal · Decision needed · Disposition) is the same one a converse session
@@ -82,7 +83,7 @@ about it, so the visit is the only disposition the script will perform on it.
 
 Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — demand flows
 unconditionally; the mr-invariant refuses `direct`; the formula writes the card
-and ends in one of three recorded dispositions without closing; one `scan
+and ends in one of four recorded dispositions without closing; one `scan
 --sling` sweep is capped; the slice tool fences reached content.
 `assets/scripts/first-reaction-dispose.test.sh` covers the exits themselves.
 Design refs: design-doc.md Key Components 5-6, Phase 4.

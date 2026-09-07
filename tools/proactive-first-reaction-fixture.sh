@@ -24,8 +24,9 @@
 #   • THE mr-INVARIANT — `sling` bakes in --on mol-first-reaction --merge mr and
 #     HARD-REFUSES --merge direct (the security invariant).
 #   • THE FORMULA CONTRACT — mol-first-reaction writes the fixed card shape,
-#     ends in ONE of three dispositions (route it, hold it, ask), records which
-#     one and why, flags the bead onto the board, and NEVER closes the target.
+#     ends in ONE of four dispositions (route it, hold it, hand a resolved one
+#     to the sweep, ask), records which one and why, flags the bead onto the
+#     board, and NEVER closes the target.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the pool's only throttle), it defaults to mr, and one
 #     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
@@ -603,7 +604,7 @@ has "formula attributes the takeaway to proactive"      "--by proactive"        
 has "formula collapses stamp+release into one --release call" "--release"         "$F"
 has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
 
-echo "── the terminal step has THREE exits, not one hardcoded visit ──"
+echo "── the terminal step has FOUR exits, not one hardcoded visit ──"
 # The defect this replaces: every bead a reaction touched became a request for
 # the operator's attention, whatever the bead actually needed. The exits are
 # named in the formula and performed by one script, so the choice is a branch
@@ -613,14 +614,15 @@ DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
 has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
 has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
+has "exit: superseded — route to the close sweep"  "--disposition superseded" "$F"
 has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
 has "the exits are performed by one script"        "first-reaction-dispose.sh" "$F"
 has "the blocked exit names an existing wait"      "--waiting-on"             "$F"
 has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
 has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
 has "every exit records WHY it was chosen"         "--reason"                 "$F"
-# The three exits must be distinguishable to the reader, not one exit with
-# three labels: the actionable exit routes to the pool that does the work.
+# The exits must be distinguishable to the reader, not one exit with several
+# labels: the actionable exit routes to the pool that does the work.
 has "the actionable exit names the pool that works it" "polecat pool"         "$F"
 D="$(cat "$DISPOSE")"
 has "…and the route default lives in the script, once" "gc-toolkit.polecat"   "$D"
@@ -686,6 +688,7 @@ has "prompt stamps the board takeaway on every exit"    "--takeaway"            
 has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
 has "prompt teaches the actionable exit"               "--disposition actionable" "$PM"
 has "prompt teaches the blocked exit"                  "--disposition blocked"    "$PM"
+has "prompt teaches the superseded exit"               "--disposition superseded" "$PM"
 has "prompt teaches the ruling exit"                   "--disposition ruling"     "$PM"
 has "prompt says a visit is the minority case"         "minority case"            "$PM"
 has "prompt carries the operator-commission rule"     "gc.origin=operator"       "$PM"
