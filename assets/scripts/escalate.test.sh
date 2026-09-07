@@ -157,14 +157,26 @@ has "$out" "filed visit vis-1" "reports what it filed"
 
 echo "# the default route is human, and --pool overrides it"
 # The converse routed-pool is retired: the default is the board (human), which
-# needs no rig qualifier and no live-agent match. --pool still routes to a pool.
+# needs no live-agent match. --pool still routes to a pool.
 reset
-GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
-eq "$(meta vis-1 gc.routed_to)" "human" "the default route is the board, rig-agnostic"
+GC_RIG=gc-toolkit "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
+eq "$(meta vis-1 gc.routed_to)" "human" "the default route is the board"
 reset
 GC_RIG=other "$SUT" --subject tk-a --key k1 --message m --pool other/rig.converse >/dev/null 2>&1
 eq "$(meta vis-1 gc.routed_to)" "other/rig.converse" "--pool overrides the default"
 
+echo "# a board-route caller whose GC_RIG is not the subject's rig REFUSES"
+# The old converse default was verified against the live agent set, which also
+# proved GC_RIG named a real rig. `human` needs no agent match, and `gc bd`
+# only WARNS on a GC_RIG that names no bound rig before filing into the ambient
+# store — so a stale or misspelled export would file the visit on a board the
+# subject never reaches, exit 0. The subject's own rig (tk -> gc-toolkit) is
+# the store the visit must land in; a pin that disagrees is refused.
+reset
+out=$(GC_RIG=myrig "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
+eq "$rc" 1 "GC_RIG naming a rig other than the subject's exits 1"
+eq "$(visits)" "0" "and files nothing"
+has "$out" "lives in rig 'gc-toolkit'" "and names the rig the subject lives in"
 echo "# a rig-less board-route caller pins the store to the subject's own rig"
 # The board route ('human') names no store, so a rig-less caller cannot let the
 # create fall to the ambient store — the visit would land on the wrong board and
@@ -185,13 +197,23 @@ reset
 out=$(env -u GC_RIG "$SUT" --subject zz-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 1 "an unresolvable subject prefix on the board route exits 1"
 eq "$(visits)" "0" "and files nothing"
-has "$out" "resolves to no rig" "and says the store could not be proven"
+has "$out" "could not be proven" "and says the store could not be proven"
+has "$out" "no rig carries the prefix 'zz'" "with escalation-rig's reason (an unknown prefix, not an unreadable rig set)"
 
 echo "# a rig-less board-route caller REFUSES when the rig set is unreadable"
 reset
 out=$(env -u GC_RIG STUB_RIG_LIST_FAIL=1 "$SUT" --subject tk-a --key k1 --message m 2>&1); rc=$?
 eq "$rc" 1 "an unreadable rig set on the board route exits 1 (fail closed)"
 eq "$(visits)" "0" "and files nothing"
+has "$out" "could not read" "and says the rig set was unreadable, not that the prefix is unknown"
+
+echo "# a board-route caller whose subject has no rig prefix keeps its own GC_RIG"
+# An ephemeral or prefix-less subject cannot disprove the caller's pin, so the
+# pinned store files as before.
+reset
+out=$(GC_RIG=gc-toolkit "$SUT" --subject refinery --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "a prefix-less subject under a pinned GC_RIG still files"
+eq "$(visits)" "1" "the visit exists"
 
 echo "# an unroutable --pool is refused before anything is created"
 # A --pool that names no live agent is refused BEFORE anything is created: a

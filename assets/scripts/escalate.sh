@@ -99,25 +99,41 @@ fi
 # The default route is `human` (the retired converse pool's replacement; set in
 # the gate-visit block below): the visit parks on the helm board, which is not a
 # pool name that selects a store. So unlike a rig-qualified --pool, the default
-# cannot prove which rig's ledger `gc bd create` writes to. A rig-less caller
-# (GC_RIG unset and no rig-qualified --pool) would otherwise file the visit — and
-# its tracks edge to the subject — into whatever ambient store the working
-# directory resolves, invisible to the subject's board and severed from the
-# subject. Pin the store to the subject's own rig, resolved from its id prefix,
-# the mapping gc-helm.sh's rig_name_for_bead uses (`gc rig list` prefix -> name).
-# Fail before filing if the prefix names no rig or the rig set is unreadable: a
-# visit on the wrong board reports a human was asked while none can see it — the
-# silent mute this script exists to end.
-if [ -z "${GC_RIG:-}" ] && { [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; }; then
-  subj_prefix="${SUBJECT%%-*}"
-  subj_rig=$(if command -v timeout >/dev/null 2>&1; then timeout 15 gc rig list --json 2>/dev/null
-             else gc rig list --json 2>/dev/null; fi \
-    | scrub | jq -r --arg p "$subj_prefix" '(.rigs // [])[]? | select((.prefix // "") == $p) | .name' 2>/dev/null | head -n1)
-  if [ -n "$subj_rig" ]; then
-    export GC_RIG="$subj_rig"
-    warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$subj_rig' from subject '$SUBJECT' so the visit lands in the store the subject lives in, not the caller's ambient store"
+# cannot prove which rig's ledger `gc bd create` writes to — and `gc bd` itself
+# only WARNS on a GC_RIG that names no bound rig, then answers from the ambient
+# store. Either way the visit — and its tracks edge to the subject — would land
+# in a store the subject's board never reads, invisible to the operator and
+# severed from the subject: the silent mute this script exists to end.
+#
+# So on the board route the store is proven from the subject itself, through
+# escalation-rig.sh (bead-store.sh): the one prefix->rig derivation the
+# destructive gates and the deacon's own escalations already use, which refuses
+# a prefix no rig carries, one two rigs carry, and an unreadable rig set, each
+# with its own reason on stderr. GC_RIG unset: bind the derived rig. GC_RIG set:
+# it must be the subject's rig, or the caller's pin is the wrong store (a stale
+# export, a typo) and nothing is filed. A subject whose store cannot be derived
+# (an ephemeral id with no rig prefix) is filed under the caller's GC_RIG as
+# before — there is nothing to disprove it with.
+if [ -z "$POOL_ARG" ] || [ "$POOL_ARG" = "human" ]; then
+  ESC_RIG_SH="${GC_ESCALATION_RIG_TOOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/escalation-rig.sh}"
+  subj_rig=""
+  if [ -x "$ESC_RIG_SH" ]; then
+    subj_rig=$("$ESC_RIG_SH" "$SUBJECT" 2>"${TMPDIR:-/tmp}/escalate-rig.$$") || subj_rig=""
+    subj_rig_why=$(tr '\n' ' ' < "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+    rm -f "${TMPDIR:-/tmp}/escalate-rig.$$" 2>/dev/null || true
   else
-    warn "GC_RIG unset, the route defaults to the board ('human'), and subject '$SUBJECT' (prefix '$subj_prefix') resolves to no rig in 'gc rig list' — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
+    subj_rig_why="cannot execute $ESC_RIG_SH"
+  fi
+  if [ -z "${GC_RIG:-}" ]; then
+    if [ -n "$subj_rig" ]; then
+      export GC_RIG="$subj_rig"
+      warn "GC_RIG unset and the route defaults to the board ('human'); deriving rig '$subj_rig' from subject '$SUBJECT' so the visit lands in the store the subject lives in, not the caller's ambient store"
+    else
+      warn "GC_RIG unset, the route defaults to the board ('human'), and the store for subject '$SUBJECT' could not be proven (${subj_rig_why:-no rig resolved}) — nothing filed. A visit created in the caller's ambient store would land on the wrong board and its tracks edge would never reach the subject. Re-run with GC_RIG set, or with a rig-qualified --pool."
+      exit 1
+    fi
+  elif [ -n "$subj_rig" ] && [ "$subj_rig" != "$GC_RIG" ]; then
+    warn "GC_RIG='$GC_RIG' but subject '$SUBJECT' lives in rig '$subj_rig' — nothing filed. On the board route the visit must land in the subject's own store or its board never shows it and its tracks edge never reaches the subject; 'gc bd' would not refuse an unbound GC_RIG, only warn and file elsewhere. Re-run with GC_RIG=$subj_rig (or unset, to derive it)."
     exit 1
   fi
 fi

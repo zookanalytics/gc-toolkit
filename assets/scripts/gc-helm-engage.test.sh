@@ -19,8 +19,9 @@
 #   (BLOCKED) a blocked explicit visit is refused before spawning (exit 4)
 #   (NOSPAWN) a session new that returns no identity aborts without assigning
 #   (RACE)    a bind whose --if-assignee guard is rejected (a concurrent engage
-#             won in the spawn window) does not overwrite the winner, suspends the
-#             loser sitting, and exits 4
+#             won in the spawn window) does not overwrite the winner, CLOSES the
+#             loser sitting (a suspended one keeps its alias, so the re-run the
+#             message advertises would be refused at `session new`), and exits 4
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
 set -euo pipefail
 
@@ -66,7 +67,13 @@ case "$1 ${2:-}" in
     fi ;;
   "bd list")
     # The one open visit tracking tk-subj, when $HAVE_VISIT is set.
-    if [ -n "${HAVE_VISIT:-}" ]; then
+    if [ "${HAVE_VISIT:-}" = "2" ]; then
+      jq -n '[{id:"tk-vis2", status:"open", assignee:"", created_at:"2026-09-02T00:00:00Z", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}},
+              {id:"tk-vis", status:"open", assignee:"", created_at:"2026-09-01T00:00:00Z", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+    elif [ "${HAVE_VISIT:-}" = "held" ]; then
+      jq -n '[{id:"tk-vis2", status:"in_progress", assignee:"gc-toolkit__converse-3", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}},
+              {id:"tk-vis", status:"open", assignee:"", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
+    elif [ -n "${HAVE_VISIT:-}" ]; then
       jq -n '[{id:"tk-vis", status:"open", assignee:"", metadata:{task_kind:"visit","gc.continuation_group":"tk-subj"}}]'
     else printf '[]\n'; fi ;;
   "session new")
@@ -74,13 +81,16 @@ case "$1 ${2:-}" in
     # Record the rig context engage supplies: `gc session new` resolves a bare
     # template through GC_DIR/cwd, so engage must point it at the subject's rig.
     printf 'GC_DIR=%s\n' "${GC_DIR-<unset>}" >> "$CALLS"
-    if [ -n "${SPAWN_EMPTY:-}" ]; then jq -n '{ok:true}'; else
+    if [ -n "${SPAWN_EMPTY:-}" ]; then
+      echo "gc session new: agent \"converse-opus\" not found in city.toml" >&2; jq -n '{ok:true}'; else
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
   "session attach")
     printf 'session attach %s\n' "$*" >> "$CALLS" ;;
   "session suspend")
     printf 'session suspend %s\n' "$*" >> "$CALLS" ;;
+  "session close")
+    printf 'session close %s\n' "$*" >> "$CALLS" ;;
   "bd update")
     printf 'bd update %s\n' "$*" >> "$CALLS"
     _a="$*"
@@ -248,7 +258,7 @@ eq "$RC" 4 "(RACE) a lost bind race exits 4"
 has "$CALLED" "session new" "(RACE) …the sitting did spawn — the race is in the bind window, past the pre-spawn guards"
 has "$CALLED" "bd update tk-vis --if-assignee" "(RACE) …the bind is conditional, so the store rejects the loser (exit 13)"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(RACE) …the assignee stays the winner, never the loser"
-has "$CALLED" "session suspend gc-77" "(RACE) …the stranded loser sitting is suspended"
+has "$CALLED" "session close gc-77" "(RACE) …the stranded loser sitting is closed"
 has "$OUT" "not overwriting" "(RACE) …and the operator is told the winner was not overwritten"
 unset RACE_LOST RACE_WINNER
 
@@ -263,7 +273,7 @@ export BIND_FAIL=1
 run_engage tk-vis --no-attach
 eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session new" "(BIND-FAIL) …the sitting did spawn"
-has "$CALLED" "session suspend gc-77" "(BIND-FAIL) …the spawned sitting is suspended, not left orphaned"
+has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(cat "$ASSIGNEE")" "" "(BIND-FAIL) …the visit stays unassigned"
 hasnt "$OUT" "Assign by hand" "(BIND-FAIL) …the operator is not told to hand-assign to a suspended sitting"
 unset BIND_FAIL
@@ -275,7 +285,7 @@ echo "# a bind another writer stomps: read-back shows a different holder"
 export BIND_STOMP="gc-toolkit__converse-8"
 run_engage tk-vis --no-attach
 eq "$RC" 4 "(STOMP) a stomped bind exits 4"
-has "$CALLED" "session suspend gc-77" "(STOMP) …the stranded sitting is suspended"
+has "$CALLED" "session close gc-77" "(STOMP) …the stranded sitting is closed"
 has "$OUT" "gc-toolkit__converse-8" "(STOMP) …and the operator is pointed at the holder that won"
 unset BIND_STOMP
 
@@ -285,9 +295,55 @@ echo "# a bind that does not persist: read-back finds the visit still unassigned
 export BIND_NOPERSIST=1
 run_engage tk-vis --no-attach
 eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
-has "$CALLED" "session suspend gc-77" "(NOPERSIST) …the spawned sitting is suspended"
+has "$CALLED" "session close gc-77" "(NOPERSIST) …the spawned sitting is closed"
 has "$OUT" "did not persist" "(NOPERSIST) …and the operator is told the bind did not persist"
 unset BIND_NOPERSIST
+
+echo "# a closed visit that still carries its last holder is 'not open', not 'attach to it'"
+# bd close never clears the assignee, so every dismissed visit is closed+assigned.
+# The status must be settled before the owner is read as a live sitting.
+export VIS_OWNER="gc-toolkit__converse-7"
+printf 'closed' > "$VIS_STATUS"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(CLOSED-OWNER) a closed visit with a stale assignee exits 4"
+has "$OUT" "not open" "(CLOSED-OWNER) …as not open"
+hasnt "$OUT" "attach to it" "(CLOSED-OWNER) …never pointing the operator at the ended sitting"
+hasnt "$CALLED" "session new" "(CLOSED-OWNER) …and spawns nothing"
+export VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+
+echo "# a subject with several parked visits is an ambiguity the operator settles"
+# escalate.sh files one visit per (subject, key), so a subject can carry more
+# than one parked visit. engage must not pick one at random.
+export BEAD_KIND=task HAVE_VISIT=2
+run_engage tk-subj --no-attach
+eq "$RC" 4 "(MULTI) two parked visits on the subject exit 4"
+has "$OUT" "2 parked visits" "(MULTI) …naming the count"
+has "$OUT" "tk-vis2" "(MULTI) …and the ids"
+hasnt "$CALLED" "session new" "(MULTI) …and spawns nothing"
+
+echo "# a subject whose only parked visit sits beside a held one engages the parked one"
+export HAVE_VISIT=held
+run_engage tk-subj --no-attach
+eq "$RC" 0 "(PARKED-FIRST) the parked visit is engaged, not the held sibling"
+has "$CALLED" "session new converse-opus --alias tk-vis " "(PARKED-FIRST) …spawning for the parked visit"
+export BEAD_KIND=visit HAVE_VISIT=""
+
+echo "# a spawn failure carries gc's reason"
+# gc says WHY only on stderr; a template a rig does not carry (the converse
+# templates are rig-scoped) must reach the operator as that, not as an empty output.
+export SPAWN_EMPTY=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(SPAWN-WHY) a spawn that yields no identity exits 4"
+has "$OUT" "gc said: gc session new: agent" "(SPAWN-WHY) …quoting gc's stderr"
+has "$OUT" "rig-scoped" "(SPAWN-WHY) …and explaining the rig-scoped template"
+unset SPAWN_EMPTY
+
+echo "# a bead whose prefix names no rig is refused before anything runs"
+run_engage zz-vis --no-attach
+eq "$RC" 4 "(NORIG) an unknown prefix exits 4"
+has "$OUT" "matches no rig" "(NORIG) …saying so"
+hasnt "$CALLED" "session new" "(NORIG) …and spawns nothing"
 
 echo "# attach behaviour: default attaches, --no-attach does not"
 run_engage tk-vis --no-attach

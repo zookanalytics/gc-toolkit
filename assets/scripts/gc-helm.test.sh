@@ -134,6 +134,17 @@ case "$1 ${2:-}" in
     # like a visit that was never stamped. FAKE_OUTCOME_DROP is the write below
     # that exits 0 and yet does not land.
     outcome="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id" 2>/dev/null || true)"
+    # A visit id (v-*) answers with its fixture row from FAKE_STEPS_JSON, so a
+    # verb handed a VISIT (the board lists parked visits as rows of their own)
+    # sees task_kind=visit and the subject it tracks, the way the store would.
+    # gc.outcome still reads back from FAKE_OUTCOME_DIR, as for any bead.
+    case "$id" in v-*)
+      if [ -n "${FAKE_STEPS_JSON:-}" ] && vrow=$(jq -c --arg i "$id" --arg s "$st" --arg oc "$outcome" \
+            '[ .[] | select(.id == $i) | .status = $s | .metadata["gc.outcome"] = $oc ]' "$FAKE_STEPS_JSON" 2>/dev/null) \
+         && [ "$vrow" != "[]" ]; then
+        printf '%s\n' "$vrow"; exit 0
+      fi ;;
+    esac
     # A folded anchor names the bead that carried its work on. The release
     # path reads it to say which disposition it is preserving; an empty
     # string reads the same as an absent key, which is every other bead.
@@ -1107,6 +1118,14 @@ if grep -q 'gc.dismissed_at=' <<< "$DU"; then
 else
     bad "(DISMISS-ROW) gc.dismissed_at not stamped (got: $DU)"
 fi
+# (DISMISS-VISIT-ROW) the closed visit is a DONE row of its own (it carries the
+# gc.routed_to=human anchor stamp), so it is stamped dismissed too — or its row
+# outlives the dismissal for the whole DONE window.
+if grep -q 'gc.dismissed_at=' <<< "$VU"; then
+    ok "(DISMISS-VISIT-ROW) the closed visit is stamped dismissed, so its own DONE row leaves the board"
+else
+    bad "(DISMISS-VISIT-ROW) gc.dismissed_at not stamped on the closed visit (got: ${VU:-<no update on v-HELD>})"
+fi
 if grep -q -- '--append-notes' <<< "$DU"; then
     ok "(DISMISS-NOTES) the reason is appended, never replacing the dispatch note"
 else
@@ -1155,6 +1174,34 @@ if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-QUIET' "$TMP/updates"
     ok "(DISMISS-IDEM) …and the row is still cleared"
 else
     bad "(DISMISS-IDEM) the board half was skipped when there was no visit"
+fi
+
+# (DISMISS-VISITID) the board lists a parked visit as a row of its own and
+# engage takes that id straight off the row, so dismiss must take it too: a
+# visit id dismisses the subject it tracks (stamp, else tracks edge), closing
+# the visit and clearing the subject's row — not stamping the visit as a
+# subject with "no open visit" while its sitting keeps the pane.
+: > "$TMP/updates"; : > "$TMP/closes"
+VOUT="$(sh "$SCRIPT" dismiss v-HELD --reason "done" 2>&1 || true)"
+if grep -q 'closed visit v-HELD' <<< "$VOUT"; then
+    ok "(DISMISS-VISITID) dismissing by visit id closes that visit"
+else
+    bad "(DISMISS-VISITID) the visit was not closed (got: $VOUT)"
+fi
+if grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-PARKED' "$TMP/updates" || true)"; then
+    ok "(DISMISS-VISITID) …and clears the row of the subject it tracks"
+else
+    bad "(DISMISS-VISITID) the subject's row was not cleared (updates: $(cat "$TMP/updates"))"
+fi
+grep -q 'no open visit' <<< "$VOUT" \
+  && bad "(DISMISS-VISITID) the visit id was read as a subject with no visit" \
+  || ok "(DISMISS-VISITID) …never reading the visit id as a visit-less subject"
+: > "$TMP/updates"; : > "$TMP/closes"
+EOUT="$(sh "$SCRIPT" dismiss v-EDGE 2>&1 || true)"
+if grep -q 'closed visit v-EDGE' <<< "$EOUT" && grep -q 'gc.dismissed_at=' <<< "$(grep -E '^bd update A-EDGE' "$TMP/updates" || true)"; then
+    ok "(DISMISS-VISITID-EDGE) a visit with only a tracks edge resolves its subject through the edge"
+else
+    bad "(DISMISS-VISITID-EDGE) edge-only visit id did not dismiss A-EDGE (got: $EOUT / $(cat "$TMP/updates"))"
 fi
 
 # (DISMISS-STUCK) a visit that will not close must not take the row with it.

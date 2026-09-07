@@ -143,8 +143,11 @@ while IFS="$TAB" read -r glyph sev id rig title frontier needs; do
     # Background the engage: spawning a converse sitting takes seconds and
     # must never freeze the tmux server. --no-attach spawns and binds the
     # visit; the operator attaches from the session picker (prefix+S), the way
-    # a pool sitting was reached before.
-    cmd="run-shell -b \"${CMD_PREFIX}${SQ_ATTN} engage ${id} --no-attach\""
+    # a pool sitting was reached before. run-shell drops the job's stderr and
+    # shows only stdout plus "returned N" in its view window, and every engage
+    # refusal (already engaged, blocked, lost race, no template in this rig)
+    # is a stderr line — fold it into stdout so the reason reaches the operator.
+    cmd="run-shell -b \"${CMD_PREFIX}${SQ_ATTN} engage ${id} --no-attach 2>&1\""
 
     if [ "$i" -le ${#HOTKEYS} ]; then
         key=$(printf '%s' "$HOTKEYS" | cut -c"$i")

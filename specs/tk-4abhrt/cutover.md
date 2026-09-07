@@ -43,8 +43,10 @@ never cycled. `gc-helm engage` captures that session's runtime name from
    `formulas/mol-first-reaction.toml`, `formulas/mol-feedback-distiller.toml`,
    `agents/proactive/prompt.template.md`). `assets/scripts/escalate.sh` — which
    files ~85 of the ~91 live converse-routed visits — defaults to `human` and
-   still repoints stale converse routes to the board; `--pool` overrides it to a
-   live pool. `assets/scripts/migrate-lane-states.sh` drops its explicit
+   repoints routes no live pool claims (bare, cross-rig, empty) to the board
+   when a situation is re-raised; a rig-qualified route the still-deployed pool
+   identity claims is left alone until step 2 below moves it. `--pool`
+   overrides the default to a live pool. `assets/scripts/migrate-lane-states.sh` drops its explicit
    converse `--pool`.
 
 3. **The board picker engages.** `assets/scripts/tmux-pick-helm.sh` (prefix+b)
@@ -62,8 +64,11 @@ never cycled. `gc-helm engage` captures that session's runtime name from
    So the cutover adds no pin.
 
 5. **The pool holds nothing.** With every producer routing to the board, the
-   `gc-toolkit.converse` pool receives no demand and spawns no sessions
-   (`min_active_sessions = 0`). The pool is retired in effect. Its
+   `gc-toolkit.converse` pool receives no NEW demand; once the backlog
+   migration (step 2 of the runbook) has run it spawns no sessions
+   (`min_active_sessions = 0`) — until then the un-migrated backlog is still
+   demand it serves, up to `max_active_sessions`. The pool is retired in
+   effect after that step. Its
    `agents/converse/agent.toml` is retained pending the follow-up below, which
    removes it and reshapes the tests that read it — the config file's deletion is
    safely separable from the behavioral cutover and keeps this change's blast

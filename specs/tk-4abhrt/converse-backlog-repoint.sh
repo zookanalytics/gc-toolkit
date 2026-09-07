@@ -13,7 +13,7 @@
 # idempotent — a re-run re-points only what still carries the pool route — so a
 # transient bead routed to the retired pool self-heals on the next run.
 #
-# It matches the POOL address (`.../gc-toolkit.converse`) and NOT the per-model
+# It matches the POOL address (`gc-toolkit.converse`, bare or rig-qualified) and NOT the per-model
 # manual sitting templates (`.../gc-toolkit.converse-opus|-fable|-codex`), whose
 # addresses end in `-opus`/`-fable`/`-codex`.
 #
@@ -34,7 +34,7 @@ while [ $# -gt 0 ]; do
         --rig)    shift; [ $# -gt 0 ] || { echo "converse-backlog-repoint: --rig requires a value" >&2; exit 2; }; RIG="$1"; shift ;;
         --apply)  APPLY=1; shift ;;
         -h|--help)
-            sed -n '2,30p' "$0"; exit 0 ;;
+            awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "converse-backlog-repoint: unknown argument '$1'" >&2; exit 2 ;;
     esac
 done
@@ -45,8 +45,10 @@ command -v jq >/dev/null 2>&1 || { echo "converse-backlog-repoint: jq is require
 RIG_FLAG=""
 [ -n "$RIG" ] && RIG_FLAG="--rig $RIG"
 
-# The retired pool's address ends in `/gc-toolkit.converse`. Match that suffix
-# so every rig-qualified form is caught and no converse-* manual template is.
+# The retired pool's address is `<rig>/gc-toolkit.converse`, or the BARE
+# `gc-toolkit.converse` from a rig-less caller on code that predates escalate's
+# route gate (its own tests seed that form). Match both so every rig-qualified
+# form is caught, and no converse-* manual template is.
 # shellcheck disable=SC2086  # $RIG_FLAG is 0 or 2 space-free fields, intentionally split.
 LISTING=$(gc bd list $RIG_FLAG --status open,in_progress,blocked --limit 0 --json 2>/dev/null) \
     || { echo "converse-backlog-repoint: 'gc bd list' failed for rig '${RIG:-<current>}'" >&2; exit 4; }
@@ -57,7 +59,7 @@ if ! printf '%s' "$LISTING" | jq -e 'type == "array"' >/dev/null 2>&1; then
 fi
 
 TARGETS=$(printf '%s' "$LISTING" | jq -r '
-    [ .[] | select(((.metadata // {})["gc.routed_to"] // "") | endswith("/gc-toolkit.converse")) ]
+    [ .[] | select(((.metadata // {})["gc.routed_to"] // "") | (. == "gc-toolkit.converse" or endswith("/gc-toolkit.converse"))) ]
     | .[] | "\(.id)\t\(.status)\t\((.metadata["task_kind"]) // "-")\t\(.metadata["gc.routed_to"])"')
 
 if [ -z "$TARGETS" ]; then
@@ -74,8 +76,7 @@ if [ "$APPLY" -ne 1 ]; then
     exit 0
 fi
 
-FAIL=0
-printf '%s\n' "$TARGETS" | while IFS="$(printf '\t')" read -r id _status _kind _route; do
+printf '%s\n' "$TARGETS" | while IFS="$(printf '\t')" read -r id _; do
     [ -n "$id" ] || continue
     # A metadata write bypasses bd's claim guard, so an actively-held visit is
     # re-pointed too: the sitting holds it by assignee, not by route, and the
@@ -85,15 +86,14 @@ printf '%s\n' "$TARGETS" | while IFS="$(printf '\t')" read -r id _status _kind _
         echo "    re-pointed $id -> human"
     else
         echo "    FAILED to re-point $id (re-run to retry)" >&2
-        FAIL=1
     fi
 done
 
-# The while-loop runs in a pipeline subshell, so re-derive the outcome from the
-# store rather than trusting $FAIL across the subshell boundary.
+# The while-loop runs in a pipeline subshell, so the outcome is re-derived from
+# the store rather than carried out of the loop.
 # shellcheck disable=SC2086
 REMAIN=$(gc bd list $RIG_FLAG --status open,in_progress,blocked --limit 0 --json 2>/dev/null \
-    | jq -r '[ .[] | select(((.metadata // {})["gc.routed_to"] // "") | endswith("/gc-toolkit.converse")) ] | length' 2>/dev/null || echo "?")
+    | jq -r '[ .[] | select(((.metadata // {})["gc.routed_to"] // "") | (. == "gc-toolkit.converse" or endswith("/gc-toolkit.converse"))) ] | length' 2>/dev/null || echo "?")
 if [ "$REMAIN" = "0" ]; then
     echo "converse-backlog-repoint: done — nothing remains on the retired converse pool in rig '${RIG:-<current>}'."
     exit 0
