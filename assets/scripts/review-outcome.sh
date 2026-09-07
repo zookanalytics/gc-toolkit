@@ -45,7 +45,6 @@ set -uo pipefail
 # consumers downstream split jq's own @tsv, emitted after this runs.
 scrub() { tr -d '\000-\011\013-\037'; }
 # <<< control-char-scrub
-bd_json() { gc bd "$@" --json 2>/dev/null | scrub; }
 warn() { echo "review-outcome: $*" >&2; }
 
 ALL_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"

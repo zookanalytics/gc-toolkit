@@ -90,16 +90,19 @@ echo "validating lane $LANE on anchor $ANCHOR at ${REVIEWED_OID:-<unpinned>}"
 An absent `check_name` resolves to `codex`, the same default lane-state.sh and
 gate-ensure.sh use, so a pass dispatched without one rules the codex lane.
 
-**3. Read the batch.** The findings to rule are the open `task_kind=finding`
+**3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition
-still `unvalidated`. Read into a variable and prove BOTH that the list command
-succeeded AND that it returned a JSON array before you read it: a bare
+still `unvalidated`. "Live" is the whole non-closed status list `finding.sh`
+itself reads (`open,in_progress,blocked,deferred,hooked,pinned`), not just
+`open`: a narrower filter drops a finding that is merely parked, and a dropped
+finding is one nobody ever rules. Read into a variable and prove BOTH that the
+list command succeeded AND that it returned a JSON array before you read it: a bare
 `gc bd list ... | jq` pipeline exits 0 with empty stdout when the store cannot be
 read, and an empty batch reads as "no findings" — the same shape a converged
 lane has — so an unreadable ledger would green the lane without ruling the
 findings it holds. Fail closed instead:
 ```bash
-BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked --limit=0 --json) \
+BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json) \
   || { echo "cannot read the finding ledger for anchor $ANCHOR; refusing to treat an unreadable store as an empty batch" >&2; exit 1; }
 printf '%s' "$BATCH_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
   || { echo "finding ledger for anchor $ANCHOR did not read back as a JSON array; refusing to proceed on malformed output" >&2; exit 1; }
@@ -114,7 +117,7 @@ why it matters, and the fix the reviewer proposed. That is what you rule on.
 
 **4. Read the intent.** The anchor bead (`metadata.anchor_bead`) and the PR or
 branch it gates tell you what the diff was for, which is what makes a finding
-"introduces risk" judgeable in step 2.
+"introduces risk" judgeable in `triage-findings`.
 
 **5. Close this step bead so the graph advances.** Non-terminal step, no drain —
 the same session carries on into `triage-findings`:
@@ -152,7 +155,7 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
   [ -x "$c/assets/scripts/finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 [ -n "$SCRIPTS" ] || { echo "finding.sh not found in the pack" >&2; exit 1; }
-BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked --limit=0 --json) \
+BATCH_JSON=$(gc bd list --metadata-field anchor_bead="$ANCHOR" --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json) \
   || { echo "cannot read the finding ledger for anchor $ANCHOR; refusing to treat an unreadable store as an empty batch" >&2; exit 1; }
 printf '%s' "$BATCH_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
   || { echo "finding ledger for anchor $ANCHOR did not read back as a JSON array; refusing to proceed on malformed output" >&2; exit 1; }
@@ -163,7 +166,7 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | "\\(.id)\\t\\(.title)"'
 ```
 
-**The threshold ({{defer_policy}}):**
+**The threshold** — this rig's `defer_policy`, rendered here at pour:
 
 {{defer_policy}}
 
@@ -184,7 +187,9 @@ dependency edge by hand:
 - **deferred** — a real objection, but fixing it now introduces risk or might
   break something, so it lands as a tracked bead and needs fresh work once the
   PR merges. `finding.sh` wires `--discovered-from`, which records provenance
-  and holds nothing.
+  and holds nothing, and appends your `--reason` to the finding — a deferred
+  finding blocks nothing, so that note is the only place whoever picks it up
+  after the merge can read why it was left. Always give one.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition deferred --reason "<why fixing now is riskier than deferring>"
   ```
@@ -194,11 +199,21 @@ dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined --reason "<why this is not an objection>"
   ```
 
+**Check every exit status.** `finding.sh set-disposition` stamps the
+disposition FIRST and wires the edge second, so a non-zero exit can leave a
+finding reading `must-fix` while nothing blocks the anchor — an objection that
+looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
+exit from any `set-disposition` call stops the pass here: do not close this step
+and do not go on to `rule-convergence`; append what failed to the
+validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
+leave the chain open for the next claim to resume.
+
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you neither must-fixed nor declined is
-silently dropped. If the batch was empty — the reviewer found nothing — there is
-nothing to rule here and the lane converges by definition; carry on to
-`rule-convergence`.
+silently dropped. An empty batch means only that nothing is left to rule — the
+reviewer found nothing, or an earlier pass already ruled it all. It settles
+nothing about decision 3: carry on to `rule-convergence` and judge convergence
+there on the batch's own evidence, never on the emptiness of this read.
 
 A deferred finding needs a bead someone can pick up later; filing that follow-up
 work is the fix-unit dispatch the gate authority owns (tk-o1bzbm), not this pass.
@@ -231,6 +246,7 @@ M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LANE=codex
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
+[ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/review-outcome.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done

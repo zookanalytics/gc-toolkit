@@ -64,8 +64,11 @@ eq "$(grep -c "^$F1|blocks|tk-anc$" "$STUB_DEPS")" "1" "re-running must-fix adds
 # set-disposition deferred: discovered-from holds nothing — the probe ignores it.
 # ---------------------------------------------------------------------------
 F3=$("$SUT" upsert --anchor tk-anc --lane codex --locus "docs/x.md" --message "stale reference to a retired script")
-"$SUT" set-disposition --finding "$F3" --anchor tk-anc --disposition deferred
+"$SUT" set-disposition --finding "$F3" --anchor tk-anc --disposition deferred --reason "the rewrite it needs lands in the next PR"
 eq "$(meta "$F3" 'finding.disposition')" "deferred" "disposition recorded as deferred"
+# A deferred finding holds nothing and outlives the merge: its bead is the only
+# place whoever picks it up can read WHY it was not fixed now.
+has "$(notes "$F3")" "the rewrite it needs lands in the next PR" "the deferral reason is recorded"
 has "$(deps)" "$F3|discovered-from|tk-anc" "deferred wires finding --discovered-from anchor"
 hasnt "$(deps)" "$F3|blocks|tk-anc" "deferred writes no blocks edge"
 hasnt " $(probe_blockers tk-anc) " " $F3 " "merge.sh's probe does NOT see the deferred finding"
