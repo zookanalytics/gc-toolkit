@@ -507,9 +507,11 @@ STRAY
   if [ "$hold" = "signoff_cap" ] && [ -n "$(meta_of "$row" signoff_cap)" ]; then
     mach_wedge=1
   fi
-  # Quiescence is anchor-wide and read at most once per anchor, lazily, when the
-  # first non-green lane reaches the dispatch decision (a green anchor spends no
-  # such read). compute_quiescence sets the three quiesce_* globals below.
+  # Quiescence is anchor-wide and read at most once per anchor, lazily: the first
+  # non-green lane to reach the dispatch decision computes it, and a fully green
+  # anchor computes it once at the settle decision below (settling asserts nothing
+  # is owed, which an open must-fix finding, fix unit, or validation pass
+  # contradicts). compute_quiescence sets the three quiesce_* globals below.
   quiesce_computed=0
   quiesce_hold=""
   quiesce_reason=""
@@ -750,6 +752,22 @@ GATES
   # holds every gate at once, so no amount of progress on the others moves it,
   # and the operator's move is the same one either way.
   if [ -n "$head" ]; then
+    # Settling asserts nothing is owed, which is more than every lane deriving
+    # green: an open must-fix finding, an in-flight fix unit, or a validation
+    # pass acts on the anchor as a whole, not on a lane this loop visited. That
+    # is quiescence, the predicate the dispatch decision already consults. A
+    # fully green anchor lets the loop skip the lazy compute, so run it here
+    # before settling and fail closed — a hold, or a probe that cannot answer,
+    # is progressing, not settled.
+    if [ "$mach_wedge" = 0 ] && [ "$mach_progress" = 0 ]; then
+      if [ "$quiesce_computed" = 0 ]; then
+        quiesce_computed=1
+        compute_quiescence "$id"
+      fi
+      if [ -n "$quiesce_hold" ] || [ "$quiesce_unreadable" = 1 ]; then
+        mach_progress=1
+      fi
+    fi
     if [ "$mach_wedge" = 1 ]; then mach="wedged-exception"
     elif [ "$mach_progress" = 1 ]; then mach="progressing"
     else mach="settled"

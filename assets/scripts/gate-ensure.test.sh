@@ -861,6 +861,23 @@ for bad_shape in "settled" "settled@OID@" "settled@OID@2026-08-28T04:05:06Z@x"; 
   esac
 done
 
+echo "# machine axis: a green anchor still being acted on is progressing, not settled"
+# Every declared lane deriving green is not the same as nothing owed. Quiescence
+# is anchor-wide — an open must-fix finding, an in-flight fix unit, or an open
+# validation pass — and none of those is a pool-routed blocker the gate loop
+# visits, so a fully green anchor reaches the settle decision with the loop's
+# progress flag still clear. Recording settled would render the board row green
+# while the anchor is still being worked, so quiescence is computed before
+# settling and any hold names the anchor progressing.
+store "[$(anchor X10 pull_request codex "" polecat/x10), $(backed rev-x10 X10), $(mustfix find-x10 X10)]"
+oid x10 > "$GH_DIR/head_polecat_x10"
+run >/dev/null
+eq "$(pinned X10)" "progressing@$(oid x10)" "a green lane with an open must-fix finding records progressing, not settled"
+store "[$(anchor X11 pull_request codex "" polecat/x11), $(backed rev-x11 X11), $(validation val-x11 X11)]"
+oid x11 > "$GH_DIR/head_polecat_x11"
+run >/dev/null
+eq "$(pinned X11)" "progressing@$(oid x11)" "a green lane with an open validation pass records progressing, not settled"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
