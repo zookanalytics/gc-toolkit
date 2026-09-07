@@ -42,7 +42,7 @@ agents/proactive/PROVENANCE.md
 agents/proactive/agent.toml
 2ab0d0a15e057e2a1163ac3f1e0c6d882e53f39aa7975af74215ad0dbc306453
 agents/proactive/prompt.template.md
-7f66f068944a0572f0f074c7ccc379bb9159925c5f738214eee77350bd9a4922
+8b481a2fa97b1ffec952e743b782f3060392f55e75a620e4b86aafb2cd1b6e7b
 agents/refinery/agent.toml
 ccf0fa8747e70a0e268b6041cd5d883cb858295fff27918e85ab64b503aea324
 agents/refinery/prompt.template.md
@@ -62,7 +62,7 @@ formulas/mol-feedback-distiller.toml
 formulas/mol-feedback-miner.toml
 d3c3597bf30a4e678d94b228be2ac3187f4d7ae0e403bcf44cb6b26c27ba6885
 formulas/mol-first-reaction.toml
-4e110a1ec2fb0adb85e381a5f18f061ccbf4258c3a62dc1274a40bd64709cec8
+4ac52c27cc10bef86ddd3918bb2da5351a7aeca54567956dc32dd4e7cc7bdb9e
 formulas/mol-polecat-work.toml
 f1be8d2dbab54a3daec0fe5ea076759d84596e064c57a6c144354cc7e010c747
 formulas/mol-refinery-patrol.toml
