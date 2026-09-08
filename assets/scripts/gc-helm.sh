@@ -430,10 +430,10 @@ quiesce_release_molecule_steps() (
 # Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release adds
 # two acts to that stamp: PARK the anchor, and QUIESCE the molecule beneath it.
 #
-# The park (reopen, unassign, stamp the route, gc.proactive_reaction=1) rides
-# the same write as the headline, so a reaction that concludes "this is work"
-# hands the bead on in the write that records the conclusion: either the whole
-# disposition lands or none of it does. It applies to an anchor still standing.
+# The park (reopen, unassign, stamp the route) rides the same write as the
+# headline, so a reaction that concludes "this is work" hands the bead on in the
+# write that records the conclusion: either the whole disposition lands or none
+# of it does. It applies to an anchor still standing.
 # A closed anchor was disposed already, so it keeps that disposition and gets
 # the quiesce alone.
 #
@@ -667,8 +667,7 @@ cmd_takeaway() {
     # refuse to route it; a release means that pour is over, so the stamp goes
     # with the route.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
-               --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
-               --set-metadata "gc.proactive_reaction=1"
+               --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
@@ -1194,10 +1193,9 @@ cmd_open() {
 }
 
 # ── Verb: react ──────────────────────────────────────────────────────
-# Thin wrapper over tools/gc-proactive.sh `sling` (which owns the
-# budget/cap clamp and the codex-gated mr merge path): slings
-# mol-first-reaction at the bead so a worker writes a first-reaction card
-# and stamps gc.takeaway.
+# Thin wrapper over tools/gc-proactive.sh `sling` (which owns the budget/cap
+# clamp): routes the bead raw to the proactive pool so a worker claims it,
+# writes a first-reaction card, and stamps gc.takeaway.
 cmd_react() {
     bead=""; reason=""; nudge=""; dry=""
     while [ $# -gt 0 ]; do

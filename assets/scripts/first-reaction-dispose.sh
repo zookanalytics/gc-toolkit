@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # first-reaction-dispose.sh — the disposition a first reaction ends in.
-# mol-first-reaction's terminal step chooses one of three exits from the card
-# it just wrote, and this script performs it. Each exit advances the subject
-# and records what was chosen and why; none of them closes it.
+# The proactive prompt chooses one of four exits from the card it just wrote,
+# and this script performs it. Each exit advances the subject and records what
+# was chosen and why; only superseded closes it, and only through the one
+# evidence-gated writer.
 #
 #   actionable  the bead is work -> release it TO a pool, which is the whole
 #               of "schedule an action for a bead": a routed, unassigned,
@@ -11,11 +12,16 @@
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts.
 #   ruling      only the operator can answer -> the visit its caller filed.
+#   superseded  another bead already carries this one's work -> release it, then
+#               close it through bead-rehome.sh --kind fixed-upstream|duplicate,
+#               which re-establishes the evidence itself. --check runs FIRST, so
+#               a release is never followed by a refused close; on its refusal
+#               nothing is written and the caller takes ruling instead.
 #
-# The route/edge/visit is the act; gc.first_reaction* is the record of it, and
-# is written FIRST so a disposition that dies half-way is still auditable.
-# Callers: formulas/mol-first-reaction.toml (advance-and-drain), operators by
-# hand. Exit: 0 disposed · 2 usage · 4 runtime failure.
+# The route/edge/visit/close is the act; gc.first_reaction* is the record of it,
+# and is written FIRST so a disposition that dies half-way is still auditable.
+# Callers: agents/proactive/prompt.template.md, operators by hand.
+# Exit: 0 disposed · 2 usage · 4 runtime failure (including a refused --check).
 set -u
 
 PROG="first-reaction-dispose"
@@ -23,6 +29,7 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
 DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$HERE/deferred-dispatch.sh}"
 PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
+REHOME="${GC_BEAD_REHOME_TOOL:-$HERE/bead-rehome.sh}"
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
@@ -46,6 +53,8 @@ Usage:
                             [--then-route <rig>/<agent>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
                             --visit <visit-bead-id>
+  first-reaction-dispose.sh <bead> --disposition superseded --reason "<why>" --takeaway "<headline>"
+                            --successor <bead-id> [--kind fixed-upstream|duplicate]
   common: [--by <who>] [--db <path>] [--dry-run]
 
   --reason is required on every exit: a disposition nobody can second-guess is
@@ -58,11 +67,16 @@ Usage:
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh).
+  --successor is the bead that already carries this one's work; --kind defaults
+  to fixed-upstream. The close runs through bead-rehome.sh, which re-checks its
+  own evidence — a superseded exit refused by --check writes nothing and the
+  caller takes ruling instead.
 EOF
 }
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
+SUCCESSOR=""; KIND=""
 DB=""; DRY=""
 WAITING=""          # space-separated bead ids
 
@@ -88,6 +102,10 @@ while [ $# -gt 0 ]; do
         --blocker-key=*) BLOCKER_KEY="${1#--blocker-key=}"; shift ;;
         --visit)    shift; [ $# -gt 0 ] || usage_die "--visit needs a bead id"; VISIT="$1"; shift ;;
         --visit=*)  VISIT="${1#--visit=}"; shift ;;
+        --successor)   shift; [ $# -gt 0 ] || usage_die "--successor needs a bead id"; SUCCESSOR="$1"; shift ;;
+        --successor=*) SUCCESSOR="${1#--successor=}"; shift ;;
+        --kind)     shift; [ $# -gt 0 ] || usage_die "--kind needs a value"; KIND="$1"; shift ;;
+        --kind=*)   KIND="${1#--kind=}"; shift ;;
         --db)       shift; [ $# -gt 0 ] || usage_die "--db needs a path"; DB="$1"; shift ;;
         --db=*)     DB="${1#--db=}"; shift ;;
         --dry-run|-n) DRY=1; shift ;;
@@ -100,9 +118,9 @@ done
 # ── Validation: refuse before writing anything ───────────────────────
 [ -n "$BEAD" ] || usage_die "needs <bead-id>"
 case "$DISPOSITION" in
-    actionable|blocked|ruling) : ;;
-    "") usage_die "needs --disposition actionable|blocked|ruling" ;;
-    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|ruling)" ;;
+    actionable|blocked|ruling|superseded) : ;;
+    "") usage_die "needs --disposition actionable|blocked|ruling|superseded" ;;
+    *)  usage_die "unknown disposition '$DISPOSITION' (actionable|blocked|ruling|superseded)" ;;
 esac
 [ -n "$REASON" ]   || usage_die "--reason is required: the record of WHY this disposition was chosen is what makes a wrong call visible"
 [ -n "$TAKEAWAY" ] || usage_die "--takeaway is required: it is the board headline the operator reads"
@@ -143,8 +161,19 @@ case "$DISPOSITION" in
         fi
         ;;
     ruling)
-        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE" ] || usage_die "ruling takes --visit only"
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$SUCCESSOR" ] || usage_die "ruling takes --visit only"
         [ -n "$VISIT" ] || usage_die "ruling needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
+        ;;
+    superseded)
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$VISIT" ] || usage_die "superseded takes --successor/--kind only"
+        [ -n "$SUCCESSOR" ] || usage_die "superseded needs --successor <bead-id>: the bead that already carries this one's work"
+        [ "$SUCCESSOR" != "$BEAD" ] || usage_die "--successor $SUCCESSOR is the bead itself"
+        [ -n "$KIND" ] || KIND="fixed-upstream"
+        case "$KIND" in
+            fixed-upstream|duplicate) : ;;
+            *) usage_die "superseded --kind must be fixed-upstream or duplicate (got '$KIND'); the judgment kinds re-homed|folded|not-needed are a ruling, not a reaction's own call" ;;
+        esac
+        [ -x "$REHOME" ] || die "bead-rehome.sh not found at $REHOME; superseded closes only through that one writer"
         ;;
 esac
 
@@ -183,17 +212,16 @@ subject_meta() {
 
 # ── A first reaction happens once ────────────────────────────────────
 # The act below stamps gc.first_reaction* and releases the subject through
-# gc-helm.sh takeaway --release, which reopens and unassigns it; the caller
-# then stamps gc.proactive_reaction=1. A re-offered advance-and-drain that runs
-# this a second time re-releases a bead a worker has since claimed, yanking
-# live work back to the pool. The first run's stamps describe it fully, so
-# refuse and name them — a second dispose is never correct.
+# gc-helm.sh takeaway --release, which reopens and unassigns it. A re-offered
+# reaction that runs this a second time re-releases a bead a worker has since
+# claimed, yanking live work back to the pool. gc.first_reaction is the record
+# the first run leaves, and it describes the disposition fully, so refuse and
+# name it — a second dispose is never correct.
 PRIOR_REACTION=$(subject_meta "gc.first_reaction")
-PRIOR_PROACTIVE=$(subject_meta "gc.proactive_reaction")
-if [ -n "$PRIOR_REACTION" ] || [ "$PRIOR_PROACTIVE" = "1" ]; then
+if [ -n "$PRIOR_REACTION" ]; then
     PRIOR_AT=$(subject_meta "gc.first_reaction_at")
     PRIOR_TARGET=$(subject_meta "gc.first_reaction_target")
-    usage_die "$BEAD already carries a first reaction (gc.first_reaction=${PRIOR_REACTION:-<unset>}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
+    usage_die "$BEAD already carries a first reaction (gc.first_reaction=${PRIOR_REACTION}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
 fi
 
 # ── Route only where something can claim ─────────────────────────────
@@ -228,6 +256,7 @@ if [ -n "$DRY" ]; then
         actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
         ruling)     printf 'would record visit %s on %s\n' "$VISIT" "$BEAD" ;;
+        superseded) printf 'would close %s as %s of %s (after bead-rehome --check)\n' "$BEAD" "$KIND" "$SUCCESSOR" ;;
     esac
     exit 0
 fi
@@ -264,6 +293,19 @@ $REASON" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id //
     fi
 fi
 
+# ── superseded checks its close is allowed BEFORE it releases ─────────
+# bead-rehome.sh re-establishes the close evidence itself; run it in --check
+# mode first, so a release (which reopens and unassigns the subject) is never
+# followed by a close the evidence refuses — that would strand the subject
+# open, unassigned and unrouted. On a refusal nothing here is written; the
+# reaction reads the reason and takes ruling instead.
+if [ "$DISPOSITION" = "superseded" ]; then
+    CHECK_ERR="$("$REHOME" --check --origin "$BEAD" --successor "$SUCCESSOR" --kind "$KIND" 2>&1)" || {
+        printf '%s\n' "$CHECK_ERR" >&2
+        die "superseded refused by bead-rehome --check on $BEAD -> $SUCCESSOR ($KIND); nothing was written. Take --disposition ruling instead."
+    }
+fi
+
 # ── The record, before the act ───────────────────────────────────────
 # What was chosen, why, and what it names. Written first so a run that dies
 # part-way leaves the classification visible instead of an unexplained bead.
@@ -272,6 +314,7 @@ case "$DISPOSITION" in
     actionable) TARGET="$ROUTE" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
     ruling)     TARGET="$VISIT" ;;
+    superseded) TARGET="$SUCCESSOR" ;;
 esac
 gc_bd update "$BEAD" \
     --set-metadata "gc.first_reaction=$DISPOSITION" \
@@ -294,6 +337,7 @@ set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable) set -- "$@" --route "$ROUTE" --no-wait ;;
     blocked)    for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
+    superseded) set -- "$@" --no-wait ;;   # released with no route; bead-rehome closes it next
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."
 
@@ -324,6 +368,16 @@ if [ "$DISPOSITION" = "blocked" ]; then
             note "WARNING: deferred-dispatch.sh not found at $DEFERRED; the wait holds but nothing will route $BEAD when it lifts"
         fi
     fi
+fi
+
+# superseded: the release above reopened and unassigned the subject; now close
+# it through the one writer. --check already passed, so bead-rehome's own gate
+# re-runs green here; a failure now is a live store problem (the write refused,
+# a race reclaimed the bead), reported so the reaction stops rather than
+# draining over a released-but-not-closed subject.
+if [ "$DISPOSITION" = "superseded" ]; then
+    "$REHOME" --origin "$BEAD" --successor "$SUCCESSOR" --kind "$KIND" --note "$REASON" \
+        || die "bead-rehome could not close $BEAD as $KIND of $SUCCESSOR after the release; its message above names what stuck. The subject is open, unassigned and route-cleared; judge the refusal and finish the close by hand."
 fi
 
 printf '%s: %s disposed as %s (%s)\n' "$PROG" "$BEAD" "$DISPOSITION" "${TARGET:-no target}"
