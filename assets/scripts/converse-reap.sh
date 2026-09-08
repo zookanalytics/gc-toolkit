@@ -89,12 +89,12 @@ while IFS=$'\t' read -r sid vid; do
         skipped=$((skipped + 1)); continue
     fi
 
-    # Read the visit, capturing stdout and exit status SEPARATELY. `gc bd show`
-    # exits non-zero for an id that resolves to nothing, yet still prints the
-    # not-found object that proves the visit is GONE — so blanking stdout on a
-    # non-zero exit (the old `|| show=""`) threw that answer away and leaked the
-    # slot. An answer that is not JSON at all — empty, or a garbled/failed read —
-    # carries nothing to classify and is an unreadable probe: never reap.
+    # Read the visit, capturing stdout and exit status SEPARATELY: `gc bd show`
+    # exits non-zero for an id that resolves to nothing yet still prints the
+    # not-found object that proves the visit is GONE, so stdout must survive a
+    # non-zero exit for that signature to be classified. An answer that is not
+    # JSON at all — empty, or a garbled/failed read — carries nothing to classify
+    # and is an unreadable probe: never reap.
     show="$("$GC" bd show "$vid" --json 2>/dev/null)"; show_rc=$?
     if ! printf '%s' "$show" | jq -e . >/dev/null 2>&1; then
         skipped=$((skipped + 1)); continue

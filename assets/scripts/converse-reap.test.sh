@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for converse-reap.sh (tk-2i4bde).
+# Hermetic test for converse-reap.sh.
 #
 # converse-reap ends a converse sitting once its visit has closed: converse is
 # spawn-on-engagement, the manual session is exempt from every pool backstop, and
@@ -18,7 +18,7 @@
 #             the single object it returns for one id
 #   (OPEN)    a session whose visit is still open (a live hold) is kept
 #   (ATTACHED) a session an operator is attached to is NEVER closed, even with a
-#             closed visit — the typed-text hard-no, and the tk-8nt4tt case
+#             closed visit — the typed-text hard-no
 #   (NONVISIT) an alias that resolves to a non-visit bead is left alone
 #   (NOALIAS)  a converse session with no alias is left alone
 #   (BADALIAS) an alias whose tail is not a bead id is left alone
