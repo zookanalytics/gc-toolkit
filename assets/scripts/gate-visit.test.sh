@@ -10,8 +10,11 @@
 # formulas-only; gc-helm.sh's `open` verb carries the copy the operator front
 # doors actually reach — and asserts the load-bearing invariants each stamp
 # carries (each has a silent-failure trap the pack has paid for):
-#   - the visit parks on the board: POOL="human", the literal the board's
-#     gather matches (gc.routed_to == "human") on the exact-string read side
+#   - each copy routes to the board (POOL="human", the literal the board's
+#     gather matches on gc.routed_to == "human") or to a pool proved by
+#     pool-route.sh against the live agent set; either way the conditional rig
+#     prefix that renders bare for a rig-less caller is gone (a pool offer is
+#     read by exact string equality, so a bare address sits silently forever)
 #   - the three metadata stamps ride one --set-metadata flag each
 #     (comma-joined pairs become one garbage value)
 #   - the visit is wired to its subject with a tracks edge (parent-child
@@ -70,15 +73,44 @@ check_file() {
         # Leading whitespace tolerated: a copy living inside a shell function
         # (gc-helm.sh's cmd_open) is legitimately indented, and an assertion
         # anchored at column 0 would report a correct POOL line as "absent".
-        # The converse routed-pool is retired: a filed visit parks on the helm
-        # board, whose gather matches gc.routed_to == "human" exactly. Every
-        # copy's default route is that literal. (escalate.sh reassigns POOL from
-        # --pool on the NEXT line; grep anchors on POOL= so it reads this one.)
-        pool_line="$(grep -E '^[[:space:]]*POOL=' "$tmp" | head -n1 || true)"
-        case "$pool_line" in
-            *'POOL="human"') ok "$name: parks the visit on the board (POOL=human)" ;;
-            *) bad "$name: parks the visit on the board (POOL=human)" "POOL line: ${pool_line:-absent}" ;;
+        # A gate-visit copy routes EITHER to the board (POOL="human", the retired
+        # converse pool's replacement; the board's gather matches
+        # gc.routed_to == "human" exactly) OR to a pool proved by pool-route.sh
+        # (a fix/rework or polecat pool that survives). EVERY POOL assignment is
+        # checked, not the first: a copy that resolves the route and then
+        # overwrites POOL is back where it started. (escalate.sh reassigns POOL
+        # from --pool, but through pool-route.sh, so it too is a guarded call.)
+        pool_lines="$(grep -E '^[[:space:]]*POOL=' "$tmp" || true)"
+        unproved="$(printf '%s\n' "$pool_lines" \
+            | grep -vE 'POOL="human"|POOL=\$\(.*POOL_ROUTE.*\)[[:space:]]*\|\|[[:space:]]*exit' || true)"
+        if [ -n "$pool_lines" ] && [ -z "$unproved" ]; then
+            ok "$name: every POOL assignment is the board literal or a guarded pool-route.sh call"
+        else
+            bad "$name: every POOL assignment is the board literal or a guarded pool-route.sh call" \
+                "POOL line(s): ${pool_lines:-absent}"
+        fi
+        # The construct the resolver replaces must be GONE, not merely unused:
+        # GC_RIG picks both the store the visit lands in and the rig segment a
+        # rig-scoped pool carries, so a copy that rebuilds the address itself
+        # renders it bare for a rig-less caller and files a visit nobody holds.
+        case "$block" in
+            *'${GC_RIG:+$GC_RIG/}'*)
+                bad "$name: no conditional rig prefix" "the copy still builds an address out of GC_RIG" ;;
+            *)  ok "$name: no conditional rig prefix" ;;
         esac
+        # ...and a copy that RESOLVES a pool through the resolver must name the
+        # SHARED one. A copy is free to bind it outside its own markers
+        # (escalate.sh does), so the file carries the proof, not the block. A
+        # board-only copy (POOL="human") resolves no pool and needs none.
+        if printf '%s\n' "$pool_lines" | grep -qE 'POOL=\$\(.*POOL_ROUTE'; then
+            if grep -qF 'pool-route.sh' "$f"; then
+                ok "$name: POOL_ROUTE names the shared resolver"
+            else
+                bad "$name: POOL_ROUTE names the shared resolver" "no pool-route.sh anywhere in $f"
+            fi
+        else
+            ok "$name: board route resolves no pool"
+        fi
         printf '%s' "$block" | grep -qE 'gc bd create -t task --title "visit: ' \
             && ok "$name: visit title brand" || bad "$name: visit title brand" 'no `--title "visit: …"` create'
         printf '%s' "$block" | grep -qF -- '--set-metadata "gc.routed_to=$POOL"' \
@@ -153,8 +185,12 @@ cat > "$EXTMP/bin/gc" <<'GVSTUB'
 #!/usr/bin/env bash
 # Serves the reads the block makes. LOST=1 makes the first stamp vanish —
 # the observed failure: the update returns 0 and the value reads back empty.
+# $AGENTS is the live identity set the route is proved against; an arm that
+# answered nothing would read as UNREADABLE, which fails open and would take
+# the whole route check out of this suite.
 case "$1 ${2:-}" in
-  "bd create") echo '{"id":"v-1"}' ;;
+  "agent list") printf '%s\n' "${AGENTS:-}" ;;
+  "bd create") printf 'CREATE %s\n' "$*" >> "$LOG"; echo '{"id":"v-1"}' ;;
   "bd update") printf 'UPDATE %s\n' "$*" >> "$LOG"
                case "$*" in *gc.continuation_group=*)
                  if [ -f "$STATE/stamped" ]; then touch "$STATE/repaired"; else touch "$STATE/stamped"; fi ;;
@@ -175,9 +211,13 @@ chmod +x "$EXTMP/bin/gc"
 awk '/# >>> gate-visit/{f = 1; next} /# <<< gate-visit/{f = 0} f' "$FDIR/mol-visit.toml" \
     | sed 's/{{subject}}/sub-A/g; s/{{visit}}/why/g; s/{{binding_prefix}}/gc-toolkit./g' \
     > "$EXTMP/block.sh"
+# The canonical copy parks on the board (POOL="human", the retired converse
+# pool's replacement) and resolves no pool, so this run exercises the create and
+# the continuation_group repair, not a route. The route-refusal proof lives with
+# the surviving pool-route.sh call sites (escalate.test.sh executes it).
 run_block_gv() { # <LOST> -> stdout+stderr of the block; $EXTMP/log side-effects
     rm -rf "$EXTMP/state"; mkdir -p "$EXTMP/state"; : > "$EXTMP/log"
-    env PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST="$1" GC_RIG=rig \
+    PATH="$EXTMP/bin:$PATH" LOG="$EXTMP/log" STATE="$EXTMP/state" LOST="$1" GC_RIG=rig \
         bash "$EXTMP/block.sh" 2>&1
 }
 group_writes() { grep -c 'gc.continuation_group=' "$EXTMP/log" 2>/dev/null || echo 0; }
