@@ -581,9 +581,10 @@ func doneSince(now time.Time) (time.Time, bool) {
 // the anchors it produces as DONE.
 func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, status beads.Status, closedAfter *time.Time) {
 	// Phase 1 — collect every anchor for this rig+status, typed then
-	// metadata-keyed, WITHOUT reading any edges. The order (typed first) is the
-	// same order the anchors used to be appended in, which BuildBoard's id-dedup
-	// depends on: a bead gathered twice keeps its first kind (tk-2v08m).
+	// metadata-keyed, WITHOUT reading any edges. Typed kinds are appended first
+	// because BuildBoard's id-dedup keeps the first kind a bead is gathered
+	// under, so a bead that qualifies as both a typed and a metadata-keyed anchor
+	// keeps its typed kind.
 	var pending []pendingAnchor
 	for _, kind := range typedAnchorKinds {
 		it := beads.IssueType(kind)
@@ -648,20 +649,19 @@ func needsWaitingEdges(kind string) bool {
 }
 
 // attachEdges resolves the relations of every anchor in pending with at most
-// three store reads for the whole set: one batched INBOUND read (parent-child
-// children), one batched OUTBOUND read (a convoy's `tracks`, everything else's
-// `blocks`), and one SearchIssues that hydrates every far-end issue both name.
-// This is the whole of the fix for the per-anchor N+1 (tk-9tbbk.5): the reads no
-// longer scale with the number of anchors.
+// three store reads for the whole set, never one per anchor: one batched
+// INBOUND read (parent-child children), one batched OUTBOUND read (a convoy's
+// `tracks`, everything else's `blocks`), and one SearchIssues that hydrates
+// every far-end issue both name. The read count is fixed by the rig+status
+// pass, so it does not scale with the number of anchors.
 //
-// The two batched reads fail INDEPENDENTLY, and each failure degrades exactly
-// what the matching per-anchor read used to. A failed dependents read (or a
-// failed hydration) leaves the parent-child roll-ups empty and notes partial,
-// as the old parentChildren/convoyChildren did. A failed dependencies read
+// The two batched reads fail INDEPENDENTLY, and each failure degrades only the
+// roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
+// parent-child roll-ups empty and notes partial. A failed dependencies read
 // leaves `tracks` roll-ups empty AND marks every `blocks`-spending anchor's
 // waits UNKNOWN — not empty — because board.ruled reads an empty wait set as
 // "every recorded wait has landed" and would stand a row down on a graph it
-// could not read (tk-fhd705).
+// could not read.
 func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, pending []pendingAnchor) {
 	var dependentIDs, dependencyIDs []string
 	for i := range pending {
@@ -813,8 +813,7 @@ func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, i
 // the same OUTBOUND read: it reports the blockers a subject waits on and which
 // of them have closed. A blocker whose issue did not hydrate is dropped, not
 // counted as unknown — unknown is reserved for a READ that failed, which the
-// caller signals by not calling this at all (see attachEdges). Mirrors the field
-// extraction the old per-anchor waitingEdges did.
+// caller signals by not calling this at all (see attachEdges).
 func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issue) (blockers []board.Blocker, all, closed []string, unknown bool) {
 	for _, d := range recs {
 		if d == nil || string(d.Type) != "blocks" {

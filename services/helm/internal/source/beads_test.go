@@ -29,7 +29,7 @@ type fakeStore struct {
 	closed   bool
 
 	// Read tallies, for the batched-edge-read acceptance test: the edge reads
-	// must not scale with the number of anchors (tk-9tbbk.5).
+	// must not scale with the number of anchors.
 	searchN, depnN, depyN int
 }
 
@@ -771,7 +771,7 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 // work, so the only trace of the failure is what they report about their edges.
 // Report an empty set and a row is indistinguishable from one that genuinely has
 // no waits, which is precisely the state board.ruled reads as "every recorded
-// wait has landed" and stands the row down (tk-fhd705). So a failed read reports
+// wait has landed" and stands the row down. So a failed read reports
 // UNKNOWN, not empty. The inbound (parent-child) read is a SEPARATE batch and is
 // unaffected: a failed wait read does not also cost an anchor its child roll-up.
 func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
@@ -817,11 +817,11 @@ func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
 	}
 }
 
-// TestEdgeReadsAreBatchedNotPerAnchor is the acceptance criterion for
-// tk-9tbbk.5: the per-anchor edge N+1 that made the board's gather take ~68s is
-// gone. The number of edge reads is fixed by the number of (rig × status-pass)
-// gathers, not by how many anchors those gathers return, so two stores that
-// differ ONLY in anchor count must make the SAME number of edge reads.
+// TestEdgeReadsAreBatchedNotPerAnchor is the acceptance criterion for the
+// batched edge reads: the number of edge reads is fixed by the number of
+// (rig × status-pass) gathers, not by how many anchors those gathers return, so
+// two stores that differ ONLY in anchor count must make the SAME number of edge
+// reads.
 func TestEdgeReadsAreBatchedNotPerAnchor(t *testing.T) {
 	build := func(n int) *fakeStore {
 		st := &fakeStore{
