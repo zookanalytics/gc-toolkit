@@ -1,8 +1,9 @@
-# proactive — the dedicated, small, always-on pool that runs slung first
-# reactions (mol-first-reaction): read the bead, write a card to its notes,
-# then dispose — route the bead to a pool, hold it on a `blocks` edge, or file
-# a visit. NOT a resident loop — triggered per bead by
-# `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction` or
+# proactive — the dedicated, small, always-on pool for first reactions. A bead
+# is routed to it RAW (gc.routed_to only, no formula); a worker claims it with
+# `gc hook --claim`, reads it, writes a card to its notes, and disposes — route
+# the bead to a pool, hold it on a `blocks` edge, file a visit, or close it as
+# superseded — per agents/proactive/prompt.template.md, then drains. NOT a
+# resident loop — a bead reaches it via `tools/gc-proactive.sh sling <bead>` or
 # `tools/gc-proactive.sh scan --sling`. max_active_sessions = 2 is this pool's
 # only throttle: routed beads queue at zero cost until a slot frees, so the
 # pool never starves impl work and never drops a slung reaction. How many
@@ -15,7 +16,7 @@
 scope = "rig"
 wake_mode = "fresh"
 work_dir = ".gc/worktrees/{{.Rig}}/proactive/{{.AgentBase}}"
-nudge = "Run gc hook; proactive demand is routed first-reaction work (mol-first-reaction). If the claim returns nothing, drain."
+nudge = "Claim one routed subject with gc hook --claim, react to it per your prompt (write the card, then dispose), and drain. If the claim returns nothing, drain."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 min_active_sessions = 0
@@ -25,8 +26,8 @@ max_active_sessions = 2
 # board weight (oldest-first within a band), sliced to the worker's page. The
 # jq drops graph.v2 topology ROOTS (gc.kind in workflow/scope/spec) — a root is
 # routed only to name its run and gc hook --claim never offers it; the claimable
-# unit is the routed non-topology STEP (e.g. mol-first-reaction.load-bead),
-# which survives the filter. It reads the FULL routed set (--limit 0) and drops
+# unit is the routed subject bead itself (a plain task/bug/feature/spike), which
+# survives the filter. It reads the FULL routed set (--limit 0) and drops
 # roots BEFORE the 20-row slice, so a page filled by topology roots cannot bury
 # a claimable step behind them — that would leave this query empty while
 # scale_check, which counts the same full filtered set, reads > 0, spawning a

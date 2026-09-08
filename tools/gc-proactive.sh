@@ -1,30 +1,33 @@
 #!/usr/bin/env bash
-# gc-proactive.sh — the proactive-via-slung-mol engine (Bead-Universe Phase 4;
-# v1 design specs/bead-universe/design-doc.md, still governing this tool).
-# "Proactive" is NOT a resident loop: it is mol-first-reaction slung at a
-# bead (read body → write a first-reaction CARD → dispose: route it to a pool,
-# hold it on an edge, or file a visit) so the human arrives at advanced work,
-# and at fewer beads. This tool is the trigger layer:
+# gc-proactive.sh — the proactive first-reaction trigger layer (Bead-Universe
+# Phase 4; v1 design specs/bead-universe/design-doc.md, still governing this
+# tool). "Proactive" is NOT a resident loop: `sling` routes a bead RAW to the
+# proactive pool (gc.routed_to only, no formula), a pool worker claims it,
+# reacts per its prompt (read body → write a first-reaction CARD → dispose:
+# route it to a pool, hold it on an edge, file a visit, or close it as
+# superseded), and drains — so the human arrives at advanced work, and at fewer
+# beads. This tool is the trigger layer:
 #   demand [<pool>]      pool work_query — routed beads, board-ranked
-#   scan [--json|--sling] find movable-forward / opt-in beads; --sling reacts,
+#   scan [--json|--sling] find movable-forward / opt-in beads; --sling routes,
 #                        bounded by GC_PROACTIVE_SLING_CAP per sweep
-#   sling <bead> [--nudge] [-n]  sling a first reaction (mr path, hard-refuses
-#                        --merge direct — the security invariant)
+#   sling <bead> [--nudge] [-n]  route a bead raw to the proactive pool for a
+#                        first reaction
 #   deliverable          "would a sling be picked up?" — no when the city's
 #                        agent roster says this pool cannot pick it up
 #                        (absent, suspended, or capped at zero), exit 0/1
 # The pool's only throttle is its max_active_sessions
 # (agents/proactive/agent.toml); slung beads queue until a slot frees. That
 # bounds how many reactions run at once. GC_PROACTIVE_SLING_CAP is a different
-# bound: how many one `scan --sling` sweep may hand out.
-# Tunables: GC_PROACTIVE_POOL / _MERGE / _SCAN_LIMIT / _SLING_CAP / _FIXTURE
+# bound: how many one `scan --sling` sweep may hand out. Any code a reaction
+# produces takes the codex-gated mr path — enforced by the pool env
+# (GC_DEFAULT_MERGE_STRATEGY=mr) and the prompt, not by this router.
+# Tunables: GC_PROACTIVE_POOL / _SCAN_LIMIT / _SLING_CAP / _FIXTURE
 # (test hook: canned ready/scan/agents .json instead of gc calls).
 set -euo pipefail
 
 PROG="${0##*/}"
 
 POOL_BASE="${GC_PROACTIVE_POOL:-gc-toolkit.proactive}"
-MERGE="${GC_PROACTIVE_MERGE:-mr}"
 SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 # What ONE --sling sweep may hand out. A first reaction can end in a route to
 # the polecat pool, so an uncapped sweep is a queue of implementation sessions
@@ -32,7 +35,6 @@ SCAN_LIMIT="${GC_PROACTIVE_SCAN_LIMIT:-20}"
 # never hands out more than the city can start working in one cycle.
 SLING_CAP="${GC_PROACTIVE_SLING_CAP:-5}"
 FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
-FORMULA="mol-first-reaction"
 # Set by cmd_sling to 1 when it skips an already-reacted bead as a no-op, else
 # empty. cmd_scan's --sling loop reads it in-process to keep a skip from
 # spending the cap; the `sling` CLI verb in main() translates it to
@@ -87,20 +89,16 @@ rig_beads_db() {
 }
 
 # sling_first_reaction_guard — a first reaction happens once, so refuse to
-# re-start mol-first-reaction on a bead that already carries one. A workflow
-# start retires the subject's pool claim route (gascity's
-# retireInputConvoyClaimRoutes), on the premise the started workflow will drive
-# that bead as work. mol-first-reaction does not: it reacts to the subject and,
-# on an already-reacted one, first-reaction-dispose.sh refuses the second
-# dispose. So a re-sling destroys the route the first disposition set and puts
-# nothing in its place, leaving the bead disposed-looking but offered to no
-# pool. gc.first_reaction is stamped by the dispose before it acts,
-# gc.proactive_reaction by the release; either proves a completed reaction. The
-# subject is read from the fixture under test, live otherwise; an unreadable
+# route a bead for one when it already carries a completed reaction. Routing an
+# already-reacted bead re-offers a done reaction to the pool, and a fresh worker
+# re-derives the same disposition on a bead whose disposition already landed.
+# gc.first_reaction is stamped by the dispose before it acts and is the record
+# of that completed reaction. The subject is read from the fixture under test,
+# live otherwise; an unreadable
 # bead is not proof of a reaction, so it proceeds. Returns non-zero when the
 # bead is already reacted, so the caller skips the sling.
 sling_first_reaction_guard() {
-    local bead="$1" meta fr pr detail
+    local bead="$1" meta fr
     if [ -n "$FIXTURE" ]; then
         [ -f "$FIXTURE/beads.json" ] || return 0
         meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
@@ -111,10 +109,8 @@ sling_first_reaction_guard() {
             | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
     fi
     fr="$(printf '%s' "$meta" | jq -r '."gc.first_reaction" // ""' 2>/dev/null || printf '')"
-    pr="$(printf '%s' "$meta" | jq -r '."gc.proactive_reaction" // ""' 2>/dev/null || printf '')"
-    [ -n "$fr" ] || [ "$pr" = "1" ] || return 0
-    detail="gc.first_reaction=${fr:-<unset>}, gc.proactive_reaction=${pr:-<unset>}"
-    log "$PROG: sling: $bead already carries a first reaction ($detail) — not re-slinging. A first reaction happens once; re-slinging retires its route and drives nothing, leaving the bead offered to no pool. Clear the reaction marker to re-react."
+    [ -n "$fr" ] || return 0
+    log "$PROG: sling: $bead already carries a first reaction (gc.first_reaction=$fr) — not re-routing. A first reaction happens once; routing an already-reacted bead re-offers a done reaction to the pool. Clear gc.first_reaction to re-react."
     return 1
 }
 
@@ -147,11 +143,10 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       (GC_PROACTIVE_SLING_CAP). Read-only
                                       without --sling.
        $PROG sling <bead> [--nudge] [-n|--dry-run]
-                                      Sling mol-first-reaction at <bead> on the
-                                      codex-gated mr path. Refuses --merge
-                                      direct (the security invariant). Exit 0
-                                      slung, $RC_ALREADY_REACTED already reacted
-                                      (no-op, nothing slung), 1 error.
+                                      Route <bead> raw (gc.routed_to, no formula)
+                                      to the proactive pool for a first reaction.
+                                      Exit 0 routed, $RC_ALREADY_REACTED already
+                                      reacted (no-op, nothing routed), 1 error.
        $PROG deliverable [<pool-target>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
@@ -164,8 +159,8 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
 Budget: the pool cap (agents/proactive/agent.toml max_active_sessions) throttles
 how many run at once; routed beads queue until a slot frees. One --sling sweep
 hands out at most $SLING_CAP reactions.
-Security: proactive output is mr-only
-(GC_PROACTIVE_MERGE=$MERGE; "direct" is refused).
+Security: any code a reaction produces takes the codex-gated mr path, enforced
+by the pool env (GC_DEFAULT_MERGE_STRATEGY=mr) and the prompt, not by this router.
 EOF
 }
 
@@ -298,10 +293,10 @@ cmd_demand() {
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
 #     catches parented beads, not every convoy member.
 # Plus a state predicate: not already reacted, not routed, has a description;
-# deduped by id. "Not already reacted" drops EITHER marker a completed reaction
-# leaves — gc.proactive_reaction (the release) and gc.first_reaction (the
-# dispose) — the same pair sling_first_reaction_guard refuses, so a reacted bead
-# is dropped here and never reaches the sling loop to spend a cap slot.
+# deduped by id. "Not already reacted" drops the gc.first_reaction a completed
+# reaction leaves — the same marker sling_first_reaction_guard refuses, so a
+# reacted bead is dropped here and never reaches the sling loop to spend a cap
+# slot.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -311,8 +306,7 @@ scan_precision_filter() {
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
     jq --argjson types "$types_json" --argjson markers "$markers_json" '
         map(select(
-            ((.metadata["gc.proactive_reaction"] // "") == "")
-            and ((.metadata["gc.first_reaction"] // "") == "")
+            ((.metadata["gc.first_reaction"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
@@ -438,8 +432,9 @@ cmd_scan() {
 }
 
 # ---------------------------------------------------------------------------
-# sling — route a first reaction at a bead on the mr path. The security
-# invariant lives here: proactive output is mr-only; `direct` is refused.
+# sling — route a bead RAW to the proactive pool for a first reaction: Lane 1,
+# gc.routed_to only, no formula. The reaction's own mr-only invariant lives in
+# the pool env and the prompt, not here (this router pins no merge path).
 # ---------------------------------------------------------------------------
 
 cmd_sling() {
@@ -455,24 +450,17 @@ cmd_sling() {
     done
     [ -n "$bead" ] || { log "$PROG: sling needs <bead-id>"; usage; exit 2; }
 
-    # THE SECURITY INVARIANT: proactive output never takes the direct path.
-    case "$MERGE" in
-        direct) die "security invariant: proactive output must take the codex-gated mr path, never --merge direct (GC_PROACTIVE_MERGE=direct refused)" ;;
-        mr|local) : ;;
-        *) die "sling: unknown merge strategy '$MERGE' (mr|local)" ;;
-    esac
-
-    # A first reaction happens once. Re-slinging one destroys the route the
-    # first disposition set (see sling_first_reaction_guard), so skip it as an
-    # idempotent no-op rather than clobber a live dispatch. cmd_sling returns 0
-    # either way and flags the skip out-of-band in SLING_SKIPPED: the in-process
-    # cmd_scan --sling loop reads that flag to tell a skip from a dispatch and
-    # not spend a cap slot on it, and the `sling` CLI verb in main() reads it to
-    # exit RC_ALREADY_REACTED, the signal a cross-process caller needs. The
-    # return stays 0 because a non-zero one cannot carry the distinction here:
-    # caught in the loop's condition it would disable set -e for this function,
-    # and returned to main it would read as the generic fail-closed error, not
-    # the specific no-op.
+    # A first reaction happens once. Routing an already-reacted bead re-offers a
+    # done reaction (see sling_first_reaction_guard), so skip it as an idempotent
+    # no-op rather than clobber a live dispatch. cmd_sling returns 0 either way
+    # and flags the skip out-of-band in SLING_SKIPPED: the in-process cmd_scan
+    # --sling loop reads that flag to tell a skip from a dispatch and not spend a
+    # cap slot on it, and the `sling` CLI verb in main() reads it to exit
+    # RC_ALREADY_REACTED, the signal a cross-process caller needs. The return
+    # stays 0 because a non-zero one cannot carry the distinction here: caught in
+    # the loop's condition it would disable set -e for this function, and
+    # returned to main it would read as the generic fail-closed error, not the
+    # specific no-op.
     SLING_SKIPPED=""
     if ! sling_first_reaction_guard "$bead"; then
         SLING_SKIPPED=1
@@ -482,16 +470,15 @@ cmd_sling() {
     local target
     target="$(resolve_pool_target)"
 
-    # --on attaches the workflow to the existing bead and routes THAT bead;
-    # --merge pins the path; --reassign hands a human-held bead over cleanly.
-    #
-    # --on is load-bearing: without it the pool inherits agent_defaults'
-    # mol-polecat-work and pours the wrong formula.
-    set -- "$target" "$bead" --on "$FORMULA" --merge "$MERGE" --reassign
+    # --no-formula is load-bearing: the city's default_sling_formula is
+    # mol-polecat-work, so a bare sling would POUR that formula instead of
+    # leaving the bead a raw routed claim the reaction prompt reads. --reassign
+    # clears any human assignee so the pool's --unassigned query can see it.
+    set -- "$target" "$bead" --no-formula --reassign
     [ -n "$nudge" ] && set -- "$@" --nudge
 
     if [ -n "$dry" ]; then
-        # Prove the command shape (the gate asserts --merge mr + the formula).
+        # Prove the command shape (the gate asserts --no-formula, no --on/--merge).
         printf 'gc sling %s --dry-run\n' "$*"
         if [ -z "$FIXTURE" ]; then
             gc sling "$@" --dry-run 2>&1 || true
@@ -503,12 +490,12 @@ cmd_sling() {
         # The fixture hook stands in for every gc call in this tool, including
         # this one: a --sling sweep under test must exercise the loop and its
         # cap without dispatching anything into a live city.
-        log "$PROG: (fixture) would sling $FORMULA at $bead (merge=$MERGE) -> $target"
+        log "$PROG: (fixture) would route $bead raw -> $target"
         printf 'gc sling %s\n' "$*"
         return 0
     fi
 
-    log "$PROG: slinging $FORMULA at $bead (merge=$MERGE) -> $target"
+    log "$PROG: routing $bead raw -> $target"
     gc sling "$@"
 }
 

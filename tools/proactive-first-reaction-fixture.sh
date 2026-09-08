@@ -6,26 +6,26 @@
 # still the gate this fixture scores against — read its supersession banner
 # before citing the rest of it.
 #
-# Phase 4's SHIP gate (design Phase 4) is: a slung first reaction writes a
-# verdict card to a bead; the board surfaces it as "advanced"; the human
-# accepts/redirects in one move; AND any code-producing proactive output takes
-# the codex-gated mr path, never direct. (The design's enable-gate and
-# city-cap legs were retired: the pool is always on, and its own
-# max_active_sessions is the only bound on how many reactions run at once —
-# routed beads queue until a slot frees.) The human accept/redirect leg is the
-# same operator-judged capstone Phase 3 already gates (board → pick → land →
-# answer), so this fixture is NOT that. It locks down the deterministic
-# Phase-4 machinery underneath it:
+# Phase 4's SHIP gate (design Phase 4) is: a first reaction writes a verdict
+# card to a bead; the board surfaces it as "advanced"; the human
+# accepts/redirects in one move. (The design's enable-gate and city-cap legs
+# were retired: the pool is always on, and its own max_active_sessions is the
+# only bound on how many reactions run at once — routed beads queue until a slot
+# frees.) The human accept/redirect leg is the same operator-judged capstone
+# Phase 3 already gates (board → pick → land → answer), so this fixture is NOT
+# that. It locks down the deterministic Phase-4 machinery underneath it:
 #
 #   • ALWAYS-ON — tools/gc-proactive.sh `demand` (the pool's work_query,
 #     mirrored) flows routed work unconditionally: no enable flag, no
 #     city-cap shed. `deliverable` answers yes while the city's roster carries
 #     the pool, and no on the positive finding that it cannot claim.
-#   • THE mr-INVARIANT — `sling` bakes in --on mol-first-reaction --merge mr and
-#     HARD-REFUSES --merge direct (the security invariant).
-#   • THE FORMULA CONTRACT — mol-first-reaction writes the fixed card shape,
-#     ends in ONE of three dispositions (route it, hold it, ask), records which
-#     one and why, flags the bead onto the board, and NEVER closes the target.
+#   • THE RAW ROUTE — `sling` routes a bead RAW (--no-formula, gc.routed_to
+#     only): no formula is poured, no merge path is pinned. A bead already
+#     carrying gc.first_reaction is not re-routed.
+#   • THE DISPOSITION SET — {actionable, blocked, ruling, superseded} is spelled
+#     in EXACTLY two places, the dispose script and the prompt; a drift check
+#     below refuses a third surface enumerating it. The dispose script records
+#     which exit and why, and only superseded closes (through bead-rehome).
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
 #     (max 2-3, the pool's only throttle), it defaults to mr, and one
 #     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
@@ -47,14 +47,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 PROACTIVE="$HERE/gc-proactive.sh"
 UNIVERSE="$HERE/gc-bd-universe.sh"
-FORMULA_TOML="$ROOT/formulas/mol-first-reaction.toml"
 AGENT_TOML="$ROOT/agents/proactive/agent.toml"
 PROMPT_MD="$ROOT/agents/proactive/prompt.template.md"
+DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
 
-for f in "$PROACTIVE" "$UNIVERSE"; do
+for f in "$PROACTIVE" "$UNIVERSE" "$DISPOSE"; do
     [ -x "$f" ] || { echo "fixture: $f not executable" >&2; exit 2; }
 done
-for f in "$FORMULA_TOML" "$AGENT_TOML" "$PROMPT_MD"; do
+for f in "$AGENT_TOML" "$PROMPT_MD"; do
     [ -f "$f" ] || { echo "fixture: $f missing" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "fixture: jq required" >&2; exit 2; }
@@ -336,19 +336,12 @@ eq "demand mirror keeps the step behind the page of roots"                "1" \
 has "…and it is the claimable step"                    "claimable-step" "$dem_churn"
 rm -rf "$CHURN"
 
-echo "── the security invariant: proactive output is mr-only, never direct ──"
-ec=0; GC_PROACTIVE_MERGE=direct P sling px-1 --dry-run >/dev/null 2>&1 || ec=$?
-eq  "GC_PROACTIVE_MERGE=direct is REFUSED (non-zero)" "1" "$ec"
-has "refusal names the invariant" "never --merge direct" \
-    "$(GC_PROACTIVE_MERGE=direct P sling px-1 --dry-run 2>&1 || true)"
+echo "── the raw route: gc.routed_to only, no formula, no merge path pinned ──"
 DRY="$(P sling px-1 --dry-run 2>&1 || true)"
-has "default sling attaches mol-first-reaction" "--on mol-first-reaction" "$DRY"
-has "default sling pins the mr path"            "--merge mr"              "$DRY"
-absent "default sling never routes direct"      "--merge direct"          "$DRY"
+has    "default sling suppresses the default formula (--no-formula)" "--no-formula" "$DRY"
+absent "default sling pours no formula (no --on)"       "--on"                    "$DRY"
+absent "default sling pins no merge path (no --merge)"  "--merge"                 "$DRY"
 has "sling target is RIG-QUALIFIED (gc sling resolves it)" "gc-toolkit/gc-toolkit.proactive" "$DRY"
-# local is the one allowed non-mr path (never direct).
-has "GC_PROACTIVE_MERGE=local is allowed"        "--merge local" \
-    "$(GC_PROACTIVE_MERGE=local P sling px-1 --dry-run 2>&1 || true)"
 
 echo "── target resolution: rig-qualify or fail closed (never a bare name) ──"
 # A bare (un-rig-qualified) agent name is unroutable — gc sling rejects it as
@@ -364,27 +357,22 @@ has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proact
     "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" GC_PROACTIVE_POOL=altrig/gc-toolkit.proactive \
         "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
 
-echo "── a first reaction happens once: a reacted bead is not re-slung ──"
-# The actionable exit releases its subject on a bare gc.routed_to — a legitimate
-# pool claim a worker picks up directly. A SECOND sling of mol-first-reaction
-# retires that route at workflow-start (gascity retireInputConvoyClaimRoutes)
-# and drives nothing in its place, stranding the bead disposed-looking but
-# offered to no pool. So the sling skips a bead that already carries a reaction,
-# keyed on either marker a completed one leaves: gc.first_reaction (stamped by
-# the dispose) or gc.proactive_reaction (stamped by the release). A bead with
-# neither still slings. beads.json feeds the guard the subject state the way
-# agents.json feeds the deliverable probe; it lists only these beads, so every
-# other sling test above (px-1) reads as un-reacted and is unaffected.
+echo "── a first reaction happens once: a reacted bead is not re-routed ──"
+# A completed reaction leaves gc.first_reaction (stamped by the dispose before
+# it acts). Routing that bead again re-offers a done reaction to the pool, so
+# the sling skips it, keyed on gc.first_reaction. A bead without it still routes.
+# beads.json feeds the guard the subject state the way agents.json feeds the
+# deliverable probe; it lists only these beads, so every other sling test above
+# (px-1) reads as un-reacted and is unaffected.
 cat > "$FXDIR/beads.json" <<'JSON'
 {
   "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
-  "px-released": {"metadata": {"gc.proactive_reaction": "1"}},
   "px-fresh":    {"metadata": {}}
 }
 JSON
 REACTED_OUT="$(P sling px-reacted --dry-run 2>&1 || true)"
-absent "a reacted bead is NOT re-slung (no sling command emitted)" "gc sling" "$REACTED_OUT"
-has    "…and the skip names the cause"                             "already carries a first reaction" "$REACTED_OUT"
+absent "a reacted bead is NOT re-routed (no sling command emitted)" "gc sling" "$REACTED_OUT"
+has    "…and the skip names the cause"                              "already carries a first reaction" "$REACTED_OUT"
 # The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so
 # a cross-process caller (gc-helm react, gc-visit-open) can tell it from a
 # dispatch and file its own visit rather than wait for a reaction that never
@@ -392,15 +380,11 @@ has    "…and the skip names the cause"                             "already ca
 # does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-reacted --dry-run >/dev/null 2>&1 || rec=$?
 eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
-absent "a released bead (gc.proactive_reaction=1) is NOT re-slung" "gc sling" \
-       "$(P sling px-released --dry-run 2>&1 || true)"
-rel=0; P sling px-released --dry-run >/dev/null 2>&1 || rel=$?
-eq     "…and a released bead's skip exits RC_ALREADY_REACTED (3) too"    "3" "$rel"
-has    "an un-reacted bead still slings mol-first-reaction"        "--on mol-first-reaction" \
+has    "an un-reacted bead still routes raw"                       "--no-formula" \
        "$(P sling px-fresh --dry-run 2>&1 || true)"
 fec=0; P sling px-fresh --dry-run >/dev/null 2>&1 || fec=$?
 eq     "…and a dispatched (un-reacted) sling exits 0"              "0" "$fec"
-has    "a bead absent from the store reads as un-reacted, slings"  "--on mol-first-reaction" \
+has    "a bead absent from the store reads as un-reacted, routes"  "--no-formula" \
        "$(P sling px-1 --dry-run 2>&1 || true)"
 rm -f "$FXDIR/beads.json"
 
@@ -452,12 +436,11 @@ eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
 
 echo "── a reacted bead never spends the sling cap (filter + loop) ──"
-# The bug: scan_precision_filter kept a bead carrying gc.first_reaction but no
-# gc.proactive_reaction, so it reached the loop; cmd_sling's guard skipped it
-# but returned success, and the loop counted the skip against the cap. Enough
-# stale first_reaction-only records could spend the whole cap every sweep while
-# no new reaction was slung. Two layers close it: the filter drops a reacted
-# bead (common case), and the loop refuses to count a guard-skip (the race).
+# The bug: a bead carrying gc.first_reaction reached the loop; cmd_sling's guard
+# skipped it but returned success, and the loop counted the skip against the cap.
+# Enough stale reacted records could spend the whole cap every sweep while no new
+# reaction was slung. Two layers close it: the filter drops a reacted bead
+# (common case), and the loop refuses to count a guard-skip (the race).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
   {"id":"px-fr-only","title":"reacted: gc.first_reaction stamped, release pending","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable"}},
@@ -567,79 +550,56 @@ absent "usage no longer advertises the unimplemented --reason flag" "--reason" \
 ec=0; P sling px-1 --reason whatever --dry-run >/dev/null 2>&1 || ec=$?
 eq  "sling rejects an unknown --reason flag (non-zero)" "1" "$ec"
 
-echo "── the formula contract (mol-first-reaction) ──"
-F="$(cat "$FORMULA_TOML")"
-has "formula declares its name"                 'formula = "mol-first-reaction"' "$F"
-has "step: load the bead + universe slice"      'id = "load-bead"'        "$F"
-has "step: do the reaction + write the card"    'id = "first-reaction"'   "$F"
-has "step: dispose + advance, do not close"     'id = "advance-and-drain"' "$F"
-# The fixed card shape (design Interface), now ending in the line the
-# terminal step acts on.
-has "card · Understanding"                      "Understanding"           "$F"
-has "card · Found (freshness-stamped)"          "Found"                   "$F"
-has "card · Proposal"                           "Proposal"                "$F"
-has "card · Decision needed"                    "Decision needed"         "$F"
-has "card · Disposition"                        "## Disposition"          "$F"
-# Surfaces as advanced: it flags the bead onto the board.
-has "formula flags the bead onto the board"     "gc-helm.sh"         "$F"
-# There is no longer a `flag` verb to assert: gc-helm.sh's verbs are
-# open/react/takeaway/board; raising the hand is `takeaway … --release`
-# (see the three assertions below).
-# Never closes the target work bead.
-has "formula forbids closing the target"        "gc bd close"             "$F"
-# The release is folded into `takeaway … --release` (one Dolt write), so there is
-# no separate `gc bd update {{issue}} --status=open …` release update anymore.
-absent "formula has no separate --status=open release update" "--status=open" "$F"
-# mr-invariant inside the formula's code path.
-has "formula pins code output to mr"            "merge_strategy=mr"       "$F"
-has "formula tags reached content untrusted"    "UNTRUSTED DATA"          "$F"
-# The board-visible takeaway: stamped (by=proactive) via the gc-helm.sh
-# `takeaway` wrapper, now with `--release` folding the reaction-release bundle
-# (reopen, unassign, clear route, the gc.proactive_reaction advance marker) into
-# the SAME Dolt write — one call replaces the takeaway stamp + a separate release
-# update. The raw metadata moved into the wrapper, so we assert the call shape.
-has "formula stamps the board takeaway on every exit"   "--takeaway"              "$F"
-has "formula attributes the takeaway to proactive"      "--by proactive"          "$F"
-has "formula collapses stamp+release into one --release call" "--release"         "$F"
-has "formula keeps the proactive advance marker"        "gc.proactive_reaction=1" "$F"
-
-echo "── the terminal step has THREE exits, not one hardcoded visit ──"
-# The defect this replaces: every bead a reaction touched became a request for
-# the operator's attention, whatever the bead actually needed. The exits are
-# named in the formula and performed by one script, so the choice is a branch
-# rather than a paragraph.
-DISPOSE="$ROOT/assets/scripts/first-reaction-dispose.sh"
-[ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
-                  || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
-has "exit: actionable — route the bead to a pool"  "--disposition actionable" "$F"
-has "exit: blocked — record the wait as an edge"   "--disposition blocked"    "$F"
-has "exit: ruling — file the visit"                "--disposition ruling"     "$F"
-has "the exits are performed by one script"        "first-reaction-dispose.sh" "$F"
-has "the blocked exit names an existing wait"      "--waiting-on"             "$F"
-has "…or files the missing one, deduped by cause"  "--blocker-key"            "$F"
-has "the ruling exit still files the visit inline" "# >>> gate-visit"         "$F"
-has "every exit records WHY it was chosen"         "--reason"                 "$F"
-# The three exits must be distinguishable to the reader, not one exit with
-# three labels: the actionable exit routes to the pool that does the work.
-has "the actionable exit names the pool that works it" "polecat pool"         "$F"
+echo "── the disposition set: the dispose script + prompt spell all four exits ──"
+# The exits are named in one script and taught in the prompt, so the choice is a
+# branch rather than a paragraph. The set is {actionable, blocked, ruling,
+# superseded}; only superseded closes, and only through bead-rehome.
 D="$(cat "$DISPOSE")"
-has "…and the route default lives in the script, once" "gc-toolkit.polecat"   "$D"
-has "the script records the choice on the bead"    "gc.first_reaction="       "$D"
-has "…and the reason beside it"                    "gc.first_reaction_reason=" "$D"
-has "…and what the choice named"                   "gc.first_reaction_target=" "$D"
-has "the blocked exit refuses a cross-store edge"  "another store"            "$D"
+PM="$(cat "$PROMPT_MD")"
+for exit in actionable blocked ruling superseded; do
+    has "the dispose script validates the '$exit' exit" "$exit"               "$D"
+    has "the prompt teaches the '$exit' exit"           "--disposition $exit" "$PM"
+done
+has "the actionable exit names the pool that works it"  "polecat pool"        "$PM"
+has "…and the route default lives in the script, once"  "gc-toolkit.polecat"  "$D"
+has "the script records the choice on the bead"         "gc.first_reaction="       "$D"
+has "…and the reason beside it"                         "gc.first_reaction_reason=" "$D"
+has "…and what the choice named"                        "gc.first_reaction_target=" "$D"
+has "the blocked exit names an existing wait"           "--waiting-on"        "$D"
+has "…or files the missing one, deduped by cause"       "--blocker-key"       "$D"
+has "the blocked exit refuses a cross-store edge"       "another store"       "$D"
+# superseded is the only exit that closes, and only through the one evidence-
+# gated writer — never a direct bd close, and never the judgment kinds.
+has "the superseded exit closes through bead-rehome"    "bead-rehome"         "$D"
+has "…on the evidence kinds only, not a judgment call"  "fixed-upstream"      "$D"
+has "…checked before the release, so no orphaned release" "--check"           "$D"
+absent "no exit closes the work bead directly"          "gc_bd close"         "$D"
 # The operator-intake contract: a topic a human typed is a conversation, and
 # routing it silently answers a question nobody asked
 # (docs/gascity-human-engagement.md, gc-visit-open's react path).
 has "an operator-commissioned subject is always the visit" "gc.origin=operator" "$D"
-has "…and the formula says so before the script refuses"   "gc.origin=operator" "$F"
-absent "no exit closes the work bead"              "bd close"                 "$D"
-# A disposition that did not land is not a disposition. The script fails
-# non-zero when the route never stamped or the wait never became an edge, and
-# the terminal step reads that exit rather than closing over a bead that is
-# recorded as routed or waiting and is neither.
-has "the formula reads the exit code before it closes" "exited zero"          "$F"
-has "…naming the two ways a disposition fails to land" "never became a"     "$F"
+has "…and the prompt says so"                              "gc.origin=operator" "$PM"
+
+echo "── drift check: no described surface enumerates the disposition set ──"
+# The set lives in exactly two places above. Each surface below describes the
+# component in prose and points at the script; none may spell the whole set, or
+# it drifts the moment an exit is added or renamed (this bead added superseded
+# to a set that spanned several surfaces before). A surface naming ALL FOUR exit
+# tokens is enumerating it — the prose ones name at most three incidentally (a
+# bead is "blocked", an operator gives a "ruling", a bead is "superseded"),
+# never "actionable", the token that marks an enumeration of the CLI set.
+for surface in "agents/proactive/agent.toml" "docs/component-model.md" \
+               "docs/gascity-human-engagement.md" "agents/proactive/PROVENANCE.md"; do
+    SF="$ROOT/$surface"
+    [ -f "$SF" ] || continue
+    n=0
+    for tok in actionable blocked ruling superseded; do
+        grep -qiwE "$tok" "$SF" && n=$((n + 1))
+    done
+    [ "$n" -lt 4 ] \
+        && ok "$surface does not enumerate the set (${n}/4 exit tokens; it describes + points at the script)" \
+        || bad "$surface enumerates the disposition set (all four exit tokens) — it belongs only in the dispose script + prompt"
+done
 
 echo "── the pool budget (agents/proactive/agent.toml) ──"
 A="$(cat "$AGENT_TOML")"
@@ -677,21 +637,18 @@ has "the pool config states the routing exit, not the visit alone" "route the be
 has "…and the holding exit"                                        "hold it on a" "$AF"
 
 echo "── the worker prompt names the contract ──"
-PM="$(cat "$PROMPT_MD")"
-has "prompt names the formula"                  "mol-first-reaction"     "$PM"
+# The prompt IS the reaction method now — no formula is poured — so it carries
+# the card shape, the exits (asserted in the disposition-set section above) and
+# these invariants.
 has "prompt forbids closing the target"         "Close the target"       "$PM"
-has "prompt keeps code on the mr path"          "mr path only"           "$PM"
+has "prompt keeps code on the mr path"          "mr path"                "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
 has "prompt stamps the board takeaway on every exit"    "--takeaway"              "$PM"
 has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
-has "prompt teaches the actionable exit"               "--disposition actionable" "$PM"
-has "prompt teaches the blocked exit"                  "--disposition blocked"    "$PM"
-has "prompt teaches the ruling exit"                   "--disposition ruling"     "$PM"
 has "prompt says a visit is the minority case"         "minority case"            "$PM"
-has "prompt carries the operator-commission rule"     "gc.origin=operator"       "$PM"
 has "prompt collapses stamp+release into one --release call" "--release"         "$PM"
-has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1" "$PM"
-absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
+absent "prompt no longer names the retired mol-first-reaction formula" "mol-first-reaction" "$PM"
+absent "prompt no longer writes the retired proactive-reaction marker" "gc.proactive_reaction" "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
 UFX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
