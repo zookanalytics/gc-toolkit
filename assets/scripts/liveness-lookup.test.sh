@@ -78,26 +78,37 @@ state() {
   ' "$TMP/lookup.sh" 2>/dev/null
 }
 
-# --- Compose the owner derivation with the lookup. ---------------------------
+# --- Compose the owner derivation with the candidate filters and the lookup. -
 # The loop never sees a raw assignee: it resolves the `.owner` that the
-# host-bead-skip filter stamped. Extract that filter too and run the two blocks
-# in series, so a case can start from a whole bead rather than a bare identity.
+# host-bead-skip filter stamped, on the candidate set the kind filter already
+# pruned. Extract host-bead-skip and topology-root-skip and run them in series,
+# so a case can start from a whole bead rather than a bare identity — and a
+# topology root the kind filter drops never reaches the lookup at all.
 FILTER="$(awk '
   /# >>> host-bead-skip/ {f=1; next}
   /# <<< host-bead-skip/ {f=0}
+  f' "$TOML")"
+TOPOSKIP="$(awk '
+  /# >>> topology-root-skip/ {f=1; next}
+  /# <<< topology-root-skip/ {f=0}
   f' "$TOML")"
 
 [ -n "$FILTER" ] \
   && ok "owner filter extracted between host-bead-skip markers" \
   || bad "owner filter extraction EMPTY — markers missing from $TOML"
+[ -n "$TOPOSKIP" ] \
+  && ok "topology-root-skip extracted (a topology root never reaches the lookup)" \
+  || bad "topology-root-skip extraction EMPTY — markers missing from $TOML"
 
 printf '%s\n' "$FILTER" > "$TMP/filter.sh"
+printf '%s\n' "$TOPOSKIP" > "$TMP/toposkip.sh"
 
 # bead_state <liveness-map-json> <bead-json> -> the resolved STATE, or the empty
-# string when the filter drops the bead as naming no owner.
+# string when the candidate filters drop the bead — it names no owner, or it is
+# a topology root the kind filter removes before the loop.
 bead_state() {
   local owner
-  owner=$(printf '[%s]' "$2" | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner // empty')
+  owner=$(printf '[%s]' "$2" | bash "$TMP/filter.sh" 2>/dev/null | bash "$TMP/toposkip.sh" 2>/dev/null | jq -r '.[0].owner // empty')
   [ -n "$owner" ] || return 0
   state "$1" "$owner"
 }
@@ -185,9 +196,11 @@ eq "$(state "$MAP_CITYWISP" "gascity/")" "absent" \
 # --- Whole-bead classification: owners that are not assignees. ----------------
 # A workflow STEP bead carries no assignee at all — `gc bd list --json` omits the
 # key when it is empty — and names its owner in gc.session_id, which is what
-# gc.session_affinity=require pins it to. A workflow ROOT names only
-# gc.session_name. Resolving those is what lets orphan recovery see graph.v2
-# machinery; resolving them WRONG either strands the chain or yanks a live one.
+# gc.session_affinity=require pins it to; resolving it is what lets orphan
+# recovery see graph.v2 machinery, and resolving it WRONG strands the chain. A
+# workflow ROOT names only gc.session_name, but a root is not recoverable work:
+# topology-root-skip drops it before the lookup (case S), so its inherited slot
+# label can neither strand the chain nor yank the live successor holding the slot.
 MAP_STEP='{"lx-3rk8v":"active","gc-toolkit--gc-toolkit__polecat-1-pool":"active"}'
 
 # (Q) The recovery case: the pinned session is gone from the map entirely.
@@ -210,12 +223,18 @@ eq "$(bead_state "$MAP_STEP" '{"id":"st3","metadata":{"gc.session_id":"lx-7xcse"
 #     stop. Only the id remembers who died.
 eq "$(bead_state "$MAP_STEP" '{"id":"st4","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-7xcse","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","gc.session_affinity":"require"}}')" "absent" \
    "(R) dead session id outranks a LIVE slot assignee -> orphaned, not stranded"
-# (S) A workflow root has only a session name. A per-instance name dies with its
-#     session; a slot name outlives it, and recovery must not yank the live one.
-eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "active" \
-   "(S) workflow root on a live session name -> active"
-eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-lx-7xcse"}}')" "absent" \
-   "(S) workflow root on a dead per-instance session name -> absent"
+# (S) A workflow root is topology, not recoverable work — topology-root-skip
+#     drops it before the lookup, so it never resolves to a liveness state at
+#     all. That drop is the fix for the successor-inherited-slot-label bug: a
+#     root on a LIVE slot name no longer resolves active (which routed it to the
+#     warrant path and killed the successor now holding the slot), and a root on
+#     a dead per-instance name no longer resolves absent (which churned a
+#     salvage-refused notice on a bead that never had a worktree). Kind decides,
+#     not liveness: the same drop whether the slot label is live or dead.
+eq "$(bead_state "$MAP_STEP" '{"id":"rt1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}')" "" \
+   "(S) workflow root on a LIVE slot name is dropped, never resolved (no warrant against the live successor)"
+eq "$(bead_state "$MAP_STEP" '{"id":"rt2","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit__polecat-lx-7xcse"}}')" "" \
+   "(S) workflow root on a dead per-instance name is dropped too (kind decides, not liveness)"
 # (T) With no session id to be more specific than it, the assignee decides —
 #     the established assignee path is untouched for every bead that has one.
 eq "$(bead_state '{"gc-toolkit/gc-toolkit.furiosa":"active"}' '{"id":"b1","assignee":"gc-toolkit/gc-toolkit.furiosa"}')" "active" \

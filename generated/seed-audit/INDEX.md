@@ -47,7 +47,7 @@ covers that dimension.
 | [`polecat-codex`](agents/polecat-codex.md) | 22,978 | 5,744 |
 | [`proactive`](agents/proactive.md) | 13,117 | 3,279 |
 | [`refinery`](agents/refinery.md) | 8,682 | 2,170 |
-| [`witness`](agents/witness.md) | 12,807 | 3,201 |
+| [`witness`](agents/witness.md) | 12,989 | 3,247 |
 
 ## Formula recipes
 
@@ -81,7 +81,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,867 | 966 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,908 | 727 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,949 | 737 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
