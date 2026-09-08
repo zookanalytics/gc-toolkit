@@ -354,6 +354,59 @@ eq "$?" "0" "the attached --flag=value form parks"
 eq "$(count)" "1" "the attached form parks exactly one bead"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the attached --repo=value resolves as the target"
 
+# ── a subject-scoped write verb needs an explicit issue/PR selector ────────
+# `issue comment`, `pr comment`, `pr review` and the other verbs that act on
+# one existing issue or PR take it as a positional argument. gh rejects the
+# pasted command without one ("accepts 1 arg(s), received 0"), and a pr verb
+# with no selector falls back to the current branch — ambient state, not the
+# reviewed finding. --repo is always present here, so the selector is required.
+reset_state
+OUT=$("$SUT" --message "why" -- gh issue comment --repo a/b --body B 2>&1)
+eq "$?" "2" "an issue comment with a body but no issue selector is refused"
+eq "$(count)" "0" "nothing is parked for a comment that names no issue"
+has "$OUT" "specific issue or PR" "the refusal says the command names no target"
+
+OUT=$("$SUT" --message "why" -- gh pr comment --repo a/b --body B 2>&1)
+eq "$?" "2" "a pr comment with a body but no PR selector is refused"
+
+OUT=$("$SUT" --message "why" -- gh pr review --repo a/b --approve 2>&1)
+eq "$?" "2" "a pr review with no PR selector is refused"
+
+OUT=$("$SUT" --message "why" -- gh --repo a/b issue comment --body B 2>&1)
+eq "$?" "2" "the missing selector is caught with --repo before the verb too"
+
+# gh reads the word after a value flag as that flag's value, so a bare --body
+# value — even a number — is not the selector.
+OUT=$("$SUT" --message "why" -- gh pr review --repo a/b --body "looks like text" 2>&1)
+eq "$?" "2" "a --body value is not mistaken for the PR selector"
+OUT=$("$SUT" --message "why" -- gh issue comment --repo a/b --body 42 2>&1)
+eq "$?" "2" "a numeric --body value is not mistaken for the issue selector"
+
+# With the selector present, the same commands park. The number, a URL, and a
+# branch all satisfy it, and a boolean flag before it does not consume it.
+reset_state
+"$SUT" --message "why" -- gh issue comment 123 --repo get-convex/agent --body "ping" >/dev/null 2>&1
+eq "$?" "0" "an issue comment with a number selector parks"
+eq "$(count)" "1" "the selector form parks exactly one bead"
+eq "$(meta up-1 gh_verb)" "issue comment" "the parked comment records its verb"
+
+reset_state
+"$SUT" --message "why" -- gh pr review 45 --repo get-convex/agent --approve >/dev/null 2>&1
+eq "$?" "0" "a pr review with a number selector parks"
+eq "$(count)" "1" "the review selector form parks one bead"
+
+reset_state
+"$SUT" --message "why" -- gh pr review --repo get-convex/agent --approve 45 >/dev/null 2>&1
+eq "$?" "0" "a boolean flag does not swallow the selector that follows it"
+
+reset_state
+"$SUT" --message "why" -- gh pr comment https://github.com/get-convex/agent/pull/9 --repo get-convex/agent --body "ping" >/dev/null 2>&1
+eq "$?" "0" "a URL selector parks"
+
+reset_state
+"$SUT" --message "why" -- gh pr comment mybranch --repo get-convex/agent --body "ping" >/dev/null 2>&1
+eq "$?" "0" "a branch selector parks"
+
 # ── the own-origin refusal ────────────────────────────────────────────────
 reset_state
 OUT=$("$SUT" --message "why" -- gh issue create --repo zookanalytics/gc-toolkit --title T --body B 2>&1)

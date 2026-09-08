@@ -236,6 +236,44 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   exit 2
 fi
 
+# A write verb whose target is an existing issue or PR needs that issue or PR
+# named on the command line as a positional argument — a number, a URL, or a
+# branch. gh rejects the pasted command without one (`gh issue comment --repo
+# o/r --body B` fails with "accepts 1 arg(s), received 0"), and `pr comment`,
+# `pr review` and the other pr verbs fall back to the current branch, which is
+# ambient state rather than the reviewed finding. `create` verbs take no
+# selector and are not listed. gh reads the word after a value flag as that
+# flag's value, so those words are skipped when looking for the selector; the
+# skip list errs long, because over-skipping only over-refuses.
+SELECTOR_VALUE_FLAGS="--repo -R --body -b --body-file -F --title -t --milestone -m --label -l --add-label --remove-label --assignee --add-assignee --remove-assignee --project -p --add-project --remove-project --reviewer --add-reviewer --remove-reviewer --base -B --subject --author --author-email --match-head-commit --template"
+has_selector() {
+  local total="${#CMD[@]}" i skip=0 counted=0 tok
+  local verb_words=1; case "$VERB" in *" "*) verb_words=2 ;; esac
+  for (( i = 1; i < total; i++ )); do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    tok="${CMD[$i]}"
+    case "$tok" in
+      --*=*|-[A-Za-z]*=*) continue ;;   # attached value: consumes no next word
+      -*) case " $SELECTOR_VALUE_FLAGS " in *" $tok "*) skip=1 ;; esac; continue ;;
+      *)  if [ "$counted" -lt "$verb_words" ]; then counted=$((counted + 1)); continue; fi
+          return 0 ;;                    # the first positional past the verb words
+    esac
+  done
+  return 1
+}
+NEED_SELECTOR=0
+case "$VERB" in
+  "issue comment"|"issue close"|"issue reopen"|"issue edit"|"issue delete"|\
+  "issue lock"|"issue unlock"|"issue pin"|"issue unpin"|"issue transfer"|\
+  "pr comment"|"pr review"|"pr close"|"pr reopen"|"pr edit"|"pr merge"|\
+  "pr ready"|"pr lock"|"pr unlock")
+    NEED_SELECTOR=1 ;;
+esac
+if [ "$NEED_SELECTOR" = 1 ] && ! has_selector; then
+  warn "\`$VERB\` acts on one specific issue or PR, but the command names none. gh takes the issue number, PR number, URL, or branch as a positional argument; without it the pasted command is rejected (\"accepts 1 arg(s), received 0\"), or a pr verb falls back to the current branch, which is not the reviewed finding. Name the target, e.g. \`$VERB 123 --repo $TARGET ...\`."
+  exit 2
+fi
+
 # A stable digest over the exact argv, NUL-joined so no argument boundary can
 # be forged by an argument's own bytes.
 sig() {
