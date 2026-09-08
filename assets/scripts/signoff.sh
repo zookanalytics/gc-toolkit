@@ -61,6 +61,9 @@ HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
 # still-unruled findings through it. Overridable so the hermetic test can stand
 # in for it without a live store.
 FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
+# The route gate (pool-route.sh) lives beside this script; the rework route is
+# proved through it before the fix child is filed.
+SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 
 usage() {
   cat >&2 <<'U'
@@ -912,8 +915,18 @@ fi
 FINDING_COUNT=0
 [ -n "$FINDING_IDS" ] && FINDING_COUNT=$(printf '%s' "$FINDING_IDS" | tr ',' '\n' | grep -c '[^[:space:]]')
 
-FIX_POOL=$(row_meta "$REVIEW_ROW" fix_target_pool)
-[ -n "$FIX_POOL" ] || FIX_POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
+# The child is offered off this route by exact byte equality, and GC_RIG picks
+# both the store it lands in and the rig segment a rig-scoped pool carries, so
+# an address built out of GC_RIG alone renders bare for a rig-less caller: the
+# stamp reads back clean, no polecat is ever offered the rework, and the PR
+# just stops moving. Prove the route BEFORE the child exists — a review left
+# open is retried, a rework child nothing claims is found by a human.
+FIX_POOL_NAME=$(row_meta "$REVIEW_ROW" fix_target_pool)
+[ -n "$FIX_POOL_NAME" ] || FIX_POOL_NAME="gc-toolkit.polecat"
+FIX_POOL=$("$SCRIPT_DIR/pool-route.sh" "$FIX_POOL_NAME") || {
+  warn "the rework child would route to '$FIX_POOL_NAME', which no live pool claims; review left open for a retry"
+  exit 2
+}
 FIX_TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$ANCHOR_ROW" target)
 [ -n "$FIX_TARGET" ] || FIX_TARGET=$(row_meta "$REVIEW_ROW" review_base)

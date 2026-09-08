@@ -337,6 +337,46 @@ eq "$rc" 0 "an unprovable route leaves the visit alone"
 eq "$(meta vis-0 gc.routed_to)" "gc-toolkit.converse" "the route is not rewritten on no evidence"
 has "$out" "UNVERIFIED" "and says so"
 
+echo "# a rig-less caller with a bare --pool cannot confirm a rig-qualified route"
+# The board route derives its store from the subject (above), and a rig-qualified
+# --pool adopts its rig, but a BARE --pool does neither, so GC_RIG stays unset.
+# The dedup listing then runs against whatever store the ambient environment
+# picks, and nothing here says the matched visit lives in the store its
+# rig-scoped pool reads. Counting it exits 0 on a visit that may have asked
+# nobody — the same mute, entered from the dedup side — while the create path
+# refuses this very caller. Repointing is wrong too: the route is likely sound.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again --pool gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 1 "an unconfirmable already-open route exits 1"
+eq "$(visits)" "0" "and files nothing"
+eq "$(meta vis-0 gc.routed_to)" "gc-toolkit/gc-toolkit.converse" "and leaves the route it cannot condemn"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "no write at all"
+has "$out" "GC_RIG is unset" "says why the open visit cannot be counted"
+has "$out" "--pool 'gc-toolkit/gc-toolkit.converse'" "and the repair names the row's own route"
+
+# The repair the refusal names: --pool binds the store, and the dedup that
+# could not be trusted rig-less is then a proved match in the pool's own store.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again \
+  --pool gc-toolkit/gc-toolkit.converse 2>&1); rc=$?
+eq "$rc" 0 "naming that pool exits 0"
+eq "$(visits)" "0" "still files nothing"
+has "$out" "already open" "the situation is confirmed, not guessed"
+has "$(cat "$STUB_GC_LOG")" "[gc-toolkit] bd list" "the dedup read ran in the pool's own store"
+
+# A city identity carries no rig segment, so there is no store claim to
+# reconcile and the rig-less caller's dedup stands on identity alone.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit.dog","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "a bare city identity still suppresses for a rig-less caller"
+eq "$(visits)" "0" "and files nothing"
+
+# ...and so does the operator marker: `human` is a held route, not a rig.
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"human","escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
+out=$(env -u GC_RIG "$SUT" --subject tk-a --key k1 --message again 2>&1); rc=$?
+eq "$rc" 0 "a human-parked visit still suppresses for a rig-less caller"
+eq "$(meta vis-0 gc.routed_to)" "human" "and keeps its route"
+
 echo "# a closed visit does not suppress; a different subject/key does not suppress"
 reset '[{"id":"vis-0","status":"closed","assignee":"","metadata":{"escalation_key":"k1","gc.continuation_group":"tk-a"},"notes":""}]'
 "$SUT" --subject tk-a --key k1 --message m >/dev/null 2>&1
@@ -547,6 +587,10 @@ echo "# the deacon's filed visits reach its incident ledger"
 # real ledger script; what is under test is which calls escalate.sh makes.
 LSUT="$TMP/sut"; mkdir -p "$LSUT"
 cp "$SUT" "$LSUT/escalate.sh"; chmod +x "$LSUT/escalate.sh"
+# escalate.sh proves its route through the sibling pool-route.sh, so the private
+# copy needs it beside escalate.sh too, or every filing here exits 1 before the
+# ledger is reached.
+cp "$HERE/pool-route.sh" "$LSUT/pool-route.sh"; chmod +x "$LSUT/pool-route.sh"
 cat > "$LSUT/gc-deacon-ledger.sh" <<'LSTUB'
 #!/usr/bin/env bash
 set -u
