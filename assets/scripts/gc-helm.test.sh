@@ -136,6 +136,10 @@ case "$1 ${2:-}" in
     # model the route LANDING and the route landing EMPTY (the silent drop a
     # multi-pair --set-metadata update can produce) with the same stub.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
+    # What gc.execution_routed_to reads back as: the pour stamp a --release
+    # retires. FAKE_EXEC holds it, so a test models the clear LANDING (empty)
+    # and the clear being DROPPED (the stamp still standing) with one stub.
+    exec_routed="$(cat "${FAKE_EXEC:-/dev/null}" 2>/dev/null || true)"
     # What gc.takeaway_settled reads back as. Every landed write updates it
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
@@ -169,8 +173,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -214,6 +218,17 @@ case "$1 ${2:-}" in
             1) ;;
             *) [ -n "${FAKE_OUTCOME_DIR:-}" ] && printf '%s' "${a#gc.outcome=}" > "$FAKE_OUTCOME_DIR/$3" ;;
           esac ;;
+        # gc.execution_routed_to is CLEARED via --unset-metadata, so its token
+        # arrives bare (no =value). A landed clear empties FAKE_EXEC, so the
+        # read-back reads absent. FAKE_EXEC_DROP=1 loses every clear (the store
+        # that will not take it, no repair recovers it); =multi loses it only
+        # out of the multi-pair release write, the shape the lone repair clears.
+        gc.execution_routed_to)
+          case "${FAKE_EXEC_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && : > "$FAKE_EXEC" ;;
+            *)     : > "$FAKE_EXEC" ;;
+          esac ;;
       esac
     done ;;
   "bd dep")
@@ -244,7 +259,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_DEPLISTS="$TMP/deplists" \
+       FAKE_SETTLED="$TMP/settled" FAKE_EXEC="$TMP/exec" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
@@ -325,6 +340,12 @@ grep -q 'gc.proactive_reaction=1' <<< "$A" \
   && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
+# The pour that dispatched this bead stamped gc.execution_routed_to; a release
+# ends that pour, so the stamp is retired in the same write. Left set, it reads
+# as a live dispatch to deferred-dispatch's arm and reconcile guards, which then
+# refuse to route the bead when its blocker lifts.
+grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
+  && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
@@ -740,6 +761,10 @@ case "$RLINE" in
   *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
 esac
 case "$RLINE" in
+  *"--unset-metadata gc.execution_routed_to"*) ok "(ROUTE) …and the prior pour stamp is retired, not carried into the new route" ;;
+  *) bad "(ROUTE) the release-to-pool write kept gc.execution_routed_to: ${RLINE:-<none>}" ;;
+esac
+case "$RLINE" in
   *"--set-metadata gc.takeaway=actionable — routed to the polecat pool"*) ok "(ROUTE) …and the headline still rides it" ;;
   *) bad "(ROUTE) the headline was lost: ${RLINE:-<none>}" ;;
 esac
@@ -816,6 +841,71 @@ eq "$GRC" "0" "(ROUTEDEAD) a route that stamps still exits zero"
 grep -q "released to $POOL" "$TMP/rout" \
   && ok "(ROUTEDEAD) …and says where the bead went" \
   || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
+
+# ── takeaway --release: the pour stamp read-back ──────────────────────────────
+# gc.execution_routed_to is the field the release exists to clear: a first
+# reaction was slung to a pool, the pour stamped it, and deferred-dispatch's arm
+# and reconcile guards refuse a bead that still carries it as one already out.
+# The clear rides the multi-pair release write, so a pair silently dropped there
+# leaves the stamp standing and the blocked reaction holds with nothing to route
+# it when its blocker closes — the exact defect the clear removes. Covered:
+#   (EXECOK)   a clear that reads back empty is verified once, no repair, no word
+#   (EXECFIX)  a clear dropped from the multi-pair write is retried and reported
+#   (EXECDEAD) a clear that will not land is a verb failure, with its writes kept
+STAMP="gc-toolkit/gc-toolkit.proactive"
+
+# (EXECOK) the clear lands: the release's own unset is the only one written, and
+# a read-back that finds it gone says nothing.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+XORC=0
+sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
+  >/dev/null 2>"$TMP/xerr" || XORC=$?
+eq "$XORC" "0" "(EXECOK) a pour stamp that reads back cleared exits 0"
+eq "$(grep -c -- '--unset-metadata gc.execution_routed_to' "$TMP/updates" || true)" "1" \
+   "(EXECOK) …and the clear is written once, with no repair"
+grep -q 'gc.execution_routed_to on' "$TMP/xerr" \
+  && bad "(EXECOK) a landed clear should say nothing (stderr: $(cat "$TMP/xerr"))" \
+  || ok "(EXECOK) …and says nothing about a read-back"
+
+# (EXECFIX) the stamp of the pour that dispatched this bead, and a clear that
+# does not land: the multi-pair release drops it, the lone repair unset carries
+# it. The stamp stood after the first write, so the read-back re-issues the clear.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+XFRC=0
+FAKE_EXEC_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/xerr" || XFRC=$?
+eq "$(grep -c -- '--unset-metadata gc.execution_routed_to' "$TMP/updates" || true)" "2" \
+   "(EXECFIX) a clear that did not land is re-issued"
+grep -q "gc.execution_routed_to on A-PARKED read back as '$STAMP'" "$TMP/xerr" \
+  && ok "(EXECFIX) …and the miss is reported with the stamp that stood" \
+  || bad "(EXECFIX) the dropped clear was silent (stderr: $(cat "$TMP/xerr"))"
+grep -q 'execution-stamp repair landed' "$TMP/xerr" \
+  && ok "(EXECFIX) …and the repair that fixed it says so" \
+  || bad "(EXECFIX) the repair did not report landing (stderr: $(cat "$TMP/xerr"))"
+eq "$XFRC" "0" "(EXECFIX) …and a repaired stamp is not a verb failure"
+eq "$(cat "$TMP/exec")" "" "(EXECFIX) …the bead ends with the pour stamp cleared"
+
+# (EXECDEAD) the store that will not take the clear at all. The stamp stands
+# after both writes, so a zero exit would report a release deferred-dispatch
+# will still refuse to arm — the strand this whole guard exists to catch.
+: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+XDRC=0
+FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/xout" 2>"$TMP/xerr" || XDRC=$?
+eq "$XDRC" "4" "(EXECDEAD) a pour stamp that will not clear is a verb runtime failure"
+grep -q "still carries gc.execution_routed_to='$STAMP'" "$TMP/xerr" \
+  && ok "(EXECDEAD) …and the message names the stamp left standing" \
+  || bad "(EXECDEAD) the persistent miss does not name the stale stamp (stderr: $(cat "$TMP/xerr"))"
+grep -q -- '--unset-metadata gc.execution_routed_to' "$TMP/xerr" \
+  && ok "(EXECDEAD) …and carries the by-hand repair" \
+  || bad "(EXECDEAD) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
+grep -q 'takeaway set on' "$TMP/xout" \
+  && bad "(EXECDEAD) the verb reported success on a bead still stamped" \
+  || ok "(EXECDEAD) …and does not report the takeaway as set"
+grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/updates" \
+  && ok "(EXECDEAD) …the headline it did write is kept, not rolled back" \
+  || bad "(EXECDEAD) the headline write was lost: $(cat "$TMP/updates")"
+: > "$TMP/exec"
 
 # ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────
 # A fold that lands after the pour leaves a molecule routed under an anchor

@@ -660,8 +660,15 @@ cmd_takeaway() {
                --set-metadata "gc.takeaway_at=$(iso_now)" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=$no_wait"
+    # --release retires the pour's routing on the anchor: gc.routed_to takes the
+    # new route (empty when none) and gc.execution_routed_to — the stamp a pour
+    # leaves naming the pool it dispatched to — is dropped. Left set, it reads to
+    # deferred-dispatch's arm and reconcile guards as a bead already out, which
+    # refuse to route it; a release means that pour is over, so the stamp goes
+    # with the route.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
-               --set-metadata "gc.routed_to=$route" --set-metadata "gc.proactive_reaction=1"
+               --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
+               --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
@@ -710,6 +717,30 @@ cmd_takeaway() {
             echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
         fi
     fi
+    # The pour stamp is read back on the same terms, and it is the field this
+    # release exists to clear: gc.execution_routed_to names the pool a first
+    # reaction was slung to, and deferred-dispatch's arm and reconcile guards
+    # refuse a bead that still carries it as one already dispatched. A clear
+    # dropped from the multi-pair write above leaves it set, so the blocked
+    # reaction holds with nothing to route it when its blocker closes — the
+    # exact defect the clear removes. Read it back, retry a lone unset, and
+    # fail if it survives so no caller reads a zero exit as "the pour is
+    # retired".
+    exec_missed=""
+    if [ -n "$release_park" ]; then
+        exec_got=$(meta_now "$bead" gc.execution_routed_to)
+        if [ -n "$exec_got" ]; then
+            echo "$PROG: takeaway: gc.execution_routed_to on $bead read back as '$exec_got', expected empty — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.execution_routed_to >/dev/null 2>&1 || true
+            exec_got=$(meta_now "$bead" gc.execution_routed_to)
+            if [ -z "$exec_got" ]; then
+                echo "$PROG: takeaway: the execution-stamp repair landed on $bead" >&2
+            else
+                exec_missed=1
+            fi
+        fi
+    fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads. Only the
@@ -738,6 +769,12 @@ cmd_takeaway() {
     # Reported at its read-back above; the exit waits until here so the edges
     # and the quiesce still run, the way the route miss does.
     if [ -n "$settled_missed" ]; then
+        exit 4
+    fi
+    # The pour stamp waits for the same window, so the edges and the quiesce
+    # still run before a stamp left standing fails the verb.
+    if [ -n "$exec_missed" ]; then
+        echo "$PROG: takeaway: $bead still carries gc.execution_routed_to='$exec_got' after release — deferred-dispatch's arm and reconcile guards read a set stamp as already-dispatched and refuse to route it, so a blocked first reaction would hold with nothing to resume it when its blocker closes. Clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.execution_routed_to" >&2
         exit 4
     fi
     # A route asked for on a closed anchor is refused the same way a route that
