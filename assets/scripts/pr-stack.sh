@@ -89,19 +89,23 @@ bd_list() {
 # The branch key alone is not proof of a commit: signoff.sh stamps
 # branch=<this head> on a rework child at CREATION, before any polecat claims
 # it, and that child sits open and routed to a pool until one does. Its fix is
-# not on the branch, so a direct row that is still routed to a pool
-# (gc.routed_to set, not `human`) and carries no merge_result is dropped — the
-# same route signal merge.sh reads to hold a merge for an in-flight child. The
-# anchor (merge_result set) and a hand-back whose submit-and-exit cleared the
-# route both stay; fold_target and merged_target rows are records of work
-# already on the branch and skip this gate.
+# not on the branch, so a direct row carrying no merge_result that is still
+# routed to a pool is dropped. A pool route takes two shapes, and either marks
+# an in-flight child: a bare gc.routed_to (not `human`), and the graph.v2
+# mol-polecat-work dispatch, which retires gc.routed_to and stamps
+# gc.execution_routed_to=<pool> (signoff.sh). The anchor (merge_result set)
+# stays; fold_target and merged_target rows are records of work already on the
+# branch and skip this gate.
 ledger_of() { # <branch>
   local br="$1" direct folded landed
   direct=$(bd_list --status="$ALL_STATUSES" --metadata-field branch="$br") || return 1
   direct=$(printf '%s' "$direct" | jq '
     map(select(
       (((.metadata // {}).merge_result // "") | tostring) != ""
-      or (((.metadata // {})["gc.routed_to"] // "") | tostring | (. == "" or . == "human"))
+      or (
+        (((.metadata // {})["gc.routed_to"] // "") | tostring | (. == "" or . == "human"))
+        and (((.metadata // {})["gc.execution_routed_to"] // "") | tostring) == ""
+      )
     ))') || return 1
   folded=$(bd_list --status="$ALL_STATUSES" --metadata-field fold_target="$br") || return 1
   landed=$(bd_list --status="$ALL_STATUSES" --metadata-field merged_target="$br" \

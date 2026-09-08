@@ -111,30 +111,43 @@ has "$(body 20)" '- `D1` — Rework PR#20: address signoff findings' "the rework
 hasnt "$(body 20)" 'D1` — Rework PR#20: address signoff findings _(merged in' \
     "…and is NOT marked as merged in — its commits are on this branch"
 
-echo "# an open rework child still routed to a pool is not yet on the branch"
+echo "# a graph.v2 rework child, routed by gc.execution_routed_to, is not yet on the branch"
 # signoff.sh stamps branch=<this head> on the rework child at CREATION, before
-# any polecat claims it. Open and still routed to a pool, its fix has not been
-# pushed; listing it would tell a reviewer that approving the PR approves work
-# the branch does not carry. The ledger drops it, the anchor stands alone, and
-# the one-bead body pr-open.sh wrote is left byte-identical.
+# any polecat claims it. The live mol-polecat-work dispatch retires gc.routed_to
+# and stamps gc.execution_routed_to=<pool>, so a cleared gc.routed_to is no
+# longer proof of a push; the non-empty gc.execution_routed_to is what marks the
+# child in-flight. Listing it would tell a reviewer that approving the PR
+# approves work the branch does not carry. The ledger drops it, the anchor
+# stands alone, and the one-bead body pr-open.sh wrote is left byte-identical.
+store "[$(anchor T polecat/T 100),
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat","rejection_reason":"signoff requested changes"}}')]"
+pr 100 OPEN polecat/T "$OPENER_BODY"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "1 single-bead" "the graph.v2 routed child drops out and the anchor stands alone"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so the one-bead body is never written"
+eq "$(body 100)" "$OPENER_BODY" "the body is byte-identical"
+
+echo "# a bare gc.routed_to route (pre-graph.v2 dispatch) drops the same way"
 store "[$(anchor T polecat/T 100),
         $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","rejection_reason":"signoff requested changes"}}')]"
 pr 100 OPEN polecat/T "$OPENER_BODY"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "1 single-bead" "the routed child drops out and the anchor stands alone"
-hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so the one-bead body is never written"
+has "$out" "1 single-bead" "the bare-route child drops out too"
 eq "$(body 100)" "$OPENER_BODY" "the body is byte-identical"
 
-echo "# the route is the discriminator: once the child's push clears it, it joins"
-# The same child, its submit-and-exit route now cleared — the very signal
-# merge.sh reads to tell a pushed hand-back from one a pool has yet to claim.
-# Its commits are on the branch, so it enters the ledger and the body names both.
+echo "# the route is the discriminator: with neither key naming a pool, it joins"
+# A settled hand-back keyed on the branch, with both gc.routed_to and
+# gc.execution_routed_to clear, is one no pool will claim; its commits are on the
+# branch, so it enters the ledger and the body names both. Only
+# gc.execution_routed_to differs from the graph.v2 in-flight case above, so it is
+# the discriminator.
 store "[$(anchor T polecat/T 100),
-        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","rejection_reason":"signoff requested changes"}}')]"
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","gc.execution_routed_to":"","rejection_reason":"signoff requested changes"}}')]"
 pr 100 OPEN polecat/T "$OPENER_BODY"
 out=$("$SUT" 2>&1)
-has "$out" "names 2 beads" "the hand-back joins once its route is cleared"
+has "$out" "names 2 beads" "the hand-back joins once neither route names a pool"
 has "$(body 100)" '- `T1` — Rework branch polecat/T' "…and is listed as a contributor"
 
 echo "# an ordinary one-bead PR is left exactly as pr-open.sh composed it"
