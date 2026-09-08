@@ -702,6 +702,8 @@ has "prompt says a visit is the minority case"         "minority case"          
 has "prompt collapses stamp+release into one --release call" "--release"         "$PM"
 absent "prompt no longer names the retired mol-first-reaction formula" "mol-first-reaction" "$PM"
 absent "prompt no longer writes the retired proactive-reaction marker" "gc.proactive_reaction" "$PM"
+has "the first-reaction card is written with --append-notes, never a bare --notes that erases the dispatch note" '--append-notes "..." # the first-reaction card' "$PM"
+has "the completed-reoffer release clears its route so demand cannot reclaim the subject" "--set-metadata gc.routed_to= --unset-metadata gc.execution_routed_to" "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"
 UFX="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"

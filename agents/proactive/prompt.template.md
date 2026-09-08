@@ -47,10 +47,14 @@ exit
   card. Read the card's `## Disposition` line and perform that exit directly
   (the dispose step below), then drain.
 - **A disposition already landed** (`gc.first_reaction` is set). The reaction is
-  done; you are a re-offer. Release the subject untouched and drain — never
-  re-react:
+  done; you are a re-offer. Release the subject without re-reacting, and clear
+  its route as you release — demand claims open, unassigned beads still routed to
+  this pool, so a release that leaves `gc.routed_to` set re-offers the completed
+  subject every cycle:
   ```bash
-  gc bd update <id> --status open --assignee "" --append-notes "Re-offered after a completed first reaction (gc.first_reaction already set); released untouched."
+  gc bd update <id> --status open --assignee "" \
+    --set-metadata gc.routed_to= --unset-metadata gc.execution_routed_to \
+    --append-notes "Re-offered after a completed first reaction (gc.first_reaction already set); released without re-reacting, route cleared."
   gc runtime drain-ack
   ```
 
@@ -207,7 +211,7 @@ main. Never `--merge direct`. The pool already defaults
 
 ```bash
 gc bd show <id>                       # re-read the bead / refresh the slice
-gc bd update <id> --notes "..."       # the first-reaction card
+gc bd update <id> --append-notes "..." # the first-reaction card (never --notes — it erases the dispatch note)
 gc session nudge <addr> "..."         # talk to another agent (ephemeral)
 gc runtime drain-ack                  # end this one-shot session
 ```
