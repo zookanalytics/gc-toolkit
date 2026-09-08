@@ -4,15 +4,18 @@
 # PR, so pr-facts.sh consummates the terminal close through bead-rehome.sh.
 # Covers: the marker stamped and read back on an OPEN pull_request anchor;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open;
-# idempotent no-op on an already-disposed anchor; refusal on an anchor past the
-# pull_request state (named bead-rehome as the direct verb); refusal on a
-# missing PR number; the marker read-back gate refusing to close the PR when the
-# stamp did not land — including the successor store, which a dropped write, or
-# a stale value an omitted store fails to clear, both catch; the successor store
-# carried through when given and cleared when omitted; the close-mode failures
-# that record the marker but exit non-zero (gh missing, origin unresolvable, an
-# unreadable or failed gh close); dry-run writing nothing; and the usage
-# refusals (bad kind, missing args).
+# gh view and close pinned to the anchor's own pr_url repo, never the checkout
+# origin; a --pr that contradicts the pr_url refused; the live PR identity
+# certified against the anchor before closing; idempotent no-op on an
+# already-disposed anchor; refusal on an anchor past the pull_request state
+# (named bead-rehome as the direct verb); refusal on an anchor with no parseable
+# pr_url; the marker read-back gate refusing to close the PR when the stamp did
+# not land — including the successor store, which a dropped write, or a stale
+# value an omitted store fails to clear, both catch; the successor store carried
+# through when given and cleared when omitted; the close-mode failures that
+# record the marker but exit non-zero (gh missing, an unreadable or failed gh
+# close); dry-run writing nothing; and the usage refusals (bad kind, missing
+# args).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,30 +29,47 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-dispose.sh"
 SUT="$SD/pr-dispose.sh"
 
-# gh: pr-dispose reads the PR state and closes it. The harness gh stub cats a
-# whole fixture and has no `close`, so override it with a minimal one that
-# serves a canned state (per PR, default OPEN) and logs the close, honouring a
-# refusal knob. Written after harness_init so it wins on PATH.
+# gh: pr-dispose reads the PR (state + url) and closes it, both pinned to the
+# --repo it derives from the anchor's pr_url. The harness gh stub cats a whole
+# fixture and has no `close`, so override it with a minimal one that serves a
+# canned state (per PR, default OPEN) and a url built from the pinned --repo, and
+# logs the close, honouring the refusal knobs. Written after harness_init so it
+# wins on PATH.
 cat > "$BIN/gh" <<'GH'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 [ "${1:-}" = "pr" ] || { echo "gh stub: only 'pr' supported" >&2; exit 2; }
 v="${2:-}"; shift 2 || true
-num=""; for a in "$@"; do case "$a" in ''|--*|github.com/*) : ;; *) [ -z "$num" ] && num="$a" ;; esac; done
+num=""; repo=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo) repo="${2:-}"; shift 2 ;;
+    --*)    shift ;;
+    *)      [ -z "$num" ] && num="$1"; shift ;;
+  esac
+done
 case "$v" in
   view)  [ -n "${STUB_PR_VIEW_RC:-}" ] && { echo "gh (stub): simulated pr view failure" >&2; exit "$STUB_PR_VIEW_RC"; }
-         f="$STUB_GH_DIR/pr_state_$num"; [ -s "$f" ] && cat "$f" || echo "OPEN" ;;
+         f="$STUB_GH_DIR/pr_state_$num"; st="OPEN"; [ -s "$f" ] && st="$(cat "$f")"
+         # The url reflects the repo the SUT pinned (--repo, from the anchor's
+         # pr_url), so its identity check certifies the live PR against the
+         # anchor. STUB_PR_URL forces a mismatch to exercise that refusal.
+         url="${STUB_PR_URL:-https://$repo/pull/$num}"
+         printf '{"state":"%s","url":"%s"}\n' "$st" "$url" ;;
   close) exit "${STUB_PR_CLOSE_RC:-0}" ;;
   *)     echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
 esac
 GH
 chmod +x "$BIN/gh"
 
-# An OPEN anchor gating a PR, plus the successor it points to.
-anchor() { # id num [extra-metadata]
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/%s"%s}}' \
-    "$1" "$2" "$2" "$1" "${3:-}"
+# An OPEN anchor gating a PR, plus the successor it points to. The pr_url
+# defaults to the checkout's own repo but can be overridden (arg 4) to prove the
+# gh calls follow the anchor's pr_url, not the checkout origin.
+anchor() { # id num [extra-metadata] [pr_url-override]
+  prurl="${4:-https://github.com/zook/gc-toolkit/pull/$2}"
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"%s","branch":"polecat/%s"%s}}' \
+    "$1" "$2" "$prurl" "$1" "${3:-}"
 }
 succ() { printf '{"id":"%s","status":"open","title":"successor","notes":"","metadata":{}}' "$1"; }
 
@@ -94,11 +114,14 @@ eq "$rc" 1 "exits 1"
 has "$out" "bead-rehome.sh --origin A5" "names the direct disposition verb for a non-pull_request anchor"
 eq "$(meta A5 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped on the refused anchor"
 
-echo "# a pull_request anchor with no PR number and no --pr is refused"
-store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\"}}, $(succ S6)]"
+echo "# a pull_request anchor with no parseable pr_url is refused before stamping"
+store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\",\"pr_number\":\"80\"}}, $(succ S6)]"
+: > "$STUB_GH_LOG"
 out=$("$SUT" --anchor A6 --successor S6 --kind duplicate 2>&1); rc=$?
 eq "$rc" 1 "exits 1"
-has "$out" "no numeric PR number" "explains the missing PR number"
+has "$out" "no parseable pr_url" "explains the missing pr_url — a bare number cannot pin the repo"
+eq "$(meta A6 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped when the PR cannot be identified"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "no gh call when the pr_url is unparseable"
 
 echo "# the read-back gate: a marker that does not stick refuses to close the PR"
 store "[$(anchor A7 75), $(succ S7)]"
@@ -165,15 +188,38 @@ eq "$(meta A11 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recor
 has "$(cat "$STUB_GH_LOG")" "pr close 79" "the close was attempted"
 has "$out" "still OPEN" "reports the PR is still open and needs closing"
 
-echo "# in close mode with an unresolvable origin, the marker is recorded but the exit is non-zero"
-store "[$(anchor A23 93), $(succ S23)]"
+echo "# gh calls follow the anchor's pr_url repo, NOT the checkout origin"
+# The reviewed bug: #NUM was aimed at the checkout's origin, so an anchor read
+# cross-rig could close a same-numbered PR in the wrong repository. Here the
+# anchor's pr_url names a different repo than the checkout origin; the view and
+# the close must both target the pr_url's repo.
+store "[$(anchor A23 93 '' 'https://github.com/other/proj/pull/93'), $(succ S23)]"
 : > "$STUB_GH_LOG"
-out=$(STUB_ORIGIN_URL="" "$SUT" --anchor A23 --successor S23 --kind duplicate 2>&1); rc=$?
-eq "$rc" 1 "an unresolvable origin in close mode exits non-zero (no false success)"
-eq "$(meta A23 'gc.pr_close_disposition_kind')" "duplicate" "the marker is still recorded (it is durable)"
-has "$out" "origin repo could not be resolved" "reports the origin could not be resolved"
-hasnt "$out" "already" "does NOT claim the PR is closed or disposed"
-hasnt "$(cat "$STUB_GH_LOG")" "pr close" "no PR close attempted when the origin is unresolvable"
+out=$(STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit" "$SUT" --anchor A23 --successor S23 --kind duplicate 2>&1); rc=$?
+eq "$rc" 0 "closes against the pr_url's repo"
+has "$(cat "$STUB_GH_LOG")" "pr view 93 --repo github.com/other/proj" "reads the PR in the anchor's own repo"
+has "$(cat "$STUB_GH_LOG")" "pr close 93 --repo github.com/other/proj" "closes the PR in the anchor's own repo"
+hasnt "$(cat "$STUB_GH_LOG")" "github.com/zook/gc-toolkit" "never aims a gh call at the checkout origin repo"
+
+echo "# a --pr that contradicts the anchor's pr_url is refused before any gh call"
+store "[$(anchor A25 95), $(succ S25)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --anchor A25 --successor S25 --kind duplicate --pr 999 2>&1); rc=$?
+eq "$rc" 1 "a mismatched --pr is refused"
+has "$out" "does not match the anchor's pr_url" "explains the mismatch"
+eq "$(meta A25 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped on a mismatched --pr"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "no gh call on a mismatched --pr"
+
+echo "# the live PR identity is certified against the anchor before closing"
+store "[$(anchor A26 96), $(succ S26)]"
+: > "$STUB_GH_LOG"
+# gh returns a PR whose url is a different repo than the anchor's pr_url, as a
+# transferred or renamed repo would redirect: refuse rather than close it.
+out=$(STUB_PR_URL="https://github.com/moved/elsewhere/pull/96" "$SUT" --anchor A26 --successor S26 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "a live PR whose url does not match the anchor is refused"
+has "$out" "not the anchor's pr_url" "reports the identity mismatch"
+eq "$(meta A26 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recorded (identity is checked in the close path)"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed on an identity mismatch"
 
 echo "# in close mode with gh missing, the marker is recorded but the exit is non-zero"
 store "[$(anchor A24 94), $(succ S24)]"

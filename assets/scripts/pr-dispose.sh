@@ -45,6 +45,17 @@ scrub() { tr -d '\000-\011\013-\037'; }
 warn() { echo "$PROG: $1" >&2; }
 die()  { echo "$PROG: $1" >&2; exit "${2:-1}"; }
 
+# host/owner/repo from a PR url, so every gh call is pinned to the PR's own
+# repository: a bare #NUM names a different pull request per repo per host.
+url_repo_q() {
+  printf '%s' "${1:-}" \
+    | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\([^/][^/]*\)/\([^/][^/]*/[^/][^/]*\)/pull/[0-9].*#\1/\2#p'
+}
+# a PR url reduced to scheme://host/owner/repo/pull/<n>, for identity comparison.
+canon_pr_url() {
+  printf '%s' "${1:-}" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##'
+}
+
 usage() {
   cat >&2 <<'U'
 usage: pr-dispose.sh --anchor <bead-id> --successor <bead-id>
@@ -116,9 +127,22 @@ fi
 if [ "$A_STATUS" != "open" ] || [ "$A_MR" != "pull_request" ]; then
   die "$ANCHOR is status='$A_STATUS' merge_result='${A_MR:-unset}', not an OPEN pull_request anchor pr-facts can consummate. Dispose an anchor past that state directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
 fi
-case "$PRNUM" in
-  ''|*[!0-9]*) die "no numeric PR number on $ANCHOR (metadata.pr_number) and none given via --pr" 1 ;;
-esac
+# The PR repository AND number both come from the anchor's own pr_url. A bare
+# PR number names a different pull request per repository per host, and this
+# script can read the anchor from another rig (GC_RIG) while the checkout's
+# origin is an unrelated repo — pinning gh to the checkout origin could then
+# close a same-numbered PR in the wrong repository. Refuse an unparseable
+# pr_url, and a --pr / metadata.pr_number that contradicts it, before touching
+# anything.
+PR_URL=$(printf '%s' "$AJSON" | jq -r '.[0].metadata.pr_url // ""')
+PR_REPO_Q=$(url_repo_q "$PR_URL")
+[ -n "$PR_REPO_Q" ] || die "no parseable pr_url on $ANCHOR (metadata.pr_url='$PR_URL'); refusing to run GitHub calls a bare PR number would aim at the checkout's origin repo. Close the PR by hand, and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+URL_NUM="${PR_URL##*/pull/}"; URL_NUM="${URL_NUM%%[!0-9]*}"
+case "$URL_NUM" in ''|*[!0-9]*) die "the pr_url on $ANCHOR ('$PR_URL') carries no numeric PR number" 1 ;; esac
+if [ -n "$PRNUM" ] && [ "$PRNUM" != "$URL_NUM" ]; then
+  die "the PR number ($PRNUM, from --pr or metadata.pr_number) does not match the anchor's pr_url (#$URL_NUM in $PR_REPO_Q); refusing rather than acting on the wrong PR — reconcile --pr / metadata.pr_number with metadata.pr_url" 1
+fi
+PRNUM="$URL_NUM"
 
 # Best-effort: confirm the successor resolves. bead-rehome is the authority at
 # consummation (it searches every store), so an unresolved successor here only
@@ -128,10 +152,10 @@ if ! gc bd show "$SUCCESSOR" --json 2>/dev/null | scrub | jq -e 'type == "array"
 fi
 
 if [ "$DRY" -eq 1 ]; then
-  printf '%s (dry run)\n  anchor:    %s [%s] merge_result=%s\n  successor: %s%s\n  kind:      %s\n  marker:    gc.pr_close_disposition_kind=%s gc.pr_close_disposition_successor=%s%s\n  pr:        #%s %s\n' \
+  printf '%s (dry run)\n  anchor:    %s [%s] merge_result=%s\n  successor: %s%s\n  kind:      %s\n  marker:    gc.pr_close_disposition_kind=%s gc.pr_close_disposition_successor=%s%s\n  pr:        #%s in %s %s\n' \
     "$PROG" "$ANCHOR" "$A_STATUS" "$A_MR" "$SUCCESSOR" "${STORE:+ ($STORE)}" "$KIND" \
     "$KIND" "$SUCCESSOR" "${STORE:+ gc.pr_close_disposition_successor_store=$STORE}" \
-    "$PRNUM" "$( [ "$NO_CLOSE" -eq 1 ] && echo '(left open; --no-close-pr)' || echo '(will be closed)' )"
+    "$PRNUM" "$PR_REPO_Q" "$( [ "$NO_CLOSE" -eq 1 ] && echo '(left open; --no-close-pr)' || echo '(will be closed)' )"
   exit 0
 fi
 
@@ -169,40 +193,36 @@ fi
 command -v gh >/dev/null 2>&1 \
   || die "the marker is recorded but gh is not available, so PR#$PRNUM was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
 
-# Origin repo, resolved the way pr-facts.sh resolves it.
-ORIGIN_HOST=""; ORIGIN_REPO=""
-u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
-case "$u" in
-  git@github.com:*|https://github.com/*|ssh://git@github.com/*)
-    ORIGIN_HOST="github.com"
-    ORIGIN_REPO=$(printf '%s' "$u" | sed -e 's#^ssh://git@github.com/##' \
-      -e 's#^git@github.com:##' -e 's#^https://github.com/##' -e 's#\.git$##' -e 's#/*$##') ;;
-esac
-case "$ORIGIN_REPO" in */*/*|/*|*/) ORIGIN_REPO="" ;; */*) : ;; *) ORIGIN_REPO="" ;; esac
-if [ -z "$ORIGIN_REPO" ]; then
-  die "the marker is recorded but the origin repo could not be resolved from this checkout, so PR#$PRNUM was NOT closed and may still be OPEN — close it by hand (or re-run in the anchor's checkout), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+# Read the live PR once, pinned to the anchor's own repository (PR_REPO_Q from
+# its pr_url, resolved above), and certify identity before any close. Keep gh's
+# exit status — an unreadable state (gh failed, or empty output) must NOT be
+# mistaken for a closed PR. Reading it as closed would leave the marker recorded
+# while the PR may still be OPEN, a false success: pr-facts never sees a CLOSED
+# PR to consummate the disposition. pipefail (set above) makes the pipe carry
+# gh's non-zero status when gh fails.
+PR_JSON=$(gh pr view "$PRNUM" --repo "$PR_REPO_Q" --json state,url 2>/dev/null | scrub); rc=$?
+if [ "$rc" -ne 0 ] || [ -z "$PR_JSON" ]; then
+  die "the marker is recorded but PR#$PRNUM state could not be read from $PR_REPO_Q (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
 fi
-
-# Idempotent: never reopen or re-close a PR already closed. Keep gh's exit
-# status — an unreadable state (gh failed, or empty output) must NOT be mistaken
-# for a closed PR. Reading it as closed would leave the marker recorded while
-# the PR may still be OPEN, a false success: pr-facts never sees a CLOSED PR to
-# consummate the disposition. pipefail (set above) makes the pipe carry gh's
-# non-zero status when gh fails.
-if PR_STATE=$(gh pr view "$PRNUM" --repo "$ORIGIN_HOST/$ORIGIN_REPO" --json state --jq '.state' 2>/dev/null | scrub) \
-   && [ -n "$PR_STATE" ]; then
-  if [ "$PR_STATE" = "OPEN" ]; then
-    CMT="Closing as $KIND: disposition recorded on anchor $ANCHOR (successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
-    [ -n "$NOTE" ] && CMT="$CMT $NOTE"
-    if gh pr close "$PRNUM" --repo "$ORIGIN_HOST/$ORIGIN_REPO" --comment "$CMT" >/dev/null 2>&1; then
-      echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
-    else
-      die "the marker is recorded but 'gh pr close $PRNUM' failed and the PR is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
-    fi
+# Certify the PR gh returned is the one the anchor records: #NUM resolves within
+# PR_REPO_Q, but a transferred or renamed repo redirects, so a bare number can
+# still land on a different PR. Compare the live url to the anchor's pr_url.
+LIVE_URL=$(canon_pr_url "$(printf '%s' "$PR_JSON" | jq -r '.url // ""')")
+if [ -z "$LIVE_URL" ] || [ "$(canon_pr_url "$PR_URL")" != "$LIVE_URL" ]; then
+  die "PR#$PRNUM in $PR_REPO_Q resolves to '${LIVE_URL:-<none>}', not the anchor's pr_url '$PR_URL'; refusing to close — after a repo transfer or redirect a bare number can name a different PR. Close it by hand if this is expected, and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+fi
+PR_STATE=$(printf '%s' "$PR_JSON" | jq -r '.state // ""')
+[ -n "$PR_STATE" ] || die "the marker is recorded but PR#$PRNUM returned no state from $PR_REPO_Q; the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+# Idempotent: never reopen or re-close a PR already closed.
+if [ "$PR_STATE" = "OPEN" ]; then
+  CMT="Closing as $KIND: disposition recorded on anchor $ANCHOR (successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
+  [ -n "$NOTE" ] && CMT="$CMT $NOTE"
+  if gh pr close "$PRNUM" --repo "$PR_REPO_Q" --comment "$CMT" >/dev/null 2>&1; then
+    echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
   else
-    echo "$PROG: PR#$PRNUM is already $PR_STATE; the marker is recorded, and pr-facts auto-disposes $ANCHOR on its next pass"
+    die "the marker is recorded but 'gh pr close $PRNUM' failed and the PR is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
   fi
 else
-  die "the marker is recorded but PR#$PRNUM state could not be read (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+  echo "$PROG: PR#$PRNUM is already $PR_STATE; the marker is recorded, and pr-facts auto-disposes $ANCHOR on its next pass"
 fi
 exit 0
