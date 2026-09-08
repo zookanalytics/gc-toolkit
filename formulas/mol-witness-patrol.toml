@@ -31,10 +31,10 @@ the other, and either stamp reads back clean, so a hand-written address is
 right only by luck.
 
 Marked blocks (bug-dispatch, host-bead-skip, downstream-court-skip,
-liveness-map-guard, liveness-lookup, warrant-file, husk-guard,
-owning-store-guard, crash-loop-window, patrol-wisp-pour,
-refinery-stuck-escalate) are extracted and executed by their tests; keep
-markers, keep them backslash-free."""
+topology-root-skip, liveness-map-guard, liveness-lookup, warrant-file,
+husk-guard, owning-store-guard, recovery-stamp-gate, crash-loop-window,
+patrol-wisp-pour, refinery-stuck-escalate) are extracted and executed by
+their tests; keep markers, keep them backslash-free."""
 formula = "mol-witness-patrol"
 
 [vars]
@@ -144,9 +144,11 @@ jq -c '[ .[]
 # <<< host-bead-skip
 ```
 A bead naming no owner in any of the three places is already in the pool's
-court, and it is the only thing this filter drops. There is no owned-bead class
-orphan recovery must skip on kind alone: a visit whose session died SHOULD
-return to the pool (cold continuity is respawn-and-reconstitute).
+court, and it is the only thing this filter drops. Every OTHER owned bead
+reaches the liveness loop regardless of kind — a visit whose session died
+SHOULD return to the pool (cold continuity is respawn-and-reconstitute) — save
+one class dropped below by kind: the graph.v2 topology root, which is not
+recoverable work.
 
 A bead whose work has ALREADY REACHED a downstream court is dropped next, by
 state not by kind. Orphan recovery returns LOST work to the pool, but a bead in
@@ -192,6 +194,39 @@ jq -c '[ .[]
   | select($mr != "pre_open_gate" and $mr != "pull_request"
            and $routed != "human") ]'
 # <<< downstream-court-skip
+```
+One owned class is dropped by kind rather than state: the graph.v2 topology
+root. A root carries `gc.kind` in the topology set — `workflow`, `scope`,
+`spec` — and only a `gc.session_name` slot label, never a `gc.session_id`. It
+is the anchor its STEP beads hang from, not a claimable unit of work; the steps
+carry the work and the `gc.session_id` that names the session actually holding
+them. The root's own close is the control-dispatcher's `workflow-finalize`, and
+`orphan-dispose.sh` already refuses a root as `root_not_schedulable`, so the
+loop has no recovery to offer it. Left in, a root does harm either way it
+resolves: live via the inherited slot label it is warranted against the
+successor that now holds the slot, absent it churns a `witness-salvage-refused`
+notice on a bead that never had a worktree. Drop it before the loop, the same
+kind set `hookCandidateClaimable` and the pool-demand `demandRowServable`
+refuse (`liveness-sweep.sh`'s `topology_kind` mirrors it):
+```bash
+# >>> topology-root-skip
+# Drop graph.v2 topology ROOTS before the liveness loop. A root names its owner
+# only in gc.session_name — the pool SLOT, which a successor session keeps alive
+# — so resolving its liveness reads the successor's life as the dead run's and
+# warrants a live session; and a root has no worktree, so the salvage path only
+# churns a witness-salvage-refused notice. A root is not recoverable work: its
+# steps carry the work and the gc.session_id, and its close is the
+# control-dispatcher's workflow-finalize. The kind set is
+# beadmeta.WorkflowTopologyKinds (workflow, scope, spec) — the same set the hook
+# (hookCandidateClaimable) and pool demand (demandRowServable) refuse, mirrored
+# by liveness-sweep.sh's topology_kind. Reads the candidate array on stdin (the
+# downstream-court-skip result), writes the survivors on stdout, and touches no
+# field a survivor arrived with.
+jq -c '[ .[]
+  | (.metadata // {}) as $m
+  | ($m["gc.kind"] // "") as $kind
+  | select($kind != "workflow" and $kind != "scope" and $kind != "spec") ]'
+# <<< topology-root-skip
 ```
 Two more exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,

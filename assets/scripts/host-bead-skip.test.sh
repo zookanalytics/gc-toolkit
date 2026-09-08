@@ -4,11 +4,14 @@
 # THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads scan considers
 # only beads that name an OWNER, and stamps that owner as `.owner` for the
 # liveness loop. A bead naming no owner is already in the pool's court and
-# needs no recovery. Owned-but-dead beads are exactly the witness's recovery
-# domain: no class of owned bead is exempt from orphan recovery. Visits and
-# their converse sessions need no carve-out either — a visit whose session died
-# mid-hold SHOULD return to the pool (respawn-and-reconstitute-from-the-record
-# is the cold continuity path; specs/2026-08-fresh-start/spine-port.md, D4).
+# needs no recovery. This filter keeps every OWNED bead and stamps its owner, so
+# it exempts no class here. The recovery scan as a whole exempts exactly one
+# owned class — the graph.v2 topology root, which is not recoverable work — and
+# the sibling topology-root-skip filter (topology-root-skip.test.sh) drops it
+# from the candidate set, not this one. Visits need no carve-out either: a visit
+# whose session died mid-hold SHOULD return to the pool
+# (respawn-and-reconstitute-from-the-record is the cold continuity path;
+# specs/2026-08-fresh-start/spine-port.md, D4).
 #
 # A bead names its owner in one of three places. `assignee` is the direct form
 # and the only one a `gc bd list --json` row shows on its own: the key is
@@ -83,6 +86,23 @@ assignee_only_ids() {
     | sort_by(.id) | map(.id) | join(",")'
 }
 
+# candidate_ids <bead-array-json> -> ids surviving host-bead-skip THEN the sibling
+# topology-root-skip filter: the recovery scan's real candidate set. host-bead-skip
+# resolves an owner for a topology root, and topology-root-skip removes it — the
+# boundary the header describes.
+TOPOSKIP="$(awk '
+  /# >>> topology-root-skip/ {f=1; next}
+  /# <<< topology-root-skip/ {f=0}
+  f' "$TOML")"
+[ -n "$TOPOSKIP" ] \
+  && ok "topology-root-skip extracted (needed for the composed-candidate case)" \
+  || bad "topology-root-skip extraction EMPTY — markers missing from $TOML"
+printf '%s\n' "$TOPOSKIP" > "$TMP/toposkip.sh"
+candidate_ids() {
+  printf '%s' "$1" | bash "$TMP/filter.sh" 2>/dev/null | bash "$TMP/toposkip.sh" 2>/dev/null \
+    | jq -r 'sort_by(.id) | map(.id) | join(",")'
+}
+
 # --- Fixtures. ---------------------------------------------------------------
 # u1  unassigned bead                 -> DROP (skip-unassigned)
 # p1  pool polecat, assigned          -> KEEP (a real orphan candidate)
@@ -126,6 +146,13 @@ eq "$(ids "$FIX3")" "s1,s2" \
    "keeps a step owned via gc.session_id and a root owned via gc.session_name; drops the ownerless s3"
 eq "$(owners "$FIX3")" "s1=lx-7xcse,s2=gc-toolkit--gc-toolkit__polecat-1-pool" \
    "stamps .owner from whichever signal the bead carries"
+
+# The composed candidate set the loop actually reads: host-bead-skip resolves the
+# root's owner (s2 above), then topology-root-skip removes it, so only the step
+# (s1) survives. This is what stops the loop from ever reading a root's inherited
+# slot label as its liveness.
+eq "$(candidate_ids "$FIX3")" "s1" \
+   "host-bead-skip | topology-root-skip drops the workflow root (s2), keeps the step (s1)"
 
 # Precedence, most specific first: gc.session_id, then assignee, then
 # gc.session_name. The whole order is load-bearing. Both labels are handed on to

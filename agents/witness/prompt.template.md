@@ -86,9 +86,12 @@ the current wisp.
   writes there land in the enclosing repo.
 - **Preserve `metadata.branch` on recovery.** The branch is where the next
   polecat resumes from; a recovery that strips it re-does the work.
-- **Skip infrastructure**: dispatcher-routed control beads and beads owned
-  by configured named identities are not orphans. A visit whose session died
-  DOES return to the pool — respawn-and-reconstitute is the designed path.
+- **Skip infrastructure**: dispatcher-routed control beads, graph.v2 topology
+  roots (`gc.kind` workflow/scope/spec — not recoverable work; their steps carry
+  the work and the control-dispatcher's `workflow-finalize` closes the root), and
+  beads owned by configured named identities are not orphans. A visit whose
+  session died DOES return to the pool — respawn-and-reconstitute is the designed
+  path.
 
 ## Findings
 
