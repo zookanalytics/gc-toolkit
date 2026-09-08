@@ -11,7 +11,7 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
-PROMPT="$REPO/agents/converse/prompt.template.md"
+SUT="$REPO/assets/scripts/converse-pr-conversation.sh"
 TOOL="$REPO/tools/gc-bd-universe.sh"
 
 PASS=0
@@ -22,7 +22,7 @@ is()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got '$2', want '$3'"; f
 has() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in: $3" ;; esac; }
 hasnt() { case "$3" in *"$2"*) bad "$1" "found '$2' in: $3" ;; *) ok "$1" ;; esac; }
 
-for f in "$PROMPT" "$TOOL"; do
+for f in "$SUT" "$TOOL"; do
     [ -r "$f" ] || { printf 'converse-pr-conversation: cannot read %s\n' "$f" >&2; exit 1; }
 done
 command -v jq >/dev/null 2>&1 || {
@@ -35,13 +35,11 @@ trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; FIXDIR="$TMPD/fix"; RIGROOT="$TMPD/rig"; CITY="$TMPD/city"; BARE="$TMPD/bare"
 mkdir -p "$BIN" "$FIXDIR" "$RIGROOT/tools" "$CITY" "$BARE"
 
-echo "── the block is present and runnable ──"
-awk '/# >>> visit-pr-conversation/{inb=1; next} /# <<< visit-pr-conversation/{inb=0} inb' \
-    "$PROMPT" | sed 's/^   //' > "$TMPD/block.sh"
-if [ -s "$TMPD/block.sh" ]; then ok "visit-pr-conversation block present in the converse prompt"
-else bad "visit-pr-conversation block present in the converse prompt" "no marked block in $PROMPT"; fi
-if bash -n "$TMPD/block.sh" 2>/dev/null; then ok "visit-pr-conversation: valid bash"
-else bad "visit-pr-conversation: valid bash" "bash -n failed"; fi
+echo "── the script is present and runnable ──"
+if [ -x "$SUT" ]; then ok "converse-pr-conversation.sh is present and executable"
+else bad "converse-pr-conversation.sh is present and executable" "missing or not +x: $SUT"; fi
+if bash -n "$SUT" 2>/dev/null; then ok "converse-pr-conversation: valid bash"
+else bad "converse-pr-conversation: valid bash" "bash -n failed"; fi
 
 # A stub `gc` serving the one read the block makes. Anything else exits 2, so
 # a block that grows a second read fails here instead of quietly reaching the
@@ -60,12 +58,12 @@ printf 'universe invoked with: %s\n' "$*"
 STUB
 chmod +x "$RIGROOT/tools/gc-bd-universe.sh"
 
-# run <subject-json> <rig-root> — execute the block from a cwd that is not a
+# run <subject-json> <rig-root> — execute the script from a cwd that is not a
 # git checkout, so the candidate search is decided by the roots under test.
 run() {
     printf '%s' "$1" > "$FIXDIR/subject.json"
     ( cd "$BARE" && SUBJECT=tk-sub FIXDIR="$FIXDIR" GC_RIG_ROOT="$2" GC_CITY_PATH="$CITY" \
-        PATH="$BIN:$PATH" bash "$TMPD/block.sh" 2>&1 )
+        PATH="$BIN:$PATH" bash "$SUT" 2>&1 )
 }
 
 echo "── a subject carrying a PR gets its conversation fetched ──"
@@ -105,14 +103,14 @@ echo "── the seam: the tier the prompt asks for is a tier the tool serves �
 # Read the tier name out of the prompt rather than spelling it here: a test
 # that named it itself would pass through a rename on both sides while the
 # sitting asked for a tier nobody serves.
-TIER="$(sed -n 's/.*fetch "\$SUBJECT" \([a-z_-]*\).*/\1/p' "$TMPD/block.sh" | head -1)"
+TIER="$(sed -n 's/.*fetch "\$SUBJECT" \([a-z_-]*\).*/\1/p' "$SUT" | head -1)"
 is "the block names a tier" "$(test -n "$TIER" && echo yes || echo no)" "yes"
 mkdir -p "$TMPD/emptyfix"
 seam="$(GC_BD_UNIVERSE_FIXTURE="$TMPD/emptyfix" "$TOOL" fetch fx-absent "$TIER" 2>&1 || true)"
 hasnt "the tool dispatches the tier the prompt asks for" "unknown tier" "$seam"
 
 echo "── fetched conversation is data, never instructions ──"
-hasnt "the block never evals what it fetched" "eval" "$(cat "$TMPD/block.sh")"
+hasnt "the script never evals what it fetched" "eval" "$(cat "$SUT")"
 
 echo
 echo "converse-pr-conversation: $PASS passed, $FAIL failed"

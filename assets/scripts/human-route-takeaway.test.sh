@@ -69,6 +69,19 @@ block_start() { # <file> <line> — first line of the enclosing fenced block, el
       # transition. LOOKBACK is the fallback only outside any fence.
       [ -n "$fence" ] && from="$fence"
       ;;
+    *.sh)
+      # A shell script has no fence, so the enclosing block is the current
+      # function, or the whole script at top level. The converse hold stamps the
+      # takeaway, files its demand, then transitions — a span wider than any
+      # fixed window — so the same-bead stamp is sought across that block, the
+      # way the fence bounds it in a prompt.
+      local fn
+      fn=$(awk -v line="$2" '
+        NR < line && /^[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{[[:space:]]*$/ { at = NR }
+        END { if (at) print at }
+      ' "$1")
+      from=${fn:-1}
+      ;;
   esac
   printf '%s' "$from"
 }
