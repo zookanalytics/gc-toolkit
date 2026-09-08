@@ -84,21 +84,25 @@ absent() { case "$3" in *"$2"*) bad "$1" "absent: $2" "$3" ;; *) ok "$1" ;; esac
 # priority (P3), so a board-weight rank must place it LAST — a plain
 # oldest-first sort would put it first. JSON order here is intentionally NOT
 # the expected ranked order, so a no-op (unranked) tool fails the assertions.
-# px-root is a graph.v2 topology ROOT (gc.kind=workflow): routed but never
-# claimable, so demand must DROP it. Its priority/age would rank it FIRST if it
-# leaked through, so the ranking assertions below double as an exclusion probe.
+# px-root is a graph.v2 topology ROOT (gc.kind=workflow) and px-step a graph.v2
+# formula STEP (gc.step_ref/gc.step_id/gc.root_bead_id, issue_type task, NO
+# gc.kind — the shape a roots-only filter missed): both are routed but never
+# claimable, so demand must DROP them. Their priority/age would rank them FIRST
+# if either leaked through, so the ranking assertions below double as an
+# exclusion probe.
 cat > "$FXDIR/ready.json" <<'JSON'
 [
   {"id":"px-old-lo","title":"oldest but low priority","priority":3,"created_at":"2026-01-01T00:00:00Z"},
   {"id":"px-new-hi","title":"newest, high priority","priority":1,"created_at":"2026-03-01T00:00:00Z"},
   {"id":"px-mid-hi","title":"middle age, high priority","priority":1,"created_at":"2026-02-01T00:00:00Z"},
-  {"id":"px-root","title":"graph.v2 topology root — routed but NEVER claimable","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}}
+  {"id":"px-root","title":"graph.v2 topology root — routed but NEVER claimable","priority":1,"created_at":"2026-01-15T00:00:00Z","metadata":{"gc.kind":"workflow"}},
+  {"id":"px-step","title":"graph.v2 formula step — routed but NEVER a first-reaction subject","priority":1,"created_at":"2026-01-10T00:00:00Z","issue_type":"task","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.step_id":"mol-polecat-work.implement","gc.root_bead_id":"px-wfroot"}}
 ]
 JSON
 # px-lo/px-hi are allowlisted top-level inputs the scan KEEPS; the rest are
-# each dropped by one precision filter (disallowed type, topology root,
-# feedback-pattern machinery, already-ruled, non-top-level child, a dispatched
-# review lane, an implementation branch/PR anchor).
+# each dropped by one precision filter (disallowed type, topology root, formula
+# step, feedback-pattern machinery, already-ruled, non-top-level child, a
+# dispatched review lane, an implementation branch/PR anchor).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
   {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z","issue_type":"task"},
@@ -109,7 +113,8 @@ cat > "$FXDIR/scan.json" <<'JSON'
   {"id":"px-ruled","title":"a sitting already ruled this","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.takeaway":"ruled: do X"}},
   {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]},
   {"id":"px-review","title":"a dispatched review bead (work-in-flight, not input)","description":"VERDICT pending on a branch","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"px-anchor"}},
-  {"id":"px-anchor","title":"an implementation anchor: branch/merge_result, no task_kind, allowlisted type","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug","metadata":{"branch":"polecat/px-anchor","merge_result":"pre_open_gate","work_dir":"/tmp/wt/px-anchor"}}
+  {"id":"px-anchor","title":"an implementation anchor: branch/merge_result, no task_kind, allowlisted type","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug","metadata":{"branch":"polecat/px-anchor","merge_result":"pre_open_gate","work_dir":"/tmp/wt/px-anchor"}},
+  {"id":"px-step-scan","title":"a graph.v2 formula step wearing issue_type task (advances its own workflow, never a subject)","description":"a step body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.step_id":"mol-polecat-work.implement","gc.root_bead_id":"px-scan-wfroot"}}
 ]
 JSON
 
@@ -123,13 +128,15 @@ echo "── demand is always on: routed work flows with no flag and no shed ─
 # No enable flag, no city-cap env — routed demand must simply flow. (The
 # leading `unset` guards against ambient GC_PROACTIVE_* in the test env: the
 # tool must not read them at all any more.)
-eq "demand flows the routed beads (3 of 4: the topology root is dropped)" "3" \
+eq "demand flows the routed beads (3 of 5: the topology root and formula step are dropped)" "3" \
    "$(unset GC_PROACTIVE_ENABLED GC_PROACTIVE_CITY_CAP; P demand | jq 'length')"
 eq "demand output is a valid JSON array (work_query contract)" "array" \
    "$(P demand | jq -r 'type')"
-# The never-claimable topology root must not be counted as demand — counting it
-# spawns a worker gc hook --claim will hand nothing (the churn fix).
+# The never-claimable topology root and formula step must not be counted as
+# demand — counting a root spawns a worker gc hook --claim will hand nothing,
+# counting a step spawns one that would derail a live molecule (the churn fix).
 absent "demand drops the never-claimable graph.v2 topology root" "px-root" "$(P demand)"
+absent "demand drops the never-claimable graph.v2 formula step"  "px-step" "$(P demand)"
 # The retired clamps must be GONE from the tool, not merely defaulted open.
 absent "the tool no longer reads the enable gate"  "GC_PROACTIVE_ENABLED"  "$(cat "$PROACTIVE")"
 absent "the tool no longer reads the city cap"     "GC_PROACTIVE_CITY_CAP" "$(cat "$PROACTIVE")"
@@ -285,20 +292,20 @@ echo "── churn guard: work_query and scale_check agree across the page bound
 # The bug this locks out: work_query paged `gc bd ready` to its first N rows and
 # THEN dropped topology roots in jq, while scale_check dropped them over the
 # whole --limit-0 set. With more routed topology roots than the page holds ahead
-# of one claimable step, the page is all roots — work_query returned [] while
+# of one claimable subject, the page is all roots — work_query returned [] while
 # scale_check counted 1, so the reconciler spawned a worker that could claim
 # nothing and drained (the churn). Both blocks run here against a gc stub that
-# honors `gc bd ready`'s --limit/--sort, over 21 roots (older) ahead of 1 step:
+# honors `gc bd ready`'s --limit/--sort, over 21 roots (older) ahead of 1 subject:
 # 21 exceeds the 20-row page, so a page-then-filter query is empty while a
-# filter-then-slice query keeps the step.
+# filter-then-slice query keeps the subject.
 CHURN="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 jq -n '[ range(1;22) as $d
           | { id: "root-\($d)", title: "topology root \($d)", priority: 1,
               created_at: ("2026-01-" + (if $d < 10 then "0\($d)" else "\($d)" end) + "T00:00:00Z"),
               metadata: { "gc.kind": "workflow" } } ]
-        + [ { id: "claimable-step", title: "the one routed non-topology step",
+        + [ { id: "claimable-input", title: "the one routed claimable subject",
               priority: 1, created_at: "2026-12-01T00:00:00Z",
-              metadata: { "gc.kind": "step" } } ]' > "$CHURN/ready.json"
+              issue_type: "task" } ]' > "$CHURN/ready.json"
 cat > "$CHURN/gc" <<'SH'
 #!/bin/sh
 # Faithful-enough `gc bd ready`: honor --limit (0 = all) and --sort oldest over
@@ -321,20 +328,65 @@ SH
 chmod +x "$CHURN/gc"
 churn_env() { env -u GC_PROACTIVE_ENABLED PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" "$@"; }
 sc_churn="$(churn_env sh -c "$SC" 2>/dev/null || true)"
-eq "scale_check counts the step behind 21 topology roots"                 "1" "$sc_churn"
+eq "scale_check counts the subject behind 21 topology roots"              "1" "$sc_churn"
 wq_churn="$(churn_env sh -c "$WQ" 2>/dev/null || true)"
-eq "work_query returns that step, not [] (filter before the page bound)"  "1" \
+eq "work_query returns that subject, not [] (filter before the page bound)" "1" \
    "$(printf '%s' "$wq_churn" | jq 'length' 2>/dev/null)"
-has "…and it is the claimable step, not a leaked root" "claimable-step" "$wq_churn"
+has "…and it is the claimable subject, not a leaked root" "claimable-input" "$wq_churn"
 # The tools/gc-proactive.sh `demand` mirror must filter-before-bound too: driven
-# live (no fixture) against the same stub, it keeps the step the page buried.
+# live (no fixture) against the same stub, it keeps the subject the page buried.
 dem_churn="$(env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
               PATH="$CHURN:$PATH" GC_STUB_DATA="$CHURN/ready.json" \
               "$PROACTIVE" demand gc-toolkit/gc-toolkit.proactive 2>/dev/null || true)"
-eq "demand mirror keeps the step behind the page of roots"                "1" \
+eq "demand mirror keeps the subject behind the page of roots"             "1" \
    "$(printf '%s' "$dem_churn" | jq 'length' 2>/dev/null)"
-has "…and it is the claimable step"                    "claimable-step" "$dem_churn"
+has "…and it is the claimable subject"                 "claimable-input" "$dem_churn"
 rm -rf "$CHURN"
+
+echo "── graph.v2 steps are never claimable: work_query / scale_check / demand ──"
+# The finding this locks out (tk-zdndkv): a graph.v2 STEP bead carries
+# gc.step_ref/gc.step_id/gc.root_bead_id but NO gc.kind, so a filter that only
+# rejects topology ROOTS (gc.kind in workflow/scope/spec) lets it through. Routed
+# to this pool it is then handed to gc hook --claim and reacted to as a subject —
+# the worker writes or disposes a formula step instead of advancing its molecule.
+# All three demand surfaces must drop it on the step metadata, not only the
+# root's gc.kind. Driven against the real step shape a live claim carries:
+# gc.step_ref/gc.step_id/gc.root_bead_id set, gc.kind absent.
+STEPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
+cat > "$STEPD/ready.json" <<'JSON'
+[
+  {"id":"routed-step","title":"a routed graph.v2 formula step (advances its own workflow)","priority":1,"created_at":"2026-02-01T00:00:00Z","issue_type":"task","metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.step_id":"mol-polecat-work.implement","gc.root_bead_id":"wf-root"}},
+  {"id":"routed-root","title":"a routed graph.v2 topology root","priority":1,"created_at":"2026-02-02T00:00:00Z","issue_type":"task","metadata":{"gc.kind":"workflow"}},
+  {"id":"routed-subject","title":"a routed plain first-reaction subject","priority":1,"created_at":"2026-02-03T00:00:00Z","issue_type":"task"}
+]
+JSON
+cat > "$STEPD/gc" <<'SH'
+#!/bin/sh
+# Minimal `gc bd ready`: return the canned set regardless of flags (three rows
+# fit inside any page bound, so no --limit/--sort fidelity is needed here).
+[ "$1" = bd ] && [ "$2" = ready ] || { printf '[]'; exit 0; }
+cat "$GC_STUB_DATA"
+SH
+chmod +x "$STEPD/gc"
+step_env() { env -u GC_PROACTIVE_ENABLED PATH="$STEPD:$PATH" GC_STUB_DATA="$STEPD/ready.json" "$@"; }
+
+wq_step="$(step_env sh -c "$WQ" 2>/dev/null || true)"
+eq     "work_query keeps only the plain subject (step + root dropped)" "1" \
+       "$(printf '%s' "$wq_step" | jq 'length' 2>/dev/null)"
+has    "…and the survivor is the plain subject"          "routed-subject" "$wq_step"
+absent "work_query never offers a graph.v2 formula step"  "routed-step"   "$wq_step"
+absent "work_query never offers a graph.v2 topology root" "routed-root"   "$wq_step"
+
+sc_step="$(step_env sh -c "$SC" 2>/dev/null || true)"
+eq "scale_check counts only the plain subject, not the step or root" "1" "$sc_step"
+
+dem_step="$(env -u GC_RIG -u GC_PROACTIVE_FIXTURE -u GC_PROACTIVE_ENABLED \
+              PATH="$STEPD:$PATH" GC_STUB_DATA="$STEPD/ready.json" \
+              "$PROACTIVE" demand gc-toolkit/gc-toolkit.proactive 2>/dev/null || true)"
+eq     "demand mirror keeps only the plain subject (step + root dropped)" "1" \
+       "$(printf '%s' "$dem_step" | jq 'length' 2>/dev/null)"
+absent "demand mirror never offers a graph.v2 formula step" "routed-step" "$dem_step"
+rm -rf "$STEPD"
 
 echo "── the raw route: gc.routed_to only, no formula, no merge path pinned ──"
 DRY="$(P sling px-1 --dry-run 2>&1 || true)"
@@ -402,6 +454,7 @@ has    "keeps an allowlisted task"                       "px-lo"    "$SCAN_IDS"
 has    "keeps an allowlisted bug"                        "px-hi"    "$SCAN_IDS"
 absent "drops a disallowed type (spec, an output)"       "px-spec"  "$SCAN_IDS"
 absent "drops a topology root wearing issue_type task"   "px-wf"    "$SCAN_IDS"
+absent "drops a graph.v2 formula step (real step metadata, issue_type task)" "px-step-scan" "$SCAN_IDS"
 absent "drops feedback-pattern distiller machinery"      "px-fb"    "$SCAN_IDS"
 absent "drops a bead a sitting already ruled (takeaway)" "px-ruled" "$SCAN_IDS"
 absent "drops a non-top-level parent-child child"        "px-child" "$SCAN_IDS"

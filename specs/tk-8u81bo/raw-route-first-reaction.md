@@ -27,9 +27,9 @@ demand from orphaned steps.
 The route half already worked without a formula: a bare `gc.routed_to` stamp is
 what a pool's find-work offers, and `agents/proactive/agent.toml`'s `work_query`
 and `scale_check` are already `gc bd ready --metadata-field "gc.routed_to=$target"
---unassigned` queries that drop only graph.v2 topology roots — a plain
-task/bug/feature/spike passes. So the reaction becomes a raw-route worker and all
-the pour machinery retires.
+--unassigned` queries that drop graph.v2 structural beads — topology roots and
+formula steps — so a plain task/bug/feature/spike passes. So the reaction becomes
+a raw-route worker and all the pour machinery retires.
 
 ## The model, and where each part rests
 
@@ -110,9 +110,13 @@ swept by `gate-visit.test.sh`), and `gc-helm.sh takeaway --release`.
 - `gc sling --no-formula` exists in the running binary ("suppress default
   formula (route raw bead)"), mutually exclusive with `--formula`/`--on`.
   Lane 1 writes `gc.routed_to` and nothing else (`docs/gascity-routing-model.md`).
-- `agents/proactive/agent.toml` `work_query`/`scale_check` are already raw-route
+- `agents/proactive/agent.toml` `work_query`/`scale_check` are raw-route
   `gc bd ready --metadata-field "gc.routed_to=$target" --unassigned` queries,
-  dropping only workflow/scope/spec roots — a plain task/bug passes. Unchanged.
+  dropping graph.v2 structural beads — workflow/scope/spec roots and formula
+  steps (any of gc.step_ref/gc.step_id/gc.root_bead_id) — so a plain task/bug
+  passes but neither a topology root nor a live molecule step can be claimed as
+  a first-reaction subject. `tools/gc-proactive.sh` (`scan_precision_filter`,
+  `exclude_graph_structural`) mirrors the same clause.
 - Nothing in the pack writes `duplicate_of` (`git grep 'set-metadata duplicate_of'`
   is empty), so retiring its reader strands no live population.
 - `agents/converse/prompt.template.md` already requires the same no-work evidence

@@ -122,15 +122,25 @@ board_rank() {
         sort_by(-(prio_w(.priority)), (.created_at // ""))'
 }
 
-# exclude_topology_roots — drop graph.v2 topology ROOTS (gc.kind in
-# workflow/scope/spec) from a demand array on stdin. A root is routed only to
-# name its run; gc hook --claim never offers it, so a query that counts one
-# spawns a worker that claims nothing and drains. The gc binary's default pool
-# query applies this exact clause on both its worker and count forms; this
-# mirrors it for the proactive custom queries, which inline the same clause in
-# agents/proactive/agent.toml's work_query + scale_check — keep all three in sync.
-exclude_topology_roots() {
-    jq 'map(select((.metadata["gc.kind"] // "" | (. == "workflow" or . == "scope" or . == "spec")) | not))'
+# exclude_graph_structural — drop graph.v2 STRUCTURAL beads from a demand array
+# on stdin: topology ROOTS (gc.kind in workflow/scope/spec) and formula STEP
+# beads (any of gc.step_ref/gc.step_id/gc.root_bead_id set). Neither is a raw
+# subject a first reaction may claim: a root is routed only to name its run and
+# gc hook --claim never offers it, and a step advances its own workflow by
+# closing its own bead, so reacting to it as a subject derails a live molecule.
+# A query that counts either spawns a worker that claims nothing (root) or
+# hijacks a formula step (step). The gc binary's default pool query drops the
+# roots on both its worker and count forms; this broadens it to the steps and
+# mirrors both for the proactive custom queries, which inline the same clause in
+# agents/proactive/agent.toml's work_query + scale_check and in
+# scan_precision_filter — keep all four in sync.
+exclude_graph_structural() {
+    jq 'map(select((
+            ((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec"))
+            or ((.metadata["gc.step_ref"] // "") != "")
+            or ((.metadata["gc.step_id"] // "") != "")
+            or ((.metadata["gc.root_bead_id"] // "") != "")
+          ) | not))'
 }
 
 usage() {
@@ -252,15 +262,16 @@ cmd_demand() {
                 --exclude-type=epic --json --limit 0 2>/dev/null || true)"
         [ -n "$r" ] || r='[]'
     fi
-    # Drop never-claimable topology roots (see exclude_topology_roots) so the
-    # demand mirror matches what gc hook --claim would offer, then rank by board
-    # weight and slice to the worker page. The full routed set is read
-    # (--limit 0) and roots dropped BEFORE the slice, so — like the agent.toml
-    # work_query this mirrors — a page filled by topology roots cannot bury a
-    # claimable step behind them and understate demand to zero. The scarce
-    # proactive slots then spend on the highest-priority work first (oldest
-    # within a band), not whatever bd-ready returned oldest across all bands.
-    printf '%s' "$r" | exclude_topology_roots | board_rank | jq --argjson n "$SCAN_LIMIT" '.[0:$n]'
+    # Drop never-claimable graph.v2 structural beads — topology roots and
+    # formula steps (see exclude_graph_structural) — so the demand mirror
+    # matches what gc hook --claim would offer, then rank by board weight and
+    # slice to the worker page. The full routed set is read (--limit 0) and the
+    # structural beads dropped BEFORE the slice, so — like the agent.toml
+    # work_query this mirrors — a page filled by them cannot bury a claimable
+    # subject behind them and understate demand to zero. The scarce proactive
+    # slots then spend on the highest-priority work first (oldest within a
+    # band), not whatever bd-ready returned oldest across all bands.
+    printf '%s' "$r" | exclude_graph_structural | board_rank | jq --argjson n "$SCAN_LIMIT" '.[0:$n]'
 }
 
 # ---------------------------------------------------------------------------
@@ -277,8 +288,11 @@ cmd_demand() {
 # distinct non-input population:
 #   - ALLOWLIST issue_type ($types, GC_PROACTIVE_TYPES) — drops convoy/epic/
 #     step/molecule/spec/decision by omission.
-#   - topology roots (gc.kind in workflow/scope/spec) — a workflow root is
-#     issue_type task, so the allowlist misses it; drop it explicitly.
+#   - graph.v2 structural beads — topology roots (gc.kind in workflow/scope/
+#     spec) AND formula step beads (gc.step_ref/gc.step_id/gc.root_bead_id set).
+#     Both are issue_type task, so the allowlist misses them; a root is routed
+#     only to name its run and a step advances its own workflow by closing its
+#     own bead, so a first reaction must claim neither. Drop them explicitly.
 #   - task_kind=feedback-pattern — distiller-loop machinery, not an input.
 #   - task_kind=review — a dispatched signoff lane, work-in-flight.
 #   - durable work/lifecycle markers ($markers) — a review lane carries
@@ -310,7 +324,12 @@ scan_precision_filter() {
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)
-            and (((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) | not)
+            and ((
+                ((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec"))
+                or ((.metadata["gc.step_ref"] // "") != "")
+                or ((.metadata["gc.step_id"] // "") != "")
+                or ((.metadata["gc.root_bead_id"] // "") != "")
+              ) | not)
             and ((.metadata["task_kind"] // "") != "feedback-pattern")
             and ((.metadata["task_kind"] // "") != "review")
             and ((.metadata["gc.takeaway"] // "") == "")
