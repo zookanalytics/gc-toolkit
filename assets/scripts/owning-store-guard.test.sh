@@ -88,6 +88,16 @@ grep -qF 'if [ "$OWNED" = "1" ]' "$TOML" \
   && ok "the worktree removal branches on OWNED" \
   || bad "the worktree removal must branch on OWNED"
 
+# The removal must ALSO require a nonempty worktree. A visit, a graph.v2 step
+# and a graph.v2 root carry no metadata.work_dir, so WORKTREE is empty for them,
+# and `git worktree remove "" --force` exits 128, which under set -e aborts part
+# 5 before orphan-dispose.sh releases the bead.
+RM_IF=$(grep -nE '^[[:space:]]*if \[ "\$OWNED" = "1" \]' "$TOML" | head -1)
+case "$RM_IF" in
+  *'-n "$WORKTREE"'*) ok "the worktree removal also requires a nonempty worktree" ;;
+  *) bad "the worktree removal must also require [ -n \"\$WORKTREE\" ] (got: ${RM_IF#*:})" ;;
+esac
+
 # No `git worktree remove` may appear before the guard is defined. Anchored to
 # line start so the prose that mentions the command does not match.
 GUARD_LINE=$(grep -nE '^OWNED=0' "$TOML" | head -1 | cut -d: -f1)

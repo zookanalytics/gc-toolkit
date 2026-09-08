@@ -506,11 +506,15 @@ fi
 # <<< owning-store-guard
 ```
 
-Remove the worktree only under the guard, and from the rig root — a husk
-resolves the worktree list from the wrong repo:
+Remove the worktree only under the guard, only when the bead recorded one,
+and from the rig root. A visit, a graph.v2 step and a graph.v2 root carry no
+`metadata.work_dir`, so `WORKTREE` is empty for them, and
+`git worktree remove "" --force` exits 128; under `set -e` that aborts the step
+before `orphan-dispose.sh` can release the bead. The rig root is required
+because a husk resolves the worktree list from the wrong repo:
 
 ```bash
-if [ "$OWNED" = "1" ]; then
+if [ "$OWNED" = "1" ] && [ -n "$WORKTREE" ]; then
   git -C "${GC_RIG_ROOT:-.}" worktree remove "$WORKTREE" --force
   git -C "${GC_RIG_ROOT:-.}" worktree prune
 fi
