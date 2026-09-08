@@ -7,8 +7,12 @@
 # idempotent no-op on an already-disposed anchor; refusal on an anchor past the
 # pull_request state (named bead-rehome as the direct verb); refusal on a
 # missing PR number; the marker read-back gate refusing to close the PR when the
-# stamp did not land; the optional successor store carried through; dry-run
-# writing nothing; and the usage refusals (bad kind, missing args).
+# stamp did not land — including the successor store, which a dropped write, or
+# a stale value an omitted store fails to clear, both catch; the successor store
+# carried through when given and cleared when omitted; the close-mode failures
+# that record the marker but exit non-zero (gh missing, origin unresolvable, an
+# unreadable or failed gh close); dry-run writing nothing; and the usage
+# refusals (bad kind, missing args).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -104,6 +108,34 @@ eq "$rc" 1 "exits 1"
 has "$out" "did NOT stick" "reports the failed read-back"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed when the marker did not land"
 
+echo "# the read-back gate covers the store: a dropped --successor-store refuses to close"
+store "[$(anchor A20 90), $(succ S20)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_DROP_KEYS="A20:gc.pr_close_disposition_successor_store" "$SUT" --anchor A20 --successor bt-xyz --kind duplicate --successor-store rig:beta 2>&1); rc=$?
+eq "$rc" 1 "a store that did not stick refuses to close the PR"
+has "$out" "did NOT stick" "reports the failed read-back"
+has "$out" "store='rig:beta'" "names the store the caller asked for"
+eq "$(meta A20 'gc.pr_close_disposition_successor_store')" "<absent>" "the dropped store never landed"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed on an incomplete marker"
+
+echo "# omitting --successor-store clears a stale store a prior attempt left"
+store "[$(anchor A21 91 ',"gc.pr_close_disposition_successor_store":"rig:stale"'), $(succ S21)]"
+: > "$STUB_GH_LOG"
+out=$("$SUT" --anchor A21 --successor S21 --kind duplicate 2>&1); rc=$?
+eq "$rc" 0 "exits 0 — the stale store was cleared and the marker is consistent"
+eq "$(meta A21 'gc.pr_close_disposition_successor_store')" "<absent>" "the stale store is cleared when none is given"
+eq "$(meta A21 'gc.pr_close_disposition_kind')" "duplicate" "the new marker is stamped"
+has "$(cat "$STUB_GH_LOG")" "pr close 91" "the PR is closed after the marker is made consistent"
+
+echo "# a stale store whose clearing itself half-lands refuses to close (fail closed)"
+store "[$(anchor A22 92 ',"gc.pr_close_disposition_successor_store":"rig:stale"'), $(succ S22)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_DROP_KEYS="A22:gc.pr_close_disposition_successor_store" "$SUT" --anchor A22 --successor S22 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "a surviving stale store refuses to close the PR"
+has "$out" "did NOT stick" "reports the failed read-back"
+eq "$(meta A22 'gc.pr_close_disposition_successor_store')" "rig:stale" "the stale store survived the dropped unset"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed while a stale store lingers"
+
 echo "# the PR is already closed: marker stamped, no close attempted"
 store "[$(anchor A8 76), $(succ S8)]"
 printf 'CLOSED\n' > "$GH_DIR/pr_state_76"
@@ -132,6 +164,33 @@ eq "$rc" 1 "exits non-zero — the PR was not closed"
 eq "$(meta A11 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recorded"
 has "$(cat "$STUB_GH_LOG")" "pr close 79" "the close was attempted"
 has "$out" "still OPEN" "reports the PR is still open and needs closing"
+
+echo "# in close mode with an unresolvable origin, the marker is recorded but the exit is non-zero"
+store "[$(anchor A23 93), $(succ S23)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_ORIGIN_URL="" "$SUT" --anchor A23 --successor S23 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "an unresolvable origin in close mode exits non-zero (no false success)"
+eq "$(meta A23 'gc.pr_close_disposition_kind')" "duplicate" "the marker is still recorded (it is durable)"
+has "$out" "origin repo could not be resolved" "reports the origin could not be resolved"
+hasnt "$out" "already" "does NOT claim the PR is closed or disposed"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "no PR close attempted when the origin is unresolvable"
+
+echo "# in close mode with gh missing, the marker is recorded but the exit is non-zero"
+store "[$(anchor A24 94), $(succ S24)]"
+: > "$STUB_GH_LOG"
+# gh is on the system PATH, so simulate its absence with a curated PATH: the two
+# stubs plus the real coreutils the SUT and the gc stub need, and no gh.
+NOGH="$TMP/nogh"; mkdir -p "$NOGH"
+for s in gc git; do ln -sf "$BIN/$s" "$NOGH/$s"; done
+for t in bash env jq tr awk cat cp mv rm mktemp sed grep; do
+  p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$NOGH/$t"
+done
+out=$(PATH="$NOGH" "$SUT" --anchor A24 --successor S24 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "gh missing in close mode exits non-zero (no false success)"
+eq "$(meta A24 'gc.pr_close_disposition_kind')" "duplicate" "the marker is still recorded (it is durable)"
+has "$out" "gh is not available" "reports gh was unavailable"
+hasnt "$out" "already" "does NOT claim the PR is closed or disposed"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "no PR close attempted when gh is missing"
 
 echo "# dry-run writes nothing"
 store "[$(anchor A9 77), $(succ S9)]"
