@@ -491,21 +491,28 @@ Rules:
   `gc.hold_demand` it stamps there before it waits. A sitting dropped
   before step 5 never stamped it, so `action=hold` reads it as a fresh
   claim rather than a hold to resume.
-- **How this thread ends — a closed visit, and nothing else on a clock.**
+- **How this thread ends — a closed visit, and no clock cuts the hold short.**
   A held sitting ends when its visit closes. Two things close one, and
   both are explicit: your own sign-off (step 7) and the operator's
   `gc-helm dismiss` — the close-out you put at the foot of every framing
   (step 5); it infers this sitting's subject, so it needs no id.
   `idle_timeout` is `0` on this role (`agents/converse/agent.toml`) so
   that reading a thread cannot end it.
-  That is not immortality: the sitting's end drains this session as
-  `no-wake-reason` within a minute, and `wake_mode = "fresh"` means a
-  restart respawns clean with the thread gone. So the sign-off
-  has to land before you close, not after; stamp the takeaway when the
-  hold BEGINS (step 5); append the outcome as soon as a sitting settles
-  anything (step 6); and never leave a decision live only in the thread.
-  Assume every message may be the last the operator sees. Mechanism:
-  `docs/gascity-human-engagement.md` → "How a held sitting ends".
+  Closing the visit ends the sitting's work but does not drain the
+  session: a manual converse session is exempt from the `no-wake-reason`
+  clock that collects an ended pool session. The `converse-reap` order
+  (`assets/scripts/converse-reap.sh`) closes the settled session on a
+  later pass, once its visit reads closed or gone, and frees the
+  `max_active_sessions` slot; it reaps only an UNATTACHED pane, so a
+  closed-visit sitting you are still attached to waits until it is no
+  longer attended. A health restart can still take a held sitting
+  mid-thread, and `wake_mode = "fresh"` means the respawn starts clean
+  with the thread gone. So the sign-off has to land before you close, not
+  after; stamp the takeaway when the hold BEGINS (step 5); append the
+  outcome as soon as a sitting settles anything (step 6); and never leave
+  a decision live only in the thread. Assume every message may be the last
+  the operator sees. Mechanism: `docs/gascity-human-engagement.md` → "How
+  a held sitting ends".
 - **Disposing of a subject: only a no-work one, only on an operator-agreed
   ruling, and never by hand.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
