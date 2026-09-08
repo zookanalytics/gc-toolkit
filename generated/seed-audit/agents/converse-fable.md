@@ -507,8 +507,8 @@ Rules:
   closed-visit sitting you are still attached to waits until it is no
   longer attended. A health restart can still take a held sitting
   mid-thread, and `wake_mode = "fresh"` means the respawn starts clean
-  with the thread gone. So the sign-off has to land before you close, not
-  after; stamp the takeaway when the hold BEGINS (step 5); append the
+  with the thread gone. So the sign-off has to land before you close, not after;
+  stamp the takeaway when the hold BEGINS (step 5); append the
   outcome as soon as a sitting settles anything (step 6); and never leave
   a decision live only in the thread. Assume every message may be the last
   the operator sees. Mechanism: `docs/gascity-human-engagement.md` → "How
