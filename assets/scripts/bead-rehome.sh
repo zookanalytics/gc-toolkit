@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
-# bead-rehome — close a bead with a successor pointer that is legible from the
-# store the bead lived in. The pointer (gc.superseded_by + _store) is the only
-# thing that distinguishes a sound disposition from a careless close where the
-# question gets asked, so it is stamped and READ BACK before the close; this
-# script would rather leave the origin OPEN than close it unpointed.
+# bead-rehome — the ONE writer that closes a bead with a successor pointer, for
+# every actor. The pointer (gc.superseded_by + _store) is the only thing that
+# distinguishes a sound disposition from a careless close where the question
+# gets asked, so it is stamped and READ BACK before the close; this script would
+# rather leave the origin OPEN than close it unpointed.
+# The close is gated on EVIDENCE the script re-establishes itself, so no caller
+# can close over work that has not landed:
+#   (a) EVERY kind — origin carries no unlanded work (merge_result empty/absent
+#       or `merged`); origin is not a review, step, or workflow bead; origin is
+#       not in_progress under another actor.
+#   (b) the evidence kinds fixed-upstream|duplicate ALSO — the successor
+#       resolves in the SAME store and is closed or work_outcome=shipped, and
+#       the origin did no work (gc.work_outcome=no-op, accepted even with a
+#       work-product key a rebase/rework twin leaves behind, or no work_outcome
+#       and none of branch/work_dir/gc.work_dir/pr_number/pr_url/merge_result/
+#       gc.work_commit).
+# --check evaluates those gates for the given origin/successor/kind and exits
+# 0 (eligible) or non-zero (refused, with the reason on stderr), writing
+# nothing — the first reaction's superseded exit runs it before it releases the
+# subject, so a release is never followed by a refused close.
 # Writes, in order: pointer on the origin (verified), a populated close reason
 # (kind + successor + store), a best-effort back-pointer on the successor. An
-# already-closed origin is the REPAIR path: pointer + appended note only.
+# already-closed origin is the REPAIR path: pointer + appended note only, gates
+# skipped (the close it would guard already happened).
 # Also drops an origin->successor `blocks` wait edge on the way: `bd close`
 # refuses a blocked issue, and a disposed bead is not waiting on its successor.
 # Reads the legacy bare `superseded_by` key as evidence of a prior disposition;
 # writes only the canonical gc.-prefixed pair.
-# Callers: converse dispositions, operator re-homes, duplicate-sweep.sh.
+# Callers: converse dispositions, operator re-homes, the proactive first
+# reaction's superseded exit, the polecat no-op-duplicate path.
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -26,7 +43,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
-ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""
+ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; CHECK=""
 
 usage() {
     cat <<'U'
@@ -35,16 +52,25 @@ Usage:
                  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
                  [--note "<one sentence of why>"] \
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
-                 [--dry-run]
+                 [--check] [--dry-run]
 
 Under every kind but not-needed the successor is the bead that carries the
 work now. Under not-needed nothing carries it, and the successor is the
 evidence that concluded the bead was unnecessary — typically the visit bead
 from the sitting that ruled. It is required either way.
 
+The close is refused unless the evidence holds (see the header): every kind
+needs the origin to carry no unlanded work and to be a plain, unheld work
+bead; fixed-upstream and duplicate additionally need the successor closed or
+shipped in the same store and the origin to have done no work.
+
+--check evaluates that evidence and exits 0 (eligible) or non-zero (refused,
+reason on stderr) without writing anything.
+
 Stores are derived from each bead id's prefix via `gc rig list --json`;
 pass --origin-store/--successor-store when a prefix is ambiguous.
-An already-closed origin gains the pointer and an appended note (repair path).
+An already-closed origin gains the pointer and an appended note (repair path),
+with the evidence gates skipped.
 U
     exit "${1:-1}"
 }
@@ -59,6 +85,7 @@ while [ $# -gt 0 ]; do
         --note)             NOTE="${2:-}"; shift 2 ;;
         --origin-store)     ORIGIN_STORE="${2:-}"; shift 2 ;;
         --successor-store)  SUCCESSOR_STORE="${2:-}"; shift 2 ;;
+        --check)            CHECK=1; shift ;;
         --dry-run)          DRY_RUN=1; shift ;;
         -h|--help)          usage 0 ;;
         *)                  die "unknown argument '$1' (try --help)" 64 ;;
@@ -183,6 +210,112 @@ case "$KIND" in
 esac
 REASON="$PHRASE $SUCCESSOR in $SUCCESSOR_STORE"
 [ -n "$NOTE" ] && REASON="$REASON — $NOTE"
+
+# ── The evidence, re-established here so no caller closes over unlanded work ──
+# The gates guard the CLOSE, so they run only when the origin is still open; an
+# already-closed origin is the repair path and its close, if any, already
+# happened. --check runs them and exits without writing; the real path refuses.
+ACTOR_IDS="$ACTOR
+${GC_SESSION_NAME:-}
+${GC_SESSION_ID:-}
+${GC_AGENT:-}
+${GC_ALIAS:-}"
+is_self() { # $1 assignee -> 0 when it names this session, 1 otherwise
+    local a="$1" id
+    [ -n "$a" ] || return 1
+    while IFS= read -r id; do
+        [ -n "$id" ] && [ "$a" = "$id" ] && return 0
+    done <<IDS
+$ACTOR_IDS
+IDS
+    return 1
+}
+
+GATE_REASON=""
+gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
+    GATE_REASON=""
+    local assignee task_kind step_ref kind_meta merge_result
+    assignee=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].assignee // ""' 2>/dev/null || true)
+    task_kind=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // ""' 2>/dev/null || true)
+    step_ref=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.step_ref"] // .[0].metadata["gc.step_id"] // ""' 2>/dev/null || true)
+    kind_meta=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.kind"] // ""' 2>/dev/null || true)
+    merge_result=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["merge_result"] // ""' 2>/dev/null || true)
+
+    # (a) A review, step, or workflow bead is closed by its own machinery, never
+    # here: signoff.sh/review-sweep close reviews, and a step or workflow root is
+    # topology, not the work.
+    [ "$task_kind" != "review" ] || { GATE_REASON="$ORIGIN is a review bead (task_kind=review); signoff.sh and review-sweep close those"; return 1; }
+    if [ -n "$step_ref" ] || [ "$kind_meta" = "workflow" ]; then
+        GATE_REASON="$ORIGIN is a step bead or workflow root, not a work bead"; return 1
+    fi
+    # (a) No unlanded work. A non-closed anchored merge_result (pull_request,
+    # pre_open_gate, abandoned…) is work still in flight; only empty/absent or
+    # `merged` may be disposed with a successor.
+    case "$merge_result" in
+        ""|merged) : ;;
+        *) GATE_REASON="$ORIGIN carries unlanded work (merge_result=$merge_result); it must land or be abandoned before a successor close"; return 1 ;;
+    esac
+    # (a) Not held by another session right now. In_progress under this session
+    # is fine — the superseded exit --checks while it still holds the subject,
+    # then releases before the real close.
+    if [ "$ORIGIN_STATUS" = "in_progress" ] && [ -n "$assignee" ] && ! is_self "$assignee"; then
+        GATE_REASON="$ORIGIN is in_progress under $assignee, who is judging it"; return 1
+    fi
+
+    # (b) The evidence kinds assert a specific claim — this bead's work is
+    # already delivered elsewhere — so they carry the burden of proving it.
+    case "$KIND" in
+        fixed-upstream|duplicate)
+            [ "$SUCCESSOR_STORE" = "$ORIGIN_STORE" ] \
+                || { GATE_REASON="a $KIND close needs the successor $SUCCESSOR in the same store as $ORIGIN ($ORIGIN_STORE); it is $SUCCESSOR_STORE. Judge a cross-store successor by hand"; return 1; }
+            local sstatus soutcome
+            sstatus=$(printf '%s' "$SUCC_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+            soutcome=$(printf '%s' "$SUCC_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
+            if [ "$sstatus" != "closed" ] && [ "$soutcome" != "shipped" ]; then
+                GATE_REASON="a $KIND close needs the successor $SUCCESSOR closed or work_outcome=shipped; it is ${sstatus:-unreadable} and has not shipped"; return 1
+            fi
+            # Origin did no work, proved positively. work_outcome=no-op is the
+            # explicit statement and is accepted even beside a work-product key,
+            # because a rebase/rework twin's branch names the TWIN, not a push
+            # this bead made. Absent an outcome, no work-product key may be set.
+            local ooutcome workkeys
+            ooutcome=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""' 2>/dev/null || true)
+            if [ "$ooutcome" = "no-op" ]; then
+                :
+            elif [ -z "$ooutcome" ]; then
+                workkeys=$(printf '%s' "$ORIGIN_JSON" | jq -r '
+                    (.[0].metadata // {}) as $m
+                    | ["branch","work_dir","gc.work_dir","pr_number","pr_url","merge_result","gc.work_commit"]
+                    | map(select((($m[.]) // "") | tostring | . != "")) | length' 2>/dev/null || printf '1')
+                case "$workkeys" in
+                    0) : ;;
+                    *) GATE_REASON="a $KIND close needs $ORIGIN to have done no work: it records no work_outcome but carries work-product metadata (branch/work_dir/pr/merge_result). Stamp gc.work_outcome=no-op if it truly pushed nothing"; return 1 ;;
+                esac
+            else
+                GATE_REASON="a $KIND close needs $ORIGIN to record no work: work_outcome=$ooutcome is not a no-op"; return 1
+            fi
+            ;;
+    esac
+    return 0
+}
+
+if [ "$ORIGIN_STATUS" != "closed" ]; then
+    if ! gates_pass; then
+        if [ -n "$CHECK" ]; then
+            echo "bead-rehome: --check refused: $GATE_REASON" >&2
+            exit 1
+        fi
+        die "$GATE_REASON — nothing stamped, $ORIGIN untouched" 7
+    fi
+fi
+if [ -n "$CHECK" ]; then
+    if [ "$ORIGIN_STATUS" = "closed" ]; then
+        echo "bead-rehome: --check: $ORIGIN is already closed — the repair path adds the pointer only, no close is gated"
+    else
+        printf 'bead-rehome: --check: %s is eligible to close as "%s"\n' "$ORIGIN" "$REASON"
+    fi
+    exit 0
+fi
 
 if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
