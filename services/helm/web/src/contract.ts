@@ -206,6 +206,27 @@ export interface Tile {
    * Not `updated_at`, which a wedged anchor's every reconcile pass touches.
    */
   pr_owed_since?: string;
+
+  /**
+   * The KIND of attention this row wants — `'review'` (a pull request),
+   * `'gate'` (a person must answer), `'stalled'` (open work nothing is moving),
+   * `'active'` (healthy in-flight), `'cleanup'` (a finished or empty row to
+   * dispose of), or `'done'` (the anchor itself closed). Orthogonal to
+   * `severity`'s how-badly. A surface groups by this and reads the bands in the
+   * order model.go's `SectionOrder` fixes; it is on the wire so the CLI and this
+   * app cannot each invent their own split. The Go type is a plain string, so an
+   * unknown value is representable even though this union is not exhaustive here.
+   */
+  section: string;
+  /**
+   * Set when this row is one of at least three in the same `section` sharing a
+   * `needs` sentence — a recurring template, like the first-reaction gates or
+   * the cap-3 signoff rows. It is that shared `needs` string, and a surface
+   * folds every row carrying it into one entry that names the count and lists
+   * the members. Absent (Go `omitempty`) on a row that does not cluster, which
+   * is every row with an LLM-authored, and so unique, takeaway.
+   */
+  cluster_key?: string;
 }
 
 /**

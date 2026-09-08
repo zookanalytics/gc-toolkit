@@ -58,7 +58,8 @@
       "pr_branch": "",
       "pr_machine": "",
       "pr_conversation": "",
-      "pr_approval": ""
+      "pr_approval": "",
+      "section": "stalled"
     },
     {
       "id": "gt-1a2b3",
@@ -104,7 +105,9 @@
       "pr_branch": "",
       "pr_machine": "",
       "pr_conversation": "",
-      "pr_approval": ""
+      "pr_approval": "",
+      "section": "cleanup",
+      "cluster_key": "all 2 closed — graduate"
     },
     {
       "id": "tk-01n5cc",
@@ -152,7 +155,8 @@
       "pr_machine": "wedged-exception",
       "pr_conversation": "unknown",
       "pr_approval": "unknown",
-      "pr_owed_since": "2026-08-08T11:02:00Z"
+      "pr_owed_since": "2026-08-08T11:02:00Z",
+      "section": "review"
     },
     {
       "id": "tk-9tbbk",
@@ -200,7 +204,8 @@
       "pr_branch": "",
       "pr_machine": "",
       "pr_conversation": "",
-      "pr_approval": ""
+      "pr_approval": "",
+      "section": "done"
     }
   ],
   "sittings": [
