@@ -3,13 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { Board, PackBuild, Sitting, Tile } from './contract';
 
-// A board carrying all six shapes the sections have to tell apart: an ordinary
-// ranked anchor, an operator-owned bead that is the DEFAULT answer, a parked
-// conversation that is neither, a parked conversation whose routed work has
-// landed — which stopped being "wants nothing" and has to leave the quiet
-// section (tk-2plde) — a parked conversation whose routed work is still OPEN,
-// which never was "wants nothing" (tk-a9k0l), and a parked conversation whose
-// own bead has closed, which belongs to none of them.
+// The board arrives as one ranked list; every row carries the attention BAND it
+// belongs to in `tile.section` (and, when it is one of several sharing a
+// template, `tile.cluster_key`). The app groups by reading those fields — it
+// never re-derives the split — so these fixtures set `section` the way the
+// derive layer would, and the tests address each band by its heading.
 function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severity'>): Tile {
   return {
     rig: 'gc-toolkit',
@@ -55,15 +53,15 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     pr_machine: '',
     pr_conversation: '',
     pr_approval: '',
+    section: 'active',
     ...over,
   };
 }
 
 /**
- * A merge anchor row, as the board derives one. The default is the shape that
- * put this surface in the backlog: wedged at the convergence cap's park, with
- * no pull request open, which is where six of the seven wedged anchors sat when
- * the design measured them.
+ * A merge anchor row, as the board derives one: it bands `review` whatever the
+ * cadence recorded. The default is the shape that put this surface in the
+ * backlog — wedged at the convergence cap's park, with no pull request open.
  */
 function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
   return tile({
@@ -71,6 +69,7 @@ function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
     title: 'a merge anchor',
     severity: 'ELEVATED',
     owed: true,
+    section: 'review',
     pr_branch: `polecat/${over.id}`,
     pr_machine: 'wedged-exception',
     pr_conversation: 'unknown',
@@ -115,17 +114,20 @@ const BOARD: Board = {
   sittings: SITTINGS,
   tiles: [
     // Owed rows lead the wire (contract.ts), so the fixture is in wire order.
+    // A bead a person owes with no question recorded → the gate band.
     tile({
       id: 'tk-jgq6s',
       kind: 'human',
       title: 'Disposition: 1 anchorless open PR remains (#88)',
       severity: 'ELEVATED',
       owed: true,
+      section: 'gate',
       takeaway_at: '2026-07-04T09:00:00Z',
       frontier: 'routed to the operator — no agent will take it',
       needs: 'routed to you — no question recorded',
       rank_score: 2_003_011,
     }),
+    // A stranded epic → the stalled band.
     tile({
       id: 'tk-epic',
       kind: 'epic',
@@ -133,26 +135,32 @@ const BOARD: Board = {
       severity: 'HIGH',
       m_total: 2,
       open: 2,
+      stranded: true,
+      section: 'stalled',
       frontier: '2 open · 0 in-progress (stranded)',
       needs: 'decomposed, idle — assign or visit',
       rank_score: 3_005_003,
     }),
+    // A quiet parked conversation → the cleanup band.
     tile({
       id: 'tk-yps55',
       kind: 'parked',
       title: "gc-toolkit's helm returns the raw script path",
       severity: 'LOW',
+      section: 'cleanup',
       frontier: 'conversation parked — no takeaway recorded',
       needs: 'parked for you — no question recorded',
       rank_score: 2_001,
     }),
-    // Parked by kind, but the work it was waiting on has closed. The service
-    // bands it ELEVATED; the app must not file it under "wants nothing".
+    // Parked by kind, but the work it was waiting on has closed — it owes a
+    // disposition now, so the derive layer marks it owed and bands it gate.
     tile({
       id: 'tk-dispo',
       kind: 'parked',
       title: 'routed — fix+guard ruled, nothing further needed here',
       severity: 'ELEVATED',
+      owed: true,
+      section: 'gate',
       waiting_on: ['tk-hgmob'],
       waiting_on_open: [],
       disposition_due: true,
@@ -160,10 +168,8 @@ const BOARD: Board = {
       needs: 'blocker landed — dispose or resume',
       rank_score: 2_002_001,
     }),
-    // Parked by kind, and the work the sitting routed is its own OPEN child.
-    // No waiting edge can exist on this shape — beads refuses a parent→
-    // descendant `blocks` edge — so disposition_due is false and the roll-up
-    // is the only thing that can say the subject is not quiet (tk-a9k0l).
+    // Parked by kind, and the work the sitting routed is its own OPEN child, so
+    // the subject is not quiet — the roll-up strands it into the stalled band.
     tile({
       id: 'tk-z9nln',
       kind: 'parked',
@@ -173,20 +179,20 @@ const BOARD: Board = {
       m_total: 2,
       open: 1,
       stranded: true,
+      section: 'stalled',
       open_heads: ['tk-wvrga'],
       frontier: '1 open · 0 in flight (stranded)',
       needs: 'kept open as the seat for the strategic conversation',
       rank_score: 3_005_000,
     }),
-    // A parked subject whose own bead has CLOSED. It is `parked` by kind and
-    // quiet by every other test, so without the DONE filter it would read as a
-    // live conversation to pick back up — in the section whose whole promise is
-    // that its rows are resumable.
+    // A parked subject whose own bead has CLOSED → the done band, kept off every
+    // live band even though it is `parked` by kind.
     tile({
       id: 'tk-9tbbk',
       kind: 'parked',
       title: 'the takeaway cap conversation',
       severity: 'DONE',
+      section: 'done',
       closed_at: '2026-08-20T19:14:00Z',
       frontier: 'closed 1d ago',
       needs: 'closed — dismiss to clear',
@@ -219,61 +225,46 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Address the tables through their sections, not by position: the queue leads
-// the page, so an index would silently re-point at it.
-function owedSection(): HTMLElement {
-  return screen.getByRole('region', { name: /owed by you/i });
-}
+// Address each band by its heading, never by position.
+const band = (name: string): HTMLElement => screen.getByRole('region', { name });
+const queryBand = (name: string): HTMLElement | null => screen.queryByRole('region', { name });
+const owedCover = (): HTMLElement => screen.getByRole('region', { name: 'owed by you' });
 
-function parkedSection(): HTMLElement {
-  return screen.getByRole('region', { name: /parked conversations/i });
-}
-
-function sittingsSection(): HTMLElement {
-  return screen.getByRole('region', { name: /converse sittings/i });
-}
-
-function doneSection(): HTMLElement {
-  return screen.getByRole('region', { name: /recently closed/i });
-}
-
-/** The city overview — the one table outside every section. */
-function attentionTable(): HTMLElement {
-  const tables = screen.getAllByRole('table');
-  const sectioned = [
-    owedSection(),
-    screen.queryByRole('region', { name: /parked conversations/i }),
-    screen.queryByRole('region', { name: /recently closed/i }),
-    screen.queryByRole('region', { name: /converse sittings/i }),
-  ];
-  const found = tables.find((t) => !sectioned.some((s) => s?.contains(t)));
-  if (!found) throw new Error('no overview table on the page');
-  return found;
-}
-
-// Two bugs in one assertion. A bead the operator owns has to reach the board at
-// all — before tk-2v08m the gather was keyed on issue type, so
-// `gc.routed_to=human` on an ordinary task was invisible however plainly it was
-// marked. And it has to be the board's DEFAULT answer rather than one row in a
-// ranked list, because rank sorts a one-bead demand under every container.
-it('answers with the operator-owned bead, not with the ranked overview', async () => {
+// A bead a person owes reaches the board (before tk-2v08m a gather keyed on
+// issue type could not see `gc.routed_to=human` on a task), and it surfaces in
+// the gate band — one of the two bands the operator's queue leads with — rather
+// than buried in a flat rank under every container.
+it('surfaces the operator-owned bead in the gate band', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/anchorless open PR/)).toBeTruthy());
 
-  const row = within(owedSection()).getByText(/anchorless open PR/).closest('tr');
+  const row = within(band('gate')).getByText(/anchorless open PR/).closest('tr');
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText('routed to you — no question recorded')).toBeTruthy();
   expect(within(row as HTMLElement).getByText('2026-07-04')).toBeTruthy();
 
-  // It is in the queue INSTEAD of the overview, not as well as.
-  expect(within(attentionTable()).queryByText(/anchorless open PR/)).toBeNull();
-  // …and the HIGH row it outranks nowhere still leads that overview.
-  expect(within(attentionTable()).getByText('Attention Canvas')).toBeTruthy();
+  // It is in the gate band, not the stalled overview; the stranded epic it
+  // would outrank nowhere leads that band instead.
+  expect(within(band('stalled')).queryByText(/anchorless open PR/)).toBeNull();
+  expect(within(band('stalled')).getByText('Attention Canvas')).toBeTruthy();
+});
+
+// The bands read in a fixed order: the operator's own moves (review, gate)
+// before the city's health (stalled, active) before the quiet tail.
+it('orders the bands review, gate, stalled', async () => {
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
+
+  const regions = screen.getAllByRole('region').map((r) => r.getAttribute('aria-labelledby'));
+  const gate = regions.indexOf('section-gate');
+  const stalled = regions.indexOf('section-stalled');
+  expect(gate).toBeGreaterThanOrEqual(0);
+  expect(stalled).toBeGreaterThan(gate);
 });
 
 // The never-blank contract. "Nothing is owed by you" is this page's most
 // consequential sentence and the default output of every failure path, so the
-// section states its coverage or states the error — it is never empty.
+// cover-sheet states its coverage or states the error — it is never empty.
 it('states its coverage when nothing is owed', async () => {
   const nothingOwed: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]] };
   vi.stubGlobal(
@@ -283,7 +274,7 @@ it('states its coverage when nothing is owed', async () => {
 
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
-  expect(within(owedSection()).getByText(/Every store answered/)).toBeTruthy();
+  expect(within(owedCover()).getByText(/Every store answered/)).toBeTruthy();
 });
 
 it('refuses to call a partial gather an all-clear', async () => {
@@ -295,144 +286,168 @@ it('refuses to call a partial gather an all-clear', async () => {
 
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
-  expect(within(owedSection()).getByText(/not an all-clear/)).toBeTruthy();
-  expect(within(owedSection()).queryByText(/Every store answered/)).toBeNull();
+  expect(within(owedCover()).getByText(/not an all-clear/)).toBeTruthy();
+  expect(within(owedCover()).queryByText(/Every store answered/)).toBeNull();
 });
 
-// The other half of the bead: a parked conversation must be FINDABLE without
-// competing for rank with stranded epics, so it gets a section rather than a
-// row among them.
-it('lists a parked conversation in its own section, not in the ranked table', async () => {
+// A quiet parked conversation is FINDABLE without competing for rank with
+// stranded epics: it gets the cleanup band, and carries its own ask.
+it('lists a quiet parked conversation in the cleanup band', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/helm returns the raw script path/)).toBeTruthy());
 
-  const parked = within(parkedSection()).getByText(/helm returns the raw script path/);
-  expect(within(attentionTable()).queryByText(/helm returns the raw script path/)).toBeNull();
-
-  // The row carries its own ask. This fixture is the shape a sitting left
-  // without recording one, and the section says so rather than filing it as an
-  // ordinary quiet row.
-  const row = parked.closest('tr');
+  const row = within(band('cleanup')).getByText(/helm returns the raw script path/).closest('tr');
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText('parked for you — no question recorded')).toBeTruthy();
+  expect(within(band('stalled')).queryByText(/helm returns the raw script path/)).toBeNull();
 });
 
-it('counts each section separately in the header', async () => {
+it('counts owed, live, and closed separately in the header', async () => {
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/1 owed · 3 anchors · 1 parked · 1 closed/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/2 owed · 5 anchors · 1 closed/)).toBeTruthy());
 });
 
-// The layout-stability rule for the board: a row the operator was looking at
-// does not leave because it was answered. It sinks into its own section and
-// waits there for an explicit dismiss.
-it('keeps a closed anchor on the board, in the recently-closed section', async () => {
+// The layout-stability rule: a row the operator was looking at does not leave
+// because it was answered. It sinks into the recently-closed band and waits
+// there for an explicit dismiss.
+it('keeps a closed anchor in the recently-closed band', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
 
-  const row = within(doneSection()).getByText(/takeaway cap conversation/).closest('tr');
+  const done = band('recently closed');
+  const row = within(done).getByText(/takeaway cap conversation/).closest('tr');
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText('closed 1d ago')).toBeTruthy();
-  expect(within(doneSection()).getByText(/gc-helm dismiss/)).toBeTruthy();
+  expect(within(done).getByText(/gc-helm dismiss/)).toBeTruthy();
 });
 
-// The section's copy is the operator's only statement of what the band
-// promises, and the promise the band actually keeps is narrower than "nothing
-// leaves on its own": the gather reaches back GC_HELM_DONE_WINDOW, so a row
-// does age out of the band on that clock. Copy that says otherwise teaches the
-// operator to stop looking for a row that is gone.
+// The band's copy is the operator's only statement of what it promises, and the
+// promise is narrower than "nothing leaves on its own": the gather reaches back
+// GC_HELM_DONE_WINDOW, so a row does age out on that clock.
 it('states the window bound rather than promising an unbounded band', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
 
-  const done = doneSection();
+  const done = band('recently closed');
   expect(within(done).getByText(/GC_HELM_DONE_WINDOW/)).toBeTruthy();
   expect(done.textContent).not.toMatch(/leaves it on its own/);
 });
 
-// It is `parked` by kind, so the DONE filter is what keeps it out of a section
-// that tells the operator these threads can be picked back up.
-it('keeps a closed parked subject out of the parked and ranked tables', async () => {
+// A closed parked subject is `parked` by kind, so only the section it carries
+// keeps it out of a live band that tells the operator these threads resume.
+it('keeps a closed parked subject out of every live band', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
 
-  expect(within(parkedSection()).queryByText(/takeaway cap conversation/)).toBeNull();
-  expect(within(attentionTable()).queryByText(/takeaway cap conversation/)).toBeNull();
+  expect(within(band('cleanup')).queryByText(/takeaway cap conversation/)).toBeNull();
+  expect(within(band('stalled')).queryByText(/takeaway cap conversation/)).toBeNull();
+  expect(within(band('gate')).queryByText(/takeaway cap conversation/)).toBeNull();
 });
 
-// The defect this split exists to prevent (tk-2plde): a subject that routed
-// work out of a sitting kept saying "nothing further needed here" after that
-// work merged, and the quiet section is where it went on saying it. Once the
-// blocker closes the row owes a disposition, so it must be in the ranked table
-// — a parked row the operator has to open to discover is the whole bug.
-it('promotes a parked row whose blocker landed into the ranked table', async () => {
+// The defect this split exists to prevent (tk-2plde): a subject that routed work
+// out of a sitting kept saying "nothing further needed here" after that work
+// merged. Once the blocker closes it owes a disposition, so it belongs in the
+// gate band — a parked row the operator has to open to discover is the bug.
+it('bands a parked row whose blocker landed as a gate, not cleanup', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/fix\+guard ruled/)).toBeTruthy());
 
-  expect(within(attentionTable()).getByText(/fix\+guard ruled/)).toBeTruthy();
-  expect(within(parkedSection()).queryByText(/fix\+guard ruled/)).toBeNull();
+  expect(within(band('gate')).getByText(/fix\+guard ruled/)).toBeTruthy();
+  expect(within(band('cleanup')).queryByText(/fix\+guard ruled/)).toBeNull();
 
-  const row = within(attentionTable()).getByText(/fix\+guard ruled/).closest('tr');
-  expect(row).not.toBeNull();
-  // The stale takeaway must not be the row's answer — the deterministic
-  // disposition phrase outranks it.
+  const row = within(band('gate')).getByText(/fix\+guard ruled/).closest('tr');
   expect(within(row as HTMLElement).getByText(/blocker landed — dispose or resume/)).toBeTruthy();
 });
 
 // The defect tk-a9k0l is about. A parked subject that decomposed keeps its
 // takeaway, so it stays kind `parked`, and its open child is not a tile of its
-// own — a plain bead reaches the board only through its parent's roll-up. Filed
-// under "wants nothing", the row hides the only surface that work has.
-it('promotes a parked row with open children into the ranked table', async () => {
+// own. Stranded, it belongs in the stalled band, carrying the roll-up.
+it('bands a parked row with open children as stalled, not cleanup', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/composition-seam doc/)).toBeTruthy());
 
-  expect(within(attentionTable()).getByText(/composition-seam doc/)).toBeTruthy();
-  expect(within(parkedSection()).queryByText(/composition-seam doc/)).toBeNull();
+  expect(within(band('stalled')).getByText(/composition-seam doc/)).toBeTruthy();
+  expect(within(band('cleanup')).queryByText(/composition-seam doc/)).toBeNull();
 
-  // …carrying the roll-up that promoted it, so the open child is countable
-  // from the row rather than only from --json.
-  const row = within(attentionTable()).getByText(/composition-seam doc/).closest('tr');
-  expect(row).not.toBeNull();
+  const row = within(band('stalled')).getByText(/composition-seam doc/).closest('tr');
   expect(within(row as HTMLElement).getByText('1/2')).toBeTruthy();
   expect(within(row as HTMLElement).getByText(/1 open · 0 in flight \(stranded\)/)).toBeTruthy();
 });
 
-it('drills into a parked row like any other tile', async () => {
+it('drills into a cleanup row like any other tile', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/helm returns the raw script path/)).toBeTruthy());
 
-  fireEvent.click(within(parkedSection()).getByRole('button', { name: 'tk-yps55' }));
+  fireEvent.click(within(band('cleanup')).getByRole('button', { name: 'tk-yps55' }));
   expect(screen.getByRole('complementary', { name: /detail for tk-yps55/i })).toBeTruthy();
 });
 
-// A board with nothing parked must not grow an empty section or a "· 0 parked"
-// suffix that reads as a category the operator has to check.
-it('shows no parked section when nothing is parked', async () => {
-  const attentionOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]], sittings: null };
+// A board with nothing in a band must not grow an empty section for it.
+it('shows no cleanup band when nothing is in it', async () => {
+  const stalledOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![1]], sittings: null };
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(attentionOnly), { status: 200 })),
+    vi.fn(async () => new Response(JSON.stringify(stalledOnly), { status: 200 })),
   );
 
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
-  expect(screen.queryByRole('region', { name: /parked conversations/i })).toBeNull();
+  expect(queryBand('cleanup')).toBeNull();
   expect(screen.getByText(/1 anchors · generated/)).toBeTruthy();
 });
 
-// The operator's ask in one assertion: both halves of the conversation record
-// on the board, each closed sitting carrying the justification it closed on.
+// A recurring template — many rows with one needs sentence — folds to a single
+// line that names the count and lists the members, instead of N peer rows.
+it('collapses a cluster to one line that names its members', async () => {
+  const clustered: Tile[] = [0, 1, 2, 3].map((i) =>
+    tile({
+      id: `tk-fr${i}`,
+      kind: 'human',
+      title: `first reaction ${i}`,
+      severity: 'ELEVATED',
+      owed: true,
+      section: 'gate',
+      needs: 'first reaction ready: accept or redirect',
+      cluster_key: 'first reaction ready: accept or redirect',
+    }),
+  );
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ ...BOARD, total: 4, tiles: clustered, sittings: null }), { status: 200 })),
+  );
+
+  render(<App />);
+  await waitFor(() => expect(screen.getByText('4×')).toBeTruthy());
+
+  const gate = band('gate');
+  // The shared needs prints once for the whole cluster.
+  expect(within(gate).getAllByText('first reaction ready: accept or redirect')).toHaveLength(1);
+  // Every member is still one drill click away.
+  for (const i of [0, 1, 2, 3]) {
+    expect(within(gate).getByRole('button', { name: `tk-fr${i}` })).toBeTruthy();
+  }
+});
+
+// The record is not an attention list: a sitting must not appear as a row in any
+// band, where it would compete with work that needs doing.
+it('keeps sittings out of the bands', async () => {
+  render(<App />);
+  await waitFor(() => expect(band('converse sittings')).toBeTruthy());
+
+  expect(within(band('gate')).queryByText('tk-vst01')).toBeNull();
+  expect(within(band('stalled')).queryByText(/what the canvas owes the operator/)).toBeNull();
+});
+
 it('shows running sittings and recently closed ones with their outcome', async () => {
   render(<App />);
-  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+  await waitFor(() => expect(band('converse sittings')).toBeTruthy());
 
-  const section = sittingsSection();
+  const section = band('converse sittings');
   expect(within(section).getByText(/1 running · 1 closed recently/)).toBeTruthy();
 
   const live = within(section).getByText('tk-vst01').closest('tr') as HTMLElement;
   expect(within(live).getByText('running')).toBeTruthy();
   expect(within(live).getByText('40m')).toBeTruthy();
-  // A sitting that has not ended has no outcome to show.
   expect(within(live).getByText('—')).toBeTruthy();
 
   const done = within(section).getByText('tk-vst02').closest('tr') as HTMLElement;
@@ -441,10 +456,6 @@ it('shows running sittings and recently closed ones with their outcome', async (
   expect(within(done).getByText(/the path was the launcher/)).toBeTruthy();
 });
 
-// A board dismissal stamps gc.outcome before it closes the visit; when the
-// close then fails, the visit stays open carrying "dismissed". The row shows
-// it — running, yet with an outcome — because that pairing is the signal the
-// sitting is stuck open and needs a manual close, not a contradiction to hide.
 it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
   const stuck: Board = {
     ...BOARD,
@@ -468,36 +479,21 @@ it('shows the outcome on a running sitting a dismissal stamped but could not clo
   );
 
   render(<App />);
-  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+  await waitFor(() => expect(band('converse sittings')).toBeTruthy());
 
-  const row = within(sittingsSection()).getByText('tk-vst09').closest('tr') as HTMLElement;
+  const row = within(band('converse sittings')).getByText('tk-vst09').closest('tr') as HTMLElement;
   expect(within(row).getByText('running')).toBeTruthy();
-  // The outcome shows rather than collapsing to the em dash: a running row
-  // reading "dismissed" is the stuck-sitting signal, not an empty cell.
   expect(within(row).getByText('dismissed')).toBeTruthy();
 });
 
-// The record is not an attention list: a sitting must not appear as a row in
-// the ranked table, where it would compete with work that needs doing.
-it('keeps sittings out of the ranked table', async () => {
-  render(<App />);
-  await waitFor(() => expect(sittingsSection()).toBeTruthy());
-
-  expect(within(attentionTable()).queryByText('tk-vst01')).toBeNull();
-  expect(within(attentionTable()).queryByText(/what the canvas owes the operator/)).toBeNull();
-});
-
-// A sitting's subject is an anchor, so the drill gesture is the one the rest of
-// the board already uses.
 it('drills into a sitting by its subject', async () => {
   render(<App />);
-  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+  await waitFor(() => expect(band('converse sittings')).toBeTruthy());
 
-  fireEvent.click(within(sittingsSection()).getByRole('button', { name: 'tk-epic' }));
+  fireEvent.click(within(band('converse sittings')).getByRole('button', { name: 'tk-epic' }));
   expect(screen.getByRole('complementary', { name: /detail for tk-epic/i })).toBeTruthy();
 });
 
-// A quiet city grows no empty section, exactly as it grows no empty parked one.
 it('shows no sittings section when there are none', async () => {
   const noSittings: Board = { ...BOARD, sittings: null };
   vi.stubGlobal(
@@ -507,12 +503,9 @@ it('shows no sittings section when there are none', async () => {
 
   render(<App />);
   await waitFor(() => expect(screen.getByText('Attention Canvas')).toBeTruthy());
-  expect(screen.queryByRole('region', { name: /converse sittings/i })).toBeNull();
+  expect(queryBand('converse sittings')).toBeNull();
 });
 
-// Ages are measured from the board's own generated_at rather than the wall
-// clock: a tab left open overnight must not age every sitting past what the
-// gather actually saw.
 it('ages a sitting against the board it came from, not the clock', async () => {
   const later: Board = { ...BOARD, generated_at: '2026-08-21T21:14:00Z' };
   vi.stubGlobal(
@@ -521,16 +514,14 @@ it('ages a sitting against the board it came from, not the clock', async () => {
   );
 
   render(<App />);
-  await waitFor(() => expect(sittingsSection()).toBeTruthy());
+  await waitFor(() => expect(band('converse sittings')).toBeTruthy());
 
-  const live = within(sittingsSection()).getByText('tk-vst01').closest('tr') as HTMLElement;
+  const live = within(band('converse sittings')).getByText('tk-vst01').closest('tr') as HTMLElement;
   expect(within(live).getByText('2h')).toBeTruthy();
 });
 
-// "No anchors need attention" is a claim about the WHOLE board, and the section
-// directly above it has just listed anchors that need one. On an owed-only board
-// the unqualified sentence contradicts the queue it sits under; the same board
-// with nothing on it at all is the only one it is true of.
+// "No anchors need attention" is a claim about the whole board. On an owed-only
+// board the unqualified sentence contradicts the queue it sits under.
 it('does not tell an owed-only board that nothing needs attention', async () => {
   const owedOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]] };
   vi.stubGlobal(
@@ -556,23 +547,6 @@ it('tells a board with no rows at all that nothing needs attention', async () =>
   expect(screen.getByText('No anchors need attention.')).toBeTruthy();
 });
 
-// attentionTable() addresses the overview by exclusion, so every other table on
-// the page has to be excluded by name. A board whose only row is owed renders
-// no overview table at all while the sittings section still renders one — the
-// arm where a missed exclusion hands a test the wrong table instead of failing.
-it('does not mistake the sittings table for the overview', async () => {
-  const owedOnly: Board = { ...BOARD, total: 1, tiles: [BOARD.tiles![0]] };
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => new Response(JSON.stringify(owedOnly), { status: 200 })),
-  );
-
-  render(<App />);
-  await waitFor(() => expect(sittingsSection()).toBeTruthy());
-  expect(within(sittingsSection()).getByRole('table')).toBeTruthy();
-  expect(() => attentionTable()).toThrow(/no overview table/);
-});
-
 // --- the PR round-trip (specs/tk-q0ml23) --------------------------------------
 
 /** Serve a board made of exactly these tiles. */
@@ -584,10 +558,9 @@ function serve(tiles: Tile[]) {
   );
 }
 
-// A wedged anchor is routed to a person, so the gather finds it either way. The
-// row has to say WHY nothing is moving: "routed to a person" alone reads
-// identically for an anchor awaiting a ruling and for one the review cap parked,
-// where the only release is a ruling nobody has given.
+// A merge anchor bands review, and the row says WHY nothing is moving: "routed
+// to a person" alone reads identically for an anchor awaiting a ruling and for
+// one the review cap parked, where the only release is a ruling nobody gave.
 it('names the wedge and links the pull request', async () => {
   serve([
     prTile({
@@ -602,47 +575,41 @@ it('names the wedge and links the pull request', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/a pull request a human rejected/)).toBeTruthy());
 
-  const row = within(owedSection()).getByText(/a pull request a human rejected/).closest('tr');
+  const row = within(band('review')).getByText(/a pull request a human rejected/).closest('tr');
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText(/wedged: a standing CHANGES_REQUESTED/)).toBeTruthy();
 
-  // One click to the conversation. The board never reproduces a comment thread;
-  // line-level commenting stays in GitHub and this is the way there.
   const link = within(row as HTMLElement).getByRole('link', { name: 'PR #513' });
   expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/pull/513');
 });
 
-// The row is a MERGE ANCHOR's, not a pull request's. Most wedged anchors have
-// no pull request at all, so a surface that could only identify a row by its
-// number would have nothing to show for the majority of them.
+// The row is a MERGE ANCHOR's, not a pull request's. Most wedged anchors have no
+// pull request at all, so a surface that could only identify a row by its number
+// would have nothing to show for the majority of them.
 it('identifies a pre-open row without inventing a link', async () => {
   serve([prTile({ id: 'tk-pre', title: 'wedged before the PR opened' })]);
   render(<App />);
   await waitFor(() => expect(screen.getByText(/wedged before the PR opened/)).toBeTruthy());
 
-  const row = within(owedSection()).getByText(/wedged before the PR opened/).closest('tr');
+  const row = within(band('review')).getByText(/wedged before the PR opened/).closest('tr');
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
-  // The branch, not a sentence about the absence of a number. It is what the
-  // operator inspects and what correlates the row with the gate.
   expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
 });
 
-// The one row that has neither. An anchor at a human state carries
-// merge_result and can carry no branch and no number, and a cell that named an
-// absence as if it were an identity would be the same failure inverted.
+// An anchor at a human state carries merge_result and can carry no branch and no
+// number, and a cell that named an absence as an identity is the same failure
+// inverted.
 it('says so on a row that records neither number nor branch', async () => {
   serve([prTile({ id: 'tk-bare', title: 'a merge anchor with no branch recorded', pr_branch: '' })]);
   render(<App />);
   await waitFor(() => expect(screen.getByText(/no branch recorded/)).toBeTruthy());
 
-  const row = within(owedSection()).getByText(/no branch recorded/).closest('tr');
+  const row = within(band('review')).getByText(/no branch recorded/).closest('tr');
   expect(within(row as HTMLElement).getByText('not open yet')).toBeTruthy();
 });
 
-// The queue is ordered by how long a row has been owed, and pr_owed_since is
-// the only stamp on a merge anchor that dates the TURN. updated_at is touched by
-// every reconcile pass, so falling back to it reports the most neglected row as
-// the freshest one.
+// The queue is ordered by how long a row has been owed, and pr_owed_since is the
+// only stamp on a merge anchor that dates the TURN.
 it('dates an owed PR row by its turn, not by the last pass that touched it', async () => {
   serve([
     prTile({
@@ -655,21 +622,21 @@ it('dates an owed PR row by its turn, not by the last pass that touched it', asy
   render(<App />);
   await waitFor(() => expect(screen.getByText(/wedged for three days/)).toBeTruthy());
 
-  const row = within(owedSection()).getByText(/wedged for three days/).closest('tr');
+  const row = within(band('review')).getByText(/wedged for three days/).closest('tr');
   expect(within(row as HTMLElement).getByText('2026-08-08')).toBeTruthy();
   expect(within(row as HTMLElement).queryByText('2026-08-11')).toBeNull();
 });
 
 // The empty-state contract, extended. A board that says "nothing is owed" while
 // a pull request's position is unread has told the operator to stop looking on
-// the strength of a question it never asked. `owed` is a boolean and cannot
-// carry the third value the axes do, so the gap has to surface as coverage.
+// the strength of a question it never asked.
 it('withholds the all-clear while a PR position is unread', async () => {
   serve([
     prTile({
       id: 'tk-silent',
       title: 'a pull request the cadence has not judged',
       owed: false,
+      section: 'review',
       pr_machine: 'unknown',
       pr_owed_since: undefined,
       needs: 'position unknown — the merge cadence has recorded none',
@@ -678,23 +645,22 @@ it('withholds the all-clear while a PR position is unread', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/NOT an all-clear/)).toBeTruthy());
 
-  const sub = within(owedSection()).getByRole('status');
+  const sub = within(owedCover()).getByRole('status');
   expect(sub.textContent).toMatch(/1 of 1 have no position recorded/);
-  // The conversation axis is unread on every row in this phase, and the sentence
-  // says why rather than letting the silence pass for an answer.
   expect(sub.textContent).toMatch(/acknowledgement watermarks are not built yet/);
   expect(sub.textContent).not.toMatch(/^Nothing is owed by you\./);
 });
 
 // The DONE band is not coverage debt. Its rows carry the same axes as live ones
-// and reach the browser with the same unknowns, so counting them would keep the
-// queue's own emptiness from ever reading as an all-clear.
+// with the same unknowns, so counting them would keep the queue's own emptiness
+// from ever reading as an all-clear.
 it('does not count closed pull requests as unread positions', async () => {
   const shut = prTile({
     id: 'tk-shut',
     title: 'a pull request that landed',
     owed: false,
     severity: 'DONE',
+    section: 'done',
     closed_at: '2026-08-20T19:14:00Z',
     pr_machine: 'unknown',
     pr_owed_since: undefined,
@@ -703,16 +669,16 @@ it('does not count closed pull requests as unread positions', async () => {
   serve([shut]);
   const view = render(<App />);
   await waitFor(() => expect(screen.getByText(/Nothing is owed by you/)).toBeTruthy());
-  expect(within(owedSection()).getByRole('status').textContent).not.toMatch(/all-clear/);
+  expect(within(owedCover()).getByRole('status').textContent).not.toMatch(/all-clear/);
   view.unmount();
 
-  // And beside a live row, it neither adds a gap nor inflates the denominator.
   serve([
     shut,
     prTile({
       id: 'tk-silent',
       title: 'a pull request the cadence has not judged',
       owed: false,
+      section: 'review',
       pr_machine: 'unknown',
       pr_owed_since: undefined,
       needs: 'position unknown — the merge cadence has recorded none',
@@ -720,17 +686,16 @@ it('does not count closed pull requests as unread positions', async () => {
   ]);
   render(<App />);
   await waitFor(() => expect(screen.getByText(/NOT an all-clear/)).toBeTruthy());
-  expect(within(owedSection()).getByRole('status').textContent).toMatch(/1 of 1 have no position recorded/);
+  expect(within(owedCover()).getByRole('status').textContent).toMatch(/1 of 1 have no position recorded/);
 });
 
-// …and it is a real all-clear when every position was readable. A coverage
-// sentence that can never clear is one an operator learns to ignore.
 it('gives the all-clear when every PR position was readable', async () => {
   serve([
     prTile({
       id: 'tk-green',
       title: 'a pull request waiting on the merge pass',
       owed: false,
+      section: 'review',
       pr_machine: 'settled',
       pr_conversation: 'quiet',
       pr_approval: 'not_required',
@@ -741,16 +706,11 @@ it('gives the all-clear when every PR position was readable', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/Nothing is owed by you/)).toBeTruthy());
 
-  const sub = within(owedSection()).getByRole('status');
+  const sub = within(owedCover()).getByRole('status');
   expect(sub.textContent).toMatch(/1 pull requests read, all with a position/);
 });
 
 // --- pack builds ---------------------------------------------------------
-//
-// The strip answers a question about the board itself: whether the binary
-// rendering this page is the one the sources describe. Nothing else on the page
-// can be trusted to say so — every anchor row looks normal under a stale
-// binary.
 
 function build(over: Partial<PackBuild> & Pick<PackBuild, 'component'>): PackBuild {
   return {
@@ -790,14 +750,10 @@ it('lists every compiled component, including the healthy ones', async () => {
   const section = packSection();
   expect(within(section).getByText('gctk')).toBeTruthy();
   expect(within(section).getByText(/last build FAILED/)).toBeTruthy();
-  // The healthy row is present too: a strip that appears only on trouble is a
-  // strip nobody learns to read.
   expect(within(section).getByText('helm')).toBeTruthy();
   expect(within(section).getByText(/current at aaaaaaaaaaaa/)).toBeTruthy();
 });
 
-// A city whose build orders have never run has measured nothing. Rendering an
-// empty strip there would read as an all-clear nobody established.
 it('shows no pack-builds section when the city recorded no builds', async () => {
   serveBoard({ ...BOARD, pack_health: undefined });
 
@@ -806,8 +762,6 @@ it('shows no pack-builds section when the city recorded no builds', async () => 
   expect(screen.queryByRole('region', { name: /pack builds/i })).toBeNull();
 });
 
-// The band is derived server-side so this view and the CLI cannot disagree.
-// Rendering it verbatim is what keeps that true.
 it('renders the severity the service assigned, not one it re-derives', async () => {
   serveBoard({
     ...BOARD,
