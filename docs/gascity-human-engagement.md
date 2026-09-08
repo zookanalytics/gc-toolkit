@@ -560,14 +560,14 @@ UNATTACHED session, because the pack cannot see typed text in a composer and
 draining a pane that has some is the operator's one hard no (see below); an
 attached sitting whose visit already reads closed is left for a later pass, once
 it is no longer attended. A sitting whose visit is still OPEN — the operator
-walked away before any sign-off — is the harder case, `tk-20rfkt`, untouched here.
+walked away before any sign-off — is the harder, separate case, untouched here.
 
 Two runtime endings the idle setting does not own, and both still reach converse:
 
 - **A pool session that has ENDED is still collected in about a minute** by the
   `no-wake-reason` drain, a different clock on a different path, unaffected by
   any idle setting. See *How a pane dies when no sitting is live*, below. A
-  manual converse session (the post-cutover shape, `tk-4abhrt`) is exempt from
+  manual converse session (the post-cutover shape) is exempt from
   that cycling, so `converse-reap` above is what collects its settled sitting.
 - **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
   health restart can still take a held sitting out from under a reader. The

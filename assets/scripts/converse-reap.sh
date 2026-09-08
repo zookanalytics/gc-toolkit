@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # converse-reap.sh — end a converse sitting once its VISIT has closed.
 #
-# Converse is spawn-on-engagement (tk-4abhrt): `gc-helm engage` spawns a manual
+# Converse is spawn-on-engagement: `gc-helm engage` spawns a manual
 # converse-<model> session (origin=manual) bound to a visit, and the session's
 # --alias IS that visit id. A manual session is exempt from every pool backstop,
 # so nothing in the runtime cycles it. Both endings the config names — the
@@ -17,13 +17,13 @@
 # The one visit this pass will NOT reap under is one still OPEN — that is a live
 # hold — and the one session it will not reap is one an operator is ATTACHED to.
 # The pack cannot see a half-typed reply in the composer (that needs the
-# runtime's InputAreaState, gc-ze774), and the operator's standing ruling is that
-# draining a pane with typed text is a hard no. Attachment is the only signal the
-# pack has for "someone is at this pane", so an attached sitting is left for its
-# own sign-off or a dismiss even when its visit already reads closed. The
-# unattached settled sittings — the leaked slots — are what this reaps. Ending a
-# sitting whose visit is still OPEN (the operator walked away before any sign-off)
-# is the harder case, deferred to tk-20rfkt; this pass never touches it.
+# runtime's typed-input state, which the pack cannot yet read), and the operator's
+# standing ruling is that draining a pane with typed text is a hard no. Attachment
+# is the only signal the pack has for "someone is at this pane", so an attached
+# sitting is left for its own sign-off or a dismiss even when its visit already
+# reads closed. The unattached settled sittings — the leaked slots — are what this
+# reaps. Ending a sitting whose visit is still OPEN (the operator walked away
+# before any sign-off) is the harder, separate case; this pass never touches it.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per converse session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
@@ -134,19 +134,22 @@ while IFS=$'\t' read -r sid vid; do
         kept=$((kept + 1)); continue
     fi
 
-    reaped_lines="${reaped_lines}  ${sid} (visit ${vid} ${verdict})
-"
+    # Record the per-session line only once the sitting is actually gone. A close
+    # that FAILS is reported on stderr and counted skipped; it must NOT land in the
+    # reaped list, which is the summary's account of the slots this pass freed, and
+    # the close is the one operation this order performs. A dry run frees nothing,
+    # so there the line is the plan.
     if [ "$DRY_RUN" -eq 1 ]; then
-        reaped=$((reaped + 1)); continue
-    fi
-    if "$GC" session close "$sid" >/dev/null 2>&1; then
+        reaped=$((reaped + 1))
+    elif "$GC" session close "$sid" >/dev/null 2>&1; then
         reaped=$((reaped + 1))
     else
-        # The close is the whole job; a session that would not close is left for
-        # the next pass, and reported so a standing failure is visible.
         skipped=$((skipped + 1))
         echo "$PROG: could not close settled sitting $sid (visit $vid $verdict) — left for the next pass" >&2
+        continue
     fi
+    reaped_lines="${reaped_lines}  ${sid} (visit ${vid} ${verdict})
+"
 done <<< "$candidates"
 
 verb="closed"; [ "$DRY_RUN" -eq 1 ] && verb="would close"

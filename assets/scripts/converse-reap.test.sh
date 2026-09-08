@@ -176,12 +176,22 @@ hasnt "$CLOSED" "close s-closed" "UNREADABLE-VISIT: a session whose visit will n
 has "$CLOSED" "close s-gone" "UNREADABLE-VISIT: other settled sittings are still reaped"
 
 # --- a session that will not close -------------------------------------------
+# The close is the one operation this order performs, so a session that fails to
+# close is reported on stderr and counted skipped, and must NOT appear among the
+# reaped list on stdout — otherwise the summary would claim a slot it never freed.
+# stdout and stderr are captured apart: the failure line names the sitting on
+# stderr too, so a combined capture could not tell it from a reaped-list entry.
 build_world
-OUT="$(CLOSE_FAILS='s-closed' bash "$SUT" 2>&1)"; RC=$?
+CLOSE_FAILS='s-closed' bash "$SUT" >"$TMP/cf.out" 2>"$TMP/cf.err"; RC=$?
+CF_OUT="$(cat "$TMP/cf.out")"; CF_ERR="$(cat "$TMP/cf.err")"
 CLOSED="$(cat "$CALLS" 2>/dev/null)"
 eq "$RC" "0" "CLOSEFAIL: the pass exits 0"
-has "$OUT" "could not close settled sitting s-closed" "CLOSEFAIL: the failure is reported"
+has "$CF_ERR" "could not close settled sitting s-closed" "CLOSEFAIL: the failure is reported on stderr"
 has "$CLOSED" "close s-gone" "CLOSEFAIL: a failed close does not stop the pass"
+hasnt "$CF_OUT" "s-closed (visit tk-closed closed)" "CLOSEFAIL: the failed sitting is NOT listed among the reaped"
+has "$CF_OUT" "s-gone (visit tk-gone gone)" "CLOSEFAIL: a sitting that did close IS listed"
+has "$CF_OUT" "closed 2 settled" "CLOSEFAIL: only the two that closed are counted reaped"
+has "$CF_OUT" "skipped 3" "CLOSEFAIL: the failed close is counted skipped, with the non-visit and bad-alias"
 
 # --- a visit read that fails with a NON not-found error is skipped ------------
 # `gc bd show` exits non-zero for reasons other than a purged id (a store blip).
