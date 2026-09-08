@@ -441,9 +441,21 @@ while IFS= read -r row; do
     # terminal state doctor/check-closed-implies-landed accepts — rather than
     # re-asking the decision the closer already made as a rework-or-close
     # visit. A missing or malformed marker falls through to the default.
-    disp_kind=$(printf '%s' "$row" | jq -r '.metadata["gc.pr_close_disposition_kind"] // ""')
-    disp_succ=$(printf '%s' "$row" | jq -r '.metadata["gc.pr_close_disposition_successor"] // ""')
-    disp_store=$(printf '%s' "$row" | jq -r '.metadata["gc.pr_close_disposition_successor_store"] // ""')
+    #
+    # Read the marker from a FRESH anchor read, not from $row: pr-dispose.sh
+    # stamps it immediately before it closes the PR, which can fall AFTER this
+    # pass captured $row at enumeration. The stale $row would miss a marker set
+    # in that window and abandon a deliberately-disposed anchor. If the re-read
+    # fails, skip and retry — never abandon from a marker's absence in a read
+    # that did not land.
+    fresh=$(gc bd show "$id" --json 2>/dev/null | scrub)
+    if ! printf '%s' "$fresh" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      echo "$PROG: $id — PR#$num is CLOSED but re-reading the anchor failed; skipping rather than abandoning a possibly-disposed anchor (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    disp_kind=$(printf '%s' "$fresh" | jq -r '.[0].metadata["gc.pr_close_disposition_kind"] // ""')
+    disp_succ=$(printf '%s' "$fresh" | jq -r '.[0].metadata["gc.pr_close_disposition_successor"] // ""')
+    disp_store=$(printf '%s' "$fresh" | jq -r '.[0].metadata["gc.pr_close_disposition_successor_store"] // ""')
     case "$disp_kind" in re-homed|folded|fixed-upstream|duplicate|not-needed)
       if [ -n "$disp_succ" ]; then
         STORE_ARG=(); [ -n "$disp_store" ] && STORE_ARG=(--successor-store "$disp_store")

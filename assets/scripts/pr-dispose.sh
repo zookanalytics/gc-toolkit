@@ -174,17 +174,26 @@ if [ -z "$ORIGIN_REPO" ]; then
   exit 0
 fi
 
-# Idempotent: never reopen or re-close a PR already closed.
-PR_STATE=$(gh pr view "$PRNUM" --repo "$ORIGIN_HOST/$ORIGIN_REPO" --json state --jq '.state' 2>/dev/null | scrub)
-if [ "$PR_STATE" = "OPEN" ]; then
-  CMT="Closing as $KIND: disposition recorded on anchor $ANCHOR (successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
-  [ -n "$NOTE" ] && CMT="$CMT $NOTE"
-  if gh pr close "$PRNUM" --repo "$ORIGIN_HOST/$ORIGIN_REPO" --comment "$CMT" >/dev/null 2>&1; then
-    echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
+# Idempotent: never reopen or re-close a PR already closed. Keep gh's exit
+# status — an unreadable state (gh failed, or empty output) must NOT be mistaken
+# for a closed PR. Reading it as closed would leave the marker recorded while
+# the PR may still be OPEN, a false success: pr-facts never sees a CLOSED PR to
+# consummate the disposition. pipefail (set above) makes the pipe carry gh's
+# non-zero status when gh fails.
+if PR_STATE=$(gh pr view "$PRNUM" --repo "$ORIGIN_HOST/$ORIGIN_REPO" --json state --jq '.state' 2>/dev/null | scrub) \
+   && [ -n "$PR_STATE" ]; then
+  if [ "$PR_STATE" = "OPEN" ]; then
+    CMT="Closing as $KIND: disposition recorded on anchor $ANCHOR (successor $SUCCESSOR). The refinery disposes the anchor from this close; no rework-or-close decision is owed."
+    [ -n "$NOTE" ] && CMT="$CMT $NOTE"
+    if gh pr close "$PRNUM" --repo "$ORIGIN_HOST/$ORIGIN_REPO" --comment "$CMT" >/dev/null 2>&1; then
+      echo "$PROG: closed PR#$PRNUM as $KIND; pr-facts auto-disposes $ANCHOR on its next pass"
+    else
+      die "the marker is recorded but 'gh pr close $PRNUM' failed and the PR is still OPEN; close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+    fi
   else
-    warn "the marker is recorded but 'gh pr close $PRNUM' failed; close it by hand, and pr-facts auto-disposes $ANCHOR once it is CLOSED"
+    echo "$PROG: PR#$PRNUM is already $PR_STATE; the marker is recorded, and pr-facts auto-disposes $ANCHOR on its next pass"
   fi
 else
-  echo "$PROG: PR#$PRNUM is already ${PR_STATE:-not open}; the marker is recorded, and pr-facts auto-disposes $ANCHOR on its next pass"
+  die "the marker is recorded but PR#$PRNUM state could not be read (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
 fi
 exit 0

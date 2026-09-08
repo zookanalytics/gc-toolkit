@@ -151,16 +151,18 @@ eq "$(xd "$HERE/pr-facts.sh")" "$(xd "$HERE/signoff.sh")" "…byte-identical to 
 
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration
-# downstream audits read (docs/component-model.md). A key this script writes
-# but nothing registers is state no audit can account for.
+# downstream audits read (docs/component-model.md). A key these scripts write
+# but nothing registers is state no audit can account for. pr-dispose.sh is
+# covered alongside pr-facts.sh: it WRITES the disposition marker pr-facts only
+# reads, so a drift check scanning pr-facts alone would never see those writes.
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
-WRITTEN=$(grep -oE -- '--set-metadata "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" \
+WRITTEN=$(grep -hoE -- '--set-metadata "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" \
   | sed -E 's/^--set-metadata "?//; s/=$//' | sort -u)
-[ -n "$WRITTEN" ] && ok "set-metadata writes extracted" || bad "no --set-metadata writes found in pr-facts.sh"
+[ -n "$WRITTEN" ] && ok "set-metadata writes extracted" || bad "no --set-metadata writes found in pr-facts.sh/pr-dispose.sh"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
   | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
-eq "$UNREGISTERED" "" "every metadata key pr-facts.sh writes is registered in lifecycle.toml"
+eq "$UNREGISTERED" "" "every metadata key pr-facts.sh and pr-dispose.sh write is registered in lifecycle.toml"
 
 echo "# out-of-band merge is recorded"
 store "[$(anchor F1 10)]"
@@ -274,6 +276,43 @@ out=$(run)
 eq "$(cat "$STUB_REHOME_LOG")" "" "bead-rehome is not called on a malformed marker"
 eq "$(meta F2e merge_result)" "abandoned" "the default abandon still runs"
 has "$(cat "$STUB_ESC_LOG")" "--subject F2e --key pr-abandoned.25" "…and the rework-or-close visit is filed"
+
+# The marker is read from a FRESH anchor read, not from the row captured at
+# enumeration: pr-dispose.sh stamps it just before it closes the PR, which can
+# fall AFTER this pass enumerated the anchor. Reading the stale row would abandon
+# a deliberately-disposed anchor.
+echo "# a marker set after enumeration but before the CLOSED re-read is honored (race)"
+cat > "$TMP/stamp-hook.sh" <<'HOOK'
+#!/usr/bin/env bash
+# Models pr-dispose.sh landing the marker between enumeration and the re-read:
+# stamp it on a show of the raced anchor, so the enumerated row never had it.
+[ "$1" = "F2f" ] || exit 0
+tmp=$(mktemp)
+jq -c --arg id "$1" 'map(if .id == $id then
+    .metadata["gc.pr_close_disposition_kind"] = "duplicate"
+    | .metadata["gc.pr_close_disposition_successor"] = "tk-race" else . end)' \
+  "${STUB_STORE:?}" > "$tmp" && mv "$tmp" "${STUB_STORE:?}"
+HOOK
+chmod +x "$TMP/stamp-hook.sh"
+store "[$(anchor F2f 26)]"   # stored WITHOUT the marker; the hook adds it on the re-read
+printf '%s' "$(prview 26 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_26.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_SHOW_HOOK="$TMP/stamp-hook.sh" run)
+has "$out" "auto-disposed (duplicate -> tk-race)" "a marker set after enumeration is read fresh and consummated"
+has "$(cat "$STUB_REHOME_LOG")" "--origin F2f --successor tk-race --kind duplicate" "bead-rehome got the freshly-read disposition"
+eq "$(bstatus F2f)" "closed" "the anchor is disposed, not abandoned"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and NO rework-or-close visit is filed"
+
+echo "# a failed CLOSED re-read skips and retries, never abandons from stale absence"
+store "[$(anchor F2g 27 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-g"')]"
+printf '%s' "$(prview 27 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_27.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(STUB_SHOW_FAIL=1 run)
+eq "$(bstatus F2g)" "open" "the anchor is left OPEN"
+eq "$(meta F2g merge_result)" "pull_request" "…still enumerable, so the next pass retries"
+eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated on a read that did not land"
+eq "$(cat "$STUB_REHOME_LOG")" "" "…and bead-rehome is not called"
+has "$out" "re-reading the anchor failed" "the skip names the failed re-read"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"

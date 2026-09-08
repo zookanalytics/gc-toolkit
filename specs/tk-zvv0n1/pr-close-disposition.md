@@ -47,9 +47,10 @@ three metadata keys, named to mirror `bead-rehome.sh`'s interface:
 The marker is INTENT, not the disposition itself. It names the `bead-rehome.sh`
 invocation that pr-facts will run; bead-rehome remains the sole writer of
 `gc.superseded_by`, so the sole-writer invariant the I5 check and the Disposition
-doctrine (docs/state-machine.md) rest on is preserved. Like `gc.superseded_by`,
-these keys live outside `lifecycle/lifecycle.toml`'s metadata-key registry —
-`pr-facts.sh` only reads them; it never stamps them.
+doctrine (docs/state-machine.md) rest on is preserved. `pr-dispose.sh` writes
+these three keys, so they are registered in `lifecycle/lifecycle.toml`'s
+metadata-key registry (`[metadata.pr_close_disposition]`); `pr-facts.sh` only
+reads them.
 
 The marker lives on an OPEN anchor carrying `merge_result=pull_request`, because
 that is exactly the set `pr-facts.sh` enumerates. An anchor closed before its PR

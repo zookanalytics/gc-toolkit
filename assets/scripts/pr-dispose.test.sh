@@ -34,7 +34,8 @@ printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 v="${2:-}"; shift 2 || true
 num=""; for a in "$@"; do case "$a" in ''|--*|github.com/*) : ;; *) [ -z "$num" ] && num="$a" ;; esac; done
 case "$v" in
-  view)  f="$STUB_GH_DIR/pr_state_$num"; [ -s "$f" ] && cat "$f" || echo "OPEN" ;;
+  view)  [ -n "${STUB_PR_VIEW_RC:-}" ] && { echo "gh (stub): simulated pr view failure" >&2; exit "$STUB_PR_VIEW_RC"; }
+         f="$STUB_GH_DIR/pr_state_$num"; [ -s "$f" ] && cat "$f" || echo "OPEN" ;;
   close) exit "${STUB_PR_CLOSE_RC:-0}" ;;
   *)     echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
 esac
@@ -112,6 +113,25 @@ eq "$rc" 0 "exits 0"
 eq "$(meta A8 'gc.pr_close_disposition_kind')" "folded" "marker stamped"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "no re-close of an already-closed PR"
 has "$out" "already CLOSED" "notes the PR was already closed"
+
+echo "# an unreadable PR state is not mistaken for a closed PR (false success)"
+store "[$(anchor A10 78), $(succ S10)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_VIEW_RC=1 "$SUT" --anchor A10 --successor S10 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "exits non-zero — an unreadable PR state is not a success"
+eq "$(meta A10 'gc.pr_close_disposition_kind')" "duplicate" "the marker is still recorded (it is durable)"
+has "$out" "could not be read" "reports the PR state was unreadable"
+hasnt "$out" "already" "does NOT claim the PR is already closed/not open"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "and does not blind-close on a state it could not read"
+
+echo "# gh pr close failing on an OPEN PR is an error, not a false success"
+store "[$(anchor A11 79), $(succ S11)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_CLOSE_RC=1 "$SUT" --anchor A11 --successor S11 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "exits non-zero — the PR was not closed"
+eq "$(meta A11 'gc.pr_close_disposition_kind')" "duplicate" "the marker is recorded"
+has "$(cat "$STUB_GH_LOG")" "pr close 79" "the close was attempted"
+has "$out" "still OPEN" "reports the PR is still open and needs closing"
 
 echo "# dry-run writes nothing"
 store "[$(anchor A9 77), $(succ S9)]"
