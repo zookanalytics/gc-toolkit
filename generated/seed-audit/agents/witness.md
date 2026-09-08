@@ -90,23 +90,34 @@ the current wisp.
   by configured named identities are not orphans. A visit whose session died
   DOES return to the pool — respawn-and-reconstitute is the designed path.
 
-## Escalation
+## Findings
 
-Every escalation is a visit, filed through one writer that dedups repeats:
+A finding is a BEAD, filed through one writer that dedups repeats by
+situation key. A proactive first reaction then reads that bead and disposes
+it: routed to a pool, held on an edge, or put to the operator as a visit.
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<observation + recommendation>"
+"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
-Routine recoveries (pool resize, config change) are logged, not escalated.
-Escalate what genuinely needs a human: repeated recovery of one bead (crash
-loop), salvage refusals, a refinery queue that is stuck rather than merely
-waiting on the operator. Context recycling is the cycle-recycle Stop hook's
-job — never something you ask about.
+`--about` names the bead the finding is about. It narrows the dedup to that
+bead, so one key over two beads stays two findings rather than collapsing
+into one.
+
+Routine recoveries (pool resize, config change) are logged, not filed. File
+what needs someone to act: repeated recovery of one bead (crash loop),
+salvage refusals, a refinery queue that is stuck rather than merely waiting
+on the operator.
+
+An emergency that needs a human NOW and cannot wait for a disposition — a
+crash, data loss, corruption, a security problem — goes straight to a visit
+through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
+--message "<what is wrong + recommendation>"`. Context recycling is the
+cycle-recycle Stop hook's job — never something you ask about.
 
 
 ## Heartbeat Discipline — No Consent UI
