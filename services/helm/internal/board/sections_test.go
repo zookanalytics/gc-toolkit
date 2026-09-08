@@ -3,6 +3,7 @@ package board
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // visitAnchor builds a visit wrapper the way source.gatherMetadataAnchors does:
@@ -16,6 +17,21 @@ func visitAnchor(id, subject, ask string) Anchor {
 			"gc.routed_to":          "human",
 			"task_kind":             "visit",
 			"gc.continuation_group": subject,
+		},
+	}
+}
+
+// demandAnchor builds a demand wrapper: routed to the operator, naming its
+// subject in gc.demand_for, with the authored question on its takeaway. Unlike a
+// visit it is not visit presence, so folding it must not mark its subject Held.
+func demandAnchor(id, subject, ask string) Anchor {
+	return Anchor{
+		ID: id, Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+		Title:    "demand: " + ask,
+		Takeaway: ask,
+		Metadata: map[string]string{
+			"gc.routed_to":  "human",
+			"gc.demand_for": subject,
 		},
 	}
 }
@@ -161,6 +177,57 @@ func TestTwoVisitsOneSubject(t *testing.T) {
 	subj, _ := tileByID(b, "tk-subj")
 	if !strings.Contains(subj.Needs, "2×") || !strings.Contains(subj.Needs, "first ask") || !strings.Contains(subj.Needs, "second ask") {
 		t.Errorf("folded subject counts and lists both asks: got %q", subj.Needs)
+	}
+}
+
+// TestDemandFoldsButSubjectNotHeld: a demand folds onto its subject like a visit
+// — one row, owed, carrying the ask — but a demand is not visit presence, so the
+// subject must NOT be marked Held (the CLI renders Held as an open-visit glyph).
+func TestDemandFoldsButSubjectNotHeld(t *testing.T) {
+	anchors := []Anchor{
+		demandAnchor("tk-dem", "tk-subj", "approve the budget"),
+		{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Children: []Child{{ID: "tk-c1", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	if _, ok := tileByID(b, "tk-dem"); ok {
+		t.Errorf("the demand row should be folded away, not present")
+	}
+	subj, ok := tileByID(b, "tk-subj")
+	if !ok {
+		t.Fatalf("the subject row must survive the fold")
+	}
+	if !subj.Owed {
+		t.Errorf("a folded demand makes its subject owed")
+	}
+	if subj.Held {
+		t.Errorf("a demand is not visit presence: the subject must not be held")
+	}
+	if subj.Needs != "approve the budget" {
+		t.Errorf("folded subject carries the demand ask: got %q", subj.Needs)
+	}
+}
+
+// TestFoldDatesSubjectByAsk: the folded subject's owed clock is the wrapper's ask
+// instant, not the subject's own last-touch, so the queue orders the row by when
+// the person was first asked.
+func TestFoldDatesSubjectByAsk(t *testing.T) {
+	dem := demandAnchor("tk-dem2", "tk-subj2", "decide the rollout")
+	dem.TakeawayAt = daysAgo(5).Format(time.RFC3339)
+	anchors := []Anchor{
+		dem,
+		{ID: "tk-subj2", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			UpdatedAt: fixtureNow, Children: []Child{{ID: "tk-c1", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	subj, ok := tileByID(b, "tk-subj2")
+	if !ok {
+		t.Fatalf("the subject row must survive the fold")
+	}
+	if want := daysAgo(5); !subj.PROwedSince.Equal(want) {
+		t.Errorf("folded subject owed-since dates the ask: got %v, want %v", subj.PROwedSince, want)
 	}
 }
 

@@ -384,14 +384,12 @@ type Tile struct {
 	// ordering by that sorts the most neglected rows last.
 	PROwedSince time.Time `json:"pr_owed_since,omitzero"`
 
-	// --- the attention-type band and the cluster key (tk-9tbbk.4) -----------
+	// --- the attention-type band and the cluster key -----------------------
 	//
 	// Two derived classifications the renderers group by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
 	// [Severity] band, and putting it here is what keeps the CLI table and the
-	// dashboard from each inventing their own. Before this, the dashboard sliced
-	// tiles into owed/attention/parked/done with client-side predicates the CLI
-	// did not share, so the two surfaces could disagree about where a row went.
+	// dashboard from each inventing their own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
 	// how-badly: review (a pull request), gate (a person must answer), stalled
@@ -402,11 +400,11 @@ type Tile struct {
 	Section string `json:"section"`
 
 	// ClusterKey groups rows that are instances of ONE template — the same
-	// [Needs] sentence recurring across many beads, like the eight first-reaction
-	// gates or the cap-3 signoff rows that made the flat board unreadable. It is
-	// the shared Needs string, set only when at least [clusterThreshold] rows in
-	// the SAME section carry it, and empty otherwise; a renderer folds every row
-	// sharing a key into one entry that names the count and lists the members.
+	// [Needs] sentence recurring across many beads, such as a repeated gate or
+	// signoff ask. It is the shared Needs string, set only when at least
+	// [clusterThreshold] rows in the SAME section carry it, and empty otherwise;
+	// a renderer folds every row sharing a key into one entry that names the
+	// count and lists the members.
 	// Empty is the common case — a row with an LLM-authored takeaway is unique
 	// and never clusters — so the field is omitted when it does not apply.
 	ClusterKey string `json:"cluster_key,omitempty"`

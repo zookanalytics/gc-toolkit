@@ -1190,14 +1190,14 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
-// --- the attention-type sections (tk-9tbbk.4) --------------------------------
+// --- the attention-type sections --------------------------------------------
 //
-// The board had one flat rank and no visual structure — a hundred-plus rows of
-// unlike things (a pull request, a decision, a stranded epic, a finished
-// conversation) in one column, ordered by a proxy weight. The sections give the
-// operator a small fixed set of bands keyed by the KIND of move a row wants,
-// which is a different axis from [Severity]'s how-badly: a row's band says
-// whether to review, answer, rescue, watch, or dispose of it.
+// A section bands a row by the KIND of move it wants, a different axis from
+// [Severity]'s how-badly: the band says whether to review, answer, rescue,
+// watch, or dispose of the row. It is a small fixed set the operator reads in
+// one order, so a column of unlike things — a pull request, a decision, a
+// stranded epic, a finished conversation — resolves into a handful of intents
+// rather than one flat rank.
 //
 // One row lands in exactly one section, and [classifySection] is the total
 // mapping. It reads the tile's already-derived facts rather than re-deriving
@@ -1423,9 +1423,8 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 // clusterThreshold is how many rows must share one section-and-needs before the
 // board folds them into a single grouped entry. Two identical asks are a
 // coincidence a reader absorbs at a glance; at three the repetition is a
-// template, and by the eight first-reaction gates or the cap-3 signoff rows the
-// live board carried it was the dominant noise. A separate entry per member is
-// still on the wire; only the RENDER collapses, so nothing tooling reads is lost.
+// template worth collapsing. A separate entry per member is still on the wire;
+// only the RENDER collapses, so nothing tooling reads is lost.
 const clusterThreshold = 3
 
 // foldWrappers collapses row-doubling. A visit bead (task_kind=visit, tracking
@@ -1438,12 +1437,12 @@ const clusterThreshold = 3
 // recognises the edges instead.
 //
 // When the subject has a row of its own, the wrapper's ask moves onto it and the
-// wrapper's row is dropped: the subject is already `held`, and now it is `owed`
-// and carries what the visit asked. When the subject has NO row — 12 of the 41
-// live visits named a plain bead that is no anchor — the wrapper stays, because
-// dropping it would erase the only trace of the attention; its needs is rewritten
-// from the visit's own title so the kept row states the ask instead of the empty
-// "routed to you — no question recorded".
+// wrapper's row is dropped: the subject becomes `owed` and carries what the
+// wrapper asked, and a folded visit also leaves it `held`. When the subject has
+// NO row — a wrapper can name a plain bead that is no anchor — the wrapper stays,
+// because dropping it would erase the only trace of the attention; its needs is
+// rewritten from its own title so the kept row states the ask instead of the
+// empty "routed to you — no question recorded".
 func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 	anchorByID := make(map[string]Anchor, len(anchors))
 	for _, a := range anchors {
@@ -1459,19 +1458,19 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 	// about to be dropped, so decide every drop first, then apply the folds.
 	isWrapper := func(id string) bool {
 		if a, ok := anchorByID[id]; ok {
-			_, _, w := wrapperTarget(a)
+			_, _, _, w := wrapperTarget(a)
 			return w
 		}
 		return false
 	}
-	asks := make(map[string][]string) // subject id -> the asks folded onto it
+	asks := make(map[string][]foldedAsk) // subject id -> the asks folded onto it
 	drop := make(map[string]bool)
 	for i := range tiles {
 		a, ok := anchorByID[tiles[i].ID]
 		if !ok {
 			continue
 		}
-		subj, ask, ok := wrapperTarget(a)
+		subj, ask, kind, ok := wrapperTarget(a)
 		if !ok {
 			continue
 		}
@@ -1482,7 +1481,7 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 			continue
 		}
 		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
-			asks[subj] = append(asks[subj], ask)
+			asks[subj] = append(asks[subj], foldedAsk{ask: ask, kind: kind, owedSince: owedSince(tiles[i])})
 			drop[a.ID] = true
 		} else if ask != "" {
 			// Kept wrapper: no LIVE subject row carries this attention, so the
@@ -1507,18 +1506,20 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 	return out
 }
 
-// wrapperTarget reports the subject a wrapper row concerns and the ask it
-// carries, or ok=false for an ordinary row. A visit points at its subject
-// through gc.continuation_group; a demand through gc.demand_for.
-func wrapperTarget(a Anchor) (subject, ask string, ok bool) {
+// wrapperTarget reports the subject a wrapper row concerns, the ask it carries,
+// and its kind (wrapperVisit or wrapperDemand), or ok=false for an ordinary row.
+// A visit points at its subject through gc.continuation_group; a demand through
+// gc.demand_for. The kind matters at the fold: a demand is not visit presence,
+// so it must not stamp Tile.Held.
+func wrapperTarget(a Anchor) (subject, ask, kind string, ok bool) {
 	if a.Metadata == nil {
-		return "", "", false
+		return "", "", "", false
 	}
 	if a.Metadata["task_kind"] == "visit" {
 		if subj := a.Metadata[mdContinuationGroup]; subj != "" {
-			return subj, visitAsk(a.Title), true
+			return subj, visitAsk(a.Title), wrapperVisit, true
 		}
-		return "", "", false
+		return "", "", "", false
 	}
 	if subj := a.Metadata[mdDemandFor]; subj != "" {
 		// The authored question rides on the takeaway of a demand; its title is
@@ -1527,10 +1528,15 @@ func wrapperTarget(a Anchor) (subject, ask string, ok bool) {
 		if ask == "" {
 			ask = collapseWS(a.Title)
 		}
-		return subj, ask, true
+		return subj, ask, wrapperDemand, true
 	}
-	return "", "", false
+	return "", "", "", false
 }
+
+const (
+	wrapperVisit  = "visit"
+	wrapperDemand = "demand"
+)
 
 // mdContinuationGroup is the visit metadata key naming the subject a visit holds
 // — the same field Facts.Visits keys Tile.Held on.
@@ -1555,21 +1561,44 @@ func visitAsk(title string) string {
 	return s
 }
 
+// foldedAsk is one wrapper's contribution to the subject it folds onto: the ask
+// text, the wrapper kind (Held is visit presence, so a demand must not set it),
+// and the wrapper's own owed-since so the subject's owed clock can date the ask
+// that created it rather than the subject's last touch.
+type foldedAsk struct {
+	ask       string
+	kind      string
+	owedSince time.Time
+}
+
 // applyFold moves one or more wrapper asks onto a subject tile. The subject is
-// now held and owed — a person is asked to look at it — and its needs states the
-// ask, so the one surviving row says both what the row is and what is wanted of
-// it. A merge anchor keeps its own PR needs: the pull-request position is the
-// more specific ask and the visit only adds that a person is on it.
-func applyFold(t *Tile, folded []string) {
-	t.Held = true
+// now owed — a person is asked to look at it — and its needs states the ask, so
+// the one surviving row says both what the row is and what is wanted of it. Held
+// is visit presence, so only a folded VISIT stamps it; a demand leaves it as the
+// visit facts found it. The owed clock takes the earliest ask instant folded in,
+// so the queue dates the row by when the ask began; an existing earlier instant,
+// such as a merge anchor's PR clock, is kept rather than moved forward. A merge
+// anchor also keeps its own PR needs: the pull-request position is the more
+// specific ask and the wrapper only adds that a person is on it.
+func applyFold(t *Tile, folded []foldedAsk) {
 	t.Owed = true
+	asks := make([]string, 0, len(folded))
+	for _, f := range folded {
+		asks = append(asks, f.ask)
+		if f.kind == wrapperVisit {
+			t.Held = true
+		}
+		if !f.owedSince.IsZero() && (t.PROwedSince.IsZero() || f.owedSince.Before(t.PROwedSince)) {
+			t.PROwedSince = f.owedSince
+		}
+	}
 	if t.PRMachine == "" {
-		switch len(folded) {
+		switch len(asks) {
 		case 0:
 		case 1:
-			t.Needs = folded[0]
+			t.Needs = asks[0]
 		default:
-			t.Needs = fmt.Sprintf("%d× — %s", len(folded), strings.Join(folded, " · "))
+			t.Needs = fmt.Sprintf("%d× — %s", len(asks), strings.Join(asks, " · "))
 		}
 	}
 	t.Section = classifySection(*t)

@@ -63,19 +63,19 @@ resolves each wrapper against the tile set:
 
 - **Subject has a live row** → fold. The wrapper's ask (the visit title, minus
   the `visit: <id> — ` prefix; or the demand's authored question) moves onto the
-  subject, which becomes owed and held, and the wrapper's own row is dropped.
-  29 of the 41 live visits took this path.
-- **Subject has no row** → keep the wrapper. 12 of the 41 named a plain bead
-  that is no anchor, and dropping the wrapper would erase the only trace of the
-  attention; its needs is rewritten from its own title so the kept row states
-  the ask instead of the empty "routed to you — no question recorded".
+  subject, which becomes owed — and held when the wrapper is a visit, since
+  `held` is visit presence and a demand is not — and the wrapper's own row is
+  dropped. The subject's owed clock takes the wrapper's ask instant, so the queue
+  dates the row by when the person was first asked.
+- **Subject has no row** → keep the wrapper. A wrapper can name a plain bead that
+  is no anchor, and dropping the wrapper would erase the only trace of the
+  attention; its needs is rewritten from its own title so the kept row states the
+  ask instead of the empty "routed to you — no question recorded".
 
 **A closed wrapper never folds.** A visit or demand that has itself closed is a
 finished conversation, not a live ask; it stays in the DONE band. Folding it
-would mark a live subject owed on the strength of a visit that already ended —
-the fold pass did exactly this in its first form and silently removed 140 closed
-wrappers from the DONE band, caught by a same-instant diff against the
-pre-change binary.
+would mark a live subject owed on the strength of an ask that already ended, and
+would pull the closed wrapper out of the DONE band it belongs in.
 
 ## Template clusters
 
@@ -83,7 +83,7 @@ pre-change binary.
 `clusterThreshold` (3) rows sharing a section and a `Needs` sentence. A renderer
 folds them into one line naming the count with the members listed. The threshold
 is 3 because two identical asks are a coincidence a reader absorbs at a glance,
-while three is a template — and the live board carried clusters of 8, 12, and 18.
+while three is a template worth collapsing.
 
 The wire still carries every member (the fold is render-only), so
 `tmux-pick-helm.sh` and anything else reading the JSON array is unchanged. A row
