@@ -48,11 +48,17 @@ session's alias and closes the session (`gc session close`) when that visit
 reads `closed` or no longer resolves. A visit still `open`/`in_progress` is a
 live hold and is left alone.
 
+"No longer resolves" is bd's not-found answer: `gc bd show` on a deleted or
+purged id exits non-zero yet still prints an object whose `error` names no
+matching issue, and the script reads stdout and exit status separately so that
+signature survives to be classified as gone.
+
 Fully mechanical — `gc session list`, one `gc bd show` per converse session,
 `gc session close` for the settled ones. No agent, formula, or pool. Bias
-throughout: an unreadable probe reaps nothing (a visit that will not read, an
-alias that is not a bead id, or a bound bead that is not a visit is left alone),
-so the pass only ends a sitting it can prove is settled.
+throughout: only a readable `closed` visit or bd's not-found signature reaps;
+every other outcome — a read that yields no JSON, an error that is not the
+not-found one, an alias that is not a bead id, or a bound bead that is not a
+visit — is left alone, so the pass only ends a sitting it can prove is settled.
 
 ### Why unattached-only
 
@@ -97,14 +103,16 @@ visit — so the reap belongs beside them. No `gc`-binary change is required:
 ## Verification
 
 - `assets/scripts/converse-reap.test.sh` — hermetic, stubbed `gc`. Asserts a
-  closed visit and a gone visit are reaped (array and single-object `bd show`
-  shapes both), a live hold is kept, an attached session is never closed even
-  with a closed visit (the `tk-8nt4tt` shape), non-visit/no-alias/bad-alias/
-  non-converse/already-closed sessions are left alone, the summary counts, the
-  `--dry-run` plan, an unreadable listing aborting with exit 1, an unreadable
-  visit being skipped not reaped, and a close failure being reported without
-  stopping the pass. Co-located per the `scratch-reap` / `worktree-reap`
-  convention, so the review gate runs it adjacent to the diff.
+  closed visit and a gone visit are reaped — the closed visit recognised whether
+  bd answers with an array or a single object, the gone visit against bd's real
+  not-found answer (the not-found object returned with a non-zero exit) — a live
+  hold is kept, an attached session is never closed even with a closed visit
+  (the `tk-8nt4tt` shape), non-visit/no-alias/bad-alias/non-converse/
+  already-closed sessions are left alone, the summary counts, the `--dry-run`
+  plan, an unreadable listing aborting with exit 1, an unreadable visit and a
+  non not-found visit failure both being skipped not reaped, and a close failure
+  being reported without stopping the pass. Co-located per the `scratch-reap` /
+  `worktree-reap` convention, so the review gate runs it adjacent to the diff.
 - Live `--dry-run` at build time flagged the four unattached closed-visit
   sittings then leaking slots in the city, kept the two live holds, and excluded
   the one attached closed-visit session.

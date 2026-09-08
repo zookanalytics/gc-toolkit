@@ -89,16 +89,19 @@ while IFS=$'\t' read -r sid vid; do
         skipped=$((skipped + 1)); continue
     fi
 
-    # Read the visit. An empty answer, a non-JSON answer, or a command failure is
-    # an unreadable probe: never a reason to reap.
-    show="$("$GC" bd show "$vid" --json 2>/dev/null)" || show=""
+    # Read the visit, capturing stdout and exit status SEPARATELY. `gc bd show`
+    # exits non-zero for an id that resolves to nothing, yet still prints the
+    # not-found object that proves the visit is GONE — so blanking stdout on a
+    # non-zero exit (the old `|| show=""`) threw that answer away and leaked the
+    # slot. An answer that is not JSON at all — empty, or a garbled/failed read —
+    # carries nothing to classify and is an unreadable probe: never reap.
+    show="$("$GC" bd show "$vid" --json 2>/dev/null)"; show_rc=$?
     if ! printf '%s' "$show" | jq -e . >/dev/null 2>&1; then
         skipped=$((skipped + 1)); continue
     fi
 
     # The bead whose id is exactly this visit, whether bd answered with an array
-    # (one or more matches) or the single object it returns when nothing matched.
-    # empty => bd answered and there is no such bead: the visit is GONE.
+    # (one or more matches) or the single object it returns for one id.
     row="$(printf '%s' "$show" | jq -c --arg v "$vid" '
         if type=="array" then ([ .[] | select((.id // "") == $v) ] | first)
         elif (.id // "") == $v then .
@@ -106,7 +109,16 @@ while IFS=$'\t' read -r sid vid; do
 
     verdict=keep
     if [ "$row" = "null" ] || [ -z "$row" ]; then
-        verdict=gone
+        # No bead resolved. GONE only when bd said so with its not-found
+        # signature: a non-zero exit carrying an object whose .error names no
+        # matching issue (a deleted or purged visit). Any other unmatched payload
+        # — a store blip, an unexpected error shape — we cannot classify, so it
+        # is left alone, not reaped.
+        if [ "$show_rc" -ne 0 ] && printf '%s' "$show" | jq -e 'type=="object" and ((.error // "") | test("no issues found"))' >/dev/null 2>&1; then
+            verdict=gone
+        else
+            skipped=$((skipped + 1)); continue
+        fi
     else
         kind="$(printf '%s' "$row" | jq -r '(.metadata.task_kind) // ""')"
         status="$(printf '%s' "$row" | jq -r '.status // ""')"

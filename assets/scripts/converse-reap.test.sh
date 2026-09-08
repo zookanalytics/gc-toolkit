@@ -8,8 +8,9 @@
 #
 # Runs the REAL converse-reap.sh with a stubbed `gc` (CONVERSE_REAP_GC) — no live
 # city, sessions, or store. The stub answers `session list` from a fixture file,
-# `bd show <vid>` from a per-visit fixture (absent => the error-object bd really
-# returns when nothing resolves), and records every `session close` to $CALLS.
+# `bd show <vid>` from a per-visit fixture (absent => the not-found error object,
+# with the non-zero exit, that bd really returns when nothing resolves), and
+# records every `session close` to $CALLS.
 # Covered:
 #   (CLOSED)  a converse session whose visit reads closed is closed
 #   (GONE)    a converse session whose visit no longer resolves is closed
@@ -27,6 +28,7 @@
 #   (DRYRUN)  --dry-run names the plan and closes nothing
 #   (UNREADABLE-LIST) a session listing that is not JSON aborts (exit 1), reaps 0
 #   (UNREADABLE-VISIT) a visit read that is not JSON is skipped, never reaped
+#   (OTHERERR) a visit read that fails with a non not-found error is skipped
 #   (CLOSEFAIL) a session that will not close is reported and left for next pass
 set -uo pipefail
 
@@ -60,8 +62,19 @@ case "$1 ${2:-}" in
   "bd show")
     vid="$3"
     if [ "${VISIT_BROKEN:-}" = "$vid" ]; then echo "gc bd: garbled >>>"; exit 0; fi
+    if [ "${VISIT_ERROR:-}" = "$vid" ]; then
+      # A failure that is NOT not-found (a store blip): valid JSON, non-zero
+      # exit, no not-found signature. The reap must skip it, never reap.
+      jq -n '{error:"store temporarily unavailable", schema_version:1}'; exit 1
+    fi
     if [ -f "$BEADS_DIR/$vid.json" ]; then cat "$BEADS_DIR/$vid.json"
-    else jq -n '{error:"no issues found matching the provided IDs", schema_version:1}'; fi ;;
+    else
+      # A deleted/purged id: real `gc bd show` prints the not-found object AND
+      # exits non-zero. The stub must reproduce that non-zero exit so the reap is
+      # tested against the answer it really gets — the signature it reads to
+      # classify the visit GONE.
+      jq -n '{error:"no issues found matching the provided IDs", hint:"some IDs may reference deleted/purged records with no trace left in the live database", schema_version:1}'; exit 1
+    fi ;;
   "session close")
     sid="$3"
     case " ${CLOSE_FAILS:-} " in *" $sid "*) exit 1 ;; esac
@@ -169,6 +182,19 @@ CLOSED="$(cat "$CALLS" 2>/dev/null)"
 eq "$RC" "0" "CLOSEFAIL: the pass exits 0"
 has "$OUT" "could not close settled sitting s-closed" "CLOSEFAIL: the failure is reported"
 has "$CLOSED" "close s-gone" "CLOSEFAIL: a failed close does not stop the pass"
+
+# --- a visit read that fails with a NON not-found error is skipped ------------
+# `gc bd show` exits non-zero for reasons other than a purged id (a store blip).
+# Only bd's not-found signature means gone; any other failure is an unreadable
+# probe — kept and counted skipped, never reaped.
+: > "$CALLS"; rm -f "$TMP/beads"/*.json
+printf '{"sessions":[%s]}' "$(sess s-err gc-toolkit/gc-toolkit.tk-err asleep false false)" > "$SESSIONS_FILE"
+OUT="$(VISIT_ERROR=tk-err bash "$SUT" 2>&1)"; RC=$?
+CLOSED="$(cat "$CALLS" 2>/dev/null)"
+eq "$RC" "0" "OTHERERR: the pass completes"
+eq "$CLOSED" "" "OTHERERR: a non not-found visit failure is NOT reaped"
+has "$OUT" "closed 0 settled" "OTHERERR: nothing reaped"
+has "$OUT" "skipped 1" "OTHERERR: the unreadable visit is counted skipped"
 
 # --- nothing to do ------------------------------------------------------------
 : > "$CALLS"
