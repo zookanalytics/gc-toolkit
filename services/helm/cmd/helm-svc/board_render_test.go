@@ -18,13 +18,13 @@ func doneBoard() (board.Board, []board.Tile) {
 	tiles := []board.Tile{
 		{
 			ID: "tk-live", Rig: "gc-toolkit", Kind: "epic", Title: "still open",
-			Severity: board.SevHigh, MTotal: 2, Open: 2,
+			Severity: board.SevHigh, MTotal: 2, Open: 2, Section: board.SectionStalled,
 			Frontier: "2 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or visit",
 			RankScore: 3_002_000,
 		},
 		{
 			ID: "tk-done", Rig: "gc-toolkit", Kind: "parked", Title: "answered while you were away",
-			Severity: board.SevDone, MTotal: 1, NClosed: 1,
+			Severity: board.SevDone, MTotal: 1, NClosed: 1, Section: board.SectionDone,
 			ClosedAt: now.Add(-26 * time.Hour),
 			Frontier: "closed 1d ago", Needs: "closed — dismiss to clear",
 			RankScore: -999_002,
@@ -93,14 +93,14 @@ func TestRenderTableCappedHeaderCountsOnlyTheLiveRowsShown(t *testing.T) {
 	for i := range 3 {
 		tiles = append(tiles, board.Tile{
 			ID: fmt.Sprintf("tk-live%d", i), Rig: "gc-toolkit", Kind: "epic", Title: "still open",
-			Severity: board.SevHigh, MTotal: 2, Open: 2, RankScore: 3_002_000 - i,
+			Severity: board.SevHigh, MTotal: 2, Open: 2, Section: board.SectionStalled, RankScore: 3_002_000 - i,
 		})
 	}
 	for i := range 2 {
 		tiles = append(tiles, board.Tile{
 			ID: fmt.Sprintf("tk-done%d", i), Rig: "gc-toolkit", Kind: "epic", Title: "answered",
 			Severity: board.SevDone, MTotal: 1, NClosed: 1, ClosedAt: now.Add(-26 * time.Hour),
-			RankScore: -999_002 - i,
+			Section: board.SectionDone, RankScore: -999_002 - i,
 		})
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
@@ -126,13 +126,13 @@ func TestRenderTableHeaderNamesTheClosedCap(t *testing.T) {
 	var tiles []board.Tile
 	tiles = append(tiles, board.Tile{
 		ID: "tk-live", Rig: "gc-toolkit", Kind: "epic", Title: "still open",
-		Severity: board.SevHigh, MTotal: 2, Open: 2, RankScore: 3_002_000,
+		Severity: board.SevHigh, MTotal: 2, Open: 2, Section: board.SectionStalled, RankScore: 3_002_000,
 	})
 	for i := range 4 {
 		tiles = append(tiles, board.Tile{
 			ID: fmt.Sprintf("tk-done%d", i), Rig: "gc-toolkit", Kind: "epic", Title: "answered",
 			Severity: board.SevDone, MTotal: 1, NClosed: 1, ClosedAt: now.Add(-26 * time.Hour),
-			RankScore: -999_002 - i,
+			Section: board.SectionDone, RankScore: -999_002 - i,
 		})
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
@@ -160,6 +160,65 @@ func TestRenderTableHeaderStaysPlainWhenTheBandIsWhole(t *testing.T) {
 
 	if !strings.Contains(got, "· 1 closed") || strings.Contains(got, "of 1 closed") {
 		t.Errorf("a whole band names one number; got:\n%s", firstLines(got, 3))
+	}
+}
+
+// The board is read one band at a time, so each non-empty section prints a
+// labeled banner and the rows in it fall under that banner.
+func TestRenderTableShowsSectionBanners(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	tiles := []board.Tile{
+		{ID: "tk-pr", Rig: "gc-toolkit", Kind: "merge", Title: "a PR", Severity: board.SevElevated,
+			Section: board.SectionReview, PRMachine: "settled", Needs: "green — waiting on the merge pass", RankScore: 2_000_000},
+		{ID: "tk-strand", Rig: "gc-toolkit", Kind: "epic", Title: "stranded", Severity: board.SevHigh,
+			Section: board.SectionStalled, MTotal: 2, Open: 2, Needs: "decomposed, idle — assign or visit", RankScore: 3_000_000},
+	}
+	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
+	var out strings.Builder
+	renderTable(&out, b, tiles, now, 1)
+	got := out.String()
+
+	for _, want := range []string{"▌ REVIEW", "a pull request wants you", "▌ STALLED"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing section banner %q; got:\n%s", want, got)
+		}
+	}
+	// The banner order follows SectionOrder: review before stalled.
+	if strings.Index(got, "▌ REVIEW") > strings.Index(got, "▌ STALLED") {
+		t.Errorf("review must band before stalled; got:\n%s", got)
+	}
+}
+
+// A run of rows sharing one template folds to a single line that names the count
+// and lists the members, instead of N identical peer rows.
+func TestRenderTableCollapsesAClusterToOneLine(t *testing.T) {
+	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
+	var tiles []board.Tile
+	for i := range 4 {
+		tiles = append(tiles, board.Tile{
+			ID: fmt.Sprintf("tk-fr%d", i), Rig: "gc-toolkit", Kind: "human", Title: "first reaction",
+			Severity: board.SevElevated, Section: board.SectionGate, Owed: true,
+			Needs: "first reaction ready: accept or redirect", ClusterKey: "first reaction ready: accept or redirect",
+			RankScore: 2_000_000 - i,
+		})
+	}
+	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
+	var out strings.Builder
+	renderTable(&out, b, tiles, now, 1)
+	got := out.String()
+
+	if !strings.Contains(got, "4×") {
+		t.Errorf("a cluster of 4 must show its count; got:\n%s", got)
+	}
+	// Every member id is named on the collapsed line, so nothing is hidden.
+	for i := range 4 {
+		if !strings.Contains(got, fmt.Sprintf("tk-fr%d", i)) {
+			t.Errorf("cluster line must list member tk-fr%d; got:\n%s", i, got)
+		}
+	}
+	// The shared needs prints once, not four times.
+	if n := strings.Count(got, "first reaction ready: accept or redirect"); n != 1 {
+		t.Errorf("the shared needs prints once for the cluster, got %d occurrences", n)
 	}
 }
 

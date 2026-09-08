@@ -477,9 +477,10 @@ func renderCoverage(c board.PRCoverage, rigCount int) string {
 }
 
 func renderRows(w io.Writer, shown []board.Tile) {
-	// The two identifier columns are sized to what this board actually holds;
-	// every other column carries prose, where a fixed width and a trimmed tail
-	// are the right trade.
+	// The two identifier columns are sized to what this board actually holds —
+	// once, across every section, so a column means the same width in all of
+	// them. Every other column carries prose, where a fixed width and a trimmed
+	// tail are the right trade.
 	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
 	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
 
@@ -491,33 +492,106 @@ func renderRows(w io.Writer, shown []board.Tile) {
 		rule(rigW-1, rigW)+rule(8, colKind)+rule(6, colNM)+
 		rule(35, colFrontier)+strings.Repeat("─", 16)+"\n")
 
-	for _, t := range shown {
-		glyph := " "
-		if t.Held {
-			glyph = "●"
-		}
-		// "—" means THIS ROW has no roll-up, not that its KIND never has one: a
-		// decision never does, and a human/parked bead does exactly when it
-		// decomposed. Printing "—" over a real child set is what hid the open
-		// children of a parked subject (tk-a9k0l); printing 0/0 for a bead that
-		// owns no set at all would be a fabricated count.
-		nm := fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
-		if t.MTotal == 0 {
-			switch t.Kind {
-			case "decision", "human", "parked":
-				nm = "—"
+	// The board is read one attention band at a time. GroupBySection owns the
+	// order and the split, so this and the dashboard cannot disagree about which
+	// band a row is in; ClusterRows owns the fold, so a template that recurs is
+	// one line here and one line there.
+	for _, g := range board.GroupBySection(shown) {
+		fmt.Fprintf(w, "\n%s\n", sectionBanner(g.Key, len(g.Tiles)))
+		for _, cr := range board.ClusterRows(g.Tiles) {
+			if len(cr.Members) > 1 {
+				renderClusterLine(w, cr)
+				continue
 			}
+			renderTileLine(w, cr.Tile, idW, rigW)
 		}
-		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
-			rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-			rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+	}
+}
+
+// renderTileLine writes one anchor's row in the sized columns.
+func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
+	glyph := " "
+	if t.Held {
+		glyph = "●"
+	}
+	// "—" means THIS ROW has no roll-up, not that its KIND never has one: a
+	// decision never does, and a human/parked bead does exactly when it
+	// decomposed. Printing "—" over a real child set is what hid the open
+	// children of a parked subject (tk-a9k0l); printing 0/0 for a bead that
+	// owns no set at all would be a fabricated count.
+	nm := fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
+	if t.MTotal == 0 {
+		switch t.Kind {
+		case "decision", "human", "parked":
+			nm = "—"
+		}
+	}
+	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
+		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
+		rpad(nm, colNM)+rpad(t.Frontier, colFrontier)+clip(t.Needs, colNeedsMax)+"\n")
+}
+
+// renderClusterLine writes one line for a run of rows that share a template: the
+// count, the shared needs, and the member ids so the operator can still act on
+// each. The ids are the whole point of folding here rather than dropping them —
+// the wire keeps every member, and this line names them so nothing is hidden,
+// only gathered.
+func renderClusterLine(w io.Writer, cr board.ClusterRow) {
+	ids := make([]string, 0, len(cr.Members))
+	for _, m := range cr.Members {
+		ids = append(ids, m.ID)
+	}
+	const maxIDs = 6
+	shown := ids
+	suffix := ""
+	if len(ids) > maxIDs {
+		shown = ids[:maxIDs]
+		suffix = fmt.Sprintf(" … (+%d)", len(ids)-maxIDs)
+	}
+	// Indented under the band, with the count where a severity would sit, so a
+	// scan down the column still finds it. The needs is the shared template.
+	fmt.Fprintf(w, "%s%s%s\n     %s%s\n",
+		rpad(" ", colHeld), rpad(fmt.Sprintf("%d×", len(cr.Members)), colSeverity),
+		clip(cr.Tile.Needs, colNeedsMax), strings.Join(shown, " "), suffix)
+}
+
+// sectionBanner is the labeled divider between attention bands. It carries the
+// band's name, a one-line statement of the move it wants, and how many rows are
+// in it, so the operator reads the board as a small set of questions rather than
+// one flat list.
+func sectionBanner(key string, n int) string {
+	label, desc := sectionLabel(key)
+	return fmt.Sprintf("▌ %s · %s · %d", label, desc, n)
+}
+
+// sectionLabel gives a band its display name and the move it asks for. An
+// unknown key (a band a newer derivation added) prints itself rather than
+// vanishing.
+func sectionLabel(key string) (label, desc string) {
+	switch key {
+	case board.SectionReview:
+		return "REVIEW", "a pull request wants you"
+	case board.SectionGate:
+		return "GATE", "a person must answer"
+	case board.SectionStalled:
+		return "STALLED", "open work nothing is moving"
+	case board.SectionActive:
+		return "ACTIVE", "healthy in-flight work"
+	case board.SectionCleanup:
+		return "CLEANUP", "finished or empty — dispose of it"
+	case board.SectionDone:
+		return "DONE", "the anchor itself closed"
+	default:
+		return strings.ToUpper(key), "uncategorised"
 	}
 }
 
 // renderLegend writes the trailer that says what the bands, the kinds and the
 // held glyph mean.
 func renderLegend(w io.Writer) {
-	fmt.Fprint(w, "\nLegend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
+	fmt.Fprint(w, "\nBands (▌) group by the KIND of move a row wants: REVIEW=a pull request · GATE=a person must answer · STALLED=open work nothing is moving · ACTIVE=healthy in-flight · CLEANUP=finished/empty · DONE=closed\n")
+	fmt.Fprint(w, "A \"N×\" line folds N rows that share one needs sentence (a visit template, a signoff cap); the ids under it are the members — the JSON carries every one\n")
+	fmt.Fprint(w, "Legend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
