@@ -109,6 +109,38 @@ func TestVisitKeptWhenSubjectHasNoTile(t *testing.T) {
 	}
 }
 
+// TestClosedVisitDoesNotFold: a visit that has itself closed is a finished
+// conversation, not a live ask — it stays in the DONE band and does not make its
+// subject owed.
+func TestClosedVisitDoesNotFold(t *testing.T) {
+	v := visitAnchor("tk-vc", "tk-subj", "an ask that ended")
+	v.ClosedAt = daysAgo(1)
+	anchors := []Anchor{
+		v,
+		{ID: "tk-subj", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
+			Children: []Child{{ID: "tk-c1", Status: "open"}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	subj, ok := tileByID(b, "tk-subj")
+	if !ok {
+		t.Fatalf("subject present")
+	}
+	if subj.Owed {
+		t.Errorf("a closed visit must not make its subject owed")
+	}
+	if subj.Needs == "an ask that ended" {
+		t.Errorf("a closed visit's ask must not become the subject's needs")
+	}
+	vc, ok := tileByID(b, "tk-vc")
+	if !ok {
+		t.Fatalf("the closed visit stays as its own row")
+	}
+	if vc.Section != SectionDone {
+		t.Errorf("the closed visit bands done: got %q", vc.Section)
+	}
+}
+
 // TestTwoVisitsOneSubject: two visits on one subject fold into a single row that
 // counts them and lists both asks.
 func TestTwoVisitsOneSubject(t *testing.T) {

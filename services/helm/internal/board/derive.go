@@ -1475,12 +1475,18 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 		if !ok {
 			continue
 		}
-		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) {
+		// A CLOSED wrapper is a finished conversation, not a live ask. Leaving it
+		// in the DONE band is right; folding it onto a subject would mark that
+		// subject owed on the strength of a visit that already ended.
+		if !tiles[i].ClosedAt.IsZero() {
+			continue
+		}
+		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
 			asks[subj] = append(asks[subj], ask)
 			drop[a.ID] = true
-			_ = j
 		} else if ask != "" {
-			// Kept wrapper: let it speak as the subject it names.
+			// Kept wrapper: no LIVE subject row carries this attention, so the
+			// wrapper stays and states the ask from its own title.
 			tiles[i].Needs = ask
 			tiles[i].Section = classifySection(tiles[i])
 		}
