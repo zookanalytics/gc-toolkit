@@ -88,6 +88,7 @@ and `render-seed-audit.sh --check` verifies it exactly.
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
+- [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 
 ## Related
 
