@@ -288,6 +288,69 @@ rig_db_for_session() {
     [ -n "$_spath" ] && [ -d "$_spath/.beads" ] && printf '%s' "$_spath/.beads"
 }
 
+# ── Reap helper: force-close a husk molecule ─────────────────────────
+# A released molecule that no live session is completing — its work cancelled by
+# a stand-down, or already folded — never closes its own step chain, so
+# workflow-finalize stays blocked_by the chain and the root never reaps, while
+# its held steps keep drawing re-dispatches. A stood-down molecule should die,
+# not park, so force-close the whole subtree: every step and the root. bd
+# refuses to close a bead an open blocker gates, so the chain unwinds from its
+# unblocked end — close what closes, repeat until a pass closes nothing.
+# `update --status=closed` needs no --force: the ownership check belongs to the
+# `close` verb, not to reaching the closed state, and the forward order is what
+# satisfies the blocker rule. A bead the store will not close is de-pinned
+# instead, so it stops re-attracting spawns while the patrol retries.
+#
+# $1 = newline-separated molecule rows (JSON, {id,kind,step,...}); $2 = rig
+# .beads path or ""; $3 = the released anchor id, for the log line.
+# >>> reap-release-molecule
+reap_release_molecule() {
+    _reap_rows="$1"; _reap_db="$2"; _reap_anchor="$3"
+    _reap_todo=$(printf '%s\n' "$_reap_rows" | jq -r '.id // empty' 2>/dev/null | grep . || true)
+    [ -n "$_reap_todo" ] || return 0
+    _reap_n=$(printf '%s\n' "$_reap_todo" | grep -c . 2>/dev/null || echo 0)
+    case "$_reap_n" in ''|*[!0-9]*) _reap_n=0 ;; esac
+    _reap_pass=0
+
+    while [ -n "$_reap_todo" ] && [ "$_reap_pass" -le "$_reap_n" ]; do
+        _reap_pass=$((_reap_pass + 1))
+        _reap_next=""
+        _reap_moved=0
+        while IFS= read -r _sid; do
+            [ -n "$_sid" ] || continue
+            _lbl=$(printf '%s\n' "$_reap_rows" | jq -r --arg i "$_sid" \
+                'select(.id == $i) | "\(.kind) \(.id) (\(.step // ""))"' 2>/dev/null | head -1)
+            # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
+            if gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --status=closed --set-metadata "gc.outcome=stand-down" >/dev/null 2>&1; then
+                _reap_moved=1
+                echo "$PROG: takeaway: reaped ${_lbl:-$_sid} of $_reap_anchor"
+            else
+                _reap_next="${_reap_next}${_sid}
+"
+            fi
+        done <<REAP
+$_reap_todo
+REAP
+        _reap_todo=$(printf '%s' "$_reap_next" | grep . || true)
+        [ "$_reap_moved" -eq 1 ] || break
+    done
+
+    # Anything the store refused to close — a pin-write refusal, or a blocker
+    # outside this molecule that never clears — is de-pinned so it stops
+    # re-attracting spawns, and named so the patrol knows to retry.
+    while IFS= read -r _sid; do
+        [ -n "$_sid" ] || continue
+        _lbl=$(printf '%s\n' "$_reap_rows" | jq -r --arg i "$_sid" \
+            'select(.id == $i) | "\(.kind) \(.id) (\(.step // ""))"' 2>/dev/null | head -1)
+        # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
+        gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --unset-metadata gc.routed_to --unset-metadata gc.session_affinity >/dev/null 2>&1 || true
+        echo "$PROG: takeaway: could not reap ${_lbl:-$_sid} of $_reap_anchor — de-pinned; retries via witness patrol" >&2
+    done <<REAP
+$_reap_todo
+REAP
+}
+# <<< reap-release-molecule
+
 # ── Release helper: quiesce a released molecule ──────────────────────
 # A molecule whose anchor is out of play — parked by a stand-down, or closed by
 # a fold that landed after the pour — keeps re-attracting the pins
@@ -296,25 +359,32 @@ rig_db_for_session() {
 # carry them: the graph.v2 STEP beads, and the gc.kind=workflow ROOT, which is
 # only a tracker but is pool-routed in its own right. Walk both in reverse (a
 # step through gc.root_bead_id, a root through itself, then on through the
-# root's gc.input_convoy_id to the convoy's single tracked member) and clear
-# the pins wherever that resolves to THIS anchor.
+# root's gc.input_convoy_id to the convoy's single tracked member) to the
+# molecules that resolve to THIS anchor.
 #
-# Guards: fail closed on an unresolved or foreign anchor; NEVER close a bead or
-# rewrite its status; never de-route workflow-finalize or a control-dispatcher
-# route, which is the molecule's only escape path; never de-pin the bead the
-# RELEASING session holds, which is live and not a husk; steps are selected by
+# What each resolved molecule gets turns on whether the RELEASING session holds
+# one of its steps. If it does, the molecule is the session's OWN and live — a
+# mol-first-reaction terminal step disposing the anchor it runs on, or a sitting
+# — and it closes its own chain the normal way: the held step is left alone, the
+# husk pins around it are cleared, and workflow-finalize keeps its escape route.
+# If no step is the releasing session's, nothing will ever close the chain, so
+# the molecule is a husk and reap_release_molecule force-closes the whole
+# subtree.
+#
+# Guards: fail closed on an unresolved or foreign anchor; select steps by
 # contract (gc.step_ref) and never by formula name; an absent root is the
 # witness patrol's, not ours.
 #
-# The pins go in TWO updates, route first. beads refuses `--assignee ""` on an
-# in_progress bead another session holds, and refuses the whole update along
-# with it, so folding all three keys into one write loses the route pins on
-# exactly the bead being re-offered. Clearing gc.routed_to alone already lifts
-# a bead out of every pool claim predicate; the assignee is the one key that
-# may legitimately have to wait for its holder. The order is load-bearing —
-# reversed, the gap between the writes would leave the bead routed and
-# unassigned, which is the pool-offer shape a fresh polecat races into. For the
-# same reason the second write is skipped outright when the first one fails.
+# The de-pin path clears the pins in TWO updates, route first. beads refuses
+# `--assignee ""` on an in_progress bead another session holds, and refuses the
+# whole update along with it, so folding all three keys into one write loses the
+# route pins on exactly the bead being re-offered. Clearing gc.routed_to alone
+# already lifts a bead out of every pool claim predicate; the assignee is the
+# one key that may legitimately have to wait for its holder. The order is
+# load-bearing — reversed, the gap between the writes would leave the bead
+# routed and unassigned, which is the pool-offer shape a fresh polecat races
+# into. For the same reason the second write is skipped outright when the first
+# one fails.
 #
 # Best-effort subshell. $1 = released anchor id, $2 = rig .beads path or "".
 # >>> quiesce-release-molecule-steps
@@ -364,7 +434,26 @@ quiesce_release_molecule_steps() (
         # FAIL CLOSED: act only on the molecule whose anchor IS the parked bead.
         [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
-        printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null | while IFS= read -r _row; do
+        _mol_rows=$(printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null || true)
+        [ -n "$_mol_rows" ] || continue
+
+        # A molecule the RELEASING session is itself completing keeps its chain
+        # and just sheds its husk pins; one no live session holds a step of is a
+        # husk whose work is cancelled or folded, and it is reaped so
+        # workflow-finalize can unblock and the root reaps.
+        _own=""
+        if [ -n "$_me" ]; then
+            _own=$(printf '%s\n' "$_mol_rows" | jq -r -s --arg me "$_me" '
+                ($me | split("\n") | map(select(length > 0))) as $ids
+                | [ .[] | (.assignee // "") | select(. != "") | . as $a | select($ids | any(. == $a)) ]
+                | if length > 0 then "own" else "" end' 2>/dev/null || true)
+        fi
+        if [ -z "$_own" ]; then
+            reap_release_molecule "$_mol_rows" "$_db" "$_anchor"
+            continue
+        fi
+
+        printf '%s\n' "$_mol_rows" | while IFS= read -r _row; do
             [ -n "$_row" ] || continue
             _sid=$(printf '%s'      "$_row" | jq -r '.id // empty' 2>/dev/null || true)
             _kind=$(printf '%s'     "$_row" | jq -r '.kind // empty' 2>/dev/null || true)

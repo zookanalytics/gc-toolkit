@@ -3,9 +3,11 @@
 # services/helm; the open verb is covered by gc-helm-open.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
-#   --release molecule quiescing: steps and the workflow root
-#   --release on a CLOSED anchor: the quiesce without the resurrecting park
-#   the split write, so a refused assignee clear cannot void the route pins
+#   --release molecule teardown: a husk (no live session on it) is REAPED —
+#     every step and the workflow root force-closed, incl. a held in_progress
+#     step — while the releasing session's OWN molecule keeps its chain
+#   --release on a CLOSED anchor: the reap without the resurrecting park
+#   the de-pin split write, so a refused assignee clear cannot void the route pins
 #   --waiting-on edges
 #   the ≤140-codepoint length gate, shared by takeaway and demand
 #   the demand verb's sibling shape and fail-closed edge
@@ -31,22 +33,26 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 mkdir -p "$TMP/bin"
 
 # --- Fixture ------------------------------------------------------------------
-# A-PARKED anchors the molecule root-PARKED (via convoy-PARKED). Steps:
-#   s-load   affine  : assignee + routed + affinity  -> clear all three
-#   s-impl   pool    : routed only                   -> clear routed only
-#   s-final  finalize: control-dispatcher route      -> MUST stay routed
-#   s-quiet  quiet   : no pins                       -> not re-updated
-#   s-nonmol contract: another formula's graph.v2 step -> quiesced too (tk-q5r65)
+# A-PARKED anchors the molecule root-PARKED (via convoy-PARKED). No live session
+# holds a step of it (the run carries no identity), so the release REAPS the
+# husk — every step and the root are force-closed. Steps:
+#   s-load   affine  : assignee + routed + affinity  -> reaped (closed)
+#   s-impl   pool    : routed only                   -> reaped
+#   s-final  finalize: control-dispatcher route      -> reaped too; the teardown
+#                                                       replaces the escape route
+#   s-quiet  quiet   : no pins                       -> reaped (an open step is
+#                                                       still open, so it blocks)
+#   s-nonmol contract: another formula's graph.v2 step -> reaped too (tk-q5r65)
 #   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
 #   s-other  scope   : a different molecule's step   -> untouched
 #   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
-#   s-NOPIN  refused : the store rejects its pin write -> assignee clear skipped
-#   s-fold   folded  : step of a molecule whose anchor is CLOSED -> quiesced
+#   s-NOPIN  refused : the store rejects its close   -> de-pinned as a fallback
+#   s-fold   folded  : step of a molecule whose anchor is CLOSED -> reaped
 # and the gc.kind=workflow ROOTS, which carry a pool route of their own:
-#   root-PARKED      : this molecule's root          -> de-routed with its steps
+#   root-PARKED      : this molecule's root          -> reaped with its steps
 #   root-OTHER       : another molecule's root       -> untouched
 #   root-ORPHAN      : root with no convoy           -> skipped (fail closed)
-#   root-FOLD        : root of the folded anchor's molecule -> de-routed too
+#   root-FOLD        : root of the folded anchor's molecule -> reaped too
 cat > "$TMP/steps.json" <<'JSON'
 [
   {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
@@ -349,128 +355,102 @@ grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
-# (AFFINE) affine step -> all three pins cleared.
-SL="$(line_for s-load)"
-if grep -q -- '--unset-metadata gc.routed_to' <<< "$SL" \
-   && grep -q -- '--assignee' <<< "$SL" \
-   && grep -q -- '--unset-metadata gc.session_affinity' <<< "$SL"; then
-  ok "(AFFINE) affine step -> routed_to + assignee + session_affinity all cleared"
-else
-  bad "(AFFINE) affine step must clear all three pins (got: $SL)"
-fi
+# The molecule under A-PARKED is a husk — no live session holds one of its
+# steps — so it is REAPED: every step and the root are force-closed, so
+# workflow-finalize unblocks and the root reaps instead of parking open. A
+# reaped bead announces itself on stdout; a close the store refuses is named on
+# stderr and de-pinned instead.
+reaped() { grep -qE "reaped (step|root) $1( |\$)" <<< "$OUT"; }
 
-# (ORDER) …across TWO writes, route first. beads refuses `--assignee ""` on an
-# in_progress bead a live session holds, and refuses the whole update with it,
-# so a single write loses the route pins on exactly the bead being re-offered.
-# Route first and not last: the reverse leaves a routed+unassigned window,
-# which is the pool-offer shape a fresh polecat races into.
-eq "$(grep -cE '^bd update s-load( |$)' "$UP" || true)" "2" \
-  "(ORDER) s-load's pins are written in two updates, not one"
-ROUTE_N="$(grep -nE '^bd update s-load .*--unset-metadata gc.routed_to' "$UP" | head -n1 | cut -d: -f1)"
-WHO_N="$(grep -nE '^bd update s-load .*--assignee' "$UP" | head -n1 | cut -d: -f1)"
-if [ -n "$ROUTE_N" ] && [ -n "$WHO_N" ] && [ "$ROUTE_N" -lt "$WHO_N" ]; then
-  ok "(ORDER) …the route clear goes first, so no window leaves it routed+unassigned"
-else
-  bad "(ORDER) the route clear must precede the assignee clear (route@${ROUTE_N:-none} assignee@${WHO_N:-none})"
-fi
-WHO_LINE="$(grep -E '^bd update s-load .*--assignee' "$UP" | head -n1)"
-grep -q -- '--unset-metadata' <<< "$WHO_LINE" \
-  && bad "(ORDER) the assignee clear still rides with the route pins ($WHO_LINE)" \
-  || ok "(ORDER) …and rides alone, so a refusal of it cannot void them"
+# (REAP) every worker step of the husk molecule is force-closed.
+for s in s-load s-impl s-quiet; do
+  reaped "$s" && ok "(REAP) husk step $s reaped" || bad "(REAP) husk step $s not reaped (out: $OUT)"
+done
+grep -qE '^bd update s-load .*--status=closed' "$UP" \
+  && ok "(REAP) …via update --status=closed, which carries no assignee, so the claim guard never fires" \
+  || bad "(REAP) the close did not go through update --status=closed (got: $(line_for s-load))"
+grep -qE '^bd update s-load .*gc.outcome=stand-down' "$UP" \
+  && ok "(REAP) …and records gc.outcome=stand-down" || bad "(REAP) the teardown outcome is not stamped"
 
-# (POOL) unassigned+routed step -> routed_to only.
-SI="$(line_for s-impl)"
-grep -q -- '--unset-metadata gc.routed_to' <<< "$SI" \
-  && ok "(POOL) unassigned+routed step -> routed_to cleared" || bad "(POOL) routed_to cleared (got: $SI)"
-grep -q -- '--assignee' <<< "$SI" \
-  && bad "(POOL) must not clear an assignee that was already empty" || ok "(POOL) no spurious assignee clear"
-grep -q 'gc.session_affinity' <<< "$SI" \
-  && bad "(POOL) must not clear a session_affinity that was absent" || ok "(POOL) no spurious affinity clear"
+# (REAP HELD) the held affine step is the whole point: an open held step is what
+# kept workflow-finalize blocked, and update --status=closed closes it whoever
+# holds it — the ownership guard is on the `close` verb, not the closed state.
+reaped s-load && ok "(REAP HELD) a held (assigned) step is closed the same as any other" \
+  || bad "(REAP HELD) the held step was left open (out: $OUT)"
 
-# (FINAL) workflow-finalize keeps its control-dispatcher route.
-[ -z "$(line_for s-final)" ] \
-  && ok "(FINAL) workflow-finalize step left untouched (keeps its escape route)" \
-  || bad "(FINAL) must NOT de-route workflow-finalize"
+# (CONTRACT) a graph.v2 step of ANOTHER formula, under the husk root, is reaped
+# too — selection is by contract (gc.step_ref), not formula name (tk-q5r65).
+reaped s-nonmol && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the husk anchor is reaped" \
+  || bad "(CONTRACT) graph.v2 step of another formula must be reaped (out: $OUT)"
 
-# (IDEM) already-quiet step is not re-updated.
-[ -z "$(line_for s-quiet)" ] \
-  && ok "(IDEM) already-quiet step skipped" || bad "(IDEM) quiet step must not be updated"
+# (REAP FINAL) the teardown closes workflow-finalize too: it is the molecule's
+# escape route only while the chain can close on its own, which a husk's never
+# will, so the reap is what dies here.
+reaped s-final && ok "(REAP FINAL) workflow-finalize is closed by the teardown, not left as an escape route" \
+  || bad "(REAP FINAL) finalize left open (out: $OUT)"
 
-# (CONTRACT) a graph.v2 step from ANOTHER formula, under the parked root, is
-# quiesced too — selection is by contract, not formula name (tk-q5r65).
-SN="$(line_for s-nonmol)"
-[ -n "$SN" ] \
-  && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the parked anchor IS quiesced" \
-  || bad "(CONTRACT) graph.v2 step of another formula must be quiesced (got: none)"
-grep -q -- '--unset-metadata gc.routed_to' <<< "$SN" \
-  && ok "(CONTRACT) its route is cleared" || bad "(CONTRACT) route cleared (got: $SN)"
-grep -q -- '--assignee' <<< "$SN" \
-  && ok "(CONTRACT) its assignee is cleared" || bad "(CONTRACT) assignee cleared (got: $SN)"
-
-# (NOTV2) no gc.step_ref -> never a candidate, even under the parked root.
+# (NOTV2) no gc.step_ref -> never a candidate, even under the husk root.
 [ -z "$(line_for s-noref)" ] \
-  && ok "(NOTV2) bead with no gc.step_ref never quiesced (not a graph.v2 step)" \
+  && ok "(NOTV2) bead with no gc.step_ref never touched (not a graph.v2 step)" \
   || bad "(NOTV2) a bead without gc.step_ref must never be touched"
 
 # (SCOPE) a different molecule (anchor != parked bead) is left untouched.
 [ -z "$(line_for s-other)" ] \
-  && ok "(SCOPE) molecule whose anchor != parked bead untouched" || bad "(SCOPE) wrong molecule quiesced"
+  && ok "(SCOPE) molecule whose anchor != parked bead untouched" || bad "(SCOPE) wrong molecule reaped"
 
 # (FAILCLOSE) a root whose anchor cannot be resolved is skipped.
 [ -z "$(line_for s-orphan)" ] \
-  && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor quiesced"
+  && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor reaped"
 
 # (ROOT) the gc.kind=workflow root is a second pool-routed door into the same
-# molecule. A release that quiets every worker step and leaves the root routed
-# keeps attracting polecat spawns onto the husk.
-RP="$(line_for root-PARKED)"
-grep -q -- '--unset-metadata gc.routed_to' <<< "$RP" \
-  && ok "(ROOT) the workflow root is de-routed alongside its steps" \
-  || bad "(ROOT) the workflow root kept its pool route (got: ${RP:-<none>})"
-grep -q 'quiesced husk root root-PARKED' <<< "$OUT" \
-  && ok "(ROOT) …and the run names it as a root, not a step" \
-  || bad "(ROOT) the root is unreported (out: $OUT)"
+# molecule, so it is reaped alongside its steps — a release that closes every
+# worker step and leaves the root open keeps drawing spawns onto the husk.
+reaped root-PARKED \
+  && ok "(ROOT) the workflow root is closed alongside its steps" \
+  || bad "(ROOT) the workflow root was not reaped (got: ${OUT})"
 
 # (ROOTSCOPE) the root walk inherits the step walk's scope and fail-closed guard.
 [ -z "$(line_for root-OTHER)" ] \
   && ok "(ROOTSCOPE) a root whose anchor != the parked bead is untouched" \
-  || bad "(ROOTSCOPE) another molecule's root was de-routed"
+  || bad "(ROOTSCOPE) another molecule's root was reaped"
 [ -z "$(line_for root-ORPHAN)" ] \
   && ok "(ROOTSCOPE) a root with no resolvable convoy is skipped (fail closed)" \
-  || bad "(ROOTSCOPE) an unresolvable root was de-routed"
+  || bad "(ROOTSCOPE) an unresolvable root was reaped"
 
-# (PINFAIL) the pin write is what makes the assignee clear safe. If it does not
-# land, unassigning would leave the bead routed AND unassigned — the pool-offer
-# shape the whole order exists to avoid — so the second write is skipped.
-eq "$(grep -cE '^bd update s-NOPIN( |$)' "$UP" || true)" "1" \
-  "(PINFAIL) a rejected pin write is not followed by an assignee clear"
-grep -q -- '--assignee' <<< "$(line_for s-NOPIN)" \
-  && bad "(PINFAIL) the bead was unassigned while still routed" \
-  || ok "(PINFAIL) …so the bead is never left routed+unassigned"
-grep -q 'could not quiesce step s-NOPIN' <<< "$ERR" \
-  && ok "(PINFAIL) …and the failure is reported for the patrol to retry" \
-  || bad "(PINFAIL) the failed quiesce is silent (stderr: $ERR)"
+# (REAPFAIL) a bead the store refuses to close is not left silently: the close
+# fails, and the fallback de-pins it so it stops re-attracting spawns while the
+# patrol retries. NOPIN refuses every write, so even the de-pin is refused, and
+# the run says so on stderr and never claims it reaped.
+grep -qE '^bd update s-NOPIN .*--status=closed' "$UP" \
+  && ok "(REAPFAIL) the refused bead's close was attempted" \
+  || bad "(REAPFAIL) the reap never tried to close s-NOPIN"
+grep -qE '^bd update s-NOPIN .*--unset-metadata gc.routed_to' "$UP" \
+  && ok "(REAPFAIL) …and the fallback de-pin was attempted so it stops re-offering" \
+  || bad "(REAPFAIL) a bead that would not close was not de-pinned as a fallback"
+reaped s-NOPIN && bad "(REAPFAIL) a refused close was reported as reaped" \
+  || ok "(REAPFAIL) …and a refused close never reads as reaped"
+grep -q 'could not reap step s-NOPIN' <<< "$ERR" \
+  && ok "(REAPFAIL) …and the failure is reported for the patrol to retry" \
+  || bad "(REAPFAIL) the failed reap is silent (stderr: $ERR)"
 
-# (NOCLOSE dynamic) no STEP update ever closes a bead or rewrites its status.
-STEP_UPDATES="$(grep -E '^bd update s-' "$UP" || true)"
-if grep -qE -- '--status|--close|bd close' <<< "$STEP_UPDATES"; then
-  bad "(NOCLOSE) a step update rewrote status or closed a bead (DANGER clause)"
-else
-  ok "(NOCLOSE) no step status rewrite / close (DANGER clause honored)"
-fi
+# (REPORT) the run announces the steps it reaped.
+grep -q 'reaped step s-load' <<< "$OUT" \
+  && ok "(REPORT) run reports the affine step it reaped" || bad "(REPORT) run reports s-load (out: $OUT)"
 
-# (REPORT) the run announces the steps it quiesced.
-grep -q 'quiesced husk step s-load' <<< "$OUT" \
-  && ok "(REPORT) run reports the affine step it quiesced" || bad "(REPORT) run reports s-load (out: $OUT)"
-
-# (NOCLOSE static) the quiesce block itself contains no close/status-write; the
-# only legitimate `--status` is the bd list READ filter.
-BLOCK="$(awk '/# >>> quiesce-release-molecule-steps/{f=1;next} /# <<< quiesce-release-molecule-steps/{f=0} f' "$SCRIPT")"
-[ -n "$BLOCK" ] && ok "(MARKERS) quiesce block extracted between markers" || bad "(MARKERS) block extraction EMPTY — markers missing"
-DANGER="$(printf '%s\n' "$BLOCK" | grep -v 'bd list --status' | grep -E 'bd close|--status|--close' || true)"
-[ -z "$DANGER" ] \
-  && ok "(NOCLOSE static) quiesce block writes no status and closes nothing (only the bd list read-filter uses --status)" \
-  || bad "(NOCLOSE static) quiesce block contains a close/status-write: $DANGER"
+# (REAP static) the reap block is what force-closes; the markers bound it, and
+# --status=closed is the close verb it uses.
+BLOCK="$(awk '/# >>> reap-release-molecule/{f=1;next} /# <<< reap-release-molecule/{f=0} f' "$SCRIPT")"
+[ -n "$BLOCK" ] && ok "(MARKERS) reap block extracted between markers" || bad "(MARKERS) block extraction EMPTY — markers missing"
+grep -q -- '--status=closed' <<< "$BLOCK" \
+  && ok "(REAP static) the reap block force-closes (--status=closed present)" \
+  || bad "(REAP static) the reap block never closes anything"
+# The de-pin path is still the one that must never close: the releasing
+# session's own molecule keeps its chain, so its block writes no status.
+QBLOCK="$(awk '/# >>> quiesce-release-molecule-steps/{f=1;next} /# <<< quiesce-release-molecule-steps/{f=0} f' "$SCRIPT")"
+QDANGER="$(printf '%s\n' "$QBLOCK" | grep -v 'bd list --status' | grep -E 'bd close|--status|--close' || true)"
+[ -z "$QDANGER" ] \
+  && ok "(NOCLOSE static) the de-pin walk still closes nothing (only the bd list read-filter uses --status; the reap is a separate call)" \
+  || bad "(NOCLOSE static) the de-pin block contains a close/status-write: $QDANGER"
 
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 
@@ -937,7 +917,7 @@ grep -q 'gc.takeaway=folded into CARRIER-1' <<< "$FA" \
   && ok "(FOLDED) …while the headline the sitting owes still lands" \
   || bad "(FOLDED) the headline was lost with the park write ($FA)"
 grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(FOLDED) the molecule under it is quiesced — the half a fold still needs" \
+  && ok "(FOLDED) the molecule under it is reaped — a folded husk no session completes is force-closed" \
   || bad "(FOLDED) the folded anchor's molecule was never walked"
 grep -qE '^bd update root-FOLD( |$)' "$TMP/updates" \
   && ok "(FOLDED) …its workflow root too, so no door is left open" \
@@ -964,8 +944,8 @@ grep -q "gc.routed_to=$POOL" <<< "$(line_for CLOSED-A-FOLD)" \
   && bad "(FOLDROUTE) a disposed bead was handed to a pool" \
   || ok "(FOLDROUTE) …and the pool route is never stamped"
 grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(FOLDROUTE) …while the quiesce the operator came for still runs" \
-  || bad "(FOLDROUTE) the refusal took the quiesce with it"
+  && ok "(FOLDROUTE) …while the reap the operator came for still runs" \
+  || bad "(FOLDROUTE) the refusal took the reap with it"
 grep -q 'takeaway set on' "$TMP/rout" \
   && bad "(FOLDROUTE) the verb reported success on an unrouted bead" \
   || ok "(FOLDROUTE) …and success is not reported"
@@ -1615,9 +1595,12 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 # a DIFFERENT live session, so beads refuses to clear its assignee.
 #
 # A-FOLD is a second, independent anchor: CLOSED and superseded, with its own
-# molecule (root-FOLD, F-work) still carrying the pool route the pour left. It
-# is the fold-after-pour race, and the store is what proves the release does
-# not put it back on the board.
+# molecule (root-FOLD, F-work, F-held) still carrying the pool route the pour
+# left. No live session holds a step of it, so it is a HUSK the release reaps:
+# every step and the root are force-closed. F-held is in_progress under another
+# live session, the exact step de-pinning could never release — the store is
+# what proves the reap closes it anyway (--status=closed carries no assignee,
+# so the reassign guard never fires).
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
@@ -1627,6 +1610,7 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
+ {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
  {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
 ]
 JSON
@@ -1771,11 +1755,21 @@ eq "$(field A-FOLD gc.superseded_by)" "A-CARRIER" \
    "(FOLDSTORE) …and the fold record itself untouched"
 eq "$(field A-FOLD gc.takeaway)" "superseded by A-CARRIER; the pour raced the fold" \
    "(FOLDSTORE) the sitting's headline still lands on it"
-eq "$(field F-work gc.routed_to)" "" \
-   "(FOLDSTORE) the molecule the fold outran is de-routed — the half that was unreachable"
-eq "$(field F-work assignee)" "" "(FOLDSTORE) …and unpinned from the session that is gone"
-eq "$(field root-FOLD gc.routed_to)" "" \
-   "(FOLDSTORE) …and its workflow root with it"
+eq "$(field F-work status)" "closed" \
+   "(FOLDSTORE) the molecule the fold outran is REAPED — a husk no live session completes is force-closed"
+eq "$(field F-work gc.outcome)" "stand-down" \
+   "(FOLDSTORE) …and records why it closed"
+eq "$(field root-FOLD status)" "closed" \
+   "(FOLDSTORE) …its workflow root closed with it, so no door is left to re-offer the husk"
+# The bug this fix exists for: a step in_progress under ANOTHER live session.
+# The reassign guard refuses `--assignee ""` there, which is why de-pinning
+# could never release it and workflow-finalize stayed blocked. The reap closes
+# it through `update --status=closed`, which carries no assignee, so the guard
+# never fires and the held step is gone.
+eq "$(field F-held status)" "closed" \
+   "(FOLDSTORE) a step held in_progress by another live session is force-closed — the reap uses --status=closed, which the reassign guard does not gate"
+eq "$(field F-held assignee)" "gc-toolkit__polecat-lx-other" \
+   "(FOLDSTORE) …with the assignee left as-is: a closed bead is never re-offered, so the guard is never provoked"
 grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
   && ok "(FOLDSTORE) …and the run names the disposition it kept" \
   || bad "(FOLDSTORE) the skipped park is unexplained (stderr: $FOLDERR)"
