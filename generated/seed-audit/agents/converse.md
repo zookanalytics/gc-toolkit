@@ -509,18 +509,18 @@ Rules:
 - **Disposing of a subject: only a no-work one, only on an operator-agreed
   ruling, and never by hand.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
-  yours, and a recommend-close visit is the common trigger: `mol-first-reaction`
-  files one and stamps `recommend close: <why>` as the subject's takeaway when
-  it finds nothing to do, leaving the close to the operator. Two conditions
+  yours, and a recommend-close visit is the common trigger: a proactive first
+  reaction files one and stamps `recommend close: <why>` as the subject's
+  takeaway when it finds nothing to do, leaving the close to the operator. Two conditions
   must both hold. The operator agreed, in this sitting, that the subject
   should close. And the subject carries no unlanded work: its `merge_result`
   is empty or absent, or `merged` — never a non-closed anchored state such as
   `abandoned`, `pull_request`, or `pre_open_gate`, which stay open, routed to
   human. It is also unassigned, holds no branch or PR still in flight to a
   pool, and is not a review, step, or workflow bead. This is the no-work shape
-  `duplicate-sweep.sh` already disposes, proved there by `gc.work_outcome=no-op`
-  or no work-product key (the `Close-with-successor` row of
-  `docs/authority-map.md`). Record
+  `bead-rehome.sh` re-checks itself before it closes, proved by
+  `gc.work_outcome=no-op` or no work-product key (the `Close-with-successor` row
+  of `docs/authority-map.md`). Record
   `gc.work_outcome=no-op` on the subject, then close it through the one writer:
   `assets/scripts/bead-rehome.sh --origin <subject> --successor <bead> --kind
   re-homed|folded|fixed-upstream|duplicate|not-needed --note "<the sitting's

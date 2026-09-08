@@ -255,10 +255,10 @@ else
 fi
 
 echo "── consumer census ──"
-if [ "$FORMULA_CONSUMERS" -ge 3 ]; then
+if [ "$FORMULA_CONSUMERS" -ge 2 ]; then
     ok "the known formula consumers carry marked copies ($FORMULA_CONSUMERS found)"
 else
-    bad "the known formula consumers carry marked copies" "expected >=3 (mol-visit, mol-first-reaction, mol-feedback-distiller); found $FORMULA_CONSUMERS"
+    bad "the known formula consumers carry marked copies" "expected >=2 (mol-visit, mol-feedback-distiller); found $FORMULA_CONSUMERS"
 fi
 if [ "$SCRIPT_CONSUMERS" -ge 1 ]; then
     ok "the script surface carries marked copies ($SCRIPT_CONSUMERS found)"

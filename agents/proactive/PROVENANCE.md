@@ -24,9 +24,10 @@ before citing the rest of it.
 ## Why we built this
 
 "Proactive" in v1 is deliberately NOT a resident loop (the operator deferred
-that). It is a `mol-first-reaction` (formulas/mol-first-reaction.toml) slung at
-a bead — operator/board one-shot, or the `tools/gc-proactive.sh scan --sling`
-process form over movable-forward beads. This pool is where those reactions
+that). A bead is routed to it RAW (gc.routed_to only, no formula) — operator/
+board one-shot, or the `tools/gc-proactive.sh scan --sling` process form over
+movable-forward beads — a worker claims it and reacts per
+`agents/proactive/prompt.template.md`. This pool is where those reactions
 execute. It is a sibling of the impl polecat pool (same worktree/refinery
 machinery) with three deliberate differences, all from the design's budget +
 security commitments:
@@ -56,23 +57,24 @@ design record.
 
 3. **mr-only for code.** A first reaction is notes-only by default. The
    security invariant — any code-producing proactive output takes the
-   codex-gated `mr` path, never `direct` — is enforced three ways: the city
-   default (`default_merge_strategy = "mr"`), this agent's `GC_DEFAULT_MERGE_
-   STRATEGY = "mr"`, and `tools/gc-proactive.sh sling`, which hard-refuses a
-   `--merge direct` override.
+   codex-gated `mr` path, never `direct` — is enforced by the city default
+   (`default_merge_strategy = "mr"`), this agent's `GC_DEFAULT_MERGE_STRATEGY =
+   "mr"`, and the reaction prompt (mr path only, never `direct`). The raw route
+   pins no merge path, so there is nothing to refuse there.
 
 ## Notes
 
 Rig-scoped (each rig gets its own small proactive pool, like polecat-codex).
-Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
---merge mr` (operator/board one-shot) or `tools/gc-proactive.sh scan --sling`
+Triggered by `tools/gc-proactive.sh sling <bead>`, which routes it raw
+(gc.routed_to only), from an operator/board one-shot or `scan --sling`
 (process-scan). NOT a resident loop either way.
 
-The first reaction NEVER closes the target work bead — every disposition
-advances it and leaves it open. `assets/scripts/first-reaction-dispose.sh`
-performs the three and records which one and why (`gc.first_reaction*`), so a
-wrong call is visible rather than silent. The `gc.proactive_reaction` marker
-stops the scan from re-reacting. The card shape (Understanding · Found ·
+The first reaction advances the target work bead, and only one exit closes it:
+superseded, through `bead-rehome.sh`, never a bare close. The other three leave
+it open. `assets/scripts/first-reaction-dispose.sh` performs all four and records
+which one and why (`gc.first_reaction*`), so a wrong call is visible rather than
+silent; that record is also what stops a re-offer from re-reacting. The card
+shape (Understanding · Found ·
 Proposal · Decision needed · Disposition) is the same one a converse session
 opens with and the board's pick-a-row visit lands the human on.
 

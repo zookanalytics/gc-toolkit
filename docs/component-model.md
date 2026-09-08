@@ -304,11 +304,10 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pr-facts.sh` | merge | Arm 4: records external PR facts. No merge authority. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 5: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 6: closes a dispatched review with no reviewable surface left. No merge authority. |
-| `assets/scripts/duplicate-sweep.sh` | merge | Arm 7: disposes of verified no-op duplicate dispatches via `bead-rehome.sh`. No merge authority. |
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. Fast-forward only; divergence escalates. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
-| `formulas/mol-first-reaction.toml` | visit | One cheap reaction slung at a bead from the board picker or `tools/gc-proactive.sh`, ending in one of three dispositions: route the bead to a pool, hold it on an edge, or file a visit. It sits in visit because its product is a bead the human no longer has to triage. |
-| `assets/scripts/first-reaction-dispose.sh` | visit | Performs that disposition and records which one and why. The only writer of `gc.first_reaction*`. |
+| `agents/proactive/prompt.template.md` | visit | The proactive first-reaction method: a worker claims a raw-routed subject (`gc hook --claim`), writes a card, and disposes. No formula is poured; the prompt is the method. |
+| `assets/scripts/first-reaction-dispose.sh` | visit | Performs a first reaction's disposition — route the bead to a pool, hold it on an edge, file a visit, or close it as superseded — and records which one and why. The only writer of `gc.first_reaction*`. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
 | `assets/scripts/gc-helm.sh` | visit | The board's write verbs: takeaway, open, engage, react, dismiss, demand. |
@@ -316,7 +315,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
-| `assets/scripts/bead-rehome.sh` | visit | Closes a bead with a legible successor pointer. Callers are converse dispositions, operator re-homes, and `duplicate-sweep.sh`. |
+| `assets/scripts/bead-rehome.sh` | visit | The one close-with-successor writer; it re-checks the evidence itself and refuses a close over unlanded work. Callers are converse dispositions, operator re-homes, the proactive `superseded` exit, and a polecat whose work another bead delivered. |
 | `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
 | `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
 | `assets/scripts/tmux-bindings.sh` | visit | Installs the keybindings that reach the surfaces above. |

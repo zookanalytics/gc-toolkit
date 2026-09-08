@@ -11,9 +11,7 @@
 # the refinery so its closes and records are attributed to it), pr-facts (same projection),
 # convoy-graduate (GC_AGENT projected: graduation assigns the convoy),
 # review-sweep (cleanup over closed anchors; no projection, no merge authority),
-# duplicate-sweep (BEADS_ACTOR projected: it closes duplicate dispatches through
-# bead-rehome; no merge authority), pr-stack (PR bodies only; no projection, no
-# merge authority).
+# pr-stack (PR bodies only; no projection, no merge authority).
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
 # gate: the controller watchdog closes any tracking bead older than 2m, which
 # reopens that gate under a pass still running.
@@ -249,21 +247,12 @@ fi
 # them, and the residue this pass's merges create drains on the same tick.
 run_pass "(6) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
 
-# (7) duplicate-sweep: dispose of verified no-op duplicate dispatches. Last,
-# and after review-sweep, because the gate it re-verifies is a CLOSED
-# successor: a twin that arm 3 merged or arm 4 recorded this pass is
-# disposable on this tick rather than a minute later. BEADS_ACTOR projected —
-# the close it delegates to bead-rehome is attributed in the events table.
-( export BEADS_ACTOR="$AGENT"
-  run_pass "(7) duplicate-sweep" duplicate-sweep.sh ) \
-  || FAILED="${FAILED}duplicate-sweep rc=$?; "
-
-# (8) pr-stack: re-render each open PR's beads-on-this-branch section. Last, and
+# (7) pr-stack: re-render each open PR's beads-on-this-branch section. Last, and
 # after merge: a bead this pass landed onto another anchor's branch is in the
 # ledger it reads, so the body names it on the same tick rather than a minute
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
-run_pass "(8) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
+run_pass "(7) pr-stack" pr-stack.sh || FAILED="${FAILED}pr-stack rc=$?; "
 
 if [ -n "$LOG_SINK" ]; then
   {

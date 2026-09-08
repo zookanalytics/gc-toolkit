@@ -487,8 +487,8 @@ the difference between a bead someone can dispose of and one that just sits:
   `assets/scripts/bead-rehome.sh --origin <bead> --successor <filed-bead>
   --kind re-homed`, plus `--successor-store rig:<name>` where the successor's
   id prefix is ambiguous. docs/authority-map.md gives that verb to converse
-  dispositions, operator re-homes and duplicate-sweep.sh, so write the exact
-  invocation into the note and mail the witness a `NOTICE:` carrying it.
+  dispositions, operator re-homes and any actor with the evidence, so write the
+  exact invocation into the note and mail the witness a `NOTICE:` carrying it.
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.

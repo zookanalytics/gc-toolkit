@@ -542,13 +542,6 @@ sequenceDiagram
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 8): a duplicate
-  dispatch a polecat diagnosed and parked has no other way out, since polecats
-  never close work beads. The arm closes it through `bead-rehome.sh --kind
-  duplicate` only when the named successor resolves and is closed or shipped
-  AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It writes nothing to the
-  successor's branch or PR, and holds on anything it cannot establish.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared gate that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -566,16 +559,24 @@ sequenceDiagram
 ## Disposition
 
 A close that is not a landing must say so from the store the bead lived in:
-`assets/scripts/bead-rehome.sh` closes the bead with `gc.superseded_by` +
-`gc.superseded_by_store` (and stamps the inverse `gc.supersedes*` on the
-successor), so a sound disposition and a careless false close are
-distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
-`duplicate` — say the work relocated, and the pointer names the bead that
-carries it now. The fifth, `not-needed`, says nothing carries it: the bead
-was not needed, and the pointer names the evidence that concluded so,
+`assets/scripts/bead-rehome.sh` is the one writer of that close, for every
+actor. It stamps `gc.superseded_by` + `gc.superseded_by_store` (and the inverse
+`gc.supersedes*` on the successor) and READS them back before it closes, so a
+sound disposition and a careless false close are distinguishable on read. It
+also re-establishes the evidence itself, so no caller closes over unlanded
+work: every kind requires the origin to carry no unlanded work (`merge_result`
+empty/absent or `merged`) and to be a plain, unheld work bead; `fixed-upstream`
+and `duplicate` additionally require the successor closed or shipped in the
+same store and the origin to have done no work (`gc.work_outcome=no-op` or no
+work-product key). `--check` evaluates that evidence and writes nothing, so a
+caller can gate a release on it. Four kinds — `re-homed`, `folded`,
+`fixed-upstream`, `duplicate` — say the work relocated, and the pointer names
+the bead that carries it now. The fifth, `not-needed`, says nothing carries it:
+the bead was not needed, and the pointer names the evidence that concluded so,
 typically the visit bead from the sitting that ruled. The pointer is required
 under every kind, because it is the whole of that distinction. The read side
-searches every store before concluding a close was false. Consumers: the
+searches every store before concluding a close was false. Callers: the
 mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
+(`template-fragments/bead-disposition.template.md`), the proactive first
+reaction's `superseded` exit, a polecat whose work another bead delivered, and
+any patrol judging a closed bead.

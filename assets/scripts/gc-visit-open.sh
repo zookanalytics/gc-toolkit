@@ -9,8 +9,8 @@
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:
-# PREFERRED slings mol-first-reaction (framing card, reaction files the
-# visit); FALLBACK files the visit directly — taken on --no-react, whenever
+# PREFERRED routes the subject raw to the proactive pool (framing card, the
+# reaction files the visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
 # a sling into a downed pool fails invisibly; today's tool always says yes),
 # and when the subject already carries a first reaction so the sling is a no-op

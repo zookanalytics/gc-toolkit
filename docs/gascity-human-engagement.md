@@ -231,8 +231,8 @@ the alert model rather than duplicating them.
 ## How a conversation starts: operator-origin intake (2026-08-14)
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
-bead that already exists — `mol-first-reaction` files one when its reaction
-concludes the next move is the operator's,
+bead that already exists — a proactive first reaction files one when its
+reaction concludes the next move is the operator's,
 `liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
 agent on topic X," where X has no bead yet. That affordance existed under the
@@ -269,20 +269,19 @@ fired from wherever the operator happens to be sitting, and a destination that
 varies silently with the shell's directory is the worst failure mode an intake
 path can have.
 
-**Two paths, and the choice is not a preference.** The preferred path slings
-`mol-first-reaction` at the new subject, and *that formula files the visit*
-from its `advance-and-drain` step — so the operator arrives at a framed
-conversation with a first-reaction card already written, not a blank one. The
-script files nothing on that path; a second visit would split one conversation
-into two sittings of the same subject.
+**Two paths, and the choice is not a preference.** The preferred path routes the
+new subject RAW to the proactive pool, and *the reaction files the visit* from
+its `ruling` exit — so the operator arrives at a framed conversation with a
+first-reaction card already written, not a blank one. The intake script files
+nothing on that path; a second visit would split one conversation into two
+sittings of the same subject.
 
-That step has three dispositions, and only one of them files a visit — but a
+The reaction has four dispositions, and only `ruling` files a visit — but a
 subject this intake creates always gets it. `gc.origin=operator`, stamped here,
-is what `first-reaction-dispose.sh` reads to refuse the routing and holding
-exits: the operator typed a topic because they want the conversation, so
-answering it with a dispatch would leave them with a topic that looks filed and
-is silently forgotten. Beads that reach the reaction any other way are triaged
-on their merits.
+is what `first-reaction-dispose.sh` reads to refuse the other exits: the operator
+typed a topic because they want the conversation, so answering it with a dispatch
+would leave them with a topic that looks filed and is silently forgotten. Beads
+that reach the reaction any other way are triaged on their merits.
 
 The fallback path (`--no-react`, or automatically) files the visit
 immediately, through `gc-helm.sh open --reason/--body`. **Visit filing lives
