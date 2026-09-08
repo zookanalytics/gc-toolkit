@@ -7,7 +7,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/upstream-finding.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-upstream-finding-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -177,7 +177,7 @@ has "$(cat "$STUB_ESC_LOG")" "--subject up-1" "the repeat run refreshes the ask 
 
 # ── an answered ask is not re-asked ───────────────────────────────────────
 : > "$STUB_ESC_LOG"
-tmp=$(mktemp); jq -c 'map(if .id == "up-1" then .status = "closed" else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-upstream-finding-test.XXXXXX"); jq -c 'map(if .id == "up-1" then .status = "closed" else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
 OUT=$("$SUT" --message "third pass, after the operator answered" \
   -- gh issue create --repo get-convex/agent --title "sendSources cannot be enabled" --body "$BODY_TEXT" 2>&1)
 eq "$?" "0" "a run against a closed ask exits 0"
