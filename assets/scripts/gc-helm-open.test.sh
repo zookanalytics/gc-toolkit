@@ -421,6 +421,161 @@ grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw
   && bad "(RIGWHY-EVIDENCE) '|| true' is back — the exit status is discarded again" \
   || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
 
+# --- (RESOLVE) the subject resolver: PR ref / superseded id -> live bead ------
+# THE BUG (tk-0mhde5): the operator reads a subject off whatever is in front of
+# them — a PR, or a bead whose title cites the predecessor it superseded — and
+# `open <that-id>` filed a visit on the settled predecessor while the live wedge
+# sat unattended. THE FIX: resolve the reference to the LIVE bead that owns the
+# work by metadata and the graph, never a title. These cases drive the REAL
+# cmd_open over a stub whose `bd show` is id-aware (a supersede chain) and whose
+# `bd list` answers the PR search, asserting the visit is filed on the RESOLVED
+# bead — or, on an unresolvable/ambiguous reference, that NOTHING is filed.
+mkdir -p "$TMP/resbin"
+cat > "$TMP/resbin/gc" <<'RESGC'
+#!/usr/bin/env bash
+# One rig, prefix tk, path with no .beads — so the resolver's PR search and the
+# existence gate issue unscoped bd calls this stub answers (as the note in the
+# EXISTS stub explains). `bd show` branches on the id so a supersede chain and a
+# live bead read differently; `bd list` tells the PR search (which carries
+# `blocked` in --status) apart from the already-held visit lookup (which does
+# not), so neither reads as the other.
+case "$1 ${2:-}" in
+  "rig list")
+    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+  "bd show")
+    case "$3" in
+      tk-pred)    jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ","gc.superseded_by_store":"rig:gc-toolkit"}}]' ;;
+      tk-pred2)   jq -n '[{id:"tk-pred2",  status:"closed", metadata:{"gc.superseded_by":"tk-gone"}}]' ;;
+      tk-head)    jq -n '[{id:"tk-head",   status:"closed", metadata:{"gc.superseded_by":"tk-mid"}}]' ;;
+      tk-mid)     jq -n '[{id:"tk-mid",    status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
+      tk-succ)    jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
+      tk-cyc1)    jq -n '[{id:"tk-cyc1",   status:"closed", metadata:{"gc.superseded_by":"tk-cyc2"}}]' ;;
+      tk-cyc2)    jq -n '[{id:"tk-cyc2",   status:"closed", metadata:{"gc.superseded_by":"tk-cyc1"}}]' ;;
+      tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
+      tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
+      tk-prbead2) jq -n '[{id:"tk-prbead2",status:"open",   title:"another PR anchor"}]' ;;
+      *)          printf '{"error":"no issues found"}\n'; exit 1 ;;
+    esac ;;
+  "bd list")
+    case "$*" in
+      *blocked*) printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
+      *)         printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
+    esac ;;
+  "bd create") printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{id:"tk-visitR"}' ;;
+  "bd update") printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
+  "bd dep")    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
+esac
+exit 0
+RESGC
+chmod +x "$TMP/resbin/gc"
+export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[]'
+
+# run_resolve <arg> -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
+run_resolve() {
+    : > "$FAKE_CALLS"
+    set +e
+    OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" open "$1" 2>"$TMP/err")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
+}
+
+# (RESOLVE-SUPERSEDE) a closed+superseded id files on the SUCCESSOR, said aloud.
+FAKE_PR_ROWS='[]'; run_resolve tk-pred
+eq "$RC" "0" "(RESOLVE-SUPERSEDE) a closed+superseded id resolves and files"
+grep -q 'gc.continuation_group=tk-succ' <<< "$CALLS" \
+  && ok "(RESOLVE-SUPERSEDE) the visit is filed on the live successor" \
+  || bad "(RESOLVE-SUPERSEDE) continuation_group is the successor (calls: $CALLS)"
+grep -q 'continuation_group=tk-pred' <<< "$CALLS" \
+  && bad "(RESOLVE-SUPERSEDE) filed on the dead predecessor" \
+  || ok "(RESOLVE-SUPERSEDE) never files on the predecessor"
+grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
+  && ok "(RESOLVE-SUPERSEDE) announces the redirect — never silent" \
+  || bad "(RESOLVE-SUPERSEDE) redirect not announced (err: $ERR)"
+
+# (RESOLVE-CHAIN) a multi-hop chain (head -> mid -> succ) resolves to the end.
+FAKE_PR_ROWS='[]'; run_resolve tk-head
+eq "$RC" "0" "(RESOLVE-CHAIN) a supersede chain resolves and files"
+grep -q 'gc.continuation_group=tk-succ' <<< "$CALLS" \
+  && ok "(RESOLVE-CHAIN) followed head->mid->succ to the live end" \
+  || bad "(RESOLVE-CHAIN) chain not followed to the end (calls: $CALLS)"
+
+# (RESOLVE-LIVE) a live bead id passes through unchanged and unremarked.
+FAKE_PR_ROWS='[]'; run_resolve tk-live1
+eq "$RC" "0" "(RESOLVE-LIVE) a live bead id still files"
+grep -q 'gc.continuation_group=tk-live1' <<< "$CALLS" \
+  && ok "(RESOLVE-LIVE) filed on the id as given" || bad "(RESOLVE-LIVE) filed elsewhere (calls: $CALLS)"
+grep -qiE 'superseded|PR #' <<< "$ERR" \
+  && bad "(RESOLVE-LIVE) a live id must not trigger a redirect note (err: $ERR)" \
+  || ok "(RESOLVE-LIVE) no redirect note for a live id"
+
+# (RESOLVE-CYCLE) a superseded-by cycle is refused, not guessed; nothing filed.
+FAKE_PR_ROWS='[]'; run_resolve tk-cyc1
+eq "$RC" "4" "(RESOLVE-CYCLE) a supersede cycle exits 4"
+[ -z "$CALLS" ] && ok "(RESOLVE-CYCLE) nothing filed on a cycle" || bad "(RESOLVE-CYCLE) filed despite a cycle (calls: $CALLS)"
+grep -q 'cycle' <<< "$ERR" && ok "(RESOLVE-CYCLE) names the cycle" || bad "(RESOLVE-CYCLE) message (err: $ERR)"
+
+# (RESOLVE-BROKEN-POINTER) a superseded id whose successor does not resolve is
+# refused — never a silent fall-back to opening the settled predecessor.
+FAKE_PR_ROWS='[]'; run_resolve tk-pred2
+eq "$RC" "4" "(RESOLVE-BROKEN-POINTER) an unresolvable successor exits 4"
+[ -z "$CALLS" ] \
+  && ok "(RESOLVE-BROKEN-POINTER) nothing filed on the settled predecessor" \
+  || bad "(RESOLVE-BROKEN-POINTER) filed something (calls: $CALLS)"
+grep -q 'tk-gone' <<< "$ERR" \
+  && ok "(RESOLVE-BROKEN-POINTER) names the successor it could not resolve" \
+  || bad "(RESOLVE-BROKEN-POINTER) names the successor (err: $ERR)"
+
+# (RESOLVE-PR-NUMBER) a bare PR number resolves to the anchor recording it.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+run_resolve 615
+eq "$RC" "0" "(RESOLVE-PR-NUMBER) a PR number resolves and files"
+grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-NUMBER) filed on the bead whose pr_number matches" \
+  || bad "(RESOLVE-PR-NUMBER) filed elsewhere (calls: $CALLS)"
+grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
+  && ok "(RESOLVE-PR-NUMBER) says which bead it matched" || bad "(RESOLVE-PR-NUMBER) match not announced (err: $ERR)"
+
+# (RESOLVE-PR-URL) a PR URL resolves the same way, pinning the repo.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+run_resolve 'https://github.com/o/r/pull/615'
+eq "$RC" "0" "(RESOLVE-PR-URL) a PR URL resolves and files"
+grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-URL) filed on the anchor whose pr_url matches" || bad "(RESOLVE-PR-URL) filed elsewhere (calls: $CALLS)"
+
+# (RESOLVE-PR-URL-DISAMBIG) two beads share a number; the URL pins the repo.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r1/pull/615"}},{"id":"tk-prbead2","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r2/pull/615"}}]'
+run_resolve 'https://github.com/o/r1/pull/615'
+eq "$RC" "0" "(RESOLVE-PR-URL-DISAMBIG) the URL disambiguates a shared number"
+grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-URL-DISAMBIG) the repo in the URL selects one bead" \
+  || bad "(RESOLVE-PR-URL-DISAMBIG) filed elsewhere (calls: $CALLS)"
+
+# (RESOLVE-PR-MISSING) a PR no bead records fails closed, nothing filed.
+FAKE_PR_ROWS='[]'; run_resolve 999
+eq "$RC" "4" "(RESOLVE-PR-MISSING) an unrecorded PR exits 4"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-MISSING) nothing filed" || bad "(RESOLVE-PR-MISSING) filed something (calls: $CALLS)"
+grep -q 'no open bead records PR #999' <<< "$ERR" \
+  && ok "(RESOLVE-PR-MISSING) names the PR it could not resolve" || bad "(RESOLVE-PR-MISSING) message (err: $ERR)"
+
+# (RESOLVE-PR-AMBIGUOUS) a bare number several beads record is refused by name.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615"}},{"id":"tk-prbead2","status":"open","metadata":{"pr_number":"615"}}]'
+run_resolve 615
+eq "$RC" "4" "(RESOLVE-PR-AMBIGUOUS) an ambiguous PR number exits 4"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-AMBIGUOUS) nothing filed" || bad "(RESOLVE-PR-AMBIGUOUS) filed something (calls: $CALLS)"
+grep -q 'ambiguous' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) says ambiguous" || bad "(RESOLVE-PR-AMBIGUOUS) message (err: $ERR)"
+grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candidate" || bad "(RESOLVE-PR-AMBIGUOUS) names candidates (err: $ERR)"
+unset FAKE_PR_ROWS FAKE_VISIT_ROWS
+
+# (RESOLVE-ORDER static) the resolver runs before the gate-visit block, in each
+# verb that takes an operator-supplied subject — so a PR/superseded reference is
+# resolved before anything is filed on it.
+for verb in cmd_open cmd_react cmd_engage; do
+  RES_LINE="$(awk -v v="^$verb\\\\(\\\\)" '$0 ~ v {f=1} f && /resolve_live_subject/{print NR; exit}' "$SCRIPT")"
+  [ -n "$RES_LINE" ] \
+    && ok "(RESOLVE-ORDER) $verb calls resolve_live_subject (line $RES_LINE)" \
+    || bad "(RESOLVE-ORDER) $verb does not resolve its subject"
+done
+
 # --- (SYNTAX) the shipped script still parses ---------------------------------
 sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) gc-helm.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"
 
