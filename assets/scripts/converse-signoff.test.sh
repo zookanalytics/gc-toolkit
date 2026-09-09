@@ -600,17 +600,23 @@ if [ -s "$NUDGE_VAL" ]; then
             "converse's pane is the operator's conversation surface — put the fix in the prompt or a script, not another clause here (tk-mpl1c)"
     fi
 else
-    # The field is empty on purpose. All three claim backstops resolve their
-    # re-delivery text from it and skip an empty one before reserving an
-    # attempt, so no backstop nudge reaches a sitting that is holding for the
-    # operator and the attempt-cap drain behind them cannot be reached. That
-    # takes the idle-claim rescue with it. There is no value left to read here,
-    # so unlike the pair above these DO read the file: what an empty nudge rests
-    # on is only ever recorded in prose, and prose is where it silently rots.
-    have "config records what the empty nudge silences" 'claim backstops' "$ATOML"
-    have "config records the cost of silencing them" 'idle-claim rescue' "$ATOML"
+    # The field is empty, but empty is not a backstop lever. converse runs as a
+    # manual session, never pool_managed, and all three claim backstops gate
+    # governs() on pool_managed (gascity idle_nudge.go / execution_backstop.go),
+    # so none of them reaches a held sitting whatever this field holds — the
+    # manual origin is the exemption, not the empty text. An empty nudge is not a
+    # "skip" either: a pool_managed session with no nudge text is sent straight
+    # to the terminal drain after the grace window (gascity nudge_backstop.go).
+    # The config has to record the real mechanism, because a superseded one only
+    # ever lived in prose, and prose is where it silently rots.
+    have "config names the real backstop gate" 'pool_managed' "$ATOML"
+    have "config still names the backstops it is exempt from" 'claim backstops' "$ATOML"
+    have "config records that an empty nudge drains, not skips" 'terminal drain' "$ATOML"
     have "config keeps the claimer constraint for anyone re-arming it" \
          'converse-claim.sh' "$ATOML"
+    lacks "config no longer records a silenced idle-claim rescue" \
+          'idle-claim rescue' "$ATOML" \
+          "the rescue is a pool backstop; a manual session never had it, so emptying the field silences nothing (the exemption is pool_managed, verified in gascity)"
     lacks "config no longer asserts the superseded never-empty rule" \
           'must never be empty' "$ATOML" \
           "the field is empty, so the claim that it cannot be is now false in the file that carries it"
