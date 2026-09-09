@@ -150,6 +150,15 @@ the common case single-run and un-serialized, and confines the double-run to
 diffs where a session-level classifier genuinely disagrees with the mechanical
 rule.
 
+The upgrade takes effect without serializing triage ahead of correctness,
+because the gate, not dispatch order, is the join. Triage is itself a
+`check_set` lane, so `pre_open_gate` cannot open the PR until triage is green
+and its tier call is made; when that call upgrades the tier it invalidates the
+default-tier correctness marker, and the next `gate-ensure` pass re-dispatches
+correctness at the higher tier. The PR opens only on the upgraded-tier green, so
+the parallel default-tier run is discarded rather than raced ahead of the
+upgrade.
+
 If a mechanical tier rule proves hard to express for a rig, option 1 (triage as
 planner) is the fallback: it never double-runs, at the cost of one cadence hop
 and blocking the baseline on the classifier. Option 2 with a blanket `standard`
