@@ -20,10 +20,15 @@ pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.Wo
 # a manual (spawn-on-engagement) session, never pool_managed, and all three
 # claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
 # execution_backstop.go), so none of them fires against a held sitting whatever
-# this field holds. The manual origin is the exemption. Nor is an empty field a
-# "skip": for a pool_managed session the engine sends a nudge with no text
-# straight to the terminal drain after the grace window (gascity
-# nudge_backstop.go), so emptiness would drain such a session, not spare it.
+# this field holds. The manual origin is the exemption. Empty is also not a
+# uniform "skip": the three claim backstops split on an empty nudge. Only the
+# execution backstop drains on it: gascity's shared empty-content path
+# (nudge_backstop.go) runs its exhausted action, the tracked drain that
+# releases the claim. The pool-claim backstop substitutes a default claim nudge
+# and re-delivers instead. The continuation backstop's exhausted action is a
+# no-op. Neither of those drains. So for a pool_managed session emptiness
+# drains only through the execution backstop, and converse, never pool_managed,
+# is reached by none of it.
 # Nothing is lost at launch. The launch delivers the rendered prompt, and step 1
 # of that prompt is the claim block, so a fresh slot claims with no keystrokes.
 # A provider that takes no prompt argument gets the prompt prepended to this

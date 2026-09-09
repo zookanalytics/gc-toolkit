@@ -802,13 +802,17 @@ which silently disables the out-of-group guard above on every wake.
 what protects a held sitting. converse runs as a manual session, never
 pool_managed, and all three claim backstops gate `governs()` on
 `pool_managed` (`cmd/gc/idle_nudge.go`, `cmd/gc/execution_backstop.go`), so
-no backstop nudge and no attempt-cap drain reaches a converse sitting
-whatever this field holds. An empty field is not a skip either: for a
-pool_managed session the engine sends a nudge with no text straight to the
-terminal drain after the grace window (`cmd/gc/nudge_backstop.go`). What the
-empty field does reach is the launch delivery, where the prompt is prepended
-to it and still arrives, so the second constraint above is what any text put
-here has to satisfy.
+no backstop nudge and no drain reaches a converse sitting whatever this field
+holds. An empty field is not a uniform skip either, and for a pool_managed
+session the three backstops split on it. The execution backstop resolves its
+text to the empty field, so the shared empty-content path in
+`cmd/gc/nudge_backstop.go` runs that backstop's `exhausted`, the tracked drain
+that releases the claim. The pool-claim backstop substitutes a default claim
+nudge for an empty one and re-delivers instead. The continuation backstop's
+`exhausted` is a no-op. So only the execution backstop drains on an empty
+nudge. What the empty field does reach is the launch delivery, where the
+prompt is prepended to it and still arrives, so the second constraint above is
+what any text put here has to satisfy.
 
 *The core seam, now closed (landed 2026-08-12):* attachment is observable —
 `runtime.Provider.IsAttached` — and the idle ladder now consults it.

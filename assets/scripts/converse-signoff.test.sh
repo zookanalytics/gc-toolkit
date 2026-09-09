@@ -605,15 +605,24 @@ else
     # governs() on pool_managed (gascity idle_nudge.go / execution_backstop.go),
     # so none of them reaches a held sitting whatever this field holds — the
     # manual origin is the exemption, not the empty text. An empty nudge is not a
-    # "skip" either: a pool_managed session with no nudge text is sent straight
-    # to the terminal drain after the grace window (gascity nudge_backstop.go).
-    # The config has to record the real mechanism, because a superseded one only
-    # ever lived in prose, and prose is where it silently rots.
+    # uniform "skip", and it does not uniformly drain either. Only the execution
+    # backstop drains on it: the shared empty-content path in gascity
+    # nudge_backstop.go runs its exhausted action. The pool-claim backstop
+    # substitutes a default claim nudge and re-delivers, and the continuation
+    # backstop's exhausted action is a no-op. The config records that split,
+    # because a superseded mechanism only ever lived in prose, and prose is where
+    # it silently rots.
     have "config names the real backstop gate" 'pool_managed' "$ATOML"
     have "config still names the backstops it is exempt from" 'claim backstops' "$ATOML"
-    have "config records that an empty nudge drains, not skips" 'terminal drain' "$ATOML"
+    have "config names the execution backstop as the one that drains on empty" \
+         'execution backstop' "$ATOML"
+    have "config records that pool-claim substitutes a default nudge, not a drain" \
+         'default claim nudge' "$ATOML"
     have "config keeps the claimer constraint for anyone re-arming it" \
          'converse-claim.sh' "$ATOML"
+    lacks "config no longer claims a blanket empty-nudge terminal drain" \
+          'terminal drain' "$ATOML" \
+          "only the execution backstop drains on an empty nudge; the pool-claim backstop substitutes a default claim nudge and the continuation backstop's exhausted is a no-op (verified in gascity nudge_backstop.go / idle_nudge.go)"
     lacks "config no longer records a silenced idle-claim rescue" \
           'idle-claim rescue' "$ATOML" \
           "the rescue is a pool backstop; a manual session never had it, so emptying the field silences nothing (the exemption is pool_managed, verified in gascity)"
