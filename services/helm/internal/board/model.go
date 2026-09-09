@@ -383,6 +383,31 @@ type Tile struct {
 	// Not UpdatedAt. A wedged anchor is touched by every reconcile pass, so
 	// ordering by that sorts the most neglected rows last.
 	PROwedSince time.Time `json:"pr_owed_since,omitzero"`
+
+	// --- the attention-type band and the cluster key -----------------------
+	//
+	// Two derived classifications the renderers group by, on the wire for the
+	// same reason [Owed] is: the split is not recoverable from the coarse
+	// [Severity] band, and putting it here is what keeps the CLI table and the
+	// dashboard from each inventing their own client-side split.
+
+	// Section is the KIND of attention a row wants, orthogonal to Severity's
+	// how-badly: review (a pull request), gate (a person must answer), stalled
+	// (open work nothing is moving), active (healthy in-flight), cleanup (a
+	// finished or empty row to dispose of), done (the anchor itself closed). One
+	// row lands in exactly one section; [classifySection] is the total mapping,
+	// and [SectionOrder] is the order a surface reads them in.
+	Section string `json:"section"`
+
+	// ClusterKey groups rows that are instances of ONE template — the same
+	// [Needs] sentence recurring across many beads, such as a repeated gate or
+	// signoff ask. It is the shared Needs string, set only when at least
+	// [clusterThreshold] rows in the SAME section carry it, and empty otherwise;
+	// a renderer folds every row sharing a key into one entry that names the
+	// count and lists the members.
+	// Empty is the common case — a row with an LLM-authored takeaway is unique
+	// and never clusters — so the field is omitted when it does not apply.
+	ClusterKey string `json:"cluster_key,omitempty"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —

@@ -1190,6 +1190,72 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+// --- the attention-type sections --------------------------------------------
+//
+// A section bands a row by the KIND of move it wants, a different axis from
+// [Severity]'s how-badly: the band says whether to review, answer, rescue,
+// watch, or dispose of the row. It is a small fixed set the operator reads in
+// one order, so a column of unlike things — a pull request, a decision, a
+// stranded epic, a finished conversation — resolves into a handful of intents
+// rather than one flat rank.
+//
+// One row lands in exactly one section, and [classifySection] is the total
+// mapping. It reads the tile's already-derived facts rather than re-deriving
+// them, so the band cannot disagree with the frontier and needs computed from
+// the same state.
+const (
+	SectionReview  = "review"  // a pull request wants the operator
+	SectionGate    = "gate"    // a person must answer: decision, demand, human-route, disposition
+	SectionStalled = "stalled" // open work with nothing moving it, or an unowned convoy
+	SectionActive  = "active"  // healthy in-flight roll-up work
+	SectionCleanup = "cleanup" // a finished, empty or ruled row to dispose of
+	SectionDone    = "done"    // the anchor's own bead has closed
+)
+
+// SectionOrder is the order a surface reads the bands in — most-pressing first.
+// Review and gate are the operator's own moves and lead; stalled is the loudest
+// health signal under them; active is the city working normally; cleanup and
+// done are the quiet tail. A renderer iterates this, never an ad-hoc list, so
+// the CLI and the dashboard cannot present the bands in two different orders.
+var SectionOrder = []string{
+	SectionReview, SectionGate, SectionStalled, SectionActive, SectionCleanup, SectionDone,
+}
+
+// classifySection places a tile in its attention band. The order of the arms is
+// the precedence: a live pull request is review even when it is also owed, a
+// closed row is done whatever else it carries, and the owed test comes before
+// the health tests because a demand the operator owes is not "stalled work" —
+// it is the operator's move.
+//
+// It is a function of the finished [Tile] on purpose, so the visit fold can
+// re-run it after flipping a folded subject to owed without re-deriving the
+// anchor. Every input is a field the tile already carries: PRMachine is
+// non-empty exactly on a merge anchor, and Stranded/DeadOwner/Kind/Owed/Severity
+// are the same booleans severity() and computeTile() set.
+func classifySection(t Tile) string {
+	switch {
+	case t.Severity == SevDone:
+		return SectionDone
+	case t.PRMachine != "":
+		// A merge anchor is a pull request's row whether the cadence is working
+		// it or it is wedged on the operator; the round-trip axes carry which.
+		return SectionReview
+	case t.Owed:
+		// Owed is humanGated-and-unruled, disposition-due, or a PR owed by the
+		// operator; the PR case already went to review, so what is left is a
+		// person's answer on a bead.
+		return SectionGate
+	case t.Stranded || t.DeadOwner || t.Kind == "unowned":
+		return SectionStalled
+	case t.Severity == SevLow:
+		// Empty, complete, ruled, or a childless parked conversation — nothing is
+		// asking, the row only wants disposing of or ages out on its own.
+		return SectionCleanup
+	default:
+		return SectionActive
+	}
+}
+
 // computeTile derives a single tile from an anchor. now is the board's
 // generation instant, shared by every tile so one board never mixes staleness
 // measured against two different clock reads.
@@ -1217,7 +1283,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	mismatch := a.Progress != nil &&
 		(a.Progress.Total != r.mTotal || a.Progress.Closed != r.nClosed)
 
-	return Tile{
+	t := Tile{
 		ID:       a.ID,
 		Rig:      a.Rig,
 		Kind:     a.Kind,
@@ -1296,6 +1362,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PRApproval:     approval,
 		PROwedSince:    owedSince,
 	}
+	// The band is a function of the finished tile, so the visit fold can re-run
+	// it after flipping a folded subject to owed. ClusterKey stays empty here;
+	// it needs the whole board to know a template recurs, so BuildBoard sets it.
+	t.Section = classifySection(t)
+	return t
 }
 
 // BuildBoard derives every tile, ranks by rank_score descending, deduplicates
@@ -1326,16 +1397,301 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 		deduped = append(deduped, t)
 	}
 
-	sort.SliceStable(deduped, func(i, j int) bool { return owedFirst(deduped[i], deduped[j]) })
+	// Fold visit and demand WRAPPERS into the subject they concern, so one
+	// attention item is one row. This runs on the deduped set — after the twin
+	// reconcile, before the owed partition — because a wrapper folds only onto a
+	// subject that has a row, and both facts are settled by here.
+	folded := foldWrappers(deduped, anchors)
+
+	// Tag rows that are instances of one recurring template. This is last of the
+	// derivation passes because it keys on the FINAL section and needs, which the
+	// fold above can change.
+	tagClusters(folded)
+
+	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
 	return Board{
 		GeneratedAt:   now.UTC(),
-		Total:         len(deduped),
-		Tiles:         deduped,
+		Total:         len(folded),
+		Tiles:         folded,
 		Sittings:      orderSittings(facts.Sittings),
 		Partial:       partial,
 		PartialErrors: partialErrors,
 	}
+}
+
+// clusterThreshold is how many rows must share one section-and-needs before the
+// board folds them into a single grouped entry. Two identical asks are a
+// coincidence a reader absorbs at a glance; at three the repetition is a
+// template worth collapsing. A separate entry per member is still on the wire;
+// only the RENDER collapses, so nothing tooling reads is lost.
+const clusterThreshold = 3
+
+// foldWrappers collapses row-doubling. A visit bead (task_kind=visit, tracking
+// its subject in gc.continuation_group) and a demand bead (gc.demand_for naming
+// the work it gates) each carry gc.routed_to=human, so each is gathered as its
+// OWN human anchor — a second row for an attention item its subject already
+// carries. The doubling is deliberate graph structure (a tracks edge keeps the
+// visit claimable; beads refuses a parent->descendant blocks edge, forcing the
+// demand to be a sibling), so it cannot be fixed in the graph; the renderer
+// recognises the edges instead.
+//
+// When the subject has a row of its own, the wrapper's ask moves onto it and the
+// wrapper's row is dropped: the subject becomes `owed` and carries what the
+// wrapper asked, and a folded visit also leaves it `held`. When the subject has
+// NO row — a wrapper can name a plain bead that is no anchor — the wrapper stays,
+// because dropping it would erase the only trace of the attention; its needs is
+// rewritten from its own title so the kept row states the ask instead of the
+// empty "routed to you — no question recorded".
+func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
+	anchorByID := make(map[string]Anchor, len(anchors))
+	for _, a := range anchors {
+		if _, ok := anchorByID[a.ID]; !ok {
+			anchorByID[a.ID] = a
+		}
+	}
+	idx := make(map[string]int, len(tiles))
+	for i := range tiles {
+		idx[tiles[i].ID] = i
+	}
+	// A wrapper whose subject is itself a wrapper must not fold onto a row that is
+	// about to be dropped, so decide every drop first, then apply the folds.
+	isWrapper := func(id string) bool {
+		if a, ok := anchorByID[id]; ok {
+			_, _, _, w := wrapperTarget(a)
+			return w
+		}
+		return false
+	}
+	asks := make(map[string][]foldedAsk) // subject id -> the asks folded onto it
+	drop := make(map[string]bool)
+	for i := range tiles {
+		a, ok := anchorByID[tiles[i].ID]
+		if !ok {
+			continue
+		}
+		subj, ask, kind, ok := wrapperTarget(a)
+		if !ok {
+			continue
+		}
+		// A CLOSED wrapper is a finished conversation, not a live ask. Leaving it
+		// in the DONE band is right; folding it onto a subject would mark that
+		// subject owed on the strength of a visit that already ended.
+		if !tiles[i].ClosedAt.IsZero() {
+			continue
+		}
+		if j, has := idx[subj]; has && subj != a.ID && !isWrapper(subj) && tiles[j].ClosedAt.IsZero() {
+			asks[subj] = append(asks[subj], foldedAsk{ask: ask, kind: kind, owedSince: owedSince(tiles[i])})
+			drop[a.ID] = true
+		} else if ask != "" {
+			// Kept wrapper: no LIVE subject row carries this attention, so the
+			// wrapper stays and states the ask from its own title.
+			tiles[i].Needs = ask
+			tiles[i].Section = classifySection(tiles[i])
+		}
+	}
+	for subj, folded := range asks {
+		applyFold(&tiles[idx[subj]], folded)
+	}
+	if len(drop) == 0 {
+		return tiles
+	}
+	out := make([]Tile, 0, len(tiles)-len(drop))
+	for _, t := range tiles {
+		if drop[t.ID] {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// wrapperTarget reports the subject a wrapper row concerns, the ask it carries,
+// and its kind (wrapperVisit or wrapperDemand), or ok=false for an ordinary row.
+// A visit points at its subject through gc.continuation_group; a demand through
+// gc.demand_for. The kind matters at the fold: a demand is not visit presence,
+// so it must not stamp Tile.Held.
+func wrapperTarget(a Anchor) (subject, ask, kind string, ok bool) {
+	if a.Metadata == nil {
+		return "", "", "", false
+	}
+	if a.Metadata["task_kind"] == "visit" {
+		if subj := a.Metadata[mdContinuationGroup]; subj != "" {
+			return subj, visitAsk(a.Title), wrapperVisit, true
+		}
+		return "", "", "", false
+	}
+	if subj := a.Metadata[mdDemandFor]; subj != "" {
+		// The authored question rides on the takeaway of a demand; its title is
+		// the fallback for one filed without.
+		ask := collapseWS(a.Takeaway)
+		if ask == "" {
+			ask = collapseWS(a.Title)
+		}
+		return subj, ask, wrapperDemand, true
+	}
+	return "", "", "", false
+}
+
+const (
+	wrapperVisit  = "visit"
+	wrapperDemand = "demand"
+)
+
+// mdContinuationGroup is the visit metadata key naming the subject a visit holds
+// — the same field Facts.Visits keys Tile.Held on.
+const mdContinuationGroup = "gc.continuation_group"
+
+// visitAsk recovers the human ask from a visit's title. escalate.sh titles a
+// visit "visit: <subject-id> — <message>", and the message is the ask; the
+// label and the id prefix are noise on the subject's row. The id-prefix strip is
+// bounded to a short span so a message that itself contains " — " keeps it.
+func visitAsk(title string) string {
+	s := collapseWS(title)
+	s = strings.TrimSpace(strings.TrimPrefix(s, "visit:"))
+	for _, sep := range []string{" — ", " - " } {
+		if i := strings.Index(s, sep); i >= 0 && i <= 16 {
+			s = strings.TrimSpace(s[i+len(sep):])
+			break
+		}
+	}
+	if s == "" {
+		return collapseWS(title)
+	}
+	return s
+}
+
+// foldedAsk is one wrapper's contribution to the subject it folds onto: the ask
+// text, the wrapper kind (Held is visit presence, so a demand must not set it),
+// and the wrapper's own owed-since so the subject's owed clock can date the ask
+// that created it rather than the subject's last touch.
+type foldedAsk struct {
+	ask       string
+	kind      string
+	owedSince time.Time
+}
+
+// applyFold moves one or more wrapper asks onto a subject tile. The subject is
+// now owed — a person is asked to look at it — and its needs states the ask, so
+// the one surviving row says both what the row is and what is wanted of it. Held
+// is visit presence, so only a folded VISIT stamps it; a demand leaves it as the
+// visit facts found it. The owed clock takes the earliest ask instant folded in,
+// so the queue dates the row by when the ask began; an existing earlier instant,
+// such as a merge anchor's PR clock, is kept rather than moved forward. A merge
+// anchor also keeps its own PR needs: the pull-request position is the more
+// specific ask and the wrapper only adds that a person is on it.
+func applyFold(t *Tile, folded []foldedAsk) {
+	t.Owed = true
+	asks := make([]string, 0, len(folded))
+	for _, f := range folded {
+		asks = append(asks, f.ask)
+		if f.kind == wrapperVisit {
+			t.Held = true
+		}
+		if !f.owedSince.IsZero() && (t.PROwedSince.IsZero() || f.owedSince.Before(t.PROwedSince)) {
+			t.PROwedSince = f.owedSince
+		}
+	}
+	if t.PRMachine == "" {
+		switch len(asks) {
+		case 0:
+		case 1:
+			t.Needs = asks[0]
+		default:
+			t.Needs = fmt.Sprintf("%d× — %s", len(asks), strings.Join(asks, " · "))
+		}
+	}
+	t.Section = classifySection(*t)
+}
+
+// tagClusters stamps ClusterKey on every row that is one of at least
+// clusterThreshold rows sharing a section and a needs sentence. The DONE band is
+// left alone: it is already capped and recency-ordered, and its rows are not
+// attention the grouping exists to thin.
+func tagClusters(tiles []Tile) {
+	type key struct{ section, needs string }
+	count := make(map[key]int, len(tiles))
+	for _, t := range tiles {
+		if t.Section == SectionDone || t.Needs == "" {
+			continue
+		}
+		count[key{t.Section, t.Needs}]++
+	}
+	for i := range tiles {
+		if tiles[i].Section == SectionDone || tiles[i].Needs == "" {
+			continue
+		}
+		if count[key{tiles[i].Section, tiles[i].Needs}] >= clusterThreshold {
+			tiles[i].ClusterKey = tiles[i].Needs
+		}
+	}
+}
+
+// SectionGroup is one attention band and the tiles in it, in the order the
+// caller ranked them. It is a RENDER helper, not a wire type: the section lives
+// on each [Tile], and this only buckets a ranked slice so a surface iterates
+// bands rather than re-deriving the split.
+type SectionGroup struct {
+	Key   string
+	Tiles []Tile
+}
+
+// GroupBySection buckets tiles into the fixed [SectionOrder], preserving the
+// caller's within-section order. An empty band is omitted. A tile whose section
+// is not in the order (a value a newer derivation added) is appended under its
+// own key after the known bands, so an unrecognised section shows rather than
+// vanishing.
+func GroupBySection(tiles []Tile) []SectionGroup {
+	buckets := make(map[string][]Tile)
+	for _, t := range tiles {
+		buckets[t.Section] = append(buckets[t.Section], t)
+	}
+	out := make([]SectionGroup, 0, len(SectionOrder))
+	for _, k := range SectionOrder {
+		if len(buckets[k]) > 0 {
+			out = append(out, SectionGroup{Key: k, Tiles: buckets[k]})
+			delete(buckets, k)
+		}
+	}
+	extra := make([]string, 0, len(buckets))
+	for k := range buckets {
+		extra = append(extra, k)
+	}
+	sort.Strings(extra)
+	for _, k := range extra {
+		out = append(out, SectionGroup{Key: k, Tiles: buckets[k]})
+	}
+	return out
+}
+
+// ClusterRow is one rendered line: a single tile, or the head of a cluster with
+// every member behind it. Members has length one for an unclustered row.
+type ClusterRow struct {
+	Tile    Tile
+	Members []Tile
+}
+
+// ClusterRows folds a section's tiles into render lines. Rows sharing a
+// non-empty ClusterKey become ONE line whose Members are all of them, placed
+// where the first member fell; an empty key is always its own line. The order of
+// the input is preserved, so the caller's rank still decides where each line and
+// each cluster head sits.
+func ClusterRows(tiles []Tile) []ClusterRow {
+	out := make([]ClusterRow, 0, len(tiles))
+	at := make(map[string]int) // cluster key -> index in out
+	for _, t := range tiles {
+		if t.ClusterKey == "" {
+			out = append(out, ClusterRow{Tile: t, Members: []Tile{t}})
+			continue
+		}
+		if i, ok := at[t.ClusterKey]; ok {
+			out[i].Members = append(out[i].Members, t)
+			continue
+		}
+		at[t.ClusterKey] = len(out)
+		out = append(out, ClusterRow{Tile: t, Members: []Tile{t}})
+	}
+	return out
 }
 
 // orderSittings sorts the conversation record: running sittings first, oldest

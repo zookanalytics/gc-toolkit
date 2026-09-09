@@ -508,6 +508,8 @@ func fixtureBoard() board.Board {
 				Frontier:  "7 open · 1 in flight · 1 stuck (dead owner) · 1 parked for the operator",
 				Needs:     takeaway,
 				RankScore: 3014004,
+				// A dead owner under it, so classifySection bands it stalled.
+				Section: board.SectionStalled,
 			},
 			{
 				ID:       "gt-1a2b3",
@@ -557,6 +559,12 @@ func fixtureBoard() board.Board {
 				Frontier:  "all 2 closed · 0 open",
 				Needs:     "all 2 closed — graduate",
 				RankScore: 3000,
+				// A LOW row with nothing asking bands cleanup. ClusterKey is pinned
+				// here — the fixture's one clustered row — to carry the field into
+				// the TypeScript check, the way the DONE tile carries closed_at; on
+				// a live board it is set only when at least three rows share it.
+				Section:    board.SectionCleanup,
+				ClusterKey: "all 2 closed — graduate",
 			},
 			// A merge anchor: the PR round-trip's row. Wedged at the convergence
 			// cap's exception, which is the live shape six of the seven wedged
@@ -624,6 +632,9 @@ func fixtureBoard() board.Board {
 				// Three days before the board was generated, and held there by
 				// every reconcile pass in between.
 				PROwedSince: time.Date(2026, 8, 8, 11, 2, 0, 0, time.UTC),
+				// A merge anchor is a pull request's row, so it bands review even
+				// while it is wedged on the operator.
+				Section: board.SectionReview,
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into
@@ -674,6 +685,7 @@ func fixtureBoard() board.Board {
 				Frontier:  "closed 1d ago",
 				Needs:     "closed — dismiss to clear",
 				RankScore: -1_000_000 + 998, // the DONE lane: closed 1 day ago
+				Section:   board.SectionDone,
 			},
 		},
 		Partial:       true,

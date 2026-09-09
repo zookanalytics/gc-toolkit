@@ -15,32 +15,28 @@ import type { Board, PackBuild, Sitting, Tile } from './contract';
 // refreshes in place and never notifies.
 const REFRESH_MS = 30_000;
 
-// The board arrives as ONE ranked list carrying two different kinds of answer.
-// Every kind but this one is something that wants doing, ranked by how badly. A
-// `parked` tile is a conversation that already reached a takeaway: it wants
-// nothing, it only has to stay FINDABLE. Ranking those against stranded epics is
-// what tk-2v08m asks not to do — the LOW band already floors them, and splitting
-// them into their own section keeps them out of the contest visually too.
-//
-// EXCEPT a tile whose `disposition_due` is set. That row was waiting on work
-// that has since landed, so "wants nothing" has stopped being true of it: it
-// owes the operator a disposition, and the service already bands it ELEVATED.
-// Leaving it in the parked section would re-hide the one row this distinction
-// exists to surface — the section's own sub-heading promises nothing there is
-// waiting on work (tk-2plde).
-//
-// And EXCEPT a tile with OPEN CHILDREN. "Wants nothing" is equally untrue of a
-// subject whose routed work is still in flight, and that work reaches the board
-// only through this tile's roll-up — a plain child bead is never a tile of its
-// own — so the quiet section is where it would disappear. The service bands
-// these by their roll-up rather than flooring them (tk-a9k0l); this is the same
-// row set, kept out of the same section for the same reason.
-const PARKED_KIND = 'parked';
+// The board arrives as ONE ranked list, and every row carries the band it
+// belongs to in `tile.section` and — when it is one of several sharing a
+// template — the `tile.cluster_key` that folds them. Those are derived once, in
+// the shared Go layer, so the CLI board and this app cannot each invent their
+// own split; this file READS the fields, it does not re-derive them. The order
+// the bands read in is the derive layer's SectionOrder, mirrored here.
+const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
 
-// A tile that belongs in the quiet parked section rather than the attention
-// table: parked, not owed a disposition, and with no open work under it.
-const isParked = (tile: Tile): boolean =>
-  tile.kind === PARKED_KIND && !tile.disposition_due && tile.open === 0;
+// The heading and one-line promise each band makes. The `done` band keeps the
+// "recently closed" heading and the dismiss/window copy it always carried.
+const SECTION_META: Record<string, { title: string; blurb: string }> = {
+  review: { title: 'review', blurb: 'a pull request wants you' },
+  gate: { title: 'gate', blurb: 'a person must answer — a decision, a demand, or a routed bead' },
+  stalled: { title: 'stalled', blurb: 'open work nothing is moving' },
+  active: { title: 'active', blurb: 'healthy in-flight work' },
+  cleanup: { title: 'cleanup', blurb: 'finished, empty, or ruled — dispose of it' },
+  done: { title: 'recently closed', blurb: 'closed while you were away' },
+};
+
+function sectionMeta(key: string): { title: string; blurb: string } {
+  return SECTION_META[key] ?? { title: key, blurb: 'uncategorised' };
+}
 
 // A sitting is finished when its visit bead closed; anything else is a
 // conversation someone is still in. Reading the status rather than the presence
@@ -61,16 +57,6 @@ function shortAge(stamp: string | undefined, now: number): string {
   if (hours < 48) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
 }
-// The DONE band: the anchor's own bead has closed. It is a section of its own
-// rather than a row in the attention or parked tables, and it is filtered out
-// of both, because a closed anchor of any kind lands here — a closed `parked`
-// subject would otherwise read as a live parked conversation to pick back up.
-// The operator's queue never carries one either: a closed anchor is not `owed`.
-//
-// No row leaves for being answered: `gc-helm dismiss <id>` clears one on the
-// operator's word. A row does age out of the band on a clock, once it has been
-// closed longer than GC_HELM_DONE_WINDOW.
-const isDone = (tile: Tile): boolean => tile.severity === 'DONE';
 
 // Document-relative on purpose. The app is served under a runtime-city-named
 // prefix (/v0/city/<city>/svc/helm/), so an absolute '/helm' would address the
@@ -133,8 +119,8 @@ function PRLink({ tile }: { tile: Tile }) {
 /**
  * What the board could not read about the pull requests it holds.
  *
- * The owed section's empty state is a contract: it states its coverage or it
- * states the error, never a blank. PR rows add a way for that to go quietly
+ * The coverage sentence's empty state is a contract: it states its coverage or
+ * it states the error, never a blank. PR rows add a way for that to go quietly
  * wrong, because an axis nothing has recorded looks exactly like an axis with
  * nothing to say — so the all-clear is withheld while any position is unread.
  * `owed` is a boolean and cannot carry the third value the axes do.
@@ -196,7 +182,7 @@ function PackHealth({ rows }: { rows: PackBuild[] }) {
   );
 }
 
-// The drill-in entry point, shared by both tables. A button rather than a
+// The drill-in entry point, shared by every table. A button rather than a
 // clickable row so it is reachable by keyboard and announced as an action.
 function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
   return (
@@ -206,13 +192,140 @@ function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void })
   );
 }
 
+// A render line for a section: a single tile, or the head of a cluster with
+// every member behind it. Mirrors board.ClusterRow in the Go layer; the members
+// list has length one for an unclustered row.
+type RenderRow = { tile: Tile; members: Tile[] };
+
+// clusterRows folds a section's tiles into render lines. Rows sharing a
+// non-empty cluster_key become ONE line whose members are all of them, placed
+// where the first member fell; an empty key is always its own line. This is the
+// TypeScript twin of board.ClusterRows, kept trivial so the two cannot diverge:
+// the hard decision — which rows share a key — was made once on the wire.
+function clusterRows(tiles: Tile[]): RenderRow[] {
+  const out: RenderRow[] = [];
+  const at = new Map<string, number>();
+  for (const tile of tiles) {
+    const key = tile.cluster_key;
+    if (!key) {
+      out.push({ tile, members: [tile] });
+      continue;
+    }
+    const i = at.get(key);
+    if (i !== undefined) {
+      out[i].members.push(tile);
+      continue;
+    }
+    at.set(key, out.length);
+    out.push({ tile, members: [tile] });
+  }
+  return out;
+}
+
+// The "N/M" progress cell. "—" means the row owns no child set at all — a
+// decision never does, and a human/parked bead does exactly when it decomposed
+// — rather than a set that happens to be empty, which the counts would report
+// as 0/0 (the tk-a9k0l distinction).
+function progressCell(tile: Tile): string {
+  if (tile.m_total === 0 && (tile.kind === 'decision' || tile.kind === 'human' || tile.kind === 'parked')) {
+    return '—';
+  }
+  return `${tile.n_closed}/${tile.m_total}`;
+}
+
+// One attention band, rendered as a table under a heading that names the move
+// its rows want. A run of rows sharing a template folds to a single line that
+// names the count and lists the members, so the operator reads one entry rather
+// than N identical peers.
+function SectionTable({
+  sectionKey,
+  tiles,
+  drillTarget,
+  onOpen,
+}: {
+  sectionKey: string;
+  tiles: Tile[];
+  drillTarget: string | null;
+  onOpen: (id: string) => void;
+}) {
+  const meta = sectionMeta(sectionKey);
+  const rows = clusterRows(tiles);
+  const headingId = `section-${sectionKey}`;
+  return (
+    <section className={`board-section board-section--${sectionKey}`} aria-labelledby={headingId}>
+      <h2 id={headingId}>{meta.title}</h2>
+      <p className="sub">
+        {meta.blurb} · {tiles.length}
+        {sectionKey === 'done' && (
+          <>
+            . They sit below every live band, and no row leaves for being answered:{' '}
+            <code>gc-helm dismiss &lt;id&gt;</code> clears one now. A row does age out of this band on a
+            clock, once it has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
+            <code>0</code> off).
+          </>
+        )}
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>sev</th>
+            <th>id</th>
+            <th>rig</th>
+            <th>kind</th>
+            <th>pr</th>
+            <th>title</th>
+            <th>progress</th>
+            <th>frontier</th>
+            <th>needs</th>
+            <th>owed since</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) =>
+            row.members.length > 1 ? (
+              <tr key={row.tile.cluster_key} className="cluster-row">
+                <td>{row.members.length}×</td>
+                {/* The shared needs spans the row's descriptive columns; the
+                    member ids follow so each is still one drill click away —
+                    folding gathers the rows, it does not hide them. */}
+                <td colSpan={7}>{row.tile.needs}</td>
+                <td colSpan={2} className="cluster-members">
+                  {row.members.map((m) => (
+                    <DrillOpen key={m.id} id={m.id} onOpen={onOpen} />
+                  ))}
+                </td>
+              </tr>
+            ) : (
+              <tr key={row.tile.id} className={row.tile.id === drillTarget ? 'drilled' : undefined}>
+                <td>{row.tile.severity}</td>
+                <td>
+                  <DrillOpen id={row.tile.id} onOpen={onOpen} />
+                </td>
+                <td>{row.tile.rig}</td>
+                <td>{row.tile.kind}</td>
+                <td>
+                  <PRLink tile={row.tile} />
+                </td>
+                <td>{row.tile.title}</td>
+                <td>{progressCell(row.tile)}</td>
+                <td>{row.tile.frontier}</td>
+                <td>{row.tile.needs}</td>
+                <td>{sectionKey === 'done' ? '' : owedSince(row.tile)}</td>
+              </tr>
+            ),
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 // The conversation record: what is being talked about right now, and what the
 // sittings that just ended concluded.
 //
-// A section rather than rows in the ranked table, for the reason parked
-// conversations are one: a sitting is an event, not a demand, and ranking it
-// against a stranded epic would be answering a question nobody asked. The
-// ranked table says what needs doing; this says what is being said.
+// A section rather than rows in a ranked table: a sitting is an event, not a
+// demand, and ranking it against a stranded epic would be answering a question
+// nobody asked. The bands say what needs doing; this says what is being said.
 function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number; onOpen: (id: string) => void }) {
   if (sittings.length === 0) return null;
   const running = sittings.filter(isRunning).length;
@@ -315,15 +428,43 @@ export function App() {
     const t = board ? Date.parse(board.generated_at) : NaN;
     return Number.isNaN(t) ? Date.now() : t;
   }, [board]);
-  // The wire arrives partitioned — every `owed` row first, oldest-owed first
-  // (contract.ts). The sections re-read the flag rather than slicing by
-  // position, so a section can never disagree with the order that produced it.
-  const owed = tiles.filter((tile) => tile.owed);
+
+  // Group the ranked list into its bands by reading tile.section — the split
+  // the derive layer already made. The wire order (owed rows first, oldest
+  // first) is preserved within each band, so a band never disagrees with the
+  // order that produced it.
+  const bands = useMemo(() => {
+    const buckets = new Map<string, Tile[]>();
+    for (const t of tiles) {
+      const arr = buckets.get(t.section);
+      if (arr) arr.push(t);
+      else buckets.set(t.section, [t]);
+    }
+    const ordered: { key: string; tiles: Tile[] }[] = [];
+    for (const key of SECTION_ORDER) {
+      const bt = buckets.get(key);
+      if (bt && bt.length > 0) {
+        ordered.push({ key, tiles: bt });
+        buckets.delete(key);
+      }
+    }
+    // A band a newer derivation added shows under its own key rather than
+    // vanishing, after the known ones.
+    for (const key of [...buckets.keys()].sort()) {
+      ordered.push({ key, tiles: buckets.get(key)! });
+    }
+    return ordered;
+  }, [tiles]);
+
+  const owed = tiles.filter((t) => t.owed);
   const coverage = prCoverage(tiles);
-  const rest = tiles.filter((tile) => !tile.owed);
-  const done = rest.filter(isDone);
-  const attention = rest.filter((tile) => !isDone(tile) && !isParked(tile));
-  const parked = rest.filter((tile) => !isDone(tile) && isParked(tile));
+  // Live rows are everything but the DONE band — what "needs attention" counts.
+  const liveCount = tiles.filter((t) => t.section !== 'done').length;
+  const doneCount = tiles.length - liveCount;
+  // The rows that are live and NOT already in the owed cover-sheet's count.
+  // "No other anchors need attention" is a claim about these, not about a board
+  // whose only live rows are the ones the queue just named.
+  const otherLive = tiles.filter((t) => !t.owed && t.section !== 'done');
 
   return (
     <main>
@@ -331,11 +472,9 @@ export function App() {
         <h1>helm</h1>
         <p className="sub">
           {board
-            ? `${owed.length ? `${owed.length} owed · ` : ''}${attention.length} anchors${
-                parked.length ? ` · ${parked.length} parked` : ''
-              }${done.length ? ` · ${done.length} closed` : ''} · generated ${
-                board.generated_at
-              }`
+            ? `${owed.length ? `${owed.length} owed · ` : ''}${liveCount} anchors${
+                doneCount ? ` · ${doneCount} closed` : ''
+              } · generated ${board.generated_at}`
             : loading
               ? 'loading the board…'
               : 'no board'}
@@ -359,11 +498,13 @@ export function App() {
         </p>
       )}
 
-      {/* The default answer, and the only section that renders unconditionally.
+      {/* The queue status, and the only section that renders unconditionally.
           "Nothing is owed by you" is the most consequential sentence on this
           page and it is also what every failure path produces by default, so
-          this section states its COVERAGE or states the error — never a blank
-          space that reads as an all-clear nobody earned. */}
+          this states its COVERAGE or states the error — never a blank space
+          that reads as an all-clear nobody earned. The owed ROWS themselves
+          are in the review and gate bands below, oldest-owed first; this
+          section is the queue's cover sheet, not a second copy of it. */}
       <section className="owed" aria-labelledby="owed-heading">
         <h2 id="owed-heading">owed by you</h2>
         {!board ? (
@@ -383,172 +524,29 @@ export function App() {
                   : 'Nothing is owed by you. Every store answered.'}
           </p>
         ) : (
-          <>
-            <p className="sub">
-              Rows whose next move is a person&apos;s, longest-waiting first. The headline is what
-              was asked; the bead&apos;s own title is secondary.
-            </p>
-            <table>
-              <thead>
-                <tr>
-                  <th>id</th>
-                  <th>rig</th>
-                  <th>pr</th>
-                  <th>needs</th>
-                  <th>title</th>
-                  <th>owed since</th>
-                </tr>
-              </thead>
-              <tbody>
-                {owed.map((tile) => (
-                  <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
-                    <td>
-                      <DrillOpen id={tile.id} onOpen={setDrillTarget} />
-                    </td>
-                    <td>{tile.rig}</td>
-                    <td>
-                      <PRLink tile={tile} />
-                    </td>
-                    <td>{tile.needs}</td>
-                    <td>{tile.title}</td>
-                    <td>{owedSince(tile)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
+          <p className="sub" role="status">
+            {owed.length} owed by you, oldest first — in the review and gate bands below.
+          </p>
         )}
       </section>
 
       <PackHealth rows={board?.pack_health ?? []} />
 
-      {/* An owed row IS an anchor needing attention — it is the one the section
-          above just listed — so the unqualified sentence contradicts it. */}
-      {board && attention.length === 0 && !error && (
+      {board && otherLive.length === 0 && !error && (
         <p>{owed.length > 0 ? 'No other anchors need attention.' : 'No anchors need attention.'}</p>
       )}
 
-      {attention.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>severity</th>
-              <th>id</th>
-              <th>rig</th>
-              <th>kind</th>
-              <th>title</th>
-              <th>progress</th>
-              <th>open / wip</th>
-              <th>stale</th>
-              <th>frontier</th>
-              <th>needs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* The drilled row is marked with a class, not aria-selected: that
-                attribute is only meaningful on a grid/treegrid row, and this is
-                a plain table. */}
-            {attention.map((tile) => (
-              <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
-                <td>{tile.severity}</td>
-                <td>
-                  <DrillOpen id={tile.id} onOpen={setDrillTarget} />
-                </td>
-                <td>{tile.rig}</td>
-                <td>{tile.kind}</td>
-                <td>{tile.title}</td>
-                <td>
-                  {tile.n_closed}/{tile.m_total}
-                </td>
-                <td>
-                  {tile.open} / {tile.in_progress}
-                </td>
-                <td>{tile.stale_days}d</td>
-                <td>{tile.frontier}</td>
-                <td>{tile.needs}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {parked.length > 0 && (
-        <section className="parked" aria-labelledby="parked-heading">
-          <h2 id="parked-heading">parked conversations</h2>
-          <p className="sub">
-            Open beads whose visit ended with a takeaway. Nothing here is owed a disposition and
-            nothing here has open work under it — either one moves the row up to the anchor
-            table. These are threads to pick back up: press prefix+a and type the id.
-          </p>
-          {/* No progress columns. Every row that reaches this section has an
-              empty open frontier — that is the filter — so open/wip reads 0 on
-              all of them, and any row whose roll-up is still saying something
-              is in the anchor table by construction. (Those columns are
-              questionable there too; that is tk-x55wt's bead, not this one.) */}
-          <table>
-            <thead>
-              <tr>
-                <th>id</th>
-                <th>rig</th>
-                <th>title</th>
-                <th>stale</th>
-                <th>needs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {parked.map((tile) => (
-                <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
-                  <td>
-                    <DrillOpen id={tile.id} onOpen={setDrillTarget} />
-                  </td>
-                  <td>{tile.rig}</td>
-                  <td>{tile.title}</td>
-                  <td>{tile.stale_days}d</td>
-                  <td>{tile.needs}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+      {bands.map((band) => (
+        <SectionTable
+          key={band.key}
+          sectionKey={band.key}
+          tiles={band.tiles}
+          drillTarget={drillTarget}
+          onOpen={setDrillTarget}
+        />
+      ))}
 
       <Sittings sittings={board?.sittings ?? []} now={renderedAt} onOpen={setDrillTarget} />
-
-      {done.length > 0 && (
-        <section className="done" aria-labelledby="done-heading">
-          <h2 id="done-heading">recently closed</h2>
-          <p className="sub">
-            Anchors that closed while you were away. They sit below every live band, and no
-            row leaves for being answered: <code>gc-helm dismiss &lt;id&gt;</code> clears one
-            now. A row does age out of this band on a clock, once it has been closed longer
-            than <code>GC_HELM_DONE_WINDOW</code> (default 7d, <code>0</code> off).
-          </p>
-          <table>
-            <thead>
-              <tr>
-                <th>id</th>
-                <th>rig</th>
-                <th>kind</th>
-                <th>title</th>
-                <th>closed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {done.map((tile) => (
-                <tr key={tile.id} className={tile.id === drillTarget ? 'drilled' : undefined}>
-                  <td>
-                    <DrillOpen id={tile.id} onOpen={setDrillTarget} />
-                  </td>
-                  <td>{tile.rig}</td>
-                  <td>{tile.kind}</td>
-                  <td>{tile.title}</td>
-                  <td>{tile.frontier}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
 
       {/* One terminal, not one per anchor — and that is now a LAYOUT decision,
           not a wiring limit. The city still runs a single ttyd, but its attach

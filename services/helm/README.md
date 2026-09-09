@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 47 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -67,15 +67,28 @@ stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
+section cluster_key
 ```
 
-`updated_at`, `closed_at` and `pr_owed_since` are `omitzero` — the three fields
-a tile may omit. A source that cannot read `updated_at` (the supervisor backend)
-omits it on every row; `closed_at` is present on a `DONE` row and absent from
-every live one; `pr_owed_since` is omitted on every row nothing is owed on.
+`updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
+is `omitempty` — the fields a tile may omit. A source that cannot read
+`updated_at` (the supervisor backend) omits it on every row; `closed_at` is
+present on a `DONE` row and absent from every live one; `pr_owed_since` is
+omitted on every row nothing is owed on; `cluster_key` is absent on a row that
+is not one of a template's several.
 
 Tiles are deduplicated by id and **partitioned**: every `owed` row first,
 longest-waiting first, then everything else by `rank_score` descending.
+
+`section` bands each row by the KIND of attention it wants — `review` (a pull
+request), `gate` (a person must answer), `stalled` (open work nothing is
+moving), `active` (healthy in-flight), `cleanup` (finished/empty), `done`
+(closed) — read in `board.SectionOrder`. It is orthogonal to `severity`'s
+how-badly, and both renderers group by it rather than each re-deriving a split.
+`cluster_key` is the shared `needs` of a run of at least three same-section rows
+that are one template (a visit family, a signoff cap); a renderer folds them
+into one entry while the wire keeps every member. `specs/tk-9tbbk.4/` records
+the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
 
