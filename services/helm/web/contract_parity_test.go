@@ -683,7 +683,7 @@ func fixtureBoard() board.Board {
 				UpdatedAt: time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC),
 				ClosedAt:  time.Date(2026, 8, 10, 9, 30, 0, 0, time.UTC),
 				Frontier:  "closed 1d ago",
-				Needs:     "closed — dismiss to clear",
+				Needs:     "closed — ages out",
 				RankScore: -1_000_000 + 998, // the DONE lane: closed 1 day ago
 				Section:   board.SectionDone,
 			},

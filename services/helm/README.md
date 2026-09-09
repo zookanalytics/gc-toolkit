@@ -232,11 +232,11 @@ human-routed rows.
 at status closed over `GC_HELM_DONE_WINDOW` (default 7d, `0` disables). The open
 queries stop returning an anchor the moment it is answered, so the second pass
 is the only thing that gives a closed one a row. It bands `DONE`, which sorts
-below every live band, and stays there until `gc-helm dismiss <id>` stamps
-`gc.dismissed_at`. The two bounds are different in kind: the window bounds what
-ENTERS the band, and the dismiss is the only thing that removes a row the
-operator can already see. Design and the tradeoff the window accepts:
-`specs/tk-ghlg1e/layout-stability.md`.
+below every live band, and stays there until the window ages it out. The band
+carries no per-row state: nothing retires a row early, so a row leaves only once
+it has been closed longer than the window. The collapse to a stateless band:
+`specs/tk-7cb4l2/collapse.md`; the layout-stability rule and the tradeoff the
+window accepts: `specs/tk-ghlg1e/layout-stability.md`.
 
 The HTTP backend scans `status=open` only, so its board carries no `DONE` band
 — narrower, not wrong, and the same shape of gap the source seam already

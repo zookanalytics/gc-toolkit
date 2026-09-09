@@ -41,9 +41,9 @@ const (
 	SevNormal   Severity = "NORMAL"   // healthy in-flight work
 	SevLow      Severity = "LOW"      // empty or fully closed
 	// SevDone is the terminal band: the anchor bead itself has closed. It is
-	// not an attention level, so it ranks below every live band. A row leaves
-	// it on `gc-helm dismiss`, or once the anchor has been closed longer than
-	// the gather's window reaches back.
+	// not an attention level, so it ranks below every live band. A row ages out
+	// only once the anchor has been closed longer than the DONE window; nothing
+	// retires it early.
 	SevDone Severity = "DONE"
 )
 

@@ -9,7 +9,7 @@
 #   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
 #   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
 #   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
-#   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting and clear the row (subject inferred from the current sitting when omitted)
+#   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting by closing the subject's open visit; the board is untouched, so a DONE row ages out on its own (subject inferred from the current sitting when omitted)
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -44,7 +44,7 @@ Usage:
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
-  gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row (subject inferred from the current sitting when omitted)
+  gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted)
 
 The board is `helm-svc board` (services/helm). This script carries only the
 write verbs. open files a visit in the picked bead's continuation group and
@@ -79,20 +79,17 @@ blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
 <gated>`, so a caller reads the id back with
 `awk '/^demand /{print $2; exit}'`.
 
-dismiss is the operator's one explicit act for "take this out of my view",
-and both halves of it exist because the alternative is something leaving on
-its own. It closes the subject's open visit, which is what holds a converse
-sitting up now that nothing idle-reaps one; and it stamps gc.dismissed_at, so
-the board drops the subject's row from the terminal DONE band a closed anchor
-otherwise keeps for GC_HELM_DONE_WINDOW (default 7d). The close half stamps
-gc.outcome=dismissed first, so the ended sitting is still one the board can
-report, and a visit that will not take that stamp is left open rather than
-closed unreadable; the close itself falls back to --force when the visit is
-held under a session identity this actor cannot close under. A sitting the
-verb could not account for aborts the row stamp: the row stays and the run
-exits 4.
-Idempotent: a subject with no visit and no row is already dismissed and says
-so.
+dismiss is the operator's explicit "end this sitting". It closes the subject's
+open visit, which is what holds a converse sitting's pane up; converse-reap
+then ends the now-settled session. It stamps gc.outcome=dismissed first, so the
+ended sitting is still one the board can report, and a visit that will not take
+that stamp is left open rather than closed unreadable; the close itself falls
+back to --force when the visit is held under a session identity this actor
+cannot close under. A visit the verb could not account for aborts the run,
+which exits 4. It writes nothing to the subject: the DONE band a closed anchor
+lands in carries no per-row state, so a row leaves only by ageing past
+GC_HELM_DONE_WINDOW (default 7d).
+Idempotent: a subject with no open visit has no sitting to end and says so.
 
 dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
 current sitting from session state: the one open visit assigned to this session
@@ -1331,23 +1328,16 @@ current_sitting_subject() {
 }
 
 # ── Verb: dismiss ────────────────────────────────────────────────────
-# The operator's explicit "I am done with this". Two writes, because two
-# surfaces hold the subject in view and neither lets go on its own:
+# The operator's explicit "end this sitting". converse runs with no
+# idle_timeout, so a held visit keeps its pane up until something closes the
+# visit; closing it here is the act that ends a sitting the operator no longer
+# wants, and converse-reap ends the now-settled session. The DONE band the
+# subject's closed anchor lands in carries no per-row state — a row leaves only
+# by ageing past GC_HELM_DONE_WINDOW — so dismiss writes nothing to the subject.
 #
-#   the SITTING — converse runs with no idle_timeout, so a held visit keeps
-#   its pane up until something closes the visit. Closing it here is the only
-#   act that ends a sitting the operator no longer wants.
-#
-#   the ROW — a closed anchor keeps its row in the DONE band. gc.dismissed_at
-#   is what the gather reads to stop offering it on the operator's word. A row
-#   also ages out once it has been closed longer than GC_HELM_DONE_WINDOW.
-#
-# Order is: visit half first, row stamp second, and the row stamp runs only if
-# the visit half accounted for every sitting. Inside the visit half the outcome
-# stamp precedes the close on the same rule. A row retired over a sitting that
-# is still up is the failure this verb exists to prevent, and it is the quiet
-# one: the operator sees a cleared row and no longer has anything to look for.
-# Idempotent in both halves.
+# The outcome stamp precedes the close: a visit closed without a gc.outcome is
+# a sitting the board cannot report, and once closed no re-run reaches it. A
+# visit the verb could not account for aborts the run. Idempotent.
 cmd_dismiss() {
     bead=""; dismiss_reason=""
     while [ $# -gt 0 ]; do
@@ -1382,11 +1372,6 @@ cmd_dismiss() {
         echo "$PROG: dismiss: could not verify '$bead' — 'gc bd show' returned no bead with that id. Nothing was written." >&2
         exit 4
     fi
-    subject_status=$(printf '%s' "$subject_clean" \
-        | jq -r --arg b "$bead" \
-            'if type == "array"
-             then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
-             else empty end' 2>/dev/null || true)
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -1419,11 +1404,6 @@ cmd_dismiss() {
         fi
         echo "$PROG: dismiss: $bead is a visit on $visit_of — dismissing that subject's sitting" >&2
         bead="$visit_of"
-        subject_status=$(gc bd show "$bead" --json 2>/dev/null | scrub \
-            | jq -r --arg b "$bead" \
-                'if type == "array"
-                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
-                 else empty end' 2>/dev/null || true)
     fi
 
     # Pin bd at the SUBJECT's rig for the visit lookup and close, the way
@@ -1440,9 +1420,10 @@ cmd_dismiss() {
     # a dismiss that missed the visit would leave the sitting it was asked to
     # end still holding the pane.
     #
-    # sitting_failed carries the visit half's verdict to the row half below. A
-    # read that did not answer is not the same as a subject with no visit, so
-    # it fails rather than falling through to the empty case.
+    # sitting_failed records whether every visit was accounted for; an
+    # unaccounted sitting aborts the run below. A read that did not answer is
+    # not the same as a subject with no visit, so it fails rather than falling
+    # through to the empty case.
     #
     # The shape gate is the load-bearing half of that. An exit code of 0 is not
     # an answer on its own: empty stdout and a bare `null` both leave the derive
@@ -1494,16 +1475,6 @@ cmd_dismiss() {
     # the forced case is a line the operator can see. (`gc bd close` accepts
     # --force; `gc bd update` does not.)
     closed_n=0
-    # A closed visit is a DONE row of its own on the board (it carries the
-    # gc.routed_to=human anchor stamp), and the board retires a DONE row on
-    # gc.dismissed_at — stamped on the subject below. Stamp each visit this
-    # dismiss closes too, or its row outlives the dismissal for the whole DONE
-    # window. Best-effort: the close already landed, and a missed stamp only
-    # leaves a row that ages out.
-    dismiss_stamp_visit() {
-        gc bd update "$1" --set-metadata "gc.dismissed_at=$(iso_now)" \
-            --set-metadata "gc.dismissed_by=${GC_SESSION_NAME:-operator}" >/dev/null 2>&1 || true
-    }
     for _v in $visits; do
         [ -n "$_v" ] || continue
         _why="dismissed by the operator${dismiss_reason:+: $dismiss_reason}"
@@ -1544,47 +1515,25 @@ cmd_dismiss() {
         if gc bd close "$_v" --reason "$_why" >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
             echo "$PROG: dismiss: closed visit $_v — the sitting on $bead ends"
-            dismiss_stamp_visit "$_v"
         elif gc bd close "$_v" --reason "$_why" --force >/dev/null 2>&1; then
             closed_n=$((closed_n + 1))
             echo "$PROG: dismiss: closed visit $_v over its holder's claim — the sitting on $bead ends"
-            dismiss_stamp_visit "$_v"
         else
             sitting_failed=1
             echo "$PROG: dismiss: could not close visit $_v; its sitting keeps the pane. Close it by hand: gc bd close $_v --force" >&2
         fi
     done
 
-    # The row is the operator's only evidence that a sitting is still up, so it
-    # may not be retired while one is. Nothing is written on this arm: a second
-    # dismiss after the visit is dealt with does both halves.
+    # A visit the verb could not account for aborts the run: each unfinished
+    # visit above says what it needs, and a re-run resumes from there.
     if [ "$sitting_failed" -ne 0 ]; then
         # Any visit that DID close changed the board's Held marker, so the
-        # cache goes even though the row half did not run.
+        # cache goes.
         bust_cache
-        echo "$PROG: dismiss: $bead was NOT dismissed — the sitting is unaccounted for, so its row stays on the board. Nothing was stamped on the subject; each unfinished visit above says what it needs, and a re-run resumes from there." >&2
+        echo "$PROG: dismiss: $bead was NOT dismissed — a sitting is unaccounted for. Each unfinished visit above says what it needs, and a re-run resumes from there." >&2
         exit 4
     fi
 
-    set --
-    set -- "$@" --set-metadata "gc.dismissed_at=$(iso_now)" \
-               --set-metadata "gc.dismissed_by=${GC_SESSION_NAME:-operator}"
-    [ -n "$dismiss_reason" ] && set -- "$@" --append-notes "Dismissed from the helm board: $dismiss_reason"
-    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    if gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1; then
-        # Say which of the two things actually happened. The marker only
-        # retires a DONE row, so on a bead that is still OPEN the row stays —
-        # it is live work, and a verb that claimed to have cleared it would be
-        # teaching the operator that dismiss hides things that still need them.
-        if [ "$subject_status" = "closed" ]; then
-            echo "$PROG: dismiss: $bead marked dismissed — it leaves the board's DONE band"
-        else
-            echo "$PROG: dismiss: $bead marked dismissed (status=${subject_status:-unknown}) — it is still open, so it keeps its live row; the marker retires the DONE row it gets once it closes"
-        fi
-    else
-        echo "$PROG: dismiss: could not stamp gc.dismissed_at on '$bead' (rig '${path:-?}'); its row stays on the board" >&2
-        exit 4
-    fi
     bust_cache
     [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
     return 0

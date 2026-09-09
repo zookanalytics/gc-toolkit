@@ -195,7 +195,7 @@ const BOARD: Board = {
       section: 'done',
       closed_at: '2026-08-20T19:14:00Z',
       frontier: 'closed 1d ago',
-      needs: 'closed — dismiss to clear',
+      needs: 'closed — ages out',
       rank_score: -999_002,
     }),
   ],
@@ -308,8 +308,8 @@ it('counts owed, live, and closed separately in the header', async () => {
 });
 
 // The layout-stability rule: a row the operator was looking at does not leave
-// because it was answered. It sinks into the recently-closed band and waits
-// there for an explicit dismiss.
+// because it was answered. It sinks into the recently-closed band and ages out
+// of it on the window clock, with no manual clear.
 it('keeps a closed anchor in the recently-closed band', async () => {
   render(<App />);
   await waitFor(() => expect(screen.getByText(/takeaway cap conversation/)).toBeTruthy());
@@ -318,7 +318,7 @@ it('keeps a closed anchor in the recently-closed band', async () => {
   const row = within(done).getByText(/takeaway cap conversation/).closest('tr');
   expect(row).not.toBeNull();
   expect(within(row as HTMLElement).getByText('closed 1d ago')).toBeTruthy();
-  expect(within(done).getByText(/gc-helm dismiss/)).toBeTruthy();
+  expect(within(done).getByText(/ageing out of this band/)).toBeTruthy();
 });
 
 // The band's copy is the operator's only statement of what it promises, and the
@@ -664,7 +664,7 @@ it('does not count closed pull requests as unread positions', async () => {
     closed_at: '2026-08-20T19:14:00Z',
     pr_machine: 'unknown',
     pr_owed_since: undefined,
-    needs: 'closed — dismiss to clear',
+    needs: 'closed — ages out',
   });
   serve([shut]);
   const view = render(<App />);

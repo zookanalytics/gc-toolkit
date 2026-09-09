@@ -24,7 +24,7 @@ const REFRESH_MS = 30_000;
 const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done'] as const;
 
 // The heading and one-line promise each band makes. The `done` band keeps the
-// "recently closed" heading and the dismiss/window copy it always carried.
+// "recently closed" heading and the window copy it carries.
 const SECTION_META: Record<string, { title: string; blurb: string }> = {
   review: { title: 'review', blurb: 'a pull request wants you' },
   gate: { title: 'gate', blurb: 'a person must answer — a decision, a demand, or a routed bead' },
@@ -258,9 +258,9 @@ function SectionTable({
         {meta.blurb} · {tiles.length}
         {sectionKey === 'done' && (
           <>
-            . They sit below every live band, and no row leaves for being answered:{' '}
-            <code>gc-helm dismiss &lt;id&gt;</code> clears one now. A row does age out of this band on a
-            clock, once it has been closed longer than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
+            . They sit below every live band, and no row leaves for being answered. A row
+            leaves only by ageing out of this band on a clock, once it has been closed longer
+            than <code>GC_HELM_DONE_WINDOW</code> (default 7d,{' '}
             <code>0</code> off).
           </>
         )}
