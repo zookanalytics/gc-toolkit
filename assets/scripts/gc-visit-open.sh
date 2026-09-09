@@ -40,12 +40,14 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-visit-open "<topic>" [--rig <rig>] [--no-react] [--type <t>] [--topic]
-  gc-visit-open <bead-id>  [--no-react]
+  gc-visit-open <bead-id|pr-number|pr-url>  [--no-react]
 
 Opens a durable conversation in one step. A topic string becomes a subject
-bead; an existing bead id is used as the subject as-is. Either way the visit
-parks on the helm board (`gc.routed_to=human`); the operator draws it off the
-board and `gc-helm engage` spawns a converse sitting on demand.
+bead; a bead id, a PR number or URL, or a superseded id resolves through
+gc-helm to the LIVE bead that owns the work and is used as the subject as-is.
+Either way the visit parks on the helm board (`gc.routed_to=human`); the
+operator draws it off the board and `gc-helm engage` spawns a converse sitting
+on demand.
 
   --rig <rig>    File the subject in this rig's ledger (default: gc-toolkit;
                  override with GC_VISIT_DEFAULT_RIG). Ignored for a bead id —
@@ -54,7 +56,8 @@ board and `gc-helm engage` spawns a converse sitting on demand.
                  Faster and unconditional; you lose the framing card.
   --type <t>     Subject bead type (default: task, or decision when the topic
                  reads as a question).
-  --topic        Treat the argument as a topic even if it looks like a bead id.
+  --topic        Treat the argument as a topic even if it looks like a bead id,
+                 a PR number, or a PR URL.
   -h, --help     This help.
 
 Without --no-react the topic is handed to a proactive first reaction, which
@@ -175,11 +178,35 @@ enumerate_rigs() {
     # <<< rig-enumeration-taxonomy
 }
 
+# derive_subject_rig <bead-id> — set prefix_hit, RIG_NAME and SUBJ_DB (the
+# .beads path, empty when the prefix matches no rig) from a bead id's rig
+# prefix. RIGS must already be populated by enumerate_rigs.
+derive_subject_rig() {
+    prefix_hit=$(printf '%s' "$RIGS" | jq -r --arg p "${1%%-*}" \
+        '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1)
+    RIG_NAME="$prefix_hit"
+    SUBJ_DB=$(printf '%s' "$RIGS" | jq -r --arg n "$prefix_hit" \
+        '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
+    [ -n "$SUBJ_DB" ] && SUBJ_DB="$SUBJ_DB/.beads"
+}
+
 if [ -n "$looks_like_bead_id" ]; then
     enumerate_rigs
-    prefix_hit=$(printf '%s' "$RIGS" | jq -r --arg p "${ARG%%-*}" \
-        '.[] | select(.prefix==$p) | .name' 2>/dev/null | head -n1)
+    derive_subject_rig "$ARG"
     [ -n "$prefix_hit" ] || looks_like_bead_id=""   # no such rig prefix → it is a topic
+fi
+
+# A bare PR number or a pull URL is a subject reference — the anchor recording
+# the PR — not a topic. The shape check above only recognizes rig-prefixed bead
+# ids, so without this a PR number falls to the topic path and mints a bead
+# titled with the number. --topic opts out.
+looks_like_pr_ref=""
+if [ -z "$FORCE_TOPIC" ] && [ -z "$looks_like_bead_id" ]; then
+    case "$ARG" in
+        http://*/pull/[0-9]* | https://*/pull/[0-9]*) looks_like_pr_ref=1 ;;
+        *[!0-9]*) : ;;
+        [0-9]*)   looks_like_pr_ref=1 ;;
+    esac
 fi
 
 # ── Resolve the subject ──────────────────────────────────────────────
@@ -188,12 +215,31 @@ if [ -n "$looks_like_bead_id" ]; then
     # rather than silently ignored.
     [ -z "$RIG" ] || die "--rig does not apply to an existing bead ('$ARG' belongs to rig '$prefix_hit')" 2
     [ -z "$SUBJ_TYPE" ] || die "--type does not apply to an existing bead ('$ARG' already has a type)" 2
+    # A settled (superseded) id redirects to its live successor before it is
+    # stamped as the subject: gc-helm's resolver follows gc.superseded_by, and a
+    # live id passes through unchanged. Recompute the rig from the successor.
+    if [ -z "$FORCE_TOPIC" ]; then
+        RESOLVED_SUBJECT_REF=$("$HELM" resolve "$ARG") || exit $?
+        if [ -n "$RESOLVED_SUBJECT_REF" ] && [ "$RESOLVED_SUBJECT_REF" != "$ARG" ]; then
+            note "$PROG: '$ARG' is superseded -> resolving to the live successor $RESOLVED_SUBJECT_REF"
+            ARG="$RESOLVED_SUBJECT_REF"
+            derive_subject_rig "$ARG"
+        fi
+    fi
     SUBJECT="$ARG"
-    RIG_NAME="$prefix_hit"
-    SUBJ_DB=$(printf '%s' "$RIGS" | jq -r --arg n "$prefix_hit" \
-        '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
-    [ -n "$SUBJ_DB" ] && SUBJ_DB="$SUBJ_DB/.beads"
     note "$PROG: subject $SUBJECT (existing bead, rig $RIG_NAME)"
+elif [ -n "$looks_like_pr_ref" ]; then
+    # A bare PR number or a pull URL names an existing anchor. gc-helm's
+    # resolver maps it to the bead that records the PR (pr_number/pr_url
+    # metadata) or fails closed when none or several do. Its rig is
+    # authoritative, so --rig/--type are refused as for any existing subject.
+    [ -z "$RIG" ] || die "--rig does not apply to a PR reference ('$ARG' resolves to an existing bead whose rig is authoritative)" 2
+    [ -z "$SUBJ_TYPE" ] || die "--type does not apply to a PR reference ('$ARG' resolves to an existing bead)" 2
+    SUBJECT=$("$HELM" resolve "$ARG") || exit $?
+    { [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$ARG" ]; } || die "'$ARG' looks like a PR reference but gc-helm resolved it to no live bead — pass the live bead id, or --topic to file this text as a topic. Nothing filed." 4
+    enumerate_rigs
+    derive_subject_rig "$SUBJECT"
+    note "$PROG: PR reference '$ARG' -> subject $SUBJECT (existing bead, rig $RIG_NAME)"
 else
     # ── Create the subject bead from the topic string ────────────────
     [ -n "$RIG" ] || RIG="$DEFAULT_RIG"

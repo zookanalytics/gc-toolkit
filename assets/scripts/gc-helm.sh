@@ -45,6 +45,7 @@ Usage:
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row (subject inferred from the current sitting when omitted)
+  gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
 write verbs. open, engage and react take the subject as a bead id, a PR number
@@ -352,6 +353,9 @@ resolve_live_subject() {
 # bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
 # --metadata-field mangles a numeric value into non-JSON here. A URL additionally
 # pins the repo, so a bare number several repos share is disambiguated by it.
+# The status set is the pack's live-PR set (pr-facts.sh:247, merge.sh:126):
+# an anchor is live in deferred/hooked/pinned too, so a narrower query would
+# fail to resolve a PR whose bead sits in one of those states.
 _resolve_pr_reference() {
     _pr_num="$1"; _pr_url="$2"
     _pr_hits=""
@@ -363,7 +367,7 @@ _resolve_pr_reference() {
         _pr_db=""
         [ -n "$_pr_p" ] && [ -d "$_pr_p/.beads" ] && _pr_db="$_pr_p/.beads"
         # shellcheck disable=SC2086  # ${_pr_db:+--db "$_pr_db"} expands to 0 or 2 space-free fields
-        _pr_rows=$(gc bd list ${_pr_db:+--db "$_pr_db"} --status open,in_progress,blocked --limit 0 --json 2>/dev/null | scrub) || _pr_rows=""
+        _pr_rows=$(gc bd list ${_pr_db:+--db "$_pr_db"} --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null | scrub) || _pr_rows=""
         _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
             if type == "array" then
               [ .[]? | objects
@@ -1204,6 +1208,30 @@ cmd_demand() {
     echo "demand $demand blocks $gated (by $by, $kind): $text"
 }
 
+# ── Verb: resolve ────────────────────────────────────────────────────
+# resolve <reference> — print the LIVE bead a reference resolves to, the same
+# way open/engage/react resolve their subject: a PR number/URL to the anchor
+# that records it, a closed+superseded id to its successor. A live bead id, or
+# any reference the resolver does not recognize (a topic string), prints
+# unchanged; an unresolvable or ambiguous PR, or a superseded-by cycle, is
+# refused (exit 4) naming what it could not resolve. Read-only — it files
+# nothing. gc-visit-open.sh calls this before it decides a reference is a new
+# topic, so a PR number or URL reaches the resolver instead of becoming a topic
+# bead titled with its number.
+cmd_resolve() {
+    resolve_ref=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: resolve: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$resolve_ref" ] || { echo "$PROG: resolve takes one reference" >&2; exit 2; }; resolve_ref="$1"; shift ;;
+        esac
+    done
+    case "$resolve_ref" in "") echo "$PROG: resolve needs <bead-id|pr-number|pr-url>" >&2; usage; exit 2 ;; esac
+    resolve_live_subject "$resolve_ref"
+    printf '%s\n' "$RESOLVED_SUBJECT"
+}
+
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
 # continuation group, parked on the helm board via `gc.routed_to=human` (the
@@ -2023,6 +2051,7 @@ case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
     engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
+    resolve)       shift; cmd_resolve "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;

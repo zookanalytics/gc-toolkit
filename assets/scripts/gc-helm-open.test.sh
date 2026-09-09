@@ -453,12 +453,19 @@ case "$1 ${2:-}" in
       tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
       tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
       tk-prbead2) jq -n '[{id:"tk-prbead2",status:"open",   title:"another PR anchor"}]' ;;
+      tk-defbead) jq -n '[{id:"tk-defbead",status:"deferred",title:"a deferred PR anchor"}]' ;;
       *)          printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
   "bd list")
     case "$*" in
-      *blocked*) printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
-      *)         printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
+      # The widened live-status query (open,in_progress,blocked,deferred,hooked,
+      # pinned) carries `deferred`; a deferred/hooked/pinned anchor is visible
+      # only to it. FAKE_DEFERRED_ROWS models that anchor; unset, the widened
+      # query still answers the ordinary PR rows, so the narrow-query PR cases
+      # are unaffected by the fix.
+      *deferred*) printf '%s' "${FAKE_DEFERRED_ROWS:-${FAKE_PR_ROWS:-[]}}" ;;
+      *blocked*)  printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
+      *)          printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
     esac ;;
   "bd create") printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"; jq -n '{id:"tk-visitR"}' ;;
   "bd update") printf 'bd update %s\n' "$*" >> "$FAKE_CALLS" ;;
@@ -467,6 +474,9 @@ esac
 exit 0
 RESGC
 chmod +x "$TMP/resbin/gc"
+# FAKE_DEFERRED_ROWS is intentionally left UNSET by default so the widened PR
+# query falls back to FAKE_PR_ROWS and every narrow-query PR case is unaffected;
+# the deferred case exports it to model an anchor only the widened query sees.
 export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[]'
 
 # run_resolve <arg> -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
@@ -563,7 +573,23 @@ eq "$RC" "4" "(RESOLVE-PR-AMBIGUOUS) an ambiguous PR number exits 4"
 [ -z "$CALLS" ] && ok "(RESOLVE-PR-AMBIGUOUS) nothing filed" || bad "(RESOLVE-PR-AMBIGUOUS) filed something (calls: $CALLS)"
 grep -q 'ambiguous' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) says ambiguous" || bad "(RESOLVE-PR-AMBIGUOUS) message (err: $ERR)"
 grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candidate" || bad "(RESOLVE-PR-AMBIGUOUS) names candidates (err: $ERR)"
-unset FAKE_PR_ROWS FAKE_VISIT_ROWS
+
+# (RESOLVE-PR-DEFERRED) a PR whose anchor sits in a NON-OPEN live state (deferred)
+# resolves too. The resolver's status set must be the pack's live-PR set
+# (open,in_progress,blocked,deferred,hooked,pinned), matching pr-facts.sh:247 and
+# merge.sh:126; the narrow open,in_progress,blocked would miss it. FAKE_DEFERRED_ROWS
+# is visible only to the widened query, so this is red before the fix (the narrow
+# query finds nothing and exits 4) and green after.
+FAKE_PR_ROWS='[]'
+export FAKE_DEFERRED_ROWS='[{"id":"tk-defbead","status":"deferred","metadata":{"pr_number":"616","pr_url":"https://github.com/o/r/pull/616"}}]'
+run_resolve 616
+eq "$RC" "0" "(RESOLVE-PR-DEFERRED) a PR anchor in a non-open live state resolves and files"
+grep -q 'gc.continuation_group=tk-defbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-DEFERRED) filed on the deferred anchor recording the PR" \
+  || bad "(RESOLVE-PR-DEFERRED) not filed on the deferred anchor (calls: $CALLS)"
+grep -q 'PR #616 -> tk-defbead' <<< "$ERR" \
+  && ok "(RESOLVE-PR-DEFERRED) says which bead it matched" || bad "(RESOLVE-PR-DEFERRED) match not announced (err: $ERR)"
+unset FAKE_PR_ROWS FAKE_VISIT_ROWS FAKE_DEFERRED_ROWS
 
 # --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
 # react and engage resolve the same reference open does, then act on the LIVE
