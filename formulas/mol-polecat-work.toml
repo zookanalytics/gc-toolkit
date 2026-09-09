@@ -169,7 +169,65 @@ Owner liveness, not staleness, is the gate: an idle pool worker between claims
 looks identical to an abandoned one. Only a session absent from
 `gc session list --state all` is safely gone.
 
-**4. Check for rejection (IMPORTANT):**
+**4. Verify the work bead is ready — no open `blocks` blocker (FAIL CLOSED):**
+
+`gc sling <target> <bead> --on <formula>` pours the formula immediately and
+reads no `blocks` deps, and under a graph.v2 dispatch the routed record is the
+freshly minted workflow root, not the work bead — so a `blocks` edge on the
+work bead gates nothing and a blocked bead reaches you as an offered claim
+(docs/gascity-routing-model.md). Raw pool routing does not have this problem:
+there the work bead itself is the routed unit and `bd ready` withholds it while
+a blocker is open. This gate is the pack-level safety net for the formula-sling
+path — if the work bead carries an open `blocks` blocker, refuse to build it,
+arm a re-dispatch so the work re-offers when the blocker closes, and hold this
+molecule.
+
+```bash
+# >>> load-context-blocked-work-hold
+OPEN_BLOCKERS=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '[.[0].dependencies[]? | select((.dependency_type == "blocks") and (.status != "closed")) | .id] | join(" ")' 2>/dev/null)
+if [ -n "$OPEN_BLOCKERS" ]; then
+  POOL=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata["gc.execution_routed_to"] // .[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
+  gc bd update "$WORK_BEAD_ID" --append-notes "bd-ready guard: refused to build $WORK_BEAD_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Molecule held; re-dispatch armed to '$POOL' to fire once the blocker(s) close."
+  SCRIPTS=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
+  gc bd update "$WORK_BEAD_ID" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" --set-metadata gc.deferred_assignee=""
+  RELEASE_OK=0
+  if [ -n "$POOL" ] && [ -x "$SCRIPTS/deferred-dispatch.sh" ] && "$SCRIPTS/deferred-dispatch.sh" arm "$WORK_BEAD_ID" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "bd-ready guard: blocked by $OPEN_BLOCKERS"; then
+    RELEASE_OK=1
+  elif "$SCRIPTS/escalate.sh" --subject "$WORK_BEAD_ID" --key polecat-blocked-work --message "Formula-slung $WORK_BEAD_ID reached a polecat while blocked by open blocks-dep(s): $OPEN_BLOCKERS. Held at load-context; no workspace was touched and nothing was closed. Auto re-dispatch could not be armed (target='$POOL'); re-offer this work once the blocker(s) close."; then
+    RELEASE_OK=1
+  fi
+  if [ "$RELEASE_OK" != "1" ]; then
+    echo "neither deferred-dispatch arm nor escalate recorded a release path; NOT holding or draining, so the step stays claimable and the next worker retries the release rather than parking a molecule no reader knows how to release." >&2
+  elif "$SCRIPTS/molecule-hold.sh" --step "mol-polecat-work.load-context" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "work bead $WORK_BEAD_ID has open blocks-blocker(s) $OPEN_BLOCKERS; re-dispatch armed to re-offer when they close"; then
+    gc runtime drain-ack
+  else
+    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+  fi
+  exit 1
+fi
+# <<< load-context-blocked-work-hold
+```
+
+The work bead carries `gc.execution_routed_to` from the pour, which
+`deferred-dispatch.sh arm` reads as an already-live dispatch and refuses. The
+delivery keys are cleared first so the bead is armable, and so the reconcile
+pass slings it rather than retiring a still-routed record; `status` stays `open`
+and `assignee` empty from the pour, so neither is written and no claim-guard
+rollback is possible. The open blocker keeps the bead out of `bd ready`
+throughout, so clearing the route opens no pool window. The re-dispatch is armed
+to the same pool the pour was executing on, replaying `--on mol-polecat-work`,
+so the work re-offers itself once the blocker closes; escalation is the
+fallback only when the arm cannot be recorded. The drain is conditional on a
+recorded release path AND a landed hold, for the same reason the
+duplicate-dispatch arm above is: a blocked, de-routed molecule with no way back
+is a silent stall, and a hold that did not fully land leaves the molecule
+claimable.
+
+**5. Check for rejection (IMPORTANT):**
 
 If `metadata.rejection_reason` exists, this bead was previously attempted
 and rejected by the refinery. Read the reason carefully:
@@ -179,17 +237,16 @@ and rejected by the refinery. Read the reason carefully:
 If `metadata.branch` exists, a branch already exists from the prior attempt.
 You will use it in workspace-setup instead of creating a new one.
 
-**5. Check inbox for additional context:**
+**6. Check inbox for additional context:**
 ```bash
 gc mail inbox
 # Read any HANDOFF or assignment messages, then archive after absorbing context
 # gc mail read <id> → process → gc mail archive <id>
 ```
 
-**6. Understand the requirements:**
+**7. Understand the requirements:**
 - What exactly needs to be done?
 - What files are likely involved?
-- Are there dependencies or blockers?
 - What does "done" look like?
 - If rejected: what specifically needs fixing?
 

@@ -1292,7 +1292,14 @@ about:
   ([deferred-dispatch.md](deferred-dispatch.md)). A hold kept only in an
   agent's context is invisible to everyone else and dies with the
   session; the armed record is what the rig's `deferred-dispatch` order
-  performs once the blocker closes.
+  performs once the blocker closes. When a blocked bead is formula-slung
+  anyway, `mol-polecat-work`'s load-context step is the pack-level safety
+  net: before it builds, it reads the work bead's `blocks` deps, and on an
+  open blocker it clears the pour's delivery keys, arms that same
+  `deferred-dispatch` re-dispatch to the pool the pour was executing on, and
+  holds the molecule — so the work re-offers itself when the blocker closes
+  instead of being built early. Routing or arming blocked work is still the
+  clean path; the guard only catches the sling that should not have happened.
 - **A canonical `hold:` label** — `hold:mayor` or `hold:external`,
   written by `bd set-state <bead> hold=mayor|external` (which removes any
   existing `hold:*` label, adds the new one, and records an event bead).
