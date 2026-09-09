@@ -538,8 +538,8 @@ Rules:
   `assets/scripts/bead-rehome.sh --origin <subject> --successor <bead> --kind
   re-homed|folded|fixed-upstream|duplicate|not-needed --note "<the sitting's
   reason>"` (find it as the scripts are found in step 1). A subject whose
-  **in-flight PR** the ruling is to close, you **retire**: `gc-helm retire`
-  closes the PR and disposes the anchor as superseded in one act, so no
+  **in-flight PR** the ruling is to close, you **retire**: the PR is
+  closed and the anchor disposed as superseded in one act, so no
   `abandoned` husk is left and `pr-facts.sh` finds an already-closed anchor
   instead of filing a re-ask visit. A non-closed `merge_result` such as
   `pull_request` or `pre_open_gate` is no longer a bar to the ruling; the bar

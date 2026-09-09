@@ -581,8 +581,8 @@ mechanik/converse close paths
 cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
 
 A subject whose PR is still in flight is disposed by **retiring** it, on the
-operator's ruling in a sitting to close it: `gc-helm retire` closes the PR and
-routes the anchor through this same disposition close as superseded, in one
+operator's ruling in a sitting to close it: the PR is closed and the anchor is
+routed through this same disposition close as superseded, in one
 act. The PR is closed rather than left open, so nothing is unlanded, and the
 anchor is disposed rather than bare-closed, so `check-closed-implies-landed`
 exempts it the way it exempts any disposal. `pr-facts.sh` then finds an
