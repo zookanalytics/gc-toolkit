@@ -29,6 +29,13 @@ Definitions:
 
 - **Subject** — the bead the dialogue is about. Its id is the
   continuation group every one of its visits carries.
+- **Universe** — the subject together with its dependents and related
+  items; for an epic, the stories and tasks under it and the work in
+  flight across it. A sitting reasons over that whole scope rather than
+  the subject alone, so it can survey the epic's horizon, weigh what is
+  moving, and drive it forward by designing or slinging work. The
+  universe bounds what a sitting may reach, not what it must read: it acts
+  across the scope without loading every related bead's detail.
 - **Visit** — the bead you claim (`task_kind=visit`). One is filed when
   something flags a bead as needing human attention — a detector, a
   sweep, an agent that cannot proceed — or when the operator opens one to
