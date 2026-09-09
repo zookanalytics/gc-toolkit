@@ -3,13 +3,12 @@
 # react.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
-# Contract:
-#   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit, parked on the board (one open visit per subject)
-#   gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]   spawn a converse sitting for a parked visit and attach
-#   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
-#   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
-#   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
-#   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting and clear the row (subject inferred from the current sitting when omitted)
+# Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
+# write verbs open, engage, react, takeaway, demand, dismiss, and the read-only
+# resolve. open, engage and react take a <subject> (a bead id, a PR number or
+# URL, or a superseded id) and resolve it to the live bead that owns the work
+# by metadata and the graph, never a title; an unresolvable or ambiguous
+# reference is refused and nothing is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -307,9 +306,10 @@ rig_db_for_session() {
 # resolve_live_subject <reference> sets RESOLVED_SUBJECT. A live bead id, and
 # any reference this resolver does not recognize (a topic string), pass through
 # unchanged for the caller's own existence gate to judge. It fails CLOSED
-# (exit 4) on a PR that resolves to no live bead or to several, and on a
-# superseded-by cycle, naming what it could not resolve — the alternative is
-# filing on the wrong bead, which is the defect this exists to end.
+# (exit 4) on a PR that resolves to no live bead or to several, when a store
+# the PR search must read is unreadable, and on a superseded-by cycle, naming
+# what it could not resolve — the alternative is filing on the wrong bead,
+# which is the defect this exists to end.
 #
 #   PR number (615) or URL (…/pull/615)  ->  the anchor whose pr_number / pr_url
 #                                            metadata matches (never a title)
@@ -355,7 +355,11 @@ resolve_live_subject() {
 # pins the repo, so a bare number several repos share is disambiguated by it.
 # The status set is the pack's live-PR set (pr-facts.sh:247, merge.sh:126):
 # an anchor is live in deferred/hooked/pinned too, so a narrower query would
-# fail to resolve a PR whose bead sits in one of those states.
+# fail to resolve a PR whose bead sits in one of those states. The number's
+# uniqueness holds only across EVERY live store, so a per-rig list that will not
+# read — a non-zero exit, or an answer that is not a JSON array — refuses the
+# whole resolution (exit 4) naming that ledger, rather than resolve from the
+# stores that answered while a dropped one may also record the number.
 _resolve_pr_reference() {
     _pr_num="$1"; _pr_url="$2"
     _pr_hits=""
@@ -366,15 +370,27 @@ _resolve_pr_reference() {
     for _pr_p in $_pr_paths; do
         _pr_db=""
         [ -n "$_pr_p" ] && [ -d "$_pr_p/.beads" ] && _pr_db="$_pr_p/.beads"
+        # Capture bd's OWN exit status — a pipe to scrub would report scrub's. A
+        # store that will not read (non-zero exit) or answers with something that
+        # is not a JSON array (an error object, a wedged empty answer) leaves the
+        # cross-store uniqueness proof incomplete, so refuse rather than resolve
+        # from the stores that answered.
+        _pr_rc=0
         # shellcheck disable=SC2086  # ${_pr_db:+--db "$_pr_db"} expands to 0 or 2 space-free fields
-        _pr_rows=$(gc bd list ${_pr_db:+--db "$_pr_db"} --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null | scrub) || _pr_rows=""
+        _pr_raw=$(gc bd list ${_pr_db:+--db "$_pr_db"} --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null) || _pr_rc=$?
+        _pr_rows=$(printf '%s' "$_pr_raw" | scrub)
+        if [ "$_pr_rc" -ne 0 ] || ! printf '%s' "$_pr_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            _pr_led="${_pr_db:-the session default store}"
+            _pr_rig=$(printf '%s' "$RIGS" | jq -r --arg p "$_pr_p" '.[] | select(.path == $p) | .name' 2>/dev/null | head -n1)
+            if [ "$_pr_rc" -ne 0 ]; then _pr_why="gc bd list exited $_pr_rc"; else _pr_why="its answer was not a JSON array"; fi
+            echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} ($_pr_led) did not read ($_pr_why). A bare PR number is unique only across every live store, so resolving it from the stores that answered could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
+            exit 4
+        fi
         _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
-            if type == "array" then
-              [ .[]? | objects
-                | select(((.metadata.pr_number // "") | tostring) == $n)
-                | select($u == "" or ((.metadata.pr_url // "") == $u))
-                | .id ] | .[]
-            else empty end' 2>/dev/null) || _pr_found=""
+            [ .[]? | objects
+              | select(((.metadata.pr_number // "") | tostring) == $n)
+              | select($u == "" or ((.metadata.pr_url // "") == $u))
+              | .id ] | .[]' 2>/dev/null) || _pr_found=""
         for _pr_id in $_pr_found; do
             [ -n "$_pr_id" ] && _pr_hits="$_pr_hits$_pr_id
 "
