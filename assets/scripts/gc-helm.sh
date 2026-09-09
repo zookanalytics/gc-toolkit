@@ -47,7 +47,13 @@ Usage:
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting and clear its DONE row (subject inferred from the current sitting when omitted)
 
 The board is `helm-svc board` (services/helm). This script carries only the
-write verbs. open files a visit in the picked bead's continuation group and
+write verbs. open, engage and react take the subject as a bead id, a PR number
+or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
+work by metadata and the graph — a PR number/URL to the anchor whose
+pr_number/pr_url records it, a closed+superseded id along gc.superseded_by to
+its successor — never an id scraped from a title. An unresolvable or ambiguous
+reference is refused, naming what it could not resolve; nothing is filed.
+open files a visit in the picked bead's continuation group and
 parks it on the board (gc.routed_to=human); its --reason is the short title
 tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
@@ -286,6 +292,148 @@ rig_db_for_session() {
     _spath=$(gc rig list --json 2>/dev/null | scrub \
         | jq -r --arg n "$_srig" '.rigs[]? | objects | select(.name == $n) | .path' 2>/dev/null | head -n1)
     [ -n "$_spath" ] && [ -d "$_spath/.beads" ] && printf '%s' "$_spath/.beads"
+}
+
+# ── Subject resolver: an operator reference to the live bead it owns ──
+# The operator supplies a subject by reading it off whatever is in front of
+# them — a PR, a board row, a bead whose title cites its lineage. A PR/bead
+# title legitimately names OTHER beads (`gc.supersedes`), so an id scraped from
+# one opens the wrong bead: the settled predecessor of a fold, or nothing. The
+# fix is a deterministic resolver keyed on structured metadata and the graph,
+# never on title text, so a PR number or a superseded id cannot open a dead
+# bead.
+#
+# resolve_live_subject <reference> sets RESOLVED_SUBJECT. A live bead id, and
+# any reference this resolver does not recognize (a topic string), pass through
+# unchanged for the caller's own existence gate to judge. It fails CLOSED
+# (exit 4) on a PR that resolves to no live bead or to several, and on a
+# superseded-by cycle, naming what it could not resolve — the alternative is
+# filing on the wrong bead, which is the defect this exists to end.
+#
+#   PR number (615) or URL (…/pull/615)  ->  the anchor whose pr_number / pr_url
+#                                            metadata matches (never a title)
+#   closed + gc.superseded_by            ->  followed to the live successor
+#   live bead id                         ->  unchanged
+RESOLVED_SUBJECT=""
+resolve_live_subject() {
+    _rls_ref="$1"
+    RESOLVED_SUBJECT="$_rls_ref"
+
+    # Rig health first: the PR search reads every rig's store, so validate the
+    # rig list (exit 3) before any read reaches the wire, and cache it here for
+    # the search and for the caller's later rig_path_for_bead.
+    enumerate_rigs
+
+    # Classify without touching the store. A PR URL pins the repo; a bare
+    # number does not. A bead id carries a rig-prefix and a dash; a topic
+    # string is neither and passes through untouched.
+    _rls_prnum=""; _rls_prurl=""
+    case "$_rls_ref" in
+        http://*/pull/[0-9]*|https://*/pull/[0-9]*)
+            _rls_prurl="$_rls_ref"
+            _rls_prnum=$(printf '%s' "$_rls_ref" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p') ;;
+        *[!0-9]*) : ;;                       # a non-digit: not a bare PR number
+        [0-9]*)   _rls_prnum="$_rls_ref" ;;  # all digits: a bare PR number
+    esac
+
+    if [ -n "$_rls_prnum" ]; then
+        _resolve_pr_reference "$_rls_prnum" "$_rls_prurl"
+        return 0
+    fi
+
+    case "$_rls_ref" in
+        *-*) _resolve_superseded_reference "$_rls_ref" ;;
+    esac
+    return 0
+}
+
+# _resolve_pr_reference <number> <url-or-empty> — set RESOLVED_SUBJECT to the
+# LIVE bead that RECORDS this PR, or exit 4 fail-closed. pr_number / pr_url are
+# bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
+# --metadata-field mangles a numeric value into non-JSON here. A URL additionally
+# pins the repo, so a bare number several repos share is disambiguated by it.
+_resolve_pr_reference() {
+    _pr_num="$1"; _pr_url="$2"
+    _pr_hits=""
+    _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
+    _pr_saved_ifs=$IFS
+    IFS='
+'
+    for _pr_p in $_pr_paths; do
+        _pr_db=""
+        [ -n "$_pr_p" ] && [ -d "$_pr_p/.beads" ] && _pr_db="$_pr_p/.beads"
+        # shellcheck disable=SC2086  # ${_pr_db:+--db "$_pr_db"} expands to 0 or 2 space-free fields
+        _pr_rows=$(gc bd list ${_pr_db:+--db "$_pr_db"} --status open,in_progress,blocked --limit 0 --json 2>/dev/null | scrub) || _pr_rows=""
+        _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
+            if type == "array" then
+              [ .[]? | objects
+                | select(((.metadata.pr_number // "") | tostring) == $n)
+                | select($u == "" or ((.metadata.pr_url // "") == $u))
+                | .id ] | .[]
+            else empty end' 2>/dev/null) || _pr_found=""
+        for _pr_id in $_pr_found; do
+            [ -n "$_pr_id" ] && _pr_hits="$_pr_hits$_pr_id
+"
+        done
+    done
+    IFS=$_pr_saved_ifs
+
+    _pr_uniq=$(printf '%s' "$_pr_hits" | awk 'NF && !seen[$0]++')
+    _pr_count=$(printf '%s\n' "$_pr_uniq" | awk 'NF{c++} END{print c + 0}')
+
+    if [ "$_pr_count" -eq 0 ]; then
+        echo "$PROG: no open bead records PR #$_pr_num${_pr_url:+ ($_pr_url)}. If it merged its anchor is closed and there is nothing live to open a visit on; otherwise pass the live bead id. Nothing filed." >&2
+        exit 4
+    fi
+    if [ "$_pr_count" -gt 1 ]; then
+        echo "$PROG: PR #$_pr_num is ambiguous — recorded by $(printf '%s' "$_pr_uniq" | tr '\n' ' '). Pass the PR URL to pin the repo, or the live bead id directly. Nothing filed." >&2
+        exit 4
+    fi
+    RESOLVED_SUBJECT=$(printf '%s' "$_pr_uniq" | awk 'NF{print; exit}')
+    echo "$PROG: PR #$_pr_num -> $RESOLVED_SUBJECT (matched by pr_number/pr_url metadata, never a title)." >&2
+}
+
+# _resolve_superseded_reference <bead-id> — follow a settled disposition
+# (status closed + gc.superseded_by) to its live successor and set
+# RESOLVED_SUBJECT. bead-rehome.sh stamps gc.superseded_by (+ the legacy bare
+# key) alongside gc.superseded_by_store; the successor is read cross-ledger by
+# its rig-unique id, so that store hint is not needed to find it. A live bead,
+# or one that does not resolve, passes through unchanged for the caller's
+# existence gate; a cycle is refused (exit 4) rather than guessed.
+_resolve_superseded_reference() {
+    _ss_orig="$1"; _ss_cur="$1"; _ss_seen=" $1 "; _ss_hops=0
+    while [ "$_ss_hops" -le 24 ]; do
+        _ss_row=$(gc bd show "$_ss_cur" --json 2>/dev/null | scrub) || _ss_row=""
+        _ss_this=$(printf '%s' "$_ss_row" | jq -c --arg b "$_ss_cur" \
+            'if type == "array" then (first(.[] | objects | select((.id // "") == $b)) // null) else null end' 2>/dev/null) || _ss_this="null"
+        if [ -z "$_ss_this" ] || [ "$_ss_this" = "null" ]; then
+            # The reference ITSELF does not resolve: pass it through unchanged so
+            # the caller's existence gate reports a clean not-found.
+            [ "$_ss_cur" = "$_ss_orig" ] && { RESOLVED_SUBJECT="$_ss_orig"; return 0; }
+            # A SUCCESSOR we followed does not resolve (a broken or cross-store
+            # pointer). Refuse — never fall back to opening the settled predecessor.
+            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken or cross-store pointer). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
+            exit 4
+        fi
+        _ss_status=$(printf '%s' "$_ss_this" | jq -r '.status // ""' 2>/dev/null) || _ss_status=""
+        _ss_succ=$(printf '%s' "$_ss_this" | jq -r '(.metadata["gc.superseded_by"] // .metadata.superseded_by // "")' 2>/dev/null) || _ss_succ=""
+        if [ "$_ss_status" = "closed" ] && [ -n "$_ss_succ" ]; then
+            case "$_ss_seen" in
+                *" $_ss_succ "*)
+                    echo "$PROG: $_ss_orig leads to a superseded-by cycle at $_ss_succ; refusing to guess which is live. Pass the live bead id directly. Nothing filed." >&2
+                    exit 4 ;;
+            esac
+            _ss_seen="$_ss_seen$_ss_succ "
+            _ss_cur="$_ss_succ"
+            _ss_hops=$((_ss_hops + 1))
+            continue
+        fi
+        break
+    done
+    if [ "$_ss_cur" != "$_ss_orig" ]; then
+        echo "$PROG: $_ss_orig is closed and superseded -> resolving to the successor $_ss_cur (never the settled predecessor)." >&2
+    fi
+    RESOLVED_SUBJECT="$_ss_cur"
 }
 
 # ── Release helper: quiesce a released molecule ──────────────────────
@@ -1081,6 +1229,11 @@ cmd_open() {
     done
     case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
 
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # BEFORE the rig is derived from the id prefix (a PR number has none).
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
     # Pin bd at the bead's rig (cross-rig filing) and export its rig as GC_RIG
     # so the visit is filed in the subject's rig store and the board gathers it
     # there.
@@ -1217,6 +1370,11 @@ cmd_react() {
     [ -x "$tool" ] || tool="$(command -v gc-proactive.sh 2>/dev/null || true)"
     [ -n "$tool" ] && [ -x "$tool" ] \
         || { echo "$PROG: react: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)" >&2; exit 4; }
+
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # (parity with open), before the rig is derived from the id prefix.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
 
     # Pin bd at the bead's rig (parity with open).
     path=$(rig_path_for_bead "$bead")
@@ -1631,6 +1789,11 @@ cmd_engage() {
         *) echo "$PROG: engage: --model must be opus, fable, or codex (got '$engage_model')" >&2; exit 2 ;;
     esac
     template="converse-$engage_model"
+
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # (parity with open), before the rig is derived from the id prefix.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
 
     # Pin bd at the subject's rig, as open/dismiss do, so the visit lookup and
     # assignment read and write the ledger the picked bead lives in. A prefix
