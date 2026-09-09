@@ -1094,14 +1094,18 @@ definition first, because everything below uses it:
 > a subject is the dialogue's durable spine — board-legible,
 > cold-reconstructable, no provider transcript required.
 >
-> **A sitting is not a unit of work.** What it produces is beads: new
-> ones filed, ones slung to a pool, edges wired, an outcome appended
-> to the subject. It writes no files and makes no commits, because
-> moving a bead forward is what a molecule does — so a sitting that
-> finds work needing doing routes it to one, and where nothing can
-> reach the work, the gap is itself a bead to file. What reaches the
-> operator is the point where the operator is needed for a judgment,
-> which is narrower than judgment and narrower still than action.
+> **A sitting is not a unit of work, and it acts on its subject's
+> universe in coordination with the operator.** It files beads, slings
+> them to a pool, wires edges, appends an outcome to the subject; and on
+> an operator-agreed ruling it acts on the subject's PR — commenting,
+> replying to and resolving review threads, and retiring it, which closes
+> the PR and disposes the anchor as superseded. It writes no files and
+> makes no commits, because moving a bead forward is what a molecule does,
+> so a sitting that finds work needing doing routes it to one, and where
+> nothing can reach the work, the gap is itself a bead to file. The one
+> line it does not cross is a repo change. What reaches the operator is the
+> point where the operator is needed for a judgment, which is narrower than
+> judgment and narrower still than action.
 >
 > **A visit body is written at FILING time and read at CLAIM time**, and
 > those are routinely a day or more apart — a queued visit holds its

@@ -579,3 +579,15 @@ searches every store before concluding a close was false. Consumers: the
 mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
+
+A subject whose PR is still in flight is disposed by **retiring** it, on the
+operator's ruling in a sitting to close it: `gc-helm retire` closes the PR and
+routes the anchor through this same disposition close as superseded, in one
+act. The PR is closed rather than left open, so nothing is unlanded, and the
+anchor is disposed rather than bare-closed, so `check-closed-implies-landed`
+exempts it the way it exempts any disposal. `pr-facts.sh` then finds an
+already-closed anchor and files no re-ask visit, where a PR closed out-of-band
+would have driven `pull_request → abandoned` and a fresh visit. A bare close of
+a subject still carrying a non-closed `merge_result` remains the violation
+`lifecycle.sh reopen` repairs; retiring is the sanctioned path, not an
+exception to the invariant.

@@ -1421,12 +1421,12 @@ else
     bad "…and that it produces no commits" \
         "the commit prohibition belongs to the definition; stated only as a rule it reads as scoped to whatever repo the rule names"
 fi
-OUTPUT_RULE="$(awk '/^- \*\*Beads are your only output/ {f = 1; print; next} f && /^- \*\*/ {exit} f {print}' "$PROMPT")"
+OUTPUT_RULE="$(awk '/^- \*\*A visit acts on its universe/ {f = 1; print; next} f && /^- \*\*/ {exit} f {print}' "$PROMPT")"
 if [ -z "$OUTPUT_RULE" ]; then
-    bad "the beads-only-output rule is still extractable" \
-        "no '- **Beads are your only output' rule in $PROMPT — the extraction is stale, not the prompt"
+    bad "the visit-latitude output rule is still extractable" \
+        "no '- **A visit acts on its universe' rule in $PROMPT — the extraction is stale, not the prompt"
 else
-    ok "the beads-only-output rule is still extractable"
+    ok "the visit-latitude output rule is still extractable"
     if printf '%s\n' "$OUTPUT_RULE" | grep -q 'not a unit of work'; then
         ok "…and rests on what a sitting is, not on what a checkout holds"
     else
