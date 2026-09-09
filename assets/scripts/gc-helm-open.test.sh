@@ -422,14 +422,13 @@ grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw
   || ok "(RIGWHY-EVIDENCE) the exit status is kept, not swallowed by '|| true'"
 
 # --- (RESOLVE) the subject resolver: PR ref / superseded id -> live bead ------
-# THE BUG (tk-0mhde5): the operator reads a subject off whatever is in front of
-# them — a PR, or a bead whose title cites the predecessor it superseded — and
-# `open <that-id>` filed a visit on the settled predecessor while the live wedge
-# sat unattended. THE FIX: resolve the reference to the LIVE bead that owns the
-# work by metadata and the graph, never a title. These cases drive the REAL
-# cmd_open over a stub whose `bd show` is id-aware (a supersede chain) and whose
-# `bd list` answers the PR search, asserting the visit is filed on the RESOLVED
-# bead — or, on an unresolvable/ambiguous reference, that NOTHING is filed.
+# A PR reference or a settled (closed and superseded) bead id resolves to the
+# LIVE bead that owns the work, by metadata and the graph and never by a title,
+# before a visit is filed on it. These cases drive the REAL cmd_open over a stub
+# whose `bd show` is id-aware, so a supersede chain and a live bead read
+# differently, and whose `bd list` answers the PR search. They assert the visit
+# is filed on the RESOLVED bead, and that an unresolvable or ambiguous reference
+# files nothing.
 mkdir -p "$TMP/resbin"
 cat > "$TMP/resbin/gc" <<'RESGC'
 #!/usr/bin/env bash
@@ -566,15 +565,130 @@ grep -q 'ambiguous' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) says ambiguous" || 
 grep -q 'tk-prbead2' <<< "$ERR" && ok "(RESOLVE-PR-AMBIGUOUS) names every candidate" || bad "(RESOLVE-PR-AMBIGUOUS) names candidates (err: $ERR)"
 unset FAKE_PR_ROWS FAKE_VISIT_ROWS
 
-# (RESOLVE-ORDER static) the resolver runs before the gate-visit block, in each
-# verb that takes an operator-supplied subject — so a PR/superseded reference is
-# resolved before anything is filed on it.
-for verb in cmd_open cmd_react cmd_engage; do
-  RES_LINE="$(awk -v v="^$verb\\\\(\\\\)" '$0 ~ v {f=1} f && /resolve_live_subject/{print NR; exit}' "$SCRIPT")"
-  [ -n "$RES_LINE" ] \
-    && ok "(RESOLVE-ORDER) $verb calls resolve_live_subject (line $RES_LINE)" \
-    || bad "(RESOLVE-ORDER) $verb does not resolve its subject"
-done
+# --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
+# react and engage resolve the same reference open does, then act on the LIVE
+# bead: react slings it through gc-proactive.sh, engage spawns a sitting on a
+# visit tracking it. These cases drive the REAL verbs over a stub that answers
+# the resolve reads and, for engage, the spawn and bind, and assert the id each
+# verb writes is the RESOLVED one (a supersede chain's successor, or the bead a
+# PR number records), never the reference typed.
+mkdir -p "$TMP/rebin"
+cat > "$TMP/rebin/gc" <<'REBIN'
+#!/usr/bin/env bash
+# `bd show` branches on the id so a supersede chain, a live bead, and the visit
+# read differently; the visit's assignee is served from $VISIT_STATE so the
+# assignee the bind writes is the one the readback sees. `bd list` tells the PR
+# search (carries `blocked` in --status) apart from the visit lookup. `session
+# new` returns a fixed identity; nudge is a no-op. Mutations append to $FAKE_CALLS.
+case "$1 ${2:-}" in
+  "rig list")
+    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+  "bd show")
+    case "$3" in
+      tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
+      tk-succ)   jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
+      tk-prbead) jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
+      tk-visitE)
+        _a="$(cat "$VISIT_STATE" 2>/dev/null || true)"
+        jq -n --arg a "$_a" '[{id:"tk-visitE", status:"open", assignee:$a, metadata:{"task_kind":"visit"}}]' ;;
+      *) printf '{"error":"no issues found"}\n'; exit 1 ;;
+    esac ;;
+  "bd list")
+    case "$*" in
+      *blocked*) printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
+      *)         printf '%s' "${FAKE_VISIT_ROWS:-[]}" ;;
+    esac ;;
+  "bd dep")
+    case "$3" in
+      list) printf '[]\n' ;;
+      *)    printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS" ;;
+    esac ;;
+  "bd update")
+    printf 'bd update %s\n' "$*" >> "$FAKE_CALLS"
+    _sn="$(printf '%s' "$*" | sed -n 's/.* --assignee \(.*\)$/\1/p')"
+    [ -n "$_sn" ] && printf '%s' "$_sn" > "$VISIT_STATE" ;;
+  "session new")
+    jq -n '{session_id:"lx-fake", session_name:"gc-toolkit/converse-opus.tk-visitE"}' ;;
+esac
+exit 0
+REBIN
+chmod +x "$TMP/rebin/gc"
+cat > "$TMP/rebin/gc-proactive.sh" <<'PROACTIVE'
+#!/usr/bin/env bash
+printf 'proactive %s\n' "$*" >> "$FAKE_SLING"
+exit 0
+PROACTIVE
+chmod +x "$TMP/rebin/gc-proactive.sh"
+export FAKE_SLING="$TMP/slung" VISIT_STATE="$TMP/visit_state"
+
+# run_react <arg> — drive the REAL cmd_react; the fake gc-proactive.sh records
+# the `sling` argv so the resolved subject is checked against the slung id.
+run_react() {
+    : > "$FAKE_SLING"
+    set +e
+    OUT="$(PATH="$TMP/rebin:$PATH" GC_PROACTIVE_TOOL="$TMP/rebin/gc-proactive.sh" \
+        sh "$SCRIPT" react "$1" --dry-run 2>"$TMP/err")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/err")"; SLUNG="$(cat "$FAKE_SLING")"
+}
+# run_engage <arg> — drive the REAL cmd_engage through the spawn/bind path,
+# --no-attach so no session is attached; VISIT_STATE reset so the pre-bind read
+# sees the parked visit unassigned.
+run_engage() {
+    : > "$FAKE_CALLS"; : > "$VISIT_STATE"
+    set +e
+    OUT="$(PATH="$TMP/rebin:$PATH" sh "$SCRIPT" engage "$1" --no-attach 2>"$TMP/err")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
+}
+
+# (RESOLVE-REACT-SUPERSEDE) react slings the successor of a settled id.
+export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[]'
+run_react tk-pred
+eq "$RC" "0" "(RESOLVE-REACT-SUPERSEDE) react resolves a settled id and slings"
+grep -q 'sling tk-succ' <<< "$SLUNG" \
+  && ok "(RESOLVE-REACT-SUPERSEDE) gc-proactive.sh is slung the live successor" \
+  || bad "(RESOLVE-REACT-SUPERSEDE) slung the successor (slung: $SLUNG)"
+grep -q 'sling tk-pred' <<< "$SLUNG" \
+  && bad "(RESOLVE-REACT-SUPERSEDE) slung the settled predecessor" \
+  || ok "(RESOLVE-REACT-SUPERSEDE) never slings the predecessor"
+
+# (RESOLVE-REACT-PR) react slings the bead a PR number records, not the number.
+export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_VISIT_ROWS='[]'
+run_react 615
+eq "$RC" "0" "(RESOLVE-REACT-PR) react resolves a PR number and slings"
+grep -q 'sling tk-prbead' <<< "$SLUNG" \
+  && ok "(RESOLVE-REACT-PR) gc-proactive.sh is slung the bead recording the PR" \
+  || bad "(RESOLVE-REACT-PR) slung the PR anchor (slung: $SLUNG)"
+grep -qE 'sling 615( |$)' <<< "$SLUNG" \
+  && bad "(RESOLVE-REACT-PR) slung the raw PR number" \
+  || ok "(RESOLVE-REACT-PR) never slings the raw PR number"
+
+# (RESOLVE-ENGAGE-SUPERSEDE) engage spawns onto the visit tracking the successor.
+export FAKE_PR_ROWS='[]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-succ"}}]'
+run_engage tk-pred
+eq "$RC" "0" "(RESOLVE-ENGAGE-SUPERSEDE) engage resolves a settled id and binds a sitting"
+grep -q 'visit tk-visitE on tk-succ' <<< "$OUT" \
+  && ok "(RESOLVE-ENGAGE-SUPERSEDE) the sitting holds a visit on the live successor" \
+  || bad "(RESOLVE-ENGAGE-SUPERSEDE) sitting is on the successor (out: $OUT)"
+grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
+  && ok "(RESOLVE-ENGAGE-SUPERSEDE) announces the redirect before spawning" \
+  || bad "(RESOLVE-ENGAGE-SUPERSEDE) redirect announced (err: $ERR)"
+grep -q 'bd update tk-visitE.*--assignee gc-toolkit/converse-opus.tk-visitE' <<< "$CALLS" \
+  && ok "(RESOLVE-ENGAGE-SUPERSEDE) binds the spawned sitting to the successor's visit" \
+  || bad "(RESOLVE-ENGAGE-SUPERSEDE) bound the resolved bead's visit (calls: $CALLS)"
+
+# (RESOLVE-ENGAGE-PR) engage spawns onto the visit tracking the PR's bead.
+export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]' FAKE_VISIT_ROWS='[{"id":"tk-visitE","status":"open","assignee":"","metadata":{"task_kind":"visit","gc.continuation_group":"tk-prbead"}}]'
+run_engage 615
+eq "$RC" "0" "(RESOLVE-ENGAGE-PR) engage resolves a PR number and binds a sitting"
+grep -q 'visit tk-visitE on tk-prbead' <<< "$OUT" \
+  && ok "(RESOLVE-ENGAGE-PR) the sitting holds a visit on the bead recording the PR" \
+  || bad "(RESOLVE-ENGAGE-PR) sitting is on the PR anchor (out: $OUT)"
+grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
+  && ok "(RESOLVE-ENGAGE-PR) announces the PR match before spawning" \
+  || bad "(RESOLVE-ENGAGE-PR) PR match announced (err: $ERR)"
+unset FAKE_PR_ROWS FAKE_VISIT_ROWS FAKE_SLING VISIT_STATE
 
 # --- (SYNTAX) the shipped script still parses ---------------------------------
 sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) gc-helm.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"
