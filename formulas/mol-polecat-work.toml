@@ -244,7 +244,16 @@ if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
   cd "$WORKTREE"
 else
   WORKTREE_PATH=$(pwd)/worktrees/"$WORK_BEAD_ID"
-  git worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
+# >>> workspace-setup-worktree-add
+  # `-C "$RIG_ROOT"` binds the worktree to the rig checkout, so a session whose
+  # cwd sits in another repo still registers it in the rig, not that repo.
+  # An empty RIG_ROOT would let `git -C ""` operate on cwd — the coupling this
+  # avoids — so fail closed when neither GC_RIG_ROOT nor the roster names it.
+  RIG_ROOT="${GC_RIG_ROOT:-}"
+  [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+  [ -n "$RIG_ROOT" ] || { echo "workspace-setup: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+  git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
+# <<< workspace-setup-worktree-add
   cd "$WORKTREE_PATH"
   gc bd update "$WORK_BEAD_ID" --set-metadata work_dir="$WORKTREE_PATH"
 fi
