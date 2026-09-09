@@ -129,6 +129,21 @@ WT_FB="$TMP/wt-fallback"
 eq "$(in_wt_list "$RIG" "$WT_FB")" yes "fallback: gc rig list resolves the rig by name, worktree lands in it"
 eq "$(in_wt_list "$CWD" "$WT_FB")" no  "fallback: worktree NOT registered in the cwd repo"
 
+# --- No-match fallback: GC_RIG_ROOT empty AND the roster names no such rig. ---
+# RIG_ROOT resolves to the empty string, so a bare `git -C ""` would follow cwd
+# — the exact coupling this block binds against. The snippet must fail closed
+# and register nothing, in the rig or in cwd. The same fake `gc` roster answers;
+# GC_RIG names a rig it does not carry, so the jq select yields nothing.
+WT_NOMATCH="$TMP/wt-nomatch"
+nomatch_rc=0
+( cd "$CWD"
+  PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_NOMATCH" GC_RIG_ROOT="" GC_RIG=definitely-not-a-rig bash "$SNIPPET" ) >"$TMP/out.nomatch" 2>&1 || nomatch_rc=$?
+[ "$nomatch_rc" -ne 0 ] \
+  && ok "no-match: unresolvable rig fails closed (snippet exits non-zero)" \
+  || bad "no-match: snippet exited 0 with an unresolvable rig — git -C '' followed cwd"
+eq "$(in_wt_list "$CWD" "$WT_NOMATCH")" no "no-match: nothing registered in the cwd repo"
+eq "$(in_wt_list "$RIG" "$WT_NOMATCH")" no "no-match: nothing registered in the rig repo"
+
 echo "----"
 echo "workspace-setup-worktree-rig: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
