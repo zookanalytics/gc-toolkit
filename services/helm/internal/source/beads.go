@@ -529,11 +529,11 @@ var metadataAnchors = []metadataAnchor{
 //
 // THE SECOND PASS is the only thing that gives a closed anchor a row: the open
 // queries stop returning it the instant it is answered. It derives into the
-// terminal DONE band, below every live row. `gc-helm dismiss` retires it on the
-// operator's word; doneSince ages it out on a clock once it has been closed
-// longer than the window. That clock is the caller's captured `now`, so every
-// rig is bounded at the same cutoff and a row at the boundary does not turn on
-// which rig the gather reached last.
+// terminal DONE band, below every live row. doneSince ages it out on a clock
+// once it has been closed longer than the window; nothing else retires it, so
+// the band carries no per-row state. That clock is the caller's captured `now`,
+// so every rig is bounded at the same cutoff and a row at the boundary does not
+// turn on which rig the gather reached last.
 func (s *BeadsSource) gatherRig(ctx context.Context, g *gatherState, st beadStore, r rigRef, convoys map[string]convoyRow, now time.Time) {
 	// Children are read at ALL statuses in both passes, so n_closed is a real
 	// count rather than a count of the still-open ones.
@@ -599,9 +599,6 @@ func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st bead
 				continue
 			}
 			if kind == "convoy" && !admitConvoy(iss.Title) {
-				continue
-			}
-			if closedAfter != nil && dismissed(iss) {
 				continue
 			}
 			pending = append(pending, pendingAnchor{anchor: newAnchor(iss, kind, r), kind: kind})
@@ -840,16 +837,6 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 	return blockers, all, closed, false
 }
 
-// dismissed reports the operator's explicit "take this out of my view", written
-// by `gc-helm dismiss`. Both callers gate it on the CLOSED pass, and that gate
-// is load-bearing rather than an optimisation: the marker retires a DONE row,
-// and a dismissed anchor that is later REOPENED is live work again. Applied to
-// the open pass it would hide that row from the live board — the same
-// disappearance this band exists to stop, with a stale marker as the cause.
-func dismissed(iss *beads.Issue) bool {
-	return strings.TrimSpace(decodeMetadata(iss.Metadata)["gc.dismissed_at"]) != ""
-}
-
 // collectMetadataAnchors gathers the metadata-keyed anchor ROWS for one rig;
 // their edges are attached later, in the one batched pass gatherAnchors runs
 // over every anchor. The SearchIssues kinds fail independently of each other
@@ -895,9 +882,6 @@ func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState
 		g.ok()
 		for _, iss := range issues {
 			if iss == nil {
-				continue
-			}
-			if closedAfter != nil && dismissed(iss) {
 				continue
 			}
 			out = append(out, pendingAnchor{anchor: newAnchor(iss, ma.kind, r), kind: ma.kind})

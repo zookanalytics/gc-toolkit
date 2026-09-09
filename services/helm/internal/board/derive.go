@@ -643,11 +643,11 @@ func collapseWS(s string) string {
 func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool,
 	machine, approval string, ask *Blocker, prIsOwed bool) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
-	// describes what the row wanted while it was live; what it wants now is to
-	// stop being on the board, and only a human can decide that. The takeaway
-	// itself stays on the wire.
+	// describes what the row wanted while it was live; a closed row wants
+	// nothing now — it ages out of the DONE band on its own once it has been
+	// closed longer than the window. The takeaway itself stays on the wire.
 	if !a.ClosedAt.IsZero() {
-		return "closed — dismiss to clear"
+		return "closed — ages out"
 	}
 	// The disposition phrase OUTRANKS the takeaway, and only here. Every other
 	// row spends its takeaway as NEEDS because the sentence is the best answer

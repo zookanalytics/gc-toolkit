@@ -26,7 +26,7 @@ func doneBoard() (board.Board, []board.Tile) {
 			ID: "tk-done", Rig: "gc-toolkit", Kind: "parked", Title: "answered while you were away",
 			Severity: board.SevDone, MTotal: 1, NClosed: 1, Section: board.SectionDone,
 			ClosedAt: now.Add(-26 * time.Hour),
-			Frontier: "closed 1d ago", Needs: "closed — dismiss to clear",
+			Frontier: "closed 1d ago", Needs: "closed — ages out",
 			RankScore: -999_002,
 		},
 	}
@@ -45,18 +45,18 @@ func TestRenderTableCountsTheDoneBandSeparately(t *testing.T) {
 	}
 }
 
-func TestRenderTableShowsTheDoneRowAndHowToClearIt(t *testing.T) {
+func TestRenderTableShowsTheDoneRowAndThatItAgesOut(t *testing.T) {
 	b, tiles := doneBoard()
 	var out strings.Builder
 	renderTable(&out, b, tiles, b.GeneratedAt, 1)
 	got := out.String()
 
 	for _, want := range []string{
-		"tk-done",                   // the row is rendered at all
-		"DONE",                      // in its own band
-		"closed 1d ago",             // saying when
-		"closed — dismiss to clear", // and what clears it
-		"gc-helm.sh dismiss <id>",   // the legend names the verb
+		"tk-done",              // the row is rendered at all
+		"DONE",                 // in its own band
+		"closed 1d ago",        // saying when
+		"closed — ages out",    // and that it leaves on its own
+		"ages out of the band", // the legend says how a row leaves
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("table is missing %q; got:\n%s", want, got)

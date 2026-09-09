@@ -375,7 +375,6 @@ have "config explains what ends a sitting instead" 'gc-helm dismiss' "$ATOML"
 # absence is not a missing convenience.
 have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
-have "dismiss also clears the board row" 'gc.dismissed_at=' "$HELM"
 have "the engagement doc records the switch-off" 'off the idle ladder' "$ENGAGE"
 
 echo "── the verified mechanism is recorded centrally ──"

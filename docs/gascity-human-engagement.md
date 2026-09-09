@@ -587,8 +587,9 @@ close outright. `dismiss` stamps `gc.outcome=dismissed`, then closes, escalating
 to `--force` only when the plain close is refused. The stamp is a precondition
 of the close, not a best-effort write beside it: the verb closes only the visits
 it can read as OPEN, so a visit closed without an outcome is one no re-run
-reaches. A refused stamp leaves that visit open and the subject's row on the
-board, and the run exits 4.
+reaches. A refused stamp leaves that visit open, and the run exits 4. It writes
+nothing to the subject: the subject's DONE row, once it closes, leaves the board
+only by ageing out of `GC_HELM_DONE_WINDOW`, with no per-row clear.
 
 The ending the pack cannot reach from config at all is the pane itself:
 `Provider.Stop` destroys the tmux session, its pane and its scrollback on every

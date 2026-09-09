@@ -197,7 +197,7 @@
       "updated_at": "2026-08-10T09:00:00Z",
       "closed_at": "2026-08-10T09:30:00Z",
       "frontier": "closed 1d ago",
-      "needs": "closed — dismiss to clear",
+      "needs": "closed — ages out",
       "rank_score": -999002,
       "pr_number": 0,
       "pr_url": "",

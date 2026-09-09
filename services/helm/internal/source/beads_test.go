@@ -1728,7 +1728,8 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 // that does, and the two things that bound it.
 
 // doneStore is one rig's worth of recently closed anchors: one inside the
-// window, one outside it, and one inside it that the operator has dismissed.
+// window, one outside it, and one inside it that carries a legacy dismiss
+// marker from before the DONE band went stateless.
 func doneStore() *fakeStore {
 	return &fakeStore{
 		issues: map[string][]*beads.Issue{
@@ -1738,7 +1739,10 @@ func doneStore() *fakeStore {
 					testNow.Add(-24*time.Hour), testNow.Add(-24*time.Hour), ""),
 				closedIssue("tk-ancient", "closed last month", "epic", 2,
 					testNow.Add(-30*24*time.Hour), testNow.Add(-30*24*time.Hour), ""),
-				closedIssue("tk-gone", "closed yesterday, dismissed since", "epic", 2,
+				// A row closed inside the window that still carries the retired
+				// gc.dismissed_at marker. The band reads no per-row state, so the
+				// marker is inert and the row bands DONE like any other.
+				closedIssue("tk-marked", "closed yesterday, carries a legacy dismiss marker", "epic", 2,
 					testNow.Add(-24*time.Hour), testNow.Add(-24*time.Hour),
 					`{"gc.dismissed_at":"2026-08-01T09:00:00Z","gc.dismissed_by":"operator"}`),
 			},
@@ -1746,10 +1750,6 @@ func doneStore() *fakeStore {
 				closedIssue("tk-subject", "a conversation subject that closed", "bug", 2,
 					testNow.Add(-2*time.Hour), testNow.Add(-2*time.Hour),
 					`{"gc.takeaway":"settled — nothing further"}`),
-				// Dismissed while it was closed, then REOPENED. It is live work
-				// again and the stale marker must not follow it.
-				issue("tk-reopened", "dismissed, then reopened", "bug", 1, testNow.Add(-time.Hour),
-					`{"gc.takeaway":"back open","gc.dismissed_at":"2026-07-30T09:00:00Z"}`),
 			},
 		},
 	}
@@ -1791,7 +1791,7 @@ func TestGatherKeepsRecentlyClosedAnchors(t *testing.T) {
 	}
 }
 
-func TestGatherBoundsAndDismissesTheDoneBand(t *testing.T) {
+func TestGatherBoundsTheDoneBand(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
 
@@ -1802,28 +1802,11 @@ func TestGatherBoundsAndDismissesTheDoneBand(t *testing.T) {
 	if _, ok := findAnchor(res, "tk-ancient"); ok {
 		t.Error("the window bounds the pass: an anchor closed a month ago is history, not layout")
 	}
-	if _, ok := findAnchor(res, "tk-gone"); ok {
-		t.Error("gc.dismissed_at is the operator's explicit clear; a dismissed row must not come back")
-	}
-}
-
-// The marker retires a DONE row and nothing else. A dismissed anchor that is
-// later reopened is live work, and hiding it would be the same disappearance
-// the band exists to stop, with a stale marker as the cause.
-func TestDismissMarkerDoesNotHideALiveAnchor(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
-	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": doneStore()})
-
-	res, err := src.Gather(context.Background())
-	if err != nil {
-		t.Fatalf("Gather: %v", err)
-	}
-	i, ok := findAnchor(res, "tk-reopened")
-	if !ok {
-		t.Fatal("a reopened anchor carrying a stale gc.dismissed_at is live work and belongs on the board")
-	}
-	if !res.Anchors[i].ClosedAt.IsZero() {
-		t.Error("...and reads as live, not DONE")
+	// The window is the only bound. A row closed inside it stays on the pass
+	// even carrying a legacy gc.dismissed_at: the band reads no per-row state,
+	// so the marker is inert and the row ages out on the clock like any other.
+	if _, ok := findAnchor(res, "tk-marked"); !ok {
+		t.Error("a row closed inside the window bands DONE regardless of a legacy dismiss marker; the band is stateless")
 	}
 }
 

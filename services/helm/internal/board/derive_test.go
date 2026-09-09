@@ -1924,8 +1924,8 @@ func TestClosedAnchorBandsDoneNotByItsChildren(t *testing.T) {
 	if tile.Frontier != "closed 1d ago" {
 		t.Errorf("frontier says when it closed: got %q", tile.Frontier)
 	}
-	if tile.Needs != "closed — dismiss to clear" {
-		t.Errorf("needs names the one act that clears it: got %q", tile.Needs)
+	if tile.Needs != "closed — ages out" {
+		t.Errorf("needs says a closed row leaves on its own: got %q", tile.Needs)
 	}
 	if tile.ClosedAt.IsZero() {
 		t.Error("closed_at reaches the wire; without it no consumer can tell the band apart")
@@ -1940,8 +1940,8 @@ func TestClosedAnchorNeedsOutranksItsTakeaway(t *testing.T) {
 	a.Takeaway = "waiting on the operator to pick a storage backend"
 
 	tile := computeTile(a, fixtureNow, Facts{})
-	if tile.Needs != "closed — dismiss to clear" {
-		t.Errorf("a closed row asks to be cleared, not re-read: got %q", tile.Needs)
+	if tile.Needs != "closed — ages out" {
+		t.Errorf("a closed row ages out on its own, it is not re-read: got %q", tile.Needs)
 	}
 	if tile.Takeaway == nil || *tile.Takeaway != a.Takeaway {
 		t.Error("the takeaway still travels on the wire; only the NEEDS cell changes")
@@ -2095,8 +2095,8 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	if tile.Severity != SevDone {
 		t.Errorf("it bands DONE like every other closed row: got %s", tile.Severity)
 	}
-	if tile.Needs != "closed — dismiss to clear" {
-		t.Errorf("needs names the one act that clears it: got %q", tile.Needs)
+	if tile.Needs != "closed — ages out" {
+		t.Errorf("needs says a closed row leaves on its own: got %q", tile.Needs)
 	}
 	// The axes still travel: the row is closed, not unreadable.
 	if tile.PRMachine != MachineWedgedException {
