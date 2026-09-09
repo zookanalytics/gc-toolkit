@@ -1,11 +1,10 @@
 #!/bin/sh
 # gc-visit-open.sh — operator-origin visit intake: turn "I need an agent on
 # topic X" into a routed, durable conversation in one command (tk-4ojka).
-# Usage:
-#   gc-visit-open "<topic>"                 open a conversation on a NEW topic
-#   gc-visit-open <bead-id>                 open one on an EXISTING bead
-#   flags: --rig <rig> · --no-react · --type <t> · --topic (id-shaped strings
-#   are topics)
+# The argument (grammar and flags in usage()) is either a topic string, which
+# becomes a NEW subject bead, or a reference to an EXISTING one (a bead id, a
+# PR number or URL, or a superseded id) resolved through gc-helm to the live
+# bead that owns the work.
 # Owns everything upstream of the visit (rig, subject bead, path choice);
 # visit filing itself lives ONCE in gc-helm.sh open's gate-visit block, which
 # this calls (gate-visit.test.sh guards that single copy). Two paths:

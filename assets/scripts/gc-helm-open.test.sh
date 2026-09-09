@@ -591,6 +591,85 @@ grep -q 'PR #616 -> tk-defbead' <<< "$ERR" \
   && ok "(RESOLVE-PR-DEFERRED) says which bead it matched" || bad "(RESOLVE-PR-DEFERRED) match not announced (err: $ERR)"
 unset FAKE_PR_ROWS FAKE_VISIT_ROWS FAKE_DEFERRED_ROWS
 
+# --- (RESOLVE-PR-UNREADABLE) a store that will not read fails the number CLOSED -
+# A bare PR number is unique only across EVERY live store, so the search must be
+# able to read them all: a per-rig `gc bd list` that errors, or answers with a
+# non-array payload, leaves the candidate set incomplete and the resolution is
+# refused rather than resolved from the stores that answered — otherwise a number
+# an unreadable store also records would open a visit on the wrong anchor. Two
+# rig stores: rigA does not read, rigB records PR #615. Driven over `open` so
+# "nothing filed" is observable, with a readable-but-EMPTY control proving the
+# refusal keys on unreadability, not merely on a second rig existing.
+mkdir -p "$TMP/unread/rigA/.beads" "$TMP/unread/rigB/.beads" "$TMP/unread/bin"
+cat > "$TMP/unread/bin/gc" <<UNREADGC
+#!/usr/bin/env bash
+# rigA (prefix aa) is scanned first; its ledger read is controlled by \$RIGA_MODE:
+# fail = non-zero exit, badshape = rc 0 with a non-array answer, ok = an empty
+# array (readable, no PR rows). rigB (prefix tk) records PR #615. The PR search
+# carries the --db of the rig it scans, so the arms tell the ledgers apart by path.
+case "\$1 \${2:-}" in
+  "rig list")
+    jq -n '{rigs:[{name:"riga",path:"$TMP/unread/rigA",prefix:"aa"},{name:"rigb",path:"$TMP/unread/rigB",prefix:"tk"}]}' ;;
+  "bd list")
+    case "\$*" in
+      *"$TMP/unread/rigA/.beads"*)
+        case "\${RIGA_MODE:-fail}" in
+          badshape) printf '{"error":"dolt is wedged"}\n' ;;
+          ok)       printf '[]\n' ;;
+          *)        echo "dolt: connection refused" >&2; exit 7 ;;
+        esac ;;
+      *"$TMP/unread/rigB/.beads"*) printf '%s' "\${FAKE_PR_ROWS:-[]}" ;;
+      *) printf '[]' ;;
+    esac ;;
+  "bd show")
+    # Reached only if the resolver does NOT refuse an unreadable store: it would
+    # then resolve #615 from rigB and file a visit, so this arm lets that path
+    # complete (RC 0, a non-empty CALLS) and the assertions below catch it.
+    case "\$3" in
+      tk-prbead) jq -n '[{id:"tk-prbead",status:"open",title:"the PR anchor"}]' ;;
+      *)         printf '{"error":"no issues found"}\n'; exit 1 ;;
+    esac ;;
+  "bd create") printf 'bd create %s\n' "\$*" >> "\$FAKE_CALLS"; jq -n '{id:"tk-visitU"}' ;;
+  "bd update") printf 'bd update %s\n' "\$*" >> "\$FAKE_CALLS" ;;
+esac
+exit 0
+UNREADGC
+chmod +x "$TMP/unread/bin/gc"
+export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+
+run_unread() { # <riga-mode> <verb> -> RC/OUT/ERR/CALLS
+    : > "$FAKE_CALLS"
+    set +e
+    OUT="$(RIGA_MODE="$1" PATH="$TMP/unread/bin:$PATH" sh "$SCRIPT" "$2" 615 2>"$TMP/err")"; RC=$?
+    set -e
+    ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
+}
+
+# rigA's read fails (non-zero): refuse, name the ledger, file nothing.
+run_unread fail open
+eq "$RC" "4" "(RESOLVE-PR-UNREADABLE) a non-zero per-rig read fails the resolution closed"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-UNREADABLE) nothing filed when a store errored" \
+  || bad "(RESOLVE-PR-UNREADABLE) filed despite an unreadable store (calls: $CALLS)"
+grep -q 'riga' <<< "$ERR" && ok "(RESOLVE-PR-UNREADABLE) names the ledger that made the proof incomplete" \
+  || bad "(RESOLVE-PR-UNREADABLE) does not name the unreadable ledger (err: $ERR)"
+
+# rigA answers rc 0 but with a non-array payload: same refusal.
+run_unread badshape open
+eq "$RC" "4" "(RESOLVE-PR-BADSHAPE) a non-array per-rig answer fails the resolution closed"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-BADSHAPE) nothing filed on a non-array answer" \
+  || bad "(RESOLVE-PR-BADSHAPE) filed despite a non-array answer (calls: $CALLS)"
+grep -q 'riga' <<< "$ERR" && ok "(RESOLVE-PR-BADSHAPE) names the unreadable ledger" \
+  || bad "(RESOLVE-PR-BADSHAPE) does not name the ledger (err: $ERR)"
+
+# CONTROL: rigA is readable but empty, so the scan finds #615 in rigB and
+# resolves — proving the refusal keys on unreadability, not on a second store.
+run_unread ok resolve
+eq "$OUT" "tk-prbead" "(RESOLVE-PR-UNREADABLE-CONTROL) a readable empty store does not block resolution"
+grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
+  && ok "(RESOLVE-PR-UNREADABLE-CONTROL) announces the match found in the readable store" \
+  || bad "(RESOLVE-PR-UNREADABLE-CONTROL) match not announced (err: $ERR)"
+unset FAKE_PR_ROWS
+
 # --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
 # react and engage resolve the same reference open does, then act on the LIVE
 # bead: react slings it through gc-proactive.sh, engage spawns a sitting on a
