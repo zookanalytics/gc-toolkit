@@ -552,13 +552,23 @@ is never registered with the idle tracker (`buildIdleTracker`,
 `cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
 all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
-the operator's `gc-helm dismiss <subject>`.
+the operator's `gc-helm dismiss <subject>`. Closing the visit ends the sitting's
+work; it does not close the session, so the pack's `converse-reap` order
+(`assets/scripts/converse-reap.sh`) closes the settled session once its visit
+reads closed or gone — the reap those two endings assume. It reaps only an
+UNATTACHED session, because the pack cannot see typed text in a composer and
+draining a pane that has some is the operator's one hard no (see below); an
+attached sitting whose visit already reads closed is left for a later pass, once
+it is no longer attended. A sitting whose visit is still OPEN — the operator
+walked away before any sign-off — is the harder, separate case, untouched here.
 
-Two endings the idle setting does not own, and both still reach converse:
+Two runtime endings the idle setting does not own, and both still reach converse:
 
-- **A sitting that has ENDED is still collected in about a minute** by the
+- **A pool session that has ENDED is still collected in about a minute** by the
   `no-wake-reason` drain, a different clock on a different path, unaffected by
-  any idle setting. See *How a pane dies when no sitting is live*, below.
+  any idle setting. See *How a pane dies when no sitting is live*, below. A
+  manual converse session (the post-cutover shape) is exempt from
+  that cycling, so `converse-reap` above is what collects its settled sitting.
 - **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
   health restart can still take a held sitting out from under a reader. The
   trace-before-you-wait discipline holds for exactly this reason.
