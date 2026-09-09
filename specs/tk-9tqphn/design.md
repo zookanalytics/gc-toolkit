@@ -189,7 +189,7 @@ checked against current code:
    assumes; a skill is what it warns against.
 3. Agent-scoped skills are unverified and unused (`docs/skills.md:72-75`), and
    pack-scope skills load their `name` + `description` into every agent's
-   startup metadata (`docs/skills.md:124`). A review method as a pack-scope skill
+   startup metadata (`docs/skills.md:63-64,126-127`). A review method as a pack-scope skill
    is noise in every non-reviewer agent and a second copy of the method to keep
    in sync with the dispatch section.
 4. The per-rig, read-from-the-reviewed-commit model the rollout adopts
@@ -234,9 +234,9 @@ The menu file is `docs/review-policy.md`, renamed from `docs/review-charter.md`
 (tk-cwkmt2, this visit). "Charter" bundled two roles: the architecture contract
 a reviewer reads, and the check menu. This design keeps them separate:
 
-- **`docs/review-policy.md` is the menu.** Each row is: check name → applies-when
-  → its `review-<check>.md` method file → (for correctness) the mechanical tier
-  rule → mandatory paths → whether triage may waive it.
+- **`docs/review-policy.md` is the menu.** Each row names the check, when it
+  applies, its `review-<check>.md` method file, the mechanical tier rule for
+  correctness, the check's mandatory paths, and whether triage may waive it.
 - **The architecture contract stays where it is** — `component-model.md` §5 (the
   admission test) and `architecture.md`'s layer map (scope.md "Why small context
   works"). `review-arch.md` points at them. There is no separate "charter"
@@ -267,8 +267,8 @@ built.
 - **A3 held-versus-stamped** is the operator-deferred build-time decision above.
   The recommendation is the mechanical-default-plus-upgrade path; the build
   makes the final call once a rig's tier rule is written.
-- **Tier value names and the model per tier** (`cheap`/`standard`/`advanced` →
-  which model) are a per-rig cost decision left to tk-3voqke and the per-rig
+- **Tier value names and which model each of `cheap`/`standard`/`advanced`
+  maps to** are a per-rig cost decision left to tk-3voqke and the per-rig
   authoring.
 - **Whether tk-uqlwe8 folds into tk-cwkmt2.** The method-files migration and the
   policy rename touch the same files and could be one bead; kept separate here
