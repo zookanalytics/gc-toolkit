@@ -145,6 +145,13 @@ GC
 cat > "$TMP/bin/gc-helm.sh" <<'HELM'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "$FAKE_CALLS"
+# resolve echoes the LIVE bead a reference maps to. FAKE_RESOLVE overrides the
+# result (a PR number or superseded id redirecting to its owner); unset, it
+# echoes the reference unchanged — the resolver's pass-through for a live id.
+if [ "$1" = resolve ]; then
+  echo "${FAKE_RESOLVE:-$2}"
+  exit "${FAKE_RESOLVE_RC:-0}"
+fi
 if [ "$1" = react ] && [ -n "${FAKE_HELM_REACT_RC:-}" ]; then
   exit "$FAKE_HELM_REACT_RC"
 fi
@@ -333,6 +340,41 @@ run no "tk-abc12" --topic
 has "$CALLS" "bd create" "(SHAPE) --topic forces a bead-shaped string to be a topic"
 run no "gc-toolkit is slow"
 has "$CALLS" "bd create" "(SHAPE) a multi-word string starting with a rig prefix is still a topic"
+
+# --- (RESOLVE) a PR ref or superseded id resolves to the live owner first -----
+# A bare PR number, a pull URL, and a superseded bead id are subject references,
+# not topics. gc-visit-open hands them to `gc-helm resolve` before the id-vs-topic
+# split, so a PR number never becomes a topic bead titled with the number and a
+# settled id redirects to its successor before it is stamped. The stub echoes
+# FAKE_RESOLVE as the resolved id.
+FAKE_RESOLVE=tk-owner run no 615
+eq "$RC" "0" "(RESOLVE) a bare PR number resolves and files"
+has "$CALLS" "helm resolve 615" "(RESOLVE) the PR number is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE) no topic bead is minted for a PR number"
+hasnt "$CALLS" "--title 615" "(RESOLVE) nothing is titled with the PR number"
+has "$CALLS" "helm open tk-owner" "(RESOLVE) the visit is filed on the resolved owner"
+
+FAKE_RESOLVE=tk-owner run no "https://github.com/o/r/pull/615"
+eq "$RC" "0" "(RESOLVE-URL) a pull URL resolves and files"
+has "$CALLS" "helm resolve https://github.com/o/r/pull/615" "(RESOLVE-URL) the URL is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE-URL) no topic bead is minted for a PR URL"
+has "$CALLS" "helm open tk-owner" "(RESOLVE-URL) the visit is filed on the resolved owner"
+
+FAKE_RESOLVE=tk-succ run no tk-pred
+eq "$RC" "0" "(RESOLVE-SUPERSEDE) a superseded id redirects before it is stamped"
+has "$CALLS" "helm resolve tk-pred" "(RESOLVE-SUPERSEDE) the id is handed to gc-helm resolve"
+hasnt "$CALLS" "bd create" "(RESOLVE-SUPERSEDE) no second bead is minted"
+has "$CALLS" "helm open tk-succ" "(RESOLVE-SUPERSEDE) the visit is filed on the successor"
+hasnt "$CALLS" "helm open tk-pred" "(RESOLVE-SUPERSEDE) never on the settled predecessor"
+
+# A PR reference the resolver cannot map to a live bead fails closed; it must NOT
+# fall through to minting a topic bead titled with the number.
+unset FAKE_RESOLVE
+FAKE_RESOLVE_RC=4 run no 999
+eq "$RC" "4" "(RESOLVE-MISSING) an unresolvable PR reference fails closed"
+has "$CALLS" "helm resolve 999" "(RESOLVE-MISSING) the resolver was consulted"
+hasnt "$CALLS" "bd create" "(RESOLVE-MISSING) and mints no topic bead"
+unset FAKE_RESOLVE FAKE_RESOLVE_RC
 
 # --- (TYPE) a question is a decision -----------------------------------------
 run no "should the refinery land siblings in one pass?"
