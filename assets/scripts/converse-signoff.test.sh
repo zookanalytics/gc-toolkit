@@ -600,17 +600,32 @@ if [ -s "$NUDGE_VAL" ]; then
             "converse's pane is the operator's conversation surface — put the fix in the prompt or a script, not another clause here (tk-mpl1c)"
     fi
 else
-    # The field is empty on purpose. All three claim backstops resolve their
-    # re-delivery text from it and skip an empty one before reserving an
-    # attempt, so no backstop nudge reaches a sitting that is holding for the
-    # operator and the attempt-cap drain behind them cannot be reached. That
-    # takes the idle-claim rescue with it. There is no value left to read here,
-    # so unlike the pair above these DO read the file: what an empty nudge rests
-    # on is only ever recorded in prose, and prose is where it silently rots.
-    have "config records what the empty nudge silences" 'claim backstops' "$ATOML"
-    have "config records the cost of silencing them" 'idle-claim rescue' "$ATOML"
+    # The field is empty, but empty is not a backstop lever. converse runs as a
+    # manual session, never pool_managed, and all three claim backstops gate
+    # governs() on pool_managed (gascity idle_nudge.go / execution_backstop.go),
+    # so none of them reaches a held sitting whatever this field holds — the
+    # manual origin is the exemption, not the empty text. An empty nudge is not a
+    # uniform "skip", and it does not uniformly drain either. Only the execution
+    # backstop drains on it: the shared empty-content path in gascity
+    # nudge_backstop.go runs its exhausted action. The pool-claim backstop
+    # substitutes a default claim nudge and re-delivers, and the continuation
+    # backstop's exhausted action is a no-op. The config records that split,
+    # because a superseded mechanism only ever lived in prose, and prose is where
+    # it silently rots.
+    have "config names the real backstop gate" 'pool_managed' "$ATOML"
+    have "config still names the backstops it is exempt from" 'claim backstops' "$ATOML"
+    have "config names the execution backstop as the one that drains on empty" \
+         'execution backstop' "$ATOML"
+    have "config records that pool-claim substitutes a default nudge, not a drain" \
+         'default claim nudge' "$ATOML"
     have "config keeps the claimer constraint for anyone re-arming it" \
          'converse-claim.sh' "$ATOML"
+    lacks "config no longer claims a blanket empty-nudge terminal drain" \
+          'terminal drain' "$ATOML" \
+          "only the execution backstop drains on an empty nudge; the pool-claim backstop substitutes a default claim nudge and the continuation backstop's exhausted is a no-op (verified in gascity nudge_backstop.go / idle_nudge.go)"
+    lacks "config no longer records a silenced idle-claim rescue" \
+          'idle-claim rescue' "$ATOML" \
+          "the rescue is a pool backstop; a manual session never had it, so emptying the field silences nothing (the exemption is pool_managed, verified in gascity)"
     lacks "config no longer asserts the superseded never-empty rule" \
           'must never be empty' "$ATOML" \
           "the field is empty, so the claim that it cannot be is now false in the file that carries it"
