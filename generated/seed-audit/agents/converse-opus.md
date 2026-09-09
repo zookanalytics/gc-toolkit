@@ -542,9 +542,9 @@ Rules:
   closed and the anchor disposed as superseded in one act, so no
   `abandoned` husk is left and `pr-facts.sh` finds an already-closed anchor
   instead of filing a re-ask visit. A non-closed `merge_result` such as
-  `pull_request` or `pre_open_gate` is no longer a bar to the ruling; the bar
-  that stays is a repo change, which routes to a molecule. What is still
-  forbidden is a bare close of a subject carrying a non-closed `merge_result`:
+  `pull_request` or `pre_open_gate` does not bar the ruling; the only bar
+  is a repo change, which routes to a molecule. The forbidden shape is a
+  bare close of a subject carrying a non-closed `merge_result`:
   that leaves the PR unlanded and is the shape `lifecycle.sh reopen` and
   `check-closed-implies-landed` catch. Both paths close through the disposition
   writer, which stamps `gc.superseded_by` + `gc.superseded_by_store`, reads
