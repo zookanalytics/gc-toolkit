@@ -27,6 +27,10 @@ type fakeStore struct {
 	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
 	closed   bool
+
+	// Read tallies, for the batched-edge-read acceptance test: the edge reads
+	// must not scale with the number of anchors.
+	searchN, depnN, depyN int
 }
 
 // SearchIssues answers both gather shapes: the type-keyed anchor queries, and
@@ -35,6 +39,7 @@ type fakeStore struct {
 // returned its fixtures regardless would let the gather ask a wrong question
 // and still pass.
 func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.IssueFilter) ([]*beads.Issue, error) {
+	f.searchN++
 	// An id-keyed read is the one shape with no status scope, and that is the
 	// point of it: the sitting gather resolves a subject bead whether or not it
 	// has since closed. It is matched first so the scope rule below stays a
@@ -96,11 +101,30 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	for _, id := range filter.IDs {
 		want[id] = true
 	}
+	found := map[string]bool{}
 	var out []*beads.Issue
 	for _, kind := range slices.Sorted(maps.Keys(f.issues)) { // deterministic order
 		for _, iss := range f.issues[kind] {
-			if want[iss.ID] {
+			if want[iss.ID] && !found[iss.ID] {
 				out = append(out, iss)
+				found[iss.ID] = true
+			}
+		}
+	}
+	// The far-end children and blockers live embedded in the dependency
+	// fixtures, not in f.issues, so the batched gather's hydration — one
+	// SearchIssues over every edge's far end — must resolve them here too, the
+	// way a real store returns them from its issues table. A bead in f.issues
+	// wins a collision; a fixture does not disagree with itself.
+	for _, embedded := range []map[string][]*beads.IssueWithDependencyMetadata{f.depsUp, f.depsDown} {
+		for _, deps := range embedded {
+			for _, d := range deps {
+				if d == nil || !want[d.Issue.ID] || found[d.Issue.ID] {
+					continue
+				}
+				iss := d.Issue
+				out = append(out, &iss)
+				found[d.Issue.ID] = true
 			}
 		}
 	}
@@ -187,18 +211,61 @@ func (f *fakeStore) searchByMetadata(filter beads.IssueFilter) ([]*beads.Issue, 
 	return f.matching(out, filter), nil
 }
 
-func (f *fakeStore) GetDependenciesWithMetadata(_ context.Context, id string) ([]*beads.IssueWithDependencyMetadata, error) {
-	if err, bad := f.failDeps[id]; bad {
+// GetDependencyRecordsForIssues is the OUTBOUND batched read: for each queried
+// id, the raw `tracks`/`blocks` edges it owns, drawn from the same depsDown
+// fixtures the per-anchor read used. A raw edge carries only the two ids and the
+// type — the far-end issue is hydrated separately, which searchByIDs answers
+// from the embedded fixtures.
+func (f *fakeStore) GetDependencyRecordsForIssues(_ context.Context, issueIDs []string) (map[string][]*beads.Dependency, error) {
+	f.depyN++
+	if err := f.batchFailure(issueIDs); err != nil {
 		return nil, err
 	}
-	return f.depsDown[id], nil
+	out := map[string][]*beads.Dependency{}
+	for _, id := range issueIDs {
+		for _, d := range f.depsDown[id] {
+			out[id] = append(out[id], &beads.Dependency{
+				IssueID:     id,
+				DependsOnID: d.Issue.ID,
+				Type:        d.DependencyType,
+			})
+		}
+	}
+	return out, nil
 }
 
-func (f *fakeStore) GetDependentsWithMetadata(_ context.Context, id string) ([]*beads.IssueWithDependencyMetadata, error) {
-	if err, bad := f.failDeps[id]; bad {
+// GetDependentRecordsForIssues is the INBOUND batched read: for each queried
+// target, the raw edges pointing AT it (its dependents), from the depsUp
+// fixtures. The dependent is the edge's SOURCE, so it lands in IssueID.
+func (f *fakeStore) GetDependentRecordsForIssues(_ context.Context, targetIDs []string) (map[string][]*beads.Dependency, error) {
+	f.depnN++
+	if err := f.batchFailure(targetIDs); err != nil {
 		return nil, err
 	}
-	return f.depsUp[id], nil
+	out := map[string][]*beads.Dependency{}
+	for _, target := range targetIDs {
+		for _, d := range f.depsUp[target] {
+			out[target] = append(out[target], &beads.Dependency{
+				IssueID:     d.Issue.ID,
+				DependsOnID: target,
+				Type:        d.DependencyType,
+			})
+		}
+	}
+	return out, nil
+}
+
+// batchFailure models an ATOMIC batched read that fails when any queried id is
+// marked in failDeps. The real read is one query over the whole set, so a
+// single unreadable id fails the batch rather than that id alone — the gather's
+// error handling degrades per batch, not per anchor.
+func (f *fakeStore) batchFailure(ids []string) error {
+	for _, id := range ids {
+		if err, bad := f.failDeps[id]; bad {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeStore) Close() error { f.closed = true; return nil }
@@ -695,22 +762,23 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 }
 
 // TestWaitingEdgeFailureIsUnknownNotEmpty is the fail-closed half of the read
-// above: WHICH kinds pay it is pinned there, what a FAILED payment reports is
-// pinned here.
+// above: WHICH kinds pay the `blocks` read is pinned there, what a FAILED read
+// reports is pinned here.
 //
-// The per-anchor dependency query can fail on its own — a Dolt timeout, a
-// schema skew — while the anchor query that found the row succeeded. The row is
-// still gathered, because dropping it would hide work, so the only trace of the
-// failure is what this reports about its edges. Report an empty set and the
-// anchor is indistinguishable from one that genuinely has no waits, which is
-// precisely the state board.ruled reads as "every recorded wait has landed":
-// the answered row stands down because its graph could not be read (tk-fhd705).
+// The outbound edge read is ONE batched query for the whole rig+status, so it
+// fails as a whole — a Dolt timeout or schema skew takes every blocks-spending
+// anchor with it. The rows are still gathered, because dropping them would hide
+// work, so the only trace of the failure is what they report about their edges.
+// Report an empty set and a row is indistinguishable from one that genuinely has
+// no waits, which is precisely the state board.ruled reads as "every recorded
+// wait has landed" and stands the row down. So a failed read reports
+// UNKNOWN, not empty. The inbound (parent-child) read is a SEPARATE batch and is
+// unaffected: a failed wait read does not also cost an anchor its child roll-up.
 func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	st := populatedStore()
-	// Only the decision's read fails. The other two kinds that spend the edges
-	// are the control: one anchor's failure must not mark the rest unknown, or
-	// a single slow query quietly re-elevates half the board.
+	// The outbound batch carries every blocks-spending anchor, so marking one id
+	// unreadable fails it for all of them — the atomic shape of the real read.
 	st.failDeps = map[string]error{"tk-dec": errors.New("dolt timeout")}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
 
@@ -718,33 +786,82 @@ func TestWaitingEdgeFailureIsUnknownNotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	i, ok := findAnchor(res, "tk-dec")
-	if !ok {
-		t.Fatal("an anchor whose edge read fails must still appear")
-	}
-	dec := res.Anchors[i]
-	if len(dec.WaitingOn) != 0 || len(dec.WaitingOnClosed) != 0 {
-		t.Errorf("a failed read invents no edges: %v / %v", dec.WaitingOn, dec.WaitingOnClosed)
-	}
-	if !dec.WaitingUnknown {
-		t.Error("a failed edge read must report UNKNOWN, not an empty wait set — " +
-			"board.ruled cannot tell the two apart without it, and stands the row down")
-	}
 	if !res.Partial {
 		t.Error("a failed edge read must set partial")
 	}
-
-	for _, id := range []string{"tk-human", "tk-parked"} {
+	// Every kind that spends the `blocks` read shares the one batch, so all of
+	// them report UNKNOWN — never an empty set board.ruled would read as "all
+	// waits landed" and stand the row down.
+	for _, id := range []string{"tk-dec", "tk-human", "tk-parked"} {
 		j, ok := findAnchor(res, id)
 		if !ok {
-			t.Fatalf("%s: anchor missing", id)
+			t.Fatalf("%s: an anchor whose edge read fails must still appear", id)
 		}
-		if res.Anchors[j].WaitingUnknown {
-			t.Errorf("%s: one anchor's failed read must not mark another unknown", id)
+		a := res.Anchors[j]
+		if !a.WaitingUnknown {
+			t.Errorf("%s: a failed edge read must report UNKNOWN, not an empty wait set — "+
+				"board.ruled cannot tell the two apart without it, and stands the row down", id)
 		}
-		if len(res.Anchors[j].WaitingOn) == 0 {
-			t.Errorf("%s: the control anchors must still carry their real edges", id)
+		if len(a.WaitingOn) != 0 || len(a.WaitingOnClosed) != 0 {
+			t.Errorf("%s: a failed read invents no edges: %v / %v", id, a.WaitingOn, a.WaitingOnClosed)
 		}
+	}
+	// The inbound (parent-child) read is a separate batch: a failed WAIT read
+	// must not cost an anchor its child roll-up. tk-parked decomposed into two
+	// parent-child children, and they survive.
+	if j, ok := findAnchor(res, "tk-parked"); ok {
+		if len(res.Anchors[j].Children) != 2 {
+			t.Errorf("tk-parked: the independent children read must survive a failed wait read: %+v",
+				res.Anchors[j].Children)
+		}
+	}
+}
+
+// TestEdgeReadsAreBatchedNotPerAnchor is the acceptance criterion for the
+// batched edge reads: the number of edge reads is fixed by the number of
+// (rig × status-pass) gathers, not by how many anchors those gathers return, so
+// two stores that differ ONLY in anchor count must make the SAME number of edge
+// reads.
+func TestEdgeReadsAreBatchedNotPerAnchor(t *testing.T) {
+	build := func(n int) *fakeStore {
+		st := &fakeStore{
+			issues:   map[string][]*beads.Issue{},
+			depsUp:   map[string][]*beads.IssueWithDependencyMetadata{},
+			depsDown: map[string][]*beads.IssueWithDependencyMetadata{},
+		}
+		for i := 0; i < n; i++ {
+			ep := fmt.Sprintf("tk-ep%d", i)
+			dc := fmt.Sprintf("tk-dc%d", i)
+			st.issues["epic"] = append(st.issues["epic"], issue(ep, "an epic", "epic", 2, testNow, ""))
+			st.issues["decision"] = append(st.issues["decision"], issue(dc, "a decision", "decision", 2, testNow, ""))
+			st.depsUp[ep] = []*beads.IssueWithDependencyMetadata{withDepType(child(ep+"-c", "open", testNow, ""), "parent-child")}
+			st.depsDown[dc] = []*beads.IssueWithDependencyMetadata{withDepType(child(dc+"-w", "open", testNow, ""), "blocks")}
+		}
+		return st
+	}
+	gather := func(st *fakeStore) {
+		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+		if _, err := src.Gather(context.Background()); err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+	}
+
+	small, large := build(3), build(60)
+	gather(small)
+	gather(large)
+
+	if small.depnN != large.depnN || small.depyN != large.depyN {
+		t.Errorf("edge reads scale with anchor count — the N+1 is back: "+
+			"dependents %d vs %d, dependencies %d vs %d (3 vs 60 anchors per kind)",
+			small.depnN, large.depnN, small.depyN, large.depyN)
+	}
+	// The fixed count is one batch per direction per gather pass. The open pass
+	// gathers every anchor; the closed pass finds none here, so it reads no edges
+	// at all — hence exactly one of each.
+	if large.depnN != 1 || large.depyN != 1 {
+		t.Errorf("expected one batched read per direction, got dependents=%d dependencies=%d",
+			large.depnN, large.depyN)
 	}
 }
 
