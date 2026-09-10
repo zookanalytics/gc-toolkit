@@ -216,7 +216,18 @@ fi
 # regardless. A broken or empty `gc rig list` skips the chooser and lets the
 # intake apply its own default; an Esc keeps the draft, like the message popup.
 CHOSEN_RIG=""
-RIG_LIST=$(gc rig list --json 2>/dev/null \
+# Bounded: this enumeration runs in the foreground before the message is filed
+# and outside the intake timeout below, so a `gc rig list` wedged against a dead
+# data plane would strand the operator at a chooser-less prompt — report typed,
+# no indicator lit, no message. A timeout, a non-zero exit, or unparseable output
+# all fall to an empty list, which skips the chooser and leaves the intake on its
+# own default, the same as a genuinely empty list.
+if command -v timeout >/dev/null 2>&1; then
+    RIG_LIST_JSON=$(timeout "$INTAKE_TIMEOUT" gc rig list --json 2>/dev/null || true)
+else
+    RIG_LIST_JSON=$(gc rig list --json 2>/dev/null || true)
+fi
+RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
     | jq -r '.rigs[]? | select((.suspended != true) and (.running != false)) | .name' 2>/dev/null || true)
 if [ -n "$RIG_LIST" ]; then
     # The context rig leads the list so gum highlights it and Enter confirms it.
