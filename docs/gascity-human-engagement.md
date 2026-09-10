@@ -261,13 +261,25 @@ create "returned no id" (tk-wp50s). The title is now collapsed to one line and
 cut back to a word boundary with an ellipsis if it is long; the body always
 carries what was typed, verbatim.
 
-**The default rig is fixed: `gc-toolkit`** (`--rig` overrides,
+**The bare CLI's default rig is fixed: `gc-toolkit`** (`--rig` overrides,
 `GC_VISIT_DEFAULT_RIG` moves the default). Converse is `scope = "rig"` and its
 pool name is rig-qualified, so a topic that is not rig-specific still has to
-land somewhere. It is deliberately *not* inferred from cwd: the command is
-fired from wherever the operator happens to be sitting, and a destination that
-varies silently with the shell's directory is the worst failure mode an intake
-path can have.
+land somewhere. The CLI default is deliberately *not* inferred from cwd: the
+command is fired from wherever the operator happens to be sitting, and a
+destination that varies silently with the shell's directory is the worst
+failure mode an intake path can have.
+
+**The `prefix+a` keybinding picks the rig rather than defaulting it.** After the
+message popup, `tmux-visit-prompt.sh` shows a chooser of the live rigs —
+suspended or not-running rigs are left out, since `gc-visit-open` refuses one
+anyway — defaulted to the rig of the pane the key was pressed in (its `GC_RIG`,
+else the `<rig>__<agent>` session-name prefix; absent on a pane that names no
+rig, where the operator just picks). Enter confirms that default or the operator
+picks another, and the choice rides through as `--rig`. This is board context,
+not cwd: the pane belongs to one rig explicitly, and the operator sees and
+confirms the target in the chooser rather than having it vary under them. A
+broken or empty `gc rig list` skips the chooser and leaves the intake on the CLI
+default.
 
 **Two paths, and the choice is not a preference.** The preferred path slings
 `mol-first-reaction` at the new subject, and *that formula files the visit*
