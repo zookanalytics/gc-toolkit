@@ -1640,7 +1640,7 @@ cmd_engage() {
     # rig has its agents skipped by the reconciler, and a rig with no agents
     # running has no live runtime tending it, so on either the sitting never comes
     # up: engage would report success while the visit sits bound to a session that
-    # never registers, recoverable only by hand (tk-y3mp95). Refuse before
+    # never registers, recoverable only by hand. Refuse before
     # spawning and name the fix. Both flags come from the `gc rig list`
     # enumerate_rigs already read; a gc that reports neither leaves them empty,
     # which reads as unknown and does not refuse.
@@ -1745,14 +1745,33 @@ cmd_engage() {
                 # there, do not spawn a duplicate that overwrites the binding.
                 # But a sitting whose rig was suspended (or down) at bind time
                 # never registers, and its visit is then stranded bound to a
-                # session that does not exist (tk-y3mp95). When the owner is
+                # session that does not exist. When the owner is
                 # PROVABLY gone from `gc session list`, reclaim it — clear the
                 # binding, re-park on the board — and spawn a fresh sitting, so
                 # the operator's natural retry (`engage <subject>`) recovers it
                 # rather than being pointed at a session that is gone.
                 if sitting_is_gone "$visit_owner"; then
-                    if ! gc bd update "$VISIT" --assignee "" --set-metadata gc.routed_to=human >/dev/null 2>&1; then
-                        echo "$PROG: engage: visit $VISIT is bound to the gone sitting '$visit_owner', but re-parking it failed — clear it by hand: gc bd update $VISIT --assignee \"\" --set-metadata gc.routed_to=human" >&2
+                    # `gc session list` and this write are two calls: a second
+                    # engage that read the same gone owner can reclaim, spawn, and
+                    # bind a fresh sitting in the window between them. Clear only
+                    # while the visit still holds the gone owner just read —
+                    # --if-assignee "$visit_owner" --if-status open — so this never
+                    # overwrites the binding a concurrent winner installed and
+                    # re-strands the visit. A mismatch writes nothing and exits 13;
+                    # re-read and defer to whoever won.
+                    reclaim_rc=0
+                    gc bd update "$VISIT" --if-assignee "$visit_owner" --if-status open --assignee "" --set-metadata gc.routed_to=human >/dev/null 2>&1 || reclaim_rc=$?
+                    if [ "$reclaim_rc" -eq 13 ]; then
+                        winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
+                        if [ -n "$winner" ]; then
+                            echo "$PROG: engage: visit $VISIT was reclaimed and re-engaged by '$winner' while this engage read the gone sitting '$visit_owner' — attach to it instead: gc session attach $winner" >&2
+                        else
+                            echo "$PROG: engage: visit $VISIT changed state while this engage read the gone sitting '$visit_owner' — another actor reclaimed it. Re-run: $PROG engage $bead" >&2
+                        fi
+                        exit 4
+                    fi
+                    if [ "$reclaim_rc" -ne 0 ]; then
+                        echo "$PROG: engage: visit $VISIT is bound to the gone sitting '$visit_owner', but re-parking it failed (rc $reclaim_rc) — clear it by hand: gc bd update $VISIT --assignee \"\" --set-metadata gc.routed_to=human" >&2
                         exit 4
                     fi
                     bust_cache

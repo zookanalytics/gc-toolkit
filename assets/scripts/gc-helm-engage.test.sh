@@ -391,7 +391,7 @@ else
   bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
 fi
 
-echo "# a suspended subject rig is refused before anything spawns (tk-y3mp95)"
+echo "# a suspended subject rig is refused before anything spawns"
 # engage spawns a sitting the reconciler must sustain; on a suspended rig the
 # reconciler skips its agents, so the sitting never comes up and the visit would
 # strand bound to it. Refuse before spawning, and name the resume as the fix.
@@ -422,7 +422,7 @@ eq "$RC" 0 "(LIVE) engaging on an explicitly live rig exits 0"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(LIVE) …and spawns the sitting"
 unset RIG_SUSPENDED RIG_RUNNING
 
-echo "# an open visit bound to a GONE sitting is reclaimed, then re-engaged (tk-y3mp95)"
+echo "# an open visit bound to a GONE sitting is reclaimed, then re-engaged"
 # A sitting whose rig was suspended/down at bind time never registers, leaving
 # the visit open+assigned to a session absent from `gc session list`. engage must
 # not point the operator at that dead session: it reclaims the visit (clears the
@@ -433,11 +433,26 @@ export LIVE_SITTINGS=""
 run_engage tk-vis --no-attach
 eq "$RC" 0 "(RECLAIM) engaging a visit bound to a gone sitting exits 0"
 has "$OUT" "reclaimed visit tk-vis" "(RECLAIM) …announcing the reclaim"
-has "$CALLED" "bd update tk-vis --assignee" "(RECLAIM) …clears the binding"
+has "$CALLED" "bd update tk-vis --if-assignee gc-toolkit__converse-dead --if-status open" "(RECLAIM) …clearing the binding only while it still holds the gone owner"
 has "$CALLED" "gc.routed_to=human" "(RECLAIM) …and re-parks it on the board"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(RECLAIM) …then spawns a fresh sitting"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(RECLAIM) …bound to the fresh sitting's runtime name"
 unset LIVE_SITTINGS
+
+echo "# a reclaim whose guarded clear loses the race defers to the winner, spawning nothing"
+# `gc session list` and the reclaim write are two calls: a second engage that
+# read the same gone owner can reclaim and re-engage in the window between them.
+# The guarded clear (--if-assignee/--if-status) then writes nothing and exits 13,
+# so this engage points at the winner instead of overwriting the live binding.
+export BEAD_KIND=visit VIS_OWNER="gc-toolkit__converse-dead" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+export LIVE_SITTINGS="" RACE_LOST=1 RACE_WINNER="gc-toolkit__converse-9"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(RECLAIM-RACE) a reclaim that loses the guarded clear exits 4"
+hasnt "$CALLED" "session new" "(RECLAIM-RACE) …and spawns no duplicate"
+has "$OUT" "gc-toolkit__converse-9" "(RECLAIM-RACE) …pointing at the winner that took the visit"
+unset LIVE_SITTINGS RACE_LOST RACE_WINNER
+export VIS_OWNER=""
 
 echo "# an open visit bound to a LIVE sitting stays a pending engagement, not a reclaim"
 # Reclaim fires only when the bound sitting is PROVABLY gone. A live owner keeps
