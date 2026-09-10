@@ -248,10 +248,13 @@ esac
 RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
     | jq -r '.rigs[]? | select((.suspended != true) and (.running != false)) | .name' 2>/dev/null || true)
 if [ -z "$TOPIC_IS_BEADREF" ] && [ -n "$RIG_LIST" ]; then
-    # The context rig leads the list so gum highlights it and Enter confirms it.
+    # The context rig leads the list so gum highlights it and Enter confirms it,
+    # then the other live rigs follow. When the context rig is the only live one
+    # the tail is empty and grep exits 1 — a legitimate result that must not trip
+    # set -e and kill the script after the operator already typed the report.
     RIG_CHOICES="$RIG_LIST"
     if [ -n "$CONTEXT_RIG" ] && printf '%s\n' "$RIG_LIST" | grep -qxF -- "$CONTEXT_RIG"; then
-        RIG_CHOICES=$(printf '%s\n' "$CONTEXT_RIG"; printf '%s\n' "$RIG_LIST" | grep -vxF -- "$CONTEXT_RIG")
+        RIG_CHOICES=$(printf '%s\n' "$CONTEXT_RIG"; printf '%s\n' "$RIG_LIST" | grep -vxF -- "$CONTEXT_RIG" || true)
     fi
     RIG_ARGS=""
     for _r in $RIG_CHOICES; do RIG_ARGS="$RIG_ARGS $(sq "$_r")"; done
