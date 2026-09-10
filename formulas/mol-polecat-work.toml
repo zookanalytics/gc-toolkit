@@ -212,10 +212,12 @@ fi
 # <<< load-context-blocked-work-hold
 ```
 
-The work bead carries `gc.execution_routed_to` from the pour, which
-`deferred-dispatch.sh arm` reads as an already-live dispatch and refuses. The
-delivery keys are cleared first so the bead is armable, and so the reconcile
-pass slings it rather than retiring a still-routed record; `status` stays `open`
+The work bead carries `gc.execution_routed_to` from the pour. `arm` keys on
+`gc.routed_to`, not on that stamp, so it accepts the bead either way — but the
+re-dispatch is armed with `--on mol-polecat-work`, and the reconcile pass
+retires an `--on` arm whose `gc.execution_routed_to` is set, reading it as a
+pour that already ran. The delivery keys are cleared first so reconcile slings
+the arm rather than retiring it; `status` stays `open`
 and `assignee` empty from the pour, so neither is written and no claim-guard
 rollback is possible. The open blocker keeps the bead out of `bd ready`
 throughout, so clearing the route opens no pool window. The re-dispatch is armed

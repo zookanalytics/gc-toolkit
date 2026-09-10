@@ -341,9 +341,10 @@ grep -q 'gc.proactive_reaction=1' <<< "$A" \
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
-# ends that pour, so the stamp is retired in the same write. Left set, it reads
-# as a live dispatch to deferred-dispatch's arm and reconcile guards, which then
-# refuse to route the bead when its blocker lifts.
+# ends that pour, so the stamp is retired in the same write. arm and reconcile
+# key on gc.routed_to, not on this stamp — it is provenance a stranded bead
+# keeps, and a release must not leave a parked or re-routed bead advertising a
+# finished pour's pool.
 grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
   && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
@@ -844,11 +845,13 @@ grep -q "released to $POOL" "$TMP/rout" \
 
 # ── takeaway --release: the pour stamp read-back ──────────────────────────────
 # gc.execution_routed_to is the field the release exists to clear: a first
-# reaction was slung to a pool, the pour stamped it, and deferred-dispatch's arm
-# and reconcile guards refuse a bead that still carries it as one already out.
-# The clear rides the multi-pair release write, so a pair silently dropped there
-# leaves the stamp standing and the blocked reaction holds with nothing to route
-# it when its blocker closes — the exact defect the clear removes. Covered:
+# reaction was slung to a pool, the pour stamped it, and a release ends that
+# pour. arm and reconcile key on gc.routed_to, not on this stamp, so it is not
+# what gates a re-dispatch — but it is provenance a stranded bead keeps, and a
+# release that left it standing would leave a parked or re-routed bead
+# advertising a finished pour's pool. The clear rides the multi-pair release
+# write, so a pair silently dropped there leaves the stamp standing — the exact
+# defect the clear removes. Covered:
 #   (EXECOK)   a clear that reads back empty is verified once, no repair, no word
 #   (EXECFIX)  a clear dropped from the multi-pair write is retried and reported
 #   (EXECDEAD) a clear that will not land is a verb failure, with its writes kept

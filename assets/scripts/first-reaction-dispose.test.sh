@@ -58,10 +58,11 @@ cat > "$TMP/helm" <<'HELM'
 #!/usr/bin/env bash
 printf 'HELM %s\n' "$*" >> "$FAKE_LOG"
 [ -n "${FAKE_HELM_FAILS:-}" ] && exit 4
-# Model gc-helm.sh takeaway --release retiring the pour stamp: once released, a
-# subject no longer reads as dispatched, which is what lets the deferred arm
-# land. The shared-state file stands in for gc.execution_routed_to; a run that
-# does not opt in (FAKE_EXEC_ROUTED_FILE unset) is unchanged.
+# Model gc-helm.sh takeaway --release retiring the pour stamp as provenance. The
+# shared-state file stands in for gc.execution_routed_to; a run that does not opt
+# in (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm no longer depends on
+# this clear — a plain arm lands whether or not the stamp is set — so the clear
+# is hygiene the release owes, not a precondition for the dispatch.
 case " $* " in
   *" --release "*) [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ] && [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ] && : > "$FAKE_EXEC_ROUTED_FILE" ;;
 esac
@@ -81,13 +82,11 @@ chmod +x "$TMP/proactive"
 cat > "$TMP/deferred" <<'DD'
 #!/usr/bin/env bash
 printf 'DEFERRED %s\n' "$*" >> "$FAKE_LOG"
-# Model deferred-dispatch.sh arm's guard: it refuses a subject still stamped
-# gc.execution_routed_to (a pour not yet released). The shared-state file stands
-# in for that stamp; unset, the stub arms unconditionally as before.
-if [ "${1:-}" = "arm" ] && [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ] && [ -s "${FAKE_EXEC_ROUTED_FILE}" ]; then
-  echo "deferred-dispatch: arm: ${2:-} is already dispatched (execution_routed_to set) — refusing" >&2
-  exit 1
-fi
+# deferred-dispatch.sh arm keys on gc.routed_to and status, NOT on
+# gc.execution_routed_to — that stamp is a finished pour's provenance, not a live
+# queue. A first-reaction subject carries only the stamp and no gc.routed_to, so
+# a plain arm lands whether or not the release cleared the stamp. The stub arms
+# unconditionally, which is exactly that behavior.
 exit 0
 DD
 chmod +x "$TMP/deferred"
@@ -242,11 +241,12 @@ eq "$RC" "4" "(BLKEDGE) a dropped edge fails before the deferred dispatch is arm
 hasnt "DEFERRED arm" "$LOG" "(BLKEDGE) …so nothing is armed on a wait that does not exist"
 
 # A real first-reaction subject carries the pour stamp gc.execution_routed_to,
-# set by the sling that put it in the pool. The blocked exit releases it first
-# — gc-helm.sh --release retires that stamp — and only then arms the deferred
-# dispatch, because deferred-dispatch's arm guard refuses a subject still
-# stamped as dispatched. The stubs model both halves, so the arm is exercised
-# against the guard rather than a fixture no sling ever poured.
+# set by the sling that put it in the pool. The blocked exit releases it
+# (gc-helm.sh --release retires that stamp as provenance) and arms a PLAIN
+# deferred dispatch. deferred-dispatch's arm keys on gc.routed_to, not the
+# execution stamp, and the subject carries no gc.routed_to, so the arm lands
+# whether or not the release cleared the stamp. The stubs model that, so the arm
+# is exercised against the real guard rather than a fixture no sling ever poured.
 export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed"
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.proactive"}}]'
@@ -255,18 +255,21 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
     --then-route gc-toolkit/gc-toolkit.polecat
 has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" \
     "(BLKARM) --then-route arms the dispatch for when the wait lifts"
+hasnt "--sling-arg" "$LOG" \
+    "(BLKARM) …a plain arm, no --on — reconcile slings it even with the pour stamp set"
 has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
-    "(BLKARM) …and the release retired the pour stamp, so the arm lands"
+    "(BLKARM) …and the arm lands"
 
-# Control: a release that leaves the pour stamp set (the defect this guards)
-# leaves the subject reading as still-dispatched, so the guard refuses the arm
-# and the wait resumes nothing. Proves the assertion above is load-bearing.
+# Control: even a release that leaves the pour stamp set still lets the plain arm
+# land — arm keys on gc.routed_to, and the execution stamp is provenance, not a
+# live queue. The old contract refused here; the branch that made the stamp
+# provenance is why this coupled surface now expects the arm to succeed.
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_HELM_KEEPS_STAMP=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat
-has "could not arm the deferred dispatch" "$ERR" \
-    "(BLKARM) a stamp left set refuses the arm — the guard is really exercised"
+has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
+    "(BLKARM) a stamp left set does NOT refuse the plain arm — provenance, not a live queue"
 unset FAKE_HELM_KEEPS_STAMP FAKE_EXEC_ROUTED_FILE FAKE_SHOW_JSON
 
 # ── ruling: the visit stays the exit for a question only a human answers ─────

@@ -163,8 +163,9 @@ eq "$(run "$BLOCKED_JSON")" \
    "open blocker: notes, clears keys, arms, holds, drain-acks, exits 1"
 
 # The containment write clears every delivery key, execution route included —
-# that key is what makes arm refuse, and a still-routed armed bead is retired
-# not slung.
+# arm keys on gc.routed_to, not the execution stamp, but the arm carries --on,
+# and reconcile retires an --on arm whose gc.execution_routed_to is set (a pour
+# that already ran) rather than slinging it.
 run "$BLOCKED_JSON" >/dev/null
 has "$(cat "$TMP/update")" 'gc.execution_routed_to=' "containment clears gc.execution_routed_to"
 has "$(cat "$TMP/update")" 'gc.deferred_execution_routed_to=' "containment clears gc.deferred_execution_routed_to"
