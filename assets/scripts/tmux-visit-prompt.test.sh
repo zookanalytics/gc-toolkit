@@ -272,6 +272,22 @@ chmod +x "$TMP/bin/tmux"
 cat > "$TMP/gumbin/gum" <<'GUMSTUB'
 #!/usr/bin/env bash
 printf 'gum %s\n' "$*" >> "$GUM_CALLS"
+# gum choose (the rig picker): refuse like an Esc when FAKE_CHOOSE_RC is set,
+# else echo the chosen rig — FAKE_CHOSEN_RIG, or the first offered item, which
+# is what Enter selects from the highlighted default the handler orders first.
+if [ "$1" = choose ]; then
+    [ "${FAKE_CHOOSE_RC:-0}" = 0 ] || exit "${FAKE_CHOOSE_RC}"
+    if [ -n "${FAKE_CHOSEN_RIG:-}" ]; then printf '%s\n' "$FAKE_CHOSEN_RIG"; exit 0; fi
+    shift
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --header) shift 2 ;;
+            --*)      shift ;;
+            *)        printf '%s\n' "$1"; exit 0 ;;
+        esac
+    done
+    exit 0
+fi
 # A cancel that still put text in the buffer: gum writes, THEN exits non-zero.
 # The tmux layer cannot tell this from an Esc on an empty buffer — same exit
 # code, same empty stderr — so only the file distinguishes them.
@@ -297,6 +313,20 @@ cat > "$TMP/bin/mktemp" <<'MKSTUB'
 exec "$REAL_MKTEMP" "$@"
 MKSTUB
 chmod +x "$TMP/bin/mktemp"
+
+# `gc` stubbed for the rig chooser's `gc rig list`. DEFAULT: no rigs, so the
+# chooser no-ops and every message-flow case above/below runs exactly as before
+# and pays no real-`gc` latency. A chooser case sets FAKE_RIGS_JSON to the rig
+# array to exercise selection; suspended/running ride in that JSON, so a case
+# can offer a dead rig and prove the picker leaves it out.
+cat > "$TMP/bin/gc" <<'GCSTUB'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "rig list") printf '{"rigs":%s}\n' "${FAKE_RIGS_JSON:-[]}" ;;
+  *) exit 0 ;;
+esac
+GCSTUB
+chmod +x "$TMP/bin/gc"
 
 # run_handler <cfg-dir> <topic> — "type" the topic into the stubbed popup, run
 # the handler, wait for the backgrounded half to report. Returns the handler's
@@ -358,6 +388,61 @@ gh=$(sed -n 's/.*--height \([0-9][0-9]*\).*/\1/p' "$TMP/gum.log" | head -1)
 run_handler "$CFG_OK" "$MULTI"
 has "$(cat "$TMP/calls.log")" "argv=[$MULTI]" "MULTILINE: a multi-line message reaches the intake with every line intact"
 eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as one topic, not one per line"
+
+# (CHOOSER) prefix+a picks the target rig: default from board context, override
+# to any LIVE rig, suspended rigs left out. The chooser only runs when `gc rig
+# list` offers rigs; the default stub offers none, so every case elsewhere in
+# this suite is untouched. These cases populate it.
+CHOOSER_RIGS='[{"name":"gc-toolkit","prefix":"tk","suspended":false,"running":true},
+               {"name":"gascity","prefix":"gc","suspended":true,"running":true},
+               {"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
+# The cancel case below keeps a draft on purpose; isolate these cases in their
+# own draft dir so that kept draft does not inflate the DRAFTOK/CANCEL counts of
+# the shared $TMP/drafts further down.
+export DRAFT_DIR_OVERRIDE="$TMP/chooser-drafts"
+
+# Default: the board-context rig (from the <rig>__<agent> session) leads the
+# picker, and Enter (the first offered item) confirms it — so the report is
+# filed there, not in the fixed intake default.
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+unset FAKE_CHOSEN_RIG
+run_handler "$CFG_OK" "a report from the signal-loom pane"
+ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+has "$cgum" "gum choose" "CHOOSER: a live-rig picker is shown"
+hasnt "$cgum" "gum input" "CHOOSER: the picker is a choose list, not a single-line input"
+has "$ccalls" "argv=[--rig]" "CHOOSER: the chosen rig is forwarded to the intake"
+has "$ccalls" "argv=[signal-loom]" "CHOOSER: the board-context rig is the confirmed default"
+hasnt "$cgum" "gascity" "CHOOSER: a suspended rig is left out of the picker"
+
+# Override: the operator picks a different LIVE rig; that is what the intake
+# receives, in place of the context default.
+export FAKE_CHOSEN_RIG="gc-toolkit"
+run_handler "$CFG_OK" "a report redirected to gc-toolkit"
+ccalls=$(cat "$TMP/calls.log")
+has "$ccalls" "argv=[--rig]" "CHOOSER: an override still forwards --rig"
+has "$ccalls" "argv=[gc-toolkit]" "CHOOSER: the intake receives the overridden rig"
+hasnt "$ccalls" "argv=[signal-loom]" "CHOOSER: the context default is replaced, not appended"
+unset FAKE_CHOSEN_RIG
+
+# Cancel at the picker keeps the draft (the message is already typed) and files
+# nothing — the same contract as a cancel at the message popup.
+export FAKE_CHOOSE_RC=1
+run_handler "$CFG_OK" "a report abandoned at rig selection"
+ccalls=$(cat "$TMP/calls.log"); ctmux=$(cat "$TMP/tmux.log")
+eq "$ccalls" "" "CHOOSER: a cancelled picker files nothing"
+has "$ctmux" "DRAFT KEPT" "CHOOSER: ...and the typed message is kept as a draft"
+unset FAKE_CHOOSE_RC
+unset FAKE_RIGS_JSON FAKE_FORMAT
+
+# No rigs to offer (or an unreadable `gc rig list`) → the chooser is skipped and
+# the intake applies its own default, exactly as before this key learned to
+# pick a rig. This is the path every other case in the suite runs on.
+run_handler "$CFG_OK" "a report with no chooser"
+ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+hasnt "$cgum" "gum choose" "CHOOSER: an empty rig list shows no picker"
+hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, leaving the intake default"
+has "$ccalls" "argv=[a report with no chooser]" "CHOOSER: the report is still filed"
+unset DRAFT_DIR_OVERRIDE
 
 # (TMPFILE) — a file per press, and no file left behind.
 run_handler "$CFG_OK" "first topic"
@@ -674,6 +759,19 @@ if command -v tmux >/dev/null 2>&1 && command -v script >/dev/null 2>&1 && comma
         if term_attaches "$cand"; then LIVE_TERM="$cand"; break; fi
     done
 fi
+
+# The rig chooser calls `gc rig list`; give the LIVE servers an empty-rig `gc`
+# so these real-popup round-trips stay about the message primitive, not rig
+# selection (the chooser is covered hermetically above). livebin holds ONLY gc,
+# so the real tmux/gum/script the live half needs still resolve on the suffix.
+mkdir -p "$TMP/livebin"
+cat > "$TMP/livebin/gc" <<'LGC'
+#!/usr/bin/env bash
+[ "$1 ${2:-}" = "rig list" ] && { printf '{"rigs":[]}\n'; exit 0; }
+exit 0
+LGC
+chmod +x "$TMP/livebin/gc"
+export PATH="$TMP/livebin:$PATH"
 
 # Submit is sent as CR and then, after a beat, as C-d. gum's write keymap has
 # moved between versions — Enter submits and C-j takes a newline in current
