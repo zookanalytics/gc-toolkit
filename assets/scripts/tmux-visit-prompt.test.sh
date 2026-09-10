@@ -464,6 +464,36 @@ if command -v timeout >/dev/null 2>&1; then
 else
     skip "CHOOSERHANG: timeout(1) not installed"
 fi
+
+# A bead id typed at prefix+a is an existing-bead request, not a new report.
+# gc-visit-open.sh resolves it against the bead's own rig and REFUSES --rig for
+# it (exit 2), so the chooser must be WITHHELD — otherwise a bead id filed
+# through this key fails whenever the city has live rigs. `tk` is gc-toolkit's
+# prefix in CHOOSER_RIGS; `gc` is suspended gascity's, and a suspended rig's ids
+# are still beads — the gate reads every rig, not just the live ones offered.
+# argv is the right assertion: `${CHOSEN_RIG:+--rig …}` passes neither the flag
+# nor a value when the chooser is withheld, which is exactly what the intake
+# accepts for a bead id.
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+for beadid in tk-abc12 gc-9f8e7; do
+    run_handler "$CFG_OK" "$beadid"
+    ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+    hasnt "$cgum" "gum choose" "CHOOSER: a bead id ($beadid) shows no rig picker"
+    hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, so the intake resolves the bead's own rig"
+    has "$ccalls" "argv=[$beadid]" "CHOOSER: ...and the bead id still reaches the intake behind --"
+done
+
+# An id-SHAPED topic whose prefix names no rig is a new topic, not a bead: the
+# picker still runs and --rig is still forwarded, so a terse hyphenated report
+# ("ci-flaky") keeps rig selection — the picker is withheld for beads, not for
+# every hyphenated string.
+run_handler "$CFG_OK" "ci-flaky-again"
+ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+has "$cgum" "gum choose" "CHOOSER: an id-shaped topic with no matching rig prefix still shows the picker"
+has "$ccalls" "argv=[--rig]" "CHOOSER: ...and still forwards the chosen rig"
+has "$ccalls" "argv=[ci-flaky-again]" "CHOOSER: ...and files the report"
+unset FAKE_RIGS_JSON FAKE_FORMAT
+
 unset DRAFT_DIR_OVERRIDE
 
 # (TMPFILE) — a file per press, and no file left behind.

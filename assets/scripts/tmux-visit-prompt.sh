@@ -215,6 +215,10 @@ fi
 # filed there vanishes into a store nothing gathers, and the intake refuses one
 # regardless. A broken or empty `gc rig list` skips the chooser and lets the
 # intake apply its own default; an Esc keeps the draft, like the message popup.
+# Withheld entirely for a bead id: gc-visit-open.sh treats an id-shaped argument
+# whose prefix names a rig as an existing bead — the bead's own rig is
+# authoritative and the intake refuses --rig for it — so offering a rig here
+# would fail the bare-bead-id request this key supports (the `--` note below).
 CHOSEN_RIG=""
 # Bounded: this enumeration runs in the foreground before the message is filed
 # and outside the intake timeout below, so a `gc rig list` wedged against a dead
@@ -227,9 +231,23 @@ if command -v timeout >/dev/null 2>&1; then
 else
     RIG_LIST_JSON=$(gc rig list --json 2>/dev/null || true)
 fi
+# Bead id or new topic? Mirror gc-visit-open.sh's bead-vs-topic gate: id-shaped
+# (nothing outside [A-Za-z0-9_-], no leading '-', at least one '-') AND the
+# prefix before the first '-' names a rig in this enumeration. Match every rig,
+# not just the live ones the picker offers — the intake resolves an id against
+# all rigs, so a suspended rig's prefix still marks its ids as beads.
+TOPIC_IS_BEADREF=""
+case "$TOPIC" in
+    *[!a-zA-Z0-9_-]*|-*) : ;;
+    *-*)
+        if printf '%s' "$RIG_LIST_JSON" \
+            | jq -e --arg p "${TOPIC%%-*}" 'any(.rigs[]?; .prefix == $p)' >/dev/null 2>&1; then
+            TOPIC_IS_BEADREF=1
+        fi ;;
+esac
 RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
     | jq -r '.rigs[]? | select((.suspended != true) and (.running != false)) | .name' 2>/dev/null || true)
-if [ -n "$RIG_LIST" ]; then
+if [ -z "$TOPIC_IS_BEADREF" ] && [ -n "$RIG_LIST" ]; then
     # The context rig leads the list so gum highlights it and Enter confirms it.
     RIG_CHOICES="$RIG_LIST"
     if [ -n "$CONTEXT_RIG" ] && printf '%s\n' "$RIG_LIST" | grep -qxF -- "$CONTEXT_RIG"; then
