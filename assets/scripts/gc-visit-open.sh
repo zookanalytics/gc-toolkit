@@ -168,7 +168,10 @@ enumerate_rigs() {
         5) die "could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." 3 ;;
         *) die "could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem. This command wrote nothing." 3 ;;
     esac
-    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix}]' 2>/dev/null)
+    # suspended/running ride through so the liveness guard below reads them from
+    # this same enumeration. A `gc rig list` that omits either leaves it null,
+    # which the guard treats as unknown and never refuses on.
+    RIGS=$(printf '%s' "$rigs_raw" | jq -c '[.rigs[]? | {name, path, prefix, suspended, running}]' 2>/dev/null)
     [ -n "$RIGS" ] || RIGS='[]'
     [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
         || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
@@ -201,6 +204,21 @@ else
     RIG_PATH=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" '.[] | select(.name==$n) | .path' 2>/dev/null | head -n1)
     [ -n "$RIG_PATH" ] || die "unknown rig '$RIG' (try one of: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null))" 2
     [ -d "$RIG_PATH/.beads" ] || die "rig '$RIG' has no .beads ledger at $RIG_PATH/.beads" 3
+
+    # ── Never mint a subject in a suspended or not-running rig ───────────
+    # A suspended rig has its agents skipped by the reconciler and its store is
+    # not gathered by `gc bd list`, so a report filed there is silently lost;
+    # a rig with no agents running has nothing to triage it. Refuse before
+    # creating anything and name the operator's move. suspended/running come
+    # from the enumeration above; a gc that reports neither leaves the field
+    # null, read here as unknown — which never refuses, so this guards today's
+    # stores without becoming a new precondition when the flag is absent.
+    RIG_SUSPENDED=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
+        '.[] | select(.name==$n) | if (.suspended==null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1)
+    RIG_RUNNING=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
+        '.[] | select(.name==$n) | if (.running==null) then "" else (.running|tostring) end' 2>/dev/null | head -n1)
+    [ "$RIG_SUSPENDED" = "true" ] && die "rig '$RIG' is suspended — a report filed there lands in a store nothing gathers and would silently vanish. Resume it, then re-file: gc rig resume $RIG" 3
+    [ "$RIG_RUNNING" = "false" ] && die "rig '$RIG' has no agents running, so nothing would pick up or triage a report filed there. Start it first ('gc rig status $RIG' shows why it is down), then re-file." 3
 
     # A question is a decision, everything else a task; --type overrides.
     if [ -z "$SUBJ_TYPE" ]; then
