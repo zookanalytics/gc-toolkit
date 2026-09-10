@@ -322,7 +322,12 @@ chmod +x "$TMP/bin/mktemp"
 cat > "$TMP/bin/gc" <<'GCSTUB'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
-  "rig list") printf '{"rigs":%s}\n' "${FAKE_RIGS_JSON:-[]}" ;;
+  "rig list")
+    # A wedged data plane. `exec` so `timeout` kills THIS process and the
+    # captured pipe closes at once — a forked sleep would outlive the kill,
+    # hold the read open, and hang the substitution the bound is meant to end.
+    [ -n "${FAKE_RIG_LIST_SLEEP:-}" ] && exec sleep "$FAKE_RIG_LIST_SLEEP"
+    printf '{"rigs":%s}\n' "${FAKE_RIGS_JSON:-[]}" ;;
   *) exit 0 ;;
 esac
 GCSTUB
@@ -442,6 +447,23 @@ ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
 hasnt "$cgum" "gum choose" "CHOOSER: an empty rig list shows no picker"
 hasnt "$ccalls" "argv=[--rig]" "CHOOSER: ...and forwards no --rig, leaving the intake default"
 has "$ccalls" "argv=[a report with no chooser]" "CHOOSER: the report is still filed"
+
+# A WEDGED `gc rig list` must degrade to that same no-chooser path, not hang. The
+# enumeration runs in the foreground before the message is filed and outside the
+# intake timeout, so an unbounded hang strands the operator at a chooser-less
+# prompt with the report already typed. FAKE_RIGS_JSON is set, so a picker WOULD
+# appear if the call returned — the bound is the only reason it does not.
+if command -v timeout >/dev/null 2>&1; then
+    export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1" FAKE_RIG_LIST_SLEEP=60
+    GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_OK" "a report while rig list is wedged"
+    ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
+    hasnt "$cgum" "gum choose" "CHOOSERHANG: a wedged rig list bounds out, so no picker is shown"
+    hasnt "$ccalls" "argv=[--rig]" "CHOOSERHANG: ...and no --rig is forwarded, leaving the intake default"
+    has "$ccalls" "argv=[a report while rig list is wedged]" "CHOOSERHANG: ...and the report is still filed"
+    unset FAKE_RIGS_JSON FAKE_FORMAT FAKE_RIG_LIST_SLEEP
+else
+    skip "CHOOSERHANG: timeout(1) not installed"
+fi
 unset DRAFT_DIR_OVERRIDE
 
 # (TMPFILE) — a file per press, and no file left behind.
