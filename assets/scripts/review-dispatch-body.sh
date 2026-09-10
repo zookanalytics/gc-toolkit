@@ -77,8 +77,8 @@ case "$CHECK_NAME" in
 The standing correctness review. The method is the `mol-review` steps
 themselves: read the whole diff, run the tests the diff touches at the pinned
 commit, hold its output to the work-quality standards, and grade findings
-P0/P1/P2 with file:line. Placement and architecture belong to the `arch` gate;
-judge whether the change is correct and safe as merged.
+P0/P1/P2 with file:line. Judge whether the change is correct and safe as
+merged.
 M
     ;;
   triage)
@@ -92,27 +92,11 @@ this change warrants from the charter's declared gate menu. Adding nothing is
 the expected common case. Record the decision on the same verdict call:
 
     signoff.sh --review-bead <this bead> --verdict approve \
-      --add-gates <gate>[,<gate>] --justification "<one line, per gate>"
+      --add-gates <gate>[,<gate>]
 
-Widening is monotonic and `signoff.sh` enforces it — you cannot remove a gate.
-The one sanctioned narrowing is `--waive-gates`, accepted only for a gate the
-charter marks waivable. Correctness findings are the `codex` gate's, not
-yours.
-M
-    ;;
-  arch)
-    cat <<'M'
-`skills/arch-review/SKILL.md` (Gas City: `gc-toolkit.arch-review`). Read it
-before the diff.
-
-Read exactly three things: the charter (`docs/review-charter.md`), this bead
-and its anchor, and the diff. Not the whole repo. Judge placement against the
-declared layer map and the admission test, not correctness — `codex` owns
-correctness on this same commit.
-
-A design objection you cannot reduce to a named change is a decision, not a
-defect: file one visit through `escalate.sh` so a person rules on it, and say
-so in the verdict body. The skill carries the shape.
+Widening is monotonic and `signoff.sh` enforces it — you cannot remove a gate,
+and only a `triage` verdict may add one. Correctness findings are the `codex`
+gate's, not yours.
 M
     ;;
   demo)

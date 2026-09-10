@@ -336,12 +336,12 @@ eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
 eq "$(meta F3 'check.codex')" "<absent>" "the pre-retarget gate marker is cleared"
 
 echo "# …and EVERY declared gate's marker is cleared, not one fused token"
-store "[$(anchor F3b 25 ',"check_set":"codex,triage,arch","check.triage":"green@sha-25","check.arch":"green@sha-25"')]"
+store "[$(anchor F3b 25 ',"check_set":"codex,triage,demo","check.triage":"green@sha-25","check.demo":"green@sha-25"')]"
 printf '%s' "$(prview 25 OPEN CLEAN MERGEABLE ',"x":1')" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_25.json"
 out=$(run)
 eq "$(meta F3b 'check.codex')" "<absent>" "codex's marker is cleared"
 eq "$(meta F3b 'check.triage')" "<absent>" "triage's marker is cleared"
-eq "$(meta F3b 'check.arch')" "<absent>" "arch's marker is cleared"
+eq "$(meta F3b 'check.demo')" "<absent>" "demo's marker is cleared"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"

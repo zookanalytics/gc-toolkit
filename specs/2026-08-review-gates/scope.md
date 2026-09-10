@@ -5,9 +5,16 @@ description: Scope for adding an architectural review (and future dedicated revi
 
 # Review gates: triage scan + dedicated reviewers
 
-Status: **implemented, minus the convergence half.** The charter, the two
-methods, the triage widening verbs and the widened default all landed; the
-per-gate round accounting and the escalate verdict were carved out and are
+Status: **narrowed to the uncontested core.** The check_set machinery landed —
+the declared `codex,triage` default, the triage classifier, and the
+`signoff.sh --add-gates` widening verb over a charter-declared menu. Three
+pieces were taken back out on operator review (visit tk-mmjhuq): the waiver
+feature is removed (no cited use case), the architecture review — its `arch`
+gate, its `skills/arch-review` method, and the architecture contract the
+charter used to carry — is deferred to the follow-on that implements spike
+tk-9tqphn ([specs/tk-9tqphn/design.md](../tk-9tqphn/design.md)), and the
+charter is reduced to the minimal gate menu the machinery needs. The per-gate
+round accounting and the escalate verdict were carved out earlier and are
 retired by the review-cycle design that supersedes them. What landed and what
 did not is under the inventory. The work-feeder half is designed, not
 implemented — [work-feeder.md](work-feeder.md).
@@ -66,15 +73,13 @@ merge.sh: unchanged — merges when every declared gate reads green
 
 ## Rules that make it safe
 
-- **Monotonic widening — and triage is the sole narrower.** `--add-gates`
+- **Monotonic widening — nothing removes a declared gate.** `--add-gates`
   performs a set-union write with read-back; no dispatcher, formula, or
   reviewer may pre-set or shrink `check_set` (operator ruling 2026-08-24:
   the checks-needed decision lives in one contained, reviewable, auditable
-  place). The only sanctioned narrowing is a triage **waiver**: for gates the
-  charter explicitly marks waivable (and only those), triage may record
-  "not needed" with a one-line justification on the anchor. Waivers are
-  expected to be rare and the distiller watches their rate alongside the
-  add-rate. `none` stays a human-only opt-out.
+  place). Each add is a one-line `triage-add:` note on the anchor, and the
+  distiller watches the add-rate for gate inflation. The only narrowing is the
+  `none` human-only opt-out, on a named anchor.
 - **A lane-state marker, a commit-bound menu.** A gate marker is the bare value
   `check.<gate>=green`, a state of the lane rather than a value pinned to a
   commit. `reviewed_oid` on the review bead records the commit the reviewer read
@@ -108,33 +113,31 @@ merge.sh: unchanged — merges when every declared gate reads green
   when a gate exhausts `GC_MAX_REVIEW_ROUNDS`, and routes it to a human in the
   same act.
   `skills/arch-review/SKILL.md` carries the shape.
-- **`codex` is never waivable.** The charter's menu marks it so, and the
-  waiver verb could not reach it in any case: `--waive-gates` records a
-  non-add, and `signoff.sh` refuses it outright for a gate `check_set`
-  already declares. Both transitions judge an anchor by that set alone.
-  `pr-open.sh` publishes once every marker-bearing gate the set declares reads
-  `green`, and `merge.sh` applies the same predicate, so a set that could drop
-  `codex` would publish and merge with the correctness review never run. The
-  flow above runs triage at `pre_open_gate`, which is exactly where that would
-  happen, so codex staying always-on is what makes the publishing gate mean
-  anything.
+- **`codex` is never dropped.** It rides in the declared default and the set
+  is union-only, so nothing widens it away. Both transitions judge an anchor
+  by that set alone: `pr-open.sh` publishes once every marker-bearing gate the
+  set declares reads `green`, and `merge.sh` applies the same predicate, so a
+  set that could drop `codex` would publish and merge with the correctness
+  review never run. The flow above runs triage at `pre_open_gate`, which is
+  exactly where that would happen, so codex staying always-on is what makes the
+  publishing gate mean anything. The one opt-out, `none`, drops every gate at
+  once and is a human's alone.
 
 ## Hand calibration
 
 Before triage, `check_set` was calibrated by hand on the anchors that needed
 it. [docs/authority-map.md](../../docs/authority-map.md) now carries the power
-as two rows, widen and narrow, and triage holds the machine half of each: it
-is the sole narrower, its waiver reaches only the gates the charter marks
-waivable, and `none` stays the human-only opt-out, still on a named anchor,
-still with the reason in that anchor's notes, still only once the PR is open.
+as two rows, widen and narrow, and triage holds the machine half of the widen:
+`--add-gates` is the only machine writer of the set, and `none` stays the
+human-only opt-out, on a named anchor, with the reason in that anchor's notes,
+only once the PR is open.
 
-Two cases could look like a standing human narrowing path, and neither is
-one. A missing charter leaves a widening unvalidated rather than blocked:
-`signoff.sh` warns and accepts `--add-gates`, because adding a gate is always
-safe, and a human may widen by hand for the same reason. A narrowing the
-charter does not mark waivable is available to nobody, and no charter at all
-refuses every waiver outright. The one move left to a human there is `none`,
-which the narrowing row grants.
+Neither of two cases is a standing human narrowing path. A missing charter
+leaves a widening unvalidated rather than blocked: `signoff.sh` warns and
+accepts `--add-gates`, because adding a gate is always safe, and a human may
+widen by hand for the same reason. Narrowing has no such path — nothing removes
+a declared gate — so the one move left to a human is `none`, which the
+narrowing row grants.
 
 ## Implementation inventory (follow-up work)
 
@@ -156,9 +159,27 @@ split later only if load or model choice demands it).
 
 ### What landed, and what did not
 
-Rows 1-6, 8 and 9 landed. Two pieces did not, and one row was answered
-differently than written.
+The check_set machinery landed: the charter's minimal gate menu (row 1,
+reduced), the triage method and its `--add-gates` widening (rows 2, 4, 5), the
+`codex,triage` default (row 6), the state-machine widening rule (row 8), and
+the tests (row 9). Three pieces of the original design were taken back out on
+operator review (visit tk-mmjhuq), and, from the earlier passes, one piece was
+dropped and one row answered differently than written.
 
+- **The waiver feature was removed.** `signoff.sh --waive-gates` and
+  `--justification`, the charter's waivable column, the waiver prose in the
+  triage and arch methods, and their tests are all gone: the operator ruled
+  waivers out for want of a cited use case. `--add-gates` stays, records a bare
+  `triage-add:` note, and the `none` opt-out is the only narrowing.
+- **The architecture review was deferred** (row 3, and the `arch` half of rows
+  1, 4 and 8). The `arch` gate, `skills/arch-review/SKILL.md`, and the
+  architecture contract the charter carried — its layer map and admission test —
+  were flagged as lacking architectural substance and are deferred to the
+  follow-on that implements spike tk-9tqphn
+  ([specs/tk-9tqphn/design.md](../tk-9tqphn/design.md)), which reshapes the menu
+  as per-check `review-<check>.md` files and moves the architecture contract to
+  `architecture.md`. The charter here is reduced to the minimal gate menu the
+  triage machinery needs (`codex`, `triage`, `demo`).
 - **Row 7, the doctor clause, was dropped.** Its waiver keyed on a
   commit-pinned marker (`check.triage=green@<oid>`), and this design records
   markers as bare lane states with no oid binding for it to key on. A mandatory
@@ -190,13 +211,13 @@ this pack files most often.
   small session. codex stays always-on; triage decides the rest — this is
   the proportionality answer: expensive reviews run only when indicated.
 - Resolved (operator, 2026-08-24): dispatchers may NOT pre-set a narrower
-  `check_set`; triage runs on everything and owns the waiver mechanism above.
-  Mechanical formula-poured work gets its fast path from triage waiving
-  quickly, not from routing around triage.
-- Open: charter format for non-gc-toolkit rigs with no architecture docs —
-  the triage skill's fallback is "add `arch` when the diff creates a file,
-  crosses a top-level directory, or changes a public interface," plus the
-  charter-gap observation.
+  `check_set`; triage runs on everything and is the only machine writer of the
+  set. Mechanical formula-poured work gets its fast path from triage adding
+  nothing — the expected common case — not from routing around triage.
+- Open: charter format for non-gc-toolkit rigs with no architecture docs. With
+  no readable menu the triage skill's fallback now widens nothing and files the
+  charter-gap observation; the per-check menu redesign in spike tk-9tqphn is
+  where a rig-agnostic format is settled.
 - Resolved: proactive/first-reaction does NOT become this gate's front half.
   The two share a shape and nothing else — triage's subject is a diff and its
   output is machine-consumed by `gate-ensure.sh` and `merge.sh`, while a first

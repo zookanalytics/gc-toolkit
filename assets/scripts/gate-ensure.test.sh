@@ -209,15 +209,15 @@ tbodies=$(jq -r '[.[] | select(.metadata.anchor_bead == "T1") | .description] | 
 has "$tbodies" "gate=triage" "the triage dispatch names the triage method"
 
 echo "# a widened check_set dispatches only the gate that is not yet satisfied"
-store "[$(anchor T2 pull_request "codex,triage,arch" "" polecat/t2), $(backed rev-t2c T2 codex), $(backed rev-t2t T2 triage)]"
+store "[$(anchor T2 pull_request "codex,triage,demo" "" polecat/t2), $(backed rev-t2c T2 codex), $(backed rev-t2t T2 triage)]"
 oid t2 > "$GH_DIR/head_polecat_t2"
 : > "$STUB_GC_LOG"
 out=$(run_declared)
 has "$out" "1 reviews dispatched" "the two green gates are settled; the gate triage added is dispatched"
 arid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
-eq "$(meta "$arid" check_name)" "arch" "the dispatched review is for the added gate"
+eq "$(meta "$arid" check_name)" "demo" "the dispatched review is for the added gate"
 ad=$(jq -r --arg id "$arid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
-has "$ad" "gate=arch" "…and its dispatch body names the arch method"
+has "$ad" "gate=demo" "…and its dispatch body names the added gate's method"
 
 echo "# stamp that does not persist holds the merge (rc=3)"
 store "[$(anchor A2 pull_request "" "" polecat/a2)]"
@@ -339,9 +339,9 @@ has "$out" "quiesced (validation pass val-q2 in flight)" "the validation pass is
 hasnt "$(cat "$STUB_GC_LOG")" "bd create" "…and no review bead is created behind either hold"
 
 echo "# a must-fix finding on a SIBLING lane holds this lane's dispatch too (anchor-wide)"
-# The finding is on the arch lane; the dispatch would be for codex. An anchor
+# The finding is on the demo lane; the dispatch would be for codex. An anchor
 # mid-change is read by no lane while a sibling's fix is half-applied.
-store "[$(anchor Q3 pull_request codex "" polecat/q3), $(mustfix find-q3 Q3 arch)]"
+store "[$(anchor Q3 pull_request codex "" polecat/q3), $(mustfix find-q3 Q3 demo)]"
 oid q3 > "$GH_DIR/head_polecat_q3"
 out=$(run)
 has "$out" "0 reviews dispatched" "a sibling lane's open must-fix holds the codex dispatch"

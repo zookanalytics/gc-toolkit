@@ -21,7 +21,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 LIFECYCLE="$ROOT/lifecycle/lifecycle.toml"
 GATE="$HERE/gate-ensure.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-patrol-check-set-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
@@ -121,8 +121,8 @@ eq "$(stamped "$lc_out")" "$DECLARED" "(10) an empty render recovers the declare
 lc_out=$(run_mergepush "none" 1 "" "")
 eq "$(stamped "$lc_out")" "none" "(11) the none sentinel is stamped as itself, never widened to the default"
 
-lc_out=$(run_mergepush "codex,triage,arch" 1 "" "")
-eq "$(stamped "$lc_out")" "codex,triage,arch" "(12) an explicit wider set is passed through untouched"
+lc_out=$(run_mergepush "codex,triage,demo" 1 "" "")
+eq "$(stamped "$lc_out")" "codex,triage,demo" "(12) an explicit wider set is passed through untouched"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -64,19 +64,19 @@ bash "$SCRIPT" --check-name triage > "$TMP/triage.out" 2>/dev/null
 hasF "$TMP/triage.out" '## Gate method: `triage`' "(METHOD) the triage section is headed by its gate"
 hasF "$TMP/triage.out" 'skills/review-triage/SKILL.md' "(METHOD) triage names its method skill"
 hasF "$TMP/triage.out" '--add-gates' "(METHOD) triage is told how to record the widening"
-hasF "$TMP/triage.out" '--waive-gates' "(METHOD) …and that a waiver is the one narrowing"
 notF "$TMP/triage.out" 'run the tests the diff touches' "(METHOD) triage is not handed the correctness method"
 
+# arch was deferred to a follow-on: it is no longer a declared gate, so its
+# dispatch falls to the undeclared-method default rather than naming a skill.
 bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
-hasF "$TMP/arch.out" 'skills/arch-review/SKILL.md' "(METHOD) arch names its method skill"
-hasF "$TMP/arch.out" 'Not the whole repo' "(METHOD) arch is held to three inputs"
-hasF "$TMP/arch.out" 'escalate.sh' "(METHOD) arch is told to put a decision to a person rather than loop it"
+hasF "$TMP/arch.out" 'No gate method is declared' "(METHOD) the deferred arch gate gets the undeclared-method default"
+notF "$TMP/arch.out" 'arch-review' "(METHOD) …and names no arch-review skill"
 
 hasF "$OUT" '## Gate method: `codex`' "(METHOD) the default gate is codex"
 
 bash "$SCRIPT" --check-name telepathy > "$TMP/unknown.out" 2>/dev/null
 hasF "$TMP/unknown.out" 'No gate method is declared' "(METHOD) an undeclared gate is told so outright"
-notF "$TMP/unknown.out" 'skills/arch-review' "(METHOD) …and is never handed another gate's method"
+notF "$TMP/unknown.out" 'skills/review-triage/SKILL.md' "(METHOD) …and is never handed another gate's method"
 
 echo "# the named formula really ships in this pack"
 ROOT="$(cd "$HERE/../.." && pwd)"

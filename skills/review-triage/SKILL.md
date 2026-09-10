@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: The method for the triage gate — a broad, cheap scan that does not judge a change but decides which dedicated reviews it needs, then records that decision by widening the anchor's check_set from the charter's declared gate menu. Use when you hold a review bead whose check_name is triage, or when asked which review gates a diff warrants. Covers the menu contract, the monotonic-widen rule, per-gate justification, waivers, and the expected common case of adding nothing.
+description: The method for the triage gate — a broad, cheap scan that does not judge a change but decides which dedicated reviews it needs, then records that decision by widening the anchor's check_set from the charter's declared gate menu. Use when you hold a review bead whose check_name is triage, or when asked which review gates a diff warrants. Covers the menu contract, the monotonic-widen rule, and the expected common case of adding nothing.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -14,8 +14,8 @@ is none.
 ## Inputs — three, in this order
 
 1. **The charter** — `docs/review-charter.md` at the commit under review. It
-   carries the layer map, the admission test, and the gate menu you classify
-   over. Read it first; it is the only place the menu is declared.
+   declares the gate menu you classify over. Read it first; it is the only
+   place the menu is declared.
 2. **The review bead** — `check_name`, `anchor_bead`, `review_branch` /
    `review_base` or `pr_number`, and the dispatch-pinned `reviewed_oid`. The
    anchor states what the change was for.
@@ -49,11 +49,12 @@ done
 
 A commit that carries no charter is the no-charter case below, not a reason to
 reach for the pack's copy or for the tree you happen to be in. `signoff.sh`
-resolves it the same way, so a waiver it cannot warrant from the reviewed
-commit's own menu is refused at the verdict.
+resolves it the same way: it validates `--add-gates` against the reviewed
+commit's own menu, and accepts a widening unvalidated when that commit carries
+no charter.
 
-Each row gives you the gate, when it applies, its method, the paths that make
-it mandatory, and whether it may be waived.
+Each row gives you the gate, when it applies, its method, and the paths that
+make it mandatory.
 
 ## Deciding
 
@@ -70,8 +71,8 @@ the gate when the answer is yes. Two rules bound the judgment:
   cadence hop and a session per anchor, and the feedback distiller watches
   the add-rate for exactly that drift.
 
-When the repo has no readable charter, add `arch` if the diff creates a file,
-crosses a top-level directory, or changes a public interface — then file the
+When the repo has no readable charter, there is no menu to classify over:
+widen nothing, let the standing `codex` review carry the change, and file the
 charter gap as an observation (below).
 
 ## Recording the decision
@@ -82,8 +83,7 @@ verdict is `approve`: triage passed at this commit, which is what makes
 
 ```bash
 signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
-  --add-gates arch \
-  --justification "diff rewrites lifecycle.sh's transition write (charter: single writer)"
+  --add-gates demo
 ```
 
 - **Widening is monotonic and `signoff.sh` enforces it.** The write is a
@@ -91,24 +91,10 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
   declared, and no dispatcher, formula or other reviewer may pre-set or
   shrink `check_set`. The checks-needed decision lives here, in one place a
   human can audit.
-- **Every added gate carries a one-line justification**, appended to the
-  anchor's notes as a `triage-add:` line. Say which charter row fired and
-  what in the diff fired it. "Looked risky" is not a justification.
+- **Every added gate is recorded** on the anchor's notes as a `triage-add:`
+  line, so the add-rate the distiller watches stays countable. Name the
+  charter row that fired, and what in the diff fired it, in your verdict body.
 - **Adding nothing needs no flag** — approve on its own is the full verdict.
-
-## Waivers
-
-A waiver is the only sanctioned narrowing, and only for a gate the charter
-marks waivable:
-
-```bash
-signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
-  --waive-gates demo --justification "docs-only; nothing the operator watches happen changed"
-```
-
-`signoff.sh` refuses a waiver for a gate the charter does not mark waivable,
-and refuses every waiver when no charter is readable. Waivers are expected to
-be rare; the distiller watches their rate beside the add-rate.
 
 ## The charter gap
 

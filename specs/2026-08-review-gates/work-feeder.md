@@ -50,7 +50,7 @@ The filing-side twin of the review triage gate, sharing its contract:
 | Classifier | a review-pool session running `skills/review-triage` | a session running `skills/work-triage` |
 | Decision recorded as | `check_set` widening + `triage-add:` notes | a route stamp + `feed-*:` notes |
 | Human door | `escalate.sh`, one visit per situation key | the same |
-| Rate watched by | the feedback distiller (add-rate, waiver-rate) | the same (dispatch-rate, retire-rate) |
+| Rate watched by | the feedback distiller (the add-rate) | the same (dispatch-rate, retire-rate) |
 
 ### 1. What makes a ready bead eligible
 
