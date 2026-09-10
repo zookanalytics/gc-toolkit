@@ -81,6 +81,14 @@ eq "$RC" "1" "a blocked task carrying only gc.execution_routed_to is flagged"
 has "$OUT" "alpha bead a-1" "the exec-routed-only bead is named as a finding"
 clear_stores
 
+# The allowlist admits every named work type, not just task (which bwork uses):
+# a blocked bug/feature/chore/spike with no dispatch path is a finding too.
+for t in bug feature chore spike; do
+    blocked_store alpha "$(btyped a-1 "$t")"
+    eq "$(run_check >/dev/null; echo $?)" "1" "a blocked $t with no dispatch path is flagged (work allowlist)"
+    clear_stores
+done
+
 # --- 2. exemptions: each must NOT be flagged --------------------------------
 blocked_store alpha "$(brouted a-1)"
 OUT=$(run_check); RC=$?
@@ -110,7 +118,12 @@ for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow" "gc.d
     clear_stores
 done
 
-for t in decision epic merge-request gate molecule; do
+# A negative list would flag any type it forgot; the allowlist exempts every
+# non-work type by naming what IS work. Topology/infra types `bd ready` excludes
+# (step, convoy, session, spec, event, convergence) and container types (epic,
+# milestone, story) must all pass — each of these is flagged by the pre-allowlist
+# negative list, so this loop fails against the old check and proves the fix.
+for t in decision epic merge-request gate molecule step convoy session spec event convergence story milestone; do
     blocked_store alpha "$(btyped a-1 "$t")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked $t is not pool work — not flagged"
     clear_stores

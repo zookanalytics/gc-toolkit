@@ -35,14 +35,19 @@
 
 set -u
 
-# Types no pool claims, so blocked-and-unrouted is not this anti-pattern for
-# them. The infra/topology set is `bd ready`'s own exclusion (beads
-# sqlbuild.ReadyWorkExcludeTypes + its default infra types). `decision` is added
-# because a decision is answered by a person, not dispatched to a pool — arming
-# it would sling a human's question at a polecat. `epic` is added because an
-# epic is a container whose leaf children are the work; you route those, not the
-# epic. What remains is plainly-work types: bug, feature, task, chore, spike.
-READY_EXCLUDES=" merge-request gate molecule rig agent role message decision epic "
+# The issue types a pool claims and works — so blocked-and-unrouted-and-unarmed
+# is this anti-pattern only for these. An allowlist, not the complement of an
+# exclude set: `bd` accepts many types this check must never flag as pool work,
+# and enumerating them to exclude is a list that silently admits every type it
+# forgets. `bd ready`'s own infra/topology exclusions (merge-request, gate,
+# molecule, rig, agent, role, message, session, convoy, issue-type step, spec,
+# event, convergence, ...), `decision` (a person answers it, not a pool — arming
+# it would sling a human's question at a polecat), the container types (`epic`,
+# `milestone`, `story`, whose leaf children are the routed work), and any custom
+# type a rig adds are all not-pool-work by naming what IS. A type this check has
+# never heard of is left alone rather than mistaken for work. doctor.toml names
+# the same set.
+WORK_TYPES=" bug feature task chore spike "
 
 findings=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -114,8 +119,8 @@ while IFS=$'\037' read -r rig_name rig_path; do
     }
     # The predicate, entirely on the listing's own fields: plainly work
     # (unassigned; not review/step/workflow-topology/demand; not a merge anchor;
-    # not an infra type), AND carrying no route, AND not armed.
-    cand=$(printf '%s' "$raw" | scrub | jq -r --arg ex "$READY_EXCLUDES" '
+    # an allowlisted work issue_type), AND carrying no route, AND not armed.
+    cand=$(printf '%s' "$raw" | scrub | jq -r --arg allow "$WORK_TYPES" '
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
@@ -125,7 +130,7 @@ while IFS=$'\037' read -r rig_name rig_path; do
         | select(($m["gc.kind"] // "") == "")
         | select(($m["gc.demand_for"] // "") == "")
         | select(($m["merge_result"] // "") == "")
-        | select($ex | contains(" " + (($b.issue_type // "") | tostring) + " ") | not)
+        | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($m["gc.routed_to"] // "") == "")
         | select(($m["gc.dispatch_when_ready"] // "") == "")
         | [ $id,
