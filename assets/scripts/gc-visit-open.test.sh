@@ -87,9 +87,19 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
   "rig list")
+    # suspended/running are injected per rig ONLY when the driving var is set, so
+    # the default cases see neither field (null → unknown → the guard allows) and
+    # a liveness case sets exactly the flag it is exercising. Mirrors the real
+    # projection, which carries the two flags through {name,path,prefix,...}.
     jq -n --arg t "$FAKE_RIGS/gc-toolkit" --arg g "$FAKE_RIGS/gascity" \
-      '{rigs:[{name:"gc-toolkit", path:$t, prefix:"tk"},
-              {name:"gascity",    path:$g, prefix:"gc"}]}' ;;
+          --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
+          --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
+      '{rigs:[({name:"gc-toolkit", path:$t, prefix:"tk"}
+               + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
+               + (if $trun  != "" then {running:   ($trun =="true")} else {} end)),
+              ({name:"gascity",    path:$g, prefix:"gc"}
+               + (if $gsusp != "" then {suspended: ($gsusp=="true")} else {} end)
+               + (if $grun  != "" then {running:   ($grun =="true")} else {} end))]}' ;;
   "bd show")
     # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
     # bead, so the "never overrule an existing origin" case is a real read of a
@@ -275,6 +285,41 @@ set +e
 GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
 set -e
 has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAULT_RIG moves the default"
+
+# --- (LIVENESS) never mint a subject in a suspended or not-running rig ---------
+# The reported failure: a report filed into a suspended rig lands in a store
+# nothing gathers and silently vanishes. The guard must refuse BEFORE the
+# subject bead is created — a bead minted in a dead store is itself the loss —
+# so every case below also asserts that nothing was created.
+export GASCITY_SUSPENDED=true
+run no "a report for a suspended rig" --rig gascity
+[ "$RC" != "0" ] && ok "(LIVENESS) a suspended target rig is refused" || bad "(LIVENESS) a suspended rig should be refused (rc=$RC)"
+eq "$CALLS" "" "(LIVENESS) a suspended rig mints no subject and files nothing"
+has "$ERR" "suspended" "(LIVENESS) the refusal names the suspension"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) the refusal names the operator's move"
+unset GASCITY_SUSPENDED
+
+export GASCITY_RUNNING=false
+run no "a report for a downed rig" --rig gascity
+[ "$RC" != "0" ] && ok "(LIVENESS) a not-running target rig is refused" || bad "(LIVENESS) a not-running rig should be refused (rc=$RC)"
+eq "$CALLS" "" "(LIVENESS) a not-running rig mints no subject and files nothing"
+has "$ERR" "no agents running" "(LIVENESS) the refusal names the downed runtime"
+unset GASCITY_RUNNING
+
+# Explicit-live is allowed — the positive control that proves the guard refuses
+# the dead case, not every case.
+export GASCITY_SUSPENDED=false GASCITY_RUNNING=true
+run no "a report for a live rig" --rig gascity
+eq "$RC" "0" "(LIVENESS) an explicitly live rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and the subject lands in that rig"
+unset GASCITY_SUSPENDED GASCITY_RUNNING
+
+# A gc that reports neither flag leaves them null: unknown, never refused. This
+# is the default-stub path every other case runs on, asserted here explicitly so
+# the guard can never harden into a precondition on a flag the data plane omits.
+run no "a report when liveness is unknown" --rig gascity
+eq "$RC" "0" "(LIVENESS) an unknown (null) liveness never refuses"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and files into the chosen rig"
 
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
 run no tk-abc12
