@@ -301,7 +301,7 @@ cmd_reconcile() {
     local expected processed=0 dispatched=0 retired=0 waiting=0 held=0 failed=0
     expected="$(wc -l < "$rows" | tr -d ' ')"
 
-    local id status ready json target args_json assignee routed rc
+    local id status ready json target args_json assignee routed exec_routed on_dispatch why rc
     while IFS=$'\t' read -r id status ready; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -329,27 +329,43 @@ cmd_reconcile() {
         args_json="$(meta_of "$json" "$K_ARGS")"
         assignee="$(printf '%s' "$json" | jq -r '.assignee // ""')"
         routed="$(meta_of "$json" gc.routed_to)"
+        exec_routed="$(meta_of "$json" gc.execution_routed_to)"
         [ -n "$args_json" ] || args_json="[]"
+        # Does this arm replay a graph.v2 pour? `gc sling --on <formula>` clears
+        # gc.routed_to and stamps gc.execution_routed_to instead, so the
+        # gc.routed_to test below cannot see that such a dispatch already ran.
+        on_dispatch=0
+        printf '%s' "$args_json" | jq -e 'any(.[]?; . == "--on")' >/dev/null 2>&1 && on_dispatch=1
 
         if [ -z "$target" ]; then
             echo "$PROG: WARN $id is armed with an empty target — leaving it for a human" >&2
             failed=$((failed + 1)); continue
         fi
 
-        # Already routed (a pass died between sling and disarm, or a hand sling):
-        # retire the arm rather than pour a second dispatch. Keyed on
-        # gc.routed_to, the live pool queue pool-demand reads, not on
-        # gc.execution_routed_to, which a stranded bead keeps as provenance after
-        # its workflow is gone. Retiring on that stale marker is what would make
-        # the arm remedy doctor/check-blocked-work-armed names a dead end: the arm
-        # lands, then the next ready pass retires it without slinging. The one
-        # shape this no longer guards is a bead armed and slung via --on into a
-        # still-live workflow; no first-class caller arms with --on, and a second
-        # pour there is a redundant molecule the city reaps.
-        if [ -n "$routed" ]; then
+        # Already dispatched — retire the arm rather than pour a second time. A
+        # sling records itself differently by kind, so two markers count:
+        #  - gc.routed_to set: a plain pool sling landed (a pass died between
+        #    sling and disarm, or a hand sling). This is the live queue
+        #    pool-demand reads. gc.execution_routed_to ALONE is not — a stranded
+        #    bead keeps it as provenance after its workflow is gone, and the arm
+        #    remedy doctor/check-blocked-work-armed names would dead-end if this
+        #    retired on it (the arm lands, the next ready pass retires it unslung).
+        #  - an `--on` arm whose gc.execution_routed_to is set: the graph.v2 pour
+        #    already ran (it clears gc.routed_to, so the first marker misses it).
+        #    Replaying `gc sling --on` hits the live-workflow refusal and poisons
+        #    every later pass; a second pour is a redundant molecule the city
+        #    reaps. An `--on` arm whose pour has NOT run carries no
+        #    gc.execution_routed_to, so it still slings. mol-polecat-work's
+        #    load-context bd-ready guard is one such first-class caller.
+        if [ -n "$routed" ] || { [ "$on_dispatch" = 1 ] && [ -n "$exec_routed" ]; }; then
+            if [ -n "$routed" ]; then
+                why="routed_to='$routed'"
+            else
+                why="--on pour already ran (execution_routed_to='$exec_routed')"
+            fi
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would retire arm on already-dispatched $id"
-            elif disarm_bead "$id" "already dispatched (routed_to='$routed'); arm retired without a second sling"; then
+            elif disarm_bead "$id" "already dispatched ($why); arm retired without a second sling"; then
                 echo "$PROG: retired arm on already-dispatched $id"
             else
                 echo "$PROG: WARN could not retire arm on already-dispatched $id" >&2; failed=$((failed + 1)); continue
@@ -375,8 +391,10 @@ cmd_reconcile() {
         if [ "$DRY_RUN" = 1 ]; then dispatched=$((dispatched + 1)); continue; fi
 
         # Sling first, disarm second. If we die between the two, the next pass
-        # sees gc.routed_to/gc.execution_routed_to set and retires the arm
-        # instead of slinging again.
+        # retires the arm instead of slinging again: a plain sling shows as
+        # gc.routed_to, and an `--on` pour shows as gc.execution_routed_to on an
+        # arm whose args carry `--on` — both caught by the already-dispatched
+        # guard above.
         if disarm_bead "$id" "dispatched to $target by the deferred-dispatch reconcile pass"; then
             echo "$PROG: dispatched $id -> $target"
         else

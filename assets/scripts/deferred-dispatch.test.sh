@@ -16,8 +16,9 @@
 #     flags and names arming as the fix for, so refusing would be a dead end;
 #   * the dispatch arm: ready + armed -> exactly one `gc sling` with the
 #     recorded target and pass-through args, then the record cleared;
-#   * every arm that must NOT sling: still blocked, already routed (the
-#     crash-between-sling-and-disarm case), assignee held, sling failed;
+#   * every arm that must NOT sling: still blocked, already dispatched (the
+#     crash-between-sling-and-disarm case — a plain sling shows as gc.routed_to,
+#     an --on pour as gc.execution_routed_to), assignee held, sling failed;
 #   * the closed-bead retire arm;
 #   * the FALSE-EMPTY-QUEUE guard — an unreadable listing exits non-zero
 #     instead of printing a summary byte-identical to a healthy empty queue.
@@ -290,6 +291,28 @@ eq "$(slings)" "1" "an armed bead carrying only gc.execution_routed_to is slung,
 eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1" "the exec-routed-only bead reaches sling with its recorded target"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the record is cleared after the dispatch"
 has "$out" "1 dispatched" "summary counts the dispatch, not a retire"
+
+# The --on crash-recovery guard. `gc sling --on` clears gc.routed_to and stamps
+# gc.execution_routed_to, so the gc.routed_to retire test above cannot see an
+# --on pour that already ran. An --on arm that dies after the sling and before
+# disarm must be RETIRED on the next pass, not replayed into the live workflow
+# (which the graph.v2 refusal would poison every later pass with).
+echo "# reconcile retires an --on arm whose graph.v2 pour already ran"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an --on arm whose pour already ran (execution_routed_to set) is NOT re-slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the stale --on arm is retired instead of replayed"
+has "$out" "already-dispatched" "the retire names the reason"
+
+# The discriminator is the PAIR (--on arg, execution route), not either alone.
+# An --on arm whose pour has not run yet carries no execution route and still
+# slings — the mirror of the exec-routed-only PLAIN arm above, which also slings:
+# same execution route, opposite arg list, so neither marker alone retires.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "an --on arm with no execution route yet is slung, not retired"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1 --on mol-polecat-work" "the not-yet-poured --on arm reaches sling with its recorded args"
+has "$out" "1 dispatched" "summary counts the dispatch"
 
 store '[{"id":"b-1","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?

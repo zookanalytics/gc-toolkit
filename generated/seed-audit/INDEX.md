@@ -34,20 +34,20 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,716 | 1,429 |
 | [`codex`](agents/codex.md) | 5,716 | 1,429 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,166 | 1,291 |
-| [`converse`](agents/converse.md) | 53,128 | 13,282 |
-| [`converse-codex`](agents/converse-codex.md) | 53,128 | 13,282 |
-| [`converse-fable`](agents/converse-fable.md) | 53,128 | 13,282 |
-| [`converse-opus`](agents/converse-opus.md) | 53,128 | 13,282 |
-| [`deacon`](agents/deacon.md) | 10,057 | 2,514 |
+| [`converse`](agents/converse.md) | 41,664 | 10,416 |
+| [`converse-codex`](agents/converse-codex.md) | 41,664 | 10,416 |
+| [`converse-fable`](agents/converse-fable.md) | 41,664 | 10,416 |
+| [`converse-opus`](agents/converse-opus.md) | 41,664 | 10,416 |
+| [`deacon`](agents/deacon.md) | 10,793 | 2,698 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,716 | 1,429 |
 | [`keeper`](agents/keeper.md) | 22,726 | 5,681 |
 | [`mechanik`](agents/mechanik.md) | 26,177 | 6,544 |
-| [`polecat`](agents/polecat.md) | 22,098 | 5,524 |
-| [`polecat-codex`](agents/polecat-codex.md) | 22,128 | 5,532 |
+| [`polecat`](agents/polecat.md) | 22,948 | 5,737 |
+| [`polecat-codex`](agents/polecat-codex.md) | 22,978 | 5,744 |
 | [`proactive`](agents/proactive.md) | 13,371 | 3,342 |
 | [`refinery`](agents/refinery.md) | 8,682 | 2,170 |
-| [`witness`](agents/witness.md) | 12,186 | 3,046 |
+| [`witness`](agents/witness.md) | 12,989 | 3,247 |
 
 ## Formula recipes
 
@@ -59,7 +59,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope | bytes | est. tokens |
 |---|---|---:|---:|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 2,921 | 730 |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` | 3,104 | 776 |
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,004 | 251 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
@@ -81,7 +81,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` | 2,998 | 749 |
 | [`mol-validate`](formulas/mol-validate.md) | `city` | 3,867 | 966 |
 | [`mol-visit`](formulas/mol-visit.md) | `city` | 1,192 | 298 |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,685 | 671 |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` | 2,949 | 737 |
 
 Token counts are `bytes / 4`, the estimator the measurements this artifact was
 built on used. They exist to make a diff legible ("keeper +1,400 tokens"), not
