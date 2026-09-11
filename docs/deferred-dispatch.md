@@ -91,12 +91,15 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 and the dispatcher's open-tracking gate gives each rig its own
 single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **dispatches** every armed bead that `bd` now reports ready — running
-  the recorded sling, then clearing the record;
-- **retires** the record on an armed bead that has closed, or that a
-  sling already reached (the crash-between-sling-and-disarm case: a plain
-  sling shows as `gc.routed_to`, an `--on` pour as
-  `gc.execution_routed_to` on an arm carrying `--on`), without slinging;
+- **dispatches** every armed bead that `bd` now reports ready — stamping
+  its own `gc.dispatch_when_ready_slung` marker, running the recorded
+  sling, then clearing the record;
+- **retires** the record on an armed bead that has closed, or that
+  reconcile already slung — recognised by that `gc.dispatch_when_ready_slung`
+  marker surviving into a later pass (the crash-between-sling-and-disarm
+  case), so recovery reads one marker reconcile owns rather than the
+  lane-specific stamps a sling leaves (`gc.routed_to` for a plain sling,
+  `gc.execution_routed_to` for an `--on` pour) — without slinging again;
 - **withholds** — leaving the record armed and saying so — when the bead
   is still blocked, when someone holds it by `assignee`, when the sling
   fails, or when the recorded arguments are malformed.
@@ -108,10 +111,13 @@ beads' own predicate — open, no active blocker of a blocking type
 included. Asking `bd` is what keeps this from drifting away from the
 predicate every other reader uses.
 
-The pass slings **first** and clears the record **second**. Dying between
-the two leaves an armed bead the next pass recognizes as already
-dispatched — a plain sling by its `gc.routed_to`, an `--on` pour by its
-`gc.execution_routed_to` — and retires rather than pouring a second time.
+The pass stamps `gc.dispatch_when_ready_slung` **first**, slings
+**second**, and clears the whole record **last**. Dying after the stamp
+leaves that marker, which the next pass reads as already dispatched and
+retires on rather than pouring a second time — one marker reconcile owns,
+not an inference from whichever stamp a delivery lane happened to leave. A
+sling that fails rolls the marker back, so the arm retries next pass
+instead of retiring unslung.
 
 An unreadable listing exits non-zero and says so. It never prints a
 zero-count summary — for a dispatcher, "I could not see the queue" and

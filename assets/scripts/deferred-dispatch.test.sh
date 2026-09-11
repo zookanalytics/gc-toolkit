@@ -17,8 +17,9 @@
 #   * the dispatch arm: ready + armed -> exactly one `gc sling` with the
 #     recorded target and pass-through args, then the record cleared;
 #   * every arm that must NOT sling: still blocked, already dispatched (the
-#     crash-between-sling-and-disarm case — a plain sling shows as gc.routed_to,
-#     an --on pour as gc.execution_routed_to), assignee held, sling failed;
+#     crash-between-sling-and-disarm case, recognised by reconcile's own
+#     gc.dispatch_when_ready_slung marker rather than any lane-specific stamp),
+#     assignee held, sling failed;
 #   * the closed-bead retire arm;
 #   * the FALSE-EMPTY-QUEUE guard — an unreadable listing exits non-zero
 #     instead of printing a summary byte-identical to a healthy empty queue.
@@ -224,6 +225,14 @@ eq "$rc" 1 "arm refuses a bead already routed (gc.routed_to)"
 eq "$(meta b-2r gc.dispatch_when_ready)" "<absent>" "refused arm writes nothing"
 has "$out" "already dispatched" "refusal names the reason"
 
+# gc.dispatch_when_ready_slung means reconcile already slung a prior arm and is
+# about to retire it; re-arming over it would be retired unslung on the next pass.
+store '[{"id":"b-2s","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready_slung":"2026-01-01T00:00:00Z"},"notes":"","_ready":true}]'
+out="$("$SUT" arm b-2s --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 1 "arm refuses a bead reconcile already slung (gc.dispatch_when_ready_slung)"
+eq "$(meta b-2s gc.dispatch_when_ready)" "<absent>" "refused arm writes nothing"
+has "$out" "already dispatched" "refusal names the reason"
+
 store '[{"id":"b-3","status":"closed","assignee":"","metadata":{},"notes":"","_ready":false}]'
 out="$("$SUT" arm b-3 --target rig/pool 2>&1)"; rc=$?
 eq "$rc" 1 "arm refuses a closed bead"
@@ -275,42 +284,45 @@ eq "$(slings)" "0" "a ready bead someone holds is NOT slung out from under them"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the held bead keeps its record"
 has "$out" "HELD b-1" "the hold is reported, not silent"
 
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.routed_to":"rig/pool","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+# Already dispatched — the crash-between-sling-and-disarm case. reconcile stamps
+# gc.dispatch_when_ready_slung immediately before its own sling, so the marker
+# surviving into a later pass is what says the pour already ran; recovery reads
+# THIS marker, not whatever stamp a given lane happened to leave (a plain pool
+# sling shows as gc.routed_to, an --on pour as gc.execution_routed_to). It must
+# RETIRE, not replay.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_slung":"2026-01-01T00:00:00Z"},"notes":"","_ready":true}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "0" "an already-routed bead is NOT slung a second time"
-eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the stale record is retired instead"
+eq "$(slings)" "0" "an arm reconcile already slung (marker set) is NOT slung a second time"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the already-slung record is retired instead"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "retiring clears the slung marker too"
 has "$out" "already-dispatched" "the retire names the reason"
 
-# The contrast: gc.execution_routed_to is provenance, not a live route. A bead
-# armed while carrying only it (its workflow gone) is the doctor-flagged shape,
-# and the arm remedy only works if reconcile SLINGS it when ready rather than
-# mistaking the stale marker for an active dispatch and retiring it unslung.
+# The marker is lane-agnostic: an --on arm whose pour already ran retires on the
+# same marker, with no argv inspection and no execution-route read, so it is not
+# replayed into the graph.v2 live-workflow refusal.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]","gc.dispatch_when_ready_slung":"2026-01-01T00:00:00Z"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an --on arm reconcile already slung is NOT re-slung, exec route notwithstanding"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the already-slung --on arm is retired"
+has "$out" "already-dispatched" "the retire names the reason"
+
+# gc.execution_routed_to alone is NOT a dispatch reconcile reads: a bead armed
+# while carrying only it (its workflow gone) is the doctor-flagged shape, and the
+# arm remedy only works if reconcile SLINGS it when ready. No slung marker, so it
+# dispatches — the exec-route provenance is ignored, not mistaken for a dispatch.
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/old","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "an armed bead carrying only gc.execution_routed_to is slung, not retired"
 eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1" "the exec-routed-only bead reaches sling with its recorded target"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the record is cleared after the dispatch"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "a completed dispatch leaves no slung marker behind"
 has "$out" "1 dispatched" "summary counts the dispatch, not a retire"
 
-# The --on crash-recovery guard. `gc sling --on` clears gc.routed_to and stamps
-# gc.execution_routed_to, so the gc.routed_to retire test above cannot see an
-# --on pour that already ran. An --on arm that dies after the sling and before
-# disarm must be RETIRED on the next pass, not replayed into the live workflow
-# (which the graph.v2 refusal would poison every later pass with).
-echo "# reconcile retires an --on arm whose graph.v2 pour already ran"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true}]'
-out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "0" "an --on arm whose pour already ran (execution_routed_to set) is NOT re-slung"
-eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the stale --on arm is retired instead of replayed"
-has "$out" "already-dispatched" "the retire names the reason"
-
-# The discriminator is the PAIR (--on arg, execution route), not either alone.
-# An --on arm whose pour has not run yet carries no execution route and still
-# slings — the mirror of the exec-routed-only PLAIN arm above, which also slings:
-# same execution route, opposite arg list, so neither marker alone retires.
+# A fresh --on arm (no slung marker, pour not yet run) slings like any arm, and
+# its recorded args reach gc sling in order.
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "1" "an --on arm with no execution route yet is slung, not retired"
+eq "$(slings)" "1" "a fresh --on arm with no slung marker is slung, not retired"
 eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1 --on mol-polecat-work" "the not-yet-poured --on arm reaches sling with its recorded args"
 has "$out" "1 dispatched" "summary counts the dispatch"
 
@@ -325,6 +337,7 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_
 out="$(STUB_SLING_RC=7 "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a failed sling makes the pass exit non-zero"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a failed sling LEAVES the record armed for the next pass"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "a failed sling rolls the slung marker back so the arm retries, not retires"
 has "$out" "sling of b-1 -> rig/pool failed" "the failure names the bead and target"
 
 echo "# reconcile refuses a malformed arg list"
@@ -378,7 +391,7 @@ hasnt "$out" "b-4" "list shows only armed beads"
 
 # --- disarm ------------------------------------------------------------------
 echo "# disarm"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_by":"x","gc.dispatch_when_ready_armed_at":"t","gc.dispatch_when_ready_reason":"r"},"notes":"keep me","_ready":false}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_by":"x","gc.dispatch_when_ready_armed_at":"t","gc.dispatch_when_ready_reason":"r","gc.dispatch_when_ready_slung":"t2"},"notes":"keep me","_ready":false}]'
 out="$("$SUT" disarm b-1 --reason "superseded" 2>&1)"; rc=$?
 eq "$rc" 0 "disarm exits 0"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "disarm clears the target"
@@ -386,6 +399,7 @@ eq "$(meta b-1 gc.dispatch_when_ready_args)" "<absent>" "disarm clears the args"
 eq "$(meta b-1 gc.dispatch_when_ready_armed_by)" "<absent>" "disarm clears the actor"
 eq "$(meta b-1 gc.dispatch_when_ready_armed_at)" "<absent>" "disarm clears the timestamp"
 eq "$(meta b-1 gc.dispatch_when_ready_reason)" "<absent>" "disarm clears the reason"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "disarm clears the slung marker"
 has "$(notes b-1)" "keep me" "disarm appends to notes rather than replacing"
 has "$(notes b-1)" "superseded" "disarm records why"
 

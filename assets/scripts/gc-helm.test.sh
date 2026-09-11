@@ -341,10 +341,10 @@ grep -q 'gc.proactive_reaction=1' <<< "$A" \
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
-# ends that pour, so the stamp is retired in the same write. arm and reconcile
-# key on gc.routed_to, not on this stamp — it is provenance a stranded bead
-# keeps, and a release must not leave a parked or re-routed bead advertising a
-# finished pour's pool.
+# ends that pour, so the stamp is retired in the same write. No arm or reconcile
+# guard reads this stamp (reconcile keys on its own gc.dispatch_when_ready_slung
+# marker), so it is only cosmetic provenance — a release drops it best-effort so a
+# parked or re-routed bead does not linger advertising a finished pour's pool.
 grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
   && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
@@ -844,17 +844,16 @@ grep -q "released to $POOL" "$TMP/rout" \
   || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
 # ── takeaway --release: the pour stamp read-back ──────────────────────────────
-# gc.execution_routed_to is the field the release exists to clear: a first
+# gc.execution_routed_to is the field the release clears best-effort: a first
 # reaction was slung to a pool, the pour stamped it, and a release ends that
-# pour. arm and reconcile key on gc.routed_to, not on this stamp, so it is not
-# what gates a re-dispatch — but it is provenance a stranded bead keeps, and a
-# release that left it standing would leave a parked or re-routed bead
-# advertising a finished pour's pool. The clear rides the multi-pair release
-# write, so a pair silently dropped there leaves the stamp standing — the exact
-# defect the clear removes. Covered:
+# pour. No arm or reconcile guard reads this stamp (reconcile keys on its own
+# gc.dispatch_when_ready_slung marker), so it gates no re-dispatch — it is only
+# cosmetic provenance. The clear rides the multi-pair release write; a pair
+# silently dropped there leaves the stamp standing, so the release retries a lone
+# unset and, if that also misses, WARNS and stands rather than failing. Covered:
 #   (EXECOK)   a clear that reads back empty is verified once, no repair, no word
 #   (EXECFIX)  a clear dropped from the multi-pair write is retried and reported
-#   (EXECDEAD) a clear that will not land is a verb failure, with its writes kept
+#   (EXECWARN) a clear that will not land warns and the release still stands
 STAMP="gc-toolkit/gc-toolkit.proactive"
 
 # (EXECOK) the clear lands: the release's own unset is the only one written, and
@@ -888,26 +887,28 @@ grep -q 'execution-stamp repair landed' "$TMP/xerr" \
 eq "$XFRC" "0" "(EXECFIX) …and a repaired stamp is not a verb failure"
 eq "$(cat "$TMP/exec")" "" "(EXECFIX) …the bead ends with the pour stamp cleared"
 
-# (EXECDEAD) the store that will not take the clear at all. The stamp stands
-# after both writes, so a zero exit would report a release deferred-dispatch
-# will still refuse to arm — the strand this whole guard exists to catch.
+# (EXECWARN) the store that will not take the clear at all. The stamp is cosmetic
+# provenance — no arm or reconcile guard reads it — so a surviving stamp WARNS and
+# the release still stands (exit 0). Failing here would exit 4 into
+# first-reaction-dispose's die before its --then-route arm, skipping the arm over
+# a harmless stamp.
 : > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
 XDRC=0
 FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
   --by proactive --release --route "$POOL" >"$TMP/xout" 2>"$TMP/xerr" || XDRC=$?
-eq "$XDRC" "4" "(EXECDEAD) a pour stamp that will not clear is a verb runtime failure"
+eq "$XDRC" "0" "(EXECWARN) a pour stamp that will not clear does NOT fail the release"
 grep -q "still carries gc.execution_routed_to='$STAMP'" "$TMP/xerr" \
-  && ok "(EXECDEAD) …and the message names the stamp left standing" \
-  || bad "(EXECDEAD) the persistent miss does not name the stale stamp (stderr: $(cat "$TMP/xerr"))"
+  && ok "(EXECWARN) …and the warning names the stamp left standing" \
+  || bad "(EXECWARN) the persistent miss does not name the stale stamp (stderr: $(cat "$TMP/xerr"))"
 grep -q -- '--unset-metadata gc.execution_routed_to' "$TMP/xerr" \
-  && ok "(EXECDEAD) …and carries the by-hand repair" \
-  || bad "(EXECDEAD) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
+  && ok "(EXECWARN) …and carries the by-hand repair" \
+  || bad "(EXECWARN) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
 grep -q 'takeaway set on' "$TMP/xout" \
-  && bad "(EXECDEAD) the verb reported success on a bead still stamped" \
-  || ok "(EXECDEAD) …and does not report the takeaway as set"
+  && ok "(EXECWARN) …and the release still stands, reported as set" \
+  || bad "(EXECWARN) the release was not reported despite the harmless stamp (stdout: $(cat "$TMP/xout"))"
 grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/updates" \
-  && ok "(EXECDEAD) …the headline it did write is kept, not rolled back" \
-  || bad "(EXECDEAD) the headline write was lost: $(cat "$TMP/updates")"
+  && ok "(EXECWARN) …the headline write is kept" \
+  || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
 : > "$TMP/exec"
 
 # ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────

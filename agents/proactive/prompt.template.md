@@ -100,7 +100,7 @@ exit
    # the deferred dispatch so the blocker closing sends it to the pool, with
    # nothing left to remember. A blocked work bead left unrouted is the debt
    # doctor/check-blocked-work-armed flags.
-   "$DISPOSE" <id> --disposition blocked --by proactive --reason "<what it waits on>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<agent>
+   "$DISPOSE" <id> --disposition blocked --by proactive --reason "<what it waits on>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
 
    # ruling — the operator's call: a question only they can answer, or a
    # recommend-close (you verified nothing to do / the bead should not exist).

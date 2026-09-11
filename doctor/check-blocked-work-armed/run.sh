@@ -15,12 +15,22 @@
 # for workflow/control-dispatch flows, not a queue a worker or the pool-demand
 # reconciler consumes (those read `gc.routed_to`; gascity's route-recovery lane
 # restores `gc.routed_to` from the carried route only once a live workflow no
-# longer drives the bead). A blocked bead carrying only it, with no real route
-# and no arm, is flagged. The workflow-driven state that legitimately rests
-# unrouted and unassigned is the merge anchor: a bead carrying a `merge_result`
-# is driven by the merge cadence and offered by no pool queue
-# (lifecycle/lifecycle.toml — the anchor state is status x merge_result), so it
-# is exempt on that marker.
+# longer drives the bead). But it is ALSO the shape of a work bead under a LIVE
+# graph.v2 pour — open, unassigned, `gc.routed_to` retired by the pour, the exec
+# stamp set — so flagging on a missing route alone would flag in-flight work, and
+# the arm remedy would double-dispatch it. Liveness is consulted before a
+# candidate is flagged: a bead a not-closed workflow drives — tracked by a convoy
+# some not-closed bead names via `gc.input_convoy_id`, the forward resolution
+# assets/scripts/liveness-sweep.sh uses — is in-flight and exempt; only a bead no
+# live molecule drives is the stranded shape this reports. When a candidate
+# carries the exec stamp and liveness cannot be confirmed, it is reported as
+# unverifiable and never flagged, so an unreadable molecule is never turned into a
+# double-dispatch.
+#
+# The other workflow-driven state that legitimately rests unrouted-and-unassigned
+# is the merge anchor: a bead carrying a `merge_result` is driven by the merge
+# cadence and offered by no pool queue (lifecycle/lifecycle.toml — the anchor
+# state is status x merge_result), so it is exempt on that marker.
 #
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
@@ -78,6 +88,9 @@ budget_slice() {
 budget_spent() { [ "$(budget_slice)" -lt "$BUDGET_MIN_PROBE" ]; }
 run_bounded() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
     if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@" </dev/null; else "$@" </dev/null; fi; }
+# A probe fed from a pipe cannot borrow run_bounded's </dev/null.
+run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || return 124
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi; }
 budget_init
 # <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
@@ -90,16 +103,23 @@ scrub() { tr -d '\000-\011\013-\037'; }
 
 rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
-    | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path] | join("")' 2>/dev/null)
+    | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether blocked work carries a dispatch path"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
     exit 1
 fi
 
-while IFS=$'\037' read -r rig_name rig_path; do
+while IFS=$'\037' read -r rig_name rig_path suspended; do
     [ -n "$rig_path" ] || continue
     label="${rig_name:-<city>}"
+    # A suspended rig's store is cold; `gc bd blocked --db` on it would auto-start
+    # an orphan Dolt server just to answer, so it is skipped the way the sibling
+    # store checks skip it (doctor/check-state-space).
+    if [ "$suspended" = "true" ]; then
+        notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
+        continue
+    fi
     # `bd blocked` returns exactly the beads held out of ready by an open
     # blocker, so the edge is a fact of the listing and needs no re-derivation.
     raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>/dev/null); rc=$?
@@ -135,14 +155,46 @@ while IFS=$'\037' read -r rig_name rig_path; do
         | select(($m["gc.dispatch_when_ready"] // "") == "")
         | [ $id,
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
+            (if (($m["gc.execution_routed_to"] // "") != "") then "1" else "0" end),
             (($b.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:70]) ]
         | @tsv' 2>/dev/null) || {
         warnings+=("$label: could not evaluate blocked beads in $rig_path/.beads — this store was NOT checked")
         continue
     }
     [ -n "$cand" ] || continue
-    while IFS=$'\t' read -r id btype title; do
+
+    # Candidates exist, so resolve which of them a LIVE molecule already drives.
+    # A slung work bead carries no worker stamp of its own; coverage is a
+    # not-closed bead naming a convoy (gc.input_convoy_id) whose tracks members
+    # include the bead — the forward resolution liveness-sweep.sh uses. Computed
+    # only when there is something to filter, and left partial ($liveness_ok=0)
+    # if the alive listing or any convoy read fails, so a candidate carrying the
+    # exec stamp is warned rather than flagged when coverage cannot be confirmed.
+    worked=" "; liveness_ok=1
+    alive=$(run_bounded gc bd list --db "$rig_path/.beads" --status open,in_progress --json --limit 0 2>/dev/null)
+    if printf '%s' "$alive" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        convoys=$(printf '%s' "$alive" | scrub | jq -r '[ .[]? | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' 2>/dev/null)
+        while IFS= read -r convoy; do
+            [ -n "$convoy" ] || continue
+            crows=$(run_bounded gc bd show "$convoy" --db "$rig_path/.beads" --json 2>/dev/null)
+            if printf '%s' "$crows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+                while IFS= read -r m; do [ -n "$m" ] && worked="$worked$m "; done \
+                    <<< "$(printf '%s' "$crows" | scrub | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' 2>/dev/null)"
+            else
+                liveness_ok=0   # a convoy we could not read may cover a candidate
+            fi
+        done <<< "$convoys"
+    else
+        liveness_ok=0           # no alive listing: cannot confirm any coverage
+    fi
+
+    while IFS=$'\t' read -r id btype has_exec title; do
         [ -n "$id" ] || continue
+        case "$worked" in *" $id "*) continue ;; esac   # a live molecule drives it
+        if [ "$has_exec" = "1" ] && [ "$liveness_ok" != "1" ]; then
+            warnings+=("$label bead $id [$btype]: blocked and carries gc.execution_routed_to, but molecule liveness could not be confirmed in $rig_path/.beads — NOT flagged, because arming a bead a live workflow still drives would double-dispatch it. Verify by hand whether a live molecule drives it; if not, arm it ($title)")
+            continue
+        fi
         findings+=("$label bead $id [$btype]: blocked with no gc.routed_to and no gc.dispatch_when_ready — when its blocker closes it becomes ready and no pool is offered it. Arm it so it auto-resumes: deferred-dispatch.sh arm $id --target <rig>/<agent> --reason \"waits for <blocker>\" ($title)")
     done <<< "$cand"
 done <<< "$scopes"

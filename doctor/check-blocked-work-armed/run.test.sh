@@ -42,6 +42,13 @@ name=$(basename "$(dirname "$db")")
 case "$sub" in
   blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && exit 3
            f="$STORES/$name.blocked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+  # The liveness step: `list --status open,in_progress` is the alive set the
+  # candidate's molecule root is named in; `show <convoy>` renders the tracks
+  # edge. Both read per-rig fixtures; a missing show fixture answers bd's
+  # not-found OBJECT (not an array), which the check reads as liveness-unverified.
+  list) f="$STORES/$name.alive.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+  show) sid="$2"; f="$STORES/$name.show.$sid.json"
+        if [ -f "$f" ]; then cat "$f"; else printf '{"error":"no issues found matching the provided IDs"}'; fi ;;
   *) printf '[]'; exit 0 ;;
 esac
 BD
@@ -63,6 +70,12 @@ barmed()  { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task"
 bassigned() { printf '{"id":"%s","status":"open","assignee":"someone/else","issue_type":"task","blocked_by":["x-0"],"metadata":{}}' "$1"; }
 bmeta()   { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","blocked_by":["x-0"],"metadata":{"%s":"%s"}}' "$1" "$2" "$3"; }
 btyped()  { printf '{"id":"%s","status":"open","assignee":"","issue_type":"%s","blocked_by":["x-0"],"metadata":{}}' "$1" "$2"; }
+# Liveness fixtures. A not-closed workflow root names its input convoy (the LIVE
+# NAMER); the convoy renders a tracks edge to the work bead. Present both and the
+# work bead reads as in-flight; omit the convoy show and liveness is unverified.
+alive_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.alive.json"; }
+broot()       { printf '{"id":"%s","status":"in_progress","assignee":"","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"%s"}}' "$1" "$2"; }
+convoy_tracks() { printf '[{"id":"%s","dependencies":[{"dependency_type":"tracks","id":"%s"}]}]' "$1" "$2" > "$TMP/stores/$3.show.$1.json"; }
 
 # --- 1. the finding: blocked plainly-work bead with no route and no arm ------
 blocked_store alpha "$(bwork a-1)"
@@ -73,12 +86,52 @@ has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
 has "$OUT" "deferred-dispatch.sh arm a-1" "the finding names the arm remedy for that bead"
 clear_stores
 
-# gc.execution_routed_to is execution provenance, not a dispatch path: a bead
-# carrying only it still strands when its blocker clears — a FINDING.
+# gc.execution_routed_to is execution provenance, not a dispatch path. When NO
+# live molecule drives the bead (the alive listing is empty, so liveness is
+# confirmed), a bead carrying only it still strands when its blocker clears — a
+# FINDING. (The live-molecule case, where it must NOT be flagged, is below.)
 blocked_store alpha "$(bexec a-1)"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "a blocked task carrying only gc.execution_routed_to is flagged"
-has "$OUT" "alpha bead a-1" "the exec-routed-only bead is named as a finding"
+eq "$RC" "1" "a blocked exec-routed bead no live molecule drives is flagged (stranded)"
+has "$OUT" "alpha bead a-1" "the stranded exec-routed bead is named as a finding"
+clear_stores
+
+# --- F4: an in-flight bead under a LIVE molecule must NOT be flagged ---------
+# A LIVE graph.v2 pour leaves the work bead open, unassigned, gc.routed_to
+# retired, gc.execution_routed_to set — the same shape as a stranded bead. It is
+# distinguished by a not-closed root naming a convoy that tracks it. Flagging it
+# would have the operator arm a bead a live workflow already drives: a double
+# dispatch. It is exempt.
+blocked_store alpha "$(bexec a-1)"
+alive_store  alpha "$(broot root-1 convoy-1)"
+convoy_tracks convoy-1 a-1 alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an exec-routed bead a live molecule drives is NOT flagged (F4)"
+has "$OUT" "OK:" "the store with only an in-flight bead reads clean"
+hasnt "$OUT" "alpha bead a-1" "the in-flight bead is not named as a finding"
+clear_stores
+
+# When the molecule liveness cannot be confirmed — the alive listing names a
+# convoy the store will not render — an exec-routed candidate is reported as
+# unverifiable and NOT flagged, so an unreadable molecule never becomes an
+# arm-it-now that double-dispatches. (No convoy_tracks fixture: show answers a
+# not-found object, not an array.)
+blocked_store alpha "$(bexec a-1)"
+alive_store  alpha "$(broot root-1 convoy-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unconfirmable exec-routed bead makes the pass report (exit 1)"
+has "$OUT" "liveness could not be confirmed" "it says liveness was unverifiable"
+has "$OUT" "NOT flagged" "and that it withheld the flag rather than risk a double dispatch"
+hasnt "$OUT" "no dispatch path" "it is a warning, not a stranded-work finding"
+clear_stores
+
+# A bead with no exec stamp is hand-filed work, not a molecule bead: liveness is
+# irrelevant and it is flagged whether or not the alive listing is readable.
+blocked_store alpha "$(bwork a-1)"
+alive_store  alpha "$(broot root-1 convoy-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a non-exec blocked work bead is flagged regardless of molecule liveness"
+has "$OUT" "no dispatch path" "and it is a stranded-work finding, not a liveness warning"
 clear_stores
 
 # The allowlist admits every named work type, not just task (which bwork uses):
@@ -147,6 +200,24 @@ has "$OUT" "alpha bead a-1" "alpha's finding is labelled with its rig"
 has "$OUT" "beta bead b-1" "beta's finding is labelled with its rig"
 has "$OUT" "2 finding" "both rigs' findings are counted"
 clear_stores
+
+# --- F6: a suspended rig is skipped, not queried -----------------------------
+# Querying a suspended rig's store with `gc bd blocked --db` auto-starts an
+# orphan Dolt server, so the check skips it with a note (like the sibling store
+# checks) rather than reading its blocked beads.
+cat > "$TMP/rigs-suspended.json" <<EOF
+{"rigs":[
+  {"name":"alpha","path":"$TMP/alpha","suspended":true},
+  {"name":"beta","path":"$TMP/beta"}]}
+EOF
+blocked_store alpha "$(bwork a-1)"
+blocked_store beta  "$(bwork b-1)"
+OUT=$(RIGS_JSON="$TMP/rigs-suspended.json" run_check); RC=$?
+eq "$RC" "1" "a live rig's finding still warns while a suspended sibling is skipped"
+has "$OUT" "alpha: skipped (suspended" "the suspended rig is skipped with a note"
+hasnt "$OUT" "alpha bead a-1" "the suspended rig's blocked bead is neither read nor flagged"
+has "$OUT" "beta bead b-1" "the live rig is still scanned in the same pass"
+clear_stores; rm -f "$TMP/rigs-suspended.json"
 
 # --- 5. quiet paths ----------------------------------------------------------
 # No blocked-bead fixture at all: every store answers the empty array.

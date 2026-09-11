@@ -300,13 +300,13 @@ DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
 # The wait is already a bead:
-"$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --waiting-on <blocker-bead-id> --then-route <rig>/<agent>
+"$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --waiting-on <blocker-bead-id> --then-route <rig>/<rig>.polecat
 # The wait is not a bead yet — file it once, keyed so a repeat of the same
 # cause waits on the same bead instead of filing a second:
-"$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<agent>
+"$DISPOSE" "$WORK_BEAD_ID" --disposition blocked --by proactive --reason "<what it waits on and why>" --takeaway "<the ≤140-char headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
 ```
 
-The examples pass `--then-route <rig>/<agent>` because a blocked bead that is
+The examples pass `--then-route <rig>/<rig>.polecat` because a blocked bead that is
 plainly work must not be left unrouted: it arms the deferred dispatch, so the
 blocker closing is what sends the bead to that pool and nobody has to route it
 by hand. Leaving a blocked work bead with no route and no arm is the debt

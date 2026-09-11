@@ -260,17 +260,48 @@ hasnt "--sling-arg" "$LOG" \
 has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
     "(BLKARM) …and the arm lands"
 
-# Control: even a release that leaves the pour stamp set still lets the plain arm
-# land — arm keys on gc.routed_to, and the execution stamp is provenance, not a
-# live queue. The old contract refused here; the branch that made the stamp
-# provenance is why this coupled surface now expects the arm to succeed.
+# Control: a release that leaves the pour stamp set still lets the plain arm land.
+# The coupled surface is gc-helm.sh takeaway --release: it WARNS on a surviving
+# gc.execution_routed_to and returns 0 rather than failing, because no arm or
+# reconcile guard reads that stamp. The stub returns 0 with the stamp still set to
+# model exactly that path, so this control exercises the real release, not a state
+# the real flow cannot reach — and dispose runs on to arm the plain dispatch.
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_HELM_KEEPS_STAMP=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "0" "(BLKARM) a surviving pour stamp does not fail the disposition"
 has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
     "(BLKARM) a stamp left set does NOT refuse the plain arm — provenance, not a live queue"
-unset FAKE_HELM_KEEPS_STAMP FAKE_EXEC_ROUTED_FILE FAKE_SHOW_JSON
+unset FAKE_HELM_KEEPS_STAMP
+
+# Contract: the arm is downstream of a release that SUCCEEDED. A genuine release
+# failure — not a cosmetic surviving stamp, but gc-helm exiting non-zero because a
+# write it owed did not land — dies before the arm, so a bead whose disposition
+# only half-wrote is never armed to auto-resume from that state. This is the
+# release-then-arm coupling; the surviving-stamp control above proves a cosmetic
+# stamp is NOT such a failure.
+export FAKE_HELM_FAILS=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "4" "(BLKARM) a genuine gc-helm release failure fails the disposition"
+hasnt "DEFERRED arm" "$LOG" "(BLKARM) …and nothing is armed after a release that did not land"
+unset FAKE_HELM_FAILS FAKE_EXEC_ROUTED_FILE FAKE_SHOW_JSON
+
+# (BLKROUTE) --then-route is held to the SAME roster test as --route: a target no
+# pool runs is refused before anything is written, not silently armed to fail
+# every reconcile pass. Its parse check only tests for a "/", which a copied
+# `<rig>/<rig>.polecat` placeholder passes, so the roster probe is what catches it.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{}}]'
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+export FAKE_POOL_DEAD=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+    --then-route gc-toolkit/gc-toolkit.nosuchpool
+eq "$RC" "2" "(BLKROUTE) --then-route to a pool nothing runs is refused"
+has "PROACTIVE deliverable gc-toolkit/gc-toolkit.nosuchpool" "$LOG" \
+    "(BLKROUTE) …the exit asks whether that pool can claim before arming"
+hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every reconcile pass"
+unset FAKE_POOL_DEAD FAKE_SHOW_JSON FAKE_DEPS_JSON
 
 # ── ruling: the visit stays the exit for a question only a human answers ─────
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
