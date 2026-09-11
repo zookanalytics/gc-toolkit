@@ -358,8 +358,23 @@ if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
   fi
 fi
 # <<< gate-visit
-"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer, or for a recommend-close why there is no work and the counter-case>" --takeaway "<the ≤140-char headline; a recommend-close reads 'recommend close: <why>'>" --visit "$VISIT"
+"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer, or for a recommend-close why there is no work and the counter-case>" --takeaway "<the ≤140-char headline; a recommend-close reads 'recommend close: <why>'>" --visit "$VISIT" || exit 1
+# Auto-open for a LIVE interactive intake only, best-effort. converse-auto-open
+# reads and consumes gc.interactive_intake on the subject — stamped only by
+# gc-visit-open's keystroke path — so a scan-driven reaction on a stale operator
+# subject is a no-op here and never spawns an unattended converse. The visit is
+# filed and parked regardless; converse-idle-recycle reclaims a sitting nobody attends.
+AUTO_OPEN=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/converse-auto-open.sh" ] && { AUTO_OPEN="$c/assets/scripts/converse-auto-open.sh"; break; }
+done
+[ -n "$AUTO_OPEN" ] && "$AUTO_OPEN" --subject "$WORK_BEAD_ID" --visit "$VISIT" || true
 ```
+
+A live prefix+a intake opens as a conversation, not a parked row: `gc-visit-open`
+arms `gc.interactive_intake` at the keystroke, and the line above engages the
+visit `--no-attach` once it is filed. A scan reacting a stale operator subject
+carries no such marker, so its visit parks exactly as before — the force-to-visit
+invariant is untouched, auto-open only completes it (docs/gascity-human-engagement.md).
 
 **2. Close THIS step bead, then drain.** Run this only after the exit block
 above exited zero. `first-reaction-dispose.sh` returns non-zero when the route

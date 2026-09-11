@@ -56,6 +56,11 @@
 #               a parked-disposition sweep selects on to decide whether a
 #               parked subject is owed a visit back once its routed work
 #               lands (tk-2cyxo), so a missing stamp costs the return trip.
+#   (AUTOOPEN)  the intake arms gc.interactive_intake (the live-keystroke marker
+#               that gates auto-open, distinct from the permanent gc.origin), and
+#               the fallback path hands its filed visit to converse-auto-open so a
+#               live prefix+a opens a conversation instead of a parked row. The
+#               react path does NOT — mol-first-reaction's ruling step opens that one.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -162,7 +167,17 @@ case "${FAKE_DELIVERABLE:-yes}" in
 esac
 PRO
 
-chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gc-proactive.sh"
+# --- converse-auto-open.sh stub ----------------------------------------------
+# The fallback path auto-opens the visit it just filed. Stub it so the intake
+# script is tested in isolation — the auto-open action has its own test; here we
+# only assert that the fallback hands off to it, and that the react path does not.
+cat > "$TMP/bin/converse-auto-open.sh" <<'AO'
+#!/usr/bin/env bash
+printf 'auto-open %s\n' "$*" >> "$FAKE_CALLS"
+exit 0
+AO
+
+chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gc-proactive.sh" "$TMP/bin/converse-auto-open.sh"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls"
@@ -171,6 +186,7 @@ export FAKE_BODY="$TMP/body"
 export FAKE_RIGS="$TMP/rigs"
 export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
 export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
+export GC_AUTO_OPEN_TOOL="$TMP/bin/converse-auto-open.sh"
 export TMPDIR="$TMP"
 
 # run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS
@@ -201,6 +217,13 @@ has "$OUT" "tk-newsub" "(DIRECT) the summary names the subject id"
 # the converse session reads the BODY at claim time.
 has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subject's durable body too"
 
+# (AUTOOPEN) the live-intake marker is armed, and the fallback hands the filed
+# visit to the auto-open action so a live prefix+a becomes a conversation, not a
+# parked row. The marker is what gates auto-open downstream — NOT gc.origin,
+# which rides stale subjects a scan re-reacts.
+has "$CALLS" "--set-metadata gc.interactive_intake=1" "(AUTOOPEN) the live-intake marker is armed at intake"
+has "$CALLS" "auto-open --subject tk-newsub" "(AUTOOPEN) the fallback hands the visit to converse-auto-open"
+
 # --- (SINGLE) the react path files NO visit ----------------------------------
 run yes "how should we shard the refinery queue"
 eq "$RC" "0" "(SINGLE) the react path exits 0"
@@ -208,6 +231,10 @@ has "$CALLS" "helm react tk-newsub" "(SINGLE) the first reaction is slung at the
 hasnt "$CALLS" "helm open" "(SINGLE) no visit is filed — the reaction files it"
 has "$OUT" "not filed yet" "(SINGLE) the operator is told the visit does not exist yet"
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
+# The react path does NOT auto-open from here: mol-first-reaction's ruling step
+# files the visit and auto-opens it, and a second engage here would race it.
+hasnt "$CALLS" "auto-open" "(SINGLE) the react path does not auto-open from the intake script"
+has "$CALLS" "--set-metadata gc.interactive_intake=1" "(SINGLE) the live-intake marker is armed on the react path too"
 
 # --- (SHED) an undeliverable proactive surface diverts to the direct path ----
 run no "what should the deacon do about quota parks"

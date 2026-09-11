@@ -1,0 +1,29 @@
+# converse-idle-recycle — reclaim the slot of an auto-opened converse sitting the
+# operator never attended.
+#
+# gc-visit-open auto-opens an operator's prefix+a topic (gc-helm engage --no-attach)
+# so it becomes a live conversation instead of a board row nobody draws off. That
+# guess is speculative until the operator attaches, and converse carries
+# idle_timeout="0", so nothing in the runtime recycles a never-attended sitting —
+# it holds a session slot indefinitely. converse-reap ends a sitting whose VISIT
+# has closed; this ends the half it leaves untouched: a visit still OPEN that was
+# never attended. The discriminator is attachment, not idle time (spec tk-2i4bde,
+# tk-20rfkt). Reclaim returns the visit to parked; it does not dismiss it.
+#
+# City scope: converse sessions span rigs and the pass resolves each visit's store
+# by id prefix, so one pass reads the whole city. A pass skipped or cut short costs
+# only the reclaim the next pass takes instead; the pass is idempotent.
+[order]
+description = "Recycle auto-opened converse sittings the operator never attended (visit still open): promote on first attach, free the speculative slot after a timeout. Complements converse-reap (which handles closed visits)."
+trigger = "cooldown"
+interval = "5m"
+exec = "$PACK_DIR/assets/scripts/converse-idle-recycle.sh"
+timeout = "120s"
+scope = "city"
+idempotent = true
+
+# City-wide default for the idle budget before a never-attended sitting is
+# reclaimed. One [order.env] serves every registration; a rig that wants a
+# different budget sets CONVERSE_AUTO_OPEN_RECYCLE_SECS in its environment.
+[order.env]
+CONVERSE_AUTO_OPEN_RECYCLE_SECS = "900"

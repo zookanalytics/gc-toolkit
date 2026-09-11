@@ -31,6 +31,7 @@ PROG="gc-visit-open"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+AUTO_OPEN="${GC_AUTO_OPEN_TOOL:-$SCRIPT_DIR/converse-auto-open.sh}"
 
 # The default rig — deliberately NOT inferred from cwd: a wrong-but-FIXED
 # default is discoverable, a wrong-and-VARYING one is not.
@@ -252,6 +253,17 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
+# ── Arm the live-intake marker ───────────────────────────────────────
+# gc.interactive_intake says this visit is being born at a live keystroke — the
+# ONLY thing allowed to auto-open a converse (converse-auto-open.sh). It is
+# deliberately NOT gc.origin=operator: origin is permanent and rides stale
+# subjects a scan re-reacts, so auto-engaging on it would spawn a converse with
+# no human present. Stamped on every intake so a fresh prefix+a re-arms a subject
+# whose prior marker was already spent; the auto-open consumes it, one shot.
+# shellcheck disable=SC2086  # ${SUBJ_DB:+--db "$SUBJ_DB"} expands to 0 or 2 space-free fields
+gc bd update "$SUBJECT" ${SUBJ_DB:+--db "$SUBJ_DB"} --set-metadata "gc.interactive_intake=1" >/dev/null 2>&1 \
+    || note "$PROG: could not arm gc.interactive_intake on $SUBJECT — it will still reach a visit, but will not auto-open; engage it from the board by hand"
+
 # ── Path selection: can a slung first reaction actually be picked up? ─
 # Delegated to gc-proactive.sh deliverable so this caller cannot drift from
 # the clamps (the tool + agents/proactive/agent.toml).
@@ -302,3 +314,15 @@ fi
     --body "The operator opened this topic directly and no framing card was written ($REACT_WHY). Rebuild whatever context exists on the subject, prep, and hold for the operator. The subject's body is the seed of the conversation, not a specification — ask before assuming scope." \
     || die "could not file the visit on $SUBJECT (the subject bead exists; retry with: $HELM open $SUBJECT)" 4
 printf '%s: subject %s — visit filed (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+
+# Auto-open the visit just filed, so this live intake becomes a conversation
+# rather than a row waiting to be drawn off the board. converse-auto-open reads
+# and consumes the gc.interactive_intake armed above, resolves the subject's one
+# parked visit, and engages it --no-attach; it is best-effort and fails toward a
+# parked visit, so a miss leaves the topic engageable by hand. (The react path
+# does not come here — mol-first-reaction's ruling step auto-opens that one.)
+if [ -x "$AUTO_OPEN" ]; then
+    "$AUTO_OPEN" --subject "$SUBJECT" || true
+else
+    note "$PROG: converse-auto-open.sh not found at $AUTO_OPEN — $SUBJECT's visit is parked; engage it from the board"
+fi

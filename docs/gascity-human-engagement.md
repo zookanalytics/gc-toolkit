@@ -310,6 +310,28 @@ fail-safe by design: a react path that could not tell would leave a routed bead
 nobody picks up and *no visit at all* — a topic that looks filed and is
 silently forgotten, the one outcome this channel exists to prevent.
 
+**A live intake opens as a conversation, not a parked row.** Either path ends in
+a visit on the helm board; a live prefix+a also auto-opens it, so the operator
+lands in a sitting instead of hunting for a row. `assets/scripts/converse-auto-open.sh`
+runs `gc-helm engage <visit> --no-attach` — the same spawn the board picker
+runs — from whichever path filed the visit: the react path from
+`mol-first-reaction`'s ruling step, the fallback from `gc-visit-open` directly.
+The operator attaches from the session picker (prefix+S) when they are ready.
+
+The discriminator is **`gc.interactive_intake`, never `gc.origin=operator`**.
+Origin is permanent and rides every operator subject, including stale ones a
+`scan --sling` re-reacts; auto-engaging on it would spawn a converse with no
+human present (the failure that retired the converse routed-pool). The intake
+arms `gc.interactive_intake` only at the keystroke, and `converse-auto-open`
+consumes it on read — one shot — so a replayed or scan-driven reaction finds
+nothing to arm and parks the visit exactly as before. The force-to-visit
+invariant (`first-reaction-dispose.sh`, tk-diqxx9) is untouched: auto-open
+completes the visit, it does not bypass it. `CONVERSE_AUTO_OPEN_CAP` (default 2,
+per rig) bounds how many speculative, not-yet-attended auto-opens may stand at
+once, so firing several and walking away cannot stack sittings against the
+converse slots; past the cap the visit parks. A sitting nobody attends is
+reclaimed by `converse-idle-recycle` (see *How a held sitting ends*).
+
 Note what is *not* here: there is no mail-to-visit bridge, and no seam for one.
 A mailbox whose endpoint spins up a visit per message was considered and
 rejected outright (operator ruling, 2026-08-14) — a mail is already a bead and
@@ -559,8 +581,22 @@ reads closed or gone — the reap those two endings assume. It reaps only an
 UNATTACHED session, because the pack cannot see typed text in a composer and
 draining a pane that has some is the operator's one hard no (see below); an
 attached sitting whose visit already reads closed is left for a later pass, once
-it is no longer attended. A sitting whose visit is still OPEN — the operator
-walked away before any sign-off — is the harder, separate case, untouched here.
+it is no longer attended.
+
+A sitting whose visit is still OPEN splits by how it was opened. An AUTO-opened
+one — `gc-visit-open` guessed the operator wanted to talk and engaged the visit
+for them, stamping `gc.auto_opened` — is speculative until the operator attaches,
+so the `converse-idle-recycle` order (`assets/scripts/converse-idle-recycle.sh`)
+reclaims it after `CONVERSE_AUTO_OPEN_RECYCLE_SECS` (default 900) of never being
+attended: it closes the session and returns the visit to parked — not a dismiss,
+because the conversation was never had, so the topic stays on the board for a
+later engage. The discriminator is attachment, not idle time, which is why
+`idle_timeout="0"` can stand: the first pass that sees the sitting `.attached`
+stamps `gc.auto_open_attended_at` and leaves it held for good (the pack has only
+the live boolean and no was-ever-attached history, so the sweep keeps that
+history itself; a later detach never re-arms the reclaim). A MANUALLY engaged
+open-visit sitting carries no `gc.auto_opened` and is a deliberate hold — ended
+only by sign-off or `gc-helm dismiss`, like any held sitting.
 
 Two runtime endings the idle setting does not own, and both still reach converse:
 
