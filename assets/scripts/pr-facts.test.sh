@@ -1783,6 +1783,31 @@ out=$(STUB_GQL_READ_FAIL=1 run)
 hasnt "$out" "unengaged review-thread finding" "an unreadable thread read flags nothing"
 eq "$(meta UT5 pr_unengaged_threads)" "<absent>" "…and writes no head watermark"
 
+echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
+# refinery-reconcile runs pr-facts --posture-only, then merge.sh, then the full
+# pr-facts. merge.sh reads posture off the bead and holds only on commented@; it
+# never reads threads. So a clean green PR with a self-login unresolved thread
+# has to read `commented` after --posture-only ALONE — before merge.sh runs —
+# and the posture pass must dispatch nothing. The full pass that follows files
+# the one visit the hold stands for; a later posture pass holds off that standing
+# visit without re-reading the threads.
+store "[$(anchor UT6 66)]"
+printf '%s' "$(prview 66 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_66.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null}]' > "$GH_DIR/comments_66.json"
+echo '[]' > "$GH_DIR/reviews_66.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-66","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-66","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_66.json"
+out=$(run_posture)
+eq "$(meta_pinned UT6 pr_posture)" "commented@sha-66" "the posture pass records the merge-hold before merge.sh runs"
+eq "$(jq '[.[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads"))] | length' "$STUB_STORE")" "0" "…and dispatches no visit — that is the full pass's"
+eq "$(meta UT6 pr_unengaged_threads)" "<absent>" "…and writes no head watermark yet"
+out=$(run)
+has "$out" "unengaged review-thread finding" "the full pass that follows files the one visit"
+eq "$(meta UT6 pr_unengaged_threads)" "sha-66" "…and watermarks the head"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run_posture)
+eq "$(meta_pinned UT6 pr_posture)" "commented@sha-66" "a standing visit keeps the merge held on the next posture pass"
+hasnt "$(gh_since "$mark")" "graphql" "…without re-reading the threads"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
