@@ -1721,6 +1721,64 @@ out=$(run)
 has "$out" "identity did not certify for the write-back" "the foreign PR is refused"
 eq "$(reacted 51 NC-51)" "false" "…and NOTHING was written back"
 
+echo "# a review posted under our OWN login leaves unresolved threads arm 4 never routes"
+# The gap: an outside review agent (or an operator-run review) posts findings on a
+# green PR under the automation's own login. arm 4 counts only other logins, so it
+# routes nothing; the gate stays green, and until this backstop nothing flagged it.
+store "[$(anchor UT1 60)]"
+printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null}]' > "$GH_DIR/comments_60.json"
+echo '[]' > "$GH_DIR/reviews_60.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-60","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-60","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_60.json"
+out=$(run)
+has "$out" "unengaged review-thread finding" "the backstop flags the otherwise-clear PR"
+hasnt "$out" "routed to rework:" "arm 4 routed nothing — the finding is under our own login"
+UTVID=$(jq -r '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) | .id ] | .[0] // empty' "$STUB_STORE")
+[ -n "$UTVID" ] && ok "a visit was filed" || bad "no visit filed"
+eq "$(meta "$UTVID" pr_number)" "60" "…stamped with the PR so merge.sh holds the merge"
+eq "$(meta "$UTVID" anchor_bead)" "UT1" "…and anchored to the gating bead"
+eq "$(meta UT1 pr_unengaged_threads)" "sha-60" "…and the anchor is head-watermarked against re-filing"
+
+echo "# a RESOLVED thread is done — the finding exists but nothing is flagged"
+store "[$(anchor UT2 61)]"
+printf '%s' "$(prview 61 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_61.json"
+echo '[]' > "$GH_DIR/reviews_61.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-61","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-61","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_61.json"
+out=$(run)
+hasnt "$out" "unengaged review-thread finding" "a resolved thread raises nothing"
+eq "$(meta UT2 pr_unengaged_threads)" "<absent>" "…and no head watermark is written"
+
+echo "# a thread we already replied into is arm 4's or the write-back's to finish, not ours"
+store "[$(anchor UT3 62)]"
+printf '%s' "$(prview 62 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_62.json"
+echo '[]' > "$GH_DIR/reviews_62.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-62","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-62","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]},{"id":"NC-62b","databaseId":0,"author":{"login":"gc-city-bot"},"body":"noted <!-- gc-writeback -->","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_62.json"
+out=$(run)
+hasnt "$out" "unengaged review-thread finding" "a thread carrying our own reply is left to the write-back"
+
+echo "# a live child already on the anchor owns the follow-up — no second signal, no thread read"
+store "[$(anchor UT4 63), {\"id\":\"rw-63\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Address review comments on PR#63\",\"metadata\":{\"anchor_bead\":\"UT4\"}}]"
+printf '%s' "$(prview 63 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_63.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_63.json"
+echo '[]' > "$GH_DIR/reviews_63.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-63","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-63","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_63.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$out" "unengaged review-thread finding" "an in-flight child on the anchor suppresses the backstop"
+hasnt "$(gh_since "$mark")" "graphql" "…and the threads are not even read"
+
+echo "# a thread read that fails files nothing — the backstop fails closed"
+store "[$(anchor UT5 64)]"
+printf '%s' "$(prview 64 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_64.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"finding","pull_request_review_id":null}]' > "$GH_DIR/comments_64.json"
+echo '[]' > "$GH_DIR/reviews_64.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-64","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-64","databaseId":100,"author":{"login":"gc-city-bot"},"body":"finding","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_64.json"
+out=$(STUB_GQL_READ_FAIL=1 run)
+hasnt "$out" "unengaged review-thread finding" "an unreadable thread read flags nothing"
+eq "$(meta UT5 pr_unengaged_threads)" "<absent>" "…and writes no head watermark"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

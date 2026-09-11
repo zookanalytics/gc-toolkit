@@ -344,6 +344,40 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 }
 # <<< unanswered-feedback-body
 
+# >>> unengaged-threads-body
+# The gap the login filter above leaves open. arm 4 counts only comments
+# authored by a login other than ours (unanswered-feedback-body), so a review
+# posted UNDER our own login — an outside review agent, an operator-run review, a
+# reviewer using the automation's credential — sets no `unanswered` and routes
+# nowhere, and the gate stays green across it (lane-state reads the finding and
+# review-outcome beads, never a thread), so nothing re-reviews it. This reads the
+# review THREADS instead of the comment authors. A thread counts as an unengaged
+# finding when it is unresolved, carries a comment that is not one of our own
+# write-back replies, and holds no write-back reply of ours: a thread we replied
+# into is arm 4's or the write-back's to finish, and a resolved one is done.
+# `comments(first:100)` caps a thread at a page, so a thread longer than that
+# whose only write-back reply sits past the cap reads as unengaged — a
+# dismissable visit, never a dropped finding.
+UNENGAGED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(first:100){nodes{body}}}}}}}'
+unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could not tell
+  local num="$1" raw
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$UNENGAGED_THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | scrub | jq -s --arg marker "$WB_MARKER" '
+    [ .[].data.repository.pullRequest.reviewThreads.nodes[]?
+      | (.comments.nodes // []) as $cs
+      | select((.isResolved // false) == false)
+      | select([ $cs[] | select(((.body // "") | contains($marker)) | not) ] | length > 0)
+      | select([ $cs[] | select((.body // "") | contains($marker)) ] | length == 0)
+    ] | length' 2>/dev/null
+}
+# <<< unengaged-threads-body
+
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
@@ -1179,6 +1213,82 @@ GATES
       else
         echo "$PROG: $id — dismissal of review $stale_rid failed; marker stays recorded, retry next pass" >&2
         skipped=$((skipped + 1))
+      fi
+    fi
+  fi
+
+  # --- unengaged review-thread findings on an otherwise-clear PR ----------------
+  # The login-independent backstop for arm 4's blind spot. arm 4 routed nothing
+  # (no unanswered non-self feedback) and the dismiss arm found no stale block, so
+  # a PR reaching here reads clear — yet a review posted under our own login can
+  # leave unresolved finding threads that never became `unanswered` and, because
+  # the gate stays green across them, triggered no re-review. This files ONE visit
+  # — the follow-up nothing else raises — and holds the merge behind it, exactly
+  # as arm 4's visit branch does, keyed on the head so it re-raises when new
+  # commits still carry them. It does NOT dispatch rework: telling a finding from
+  # our own answer well enough to drive an auto-fix loop is arm 4's watermark
+  # machinery, and running that off a raw thread read would loop on our own
+  # replies.
+  if [ -n "$head_oid" ] && [ -n "$num" ] && [ -n "$SELF_LOGIN" ] \
+     && [ "$rd" != "CHANGES_REQUESTED" ] && [ -n "$cmts_live" ]; then
+    # Cheap pre-gate off the comments already fetched for the posture, so the
+    # thread read below is spent only where the gap can be. The gap is a review
+    # under OUR OWN login: arm 4 counts only other logins, so a comment ours that
+    # is not one of our write-back replies is one it filtered and left unrouted.
+    # Absent any such comment, no thread here is a finding we own the miss on, and
+    # this anchor never reaches GitHub again.
+    self_findings=$(printf '%s' "$cmts_live" | jq --arg self "$SELF_LOGIN" --arg marker "$WB_MARKER" \
+      '[ .[] | select(((.user.login // "") | tostring) == $self)
+             | select(((.body // "") | contains($marker)) | not) ] | length' 2>/dev/null)
+    case "$self_findings" in ''|*[!0-9]*) self_findings=0 ;; esac
+    # Only a green gate hides findings: a red lane is already re-reviewing, and a
+    # live review or rework bead is caught by the in-flight probe below. Green is
+    # read off the same markers the dismiss arm reads.
+    ut_green=1
+    while IFS= read -r g; do
+      [ -n "$g" ] || continue
+      case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
+      m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
+      [ "$m" = "green" ] || ut_green=0
+    done <<UTGATES
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+UTGATES
+    ut_stamp=$(printf '%s' "$row" | jq -r '(.metadata.pr_unengaged_threads // "") | tostring')
+    if [ "$self_findings" -gt 0 ] && [ "$ut_green" = 1 ] && [ "$ut_stamp" != "$head_oid" ]; then
+      # A review, rework child or visit already open on this anchor owns the
+      # follow-up; do not stack a second one. Fail closed — an unreadable ledger
+      # is not proof nothing is in flight — and only then spend the thread read.
+      ut_inflight=$(bd_list --status="$LIVE_STATUSES" --metadata-field anchor_bead="$id")
+      if [ -n "$ut_inflight" ] && [ "$(printf '%s' "$ut_inflight" | jq 'length' 2>/dev/null)" = 0 ]; then
+        utc=$(unengaged_thread_count "$num") || utc=""
+        case "$utc" in ''|*[!0-9]*) utc=0 ;; esac
+        if [ "$utc" -gt 0 ]; then
+          UTKEY="pr-unengaged-threads.$num.$head_oid"
+          escalate "$id" "$UTKEY" \
+            "PR#$num ($live_url) carries $utc unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login (an outside review agent, or an operator-run review), so the comment-routing arm never counted them and the green gate triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
+          UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
+          if [ -z "$UTVID" ]; then
+            echo "$PROG: $id — PR#$num carries $utc unengaged review thread(s) but no visit could be filed or found; NOTHING held (retry next pass)" >&2
+            skipped=$((skipped + 1))
+          else
+            gc bd update "$UTVID" \
+              --set-metadata anchor_bead="$id" \
+              --set-metadata pr_url="$live_url" \
+              --set-metadata pr_number="$num" >/dev/null 2>&1 \
+              || echo "$PROG: WARN visit $UTVID not stamped with PR#$num; it will NOT hold the merge — stamp it by hand" >&2
+            utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
+            if [ "$utvgot" != "$num" ]; then
+              echo "$PROG: WARN $id — PR#$num visit $UTVID did not record pr_number; NOT stamping the head (the same threads re-raise next pass, the safe direction)" >&2
+              skipped=$((skipped + 1))
+            elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+                   --set "pr_unengaged_threads=$head_oid" >/dev/null; then
+              flagged=$((flagged + 1))
+              echo "$PROG: $id — PR#$num has $utc unengaged review-thread finding(s); filed visit $UTVID (merge held)"
+            else
+              echo "$PROG: WARN $id — PR#$num visit $UTVID filed and stamped, but the head watermark did not record; it re-raises next pass (deduped on the same visit)" >&2
+            fi
+          fi
+        fi
       fi
     fi
   fi
