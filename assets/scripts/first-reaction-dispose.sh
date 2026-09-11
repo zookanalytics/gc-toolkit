@@ -207,6 +207,17 @@ if [ "$DISPOSITION" = "actionable" ] && [ -x "$PROACTIVE" ]; then
         usage_die "$ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Routing there would leave $BEAD open, unassigned and offered to nobody. File the visit instead (--disposition ruling)."
     }
 fi
+# --then-route names the pool the deferred dispatch slings the bead to once its
+# blocker lifts, so it is held to the SAME roster test as --route. Its own check
+# at parse time only tests for a "/", which a copied `<rig>/<agent>` placeholder
+# passes; a target the roster does not know would arm a dispatch every reconcile
+# pass replays into a failure. The probe answers no only on a positive finding,
+# so an unrunnable probe leaves the arm alone.
+if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -x "$PROACTIVE" ]; then
+    DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$THEN_ROUTE" 2>/dev/null)" || {
+        usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the reconcile pass replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
+    }
+fi
 
 # ── The one subject that is always a conversation ────────────────────
 # gc.origin=operator means a human typed this topic into gc-visit-open and is

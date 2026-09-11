@@ -162,9 +162,12 @@ eq "$(run "$BLOCKED_JSON")" \
    "1|UPDATE;UPDATE;ARM;HOLD;DRAIN;" \
    "open blocker: notes, clears keys, arms, holds, drain-acks, exits 1"
 
-# The containment write clears every delivery key, execution route included —
-# that key is what makes arm refuse, and a still-routed armed bead is retired
-# not slung.
+# The containment write clears every delivery key, execution route included.
+# Clearing gc.routed_to is what makes the bead armable; reconcile keys idempotency
+# on its own gc.dispatch_when_ready_slung marker, not on the execution stamp, so
+# the --on arm slings when the blocker closes whether or not the stamp is set —
+# the stamp is cleared alongside as hygiene so the bead advertises no finished
+# pour's pool.
 run "$BLOCKED_JSON" >/dev/null
 has "$(cat "$TMP/update")" 'gc.execution_routed_to=' "containment clears gc.execution_routed_to"
 has "$(cat "$TMP/update")" 'gc.deferred_execution_routed_to=' "containment clears gc.deferred_execution_routed_to"

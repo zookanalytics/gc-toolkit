@@ -457,6 +457,18 @@ The loop, every visit:
    graph states, not comments.* An edge that will not take warns on stderr
    and the takeaway still lands.
 
+   **A follow-up you file that is itself BLOCKED — it cannot run until
+   another bead lands — is ARMED, not left unrouted.** Slinging it now is
+   wrong (it is blocked), and leaving it unrouted to route once the blocker
+   closes is the come-back-later that keeps you or a person on the hook.
+   Wire its blocker as a `blocks` edge, then arm it so the blocker closing
+   routes it for you:
+   `deferred-dispatch.sh arm <follow-up> --target <rig>/<agent> --reason
+   "waits for <blocker>"` (resolve the script the way the blocks above
+   resolve `gc-helm.sh`). Then the sitting can queue everything and close.
+   A blocked work bead left with no route and no arm is the debt
+   `doctor/check-blocked-work-armed` flags.
+
    **A recorded wait is also the return trip.** Once every recorded wait
    closes, the subject returns through the liveness sweep
    (`assets/scripts/liveness-sweep.sh`) as an unnamed wait; it reads

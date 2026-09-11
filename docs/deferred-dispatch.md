@@ -61,11 +61,21 @@ deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
 ```
 
 `arm` is fail-closed. It refuses a bead that is closed, one that is
-already dispatched (`in_progress`, or carrying `gc.routed_to` /
-`gc.execution_routed_to`), and one with no `--target`. Arming a bead that
-has *no* open blocker is legal and says so — the next pass dispatches it,
-which is what makes `arm` a safe universal substitute for a hand-held
-sling.
+already dispatched (`in_progress`, or carrying `gc.routed_to`), and one
+with no `--target`. `gc.execution_routed_to` alone does not count as
+dispatched: it is execution provenance, not a live queue, and a blocked
+bead carrying only it is the shape `doctor/check-blocked-work-armed`
+flags and names arming as the fix for, so refusing on it would dead-end
+that remedy. Arming a bead that has *no* open blocker is legal and says
+so — the next pass dispatches it, which is what makes `arm` a safe
+universal substitute for a hand-held sling.
+
+Arming is the default move for a blocked follow-up you file or hold by
+hand: arm it rather than leave it unrouted for someone to route once its
+blocker lands, so a sitting can queue everything and drain. A blocked bead
+that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
+is silent manual-follow-up debt — the exact miss
+`doctor/check-blocked-work-armed` reports.
 
 To see what is owed, in this rig's store:
 
@@ -81,11 +91,21 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 and the dispatcher's open-tracking gate gives each rig its own
 single-flight. Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **dispatches** every armed bead that `bd` now reports ready — running
-  the recorded sling, then clearing the record;
-- **retires** the record on an armed bead that has closed, or that is
-  already routed (the crash-between-sling-and-disarm case), without
-  slinging;
+- **dispatches** every armed bead that `bd` now reports ready — stamping
+  its own `gc.dispatch_when_ready_slung` marker in its unproven `slinging@`
+  state, running the recorded sling, promoting the marker to `slung@` on
+  success, then clearing the record;
+- **retires** the record on an armed bead that has closed, or whose sling
+  reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
+  `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
+  pass that died before disarming — so recovery reads one marker reconcile
+  owns rather than the lane-specific stamps a sling leaves (`gc.routed_to`
+  for a plain sling, `gc.execution_routed_to` for an `--on` pour) — without
+  slinging again;
+- **re-slings** an arm whose marker survived in the unproven `slinging@`
+  state — a pass that died before or during its sling, or a failed sling
+  whose rollback did not land — because that dispatch was never proven and
+  retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when the bead
   is still blocked, when someone holds it by `assignee`, when the sling
   fails, or when the recorded arguments are malformed.
@@ -97,9 +117,17 @@ beads' own predicate — open, no active blocker of a blocking type
 included. Asking `bd` is what keeps this from drifting away from the
 predicate every other reader uses.
 
-The pass slings **first** and clears the record **second**. Dying between
-the two leaves an armed bead that is already routed, which the next pass
-retires rather than pouring a second workflow onto.
+The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
+**first**, slings **second**, promotes the marker to `slung@<ts>` on
+success **third**, and clears the whole record **last**. A pass that dies
+before promoting the marker leaves the unproven `slinging@` state, which
+the next pass re-slings rather than retires — so a crash mid-dispatch costs
+a retry, never a silently lost dispatch. A marker surviving as `slung@` (or
+an unprefixed timestamp) is a proven dispatch whose pass died before
+disarming, and the next pass retires it rather than pouring a second time —
+one marker reconcile owns, not an inference from whichever stamp a delivery
+lane happened to leave. A sling that fails rolls the marker back, so the arm
+retries next pass.
 
 An unreadable listing exits non-zero and says so. It never prints a
 zero-count summary — for a dispatcher, "I could not see the queue" and
