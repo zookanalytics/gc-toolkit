@@ -411,6 +411,11 @@ keys = [
   # the cumulative pr_comment_watermark. pr-facts.sh writes it as it routes each
   # batch and reconciles it in the write-back sweep.
   "pr_comment_batch",
+  # The head oid the unengaged-review-thread visit was last filed against.
+  # pr-facts.sh stamps it when it files that visit and reads it back to re-raise
+  # only when a later head still carries the threads, so the same head never
+  # re-files.
+  "pr_unengaged_threads",
 ]
 
 [metadata.pr_round_trip]

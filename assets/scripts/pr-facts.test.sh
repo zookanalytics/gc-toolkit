@@ -157,9 +157,13 @@ echo "# metadata-key drift against lifecycle.toml"
 # reads, so a drift check scanning pr-facts alone would never see those writes.
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$ROOT/lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
-WRITTEN=$(grep -hoE -- '--set-metadata "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" \
-  | sed -E 's/^--set-metadata "?//; s/=$//' | sort -u)
-[ -n "$WRITTEN" ] && ok "set-metadata writes extracted" || bad "no --set-metadata writes found in pr-facts.sh/pr-dispose.sh"
+# pr-facts.sh writes anchor metadata through three flags: bd's --set-metadata,
+# and lifecycle.sh transition's --set and --set-dated. All three are state the
+# registry must declare, so the extraction reads every one — a key written only
+# through lifecycle would otherwise drift unseen.
+WRITTEN=$(grep -hoE -- '--set(-metadata|-dated)? "?[A-Za-z_][A-Za-z0-9_.]*=' "$HERE/pr-facts.sh" "$HERE/pr-dispose.sh" \
+  | sed -E 's/^--set(-metadata|-dated)? "?//; s/=$//' | sort -u)
+[ -n "$WRITTEN" ] && ok "metadata-key writes extracted" || bad "no metadata-key writes found in pr-facts.sh/pr-dispose.sh"
 UNREGISTERED=$(printf '%s\n' "$WRITTEN" \
   | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ' | sed 's/ *$//') || true
 eq "$UNREGISTERED" "" "every metadata key pr-facts.sh and pr-dispose.sh write is registered in lifecycle.toml"
