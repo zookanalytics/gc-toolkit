@@ -135,6 +135,15 @@ demand() { # <anchor-id> [status]
     "$1" "${2:-open}" "$1" "$1"
 }
 
+# A parked rebase/rework child: shares the anchor's branch, carries a rework
+# resume (prepare_mode), routed to the fix pool, and — like every child — no
+# merge_result of its own. `extra` appends metadata (a rebase_hold freeze);
+# status/assignee default to the parked shape (open, unclaimed).
+child() { # id branch [extra-metadata] [status] [assignee]
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","title":"Rebase %s onto main:","metadata":{"branch":"%s","target":"main","prepare_mode":"rebase","gc.routed_to":"rig/gc-toolkit.polecat"%s}}' \
+    "$1" "${4:-open}" "${5:-}" "$2" "$2" "${3:-}"
+}
+
 ROOT="$(cd "$HERE/../.." && pwd)"
 
 echo "# posture vocabulary drift against lifecycle.toml"
@@ -313,6 +322,50 @@ eq "$(meta F2g merge_result)" "pull_request" "…still enumerable, so the next p
 eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated on a read that did not land"
 eq "$(cat "$STUB_REHOME_LOG")" "" "…and bead-rehome is not called"
 has "$out" "re-reading the anchor failed" "the skip names the failed re-read"
+
+# The auto-dispose closes the anchor; the rebase/rework children parked on its
+# branch are moot once the PR is gone and re-offer to the fix pool if left open,
+# so the dispose drops them the same sanctioned way — bead-rehome.sh, pointed at
+# the anchor's own successor.
+echo "# an auto-dispose drops the closed PR's parked rebase/rework children"
+store "[$(anchor F2h 28 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-h"'), $(child K1 polecat/x28), $(child K2 polecat/x28)]"
+printf '%s' "$(prview 28 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_28.json"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+out=$(run)
+has "$out" "auto-disposed (duplicate -> tk-h)" "the anchor is disposed"
+eq "$(bstatus F2h)" "closed" "the anchor is closed"
+eq "$(bstatus K1)" "closed" "the parked child K1 is dropped"
+eq "$(meta K1 'gc.superseded_by')" "tk-h" "…superseded by the anchor's successor, the sanctioned terminal close"
+eq "$(bstatus K2)" "closed" "the parked child K2 is dropped too"
+has "$(cat "$STUB_REHOME_LOG")" "--origin K1 --successor tk-h --kind not-needed" "bead-rehome drops K1 as not-needed -> the successor"
+has "$(cat "$STUB_REHOME_LOG")" "--origin K2 --successor tk-h --kind not-needed" "…and K2 the same way"
+has "$out" "dropped parked child K1" "the drop is reported"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and still no rework-or-close visit is filed"
+
+# Only a PARKED child is dropped. A child a worker holds (in_progress), a review
+# bead on the branch (no prepare_mode, signoff's to close), and a child the
+# operator froze (rebase_hold) are each left alone.
+echo "# the child drop leaves in-flight children, review beads, and frozen children alone"
+store "[$(anchor F2i 29 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-i"'), {\"id\":\"RV\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Review PR#29\",\"metadata\":{\"branch\":\"polecat/x29\",\"gc.routed_to\":\"rig/gc-toolkit.polecat-codex\"}}, $(child LV polecat/x29 '' in_progress rig/gc-toolkit.polecat), $(child FZ polecat/x29 ',"rebase_hold":"operator is reviewing this branch"')]"
+printf '%s' "$(prview 29 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_29.json"
+: > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus F2i)" "closed" "the anchor is disposed"
+eq "$(bstatus RV)" "open" "a review bead on the branch (no prepare_mode) is NOT dropped"
+eq "$(bstatus LV)" "in_progress" "a child a worker holds (in_progress) is left alone"
+eq "$(bstatus FZ)" "open" "a frozen child (rebase_hold) is NOT closed out from under the operator"
+hasnt "$(cat "$STUB_REHOME_LOG")" "--origin RV" "bead-rehome never touched the review bead"
+hasnt "$(cat "$STUB_REHOME_LOG")" "--origin LV" "…nor the in-flight child"
+hasnt "$(cat "$STUB_REHOME_LOG")" "--origin FZ" "…nor the frozen child"
+has "$out" "child FZ on 'polecat/x29' is frozen (rebase_hold)" "the skipped freeze is reported for the operator"
+
+echo "# the successor store, when the disposition records one, rides the child drop too"
+store "[$(anchor F2k 31 ',"gc.pr_close_disposition_kind":"re-homed","gc.pr_close_disposition_successor":"ot-k","gc.pr_close_disposition_successor_store":"rig:other"'), $(child K3 polecat/x31)]"
+printf '%s' "$(prview 31 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_31.json"
+: > "$STUB_REHOME_LOG"
+out=$(run)
+eq "$(bstatus K3)" "closed" "the child is dropped"
+has "$(cat "$STUB_REHOME_LOG")" "--origin K3 --successor ot-k --kind not-needed --successor-store rig:other" "the child drop carries the same successor store as the anchor"
 
 echo "# base moved -> retargeted + markers cleared"
 store "[$(anchor F3 12)]"
