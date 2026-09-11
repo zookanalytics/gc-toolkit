@@ -416,6 +416,18 @@ keys = [
 [metadata.pr_round_trip]
 keys = ["pr.machine"]
 
+[metadata.pr_close_disposition]
+# The disposition a deliberate supersede/not-planned PR close records on the
+# still-OPEN anchor (merge_result=pull_request) before the PR closes, so
+# pr-facts.sh's close arm consummates it through bead-rehome.sh instead of
+# filing a rework-or-close visit. Written by assets/scripts/pr-dispose.sh, read
+# by assets/scripts/pr-facts.sh; the marker is intent only — bead-rehome.sh
+# stays the sole writer of the gc.superseded_by pointer these name.
+keys = [
+  "gc.pr_close_disposition_kind", "gc.pr_close_disposition_successor",
+  "gc.pr_close_disposition_successor_store",
+]
+
 [metadata.holds]
 keys = ["merge_hold", "rebase_hold", "tracking_only"]
 

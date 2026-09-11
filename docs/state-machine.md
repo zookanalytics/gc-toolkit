@@ -66,7 +66,8 @@ stateDiagram-v2
 
   handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
   handed_off --> refused_false_completion: mol-refinery-patrol — no commits
-  pull_request --> abandoned: pr-facts.sh — PR closed unmerged
+  pull_request --> abandoned: pr-facts.sh — closed unmerged, no recorded disposition
+  pull_request --> [*]: pr-facts.sh — closed unmerged, disposition pre-recorded (bead-rehome.sh)
   pull_request --> retargeted: pr-facts.sh — PR base moved
   pull_request --> merged: pr-facts.sh — merged out-of-band
 
@@ -130,7 +131,8 @@ reaches such a bead in any case, because every anchor enumeration is
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 2) | every marker-bearing gate in `check_set` reads `green` |
 | pull_request → merged | `merge.sh` (cadence arm 4) | full authorization set validated; close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 5) | GitHub merged the PR out-of-band; record only |
-| pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally; files a visit |
+| pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
+| pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
 | handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
@@ -591,3 +593,16 @@ would have driven `pull_request → abandoned` and a fresh visit. A bare close o
 a subject still carrying a non-closed `merge_result` remains the violation
 `lifecycle.sh reopen` repairs; retiring is the sanctioned path, not an
 exception to the invariant.
+
+An anchor whose PR is still open cannot take that close directly: closing it
+while `merge_result=pull_request` would strand a PR the refinery still watches.
+So a deliberate supersede/not-planned PR close records the SAME disposition as
+INTENT on the still-open anchor — `assets/scripts/pr-dispose.sh` stamps
+`gc.pr_close_disposition_kind`, `gc.pr_close_disposition_successor`, and an
+optional `_store` naming the intended `bead-rehome.sh` invocation — and closes
+the PR. `pr-facts.sh`'s close arm reads that marker when the PR reaches CLOSED
+and runs `bead-rehome.sh` to consummate the terminal close, so `bead-rehome.sh`
+stays the sole writer of `gc.superseded_by` and the disposition reaches the
+same terminal state through the same verb. A close with no recorded
+disposition still transitions to `abandoned` and files the rework-or-close
+visit.

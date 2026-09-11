@@ -5,7 +5,10 @@
 # that died after merge.sh landed it) -> lifecycle transition to merged, with
 # a failure counted against the same record-failure-cap.sh budget merge.sh
 # spends, since both are attempts at the one repair;
-# CLOSED-unmerged -> abandoned + escalate.sh visit; base moved -> retargeted +
+# CLOSED-unmerged -> if the anchor carries a pre-recorded disposition
+# (gc.pr_close_disposition_*, stamped by pr-dispose.sh), auto-dispose it through
+# bead-rehome.sh and retire any stale rework-or-close visit; otherwise abandoned
+# + escalate.sh visit; base moved -> retargeted +
 # escalate (gate markers cleared: a review of the pre-retarget diff proves
 # nothing about the new base); CONFLICTING -> classify the head branch
 # (allowlist: only polecat/* may be rewritten, and never a graduation) and file
@@ -75,6 +78,11 @@ ESCALATE="$SCRIPTS_DIR/escalate.sh"
 # record arms perform the same repair on the same anchor, so their failures
 # count against one budget rather than each keeping a private tally.
 RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
+# The sanctioned terminal close for a disposed (non-landed) anchor. A close arm
+# below consummates a pre-recorded PR-close disposition through it rather than
+# abandoning + filing a rework-or-close visit; it stamps gc.superseded_by, the
+# explicit terminal state doctor/check-closed-implies-landed accepts.
+REHOME="$SCRIPTS_DIR/bead-rehome.sh"
 
 FIX_POOL=""; POSTURE_ONLY=0
 while [ $# -gt 0 ]; do
@@ -342,7 +350,7 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 }
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
-recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0
+recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
 postured=0; answered=0; unpostured=0
 while IFS= read -r row; do
   [ -n "${row:-}" ] || continue
@@ -423,8 +431,75 @@ while IFS= read -r row; do
     continue
   fi
 
-  # --- PR closed unmerged: out-of-band close -> abandoned + visit ----------------
+  # --- PR closed unmerged: out-of-band close ------------------------------------
   if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ]; then
+    # A deliberate supersede/not-planned close records its disposition on the
+    # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
+    # the bead-rehome kind, the successor, and an optional store. When it is
+    # present and well-formed, consummate it through bead-rehome.sh — the
+    # sanctioned terminal close that stamps gc.superseded_by, the explicit
+    # terminal state doctor/check-closed-implies-landed accepts — rather than
+    # re-asking the decision the closer already made as a rework-or-close
+    # visit. A missing or malformed marker falls through to the default.
+    #
+    # Read the marker from a FRESH anchor read, not from $row: pr-dispose.sh
+    # stamps it immediately before it closes the PR, which can fall AFTER this
+    # pass captured $row at enumeration. The stale $row would miss a marker set
+    # in that window and abandon a deliberately-disposed anchor. If the re-read
+    # fails, skip and retry — never abandon from a marker's absence in a read
+    # that did not land.
+    fresh=$(gc bd show "$id" --json 2>/dev/null | scrub)
+    if ! printf '%s' "$fresh" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      echo "$PROG: $id — PR#$num is CLOSED but re-reading the anchor failed; skipping rather than abandoning a possibly-disposed anchor (retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    disp_kind=$(printf '%s' "$fresh" | jq -r '.[0].metadata["gc.pr_close_disposition_kind"] // ""')
+    disp_succ=$(printf '%s' "$fresh" | jq -r '.[0].metadata["gc.pr_close_disposition_successor"] // ""')
+    disp_store=$(printf '%s' "$fresh" | jq -r '.[0].metadata["gc.pr_close_disposition_successor_store"] // ""')
+    case "$disp_kind" in re-homed|folded|fixed-upstream|duplicate|not-needed)
+      if [ -n "$disp_succ" ]; then
+        STORE_ARG=(); [ -n "$disp_store" ] && STORE_ARG=(--successor-store "$disp_store")
+        if [ -x "$REHOME" ]; then
+          rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
+                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
+                   --note "PR#$num closed $disp_kind (disposition pre-recorded before the close)" 2>&1); rrc=$?
+        else
+          rout="bead-rehome.sh is not executable at $REHOME"; rrc=127
+        fi
+        if [ "$rrc" -eq 0 ]; then
+          disposed_n=$((disposed_n + 1))
+          # If an earlier pass abandoned + filed the rework-or-close visit before
+          # the marker was set, retire it: the decision it asks for is recorded.
+          vid=$(visit_for "$id" "pr-abandoned.$num") || vid=""
+          if [ -n "$vid" ]; then
+            if gc bd update "$vid" --status=closed --set-metadata gc.outcome=moot \
+                 --append-notes "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; the rework-or-close decision is made." >/dev/null 2>&1; then
+              echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
+            else
+              echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
+            fi
+          fi
+          echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
+          continue
+        elif [ "$rrc" -eq 4 ]; then
+          # Pointer would not stick — transient. Keep merge_result=pull_request
+          # so the anchor is re-enumerated and the next pass retries.
+          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome could not stamp the pointer (transient); retry next pass" >&2
+          skipped=$((skipped + 1)); continue
+        else
+          # Close refused, a conflicting successor, or a bad invocation — a human
+          # is needed. Surface THAT, under its own key, and leave the anchor open
+          # carrying the marker; still never the generic rework-or-close visit.
+          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome refused (rc=$rrc); escalating, anchor left open" >&2
+          printf '%s\n' "$rout" >&2
+          escalate "$id" "pr-dispose-failed.$num" \
+            "PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
+          skipped=$((skipped + 1)); continue
+        fi
+      fi ;;
+    esac
+    # Default: an out-of-band close with no recorded disposition -> abandoned,
+    # routed to human, and a rework-or-close visit.
     if "$LIFECYCLE" transition "$id" --to abandoned --expect pull_request \
          --assignee "" \
          --set "blocked_reason=PR#$num closed out-of-band without merging" \
@@ -1502,6 +1577,6 @@ if [ "$POSTURE_ONLY" = 1 ]; then
   # pass runs after merge, where the same rc would gate nothing.
   [ "$unpostured" -eq 0 ] || exit 1
 else
-  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $reworked reworks filed, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
+  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $skipped skipped"
 fi
 exit 0
