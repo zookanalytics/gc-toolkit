@@ -1008,6 +1008,10 @@ printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "RE
 printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: request-changes","commit_id":"sha-57"}]' \
   > "$GH_DIR/reviews_57.json"
 printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3"}]' > "$GH_DIR/comments_57.json"
+# The city's own inline nit sits in a RESOLVED thread. The unengaged backstop (a
+# separate arm) counts only unresolved self-login threads, so it finds nothing
+# here and the posture is the review the cap-reset test asserts.
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-57","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-57","databaseId":100,"author":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_57.json"
 out=$(run)
 eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
 eq "$(meta R3 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
@@ -1120,6 +1124,10 @@ store "[$(anchor P2 41)]"
 printf '%s' "$(prview 41 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_41.json"
 printf '[{"id":6002,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"replayed verdict"}]' > "$GH_DIR/reviews_41.json"
 printf '[{"id":6001,"user":{"login":"gc-city-bot"},"body":"replayed verdict"}]' > "$GH_DIR/comments_41.json"
+# The replayed verdict sits in a RESOLVED thread. The unengaged backstop counts
+# only unresolved self-login threads, so it finds nothing here and the posture is
+# the approval this test asserts.
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-41","isResolved":true,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-41","databaseId":100,"author":{"login":"gc-city-bot"},"body":"replayed verdict","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_41.json"
 out=$(run)
 eq "$(meta_pinned P2 pr_posture)" "approved@sha-41" "our own replayed verdict is not an outstanding comment"
 eq "$(meta P2 pr_comment_watermark)" "<absent>" "…and nothing was watermarked"
@@ -1782,6 +1790,14 @@ printf '%s\n' '{"reviews":[],"threads":[{"id":"T-64","isResolved":false,"viewerC
 out=$(STUB_GQL_READ_FAIL=1 run)
 hasnt "$out" "unengaged review-thread finding" "an unreadable thread read flags nothing"
 eq "$(meta UT5 pr_unengaged_threads)" "<absent>" "…and writes no head watermark"
+# …and in the PRE-MERGE posture pass the same unreadable read holds the merge: a
+# read that did not answer is not proof of zero threads, so the posture stays
+# uncurrent (never review_required, which merge.sh would wave through) and
+# --posture-only exits non-zero for refinery-reconcile to hold merge.sh.
+out=$(STUB_GQL_READ_FAIL=1 run_posture); rc=$?
+eq "$rc" 1 "…and the pre-merge posture pass holds the merge (posture uncurrent, exits non-zero)"
+has "$out" "posture is not current" "…naming the anchor merge must not read this pass"
+eq "$(meta UT5 pr_posture)" "<absent>" "…recording no review_required posture merge.sh would clear against"
 
 echo "# ORDER: the merge-hold is set in the PRE-MERGE posture pass, not after merge"
 # refinery-reconcile runs pr-facts --posture-only, then merge.sh, then the full

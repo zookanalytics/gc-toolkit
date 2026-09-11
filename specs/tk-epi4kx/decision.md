@@ -68,6 +68,19 @@ anchor is head-watermarked (`pr_unengaged_threads`) so a closed visit does not
 re-raise until a new commit. Reading the threads once per head (the watermark and
 the standing visit answer every later pass) keeps the posture pass cheap.
 
+### The hold fails closed on an unreadable read
+
+The hold rests on two reads: the in-flight ledger (is a review or rework child
+already covering this anchor?) and the review threads. Either can fail to answer,
+and a read that did not run is not proof of zero unengaged threads, so
+`unengaged_holds` reports "could not determine" as a third outcome distinct from
+"nothing holds". On that outcome the posture pass records no posture. An
+unrecorded posture is uncurrent, `--posture-only` reports it in its exit code,
+and `refinery-reconcile.sh` holds `merge.sh` for the pass — `merge.sh` never
+reads a posture across a read that did not happen. The read retries next pass.
+Only a clean read of zero threads records the `review_required`/`approved`/`none`
+the review decision earns; a read that did not answer holds instead.
+
 ## Why not the alternatives
 
 - **Auto-rework in arm 4 (the bead's leaning).** Filing a rework child off a raw

@@ -383,9 +383,15 @@ unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could n
 # Does an unengaged self-login thread hold this PR's merge right now? merge.sh
 # reads posture off the bead and never reads threads, so this is decided in the
 # pre-merge posture pass and folded into `commented`; the visit it warrants is
-# the full pass's. Returns 0 to hold. On the FIRST pass that reads the threads it
-# sets UT_COUNT so the full pass files the one visit without a second read; a
-# later pass holds off the standing visit and leaves UT_COUNT empty.
+# the full pass's. Answers in three, because a read that will not run is not
+# proof of zero unengaged threads — the caller keeps the posture uncurrent on the
+# third so the merge holds for the pass rather than reading a stale one:
+#   0  an unengaged self-login thread holds the merge (caller folds into `commented`)
+#   1  the reads ran and none holds
+#   2  a read would not run — the in-flight ledger or the thread API did not answer
+# On the FIRST pass that reads the threads it sets UT_COUNT so the full pass files
+# the one visit without a second read; a later pass holds off the standing visit
+# and leaves UT_COUNT empty.
 UT_COUNT=""
 unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf g m grn=1 stamp inflight utc
@@ -419,12 +425,15 @@ UTGATES
   fi
   # First detection. A review or rework child already open on this anchor owns the
   # follow-up and holds the merge by its own blocks edge; do not stack a second
-  # one. Fail closed — an unreadable ledger is not proof nothing is in flight —
-  # and only then spend the thread read.
-  inflight=$(bd_list --status="$LIVE_STATUSES" --metadata-field anchor_bead="$id") || return 1
+  # one. A ledger that will not read is not proof nothing is in flight, so it holds
+  # the merge for the pass (return 2) rather than waving the anchor through; only a
+  # clean, empty read spends the thread count.
+  inflight=$(bd_list --status="$LIVE_STATUSES" --metadata-field anchor_bead="$id") || return 2
   [ "$(printf '%s' "$inflight" | jq 'length' 2>/dev/null)" = 0 ] || return 1
-  utc=$(unengaged_thread_count "$num") || return 1
-  case "$utc" in ''|*[!0-9]*) return 1 ;; esac
+  # A thread read that did not answer, or answered with no usable count, is the
+  # gap this function exists to close: return 2 so the caller holds, never 1.
+  utc=$(unengaged_thread_count "$num") || return 2
+  case "$utc" in ''|*[!0-9]*) return 2 ;; esac
   [ "$utc" -gt 0 ] || return 1
   UT_COUNT="$utc"
   return 0
@@ -609,7 +618,7 @@ while IFS= read -r row; do
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; unengaged=0; UT_COUNT=""
+  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
   revs_raw=""; cmts_raw=""; cmts_live=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
@@ -669,15 +678,26 @@ while IFS= read -r row; do
       # gate stays green, and the posture would read review_required/none. merge.sh
       # reads posture off the bead and never reads threads, and the full pass that
       # would file the visit runs after merge, so the hold has to be recorded HERE,
-      # in the pre-merge pass. Fold it into `commented`; the visit is dispatched
+      # in the pre-merge pass. Fold a confirmed hold into `commented`; a read that
+      # would not run (rc 2) is not proof of zero, so it leaves the posture
+      # uncurrent below and the merge holds for the pass. The visit is dispatched
       # below.
-      if [ "$rd" != "CHANGES_REQUESTED" ] && [ "$unanswered" != 1 ] \
-         && unengaged_holds "$id" "$num" "$head_oid" "$row" "$cmts_live"; then unengaged=1; fi
+      if [ "$rd" != "CHANGES_REQUESTED" ] && [ "$unanswered" != 1 ]; then
+        unengaged_holds "$id" "$num" "$head_oid" "$row" "$cmts_live"; uh_rc=$?
+        if [ "$uh_rc" = 0 ]; then unengaged=1
+        elif [ "$uh_rc" = 2 ]; then unengaged_unreadable=1
+        fi
+      fi
       # The posture is what merge.sh reads, and a standing CHANGES_REQUESTED
       # outranks the batch underneath it: the veto stands whether or not that
       # feedback has been routed yet. What routes is `unanswered`, below.
       if [ "$rd" = "CHANGES_REQUESTED" ]; then posture="changes_requested"
       elif [ "$unanswered" = 1 ] || [ "$unengaged" = 1 ]; then posture="commented"
+      elif [ "$unengaged_unreadable" = 1 ]; then
+        # The thread read did not answer. Recording review_required/none here would
+        # be current and let merge.sh through on a fact we do not have; leave the
+        # posture uncurrent so --posture-only holds the merge, and retry next pass.
+        echo "$PROG: $id — PR#$num unengaged-thread read did not answer; posture not recorded (retry next pass)" >&2
       elif [ "$rd" = "APPROVED" ]; then posture="approved"
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
