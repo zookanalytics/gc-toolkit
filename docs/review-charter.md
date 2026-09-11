@@ -19,7 +19,10 @@ declared here, through `signoff.sh --add-gates`; it may not invent one.
      grammar. The rows are the table lines after the separator, up to the
      first line that is not a table row. Columns are positional: gate, applies
      when, method, mandatory paths. A mandatory path is an exact repo-relative
-     path or a `dir/**` prefix, never a general glob; `-` declares none. -->
+     path or a `dir/**` prefix, never a general glob; `-` declares none. The
+     parser validates this header before reading any row and refuses a menu
+     whose columns were reordered or added, so the format cannot drift under
+     the parse without failing loudly. -->
 
 | Gate | Applies when | Method | Mandatory paths |
 |---|---|---|---|
@@ -34,6 +37,24 @@ declares its paths here.
 
 Every gate added is a one-line `triage-add:` note on the anchor, which is what
 makes gate inflation countable by the feedback distiller.
+
+### Why the menu is a table one parser reads
+
+The menu is a human-readable table because the same artifact serves both
+readers: a reviewer classifies over it by eye, and
+`assets/scripts/review-charter.sh` parses it. One source keeps the two from
+drifting. That script is the only reader of the grammar — the triage method,
+`signoff.sh --add-gates`, and the dispatch body all go through it — so the
+format is understood in exactly one place.
+
+The parser tolerates formatting that does not change meaning: case, extra
+spaces, and column alignment all read the same. What it does not tolerate is a
+change to which columns exist or their order, because the parse is positional —
+a reordered or inserted column would read a cell into the wrong field. So it
+checks the header names the four columns, in order, before it trusts a row, and
+refuses a menu that does not, naming the mismatch. A column change fails loudly
+at the parser and its test rather than shipping a silent misread, which is what
+keeps a positional parse of a hand-edited table safe.
 
 ## When this charter is missing or stale
 
