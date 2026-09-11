@@ -83,8 +83,21 @@ if [ "$ARMED" != "1" ]; then
     exit 0
 fi
 if [ -z "$DRY" ]; then
-    "$GC" bd update "$SUBJECT" --unset-metadata gc.interactive_intake >/dev/null 2>&1 \
-        || note "warning: could not consume gc.interactive_intake on $SUBJECT; proceeding (a stale marker only ever costs a later decline)"
+    # Consuming the marker is what makes the arming one-shot, so it gates the run,
+    # it does not decorate it: if it stays on the subject, a later replay or
+    # scan-driven reaction reads the same "1" and auto-opens with no human present
+    # — the d407b8c3 runaway. The update's own exit code is not enough, since a
+    # write can be lost while the call still returns 0, so read the marker back and
+    # proceed only once it is provably gone; on anything else leave the visit
+    # parked for a manual engage.
+    "$GC" bd update "$SUBJECT" --unset-metadata gc.interactive_intake >/dev/null 2>&1 || true
+    CONSUMED=$("$GC" bd show "$SUBJECT" --json 2>/dev/null | scrub \
+        | jq -r 'if type == "array" then (if (((.[0].metadata // {})["gc.interactive_intake"]) // "") == "1" then "armed" else "clear" end) else "unknown" end' 2>/dev/null || printf 'unknown')
+    [ -n "$CONSUMED" ] || CONSUMED="unknown"
+    if [ "$CONSUMED" != "clear" ]; then
+        note "could not consume gc.interactive_intake on $SUBJECT (still $CONSUMED after unset) — leaving the visit parked for a manual engage rather than risk a headless replay auto-open"
+        exit 0
+    fi
 fi
 
 # ── Resolve the visit when the caller did not name it ────────────────────────

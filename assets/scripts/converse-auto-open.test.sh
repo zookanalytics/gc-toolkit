@@ -9,6 +9,9 @@
 #               re-reacts, and auto-engaging on it is the retired-pool runaway.
 #   (CONSUME)   the marker is consumed (one shot) the moment it is read, before
 #               any branch, so a replayed reaction finds nothing to arm.
+#   (CONSUME-FAILS) if the marker cannot be taken off — the unset errors, or it
+#               returns 0 but the value survives (a lost write) — fail closed: NO
+#               engage, visit parked, so a later replay cannot auto-open headless.
 #   (ENGAGE)    armed + parked visit + under cap => gc-helm engage <visit>
 #               --no-attach, and gc.auto_opened/_at stamped AFTER the spawn.
 #   (RESOLVE)   --visit omitted resolves the subject's single parked visit.
@@ -50,7 +53,20 @@ case "\$1 \${2:-}" in
     if [ -f "\$f" ]; then cat "\$f"; exit 0; fi
     echo '{"error":"no issues found"}'; exit 1 ;;
   "bd update")
-    exit \${FAKE_UPDATE_RC:-0} ;;
+    # Model the consume: a successful unset of gc.interactive_intake clears it
+    # from the subject fixture, so a read-back sees it gone. A non-zero
+    # FAKE_UPDATE_RC, or FAKE_CONSUME_NOOP=1 (a 0-exit call whose write is lost),
+    # leaves the marker in place — the two fail-closed paths.
+    rc=\${FAKE_UPDATE_RC:-0}
+    if [ "\$rc" = "0" ] && [ -z "\${FAKE_CONSUME_NOOP:-}" ]; then
+      for a in "\$@"; do
+        if [ "\$a" = "gc.interactive_intake" ]; then
+          f="$TMP/fix/show-\${3}.json"
+          [ -f "\$f" ] && printf '[{"id":"%s","status":"open","metadata":{}}]\n' "\${3}" > "\$f"
+        fi
+      done
+    fi
+    exit \$rc ;;
   "bd list")
     for a in "\$@"; do case "\$a" in *gc.auto_opened*) cat "$TMP/fix/standing.json" 2>/dev/null || echo '[]'; exit 0;; esac; done
     cat "$TMP/fix/parked.json" 2>/dev/null || echo '[]'; exit 0 ;;
@@ -77,7 +93,7 @@ subject_fixture() {
   [ -n "$2" ] && meta="\"gc.interactive_intake\":\"$2\""
   printf '[{"id":"%s","status":"open","metadata":{%s}}]\n' "$1" "$meta" > "$TMP/fix/show-$1.json"
 }
-reset() { : > "$CALLS"; rm -f "$TMP/fix/"*.json; printf '[]' > "$TMP/fix/parked.json"; printf '[]' > "$TMP/fix/standing.json"; unset FAKE_ENGAGE_RC FAKE_UPDATE_RC; }
+reset() { : > "$CALLS"; rm -f "$TMP/fix/"*.json; printf '[]' > "$TMP/fix/parked.json"; printf '[]' > "$TMP/fix/standing.json"; unset FAKE_ENGAGE_RC FAKE_UPDATE_RC FAKE_CONSUME_NOOP; }
 run() { OUT="$("$SUT" "$@" 2>&1)"; RC=$?; }
 
 # ── (NOLIVE) no marker => no engage ───────────────────────────────────────────
@@ -91,6 +107,22 @@ has "$OUT" "no live" "(NOLIVE) says why it declined"
 reset; subject_fixture tk-subj 1
 run --subject tk-subj --visit tk-visit
 has "$(cat "$CALLS")" "bd update tk-subj --unset-metadata gc.interactive_intake" "(CONSUME) the live marker is consumed one-shot"
+
+# ── (CONSUME-FAILS) unset errors => marker survives => fail closed, no engage ──
+reset; subject_fixture tk-subj 1
+FAKE_UPDATE_RC=5 run --subject tk-subj --visit tk-visit
+hasnt "$(cat "$CALLS")" "helm engage" "(CONSUME-FAILS) does not engage when the marker cannot be consumed"
+has "$OUT" "could not consume" "(CONSUME-FAILS) says why it declined"
+[ "$RC" = "0" ] && ok "(CONSUME-FAILS) exits 0 (visit stays parked)" || bad "(CONSUME-FAILS) rc=$RC"
+
+# ── (CONSUME-LIES) unset returns 0 but the marker persists => fail closed ──────
+# A lost write (bd exits 0, value stays) must not slip through: the read-back,
+# not the exit code, is what proves the marker is gone.
+reset; subject_fixture tk-subj 1
+FAKE_CONSUME_NOOP=1 run --subject tk-subj --visit tk-visit
+hasnt "$(cat "$CALLS")" "helm engage" "(CONSUME-LIES) does not engage when a 0-exit unset left the marker"
+has "$OUT" "could not consume" "(CONSUME-LIES) says why it declined"
+[ "$RC" = "0" ] && ok "(CONSUME-LIES) exits 0 (visit stays parked)" || bad "(CONSUME-LIES) rc=$RC"
 
 # ── (ENGAGE) armed + under cap => engage --no-attach, stamp after ─────────────
 reset; subject_fixture tk-subj 1
