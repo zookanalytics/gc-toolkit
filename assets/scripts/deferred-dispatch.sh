@@ -38,14 +38,21 @@ K_ARGS="gc.dispatch_when_ready_args"
 K_BY="gc.dispatch_when_ready_armed_by"
 K_AT="gc.dispatch_when_ready_armed_at"
 K_REASON="gc.dispatch_when_ready_reason"
-# reconcile's own idempotency marker. It is stamped immediately before the sling
-# and cleared by disarm, so a later pass reads it to tell that a sling already
-# ran — a pass that died between the sling and the disarm — and retires the arm
-# rather than pouring a second time. Recovery keys on this one marker, not on the
-# stamps a sling leaves behind (gc.routed_to for a plain pool sling,
-# gc.execution_routed_to for an --on pour), which differ by delivery lane and
-# were the inference this replaces.
+# reconcile's own idempotency marker: a two-state record it stamps around its
+# sling and clears by disarm. "slinging@<ts>" is written immediately before the
+# sling and marks an attempt in flight but NOT proven; "slung@<ts>" replaces it
+# the instant the sling returns success and marks the dispatch proven. Only a
+# proven marker lets a later pass retire an arm without slinging again: a
+# surviving "slinging@" is an attempt that never confirmed (a pass that died
+# before or during its sling, or a failed sling whose rollback did not land), so
+# recovery re-slings rather than retire an arm that may never have dispatched. A
+# marker with no state prefix is read as proven, so an arm already mid-dispatch
+# reads as done, not as a fresh attempt. Recovery keys on this one owned marker,
+# never on the stamps a sling leaves (gc.routed_to for a plain pool sling,
+# gc.execution_routed_to for an --on pour), which differ by delivery lane.
 K_SLUNG="gc.dispatch_when_ready_slung"
+SLUNG_TRYING="slinging@"   # value prefix: sling attempt in flight, not proven
+SLUNG_DONE="slung@"        # value prefix: sling returned success, arm may retire
 
 # The store, pinned: `gc bd` resolves its ledger from the invoking rig and
 # ignores BEADS_DIR, so an unpinned read in the rig-scoped order env answers
@@ -147,11 +154,12 @@ cmd_arm() {
     if [ "$status" = "closed" ]; then
         echo "$PROG: arm: $bead is closed — nothing to dispatch" >&2; return 1
     fi
-    # gc.dispatch_when_ready_slung means reconcile already slung a prior arm and
-    # is about to retire it; re-arming over it would be retired unslung on the
-    # next pass. Disarm first if you truly mean to re-dispatch.
+    # A gc.dispatch_when_ready_slung marker in either state means reconcile is
+    # mid-dispatch on a prior arm: "slinging@" an attempt in flight, "slung@" one
+    # it has proven and is about to retire. Re-arming over either stacks a second
+    # dispatch, so refuse; disarm first if you truly mean to re-dispatch.
     if [ "$status" = "in_progress" ] || [ -n "$routed" ] || [ -n "$slung" ]; then
-        echo "$PROG: arm: $bead is already dispatched (status=$status routed_to='$routed'${slung:+ slung_at=$slung}) — disarm-then-rearm only if you mean to re-dispatch it" >&2
+        echo "$PROG: arm: $bead is already dispatched (status=$status routed_to='$routed'${slung:+ slung_marker=$slung}) — disarm-then-rearm only if you mean to re-dispatch it" >&2
         return 1
     fi
 
@@ -268,7 +276,11 @@ cmd_list() {
             slung="$(meta_of "$json" "$K_SLUNG")"
         fi
         if [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
-        elif [ -n "$slung" ]; then state="dispatched (arm pending retirement)"
+        elif [ -n "$slung" ]; then
+            case "$slung" in
+                "$SLUNG_TRYING"*) state="dispatch in flight (attempt not yet confirmed)" ;;
+                *)                state="dispatched (arm pending retirement)" ;;
+            esac
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
         else state="waiting on a blocker"; fi
         printf '%s -> %s [%s]%s\n' "$id" "${target:-?}" "$state" "${reason:+ — $reason}"
@@ -339,27 +351,50 @@ cmd_reconcile() {
             failed=$((failed + 1)); continue
         fi
 
-        # Already dispatched — retire, do not pour again. reconcile stamps
-        # gc.dispatch_when_ready_slung immediately before its own sling, so this
-        # marker surviving into a later pass means the sling ran and the pass
-        # died before it could disarm. It is the ONE signal recovery reads: a
-        # plain pool sling and an --on pour leave different stamps (gc.routed_to
-        # vs gc.execution_routed_to), and in a default-formula city a bare
-        # `gc sling` is itself an --on-less pour, so no stamp a sling leaves is a
-        # reliable "already ran" across every lane — this marker is. Read it
-        # before the ready gate: a dispatched bead may no longer report ready,
-        # and a stranded marker must still retire.
+        # A surviving gc.dispatch_when_ready_slung marker means a prior pass was
+        # mid-dispatch and died before it could disarm; its state decides what to
+        # do. It is the ONE signal recovery reads: a plain pool sling and an --on
+        # pour leave different stamps (gc.routed_to vs gc.execution_routed_to), and
+        # in a default-formula city a bare `gc sling` is itself an --on-less pour,
+        # so no stamp a sling leaves is a reliable "already ran" across every lane.
+        # Read it before the ready gate: a dispatched bead may no longer report
+        # ready, and a proven-but-stranded marker must still retire.
         slung="$(meta_of "$json" "$K_SLUNG")"
-        if [ -n "$slung" ]; then
-            if [ "$DRY_RUN" = 1 ]; then
-                echo "$PROG: DRY-RUN would retire arm on already-dispatched $id"
-            elif disarm_bead "$id" "already dispatched (reconcile stamped $K_SLUNG at $slung before slinging, then did not disarm); arm retired without a second sling"; then
-                echo "$PROG: retired arm on already-dispatched $id"
-            else
-                echo "$PROG: WARN could not retire arm on already-dispatched $id" >&2; failed=$((failed + 1)); continue
-            fi
-            retired=$((retired + 1)); continue
-        fi
+        case "$slung" in
+            "")
+                : # not mid-dispatch; fall through to the ready gate and sling
+                ;;
+            "$SLUNG_TRYING"*)
+                # Attempt in flight but never confirmed: the pass died before or
+                # during its sling, or a failed sling could not roll the marker
+                # back. The dispatch is NOT proven, so retiring the arm here is the
+                # silent lost dispatch this two-state marker exists to prevent —
+                # and one doctor/check-blocked-work-armed cannot catch, because the
+                # blocker has lifted and the bead is ready, not blocked. Clear the
+                # unproven stamp and fall through to re-attempt the sling.
+                if [ "$DRY_RUN" = 1 ]; then
+                    echo "$PROG: DRY-RUN would re-attempt an unconfirmed sling on $id (marker=$slung)"
+                elif bd_ update "$id" --unset-metadata "$K_SLUNG" >/dev/null 2>&1; then
+                    echo "$PROG: re-attempting $id — a prior pass stamped '$slung' and never confirmed the sling"
+                else
+                    echo "$PROG: WARN could not clear the unconfirmed $K_SLUNG on $id — leaving armed" >&2
+                    failed=$((failed + 1)); continue
+                fi
+                ;;
+            *)
+                # "slung@<ts>" (a proven dispatch), or any marker without the
+                # "slinging@" prefix: the sling ran and the pass died before it
+                # could disarm. Retire the arm — a second sling would double up.
+                if [ "$DRY_RUN" = 1 ]; then
+                    echo "$PROG: DRY-RUN would retire arm on already-dispatched $id"
+                elif disarm_bead "$id" "already dispatched (reconcile confirmed the sling at $slung, then died before disarming); arm retired without a second sling"; then
+                    echo "$PROG: retired arm on already-dispatched $id"
+                else
+                    echo "$PROG: WARN could not retire arm on already-dispatched $id" >&2; failed=$((failed + 1)); continue
+                fi
+                retired=$((retired + 1)); continue
+                ;;
+        esac
 
         if [ "$ready" != "1" ]; then waiting=$((waiting + 1)); continue; fi
 
@@ -379,14 +414,14 @@ cmd_reconcile() {
             held=$((held + 1)); continue
         fi
 
-        # Stamp the idempotency marker, THEN sling. Dying between the two leaves
-        # the marker on an unslung bead, so the next pass retires it without
-        # dispatching: a lost dispatch the doctor's unarmed-work check re-flags,
-        # the bounded cost of keeping recovery to one owned marker instead of
-        # decoding whichever stamp a given lane happened to leave. A sling that
-        # fails rolls the marker back so the arm retries next pass.
+        # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying
+        # between the two leaves an unconfirmed marker, which the next pass
+        # re-slings rather than retires — so a death here costs a retry, never a
+        # silently lost dispatch. A sling that fails rolls the marker back so the
+        # arm retries next pass. Recovery stays keyed on this one owned marker, not
+        # on whichever stamp a given lane happened to leave.
         if [ "$DRY_RUN" != 1 ]; then
-            bd_ update "$id" --set-metadata "$K_SLUNG=$(now_utc)" >/dev/null 2>&1 || {
+            bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_TRYING$(now_utc)" >/dev/null 2>&1 || {
                 echo "$PROG: WARN could not stamp $K_SLUNG on $id — leaving armed, not slinging" >&2
                 failed=$((failed + 1)); continue; }
         fi
@@ -403,8 +438,13 @@ cmd_reconcile() {
         fi
         if [ "$DRY_RUN" = 1 ]; then dispatched=$((dispatched + 1)); continue; fi
 
-        # Sling done; clear the whole record, the marker included. Dying here
-        # leaves the marker for the next pass to retire on.
+        # Sling returned success: promote the marker to its proven "slung@" state
+        # before clearing the record, so a death in the narrow window before disarm
+        # recovers as a retire, not a second sling. disarm then clears the whole
+        # record, the marker included; if this promotion write is lost, disarm
+        # still clears it on this pass, and only a death before disarm falls back to
+        # a re-sling next pass.
+        bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_DONE$(now_utc)" >/dev/null 2>&1 || true
         if disarm_bead "$id" "dispatched to $target by the deferred-dispatch reconcile pass"; then
             echo "$PROG: dispatched $id -> $target"
         else
