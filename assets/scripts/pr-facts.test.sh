@@ -22,13 +22,13 @@
 # read back, a comment above the mark re-firing while one below it stays
 # answered, and the reads that record nothing rather than clear a standing
 # `commented`.
-# Also covers the review-round cap reset such a batch performs: once per batch,
-# retiring the dispatch tally and the cap's own park with it, the takeaway the
-# cap wrote for the board included. A park no `signoff_cap` claims, a live
-# demand, a verdict the city posted itself, and a rework hand-back each leave
-# the cap standing. A takeaway whose sitting already ended holds nothing, which
-# is the shape a demand tells from a hold, and it survives the retire: only the
-# cap's own sentence is part of the park.
+# Also covers the validation pass such a batch opens: once per batch, a
+# task_kind=validation bead anchored to the PR carrying the lane and head, left
+# unrouted for gate-ensure to dispatch, deduped by the anchor-scoped probe and
+# adopted by title when a prior stamp dropped. A capped anchor keeps its park
+# (retired on signoff.sh's side, not here) and its feedback goes to the person;
+# a verdict the city posted itself and a rework hand-back are not feedback and
+# open no pass.
 # Write-back: EYES on a routed comment, one threaded reply naming the landing
 # commit, resolve behind it; idempotent across passes; nothing for a comment no
 # bead covers, for our own comments, or for a thread a human answered after us;
@@ -53,6 +53,9 @@ harness_init
 # Assertions about WHAT was recorded and at which head read through this; the
 # instant has its own coverage at the end of the posture section.
 meta_pinned() { local v; v="$(meta "$1" "$2")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
+# The id of the (single) live validation pass on an anchor, or <none>. A human
+# feedback batch opens one; assertions read its shape through this.
+vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == $a) | select((.status // "open") != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh"
@@ -84,7 +87,10 @@ gc bd update "$vid" --set-metadata "escalation_key=$key" \
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
 ESC
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
-chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh"
+# validate-dispatch-body.sh's real output is prose the validator reads; the test
+# only needs a non-empty note so the validation-pass open takes its body path.
+printf '#!/usr/bin/env bash\necho "VALIDATE-METHOD${2:+ note: $2}"\n' > "$SD/validate-dispatch-body.sh"
+chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # bead-rehome.sh, the sanctioned terminal close pr-facts consummates a
 # pre-recorded disposition through. The contract that matters here: on success
@@ -397,7 +403,7 @@ eq "$(meta F4 merge_result)" "pull_request" "the anchor keeps gating (no state f
 echo "# …dedup: second pass files nothing"
 out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "still exactly one child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "still exactly one child"
 
 echo "# …a closed child at the SAME head still dedups; holds veto the dispatch"
 store "[$(anchor F5 14 ',"rebase_hold":"true"')]"
@@ -414,7 +420,7 @@ printf '%s' "$(prview 16 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_16.json"
 out=$(run)
 eq "$(meta F5b 'gc.routed_to')" "" "the anchor itself is not human-routed"
 has "$out" "an open demand holds it for a person's decision; no rework dispatched" "the demand vetoes the dispatch"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
 eq "$(meta F5b merge_result)" "pull_request" "…while the anchor keeps gating, so the merge still waits"
 
@@ -429,40 +435,26 @@ store "[$(anchor F5d 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_90.json"
 out=$(run)
 has "$out" "a hold is set (operator gate); no rework dispatched" "an operator's own hold still vetoes the dispatch"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 
-echo "# CONFLICTING under the cap's own park: no conflict rework THIS pass, but operator feedback still retires the park"
-# The cap's park (merge_hold=signoff_cap paired with signoff_cap) must not
-# out-live the very operator feedback signoff.sh's CAP_WHY advertises as its
-# release, even while the PR conflicts. `continue`ing on the stale hold value
-# the way a person's hold does would skip the posture=commented arm below for
-# this same anchor every pass, forever. So the CONFLICTING arm falls through
-# instead: this pass dispatches no rework FOR THE CONFLICT (merge_hold still
-# read as the park at the top of the loop), but the posture=commented arm
-# reached afterward sees the same feedback and retires the park.
+echo "# CONFLICTING under the cap's own park: no conflict rework, and the feedback opens a pass"
+# The cap park (merge_hold=signoff_cap paired with signoff_cap) is not a person's
+# hold, so `continue`ing on it the way a person's hold does would skip the
+# posture=commented arm below for this anchor every pass, and its feedback would
+# never surface. So the CONFLICTING arm falls through instead: it dispatches no
+# rework FOR THE CONFLICT (merge_hold still read as the park at the top of the
+# loop), and the posture=commented arm reached afterward opens a validation pass
+# and routes the batch to a visit. The park itself is a human's to retire.
 store "[$(anchor F5e 91 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"')]"
 printf '%s' "$(prview 91 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_91.json"
 echo '[]' > "$GH_DIR/reviews_91.json"
 printf '[{"id":9200,"user":{"login":"human1"},"body":"please rebase and address this"}]' > "$GH_DIR/comments_91.json"
 out=$(run)
 has "$out" "conflicts but merge_hold parks the review-round cap (gate codex); no rework dispatched this pass" "the cap park alone does not dispatch conflict rework this pass"
-has "$out" "operator feedback resets the signoff round cap, retiring the merge_hold park on gate codex" "…but the SAME pass still sees the feedback that retires the park"
-eq "$(meta F5e merge_hold)" "<absent>" "…and the park really is retired"
-eq "$(meta F5e signoff_cap)" "<absent>" "…with the stamp that claimed it"
-eq "$(meta F5e 'gc.routed_to')" "" "…and the human route"
-eq "$(meta F5e pr_comment_disposition)" "rework:new-2" "…so the comments themselves become work, not a visit, now that the park is gone"
-
-echo "# …and the next pass: the CONFLICTING arm re-evaluates with merge_hold really clear, and dedups against the comment-rework that already covers the branch"
-# new-2 (the comment-rework filed above) carries the SAME branch+head dedup key
-# the CONFLICTING arm itself reads (branch metadata, and "head <oid>" inside
-# its own rejection_reason): it already tells whoever works it to bring the
-# branch current before pushing an answer, so a second, separate base-rewrite
-# rework here would only race it. One work item ends up covering this branch,
-# not two — the fix filed the SAME pass the park was retired.
-out=$(run)
-eq "$(meta F5e merge_hold)" "<absent>" "the park stays retired"
-has "$out" "rework new-2 already covers branch 'polecat/x91' at this head, no new child" "the CONFLICTING arm dedups against the comment-rework rather than filing a second child"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…so exactly one rework child ends up covering this branch"
+hasnt "$(vpass_id F5e)" "<none>" "…but the posture=commented arm below still opens a validation pass"
+eq "$(meta F5e merge_hold)" "signoff_cap" "…and the cap park is left standing — this arm does not retire it"
+eq "$(meta F5e 'gc.routed_to')" "human" "…nor the human route"
+eq "$(meta F5e pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it (the pass is opened after, as new-3)"
 
 store "[$(anchor F6 15), {\"id\":\"old-rw\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"branch\":\"polecat/x15\",\"rejection_reason\":\"stale base at head sha-15: ...\"}}]"
 printf '%s' "$(prview 15 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_15.json"
@@ -476,7 +468,7 @@ out=$(STUB_DROP_KEYS="new-2:branch,target,rejection_reason,merge_strategy,existi
 eq "$(meta new-2 branch)" "<absent>" "first pass left an unstamped orphan (stamp dropped)"
 out=$(run)
 has "$out" "adopting unstamped rework orphan new-2" "the next pass adopts the orphan by its deterministic title"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "STILL exactly one rework child — no twin minted"
 eq "$(meta new-2 branch)" "polecat/x19" "the adopted orphan is now fully stamped"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and routed to the fix pool"
 
@@ -525,7 +517,7 @@ echo "# …and the NEXT pass re-routes it, past the branch dedup that would bury
 out=$(run)
 has "$out" "re-routing stranded rework new-2" "the stranded child is adopted, not suppressed as a dup"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and the route lands on the retry"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…with no twin minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…with no twin minted"
 has "$out" "filed rebase-mode rework new-2 routed to $FIX" "…and only now is the dispatch reported"
 
 echo "# …once routed, the child dedups normally again"
@@ -557,7 +549,7 @@ out=$(run)
 has "$out" "rework live-rw already covers branch" "the live sibling still vetoes, strand or no strand"
 has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable strand is named, not silently left"
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
 echo "# an empty mergeCommit read never records an empty merged_sha"
 store "[$(anchor F1b 24)]"
@@ -669,7 +661,7 @@ has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "the fix pool is woken"
 echo "# …a comment below the watermark is answered; the batch never re-fires"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "no twin child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "no twin child"
 eq "$(meta_pinned P1 pr_posture)" "review_required@sha-40" "the answered comment falls back to the standing posture"
 hasnt "$out" "routed to rework" "…and nothing re-routes"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…nor re-wakes the pool"
@@ -680,8 +672,8 @@ printf '[{"id":5001,"user":{"login":"human1"},"body":"a"},{"id":5009,"user":{"lo
 out=$(run)
 eq "$(meta_pinned P1 pr_posture)" "commented@sha-40" "a comment above the mark is outstanding by construction"
 eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
-eq "$(meta P1 pr_comment_disposition)" "rework:new-3" "the new batch got its own child"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
+eq "$(meta P1 pr_comment_disposition)" "rework:new-4" "the new batch got its own child (the first batch's pass took new-3)"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
 
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"
@@ -722,7 +714,7 @@ has "$out" "watermark did NOT record" "the lost watermark is caught by the read-
 eq "$(meta W1 pr_comment_watermark)" "<absent>" "…the mark really did not move"
 out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
 eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
 echo "# …an unstamped comment-rework orphan is ADOPTED, never twinned"
@@ -735,7 +727,7 @@ has "$out" "did not record anchor_bead=W2; left unrouted" "an unstamped child is
 eq "$(meta new-2 'gc.routed_to')" "<absent>" "…and cannot be claimed"
 out=$(run)
 has "$out" "adopting unstamped comment-rework orphan new-2" "the next pass adopts it by its deterministic title"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "STILL exactly one child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "STILL exactly one child"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…now routed"
 
 echo "# …but a CLOSED orphan is never adopted: it holds nothing and still moves the mark"
@@ -748,7 +740,7 @@ has "$out" "did not record anchor_bead=W3; left unrouted" "the dropped stamp lea
 ctmp=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX"); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
 out=$(run)
 hasnt "$out" "adopting unstamped comment-rework orphan" "a closed orphan is passed over"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "2" "a live child is minted in its place"
 eq "$(meta new-3 'gc.routed_to')" "$FIX" "…and that one is routed"
 eq "$(meta W3 pr_comment_disposition)" "rework:new-3" "the disposition names the live child"
 grep -qxF "new-3|blocks|W3" "$STUB_DEPS" && ok "…and it is what holds the merge" || bad "blocks edge missing"
@@ -769,7 +761,7 @@ eq "$(meta W4 pr_comment_disposition)" "<absent>" "…with nothing recorded as i
 out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass re-checks the route it left behind"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…repairs it in place"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…without minting a twin"
 eq "$(meta W4 pr_comment_watermark)" "9300" "…and only then does the mark move"
 
 echo "# …a child whose prepare_mode stamp drops is never routed, nor watermarked past"
@@ -792,7 +784,7 @@ out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
 eq "$(meta new-2 prepare_mode)" "merge" "…re-stamps the mode it classified"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…without minting a twin"
 eq "$(meta W6 pr_comment_watermark)" "9600" "…and only then does the mark move"
 
 echo "# …a CLOSED child is dispositioned, so an unrouted one still converges"
@@ -822,7 +814,7 @@ eq "$rc" 0 "a posture-only pass exits 0"
 eq "$(meta_pinned PO1 pr_posture)" "commented@sha-60" "the posture is recorded"
 eq "$(meta PO1 pr_merge_state)" "BLOCKED@sha-60" "…and the merge state beside it"
 has "$out" "posture-only" "the summary names the mode"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "NOTHING was dispatched"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "NOTHING was dispatched"
 eq "$(meta PO1 pr_comment_watermark)" "<absent>" "…and no watermark moved: routing is the full pass's"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake" "…no pool was woken"
 
@@ -839,7 +831,7 @@ echo '[]' > "$GH_DIR/comments_61.json"
 out=$(run_posture)
 eq "$(meta_pinned PO2 pr_posture)" "none@sha-61" "the posture is still recorded"
 hasnt "$out" "filed rebase-mode rework" "…but no rework child is filed"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…none at all"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…none at all"
 
 echo "# …and MERGED/CLOSED reconciliation is left to the full pass"
 store "[$(anchor PO3 62)]"
@@ -958,100 +950,80 @@ out=$("$SUT" --review-pool "$REV" 2>&1)
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "with nowhere to route work, the human is asked"
 eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answer"
 
-# --- operator feedback resets signoff's round cap --------------------------------
-# The cap bounds the city failing to converge against its own reviewer. A review
-# the branch has never been answered against is new input, not one of those
-# rounds, so it goes back to the loop instead of spending the allowance on the
-# operator's own words.
-CAP_STATE=',"merge_hold":"signoff_cap","signoff_cap":"codex"'
-CAP_STATE="$CAP_STATE"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
-CAP_STATE="$CAP_STATE"',"gc.takeaway":"signoff did not converge after 3 rework rounds (cap 3)","gc.takeaway_by":"signoff"'
-CAP_STATE="$CAP_STATE"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-55"'
+# --- operator feedback opens a validation pass on the anchor --------------------
+# A human feedback batch is review the branch has never been answered against, so
+# it enters the graph the way a reviewer's findings do: one validation pass on the
+# anchor — a task_kind=validation bead gate-ensure's quiescence reads to hold a
+# fresh whole-diff review off the anchor while the validator rules the batch. This
+# replaces the round-cap reset the batch used to perform; signoff.sh's cap, floor
+# and park are retired on signoff.sh's own side, so this arm no longer touches
+# them. See specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane
+# backwards".
+CAP_STATE=',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
 
-echo "# new operator feedback on a capped anchor resets it, park and all"
-store "[$(anchor R1 55 "$CAP_STATE")]"
-printf '%s' "$(prview 55 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_55.json"
-echo '[]' > "$GH_DIR/reviews_55.json"
-printf '[{"id":8500,"user":{"login":"human1"},"body":"this is not what I asked for"}]' > "$GH_DIR/comments_55.json"
+echo "# a human feedback batch opens one validation pass on the anchor, left unrouted"
+store "[$(anchor V1 70)]"
+printf '%s' "$(prview 70 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_70.json"
+echo '[]' > "$GH_DIR/reviews_70.json"
+printf '[{"id":8500,"user":{"login":"human1"},"body":"this is not what I asked for"}]' > "$GH_DIR/comments_70.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the batch that reset the cap is recorded by its own id coordinates"
-eq "$(meta R1 merge_hold)" "<absent>" "the hold is lifted — a cap that resets under its own park has not reset"
-eq "$(meta R1 signoff_cap)" "<absent>" "…and the stamp that proved the park was the cap's"
-eq "$(meta R1 blocked_reason)" "<absent>" "…and the reason that named it"
-eq "$(meta R1 'gc.routed_to')" "" "…and the human park, so the anchor is back in the cadence"
-eq "$(meta R1 'gc.takeaway')" "<absent>" "…and the sentence the cap wrote for the board, which is part of that park"
-eq "$(meta R1 'gc.takeaway_by')" "<absent>" "…with the provenance that told it from a sitting's"
-eq "$(meta R1 dispatch_count)" "<absent>" "the dispatch tally goes too: released rounds nobody may dispatch are no release"
-eq "$(meta R1 'dispatch_backstop.codex')" "<absent>" "…with the backstop stamp that dedups its escalation"
-has "$(notes R1)" "operator feedback on PR#55 (review 0, comment 8500" "the reset names the feedback that caused it"
-eq "$(meta R1 pr_comment_disposition)" "rework:new-2" "the comments route to work, not to the visit the park would have forced"
+VP=$(vpass_id V1)
+hasnt "$VP" "<none>" "the batch opens a validation pass on the anchor"
+eq "$(meta "$VP" anchor_bead)" "V1" "…anchored to the gating anchor — the shape open_validation_pass reads"
+eq "$(meta "$VP" check_name)" "codex" "…naming the lane the validator rules"
+eq "$(meta "$VP" reviewed_oid)" "sha-70" "…pinned to the head the batch was produced at"
+eq "$(meta "$VP" 'gc.routed_to')" "<absent>" "…and unrouted: gate-ensure dispatches mol-validate onto a validating lane"
+eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the round-cap reset is gone — the batch no longer writes it"
+eq "$(meta V1 'check.codex')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
+eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 
-echo "# …and the same feedback on a later pass resets nothing"
-BEFORE_NOTES=$(notes R1)
+echo "# a batch whose watermark write dropped opens no second validation pass"
+# The pass and the watermark are separate writes, so a pass that opened but whose
+# mark did not record sees the same comment again. The anchor-scoped probe, not
+# the mark, is what stops the twin.
+EXIST_VP='{"id":"vp-71","status":"open","assignee":"","title":"Validate PR#71 feedback (through review 0, comment 8510)","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Ve","check_name":"codex"}}'
+store "[$(anchor Ve 71),$EXIST_VP]"
+printf '%s' "$(prview 71 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_71.json"
+echo '[]' > "$GH_DIR/reviews_71.json"
+printf '[{"id":8510,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_71.json"
 out=$(run)
-eq "$(meta R1 signoff_rounds_reset)" "0.8500" "the recorded batch is unchanged"
-eq "$(notes R1)" "$BEFORE_NOTES" "…and nothing was appended: one reset per distinct piece of feedback"
-hasnt "$out" "resets the signoff round cap" "…and the pass says nothing about a reset"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Ve")] | length' "$STUB_STORE")" "1" "the pass already open holds every lane, so no second one opens"
+has "$out" "already carries validation pass vp-71" "…and the pass names the one already open"
 
-# signoff.sh's cap now files its park as a demand (gc.takeaway_by=signoff) the
-# anchor blocks on. Operator feedback retires the park, so it closes that demand
-# with it — left open it would hold the anchor out of `bd ready` under a park
-# this feedback just lifted. A converse sitting's demand (any other writer) is
-# not the cap's to close, and it keeps the park.
-echo "# operator feedback retires the cap's park AND closes the demand that recorded it"
-store "[$(anchor R1d 60 "$CAP_STATE"),{\"id\":\"dm-R1d\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Rule on R1d\",\"notes\":\"\",\"metadata\":{\"gc.demand_for\":\"R1d\",\"gc.takeaway_by\":\"signoff\",\"gc.routed_to\":\"human\"}}]"
-printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
-echo '[]' > "$GH_DIR/reviews_60.json"
-printf '[{"id":8630,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_60.json"
+echo "# an unstamped validation-pass orphan from a dropped stamp is adopted, not twinned"
+# A prior pass created the bead but its anchor_bead stamp dropped, so the
+# anchor-scoped probe cannot see it; the title probe adopts it rather than mint a
+# twin.
+ORPH='{"id":"orph-72","status":"open","assignee":"","title":"Validate PR#72 feedback (through review 0, comment 8720)","notes":"","metadata":{}}'
+store "[$(anchor Vo 72),$ORPH]"
+printf '%s' "$(prview 72 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_72.json"
+echo '[]' > "$GH_DIR/reviews_72.json"
+printf '[{"id":8720,"user":{"login":"human1"},"body":"one more thing"}]' > "$GH_DIR/comments_72.json"
 out=$(run)
-eq "$(meta R1d merge_hold)" "<absent>" "the cap park is retired by the feedback"
-eq "$(bstatus dm-R1d)" "closed" "…and the demand that recorded the park closes with it"
-has "$(notes dm-R1d)" "cap reset by operator feedback" "…recording why it closed"
+has "$out" "adopting unstamped validation-pass orphan orph-72" "the orphan is adopted"
+eq "$(vpass_id Vo)" "orph-72" "…and stamped into the pass, no twin minted"
+eq "$(meta orph-72 anchor_bead)" "Vo" "…now carrying the anchor open_validation_pass reads"
 
-# The demand closes FIRST, before its park. A close the store refuses leaves the
-# park standing: merge.sh reads the live demand as a blocker, so lifting the
-# park would release the anchor in name only and route this feedback as work the
-# merge still holds. It stays a visit instead, and the floor still resets.
-echo "# a cap reset whose demand will not close keeps the park and routes to the person"
-store "[$(anchor Rdf 62 "$CAP_STATE"),{\"id\":\"dm-Rdf\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Rule on Rdf\",\"notes\":\"\",\"metadata\":{\"gc.demand_for\":\"Rdf\",\"gc.takeaway_by\":\"signoff\",\"gc.routed_to\":\"human\"}}]"
-printf '%s' "$(prview 62 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
-echo '[]' > "$GH_DIR/reviews_62.json"
-printf '[{"id":8660,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_62.json"
-out=$(STUB_UPDATE_FAIL="dm-Rdf" run)
-eq "$(bstatus dm-Rdf)" "open" "the demand did not close"
-eq "$(meta Rdf merge_hold)" "signoff_cap" "…so its park stands rather than release the anchor over a live blocker"
-eq "$(meta Rdf pr_comment_disposition)" "visit:new-3" "…and the feedback routes to the person holding it, not to work"
-has "$(notes Rdf)" "demand did not close" "…and the anchor records why the park was kept"
-hasnt "$out" "the merge_hold park" "…and no park retire is reported"
-
-echo "# a converse sitting's demand keeps the park, and its own demand stays open"
-store "[$(anchor R1s 61 "$CAP_STATE"),$(demand R1s)]"
-printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
-echo '[]' > "$GH_DIR/reviews_61.json"
-printf '[{"id":8640,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_61.json"
+echo "# a capped anchor: the batch opens a pass but does NOT retire the cap park"
+# signoff.sh's cap and its park are retired on signoff.sh's own side, so this arm
+# never lifts the park; it stays, and the comments go to the person holding it.
+store "[$(anchor Vc 73 "$CAP_STATE")]"
+printf '%s' "$(prview 73 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_73.json"
+echo '[]' > "$GH_DIR/reviews_73.json"
+printf '[{"id":8730,"user":{"login":"human1"},"body":"still not right"}]' > "$GH_DIR/comments_73.json"
 out=$(run)
-eq "$(meta R1s merge_hold)" "signoff_cap" "a sitting's demand keeps the cap park"
-eq "$(bstatus dm-R1s)" "open" "…and its demand stays open (not the cap's to close)"
+hasnt "$(vpass_id Vc)" "<none>" "the batch still opens a validation pass"
+eq "$(meta Vc merge_hold)" "signoff_cap" "…but the cap park is left standing — this arm does not touch it"
+eq "$(meta Vc signoff_cap)" "codex" "…nor the stamp that proved it the cap's"
+eq "$(meta Vc 'gc.routed_to')" "human" "…nor the human park"
+eq "$(meta Vc signoff_rounds_reset)" "<absent>" "…and no round-cap reset is recorded"
+eq "$(meta Vc pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it, not to work"
 
-echo "# …nor does a batch already recorded whose watermark write dropped"
-# The watermark and the reset stamp are separate writes. A pass that routed the
-# comments but lost the mark sees the same batch again; what stops the second
-# reset is the recorded batch, not the mark.
-store "[$(anchor R2 56 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","signoff_rounds_reset":"0.8600"')]"
-printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_56.json"
-echo '[]' > "$GH_DIR/reviews_56.json"
-printf '[{"id":8600,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_56.json"
-out=$(run)
-hasnt "$out" "resets the signoff round cap" "a batch already recorded resets nothing"
-eq "$(meta R2 merge_hold)" "signoff_cap" "…the cap's park still stands"
-eq "$(meta R2 'gc.routed_to')" "human" "…and its park"
-eq "$(meta R2 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
-
-echo "# a verdict the city posted itself is not feedback, and resets nothing"
+echo "# a verdict the city posted itself is not feedback, and opens no pass"
 # Identity, not shape: signoff.sh posts its verdicts under the city's own login
-# and a rework hand-back posts nothing at all, so neither can reach the reset.
+# and a rework hand-back posts nothing at all, so neither reaches this arm.
 store "[$(anchor R3 57 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human"')]"
 printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_57.json"
 printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"Signoff verdict: request-changes","commit_id":"sha-57"}]' \
@@ -1059,8 +1031,8 @@ printf '[{"id":7500,"user":{"login":"gc-city-bot"},"state":"COMMENTED","body":"S
 printf '[{"id":8700,"user":{"login":"gc-city-bot"},"body":"P2: nit at foo.sh:3"}]' > "$GH_DIR/comments_57.json"
 out=$(run)
 eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
-eq "$(meta R3 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
-eq "$(meta R3 merge_hold)" "signoff_cap" "…the cap's park stands"
+eq "$(vpass_id R3)" "<none>" "…so no validation pass opens"
+eq "$(meta R3 merge_hold)" "signoff_cap" "…the cap's park stands, untouched"
 eq "$(meta R3 'gc.routed_to')" "human" "…and the anchor stays parked for the person it was given to"
 
 echo "# …and a rework hand-back, which posts nothing at all, is not feedback either"
@@ -1071,79 +1043,24 @@ echo '[]' > "$GH_DIR/reviews_52.json"
 echo '[]' > "$GH_DIR/comments_52.json"
 out=$(run)
 eq "$(meta_pinned R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
-eq "$(meta R7 signoff_rounds_reset)" "<absent>" "…so no batch is recorded"
+eq "$(vpass_id R7)" "<none>" "…so no validation pass opens"
 eq "$(meta R7 merge_hold)" "signoff_cap" "…and the cap's park stands"
 eq "$(meta R7 'gc.routed_to')" "human" "…with the park it belongs to"
 
-echo "# a park no signoff_cap claims is a person's, and survives the reset"
-store "[$(anchor R4 58 ',"merge_hold":"true","gc.routed_to":"human"')]"
-printf '%s' "$(prview 58 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_58.json"
-echo '[]' > "$GH_DIR/reviews_58.json"
-printf '[{"id":8800,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_58.json"
-out=$(run)
-eq "$(meta R4 signoff_rounds_reset)" "0.8800" "the counter still resets — the rounds are the cap's, wherever the park came from"
-eq "$(meta R4 merge_hold)" "true" "…but a hold no signoff_cap claims is not the cap's to retire"
-eq "$(meta R4 'gc.routed_to')" "human" "…and the park stands"
-eq "$(meta R4 pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it"
-
-echo "# an orphaned signoff_cap beside a PERSON's hold is not the cap's park either"
-# The park's own pairing is merge_hold==signoff_cap (the literal string), never
-# is_held(merge_hold) alone. Here signoff_cap=codex is an orphan left behind by
-# a park the operator already lifted by hand, and merge_hold=true is a fresh,
-# unrelated freeze (a release hold, say) set afterward. Retiring on cap-non-
-# empty alone would unset that person's hold and claim in the note that it
-# retired "the cap's park", which it never was.
-store "[$(anchor R4b 60 ',"merge_hold":"true","signoff_cap":"codex","gc.routed_to":"human","blocked_reason":"release freeze"')]"
-printf '%s' "$(prview 60 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
-echo '[]' > "$GH_DIR/reviews_60.json"
-printf '[{"id":8850,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_60.json"
-out=$(run)
-eq "$(meta R4b signoff_rounds_reset)" "0.8850" "the counter still resets — the cap's rounds are separate from its park"
-eq "$(meta R4b merge_hold)" "true" "…but the operator's own hold is NOT lifted"
-eq "$(meta R4b blocked_reason)" "release freeze" "…and the reason it names stands with it"
-eq "$(meta R4b signoff_cap)" "codex" "…and the orphan cap stamp is left exactly where it was"
-eq "$(meta R4b 'gc.routed_to')" "human" "…and the park stands"
-has "$(notes R4b)" "it is a person's and stays" "…and the note says whose hold it is"
-eq "$(meta R4b pr_comment_disposition)" "visit:new-2" "…so the comments go to the person holding it, not to work"
-
-echo "# …and a sitting still waiting on a person outranks the reset, cap stamp or not"
-store "[$(anchor R5 59 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","gc.takeaway":"holding — needs a ruling"'),$(demand R5)]"
-printf '%s' "$(prview 59 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_59.json"
-echo '[]' > "$GH_DIR/reviews_59.json"
-printf '[{"id":8900,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_59.json"
-out=$(run)
-eq "$(meta R5 merge_hold)" "signoff_cap" "a decision a person still owes is not undone by a comment"
-eq "$(meta R5 'gc.routed_to')" "human" "…and the anchor stays parked for it"
-eq "$(meta R5 pr_comment_disposition)" "visit:new-3" "…which is who the comments go to"
-
-echo "# …but a takeaway recording a sitting that ENDED retires the park like any other"
-# The stuck shape this discriminator exists for: every sitting replaces the
-# takeaway it found and none of them clears it, so presence alone would park an
-# anchor from its first conversation onward, whatever the PR went on to say.
-store "[$(anchor R8 61 ',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","gc.takeaway":"approved as-is on GitHub; merge still held by the gate"')]"
-printf '%s' "$(prview 61 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_61.json"
-echo '[]' > "$GH_DIR/reviews_61.json"
-printf '[{"id":9100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_61.json"
-out=$(run)
-eq "$(meta R8 signoff_rounds_reset)" "0.9100" "the batch is recorded"
-eq "$(meta R8 merge_hold)" "<absent>" "…the cap's park is retired"
-eq "$(meta R8 signoff_cap)" "<absent>" "…with the stamp that claimed it"
-eq "$(meta R8 'gc.routed_to')" "" "…and the human route the cap wrote"
-eq "$(meta R8 pr_comment_disposition)" "rework:new-2" "…so the comments become work"
-eq "$(meta R8 'gc.takeaway')" "approved as-is on GitHub; merge still held by the gate" "…while the sitting's record is left alone"
-
-echo "# a reset the store refuses leaves the cap standing, and says so"
-# One transition carries the whole reset, so a refusal retires nothing: the
-# batch stays unrecorded and the next pass reads the same comments and retries.
-store "[$(anchor R6 51 "$(printf '%s' "$CAP_STATE" | sed 's/sha-55/sha-51/g')")]"
-printf '%s' "$(prview 51 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_51.json"
-echo '[]' > "$GH_DIR/reviews_51.json"
-printf '[{"id":8510,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_51.json"
-out=$(STUB_UPDATE_FAIL="R6" run)
-has "$out" "cap reset did not record" "the refusal is reported, not swallowed"
-eq "$(meta R6 signoff_rounds_reset)" "<absent>" "…no batch is recorded, so the next pass retries"
-eq "$(meta R6 merge_hold)" "signoff_cap" "…the park is left standing"
-eq "$(meta R6 'gc.routed_to')" "human" "…and so is the park"
+echo "# a validation-pass stamp that drops warns, holds the batch, and does not twin"
+# The pass and its anchor_bead stamp are separate writes; a stamp that does not
+# record fails closed — the batch is not watermarked, so it retries and the next
+# pass adopts the unstamped bead by title rather than minting a twin. The rework
+# child is already filed and routed, so the retry costs nothing.
+store "[$(anchor Vf 74)]"
+printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_74.json"
+echo '[]' > "$GH_DIR/reviews_74.json"
+printf '[{"id":8740,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_74.json"
+out=$(STUB_UPDATE_FAIL="new-3" run)
+has "$out" "did not record anchor_bead=Vf" "the dropped stamp is reported, not swallowed"
+eq "$(vpass_id Vf)" "<none>" "…and no stamped validation pass stands on the anchor"
+eq "$(meta Vf pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass opens, so it retries"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"
@@ -1210,30 +1127,27 @@ has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 echo "# …the same standing review is not filed twice"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "no twin child"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "no twin child"
 hasnt "$out" "routed to rework" "…nothing re-routes"
 eq "$(meta_pinned P6 pr_posture)" "changes_requested@sha-51" "…and the veto stands on its own, answered or not"
 
-echo "# …and the veto resets the round cap like any other operator feedback"
-# The cap's release was unreachable for the strongest signal an operator has,
-# because the batch that performs it was never read under a veto. The park it
-# retires is the cap's current shape (merge_hold=signoff_cap beside signoff_cap),
-# not the legacy check.<gate>=exception@ marker: that marker is indistinguishable
-# from an operator gate exception, so migrate-lane-states.sh is what clears it,
-# once and under an operator, and this arm never touches it.
+echo "# …and a CHANGES_REQUESTED veto opens a validation pass like any other feedback"
+# A veto is review the branch has never been answered against, the same as a
+# comment batch, so it opens a pass. It no longer resets the cap or retires its
+# park — both are signoff.sh's to retire — so a capped anchor keeps its park and
+# the veto goes to the person holding it.
 CAPCR=',"merge_hold":"signoff_cap","signoff_cap":"codex"'
 CAPCR="$CAPCR"',"gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
-CAPCR="$CAPCR"',"dispatch_count":"5","dispatch_backstop.codex":"5@sha-56"'
 store "[$(anchor PB 56 "$CAPCR")]"
 printf '%s' "$(prview 56 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_56.json"
 printf '[{"id":9660,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"not what I asked for","commit_id":"sha-56"}]' > "$GH_DIR/reviews_56.json"
 echo '[]' > "$GH_DIR/comments_56.json"
 out=$(run)
-eq "$(meta PB signoff_rounds_reset)" "9660.0" "the veto's own batch resets the cap"
-eq "$(meta PB dispatch_count)" "<absent>" "…retiring the tally no head move could clear while it stood"
-eq "$(meta PB merge_hold)" "<absent>" "…and the cap's park, so the veto is not held behind it"
-eq "$(meta PB signoff_cap)" "<absent>" "…with the stamp that proved the park was the cap's"
-eq "$(meta PB pr_comment_disposition)" "rework:new-2" "…so the objection routes to work, not to the visit the park would have forced"
+hasnt "$(vpass_id PB)" "<none>" "the veto opens a validation pass"
+eq "$(meta PB signoff_rounds_reset)" "<absent>" "…and no round-cap reset is recorded"
+eq "$(meta PB merge_hold)" "signoff_cap" "…the cap's park is left standing"
+eq "$(meta PB 'gc.routed_to')" "human" "…with the human route"
+eq "$(meta PB pr_comment_disposition)" "visit:new-2" "…so the objection goes to the person holding it (the pass is opened after, as new-3)"
 
 echo "# …a review DISMISSED before it routed is never filed"
 # A dismissal moves the review out of COMMENTED and CHANGES_REQUESTED both, so

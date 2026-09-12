@@ -219,7 +219,7 @@ a word outside the lane vocabulary, it is a state no reader knows and nothing
 could retire, and gate-ensure clears it. A well-formed one stays as history —
 a narrowed `check_set` keeps what its lanes recorded.
 
-### The round cap counts from the last operator feedback
+### The round cap and operator feedback
 
 `GC_MAX_REVIEW_ROUNDS` (default 3) bounds one thing — the city failing to
 converge against its own reviewer — and a round is an attempted rework child,
@@ -228,14 +228,15 @@ the branch has never been answered against, so counting it against the budget
 lets an operator's own review exhaust the allowance for reviewing the response
 to it.
 
-`pr-facts.sh` records each batch it routes as `signoff_rounds_reset=<highest
-review id>.<highest comment id>`, which is one stamp per distinct piece of
-feedback: a reconcile pass every two minutes sees the same comments until they
-are answered, and a policy resetting on their mere presence would be no cap at
-all. What makes a batch operator feedback is the author: the posture derivation
-counts only ids written by a login other than the city's own, so `signoff.sh`'s
-verdicts (posted under that login), re-reviews, and rework hand-backs (which
-post nothing) leave the counter alone.
+`pr-facts.sh` keeps operator feedback out of that budget by opening a validation
+pass on the batch (see "Review cycle",
+`specs/tk-ztapg/review-cycle-architecture.md`): the batch enters the
+finding/validation graph, from which `gate-ensure.sh`'s quiescence holds a fresh
+whole-diff review off the anchor while the validator rules it, rather than
+spending a cap round. What makes a batch operator feedback is the author: the
+posture derivation counts only ids written by a login other than the city's own,
+so `signoff.sh`'s verdicts (posted under that login), re-reviews, and rework
+hand-backs (which post nothing) are not it.
 
 `signoff.sh` subtracts a floor rather than resetting a counter, since the
 rework children stay on the anchor: at the first verdict after a new batch it
