@@ -439,8 +439,11 @@ nothing else surfaces it: the batch triage visit lists unnamed waits and this
 is not one, and merge.sh re-enumerates the anchor every cadence pass but
 cannot land it while the PR sits.
 
-Dispositions: land it (review and merge the PR) · kill it (close the PR, then
-gc bd close $id --reason \"<why>\") · park it on a real blocker (gc bd dep add
+Dispositions: land it (review and merge the PR) · retire it (pr-dispose.sh
+--anchor $id --kind not-needed --successor <this visit> records the close on
+the open anchor and closes the PR; pr-facts then lands the anchor close
+through bead-rehome. A bare gc bd close while the PR is open strands the
+anchor closed-but-unlanded) · park it on a real blocker (gc bd dep add
 $id <blocker> — the edge IS the park).
 
 Raised at most once every ${STALE_REESCALATE_DAYS} days per anchor, from
@@ -480,7 +483,7 @@ SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subj
   | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | (.[0].id // "")' "$LIVE")
 if [ -z "$SWEEP_SUBJECT" ] && [ "$DRY_RUN" -eq 0 ]; then
     SWEEP_SUBJECT=$(bd_write create -t task --title "triage: unnamed waits (this rig)" \
-        -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate / kill / park (a real dep edge onto a scope bead) / demand (a sibling bead naming what a person owes, plus a blocks edge)." \
+        -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate / kill (gc bd close, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) / park (a real dep edge onto a scope bead) / demand (a sibling bead naming what a person owes, plus a blocks edge)." \
         --json | scrub | jq -r '.id // .[0].id')
     [ -n "$SWEEP_SUBJECT" ] && [ "$SWEEP_SUBJECT" != "null" ] \
         || { echo "$PROG: could not create the standing subject — nothing filed" >&2; exit 1; }
@@ -579,7 +582,7 @@ sweep_visit() {
           "Carried (still unnamed from earlier passes, not re-litigated): \($carried | length)",
           (if ($carried | length) > 0 then "  \($carried | map(.id) | join(", "))" else empty end),
           "",
-          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (file a visit/gate) · kill (gc bd close <id> --reason) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing) · demand (gc-helm.sh demand <id> \"<what a person owes>\" — files that as a SIBLING bead and blocks <id> on it; a hold written as prose is not a disposition, it is a field someone has to come back and clear)"
+          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (file a visit/gate) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing) · demand (gc-helm.sh demand <id> \"<what a person owes>\" — files that as a SIBLING bead and blocks <id> on it; a hold written as prose is not a disposition, it is a field someone has to come back and clear)"
         ] | join("\n")')
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "$PROG: dry-run: would file batch visit on $SWEEP_SUBJECT [liveness-sweep]"
