@@ -27,9 +27,11 @@
 # the validator rules, never the whole check_set — a multi-lane anchor still opens
 # one human-lane pass) and the head, blocking the anchor so an already-green PR
 # cannot merge until the validator closes it, left unrouted for gate-ensure to
-# dispatch, deduped by the anchor-scoped probe and adopted by title when a prior
-# stamp dropped. Opening it fails closed: an unstamped anchor_bead or an
-# unattachable blocks edge holds the batch unwatermarked to retry. A capped anchor
+# dispatch, deduped by the live human-lane pass (a codex pass on the anchor does
+# not stand in for it) and adopted by title when a prior stamp dropped. Opening it
+# fails closed: a pass that did not record the shape the validator consumes
+# (anchor_bead, check_name=human, the head pin) or an unattachable blocks edge
+# holds the batch unwatermarked to retry. A capped anchor
 # keeps its park (retired on signoff.sh's side, not here) and its feedback goes to
 # the person; a verdict the city posted itself and a rework hand-back are not
 # feedback and open no pass.
@@ -1013,23 +1015,41 @@ hasnt "$(grep -F '|blocks|Vb' "$STUB_DEPS" || true)" "new-3" "…and no pass blo
 eq "$(meta Vb pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass holds, so it retries"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
 
-echo "# a batch whose watermark write dropped opens no second validation pass"
+echo "# a batch whose watermark write dropped opens no second human-lane pass"
 # The pass and the watermark are separate writes, so a pass that opened but whose
-# mark did not record sees the same comment again. The anchor-scoped probe, not
+# mark did not record sees the same comment again. The live human-lane pass, not
 # the mark, is what stops the twin.
-EXIST_VP='{"id":"vp-71","status":"open","assignee":"","title":"Validate PR#71 feedback (through review 0, comment 8510)","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Ve","check_name":"codex"}}'
+EXIST_VP='{"id":"vp-71","status":"open","assignee":"","title":"Validate PR#71 feedback (through review 0, comment 8510)","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Ve","check_name":"human","reviewed_oid":"sha-71"}}'
 store "[$(anchor Ve 71),$EXIST_VP]"
 printf '%s' "$(prview 71 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_71.json"
 echo '[]' > "$GH_DIR/reviews_71.json"
 printf '[{"id":8510,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_71.json"
 out=$(run)
-eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Ve")] | length' "$STUB_STORE")" "1" "the pass already open holds every lane, so no second one opens"
-has "$out" "already carries validation pass vp-71" "…and the pass names the one already open"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Ve")] | length' "$STUB_STORE")" "1" "the human-lane pass already open rules the batch, so no second one opens"
+has "$out" "already carries a human-lane validation pass vp-71" "…and the pass names the one already open"
+
+echo "# a codex validation pass on the anchor does NOT stand in for the human batch"
+# gate-ensure's quiescence reads any validation pass, so a codex pass holds the
+# merge — but mol-validate rules a pass by check_name, and a codex pass never rules
+# the human findings (finding.lane=human). The dedup is the human LANE, so the
+# batch opens its own human-lane pass beside the codex one rather than watermarking
+# behind a pass that leaves its findings unruled.
+CODEX_VP='{"id":"cvp-77","status":"open","assignee":"","title":"Validate codex lane on Vx","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vx","check_name":"codex","reviewed_oid":"sha-77"}}'
+store "[$(anchor Vx 77),$CODEX_VP]"
+printf '%s' "$(prview 77 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_77.json"
+echo '[]' > "$GH_DIR/reviews_77.json"
+printf '[{"id":8770,"user":{"login":"human1"},"body":"the codex pass never sees this"}]' > "$GH_DIR/comments_77.json"
+out=$(run)
+HP=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Vx") | select((.metadata.check_name // "") == "human") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+hasnt "$HP" "<none>" "the human batch opens its own human-lane pass, not reusing the codex one"
+eq "$(meta "$HP" check_name)" "human" "…named human, the lane the validator rules the batch by"
+eq "$(meta "$HP" reviewed_oid)" "sha-77" "…pinned to the head the batch was produced at"
+grep -qxF "$HP|blocks|Vx" "$STUB_DEPS" && ok "…and it blocks the anchor, beside the codex pass" || bad "human-lane validation-pass blocks edge missing"
 
 echo "# an unstamped validation-pass orphan from a dropped stamp is adopted, not twinned"
-# A prior pass created the bead but its anchor_bead stamp dropped, so the
-# anchor-scoped probe cannot see it; the title probe adopts it rather than mint a
-# twin.
+# A prior pass created the bead but its stamp dropped, so it carries no
+# check_name and the human-lane probe cannot see it; the title probe adopts it
+# rather than mint a twin.
 ORPH='{"id":"orph-72","status":"open","assignee":"","title":"Validate PR#72 feedback (through review 0, comment 8720)","notes":"","metadata":{}}'
 store "[$(anchor Vo 72),$ORPH]"
 printf '%s' "$(prview 72 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_72.json"
@@ -1091,10 +1111,37 @@ printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "RE
 echo '[]' > "$GH_DIR/reviews_74.json"
 printf '[{"id":8740,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_74.json"
 out=$(STUB_UPDATE_FAIL="new-3" run)
-has "$out" "did not record anchor_bead=Vf" "the dropped stamp is reported, not swallowed"
+has "$out" "did not record the batch shape" "the dropped stamp is reported, not swallowed"
 eq "$(vpass_id Vf)" "<none>" "…and no stamped validation pass stands on the anchor"
 eq "$(meta Vf pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass opens, so it retries"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
+
+echo "# a pass whose check_name write half-lands warns, holds the batch, does not watermark"
+# The validator selects findings by check_name and defaults a missing one to codex,
+# so a pass carrying anchor_bead but no check_name would rule codex findings and
+# leave the human batch unruled. Reading only anchor_bead back would pass it; the
+# read-back checks the lane the validator consumes and skips the watermark.
+store "[$(anchor Vk 78)]"
+printf '%s' "$(prview 78 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_78.json"
+echo '[]' > "$GH_DIR/reviews_78.json"
+printf '[{"id":8780,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_78.json"
+out=$(STUB_DROP_KEYS="new-3:check_name" run)
+has "$out" "did not record the batch shape" "the dropped lane is reported, not swallowed"
+has "$out" "check_name=<absent>" "…naming the field that did not land"
+eq "$(meta Vk pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
+
+echo "# a pass whose reviewed_oid write half-lands warns, holds the batch, does not watermark"
+# reviewed_oid is the pin mol-validate needs to back the lane, so a pass missing it
+# cannot rule the batch. The read-back checks the pin against the live head and
+# skips the mark.
+store "[$(anchor Vp 79)]"
+printf '%s' "$(prview 79 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_79.json"
+echo '[]' > "$GH_DIR/reviews_79.json"
+printf '[{"id":8790,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_79.json"
+out=$(STUB_DROP_KEYS="new-3:reviewed_oid" run)
+has "$out" "did not record the batch shape" "the dropped head pin is reported, not swallowed"
+has "$out" "reviewed_oid=<absent>" "…naming the field that did not land"
+eq "$(meta Vp pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"
