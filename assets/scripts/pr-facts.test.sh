@@ -23,12 +23,16 @@
 # answered, and the reads that record nothing rather than clear a standing
 # `commented`.
 # Also covers the validation pass such a batch opens: once per batch, a
-# task_kind=validation bead anchored to the PR carrying the lane and head, left
-# unrouted for gate-ensure to dispatch, deduped by the anchor-scoped probe and
-# adopted by title when a prior stamp dropped. A capped anchor keeps its park
-# (retired on signoff.sh's side, not here) and its feedback goes to the person;
-# a verdict the city posted itself and a rework hand-back are not feedback and
-# open no pass.
+# task_kind=validation bead anchored to the PR carrying check_name=human (the lane
+# the validator rules, never the whole check_set — a multi-lane anchor still opens
+# one human-lane pass) and the head, blocking the anchor so an already-green PR
+# cannot merge until the validator closes it, left unrouted for gate-ensure to
+# dispatch, deduped by the anchor-scoped probe and adopted by title when a prior
+# stamp dropped. Opening it fails closed: an unstamped anchor_bead or an
+# unattachable blocks edge holds the batch unwatermarked to retry. A capped anchor
+# keeps its park (retired on signoff.sh's side, not here) and its feedback goes to
+# the person; a verdict the city posted itself and a rework hand-back are not
+# feedback and open no pass.
 # Write-back: EYES on a routed comment, one threaded reply naming the landing
 # commit, resolve behind it; idempotent across passes; nothing for a comment no
 # bead covers, for our own comments, or for a thread a human answered after us;
@@ -971,13 +975,43 @@ out=$(run)
 VP=$(vpass_id V1)
 hasnt "$VP" "<none>" "the batch opens a validation pass on the anchor"
 eq "$(meta "$VP" anchor_bead)" "V1" "…anchored to the gating anchor — the shape open_validation_pass reads"
-eq "$(meta "$VP" check_name)" "codex" "…naming the lane the validator rules"
+eq "$(meta "$VP" check_name)" "human" "…naming lane human, which the validator's finding query consumes — never the whole check_set"
 eq "$(meta "$VP" reviewed_oid)" "sha-70" "…pinned to the head the batch was produced at"
 eq "$(meta "$VP" 'gc.routed_to')" "<absent>" "…and unrouted: gate-ensure dispatches mol-validate onto a validating lane"
+grep -qxF "$VP|blocks|V1" "$STUB_DEPS" && ok "…and blocks the anchor: merge.sh holds the merge until the validator closes the pass" || bad "validation-pass blocks edge missing"
 eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the round-cap reset is gone — the batch no longer writes it"
 eq "$(meta V1 'check.codex')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
 eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
+
+echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic codex,arch lane"
+# check_name is the lane the validator rules; mol-validate matches findings by
+# finding.lane == check_name and a human batch's findings are finding.lane=human,
+# so the pass names human whatever the anchor's lanes are. The whole check_set
+# (codex,arch) is one synthetic lane no finding carries — the multi-lane bug.
+store "[$(anchor Vm 75 ',"check_set":"codex,arch","check.arch":"green"')]"
+printf '%s' "$(prview 75 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_75.json"
+echo '[]' > "$GH_DIR/reviews_75.json"
+printf '[{"id":8750,"user":{"login":"human1"},"body":"this misreads the arch lane"}]' > "$GH_DIR/comments_75.json"
+out=$(run)
+VPM=$(vpass_id Vm)
+hasnt "$VPM" "<none>" "the multi-lane anchor opens a validation pass"
+eq "$(meta "$VPM" check_name)" "human" "…named human, never the synthetic codex,arch that matches no finding and backs no real lane"
+grep -qxF "$VPM|blocks|Vm" "$STUB_DEPS" && ok "…and it blocks the multi-lane anchor, both lanes green or not" || bad "validation-pass blocks edge missing"
+
+echo "# a validation-pass blocks edge that will not attach warns, holds the batch, and does not watermark"
+# The pass and its blocks edge are separate writes; an edge that cannot be
+# attached and read back is a pass that holds nothing, so the batch is not
+# watermarked and retries. The rework child is already filed, so the retry is free.
+store "[$(anchor Vb 76)]"
+printf '%s' "$(prview 76 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_76.json"
+echo '[]' > "$GH_DIR/reviews_76.json"
+printf '[{"id":8760,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_76.json"
+out=$(STUB_DEP_FAIL="new-3" run)
+has "$out" "did not record a blocks edge" "the unattached edge is reported, not swallowed"
+hasnt "$(grep -F '|blocks|Vb' "$STUB_DEPS" || true)" "new-3" "…and no pass blocks edge stands on the anchor"
+eq "$(meta Vb pr_comment_disposition)" "<absent>" "…the batch is not watermarked until the pass holds, so it retries"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…while the rework child is already filed and routed"
 
 echo "# a batch whose watermark write dropped opens no second validation pass"
 # The pass and the watermark are separate writes, so a pass that opened but whose

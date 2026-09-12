@@ -1069,8 +1069,14 @@ $CBODY"
     # this arm no longer touches them.
     #
     # The pass is a task_kind=validation bead anchored to $id — the shape
-    # gate-ensure.sh's open_validation_pass reads — carrying the lane and the head
-    # the batch was produced at, which the validator reads. It is left unrouted: a
+    # gate-ensure.sh's open_validation_pass reads — carrying check_name=human and
+    # the head the batch was produced at. check_name is the lane the validator
+    # rules: mol-validate selects findings by finding.lane == check_name, and
+    # review-outcome.sh backs or supersedes that one exact lane. A human batch's
+    # findings carry finding.lane=human, so the pass names human. The whole
+    # check_set is wrong here: a multi-lane value like codex,arch is one synthetic
+    # lane no finding carries and no anchor declares, so the validator would match
+    # no findings and back a lane that does not exist. It is left unrouted: a
     # validating lane is dispatched to mol-validate by gate-ensure.sh, so the bead
     # is opened here and armed there. The anchor-scoped probe is both the
     # once-per-batch dedup and exactly what open_validation_pass reads: any live
@@ -1116,7 +1122,7 @@ $CBODY"
           gc bd update "$VPASS" \
             --set-metadata task_kind=validation \
             --set-metadata anchor_bead="$id" \
-            --set-metadata check_name="${checkset:-codex}" \
+            --set-metadata check_name=human \
             ${head_oid:+--set-metadata reviewed_oid="$head_oid"} >/dev/null 2>&1
           # anchor_bead is what open_validation_pass reads; an unstamped pass is
           # invisible to it, so the next reconcile would open a twin. Verify it
@@ -1128,6 +1134,31 @@ $CBODY"
           else
             echo "$PROG: $id — PR#$num opened validation pass $VPASS for the feedback batch (review $max_r, comment $max_c)"
           fi
+        fi
+      fi
+      # The pass must HOLD the anchor, not merely sit beside it. merge.sh reads
+      # every live blocks blocker of the anchor into its in-flight hold and bd
+      # refuses to close a blocked anchor, so a blocks edge from the pass keeps an
+      # already-green anchor from merging or closing while the batch is unruled;
+      # the validator releases it by closing the pass. The interlock is an edge,
+      # never a metadata string (specs/tk-ztapg/review-cycle-architecture.md,
+      # "Findings"): lane-state.sh, merge.sh and pr-open.sh do not read validation
+      # beads, so absent the edge the pass holds nothing. Idempotent — a re-adopted
+      # or already-open pass keeps its one edge — and fail-closed like the
+      # anchor_bead stamp above: an edge that cannot be attached and read back is a
+      # pass that holds nothing, so warn and skip the watermark to retry rather
+      # than mark past a batch nothing holds.
+      if ! vblk=$(gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null | scrub) \
+         || ! printf '%s' "$vblk" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "$PROG: WARN $id — PR#$num validation-pass blocker probe unreadable; nothing watermarked (retry next pass)" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      if ! printf '%s' "$vblk" | jq -e --arg v "$VPASS" 'any(.[]?; (.id // "") == $v)' >/dev/null 2>&1; then
+        if ! gc bd dep "$VPASS" --blocks "$id" >/dev/null 2>&1 \
+           || ! gc bd dep list "$id" --direction=down -t blocks --json 2>/dev/null | scrub \
+                | jq -e --arg v "$VPASS" 'any(.[]?; (.id // "") == $v)' >/dev/null 2>&1; then
+          echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record a blocks edge on the anchor; nothing watermarked (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
         fi
       fi
     fi

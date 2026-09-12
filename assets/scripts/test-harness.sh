@@ -321,6 +321,9 @@ case "$verb" in
       *)
         # gc bd dep <src> --blocks <dst>
         src="${1:-}"; shift || true
+        # STUB_DEP_FAIL="id id2" — refuse to attach an edge whose src is named,
+        # modelling a dep write that reports failure so a fail-closed caller retries.
+        case " ${STUB_DEP_FAIL:-} " in *" $src "*) echo "gc bd dep: simulated refusal for $src" >&2; exit 1 ;; esac
         [ "${1:-}" = "--blocks" ] && printf '%s|%s|%s\n' "$src" "blocks" "${2:-}" >> "$D" ;;
     esac
     ;;
