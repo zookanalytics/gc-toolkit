@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # signoff.sh — the single writer of gate verdicts (component-model I7: one
-# audited writer for check.<gate> markers). Run once by the review agent after
-# mol-review's review step produced a verdict:
+# audited writer for check.<gate> markers) and of the check_set widening. Run
+# once by the review agent after mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
 #              [--notes-file <path>] [--reviewed-oid <oid>]
+#              [--add-gates <g1,g2>]
 # Both verdicts first record reviewed_oid on the review bead. A lane state names
 # no commit, but lane-state.sh derives green only from a local backing bead that
 # carries a reviewed_oid, so recording it here is what lets an approve close back
 # the lane.
 # approve: post the artifact (gh pr review --comment post-open; review-bead
-# notes pre-open), stamp check.<name>=green on the anchor, and dismiss the
-# city's own superseded CHANGES_REQUESTED review. request-changes: clear the
-# marker, returning the lane to unreviewed, and file ONE routed rework child —
-# or, at the round cap, park the anchor under merge_hold and route it to a
-# human instead.
+# notes pre-open), widen check_set when triage asked, stamp check.<name>=green
+# on the anchor, and dismiss the city's own superseded CHANGES_REQUESTED
+# review. request-changes: clear the marker, returning the lane to unreviewed,
+# and file ONE routed rework child — or, at the round cap, park the anchor
+# under merge_hold and route it to a human instead.
 # The cap counts rework rounds since the last operator feedback, not since the
 # branch was cut: pr-facts.sh records each batch of feedback on the anchor, and
 # the rounds spent before it become a floor this script subtracts. An anchor
@@ -70,6 +71,7 @@ usage() {
 usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                   [--notes-file <path>] [--findings-file <path>]
                   [--reviewed-oid <oid>]
+                  [--add-gates <g1,g2>]
        signoff.sh reset <anchor> --reason <why> [--batch <id>]
 
   --review-bead  the dispatched review bead this verdict answers (required)
@@ -91,6 +93,11 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  longer carries (rewritten out from under it) is refused, not
                  recorded. Whichever source wins is written back to the review
                  bead as the commit this verdict judged.
+  --add-gates    gates to union into the anchor's check_set (triage only, with
+                 --verdict approve). The write is a set union with read-back:
+                 it can never remove a declared gate. Each gate added is
+                 recorded on the anchor as a `triage-add:` note, so the
+                 add-rate the feedback distiller watches stays countable.
 
 reset: retire a round cap under a ruling. Advances signoff_round_floor to the
   rounds already spent and retires the park the cap wrote — merge_hold,
@@ -124,23 +131,25 @@ if [ "${1:-}" = "reset" ]; then
 fi
 
 REVIEW_BEAD=""; VERDICT=""; NOTES_FILE=""; OID_OVERRIDE=""; FINDINGS_FILE=""
+ADD_GATES=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --review-bead)  REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
-    --verdict)      VERDICT="${2:-}";         shift 2 || { usage; exit 1; } ;;
-    --notes-file)   NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
-    --findings-file) FINDINGS_FILE="${2:-}";  shift 2 || { usage; exit 1; } ;;
-    --reviewed-oid) OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
-    --reason)       RESET_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
-    --batch)        RESET_BATCH_ARG="${2:-}"; shift 2 || { usage; exit 1; } ;;
-    -h|--help)      usage; exit 0 ;;
+    --review-bead)   REVIEW_BEAD="${2:-}";     shift 2 || { usage; exit 1; } ;;
+    --verdict)       VERDICT="${2:-}";         shift 2 || { usage; exit 1; } ;;
+    --notes-file)    NOTES_FILE="${2:-}";      shift 2 || { usage; exit 1; } ;;
+    --findings-file) FINDINGS_FILE="${2:-}";   shift 2 || { usage; exit 1; } ;;
+    --reviewed-oid)  OID_OVERRIDE="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --add-gates)     ADD_GATES="${2:-}";       shift 2 || { usage; exit 1; } ;;
+    --reason)        RESET_REASON="${2:-}";    shift 2 || { usage; exit 1; } ;;
+    --batch)         RESET_BATCH_ARG="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    -h|--help)       usage; exit 0 ;;
     *) warn "unknown argument '$1'"; usage; exit 1 ;;
   esac
 done
 if [ "$MODE" = reset ]; then
   # The ruling is the whole audit trail for a retirement no dispatch justifies.
   [ -n "$RESET_REASON" ] || { warn "reset needs --reason: a cap retired with nothing recorded leaves the anchor unable to say who released it or why"; usage; exit 1; }
-  if [ -n "$REVIEW_BEAD$VERDICT$NOTES_FILE$FINDINGS_FILE$OID_OVERRIDE" ]; then
+  if [ -n "$REVIEW_BEAD$VERDICT$NOTES_FILE$FINDINGS_FILE$OID_OVERRIDE$ADD_GATES" ]; then
     warn "reset records no verdict and answers no review bead; drop the verdict flags"; usage; exit 1
   fi
 else
@@ -157,6 +166,9 @@ else
   fi
   if [ -n "$FINDINGS_FILE" ] && [ ! -r "$FINDINGS_FILE" ]; then
     warn "--findings-file '$FINDINGS_FILE' is not readable; nothing written"; exit 1
+  fi
+  if [ -n "$ADD_GATES" ] && [ "$VERDICT" != "approve" ]; then
+    warn "--add-gates carries a classification, which only an approve verdict records; nothing written"; exit 1
   fi
 fi
 
@@ -462,6 +474,67 @@ TALLY
   exit 0
 fi
 
+# The gate whose method owns the checks-needed decision; no other gate may
+# widen it.
+TRIAGE_GATE=triage
+
+# Siblings resolve from $0 so a copied-out scripts dir (the test harness) and
+# an importing rig both reach the same parser.
+SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+CHARTER_PARSER="$SCRIPTS_DIR/review-charter.sh"
+# The parser is a pack artifact, resolved above from $0. The charter is not:
+# it belongs to the REPO UNDER REVIEW at the COMMIT under review, so the read
+# is pinned to REVIEWED_OID and never taken from a working tree. mol-review
+# removes its detached test worktree before this call, so the tree this process
+# stands in is whatever the reviewer was sitting in. The pin holds a branch to
+# the menu it ships, and stops an unrelated checkout's menu from validating a
+# gate this branch's own charter never declared.
+# The repos below are rungs to the OBJECT; whichever one carries the commit
+# answers the same bytes. No pack fallback: GC_PACK_DIR or the scripts dir's
+# parent would validate an importing rig's gates against gc-toolkit's menu,
+# silently. A commit that carries no charter must read as no charter (widening
+# accepted unvalidated), which is what makes the gap visible instead of
+# borrowed.
+CHARTER=""       # how the charter is named in a refusal; empty = none found
+CHARTER_FILE=""  # the blob, materialized for the parser; removed on exit
+CHARTER_READ=""
+resolve_charter() {
+  [ -z "$CHARTER_READ" ] || return 0
+  [ -n "${REVIEWED_OID:-}" ] || return 0
+  CHARTER_READ=1
+  local root blob
+  blob=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-charter.XXXXXX") || return 0
+  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+    [ -n "$root" ] || continue
+    if git -C "$root" show "$REVIEWED_OID:docs/review-charter.md" >"$blob" 2>/dev/null; then
+      CHARTER_FILE="$blob"
+      CHARTER="docs/review-charter.md @ $REVIEWED_OID"
+      return 0
+    fi
+  done
+  rm -f "$blob"
+}
+
+# A check_set as one lowercase token per line. The comma split comes first and
+# the whitespace strip is a per-line sed: a stream-wide `tr -d` would take the
+# newlines the split just made and fuse "codex,triage" into one gate name
+# nothing declares.
+gate_tokens() {
+  printf '%s' "${1:-}" | tr ',' '\n' | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[[:space:]]//g; /^$/d'
+}
+
+# The charter's menu row for one gate, on stdout. resolve_charter is
+# idempotent and has already run in the parent shell; the call here only keeps
+# a caller added above that point from reading a charter as absent.
+# rc: 0 declared · 1 charter readable but gate undeclared · 2 no charter at
+# the reviewed commit.
+charter_row() { # <gate>
+  resolve_charter
+  [ -n "$CHARTER_FILE" ] && [ -x "$CHARTER_PARSER" ] || return 2
+  "$CHARTER_PARSER" --file "$CHARTER_FILE" --gate "$1" 2>/dev/null
+}
+
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
 is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; nothing written"; exit 1; }
 
@@ -474,6 +547,9 @@ if [ "$REVIEW_STATUS" = "closed" ]; then
 fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 [ -n "$CHECK_NAME" ] || CHECK_NAME=codex
+if [ -n "$ADD_GATES" ] && [ "$CHECK_NAME" != "$TRIAGE_GATE" ]; then
+  warn "only the '$TRIAGE_GATE' gate may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1
+fi
 
 # The anchor the gate lands on: the durable anchor_bead stamp first, the
 # blocks edge second. Unresolvable is a refusal — a verdict with nowhere to
@@ -619,7 +695,7 @@ fi
 # The artifact body. It always names the anchor and the exact commit judged,
 # so the posted comment is traceable back to the gate it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE"' EXIT
+trap 'rm -f "$BODY_FILE" ${CHARTER_FILE:+"$CHARTER_FILE"}' EXIT
 if [ -n "$NOTES_FILE" ]; then
   cat "$NOTES_FILE" > "$BODY_FILE"
 else
@@ -723,6 +799,69 @@ dismiss_superseded() {
   done
 }
 
+# Resolve the charter once here, in this shell, so the add loop below reads a
+# menu already materialized and its refusals can name it — a resolution made
+# inside a command substitution would die with that subshell, taking the temp
+# file out of the trap's reach.
+resolve_charter
+
+# Triage's classification: union the added gates into check_set and record one
+# triage-add note per gate added, in ONE write with read-back. Runs BEFORE the
+# artifact and the green stamp, so a refused or unpersisted widening leaves
+# check.triage absent and the gate still owed — the opposite order would read
+# green over a narrower set than triage decided on.
+WIDEN_SUMMARY=""
+apply_triage_decision() {
+  [ -n "$ADD_GATES" ] || return 0
+  local fresh cur canon union tok rc lines added newset got_tokens missing first
+  fresh=$(bd_json show "$ANCHOR")
+  is_rows "$fresh" || { warn "anchor $ANCHOR did not resolve for the widening read; nothing written"; exit 2; }
+  cur=$(row_meta "$fresh" check_set)
+  canon=$(printf '%s' "$cur" | tr -d '[:space:],' | tr '[:upper:]' '[:lower:]')
+  case "$canon" in
+    none|off)
+      warn "anchor $ANCHOR declares the '$cur' opt-out, which is human-only; recording the verdict without widening"
+      return 0 ;;
+  esac
+  union=$(gate_tokens "$cur")
+  lines=""; added=""
+
+  for tok in $(gate_tokens "$ADD_GATES"); do
+    charter_row "$tok" >/dev/null; rc=$?
+    if [ "$rc" -eq 1 ]; then
+      warn "gate '$tok' is not on the menu declared in $CHARTER; the menu is closed and triage classifies over it — nothing written"; exit 1
+    fi
+    [ "$rc" -eq 2 ] && warn "no charter is readable at $REVIEWED_OID: that commit carries no docs/review-charter.md, or no repo here carries the commit; accepting '$tok' unvalidated (widening is always safe)"
+    if grep -qx -- "$tok" <<< "$union"; then continue; fi
+    union="$union
+$tok"
+    added="${added:+$added,}$tok"
+    lines="${lines}triage-add: $tok @$REVIEWED_OID
+"
+  done
+
+  [ -n "$lines" ] || { WIDEN_SUMMARY=" (no gate added)"; return 0; }
+  newset=$(printf '%s\n' "$union" | sed '/^$/d' | tr '\n' ',' | sed 's/,$//')
+  gc bd update "$ANCHOR" --set-metadata "check_set=$newset" --append-notes "$lines" >/dev/null 2>&1 || true
+
+  fresh=$(bd_json show "$ANCHOR")
+  got_tokens=$(gate_tokens "$(row_meta "$fresh" check_set)")
+  missing=""
+  for tok in $(printf '%s\n' "$union" | sed '/^$/d'); do
+    grep -qx -- "$tok" <<< "$got_tokens" || missing="${missing:+$missing,}$tok"
+  done
+  if [ -n "$missing" ]; then
+    warn "check_set on $ANCHOR did not read back with '$missing' (have '$(row_meta "$fresh" check_set)', want '$newset'); review left OPEN so the gate stays owed"
+    exit 2
+  fi
+  first="${lines%%$'\n'*}"
+  case "$(printf '%s' "$fresh" | jq -r '.[0].notes // ""' 2>/dev/null)" in
+    *"$first"*) : ;;
+    *) warn "the triage-add note did not read back on $ANCHOR; a widening its add-note did not record is not auditable, so the review is left OPEN"; exit 2 ;;
+  esac
+  WIDEN_SUMMARY=" (check_set now $newset${added:+; added $added})"
+}
+
 if [ "$VERDICT" = "approve" ]; then
   # A legacy `exception@<oid>` marker predates this cadence's merge_hold+
   # signoff_cap park and is only rewritten by migrate-lane-states.sh, which
@@ -738,6 +877,7 @@ if [ "$VERDICT" = "approve" ]; then
       exit 2
       ;;
   esac
+  apply_triage_decision
   post_artifact
   stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
@@ -747,7 +887,7 @@ if [ "$VERDICT" = "approve" ]; then
   # and any a fix unit still blocks are left alone. Best-effort — this is
   # cleanup, never a gate the verdict depends on.
   "$FINDING" close-unvalidated --anchor "$ANCHOR" --lane "$CHECK_NAME" --reason "lane green at $REVIEWED_OID" >/dev/null 2>&1 || true
-  echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID; review $REVIEW_BEAD closed"
+  echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID$WIDEN_SUMMARY; review $REVIEW_BEAD closed"
   exit 0
 fi
 
