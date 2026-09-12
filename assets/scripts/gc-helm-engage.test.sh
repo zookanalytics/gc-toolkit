@@ -56,7 +56,24 @@ SNAME="gc-toolkit__converse-1"
 SID="gc-77"
 case "$1 ${2:-}" in
   "rig list")
-    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+    # suspended/running are injected per-case via $RIG_SUSPENDED/$RIG_RUNNING.
+    # Unset means the field is ABSENT (an older gc that does not report it), which
+    # the liveness guard reads as unknown and does not refuse on — the default for
+    # every case that does not set them.
+    jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" \
+      '{rigs:[ ({name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}
+               + (if $susp != "" then {suspended: ($susp == "true")} else {} end)
+               + (if $run  != "" then {running:   ($run  == "true")} else {} end)) ]}' ;;
+  "session list")
+    # Sessions the reclaim probe (sitting_is_gone) reads. Default: the current
+    # $VIS_OWNER counts as live, so the pending/busy refusals hold unchanged. A
+    # dead-sitting-reclaim case sets $LIVE_SITTINGS explicitly (space-separated
+    # session names; empty = none live, so a bound owner reads as gone).
+    # $SESSION_LIST_BROKEN makes the listing FAIL, so the probe fails closed.
+    if [ -n "${SESSION_LIST_BROKEN:-}" ]; then echo "session list: data plane down" >&2; exit 1; fi
+    _live="${LIVE_SITTINGS-$VIS_OWNER}"
+    jq -n --arg live "$_live" \
+      '{sessions:[ $live | split(" ")[] | select(. != "") | {session_name:., name:., id:., state:"running", closed:false} ]}' ;;
   "bd show")
     id="$3"
     if [ "$id" = "tk-vis" ]; then
@@ -373,6 +390,97 @@ if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach
 else
   bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
 fi
+
+echo "# a suspended subject rig is refused before anything spawns"
+# engage spawns a sitting the reconciler must sustain; on a suspended rig the
+# reconciler skips its agents, so the sitting never comes up and the visit would
+# strand bound to it. Refuse before spawning, and name the resume as the fix.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+export RIG_SUSPENDED=true
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(SUSPENDED) engaging on a suspended rig exits 4"
+hasnt "$CALLED" "session new" "(SUSPENDED) …and spawns nothing"
+has "$OUT" "is suspended" "(SUSPENDED) …saying the rig is suspended"
+has "$OUT" "gc rig resume gc-toolkit" "(SUSPENDED) …and naming the resume as the fix"
+unset RIG_SUSPENDED
+
+echo "# a subject rig with no agents running is refused before anything spawns"
+export RIG_RUNNING=false
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(NOTRUNNING) engaging on a not-running rig exits 4"
+hasnt "$CALLED" "session new" "(NOTRUNNING) …and spawns nothing"
+has "$OUT" "no agents running" "(NOTRUNNING) …saying so"
+unset RIG_RUNNING
+
+echo "# an explicitly live rig (suspended=false, running=true) spawns as normal"
+# The guard refuses only on suspended=true or running=false, so a rig gc reports
+# as live must engage exactly as one that reports neither flag.
+export RIG_SUSPENDED=false RIG_RUNNING=true
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(LIVE) engaging on an explicitly live rig exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(LIVE) …and spawns the sitting"
+unset RIG_SUSPENDED RIG_RUNNING
+
+echo "# an open visit bound to a GONE sitting is reclaimed, then re-engaged"
+# A sitting whose rig was suspended/down at bind time never registers, leaving
+# the visit open+assigned to a session absent from `gc session list`. engage must
+# not point the operator at that dead session: it reclaims the visit (clears the
+# binding, re-parks on the board) and spawns a fresh sitting.
+export BEAD_KIND=visit VIS_OWNER="gc-toolkit__converse-dead" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+export LIVE_SITTINGS=""
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(RECLAIM) engaging a visit bound to a gone sitting exits 0"
+has "$OUT" "reclaimed visit tk-vis" "(RECLAIM) …announcing the reclaim"
+has "$CALLED" "bd update tk-vis --if-assignee gc-toolkit__converse-dead --if-status open" "(RECLAIM) …clearing the binding only while it still holds the gone owner"
+has "$CALLED" "gc.routed_to=human" "(RECLAIM) …and re-parks it on the board"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(RECLAIM) …then spawns a fresh sitting"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(RECLAIM) …bound to the fresh sitting's runtime name"
+unset LIVE_SITTINGS
+
+echo "# a reclaim whose guarded clear loses the race defers to the winner, spawning nothing"
+# `gc session list` and the reclaim write are two calls: a second engage that
+# read the same gone owner can reclaim and re-engage in the window between them.
+# The guarded clear (--if-assignee/--if-status) then writes nothing and exits 13,
+# so this engage points at the winner instead of overwriting the live binding.
+export BEAD_KIND=visit VIS_OWNER="gc-toolkit__converse-dead" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+export LIVE_SITTINGS="" RACE_LOST=1 RACE_WINNER="gc-toolkit__converse-9"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(RECLAIM-RACE) a reclaim that loses the guarded clear exits 4"
+hasnt "$CALLED" "session new" "(RECLAIM-RACE) …and spawns no duplicate"
+has "$OUT" "gc-toolkit__converse-9" "(RECLAIM-RACE) …pointing at the winner that took the visit"
+unset LIVE_SITTINGS RACE_LOST RACE_WINNER
+export VIS_OWNER=""
+
+echo "# an open visit bound to a LIVE sitting stays a pending engagement, not a reclaim"
+# Reclaim fires only when the bound sitting is PROVABLY gone. A live owner keeps
+# the pending-engagement refusal, so a second engage never steals a live binding.
+export VIS_OWNER="gc-toolkit__converse-7"
+printf 'open' > "$VIS_STATUS"
+export LIVE_SITTINGS="gc-toolkit__converse-7"
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(LIVE-OWNER) an open visit under a live sitting exits 4"
+hasnt "$CALLED" "session new" "(LIVE-OWNER) …and spawns no duplicate"
+has "$OUT" "pending engagement" "(LIVE-OWNER) …naming it a pending engagement, not a reclaim"
+hasnt "$OUT" "reclaimed" "(LIVE-OWNER) …and never reclaims a live binding"
+unset LIVE_SITTINGS
+export VIS_OWNER=""
+
+echo "# an unreadable session list fails CLOSED — a bound visit is not reclaimed"
+# sitting_is_gone must PROVE the sitting gone; a session list it cannot read is
+# not that proof, so the pending-engagement refusal holds rather than reclaiming
+# a possibly-live binding on a transient read failure.
+export VIS_OWNER="gc-toolkit__converse-7"
+printf 'open' > "$VIS_STATUS"
+export SESSION_LIST_BROKEN=1
+run_engage tk-vis --no-attach
+eq "$RC" 4 "(GONE-UNREADABLE) an unreadable session list exits 4 (fails closed)"
+hasnt "$CALLED" "session new" "(GONE-UNREADABLE) …and spawns nothing"
+has "$OUT" "pending engagement" "(GONE-UNREADABLE) …keeping the pending-engagement refusal"
+unset SESSION_LIST_BROKEN
+export VIS_OWNER=""
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"
