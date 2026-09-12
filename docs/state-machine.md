@@ -603,6 +603,11 @@ optional `_store` naming the intended `bead-rehome.sh` invocation — and closes
 the PR. `pr-facts.sh`'s close arm reads that marker when the PR reaches CLOSED
 and runs `bead-rehome.sh` to consummate the terminal close, so `bead-rehome.sh`
 stays the sole writer of `gc.superseded_by` and the disposition reaches the
-same terminal state through the same verb. A close with no recorded
+same terminal state through the same verb. The same consummation disposes the
+branch's parked rebase and rework children: each exists only to carry a branch
+the closed PR will never merge, so an open, unheld one is closed through
+`bead-rehome.sh` as `not-needed` against the anchor's successor, leaving no husk
+to re-offer to a pool; a child a worker still holds (`in_progress`) or one an
+operator froze (`rebase_hold`) is left alone. A close with no recorded
 disposition still transitions to `abandoned` and files the rework-or-close
 visit.
