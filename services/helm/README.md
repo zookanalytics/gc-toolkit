@@ -498,6 +498,21 @@ cadence is `settled` and GitHub wants a review nobody has given. A standing
 requirement is unmet, but answering a rejecting review is the city's move, and it
 returns as `review_required` once the fix moves the head.
 
+**Stalled at the pre-open codex gate.** A merge anchor parked at `pre_open_gate`
+for the `codex` gate is owed once it has held past three days
+(`preOpenStaleThresholdDays`) with nothing advancing it — no review or rework a
+live session is working, and the gate not yet green. Childless it would otherwise
+band `LOW` and read `in the merge cadence` (a stale `progressing` marker) or
+`position unknown`, so it sinks with no age; the signal bands it `ELEVATED`, dates
+it from the anchor's `updated_at`, and its `needs` names the codex gate and why it
+is stuck — `no review has run`, `findings open`, or `reviewed, not advanced`.
+Routed-ness is not liveness: a review routed to a pool no session is draining is
+itself the stall, not a healthy hold, so the suppression turns on a live worker
+(`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
+wedge, a demand, a takeaway or a human route already owns the row and names it, so
+the signal defers to each; it is a merge anchor either way, so it reads in the
+`review` band beside the wedged pre-open rows.
+
 **`pr_conversation` is a constant `unknown`.** Its other values — `quiet`,
 `outstanding`, `covered`, `answered` — all resolve to acknowledgement watermarks
 the city does not record. Deriving them without those marks means guessing, and

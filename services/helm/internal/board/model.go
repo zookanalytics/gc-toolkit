@@ -197,7 +197,13 @@ type Blocker struct {
 	RoutedTo string `json:"routed_to,omitempty"`
 	// IssueType is what the bead IS. A `decision` is a demand by construction,
 	// the way the board's own `decision` kind is.
-	IssueType string    `json:"issue_type,omitempty"`
+	IssueType string `json:"issue_type,omitempty"`
+	// Assignee is who holds the child. It lets the derivation ask whether a
+	// pool-routed review or rework is actually being WORKED — claimed by a live
+	// session — rather than merely routed to a pool nothing is draining. Routed
+	// and live are different facts, and only the second makes a pre-open gate a
+	// healthy hold rather than a stall.
+	Assignee  string    `json:"assignee,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
