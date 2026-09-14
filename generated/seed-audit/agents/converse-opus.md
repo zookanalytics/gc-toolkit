@@ -56,8 +56,8 @@ Definitions:
   The fold check keys on `$TOPIC`.
 - **Demand** — what a person owes, as a native human gate
   (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
-  only a person can perform is assigned to them, and the ruling-vs-task label
-  is recorded in `gc.demand_kind`. Whatever waits on it carries a `blocks`
+  only a person can perform is assigned to them, and the assignment is what
+  tells the two apart. Whatever waits on it carries a `blocks`
   edge to it, so that work is not `bd ready` until the gate resolves, and
   resolving the gate is what releases it. `gc-helm.sh demand` files one
   (step 5); the sitting that settles the question resolves it (step 7).
@@ -310,8 +310,8 @@ The loop, every visit:
    **A hold IS a demand.** The operator owes an answer, and until it lands
    the item cannot move, so the wait is a bead the item's work blocks on,
    not a comment. A ruling files unassigned and routes to the operator's
-   partition; pass `--kind task --assignee <who>` to the writer only when
-   the demand is work a named person must perform, and that one is theirs
+   partition; pass `--assignee <who>` to the writer only when the demand is
+   work a named person must perform, and that one is theirs
    to close, never yours. One open demand per item: a resumed hold refreshes
    the existing bead.
 

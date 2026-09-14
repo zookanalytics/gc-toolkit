@@ -855,8 +855,8 @@ if [ "$ROUNDS" -ge "$CAP" ]; then
     exit 2
   fi
   if [ "$DEMAND_STATE" -eq 1 ] \
-     && ! "$HELM" demand "$ANCHOR" "$CAP_HEADLINE" --by signoff --kind decision >/dev/null 2>&1; then
-    warn "the round cap on $ANCHOR could not file the demand that gates its park (gc-helm.sh demand failed); the anchor is left UNPARKED and the review bead stays open for a retry. File it by hand, then re-run the verdict: $HELM demand $ANCHOR '<what a person owes>' --by signoff --kind decision"
+     && ! "$HELM" demand "$ANCHOR" "$CAP_HEADLINE" --by signoff >/dev/null 2>&1; then
+    warn "the round cap on $ANCHOR could not file the demand that gates its park (gc-helm.sh demand failed); the anchor is left UNPARKED and the review bead stays open for a retry. File it by hand, then re-run the verdict: $HELM demand $ANCHOR '<what a person owes>' --by signoff"
     exit 2
   fi
   # merge_hold carries the literal string "signoff_cap", not "true": the cap's

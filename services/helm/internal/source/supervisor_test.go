@@ -399,7 +399,7 @@ func TestGatherAdmitsGateBackedHumanDemand(t *testing.T) {
 			// live API does; the union must not double the anchor.
 			writeJSON(w, `{"items":[
 				{"id":"tk-gate-demand","title":"operator: pick the backend","status":"open","issue_type":"gate","priority":1,
-				 "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-work","gc.demand_kind":"decision"}},
+				 "metadata":{"gc.routed_to":"human","gc.demand_for":"tk-work"}},
 				{"id":"tk-gate-bare","title":"a gate carrying no demand marker","status":"open","issue_type":"gate"}
 			],"total":2}`)
 		default:

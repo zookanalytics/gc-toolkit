@@ -741,7 +741,11 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "the cap path still exits 0 when it files a demand"
 has "$(cat "$STUB_HELM_LOG")" "demand tk-anc" "the cap calls gc-helm.sh demand on the anchor"
 has "$(cat "$STUB_HELM_LOG")" "--by signoff" "…stamped as the cap's own (by signoff)"
-has "$(cat "$STUB_HELM_LOG")" "--kind decision" "…as a ruling a person owes"
+if hasin "$(cat "$STUB_HELM_LOG")" "--assignee"; then
+  bad "…as a ruling a person owes: the cap must file unassigned, but passed --assignee"
+else
+  ok "…as a ruling a person owes: filed unassigned (no --assignee)"
+fi
 has "$(cat "$STUB_HELM_LOG")" "did not converge" "…carrying the cap headline as the demand text"
 
 echo "# a demand that cannot be filed refuses the park: the edge is stamped first"

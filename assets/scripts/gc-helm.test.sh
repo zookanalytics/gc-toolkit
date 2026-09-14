@@ -1918,19 +1918,16 @@ grep -q -- '--parent' <<< "$(d_gate)$(d_update)" \
   && bad "(SIBLINGNONE) invented a parent: $(d_gate) / $(d_update)" \
   || ok "(SIBLINGNONE) no parent is invented for a parentless subject"
 
-# (KIND) work only a person can do is recorded as gc.demand_kind=task and
-# assigned to that person; the issue type stays gate.
-demand_run tk-solo "sign the vendor contract" --kind task --assignee zook
-eq "$DRC" "0" "(KIND) --kind task is accepted"
-grep -q -- 'gc.demand_kind=task' <<< "$(d_update)" \
-  && ok "(KIND) …recorded as a task demand" || bad "(KIND) no gc.demand_kind=task: $(d_update)"
+# (ASSIGN) work only a person can do is assigned to that person; the
+# assignment — not a separate key — is what marks it a task, and the issue
+# type stays gate. No gc.demand_kind is written: the key never had a reader.
+demand_run tk-solo "sign the vendor contract" --assignee zook
+eq "$DRC" "0" "(ASSIGN) an assigned demand is accepted"
 grep -q -- '--assignee zook' <<< "$(d_update)" \
-  && ok "(KIND) …assigned to the person who owes it" || bad "(KIND) no assignee: $(d_update)"
-
-# (KINDBAD) any other kind is a usage error, and files nothing.
-demand_run tk-solo "whatever" --kind epic
-eq "$DRC" "2" "(KINDBAD) an unsupported --kind is a usage error"
-eq "$(d_gate)" "" "(KINDBAD) …and nothing is filed"
+  && ok "(ASSIGN) …assigned to the person who owes it" || bad "(ASSIGN) no assignee: $(d_update)"
+grep -q -- 'gc.demand_kind' <<< "$(d_update)" \
+  && bad "(ASSIGN) a dead gc.demand_kind key was written: $(d_update)" \
+  || ok "(ASSIGN) …and no unread gc.demand_kind key is written"
 
 # (CAP) the ≤140 gate is SHARED with takeaway: the title is the same headline.
 demand_run tk-solo "$T141"
