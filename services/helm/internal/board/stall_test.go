@@ -70,9 +70,9 @@ func TestPreOpenCodexGateStallFires(t *testing.T) {
 
 // TestPreOpenCodexGateLiveVsDeadReview is the discriminating pair: two anchors
 // identical but for one fact — whether the session behind the routed review is
-// live. Both read pr.machine=progressing, the surface that says "in the merge
-// cadence" today; the signal splits them on liveness, which is the routed-but-
-// unclaimable stall the mis-framing hides.
+// live. Both read pr.machine=progressing, whose position phrase is "in the merge
+// cadence"; the signal splits them on liveness, surfacing the routed review no
+// live session is draining as a stall.
 func TestPreOpenCodexGateLiveVsDeadReview(t *testing.T) {
 	review := func(assignee string) Blocker {
 		return Blocker{
@@ -117,8 +117,8 @@ func TestPreOpenCodexGateLiveVsDeadReview(t *testing.T) {
 }
 
 // TestPreOpenCodexGateStallDoesNotFire: every shape that must NOT surface as a
-// stall. A fresh hold, a green gate, and a recorded wedge each keep the phrase
-// they had before this signal existed.
+// stall. A fresh hold, a green gate, and a recorded wedge each keep their own
+// position phrase.
 func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
 	wedgedAt := fixtureNow.Add(-120 * time.Hour)
 	cases := []struct {
@@ -169,8 +169,8 @@ func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
 
 // TestPreOpenCodexGateStallYieldsToStrongerSurfacing: a takeaway or a human route
 // already carries the row's NEEDS, so the stall defers rather than renaming it.
-// These are the shapes the live census parked as signoff-cap (human-routed) or
-// left a converse takeaway on, and the human route also owns the band.
+// A human-routed signoff-cap park and a converse takeaway each carry their own
+// NEEDS, and the human route also owns the band.
 func TestPreOpenCodexGateStallYieldsToStrongerSurfacing(t *testing.T) {
 	// A converse sitting parked it: gathered as the parked kind, carrying its
 	// takeaway as the NEEDS sentence.
@@ -229,12 +229,11 @@ func TestPreOpenCodexGateStallYieldsToOpenDemand(t *testing.T) {
 	}
 }
 
-// TestPreOpenCodexGateLiveReviewNotRouted is finding 2's regression: a real
-// mol-review child is not stamped with gc.routed_to — `gc sling` leaves it open
-// and puts the in-flight state on the workflow, visible only through
-// Facts.Inflight — so the live suppression has to recognize it by the cadence
-// title and the live workflow behind it, not by the route. A live review moving
-// the gate is a healthy hold, not a stall.
+// TestPreOpenCodexGateLiveReviewNotRouted: a real mol-review child is not stamped
+// with gc.routed_to — `gc sling` leaves it open and puts the in-flight state on
+// the workflow, visible only through Facts.Inflight — so the live suppression
+// recognizes it by the cadence title and the live workflow behind it, not by the
+// route. A live review moving the gate is a healthy hold, not a stall.
 func TestPreOpenCodexGateLiveReviewNotRouted(t *testing.T) {
 	// No RoutedTo: the route lives on the workflow, not the child.
 	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main", Status: "open"}

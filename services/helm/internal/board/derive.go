@@ -509,10 +509,10 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, stalle
 	if sev0 == SevNormal && stale > staleThresholdDays {
 		sev0 = SevElevated
 	}
-	// A stalled pre-open codex gate is at least ELEVATED. Childless it lands in
-	// the LOW branch above and sinks to the bottom, which is the mis-framing the
-	// signal corrects; the bump never lowers a row that a stronger branch already
-	// banded HIGH or ELEVATED.
+	// A stalled pre-open codex gate is at least ELEVATED. Childless it would
+	// otherwise land in the LOW branch above and sink to the bottom, where a
+	// stalled gate is indistinguishable from a settled one; the bump never lowers
+	// a row that a stronger branch already banded HIGH or ELEVATED.
 	if stalledGate && (sev0 == SevLow || sev0 == SevNormal) {
 		return SevElevated
 	}
@@ -1269,7 +1269,7 @@ func preOpenCodexStall(a Anchor, machine string, blockers []Blocker, stale int, 
 // It reads the title shape, not gc.routed_to. A real mol-review child is not
 // route-stamped — `gc sling` leaves the child open and puts the in-flight state
 // on the workflow, visible only through [Facts.Inflight] — and a rework child
-// carries no task_kind either, so keying on the route missed exactly the live
+// carries no task_kind either, so a route key would miss exactly the live
 // reviews this suppression exists to honor and read them as stalls.
 // preOpenStallReason reads the same titles. A review or rework no live session is
 // draining is NOT in flight — that is the dead-pool hold the stall signal exists
@@ -1328,9 +1328,9 @@ func preOpenStallReason(blockers []Blocker) string {
 	}
 }
 
-// preOpenStallNeeds is the NEEDS sentence for a stalled pre-open codex gate. The
-// acceptance is that it names the codex gate rather than reading "in the merge
-// cadence"; the age rides the frontier's owed clock, so it is not repeated here.
+// preOpenStallNeeds is the NEEDS sentence for a stalled pre-open codex gate. It
+// names the codex gate rather than reading "in the merge cadence"; the age rides
+// the frontier's owed clock, so it is not repeated here.
 func preOpenStallNeeds(reason string) string {
 	switch reason {
 	case stallReasonFindingsOpen:
@@ -1438,13 +1438,14 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
 
 	// A pre-open codex gate that nothing is advancing — no live review, no
-	// in-flight rework, past the staleness floor — is invisible today: childless
-	// it bands LOW and its position reads "in the merge cadence". Give it an owed
-	// cause so it carries its age and leaves the floor. Only for the bare held
-	// shape, though: a disposition, a ruling, a takeaway, a human route, or an
-	// open demand already owns the row and names it — the demand as its own
-	// `asking: <title>`, the operator's actual question — so those are excluded
-	// before the gate is read, not overwritten with the gate's generic wording.
+	// in-flight rework, past the staleness floor — bands LOW when childless, its
+	// position reading "in the merge cadence" indistinguishably from a healthy
+	// hold. Give it an owed cause so it carries its age and leaves the floor. Only
+	// for the bare held shape, though: a disposition, a ruling, a takeaway, a
+	// human route, or an open demand already owns the row and names it — the
+	// demand as its own `asking: <title>`, the operator's actual question — so
+	// those are excluded before the gate is read, not overwritten with the gate's
+	// generic wording.
 	stalled, stalledReason := false, ""
 	if a.ClosedAt.IsZero() && !dispDue && !isRuled && !humanGated(a) && takeaway == "" && ask == nil {
 		var stalledSince time.Time
