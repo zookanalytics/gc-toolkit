@@ -1151,7 +1151,7 @@ func TestOpenDemandStaysOwed(t *testing.T) {
 		"gc.takeaway_at": "2026-06-30T10:00:00Z",
 	}
 	anchors := []Anchor{
-		// Filed --kind=decision, and gathered twice: once as a decision, once
+		// A decision demand, gathered twice: once as a decision, once
 		// off the `gc.routed_to=human` marker. Both rows are one bead, and the
 		// dedup keeps the higher band — so both have to stay up, or the twin
 		// hands the stand-down back.

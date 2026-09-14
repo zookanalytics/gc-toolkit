@@ -415,7 +415,7 @@ and blocks the waiting work on that bead.
 What a person owes is a native human gate — `issue_type=gate`,
 `await_type=human` — that blocks the waiting work. A ruling files
 unassigned; a task only a named person can perform is assigned to them, and
-which one it is is recorded in `gc.demand_kind`. Either way it carries
+the assignment is what tells the two apart. Either way it carries
 `gc.routed_to=human`, so it lands in the operator's partition of the board,
 and the authored 140-character headline is its TITLE — the same primitive
 `gc.takeaway` already enforced, now attached to the thing that is actually
@@ -455,7 +455,7 @@ session every cooldown; the return trip for a cut-short hold rides the
 liveness sweep, as before. Stamping `gc.gate_visit=skip` on a gate before the
 sweep reaches it suppresses its visit, which is the operator's selection
 point when the default is too much; `gc bd update <gate> --unset-metadata
-gc.gate_visit` re-offers one. A gate assigned to a person (`--kind task`) gets
+gc.gate_visit` re-offers one. A gate assigned to a person gets
 no visit — the work is theirs to perform and close, and converse's discharge
 skips assigned demands on purpose — and neither does a gate whose gated bead
 is no longer open, which the sweep names on stderr until it is resolved by

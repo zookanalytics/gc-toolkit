@@ -8,7 +8,7 @@
 #   gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]   spawn a converse sitting for a parked visit and attach
 #   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
 #   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
-#   gc-helm demand <gated-bead> "<text>" [--kind ...] [--assignee ...] [--also-blocks <id>]...
+#   gc-helm demand <gated-bead> "<text>" [--assignee ...] [--also-blocks <id>]...
 #   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting by closing the subject's open visit; the board is untouched, so a DONE row ages out on its own (subject inferred from the current sitting when omitted)
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
@@ -43,7 +43,7 @@ Usage:
   gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
-  gc-helm demand <gated-bead> "<text>" [--by ...] [--kind decision|task] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
+  gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted)
 
 The board is `helm-svc board` (services/helm). This script carries only the
@@ -834,13 +834,11 @@ demand_lookup() (
 )
 
 cmd_demand() {
-    gated=""; text=""; by="host"; kind="decision"; who=""; body=""; also=""; npos=0
+    gated=""; text=""; by="host"; who=""; body=""; also=""; npos=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)          by="${1#--by=}"; shift ;;
             --by)            shift; [ $# -gt 0 ] || { echo "$PROG: demand: --by requires a value" >&2; exit 2; }; by="$1"; shift ;;
-            --kind=*)        kind="${1#--kind=}"; shift ;;
-            --kind)          shift; [ $# -gt 0 ] || { echo "$PROG: demand: --kind requires a value" >&2; exit 2; }; kind="$1"; shift ;;
             --assignee=*)    who="${1#--assignee=}"; shift ;;
             --assignee)      shift; [ $# -gt 0 ] || { echo "$PROG: demand: --assignee requires a value" >&2; exit 2; }; who="$1"; shift ;;
             --body=*)        body="${1#--body=}"; shift ;;
@@ -863,10 +861,6 @@ cmd_demand() {
     [ -n "$gated" ] || { echo "$PROG: demand needs <gated-bead>" >&2; usage; exit 2; }
     normalize_headline "$text" demand
     text="$HEADLINE"
-    case "$kind" in
-        decision|task) ;;
-        *) echo "$PROG: demand: --kind is 'decision' (a ruling) or 'task' (work only a person can do); got '$kind'" >&2; exit 2 ;;
-    esac
     [ -n "$by" ] || by="host"
     [ -n "$body" ] || body="What a person owes, filed as a human gate so the wait is a graph state rather than a comment. Resolving this gate makes $gated ready, and the pool claims it."
 
@@ -938,8 +932,7 @@ cmd_demand() {
         # File the demand as a NATIVE human gate — issue_type=gate,
         # await_type=human, the pack's human-escalation state — that blocks the
         # gated bead. `gc bd update` has no `gate` type, so the gate can only be
-        # born from `gc bd gate create`; the demand metadata is stamped after,
-        # and the kind is recorded in metadata rather than as the issue type.
+        # born from `gc bd gate create`; the demand metadata is stamped after.
         # --reason carries the body from birth, so a gate whose stamp never
         # lands still explains itself to whoever clears it by hand.
         # await_id is stored with the initial row, before the commit that can
@@ -969,7 +962,6 @@ cmd_demand() {
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=" \
                --set-metadata "gc.demand_for=$gated" \
-               --set-metadata "gc.demand_kind=$kind" \
                --set-metadata "gc.routed_to=human"
         [ -n "$who" ] && set -- "$@" --assignee "$who"
         stamped=1
@@ -1052,7 +1044,7 @@ cmd_demand() {
     fi
 
     bust_cache
-    echo "demand $demand blocks $gated (by $by, $kind): $text"
+    echo "demand $demand blocks $gated (by $by${who:+, for $who}): $text"
 }
 
 # ── Verb: open ───────────────────────────────────────────────────────

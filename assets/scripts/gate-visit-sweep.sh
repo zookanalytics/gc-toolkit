@@ -20,7 +20,7 @@
 #   * `gc bd update <gate> --unset-metadata gc.gate_visit` to re-offer a visit.
 #
 # Left alone, deliberately:
-#   * a gate ASSIGNED to a person (`demand --kind task --assignee`): the work is
+#   * a gate ASSIGNED to a person (`demand --assignee`): the work is
 #     theirs to perform and close, and converse's discharge skips assigned
 #     demands on purpose — a visit could neither resolve nor re-state it;
 #   * a gate whose gated bead is no longer open: the gate outlived its work, a

@@ -108,7 +108,7 @@ cat > "$TMP/gates.json" <<'JSON'
  {"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open","title":"suppressed","metadata":{"gc.demand_for":"tk-w2","gc.gate_visit":"skip"}},
  {"id":"tk-g3","issue_type":"gate","await_type":"timer","status":"open","title":"a timer gate","metadata":{"gc.demand_for":"tk-w3"}},
  {"id":"tk-g4","issue_type":"gate","await_type":"human","status":"open","title":"no gated bead","metadata":{}},
- {"id":"tk-g5","issue_type":"gate","await_type":"human","status":"open","title":"sign the contract","assignee":"zook","metadata":{"gc.demand_for":"tk-w5","gc.demand_kind":"task"}},
+ {"id":"tk-g5","issue_type":"gate","await_type":"human","status":"open","title":"sign the contract","assignee":"zook","metadata":{"gc.demand_for":"tk-w5"}},
  {"id":"tk-g6","issue_type":"gate","await_type":"human","status":"open","title":"already visited","metadata":{"gc.demand_for":"tk-w6","gc.gate_visit":"tk-v-old"}},
  {"id":"tk-g7","issue_type":"gate","await_type":"human","status":"open","title":"work already closed","metadata":{"gc.demand_for":"tk-w7"}},
  {"id":"tk-g8","issue_type":"gate","await_type":"human","status":"open","title":"held by a live sitting","metadata":{"gc.demand_for":"tk-w8"}},
