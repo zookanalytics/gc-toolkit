@@ -1263,13 +1263,20 @@ func preOpenCodexStall(a Anchor, machine string, blockers []Blocker, stale int, 
 }
 
 // liveReviewOrRework reports whether an open review or rework child of a merge
-// anchor is actually being WORKED: a pool-routed blocker whose worker is a live
-// session, or one a live workflow stands over. A blocker routed to a pool that no
-// session is draining is NOT in flight — that is the dead-pool hold the stall
-// signal exists to surface — so a route alone does not count here.
+// anchor is actually being WORKED: one the cadence titled "Review …"/"Rework …"
+// whose worker is a live session, or which a live workflow stands over.
+//
+// It reads the title shape, not gc.routed_to. A real mol-review child is not
+// route-stamped — `gc sling` leaves the child open and puts the in-flight state
+// on the workflow, visible only through [Facts.Inflight] — and a rework child
+// carries no task_kind either, so keying on the route missed exactly the live
+// reviews this suppression exists to honor and read them as stalls.
+// preOpenStallReason reads the same titles. A review or rework no live session is
+// draining is NOT in flight — that is the dead-pool hold the stall signal exists
+// to surface — so liveness, not the child's mere existence, is the gate.
 func liveReviewOrRework(blockers []Blocker, f Facts) bool {
 	for _, b := range blockers {
-		if !poolRouted(b) {
+		if !isReviewOrRework(b) {
 			continue
 		}
 		if f.ownerLive(b.Assignee) || f.wfLive(b.ID) {
@@ -1277,6 +1284,17 @@ func liveReviewOrRework(blockers []Blocker, f Facts) bool {
 		}
 	}
 	return false
+}
+
+// isReviewOrRework reports whether a blocker is one of the cadence's open review
+// or rework children — the beads that legitimately hold a merge anchor at the
+// pre-open gate while one runs. signoff.sh and pr-facts.sh title them "Review …"
+// and "Rework …"; the title is the discriminator because neither the route nor
+// the type identifies the pair (a mol-review child is not route-stamped and a
+// rework child carries no task_kind).
+func isReviewOrRework(b Blocker) bool {
+	return b.Status != "closed" &&
+		(strings.HasPrefix(b.Title, "Review ") || strings.HasPrefix(b.Title, "Rework "))
 }
 
 // preOpenStallReason names WHY the gate is stuck, for the NEEDS line. It reads
@@ -1423,10 +1441,12 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	// in-flight rework, past the staleness floor — is invisible today: childless
 	// it bands LOW and its position reads "in the merge cadence". Give it an owed
 	// cause so it carries its age and leaves the floor. Only for the bare held
-	// shape, though: a disposition, a ruling, a takeaway or a human route already
-	// owns the row and names it, so those are excluded before the gate is read.
+	// shape, though: a disposition, a ruling, a takeaway, a human route, or an
+	// open demand already owns the row and names it — the demand as its own
+	// `asking: <title>`, the operator's actual question — so those are excluded
+	// before the gate is read, not overwritten with the gate's generic wording.
 	stalled, stalledReason := false, ""
-	if a.ClosedAt.IsZero() && !dispDue && !isRuled && !humanGated(a) && takeaway == "" {
+	if a.ClosedAt.IsZero() && !dispDue && !isRuled && !humanGated(a) && takeaway == "" && ask == nil {
 		var stalledSince time.Time
 		stalled, stalledSince, stalledReason = preOpenCodexStall(a, machine, a.Blockers, stale, f)
 		if stalled {

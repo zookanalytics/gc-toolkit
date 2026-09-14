@@ -203,3 +203,52 @@ func TestPreOpenCodexGateStallYieldsToStrongerSurfacing(t *testing.T) {
 		t.Errorf("the human-gated park is owed and elevated by its own path: owed=%v sev=%q", hm.Owed, hm.Severity)
 	}
 }
+
+// TestPreOpenCodexGateStallYieldsToOpenDemand: an open demand already owns the
+// row and names the operator's actual question, so the stall must not overwrite
+// it with the gate's generic wording. The row renders `asking: <title>`, not
+// `codex gate stalled`, even though every other stall precondition holds — past
+// the threshold, no live review. This is the row shape the stall guard's
+// `ask == nil` clause protects.
+func TestPreOpenCodexGateStallYieldsToOpenDemand(t *testing.T) {
+	demand := Blocker{
+		ID: "tk-ask", Title: "operator: which rig owns the shared fixture?",
+		Status: "open", IssueType: "decision",
+	}
+	a := preOpenGateAnchor("tk-demand", 5, nil, demand)
+	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-demand")
+
+	if strings.Contains(tile.Needs, "codex gate stalled") {
+		t.Errorf("an open demand owns the row; the stall must not overwrite it, got %q", tile.Needs)
+	}
+	if tile.Needs != "asking: operator: which rig owns the shared fixture?" {
+		t.Errorf("needs = %q, want the demand rendered as `asking: <title>`", tile.Needs)
+	}
+	if !tile.Owed {
+		t.Error("a row carrying an unanswered demand is owed")
+	}
+}
+
+// TestPreOpenCodexGateLiveReviewNotRouted is finding 2's regression: a real
+// mol-review child is not stamped with gc.routed_to — `gc sling` leaves it open
+// and puts the in-flight state on the workflow, visible only through
+// Facts.Inflight — so the live suppression has to recognize it by the cadence
+// title and the live workflow behind it, not by the route. A live review moving
+// the gate is a healthy hold, not a stall.
+func TestPreOpenCodexGateLiveReviewNotRouted(t *testing.T) {
+	// No RoutedTo: the route lives on the workflow, not the child.
+	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main", Status: "open"}
+	a := preOpenGateAnchor("tk-live", 5, nil, review)
+	f := Facts{
+		Inflight:   map[string][]string{"tk-rev": {"gc-toolkit__polecat-codex-lx-run"}},
+		OwnerState: map[string]string{"gc-toolkit__polecat-codex-lx-run": "active"},
+	}
+	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, f), "tk-live")
+
+	if strings.Contains(tile.Needs, "codex gate stalled") {
+		t.Errorf("a live review workflow with no route is a healthy hold, not a stall; got %q", tile.Needs)
+	}
+	if tile.Owed {
+		t.Error("a pre-open gate a live review is moving is not the operator's move — not owed")
+	}
+}
