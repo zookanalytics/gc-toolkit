@@ -205,6 +205,16 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a detached anchor held at status=blocked is flagged too"
 has "$OUT" "status=blocked" "the finding names the holding status"
 
+# An OPEN detached anchor at rest is the correct state; the non-open probe must
+# not re-report it. --has-metadata-key merge_result with no --status returns every
+# non-closed status, open included, so the probe's --status scoping is what keeps
+# the open resting state (already covered by the open scan) off the non-open
+# findings. Drop --status from the probe and this case flips to a false
+# status=open, not open finding.
+store '[{"id":"a-22","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an open detached anchor at rest is not re-flagged by the non-open probe"
+
 # --- 13. ordinary in-flight work is NOT a detached-state finding -----------
 # A polecat's own work bead is in_progress and carries branch but no
 # merge_result; the --has-metadata-key filter keeps the backstop off it, so an

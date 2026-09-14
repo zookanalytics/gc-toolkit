@@ -69,13 +69,18 @@ anchors.
   statuses (`--status in_progress,blocked,deferred,hooked,pinned
   --has-metadata-key merge_result`) and reports any bead in a detached state that
   is not open. The open-scoped scan and all of its findings are unchanged.
-- `doctor/check-state-space/run.test.sh`: the `bd` stub now honors `--status` and
-  `--has-metadata-key`. A stub that ignored them could not tell the claimed-state
-  probe from the open scan, and a dropped `--status` flag on the probe would
-  still pass. The probe's `--status` flag is load-bearing: without it, real `bd`
-  defaults `--has-metadata-key` to open-only and the orphan is missed. New cases
-  cover an `in_progress` detached anchor (flagged), a `blocked` one (flagged),
-  and an ordinary `in_progress` work bead with no `merge_result` (not flagged).
+- `doctor/check-state-space/run.test.sh`: the `bd` stub honors `--status` and
+  `--has-metadata-key`, so the test can tell the non-open probe from the open scan
+  and a dropped filter is caught. `--has-metadata-key merge_result` with no
+  `--status` returns beads in every non-closed status, open included — it does not
+  restrict to open. The probe's `--status` flag is load-bearing for that reason.
+  It scopes the probe to the non-open statuses. The open detached anchors rest
+  open by design and the open scan already covers them, so without the flag the
+  probe would read them too and report each as a false `status=open, not open`
+  violation. New cases
+  cover an `in_progress` detached anchor (flagged), a `blocked` one (flagged), an
+  open detached anchor at rest (not re-flagged by the non-open probe), and an
+  ordinary `in_progress` work bead with no `merge_result` (not flagged).
 - `doctor/check-state-space/doctor.toml` and `docs/state-machine.md` state the
   invariant and the backstop.
 
