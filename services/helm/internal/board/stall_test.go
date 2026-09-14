@@ -134,8 +134,8 @@ func TestPreOpenCodexGateStallDoesNotFire(t *testing.T) {
 			wantNeeds: "position unknown — the merge cadence has recorded none",
 		},
 		{
-			name:      "the gate has gone green — the PR is about to open",
-			anchor:    preOpenGateAnchor("tk-green", 5, map[string]string{"check.codex": checkGreenPrefix + headLive}),
+			name:      "the gate marker is a bare green — the PR is about to open",
+			anchor:    preOpenGateAnchor("tk-green", 5, map[string]string{"check.codex": checkGreen}),
 			wantOwed:  false,
 			wantNeeds: "position unknown — the merge cadence has recorded none",
 		},

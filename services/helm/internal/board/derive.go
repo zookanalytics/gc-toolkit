@@ -1196,27 +1196,25 @@ func prNeeds(machine, approval string, ask *Blocker) string {
 
 // The pre-open codex gate the stall signal reads. mergeResultPreOpenGate is the
 // merge_result of an anchor parked at that gate, before any PR exists;
-// checkSetCodex is the only gate set this city runs there; and
-// mdCheckPrefix+the set names the gate marker (check.codex), whose
-// checkGreenPrefix value (green@<oid>) is what opens the PR.
+// checkSetCodex is the only gate set this city runs there; mdCheckPrefix+the set
+// names the gate marker (check.codex); and checkGreen is the settled marker value
+// on which pre-open-resolve opens the PR.
 const (
 	mergeResultPreOpenGate = "pre_open_gate"
 	checkSetCodex          = "codex"
 	mdCheckPrefix          = "check."
-	checkGreenPrefix       = "green@"
+	checkGreen             = "green"
 
 	stallReasonNeverReviewed       = "never-reviewed"
 	stallReasonFindingsOpen        = "findings-open"
 	stallReasonReviewedNotAdvanced = "reviewed-not-advanced"
 )
 
-// preOpenStaleThresholdDays is how long a pre-open codex gate may hold before
-// the board reads it as STALLED rather than in-flight. The census that motivated
-// the signal (2026-09-12) found 13 of 17 held anchors untouched more than three
-// days with no review running, so three days is the floor below which a hold is
-// still plausibly fresh. It is deliberately far tighter than staleThresholdDays:
-// that clock stale-bumps an already-NORMAL row, while a childless pre-open gate
-// bands LOW and never reaches the bump at all.
+// preOpenStaleThresholdDays is how long a pre-open codex gate may hold before the
+// board reads it as STALLED rather than in-flight. Three days is the floor below
+// which a hold is still plausibly a fresh, healthy park. It is deliberately far
+// tighter than staleThresholdDays: that clock stale-bumps an already-NORMAL row,
+// while a childless pre-open gate bands LOW and never reaches the bump at all.
 const preOpenStaleThresholdDays = 3
 
 // preOpenCodexStall reports whether a merge anchor is stuck at the pre-open codex
@@ -1249,8 +1247,9 @@ func preOpenCodexStall(a Anchor, machine string, blockers []Blocker, stale int, 
 		return false, time.Time{}, ""
 	}
 	// The gate has gone green: pre-open-resolve opens the PR on its next pass, so
-	// the anchor is about to leave this state, not stalled in it.
-	if strings.HasPrefix(a.Metadata[mdCheckPrefix+checkSetCodex], checkGreenPrefix) {
+	// the anchor is about to leave this state, not stalled in it. The lane marker
+	// carries a bare state word, so a settled gate is an exact "green".
+	if a.Metadata[mdCheckPrefix+checkSetCodex] == checkGreen {
 		return false, time.Time{}, ""
 	}
 	// A live review or rework is the healthy hold — something is moving it.
