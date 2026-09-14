@@ -39,6 +39,19 @@ cause today". The signal targets that shape and defers to every stronger
 surfacing (wedge, disposition, takeaway, human route), so it neither double-names
 the 15 parked rows nor competes with the disposition path.
 
+Live render on 2026-09-14 confirms it: `tk-9ntg93` and four gascity anchors
+(`gc-1fke8`, `gc-vveco`, `gc-blaw4`, `gc-l1l06` — the board is city-wide) now band
+`ELEVATED`, are owed, carry "owed 3d", and read the codex-gate NEEDS; the 15
+signoff-cap and ruled rows keep their own framing untouched.
+
+`tk-or0ha2` is the one named target that does NOT surface, and correctly. It is
+the sole `pre_open_gate` anchor left at status `in_progress` — the refinery never
+re-parked it to `open` — and the board gathers merge anchors at status `open`
+only. That stuck status is itself the post-review-progression failure the
+root-cause bead (`tk-w73r2q`) owns; widening the board's gather to `in_progress`
+for one anomalous bead would risk pulling genuinely in-flight work onto the board,
+so the derivation surfaces it once the root cause re-parks it.
+
 ## The lever: an owed cause in the board derivation
 
 Of the levers offered, this is the board one: a new owed cause in
