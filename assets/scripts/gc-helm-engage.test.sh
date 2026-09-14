@@ -85,7 +85,13 @@ case "$1 ${2:-}" in
     # template through GC_DIR/cwd, so engage must point it at the subject's rig.
     printf 'GC_DIR=%s\n' "${GC_DIR-<unset>}" >> "$CALLS"
     if [ -n "${SPAWN_EMPTY:-}" ]; then
-      echo "gc session new: agent \"converse-opus\" not found in city.toml" >&2; jq -n '{ok:true}'; else
+      echo "gc session new: agent \"converse-opus\" not found in city.toml" >&2; jq -n '{ok:true}'
+    elif [ -n "${ALIAS_COLLIDE:-}" ] && case "$*" in *"--alias v-"*) false ;; *) true ;; esac; then
+      # ValidateAlias refuses an alias matching the session-id syntax (a gascity
+      # all-numeric bead id, gc-62297) before any session spawns, wrapping the
+      # sentinel "invalid session alias"; only the v- retry passes here.
+      echo 'gc session new: invalid session alias: "gc-62297" conflicts with session ID syntax' >&2; jq -n '{ok:true}'
+    else
       jq -n --arg id "$SID" --arg n "$SNAME" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:"tk-vis", template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
     fi ;;
   "session attach")
@@ -350,7 +356,24 @@ run_engage tk-vis --no-attach
 eq "$RC" 4 "(SPAWN-WHY) a spawn that yields no identity exits 4"
 has "$OUT" "gc said: gc session new: agent" "(SPAWN-WHY) …quoting gc's stderr"
 has "$OUT" "rig-scoped" "(SPAWN-WHY) …and explaining the rig-scoped template"
+hasnt "$CALLED" "--alias v-" "(SPAWN-WHY) …a non-alias spawn failure is not retried under a v- prefix"
 unset SPAWN_EMPTY
+
+echo "# a visit id ValidateAlias rejects is retried once under a v- prefix"
+# gascity session ids match ^gc-[0-9]+$, and ValidateAlias refuses any alias
+# that does — so a gascity visit whose bead id is all-numeric (gc-62297) cannot
+# be the bare --alias, and nothing would spawn. engage tries the bare visit id
+# first, then retries under a v- prefix no ValidateAlias rule can match, so the
+# visit stays engageable. The stub refuses every --alias that is not v-prefixed.
+export ALIAS_COLLIDE=1
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --no-attach
+eq "$RC" 0 "(ALIAS-RETRY) a rejected bare alias is retried and engage exits 0"
+has "$CALLED" "session new converse-opus --alias tk-vis --no-attach --json" "(ALIAS-RETRY) …the bare visit id is tried first"
+has "$CALLED" "session new converse-opus --alias v-tk-vis --no-attach --json" "(ALIAS-RETRY) …then retried under a v- prefix"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(ALIAS-RETRY) …and the visit binds to the retried sitting"
+unset ALIAS_COLLIDE
+printf 'open' > "$VIS_STATUS"
 
 echo "# a bead whose prefix names no rig is refused before anything runs"
 run_engage zz-vis --no-attach
