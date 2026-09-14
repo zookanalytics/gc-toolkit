@@ -6,10 +6,15 @@
 # an open bead in a declared detached state is held by nobody and offered to no
 # pool. The merge cadence drives those states, so its assignee must be empty and
 # its gc.routed_to must be empty or the declared park_route sentinel that no
-# pool claims; any other value is a second driver racing the cadence. Finally,
-# no open bead carries a metadata key from the deleted healer-bookkeeping
-# registry — those keys have no writer any more, so their presence means a
-# retired repair pass is still writing state.
+# pool claims; any other value is a second driver racing the cadence. A detached
+# anchor must also stay open: the cadence readers (pr-open, merge, pr-facts,
+# gate-ensure) enumerate --status=open, so one claimed or held into any other
+# live status drops out of every one of them until the claim resolves. The
+# open-scoped scan misses that end-state for the same reason the cadence does, so
+# a second probe reads the non-open live statuses to report it. Finally, no open
+# bead carries a metadata key from the deleted healer-bookkeeping registry —
+# those keys have no writer any more, so their presence means a retired repair
+# pass is still writing state.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -143,6 +148,38 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: open-bead listing from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
     fi
+
+    # A detached anchor that has been claimed or held into a non-open live status
+    # is invisible to the open-scoped scan above AND to every cadence reader
+    # (pr-open, merge, pr-facts, gate-ensure), all of which enumerate
+    # --status=open — so it stalls in the pipeline unseen until the claim
+    # resolves. Read the non-open live statuses, narrowed to merge_result-bearing
+    # beads, so this end-state has a reader. A live claim is not overwritten here;
+    # it is surfaced, the same escalate-not-overwrite the cadence itself keeps.
+    craw=$(run_bounded gc bd list --db "$rig_path/.beads" \
+        --status in_progress,blocked,deferred,hooked,pinned \
+        --has-metadata-key merge_result --json --limit 0 2>/dev/null); crc=$?
+    if [ "$crc" -ne 0 ] || [ -z "$craw" ]; then
+        warnings+=("$label: could not list claimed/held anchors in $rig_path/.beads (rc=$crc) — the detached-state claim check did NOT run for this store")
+    else
+        crows=$(printf '%s' "$craw" | scrub | jq -r --argjson detached "$detached_json" '
+            def clean: tostring | gsub("[[:cntrl:]]"; " ");
+            .[]? | . as $b | ($b.metadata // {}) as $m
+            | (($b.id // "?") | clean) as $id
+            | (($b.status // "") | clean) as $st
+            | (($m.merge_result // "") | tostring) as $mr
+            | select(($detached | index($mr)) != null)
+            | [$id, $mr, $st] | join("\u001f")' 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            warnings+=("$label: claimed/held anchor listing from $rig_path/.beads could not be parsed — the detached-state claim check did NOT run for this store")
+        elif [ -n "$crows" ]; then
+            while IFS=$'\037' read -r id mr st; do
+                [ -n "$id" ] || continue
+                errors+=("$label bead $id: merge_result=$mr is a detached state (lifecycle/lifecycle.toml detached_states) but the bead is status=$st, not open — a detached anchor rests open so the merge cadence can drive it, and every cadence reader (pr-open, merge, pr-facts, gate-ensure) enumerates --status=open, so this claimed/held anchor has dropped out of the pipeline unseen until the claim resolves")
+            done <<< "$crows"
+        fi
+    fi
+
     [ -n "$rows" ] || continue
     while IFS=$'\037' read -r kind id val extra; do
         [ -n "$kind" ] || continue
@@ -172,6 +209,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every open bead's merge_result is a declared state, every detached state rests unheld and offered to no pool, and no deleted healer key survives"
+echo "OK: every open bead's merge_result is a declared state, every detached-state anchor is open and rests unheld and offered to no pool, and no deleted healer key survives"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

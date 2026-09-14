@@ -113,9 +113,15 @@ one there is spent the moment the anchor is gated. The clear stops at
 `status=open` for two reasons that agree. A live claim is a hold to escalate,
 not to overwrite; and bd refuses an assignee edit on a bead another actor holds
 `in_progress`, dropping the whole atomic update with it
-([gascity-routing-model.md](gascity-routing-model.md) row 46). No cadence pass
-reaches such a bead in any case, because every anchor enumeration is
-`--status=open`. `doctor/check-state-space` reports either violation.
+([gascity-routing-model.md](gascity-routing-model.md) row 46).
+
+A detached anchor that is nonetheless claimed or held into a non-open status —
+by a route stamped on it out of band, or a direct claim — is the residual this
+leaves open. Every anchor enumeration is `--status=open`, so it drops out of
+`pr-open`, `merge`, `pr-facts` and `gate-ensure` at once and stalls unseen until
+the claim resolves. `doctor/check-state-space` also reads the non-open live
+statuses, so it reports all three violations: a detached anchor carrying a
+route, one carrying an assignee, and one that has left `status=open`.
 
 ## Transition table
 

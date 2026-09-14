@@ -42,11 +42,34 @@ cat > "$TMP/bin/bd" <<'BD'
 # The check reaches the store through `gc bd`; a direct `bd` is the regression
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
-db=""; prev=""
-for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
+# >>> control-char-scrub
+scrub() { tr -d '\000-\011\013-\037'; }
+# <<< control-char-scrub
+# Honor the three filters the check relies on: --db, --status (comma list) and
+# --has-metadata-key. A stub that ignored --status would let an in_progress
+# fixture reach the --status=open scan, so the detached-CLAIMED probe (which
+# reads only the non-open statuses) could never be told apart from the open scan,
+# and dropping the --status flag from either query would still pass this test.
+db=""; status=""; haskey=""; prev=""
+for a in "$@"; do
+  case "$prev" in
+    --db) db="$a" ;;
+    --status) status="$a" ;;
+    --has-metadata-key) haskey="$a" ;;
+  esac
+  prev="$a"
+done
 name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
-f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
+f="$STORES/$name.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
+# scrub first: a fixture may carry raw control bytes (the check's own guard),
+# and real bd filters structured rows in the store, so its filter never sees
+# them. An unparseable fixture makes jq exit non-zero, which the check reads as
+# an unreadable store, exactly as a real bd failure would.
+scrub < "$f" | jq -c --arg status "$status" --arg haskey "$haskey" '
+  ($status | if . == "" then null else split(",") end) as $st
+  | map(select($st == null or ((.status // "open") as $bst | ($st | index($bst)) != null)))
+  | map(select($haskey == "" or ((.metadata // {}) | has($haskey))))'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
@@ -163,6 +186,32 @@ eq "$RC" "0" "a state lifecycle.toml does NOT declare detached is not held to th
 OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "2" "the same bead IS a finding under the builtin detached set"
 has "$OUT" "a-16" "the fallback arm names the bead"
+
+# --- 12. a detached anchor claimed into a non-open status ------------------
+# The open scan and every cadence reader enumerate --status=open, so this bead
+# is invisible to all of them; the non-open backstop probe is what reports it.
+store '[{"id":"a-19","status":"in_progress","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an in_progress detached anchor is an ERROR"
+has "$OUT" "a-19" "it names the claimed anchor the open scan cannot see"
+has "$OUT" "status=in_progress" "it names the status that hid it"
+has "$OUT" "dropped out of the pipeline" "it explains the cadence invisibility"
+
+# blocked is equally invisible: the invariant is status=open, not merely
+# not-in_progress. (pre_open_gate is the detached state the fixture's
+# lifecycle.toml declares.)
+store '[{"id":"a-21","status":"blocked","assignee":"","metadata":{"merge_result":"pre_open_gate"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a detached anchor held at status=blocked is flagged too"
+has "$OUT" "status=blocked" "the finding names the holding status"
+
+# --- 13. ordinary in-flight work is NOT a detached-state finding -----------
+# A polecat's own work bead is in_progress and carries branch but no
+# merge_result; the --has-metadata-key filter keeps the backstop off it, so an
+# empty assignee is never read as an orphan here.
+store '[{"id":"a-20","status":"in_progress","assignee":"","metadata":{"branch":"polecat/x"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an in_progress bead with no merge_result is ordinary work, not a finding"
 
 echo
 echo "check-state-space: $PASS passed, $FAIL failed"
