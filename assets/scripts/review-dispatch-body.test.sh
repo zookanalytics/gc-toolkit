@@ -14,6 +14,15 @@
 #   (GATE)      one signoff.sh call; never gh pr review --approve.
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
+#   (METHOD)    --check-name selects the gate's method section; an undeclared
+#               gate gets an explicit "no method declared", never a guess.
+#   (AGREE)     no charter-declared gate falls through to the undeclared-method
+#               fallback, every method the emitter names is the one the
+#               charter's menu declares for that gate, and the file it points
+#               at ships.
+#   (GUARD)     review-charter.sh refuses a gate-menu header whose columns were
+#               reordered or added, rather than reading a cell into the wrong
+#               field; a header differing only in case/spacing still parses.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,11 +62,99 @@ hasF "$TMP/note.out" '## Context from the dispatch' "(NOTE) --note adds the disp
 hasF "$TMP/note.out" 'STALE-NOTE-a1b2: the head moved.' "(NOTE) --note text reaches the body"
 notF "$TMP/plain.out" '## Context from the dispatch' "(NOTE) the section is absent without --note"
 
+echo "# --check-name selects the gate method"
+bash "$SCRIPT" --check-name triage > "$TMP/triage.out" 2>/dev/null
+hasF "$TMP/triage.out" '## Gate method: `triage`' "(METHOD) the triage section is headed by its gate"
+hasF "$TMP/triage.out" 'skills/review-triage/SKILL.md' "(METHOD) triage names its method skill"
+hasF "$TMP/triage.out" '--add-gates' "(METHOD) triage is told how to record the widening"
+notF "$TMP/triage.out" 'run the tests the diff touches' "(METHOD) triage is not handed the correctness method"
+
+# arch was deferred to a follow-on: it is no longer a declared gate, so its
+# dispatch falls to the undeclared-method default rather than naming a skill.
+bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
+hasF "$TMP/arch.out" 'No gate method is declared' "(METHOD) the deferred arch gate gets the undeclared-method default"
+notF "$TMP/arch.out" 'arch-review' "(METHOD) …and names no arch-review skill"
+
+hasF "$OUT" '## Gate method: `codex`' "(METHOD) the default gate is codex"
+
+bash "$SCRIPT" --check-name telepathy > "$TMP/unknown.out" 2>/dev/null
+hasF "$TMP/unknown.out" 'No gate method is declared' "(METHOD) an undeclared gate is told so outright"
+notF "$TMP/unknown.out" 'skills/review-triage/SKILL.md' "(METHOD) …and is never handed another gate's method"
+
 echo "# the named formula really ships in this pack"
 ROOT="$(cd "$HERE/../.." && pwd)"
 [ -r "$ROOT/formulas/mol-review.toml" ] \
   && ok "(NAME) formulas/mol-review.toml exists where the note points" \
   || bad "(NAME) formulas/mol-review.toml missing — the note names a formula the pack does not ship"
+
+echo "# the emitter and the charter name the same method for each gate"
+CHARTER="$ROOT/docs/review-charter.md"
+if [ -r "$CHARTER" ]; then
+  MENU=$("$HERE/review-charter.sh" --file "$CHARTER")
+  while IFS=$'\t' read -r g_name g_method _ _; do
+    [ -n "$g_name" ] || continue
+    for m in $g_method; do
+      case "$m" in +) continue ;; esac
+      [ -e "$ROOT/$m" ] \
+        && ok "(AGREE) the charter's method for '$g_name' ships at $m" \
+        || bad "(AGREE) the charter names $m for '$g_name', which this pack does not ship"
+    done
+    bash "$SCRIPT" --check-name "$g_name" > "$TMP/agree.out" 2>/dev/null
+    notF "$TMP/agree.out" 'No gate method is declared' \
+      "(AGREE) the '$g_name' dispatch declares a method"
+    for m in $g_method; do
+      case "$m" in +) continue ;; esac
+      hasF "$TMP/agree.out" "$m" "(AGREE) the '$g_name' dispatch names the charter's method $m"
+    done
+  done <<< "$MENU"
+else
+  bad "(AGREE) docs/review-charter.md is missing — the gate menu has nowhere to live"
+fi
+
+echo "# the parser refuses a header whose columns moved, instead of misreading"
+CH="$TMP/charter"
+mkdir -p "$CH"
+
+# Reorder: method and applies-when swapped. Read positionally, this would put
+# the applies-when prose into the method field for every gate — a silent
+# misread. The parser must refuse it.
+cat > "$CH/reorder.md" <<'MD'
+## Gate menu
+| Gate | Method | Applies when | Mandatory paths |
+|---|---|---|---|
+| `codex` | `formulas/mol-review.toml` | always | `-` |
+MD
+GRC=0
+"$HERE/review-charter.sh" --file "$CH/reorder.md" > "$TMP/guard1.out" 2> "$TMP/guard1.err" || GRC=$?
+[ "$GRC" -ne 0 ] && ok "(GUARD) a reordered header is refused" || bad "(GUARD) a reordered header was accepted (rc=$GRC)"
+hasF "$TMP/guard1.err" 'header does not match the expected schema' "(GUARD) …and reports the mismatch"
+eq "$(wc -c < "$TMP/guard1.out" | tr -d ' ')" "0" "(GUARD) …and emits no rows a caller could trust"
+
+# An added column shifts method and mandatory-paths one cell to the right.
+cat > "$CH/extra.md" <<'MD'
+## Gate menu
+| Gate | Applies when | Method | Mandatory paths | Waivable |
+|---|---|---|---|---|
+| `codex` | always | `formulas/mol-review.toml` | `-` | no |
+MD
+GRC=0
+"$HERE/review-charter.sh" --file "$CH/extra.md" > /dev/null 2> "$TMP/guard2.err" || GRC=$?
+[ "$GRC" -ne 0 ] && ok "(GUARD) an added column is refused" || bad "(GUARD) an added column was accepted (rc=$GRC)"
+hasF "$TMP/guard2.err" 'header does not match the expected schema' "(GUARD) …and reports the mismatch (added column)"
+
+# The guard checks the schema, not byte-identity: a well-formed menu differing
+# only in case, spacing, and column alignment still parses, and its method and
+# mandatory-paths cells still read from the right columns.
+cat > "$CH/variant.md" <<'MD'
+## Gate menu
+|  GATE  | Applies When |  method  | Mandatory Paths |
+|:---|:---:|---|---|
+| `demo` | watched | `skills/x` `skills/y` | `docs/**` |
+MD
+GRC=0
+VOUT=$("$HERE/review-charter.sh" --file "$CH/variant.md" 2> "$TMP/guard3.err") || GRC=$?
+eq "$GRC" "0" "(GUARD) a well-formed variant header still parses"
+eq "$VOUT" "$(printf 'demo\tskills/x skills/y\tdocs/**')" "(GUARD) …reading method and paths from the right columns"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

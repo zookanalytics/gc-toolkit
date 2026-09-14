@@ -42,16 +42,18 @@ the cadence — the arms run whether or not any refinery session is awake.
 ## The arms
 
 1. **gate-ensure.sh** — gate satisfiability. Every gating anchor declares a
-   non-empty `check_set` (the default is stamped when absent; the `none`
-   sentinel is respected), and every declared gate is *raisable*: the lane
-   reads `green`, or a live routed review bead is in flight, else dispatch one
-   (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). A lane that reads `green` ends the arm's interest however far the
-   branch has advanced since — nothing here compares a marker to a head. The
-   convergence cap's park also ends it with no dispatch: `signoff.sh` set
-   `merge_hold=signoff_cap` (the literal string, distinct from an operator's
-   own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
-   `gc.routed_to=human`, a `blocked_reason` naming the cap, and
+   non-empty `check_set` (the declared default `codex,triage` is stamped when
+   absent; the `none` sentinel is respected), and every declared gate is
+   *raisable*: the lane reads `green`, or a live routed review bead is in
+   flight, else dispatch one (stamp first, then attach `mol-review` via
+   `gc sling --on`; read the pour back). Each dispatch names its gate's method
+   in the body, and a `triage` approve widens `check_set`, so the gates triage
+   adds are dispatched on the next pass. A lane that reads `green` ends the
+   arm's interest however far the branch has advanced since — nothing here
+   compares a marker to a head. The convergence cap's park also ends it with no
+   dispatch: `signoff.sh` set `merge_hold=signoff_cap` (the literal string,
+   distinct from an operator's own `merge_hold=true`) with `signoff_cap=<gate>`
+   beside it, `gc.routed_to=human`, a `blocked_reason` naming the cap, and
    the shorter `gc.takeaway` headline the helm board renders, in one act. No
    visit is filed for it, so the anchor is parked rather than queued. What
    undoes that is new operator feedback, which arm 5 records: the cap counts

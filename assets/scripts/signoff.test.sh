@@ -16,10 +16,17 @@
 # a live demand holds the anchor, a takeaway from a sitting that ended does not.
 # Both also take the cap's OWN takeaway with the park, and leave a sitting's,
 # which gc.takeaway_by tells apart.
+# It also covers the triage widening: a monotonic union with read-back, a
+# closed menu, and a gate validated only against the charter at the REVIEWED
+# COMMIT, read out of that commit and never off the tree the reviewer happens
+# to be standing in.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/signoff.sh"
+# Captured before the stub shadows git on PATH: the charter cases read a real
+# object out of a real repo, so `git show` there has to be the real one.
+REAL_GIT="$(command -v git)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -249,6 +256,16 @@ if [ "${1:-}" = "ls-remote" ]; then
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
   exit 0
 fi
+# The charter read is `git -C <repo> show <oid>:<path>`, and REAL git answers
+# it. A stub that minted the blob itself would hand back a charter for an
+# object no repo carries, which is the case these tests exist to pin.
+if [ "${1:-}" = "-C" ] && [ "${3:-}" = "show" ]; then
+  exec "${STUB_REAL_GIT:?}" "$@"
+fi
+# The tree the reviewer is standing in, which is not the reviewed commit.
+if [ "${1:-}" = "rev-parse" ] && [ "${2:-}" = "--show-toplevel" ]; then
+  printf '%s\n' "${STUB_TOPLEVEL:-}"; exit 0
+fi
 # merge-base --is-ancestor: 0 ancestor, 1 not, 128 a commit git cannot resolve.
 [ "${1:-}" = "merge-base" ] && exit "${STUB_MERGEBASE_RC:-0}"
 exit 0
@@ -294,6 +311,7 @@ export GC_HELM_TOOL="$BIN/gc-helm" STUB_HELM_LOG="$TMP/helm.log"
 # point signoff at the stub so the real primitive never runs here.
 export GC_FINDING_TOOL="$BIN/finding" STUB_FINDING_LOG="$TMP/finding.log"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
+export STUB_REAL_GIT="$REAL_GIT"
 export STUB_GH_LOG="$TMP/gh.log" STUB_GH_BODY="$TMP/gh.body" STUB_CREATED="$TMP/created"
 export STUB_SEQ="$TMP/seq" STUB_UPD_FAIL="$TMP/updfail" STUB_GH_ALL="$TMP/gh.all"
 export STUB_UNSET_NOOP="$TMP/unsetnoop" STUB_UNSET_LOG="$TMP/unsetlog"
@@ -1310,6 +1328,154 @@ reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "approve exits 0"
 has "$(cat "$STUB_FINDING_LOG")" "close-unvalidated --anchor tk-anc --lane codex" "approve closes the lane's still-unruled findings"
+
+# --- triage: the check_set widening ------------------------------------------------
+# The charter is read out of the REVIEWED COMMIT, so the fixture is a real
+# one-commit repo and GC_RIG_ROOT is a rung to that object, never to a working
+# tree. These cases therefore never read this repo's own menu, and the pack is
+# not a rung at all: a pack-supplied charter is proven inert further down.
+REVIEWED_REPO="$TMP/reviewed"
+mkdir -p "$REVIEWED_REPO/docs"
+cat > "$REVIEWED_REPO/docs/review-charter.md" <<'CHARTER'
+# Fixture charter
+
+| Gate | Applies when | Method | Mandatory paths |
+|---|---|---|---|
+| `codex` | always | `formulas/mol-review.toml` | `-` |
+| `triage` | always | `skills/review-triage/SKILL.md` | `-` |
+| `demo` | operator-visible | `skills/demo-capture/SKILL.md` | `-` |
+CHARTER
+git_fixture() { # <repo> <git-args...>
+  local r="$1"; shift
+  "$REAL_GIT" -C "$r" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@"
+}
+mint_repo() { # <repo> <message> — init, commit the tree, print the commit oid
+  git_fixture "$1" init -q -b main
+  git_fixture "$1" add -A
+  git_fixture "$1" commit -q -m "$2"
+  git_fixture "$1" rev-parse HEAD
+}
+# The commit that carries the fixture menu is the commit every case reviews,
+# so the menu warranting a decision and the oid the marker records are one
+# object rather than two things a path read hopes agree.
+OID_CHARTER=$(mint_repo "$REVIEWED_REPO" "fixture charter")
+# The working tree then diverges from the commit, standing in for the tree a
+# reviewer is actually left in: some other commit's. It drops `demo` from the
+# menu, so a case that adds `demo` succeeds only if the read took the COMMITTED
+# menu; a read off disk would refuse it as undeclared and fail the case rather
+# than pass quietly.
+cat > "$REVIEWED_REPO/docs/review-charter.md" <<'CHARTER'
+# A stale working-tree charter, from a commit nobody is reviewing
+
+| Gate | Applies when | Method | Mandatory paths |
+|---|---|---|---|
+| `codex` | always | `formulas/mol-review.toml` | `-` |
+| `triage` | always | `skills/review-triage/SKILL.md` | `-` |
+CHARTER
+export GC_RIG_ROOT="$REVIEWED_REPO"
+
+REVIEW_TRIAGE='{"id":"rv-t","status":"in_progress","assignee":"pool/x","metadata":{"check_name":"triage","anchor_bead":"tk-anc","fix_target_pool":"rig/gc-toolkit.polecat","reviewed_oid":"'"$OID_CHARTER"'"},"notes":"triage body"}'
+setcs() { jq -c --arg v "$1" 'map(if .id == "tk-anc" then .metadata.check_set = $v else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+
+echo "# triage widens check_set and records the add"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "an approve carrying --add-gates exits 0"
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "the added gate is unioned into check_set"
+eq "$(meta tk-anc check.triage)" "green" "triage's own gate goes green"
+has "$(notes tk-anc)" "triage-add: demo @$OID_CHARTER" "a triage-add note per added gate lands on the anchor"
+eq "$(status rv-t)" "closed" "the triage review bead closes"
+has "$out" "check_set now codex,triage,demo" "the summary names the new set"
+
+echo "# widening is a UNION — it can never drop a declared gate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,demo"
+"$SUT" --review-bead rv-t --verdict approve --add-gates demo >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,demo" "an already-declared gate is not appended twice"
+
+echo "# adding a gate already declared is a no-op, not a duplicate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage,demo"
+"$SUT" --review-bead rv-t --verdict approve --add-gates demo >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "the declared gate is not appended twice"
+
+echo "# a whitespace-padded check_set still splits per gate"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex, triage"
+"$SUT" --review-bead rv-t --verdict approve --add-gates demo >/dev/null 2>&1
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "the split is per gate, not one fused token"
+
+echo "# the menu is CLOSED"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates telepathy 2>&1); rc=$?
+eq "$rc" 1 "a gate the charter does not declare is refused"
+eq "$(meta tk-anc check_set)" "codex,triage" "…and check_set is untouched"
+eq "$(meta tk-anc check.triage)" "<absent>" "…and no verdict marker was written"
+eq "$(status rv-t)" "in_progress" "…and the review stays open"
+hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and nothing was posted"
+
+echo "# --add-gates needs no justification, but must come from triage on an approve"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "--add-gates carries no justification flag and is still accepted"
+out=$("$SUT" --review-bead rv-1 --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 1 "a non-triage gate may not widen the check_set"
+out=$("$SUT" --review-bead rv-t --verdict request-changes --add-gates demo 2>&1); rc=$?
+eq "$rc" 1 "--add-gates only rides an approve verdict"
+
+echo "# the none opt-out is human-only: triage records the verdict without widening"
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "none"
+out=$("$SUT" --review-bead rv-t --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "the verdict is still recorded"
+eq "$(meta tk-anc check_set)" "none" "…and the opt-out is left alone"
+eq "$(meta tk-anc check.triage)" "green" "…and triage's marker still lands"
+
+# --- triage: the charter comes from the reviewed COMMIT ---------------------------
+echo "# with no readable charter, a widen is accepted UNVALIDATED"
+NOC="$TMP/noc/assets/scripts"
+mkdir -p "$NOC"
+cp "$HERE/signoff.sh" "$HERE/review-charter.sh" "$NOC/"
+chmod +x "$NOC"/*.sh
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(GC_RIG_ROOT="$TMP/noc" "$NOC/signoff.sh" --review-bead rv-t --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "an unvalidated widen is accepted (widening is always safe)"
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "…and lands"
+has "$out" "unvalidated" "…and says the menu could not be checked"
+
+echo "# the charter comes from the reviewed COMMIT, not the tree the reviewer is in"
+# mol-review removes its detached test worktree before the signoff call, so the
+# ambient checkout is some other tree that also ships a menu. That tree declares
+# `demo`, but it does not carry the reviewed commit, so the add is accepted
+# UNVALIDATED — proving the read took the commit (unreachable here) rather than
+# the ambient disk menu, which would have validated it clean.
+AMBIENT="$TMP/ambient"
+mkdir -p "$AMBIENT/docs"
+git_fixture "$REVIEWED_REPO" show "$OID_CHARTER:docs/review-charter.md" > "$AMBIENT/docs/review-charter.md"
+mint_repo "$AMBIENT" "an unrelated commit that also declares the menu" >/dev/null
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(STUB_TOPLEVEL="$AMBIENT" GC_RIG_ROOT="$AMBIENT" "$SUT" \
+  --review-bead rv-t --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "the widen still lands"
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "…and the added gate lands"
+has "$out" "unvalidated" "…as unvalidated, the reviewed commit being reachable from nowhere here"
+
+echo "# a checkout without the commit is stepped over, not treated as no charter"
+# The reviewer's own repo is a rung to the OBJECT: one that cannot answer for
+# the reviewed commit hands the read to the next (GC_RIG_ROOT, still the
+# reviewed repo here), whose committed menu validates the add.
+NOMENU="$TMP/nomenu"
+mkdir -p "$NOMENU"
+: > "$NOMENU/placeholder"
+mint_repo "$NOMENU" "a checkout that carries neither the menu nor the commit" >/dev/null
+reset "$ANCHOR_PR" ",$REVIEW_TRIAGE"; setcs "codex,triage"
+out=$(STUB_TOPLEVEL="$NOMENU" "$SUT" \
+  --review-bead rv-t --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "the widen is warranted from the reviewed commit's own menu"
+eq "$(meta tk-anc check_set)" "codex,triage,demo" "…and the added gate lands"
+hasnt "$out" "unvalidated" "…validated against the committed menu reached via GC_RIG_ROOT"
+
+echo "# an unknown verdict is still refused"
+reset "$ANCHOR_PR"
+out=$("$SUT" --review-bead rv-1 --verdict maybe 2>&1); rc=$?
+eq "$rc" 1 "an undeclared verdict verb is refused"
+unset GC_RIG_ROOT
 
 # --- the standing prohibition: the city never approves its own PRs ----------------
 if grep -q -- '--approve' "$STUB_GH_ALL" 2>/dev/null; then

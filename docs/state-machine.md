@@ -169,7 +169,21 @@ into a gating state, and `gate-ensure.sh --default` normalizes an anchor whose
 set is absent or empty, taking its value from `REFINERY_RECONCILE_CHECK_SET`.
 The registry records the same value at `lifecycle/lifecycle.toml`
 `[gates] check_set_default`. Who may depart from it is
-[authority-map.md](authority-map.md).
+[authority-map.md](authority-map.md). Which gate names exist, when each
+applies, and what method answers it are declared once, in the
+[review-charter.md](review-charter.md) the reviewed commit carries.
+
+**The widening rule.** The set grows after that, and one writer grows it. A
+`triage` review classifies the diff over the charter's menu and hands the
+gates it decides on to `signoff.sh --add-gates`, which unions them into
+`check_set` and reads the result back. The union is monotonic: no dispatcher,
+formula or other reviewer can pre-set or shrink the set, `signoff.sh` refuses
+the flag from any gate but `triage`, and nothing removes a declared gate —
+`none` stays a human-only opt-out triage will not touch. `--add-gates` reads
+the menu out of the reviewed commit, never off a working tree: the tree a
+reviewer stands in is some other commit's, so a branch is validated against
+the menu it ships. Every add is a one-line `triage-add:` note on the anchor,
+which is what makes gate inflation countable.
 
 `codex` is one such review gate, opaque like the rest. Both transitions read
 the same declared list: `pr-open.sh` publishes once every marker-bearing gate
