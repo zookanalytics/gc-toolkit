@@ -73,9 +73,11 @@ list_guarded() {
     printf '%s' "$raw"
 }
 
-# Open human gates that name the work they hold: issue_type=gate/await_type=
-# human beads carrying gc.demand_for. `bd list` hides gates, so --include-gates
-# is load-bearing.
+# Open human gates that name the work they hold: unassigned beads carrying
+# gc.demand_for. The current shape is issue_type=gate/await_type=human; a legacy
+# gc.demand_for demand carries neither, and both are swept (the await_type gate
+# below admits an unset one). `bd list` hides gates, so --include-gates is
+# load-bearing.
 GATES_RAW=$(list_guarded "human gates" --include-gates --has-metadata-key gc.demand_for \
     --status="$LIVE_STATUSES" --limit=0 --json) || exit 1
 # Every live bead, read once: it answers "is the gated bead still open?" and
@@ -87,9 +89,18 @@ LIVE_RAW=$(list_guarded "live beads" --status="$LIVE_STATUSES" --limit=0 --json)
 # (`--metadata '{"gc.gate_visit":false}'`) is read through tostring so a
 # non-string value is "handled", never a jq abort; a jq failure is a failed
 # read, not an empty queue.
+#
+# An unassigned bead carrying gc.demand_for IS a human gate: the demand records
+# what a person owes on the gated bead, and an assignee (excluded below) is what
+# turns it into work a named person performs instead. So the await_type gate
+# admits both the current shape (await_type=human) and one that leaves await_type
+# unset — an older gc-helm.sh wrote gc.demand_for demands as issue_type=decision
+# with no await_type, and a visit is as owed on those as on a current gate. Only
+# an EXPLICIT non-human await (a timer gate) is left alone: that one names a
+# waiter that is not a person, so a converse visit could not settle it.
 ROWS=$(printf '%s' "$GATES_RAW" | jq -r '
   .[]
-  | select((.await_type // "") == "human")
+  | select((.await_type // "") as $a | $a == "human" or $a == "")
   | select(((.assignee // "") | tostring) == "")
   | select(((.metadata["gc.gate_visit"] | if . == null then "" else tostring end)) == "")
   | ((.metadata["gc.demand_for"] // "") | tostring) as $for
