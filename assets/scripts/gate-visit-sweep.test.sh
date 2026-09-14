@@ -19,7 +19,9 @@
 #   * a gate whose gated bead is NOT open gets no visit and is named on stderr;
 #   * a visit already standing for the gated bead — matched by stall_root, which
 #     `open` alone cannot see — is recorded on the gate without a second filing;
-#   * a non-human gate (await_type != human) is left alone;
+#   * a non-human gate (an EXPLICIT await_type other than human, e.g. a timer)
+#     is left alone, while a legacy demand that records no await_type at all is
+#     swept like a current human gate;
 #   * the visit body tells converse how to resolve the gate;
 #   * LOUD-FAIL: a visit that will not file exits non-zero, so the controller
 #     logs it and the next sweep retries;
@@ -97,7 +99,9 @@ chmod +x "$BIN/helm-stub"
 # returns it deliberately); g5 is assigned to a person; g6 already carries a
 # visit stamp; g7 gates a bead that is NOT in the live set; g8's gated bead is
 # already under a live sitting whose visit names it only as stall_root; g9
-# carries a typed (boolean) opt-out.
+# carries a typed (boolean) opt-out; tk-glegacy is a legacy demand
+# (issue_type=decision, no await_type) that must be swept like a current human
+# gate (its id avoids the tk-g1 prefix so a substring check cannot alias it).
 cat > "$TMP/gates.json" <<'JSON'
 [
  {"id":"tk-g1","issue_type":"gate","await_type":"human","status":"open","title":"pick the backend","metadata":{"gc.demand_for":"tk-w1"}},
@@ -108,7 +112,8 @@ cat > "$TMP/gates.json" <<'JSON'
  {"id":"tk-g6","issue_type":"gate","await_type":"human","status":"open","title":"already visited","metadata":{"gc.demand_for":"tk-w6","gc.gate_visit":"tk-v-old"}},
  {"id":"tk-g7","issue_type":"gate","await_type":"human","status":"open","title":"work already closed","metadata":{"gc.demand_for":"tk-w7"}},
  {"id":"tk-g8","issue_type":"gate","await_type":"human","status":"open","title":"held by a live sitting","metadata":{"gc.demand_for":"tk-w8"}},
- {"id":"tk-g9","issue_type":"gate","await_type":"human","status":"open","title":"typed opt-out","metadata":{"gc.demand_for":"tk-w9","gc.gate_visit":false}}
+ {"id":"tk-g9","issue_type":"gate","await_type":"human","status":"open","title":"typed opt-out","metadata":{"gc.demand_for":"tk-w9","gc.gate_visit":false}},
+ {"id":"tk-glegacy","issue_type":"decision","status":"open","title":"legacy decision demand","metadata":{"gc.demand_for":"tk-wlegacy"}}
 ]
 JSON
 # Live fixture: every gated bead except tk-w7, plus the sitting on tk-run whose
@@ -117,7 +122,7 @@ cat > "$TMP/live.json" <<'JSON'
 [
  {"id":"tk-w1","status":"open"},{"id":"tk-w2","status":"open"},{"id":"tk-w3","status":"open"},
  {"id":"tk-w5","status":"open"},{"id":"tk-w6","status":"open"},{"id":"tk-w8","status":"open"},
- {"id":"tk-w9","status":"open"},{"id":"tk-run","status":"open"},
+ {"id":"tk-w9","status":"open"},{"id":"tk-wlegacy","status":"open"},{"id":"tk-run","status":"open"},
  {"id":"tk-vis8","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-run","stall_root":"tk-w8"},
   "dependencies":[{"type":"tracks","depends_on_id":"tk-run"}]}
 ]
@@ -153,7 +158,9 @@ hasnt "$(cat "$GC_LOG")" "bd update tk-g2" "(STAMP) an opted-out gate is not tou
 hasnt "$(cat "$GC_LOG")" "bd update tk-g7" "(STAMP) a gate on closed work is not stamped — it stays visible until resolved"
 has  "$(cat "$GC_LOG")" "--include-gates" "(INCLUDEGATES) the enumeration un-hides gate beads"
 has  "$(cat "$HELM_LOG")" "gc bd gate resolve tk-g1" "(BODY) the visit body says how to resolve the gate"
-has  "$OUT" "filed 1 visit(s); 1 gate(s) already under a visit; 1 gate(s) on closed work" "(SUMMARY) the pass reports what it did, by kind"
+has  "$(cat "$HELM_LOG")" "open tk-wlegacy" "(LEGACY) a legacy gc.demand_for demand with no await_type is swept like a human gate"
+has  "$(cat "$GC_LOG")" "bd update tk-glegacy --set-metadata gc.gate_visit=tk-v-tk-wlegacy" "(LEGACY) …and the filed visit is recorded on the legacy gate"
+has  "$OUT" "filed 2 visit(s); 1 gate(s) already under a visit; 1 gate(s) on closed work" "(SUMMARY) the pass reports what it did, by kind"
 
 # ── loud-fail: a visit that will not file must surface ────────────────────────
 HELM_FAIL_BEAD="tk-w1"; run "$TMP/gates.json"; HELM_FAIL_BEAD=""
