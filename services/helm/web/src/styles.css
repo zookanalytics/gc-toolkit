@@ -359,7 +359,7 @@ tr.drilled {
 }
 
 /* Pack builds — a compact strip, not a table: two or three rows that qualify
-   everything below them. The severity word carries the colour, matching the
+   the rest of the board. The severity word carries the colour, matching the
    plain-word bands the anchor table already prints. */
 .pack-health {
   margin: 0 0 1rem;
