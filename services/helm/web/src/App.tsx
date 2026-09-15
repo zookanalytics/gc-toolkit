@@ -153,11 +153,11 @@ function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
 // The pack-build strip: what each compiled component is serving, and whether it
 // matches its sources.
 //
-// It sits above the anchors because it qualifies them. Nothing in the running
-// system builds these binaries — the launchers exec what a build order
-// published — so this very page can be rendered by a binary older than the
-// sources that describe it, and every row below would look normal while doing
-// it. Nothing else on the page can say so.
+// It qualifies the anchors. Nothing in the running system builds these
+// binaries — the launchers exec what a build order published — so this very
+// page can be rendered by a binary older than the sources that describe it,
+// and every anchor row would look normal while doing it. Nothing else on the
+// page can say so.
 //
 // Rows are unconditional whenever the city has any record at all: a strip that
 // appears only on trouble is a strip nobody learns to read. A city with no
