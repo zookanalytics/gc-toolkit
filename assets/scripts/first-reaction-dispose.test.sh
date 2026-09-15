@@ -341,12 +341,13 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "0" "(ORIGIN) an unreadable bead is not evidence of a commission"
 unset FAKE_SHOW_JSON
 
-# ── A first reaction happens once — a second dispose is refused ───────────────
-# The first disposition stamped gc.first_reaction* and RELEASED the subject
-# (reopened, unassigned, routed); the caller then stamped gc.proactive_reaction=1.
-# A re-offered advance-and-drain that runs this again would re-release a bead a
-# worker has since claimed, so the guard refuses and names the prior reaction.
-# It sits ahead of the disposition switch, so it guards every exit.
+# ── A LANDED first reaction refuses a second dispose ─────────────────────────
+# gc-helm.sh takeaway --release stamps gc.proactive_reaction=1 in the write that
+# parks the subject (reopen, unassign, route), so that stamp proves the release
+# LANDED. A re-offered advance-and-drain that runs this again on a landed
+# reaction would re-release a bead a worker has since claimed, so the guard
+# refuses on that stamp and names the prior reaction. It sits ahead of the
+# disposition switch, so it guards every exit.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.proactive_reaction":"1","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "2" "(REACTED) a subject already carrying a first reaction refuses a second dispose"
@@ -363,8 +364,8 @@ run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "2" "(REACTED) …the ruling exit too"
 hasnt "HELM" "$LOG" "(REACTED) …with no re-release"
 
-# The caller's gc.proactive_reaction=1 alone (this script's own stamps lost) is
-# still a completed reaction.
+# gc.proactive_reaction=1 alone (the record stamps absent) still proves the
+# release landed, so a second dispose is refused.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.proactive_reaction":"1"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "2" "(REACTED) gc.proactive_reaction=1 alone also refuses a second dispose"
@@ -373,6 +374,24 @@ eq "$RC" "2" "(REACTED) gc.proactive_reaction=1 alone also refuses a second disp
 export FAKE_SHOW_JSON='not json'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "0" "(REACTED) an unreadable bead is not evidence of a prior reaction"
+unset FAKE_SHOW_JSON
+
+# ── A PARTIAL record resumes — it does not block the retry ────────────────────
+# The record is written BEFORE the act, so a bead can carry gc.first_reaction
+# while the release never landed (gc-helm.sh failed, or a guard fired after the
+# record). Only gc.proactive_reaction=1 — which takeaway --release stamps as it
+# parks — proves the act landed, so the guard keys on it, not on the pre-act
+# record: a partial resumes and re-attempts the act, which is the retry the die
+# messages promise.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "0" "(RESUME) a partial record with no gc.proactive_reaction resumes rather than refusing"
+has "HELM takeaway tk-sub" "$LOG" "(RESUME) …and re-attempts the act"
+has "the prior act did not land" "$ERR" "(RESUME) …announcing the resume"
+# The same partial on the ruling exit resumes too — the guard is ahead of the switch.
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
+eq "$RC" "0" "(RESUME) …and every exit resumes, not just actionable"
+has "HELM takeaway tk-sub" "$LOG" "(RESUME) …the ruling act is re-attempted"
 unset FAKE_SHOW_JSON
 
 # ── The store is pinned to the subject's own rig ─────────────────────────────
