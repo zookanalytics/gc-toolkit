@@ -93,14 +93,18 @@ for a in "$@"; do
   case "$a" in --limit=*) lim="${a#--limit=}" ;; esac
 done
 out=""; n=0
+# FAKE_BD_CTRL injects a note carrying a raw LF, reproducing bd's unescaped-
+# newline bug: a raw C0 byte inside a JSON string, which is invalid JSON.
+notes=""
+[ "${FAKE_BD_CTRL:-0}" = "1" ] && notes=$(printf ',"notes":"para one\npara two"')
 while IFS='|' read -r id mr; do
   [ -n "$id" ] || continue
   [ "$lim" -gt 0 ] && [ "$n" -ge "$lim" ] && break
   n=$((n + 1))
   if [ "$mr" = "-" ]; then
-    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s"}}' "$id" "$id")
+    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s"}%s}' "$id" "$id" "$notes")
   else
-    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s","merge_result":"%s"}}' "$id" "$id" "$mr")
+    obj=$(printf '{"id":"%s","metadata":{"branch":"polecat/%s","merge_result":"%s"}%s}' "$id" "$id" "$mr" "$notes")
   fi
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
 done < "$FAKE_ROWS"
@@ -159,10 +163,22 @@ done
 printf 'tk-empty|\n' > "$FAKE_ROWS"
 eq "$(select_work)" "tk-empty" "(6) empty merge_result reads as absent, stays selectable"
 
-# (7) bd fails open (errors to stderr, empty stdout). Selection must yield NO
-#     work rather than a garbage id: idling is recoverable, re-gating is not.
+# (7) bd fails open (errors to stderr, empty stdout). The shape guard sees a
+#     non-array and fails CLOSED — the turn ends with no id selected, and never
+#     with a garbage one: idling is recoverable, re-gating is not.
 printf 'tk-plain|-\n' > "$FAKE_ROWS"
 eq "$(select_work 1)" "" "(7) unreadable listing selects nothing (fails safe)"
+
+# (7b) A raw control byte in a note is bd's unescaped-newline bug: invalid JSON
+#      that aborts jq and, unscrubbed, reads a whole list as empty. The listing
+#      is scrubbed before jq, so the work behind it is still found.
+printf 'tk-plain|-\n' > "$FAKE_ROWS"
+FAKE_BD_CTRL=1 gc bd list --limit=25 --json > "$TMP/ctrl.json" 2>/dev/null
+jq -e . "$TMP/ctrl.json" >/dev/null 2>&1 \
+  && bad "(7b-pre) the control-laced fixture is invalid JSON before scrub" "it parsed clean; the scrub is unproven" \
+  || ok "(7b-pre) the control-laced fixture is invalid JSON before scrub"
+eq "$(FAKE_BD_CTRL=1 bash "$TMP/run-select.sh" 2>/dev/null)" "tk-plain" \
+   "(7b) a raw control byte in a note does not hide the work (scrubbed before jq)"
 
 echo "── 2. the query keeps a window wide enough for the filter ──"
 QUERY="$(grep -m1 'gc bd list' "$TMP/select.sh")"

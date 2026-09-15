@@ -43,7 +43,7 @@ cat > "$TMP/bin/bd" <<'BD'
 # this guard catches, so only the gc stub above may run this one.
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 # >>> control-char-scrub
-scrub() { tr -d '\000-\011\013-\037'; }
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 # Honor the three filters the check relies on: --db, --status (comma list) and
 # --has-metadata-key. A stub that ignored --status would let an in_progress
@@ -131,7 +131,10 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an unparseable store listing warns"
 
 # --- 8. control characters in a payload do not cost the store -------------
-printf '[{"id":"a-10","status":"open","metadata":{"merge_result":"bogus"},"notes":"tab\there\001etc"}]' \
+# A raw TAB, a raw C0 byte, and a raw LF (bd's unescaped-newline bug) — each is
+# invalid inside a JSON string and each must be scrubbed, or the whole store
+# degrades to "NOT checked" and hides every finding in it.
+printf '[{"id":"a-10","status":"open","metadata":{"merge_result":"bogus"},"notes":"tab\there\001and a\nraw newline"}]' \
     > "$TMP/stores/alpha.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a payload carrying raw control characters still yields the finding"

@@ -30,21 +30,18 @@ type Bead struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
-// Scrub strips the control characters that break `--json` parsing, keeping LF
-// alone. It must accept exactly what the shell fallback accepts — lifecycle.sh
-// scrubs with `tr -d '\000-\011\013-\037'` — because a caller cannot tell which
-// implementation answered, and a raw TAB or CR is just as invalid inside a JSON
-// string as any other C0 byte.
+// Scrub strips every C0 control byte (U+0000–U+001F), the range JSON requires
+// escaped inside a string; a raw one — LF and TAB alike — makes the payload
+// invalid JSON. Every byte above 0x1F passes through, DEL included, which JSON
+// permits raw. It must accept exactly what the shell fallback accepts —
+// lifecycle.sh scrubs with `tr -d '\000-\037'` — because a caller cannot tell
+// which implementation answered.
 func Scrub(b []byte) []byte {
 	return bytes.Map(func(r rune) rune {
-		switch {
-		case r == '\n':
-			return r
-		case r < 0x20:
+		if r < 0x20 {
 			return -1
-		default:
-			return r
 		}
+		return r
 	}, b)
 }
 

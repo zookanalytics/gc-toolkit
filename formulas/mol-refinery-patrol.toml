@@ -132,7 +132,17 @@ returns a bead here clears the field first.
 
 ```bash
 # >>> find-work-select
-WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json)
+# bd's --json can emit a raw control byte inside a note (an unescaped newline
+# from a multi-paragraph comment), which is invalid JSON and aborts jq;
+# tr -d '[:cntrl:]' drops the control bytes JSON forbids raw before the parse.
+# The shape guard then fails CLOSED on anything still unparseable, so a broken
+# read ends the turn visibly instead of reading as an empty queue.
+WORK_ROWS=$(gc bd list ${GC_RIG:+--rig="$GC_RIG"} --assignee=$GC_AGENT --status=open --exclude-type=epic --has-metadata-key=branch --limit=25 --json | tr -d '[:cntrl:]')
+if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "find-work: work list did not parse as a JSON array (bd unreadable, or a payload no scrub could rescue) — ending the turn without claiming; the next patrol retries." >&2
+  gc runtime drain-ack
+  exit 0
+fi
 WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | .[0].id // empty' 2>/dev/null)
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
