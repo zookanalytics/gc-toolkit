@@ -182,19 +182,28 @@ subject_meta() {
         | jq -r --arg k "$1" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
 }
 
-# ── A first reaction happens once ────────────────────────────────────
-# The act below stamps gc.first_reaction* and releases the subject through
-# gc-helm.sh takeaway --release, which reopens and unassigns it; the caller
-# then stamps gc.proactive_reaction=1. A re-offered advance-and-drain that runs
-# this a second time re-releases a bead a worker has since claimed, yanking
-# live work back to the pool. The first run's stamps describe it fully, so
-# refuse and name them — a second dispose is never correct.
+# ── A first reaction happens once — once it has LANDED ────────────────
+# gc.first_reaction* is written BEFORE the act (below), so its presence proves
+# the disposition was ATTEMPTED, not that it landed. The act — gc-helm.sh
+# takeaway --release — stamps gc.proactive_reaction=1 in the same write that
+# parks the subject (reopen, unassign, route), so that stamp is what proves the
+# release landed. Key the guard on it: a landed reaction refuses a second
+# dispose, which would re-release a bead a worker has since claimed and yank
+# live work back to the pool.
+#
+# A bare record with no such stamp is a PARTIAL: the act failed after the record
+# was written (gc-helm.sh exited non-zero, or a guard below fired). Refusing it
+# on the record alone is what strands the documented retry — the die messages
+# below say "re-run this command", and the record would refuse the re-run. So a
+# partial falls through and re-attempts the act.
 PRIOR_REACTION=$(subject_meta "gc.first_reaction")
 PRIOR_PROACTIVE=$(subject_meta "gc.proactive_reaction")
-if [ -n "$PRIOR_REACTION" ] || [ "$PRIOR_PROACTIVE" = "1" ]; then
+if [ "$PRIOR_PROACTIVE" = "1" ]; then
     PRIOR_AT=$(subject_meta "gc.first_reaction_at")
     PRIOR_TARGET=$(subject_meta "gc.first_reaction_target")
-    usage_die "$BEAD already carries a first reaction (gc.first_reaction=${PRIOR_REACTION:-<unset>}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
+    usage_die "$BEAD already carries a first reaction that landed (gc.first_reaction=${PRIOR_REACTION:-<unset>}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}, released). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
+elif [ -n "$PRIOR_REACTION" ]; then
+    note "$BEAD carries a first-reaction record (gc.first_reaction=$PRIOR_REACTION) but no gc.proactive_reaction=1 — the prior act did not land. Resuming: re-attempting the disposition."
 fi
 
 # ── Route only where something can claim ─────────────────────────────
@@ -325,7 +334,7 @@ if [ "$DISPOSITION" = "blocked" ]; then
         esac
     done
     [ -z "$MISSING" ] \
-        || die "the blocked disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is still ready and the next worker claims it. The record and the headline stand; wire the edge above and re-run this command."
+        || die "the blocked disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is still ready and the next worker claims it. The record, the headline and the release stand — only the hold is missing, so wire the edge above by hand to complete it (a second dispose is refused, because the release already landed)."
     if [ -n "$THEN_ROUTE" ]; then
         if [ -x "$DEFERRED" ]; then
             # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
