@@ -146,6 +146,9 @@ case "$DISPOSITION" in
     ruling)
         [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE" ] || usage_die "ruling takes --visit only"
         [ -n "$VISIT" ] || usage_die "ruling needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
+        [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
+        same_store "$VISIT" "$BEAD" \
+            || usage_die "--visit $VISIT is in another store than $BEAD; a blocks edge onto it reports success and holds nothing (component-model I1). File the visit in ${BEAD%%-*}'s store, then record it here."
         ;;
 esac
 
@@ -308,25 +311,34 @@ gc_bd update "$BEAD" \
 # Each disposition also answers the headline's own question — is anything still
 # waiting on this bead? An actionable one is not: it is moving, and the pool its
 # route names will claim it, so --no-wait says so. A blocked one names its wait
-# as an edge. A ruling says neither, because it IS a bead waiting on a person
-# with no edge to carry that wait, which is what doctor/check-wait-is-an-edge
-# reports and what the visit is filed to end.
+# as an edge. A ruling names the visit as its wait: the subject is waiting on a
+# person, and the visit bead is what carries that wait, so --waiting-on stamps
+# the blocks edge onto it. The release parks the subject and the edge holds it,
+# so it is not offered again until the visit closes, and the wait is a graph
+# state doctor/check-wait-is-an-edge reads rather than prose it reports.
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable) set -- "$@" --route "$ROUTE" --no-wait ;;
     blocked)    for w in $WAITING; do set -- "$@" --waiting-on "$w"; done ;;
+    ruling)     set -- "$@" --waiting-on "$VISIT" ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. The disposition record stands — clear the cause and re-run this command."
 
 # The edge is the hold. gc-helm.sh warns on a rejected edge and keeps going,
-# which is right for a headline but not for this exit: a blocked disposition
-# whose edge never landed leaves the bead ready, and nothing says so. A
-# missing edge fails the whole exit, so the terminal step stops rather than
+# which is right for a headline but not for the exits that hold on one: a
+# blocked disposition waits on its blocker, a ruling waits on its visit, and
+# either whose edge never landed leaves the bead unheld with nothing to say so.
+# A missing edge fails the whole exit, so the terminal step stops rather than
 # closing over a bead that is recorded as waiting and is not held.
-if [ "$DISPOSITION" = "blocked" ]; then
+HOLD_WAITS=""
+case "$DISPOSITION" in
+    blocked) HOLD_WAITS="$WAITING" ;;
+    ruling)  HOLD_WAITS="$VISIT" ;;
+esac
+if [ -n "$HOLD_WAITS" ]; then
     HELD=$(gc_bd dep list "$BEAD" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[]?.id // empty) else empty end' 2>/dev/null || printf '')
     MISSING=""
-    for w in $WAITING; do
+    for w in $HOLD_WAITS; do
         case " $(printf '%s' "$HELD" | tr '\n' ' ') " in
             *" $w "*) : ;;
             *) note "$BEAD is not held by $w — wire it by hand: gc bd dep add $BEAD $w -t blocks"
@@ -334,8 +346,8 @@ if [ "$DISPOSITION" = "blocked" ]; then
         esac
     done
     [ -z "$MISSING" ] \
-        || die "the blocked disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is still ready and the next worker claims it. The record, the headline and the release stand — only the hold is missing, so wire the edge above by hand to complete it (a second dispose is refused, because the release already landed)."
-    if [ -n "$THEN_ROUTE" ]; then
+        || die "the $DISPOSITION disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is not held — it reads as parked on prose alone, the wait this exit recorded carried by no edge. The record, the headline and the release stand — only the hold is missing, so wire the edge above by hand to complete it (a second dispose is refused, because the release already landed)."
+    if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ]; then
         if [ -x "$DEFERRED" ]; then
             # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
             "$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \

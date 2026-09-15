@@ -573,7 +573,7 @@ if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
     PRIOR_STATUS="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].status // "open"')"
     PRIOR_ASSIGNEE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].assignee // ""')"
     PRIOR_ROUTE="$(gc bd show "$bead" --json 2>/dev/null | jq -r '.[0].metadata["gc.routed_to"] // ""')"
-    "$TOOL" takeaway "$bead" "helm-surface-fixture release smoke" --by proactive --release >/dev/null 2>&1 \
+    "$TOOL" takeaway "$bead" "helm-surface-fixture release smoke" --by proactive --release --no-wait >/dev/null 2>&1 \
         && ok "takeaway --release $bead" || bad "takeaway --release $bead" "exit 0" "non-zero"
     RELJSON="$(gc bd show "$bead" --json 2>/dev/null)"
     eq "release stamps the gc.takeaway headline"      "helm-surface-fixture release smoke" \
