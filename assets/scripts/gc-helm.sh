@@ -621,11 +621,14 @@ cmd_takeaway() {
     # edge and no settled mark, the shape doctor/check-wait-is-an-edge reports and
     # the I1 backlog drains, refilled by parks faster than closes drain it. Any
     # open blocker counts, its own demand included: a demand is an edge that holds.
-    # An unreadable probe allows the park (a bd that will not answer must not cost
-    # a sitting its disposition, and the check still reports a truly edgeless one).
-    # A dispatch is moving; a closed anchor took no park (release_park cleared
-    # above); a bare headline (no --release) parks nothing; a converse sitting
-    # stamps one beside a demand that holds it.
+    # An unreadable probe refuses the park: with the blockers unread no existing
+    # edge can be proven, and stamping an unedged hold on a bead the guard could
+    # not inspect is the shape it exists to stop, so the caller states its
+    # disposition (--waiting-on or --no-wait) or re-runs once the store answers.
+    # A dispatch is moving and leaves no unedged hold, so the route guard below
+    # fails open on the same probe where this one fails closed; a closed anchor
+    # took no park (release_park cleared above); a bare headline (no --release)
+    # parks nothing; a converse sitting stamps one beside a demand that holds it.
     if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         park_held=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
@@ -633,6 +636,10 @@ cmd_takeaway() {
                    [ .[] | select((.dependency_type // "") == "blocks")
                          | select((.status // "") != "closed") | .id ] | join(" ")
                  else error("not an edge array") end' 2>/dev/null) || park_held="__unreadable__"
+        if [ "$park_held" = "__unreadable__" ]; then
+            echo "$PROG: takeaway: --release parks $bead for a person, and a park states its disposition — but $bead's blockers could not be read, so an open blocker holding it beside an edge cannot be proven. Pass --waiting-on <bead> for the wait it holds on (written as a blocks edge), or --no-wait when nothing waits on it, or re-run once the store answers: a park the guard cannot clear must not stamp an unedged hold on a bead it could not inspect. Nothing was written." >&2
+            exit 2
+        fi
         if [ -z "$park_held" ]; then
             echo "$PROG: takeaway: --release parks $bead for a person, and a park states its disposition: --waiting-on <bead> for the wait it holds on (written as a blocks edge), or --no-wait when nothing waits on it. $bead carries no open blocker to hold it, so neither flag leaves the headline an unedged hold — the shape doctor/check-wait-is-an-edge reports and the I1 backlog drains. Nothing was written." >&2
             exit 2

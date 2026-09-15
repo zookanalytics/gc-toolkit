@@ -697,6 +697,37 @@ grep -q -- '--set-metadata gc.takeaway=a headline beside a demand' "$TMP/updates
   && ok "(NEITHERBARE) a bare takeaway with neither flag still lands" \
   || bad "(NEITHERBARE) a bare takeaway was refused or dropped: $(cat "$TMP/updates") / $(cat "$TMP/nberr")"
 
+# (NEITHERPROBE) the park guard fails CLOSED on an unreadable probe. Unlike the
+# --route guard below (DELEGPROBE/DELEGJUNK), a bare --release park that cannot
+# read its blockers cannot prove an edge holds the bead, and a headline stamped
+# anyway is the unedged hold this guard exists to stop. A store that will not
+# answer (A-PROBEDEAD) is refused before any write, and the refusal names the
+# unread probe and sends the caller to a disposition.
+: > "$TMP/updates"; : > "$TMP/deps"
+NPP=0
+sh "$SCRIPT" takeaway A-PROBEDEAD "parked, store silent" --by proactive --release >/dev/null 2>"$TMP/nperr" || NPP=$?
+eq "$NPP" "2" "(NEITHERPROBE) a park whose blocker probe will not answer is refused"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(NEITHERPROBE) …before anything is written"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(NEITHERPROBE) …and no edge is wired"
+grep -q 'could not be read' "$TMP/nperr" \
+  && ok "(NEITHERPROBE) …and the refusal says the probe did not run" \
+  || bad "(NEITHERPROBE) the refusal does not name the unreadable probe (stderr: $(cat "$TMP/nperr"))"
+grep -q -- '--waiting-on' "$TMP/nperr" \
+  && ok "(NEITHERPROBE) …and points the caller at a disposition" \
+  || bad "(NEITHERPROBE) the refusal offers no move (stderr: $(cat "$TMP/nperr"))"
+
+# (NEITHERJUNK) the non-array error object `dep list` returns for a bead it
+# cannot resolve is unreadable the same way — read as "no edges" it would pass
+# the guard, so the SHAPE must refuse, not the exit code a pipeline never sees.
+: > "$TMP/updates"; : > "$TMP/deps"
+NPJ=0
+sh "$SCRIPT" takeaway A-PROBEJUNK "parked, junk payload" --by proactive --release >/dev/null 2>"$TMP/njerr" || NPJ=$?
+eq "$NPJ" "2" "(NEITHERJUNK) a park whose probe returns a non-array payload is refused too"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(NEITHERJUNK) …before anything is written"
+grep -q 'could not be read' "$TMP/njerr" \
+  && ok "(NEITHERJUNK) …and it is reported unreadable, not empty" \
+  || bad "(NEITHERJUNK) an error object was read as an empty edge list (stderr: $(cat "$TMP/njerr"))"
+
 : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-PARKED "actionable — slung to the pool" \
    --release --route "gc-toolkit/gc-toolkit.polecat" --no-wait >/dev/null 2>&1 || true

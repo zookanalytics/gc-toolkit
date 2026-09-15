@@ -26,8 +26,12 @@ Three cases are exempt, because none leaves an unedged hold:
 - **A bead already held by an open blocker.** The wait is an existing edge, so
   the park sits beside it rather than minting a prose-only hold. The guard reads
   the blockers the way the route-delegation probe does and allows the park when
-  one is present; an unreadable probe allows it too, and the future
-  `doctor/check-wait-is-an-edge` still reports a truly edgeless one.
+  one is present. An unreadable probe refuses the park instead: with the blockers
+  unread the guard cannot prove an edge holds the bead, so the caller states its
+  disposition (`--waiting-on`/`--no-wait`) or re-runs, rather than have a park
+  stamp an unedged hold on a bead it could not inspect. This is where the park
+  guard parts from the `--route` guard, which fails open on an unreadable probe
+  because a dispatch is moving and leaves no unedged hold.
 - **A bare headline** (no `--release`) changes no state, and a closed anchor
   takes only the quiesce.
 
