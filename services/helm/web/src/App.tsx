@@ -530,8 +530,6 @@ export function App() {
         )}
       </section>
 
-      <PackHealth rows={board?.pack_health ?? []} />
-
       {board && otherLive.length === 0 && !error && (
         <p>{owed.length > 0 ? 'No other anchors need attention.' : 'No anchors need attention.'}</p>
       )}
@@ -545,6 +543,11 @@ export function App() {
           onOpen={setDrillTarget}
         />
       ))}
+
+      {/* Pack builds sit below the attention bands: the strip qualifies whether
+          the binary rendering the board matches its sources — context for the
+          triage above, not an item in it. */}
+      <PackHealth rows={board?.pack_health ?? []} />
 
       <Sittings sittings={board?.sittings ?? []} now={renderedAt} onOpen={setDrillTarget} />
 
@@ -561,11 +564,18 @@ export function App() {
           board contract carries no session for a tile (contract.ts), and
           inventing a name from a bead's rig would be a guess that the guard
           would then refuse. Naming that mapping is part of tk-mw9qz. */}
-      <TerminalTile
-        label={terminalSession ?? 'city terminal'}
-        base={terminalBase}
-        session={terminalSession}
-      />
+      {/* Collapsed by default: the terminal is the largest block on the page and
+          is not attention triage, so it does not take a standing box above the
+          triage below. It stays one click away, and the peek/attach behaviour
+          works once it is open. */}
+      <details className="terminal-details">
+        <summary>city terminal</summary>
+        <TerminalTile
+          label={terminalSession ?? 'city terminal'}
+          base={terminalBase}
+          session={terminalSession}
+        />
+      </details>
       <DrillPanel beadId={drillTarget} onClose={() => setDrillTarget(null)} />
     </main>
   );

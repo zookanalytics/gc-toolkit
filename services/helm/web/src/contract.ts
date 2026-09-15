@@ -227,6 +227,16 @@ export interface Tile {
    * is every row with an LLM-authored, and so unique, takeaway.
    */
   cluster_key?: string;
+  /**
+   * A merge anchor stuck at the pre-open codex gate that nothing is moving and
+   * nobody owes — past the grace window, no review armed or in flight, no rework
+   * running, not progressing. It is what tells a genuine gate stall apart from a
+   * healthy hold (a fresh park, a live re-review, or a wedge the operator already
+   * owns), so the stalled band carries only the first; its row bands ELEVATED and
+   * names the gate rather than sinking to the bottom of review as a LOW row.
+   * Absent (Go `omitempty`) on every row that is not one.
+   */
+  pre_open_stalled?: boolean;
 }
 
 /**

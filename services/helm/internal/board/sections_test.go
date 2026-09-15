@@ -39,9 +39,21 @@ func demandAnchor(id, subject, ask string) Anchor {
 // TestSectionClassification pins the band each kind lands in.
 func TestSectionClassification(t *testing.T) {
 	anchors := []Anchor{
-		// A pull request → review, whether or not the cadence recorded a position.
+		// A pull request the operator is OWED → review: wedged on a ruling only a
+		// person can give. review is the operator's own PR queue, not every PR.
 		{ID: "tk-pr", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
-			Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}},
+			Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7",
+				"pr.machine": "wedged-exception@abc123@2026-09-01T00:00:00Z"}},
+		// A progressing pull request → active: healthy in-flight work the cadence
+		// is moving, not a PR that wants the operator.
+		{ID: "tk-pr-active", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "8",
+				"pr.machine": "progressing@def456@2026-09-01T00:00:00Z"}},
+		// A pre-open gate nothing is moving and nobody owes, aged past the grace
+		// window → stalled. No review armed, nothing in flight.
+		{ID: "tk-preopen-stall", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+			UpdatedAt: daysAgo(5),
+			Metadata:  map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-preopen-stall"}},
 		// A decision → gate (a person must answer).
 		{ID: "tk-dec", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1)},
 		// A stranded epic → stalled.
@@ -59,12 +71,14 @@ func TestSectionClassification(t *testing.T) {
 	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("sess-live"))
 
 	want := map[string]string{
-		"tk-pr":     SectionReview,
-		"tk-dec":    SectionGate,
-		"tk-strand": SectionStalled,
-		"tk-active": SectionActive,
-		"tk-empty":  SectionCleanup,
-		"tk-closed": SectionDone,
+		"tk-pr":            SectionReview,
+		"tk-pr-active":     SectionActive,
+		"tk-preopen-stall": SectionStalled,
+		"tk-dec":           SectionGate,
+		"tk-strand":        SectionStalled,
+		"tk-active":        SectionActive,
+		"tk-empty":         SectionCleanup,
+		"tk-closed":        SectionDone,
 	}
 	for id, sec := range want {
 		tile, ok := tileByID(b, id)
@@ -74,6 +88,82 @@ func TestSectionClassification(t *testing.T) {
 		if tile.Section != sec {
 			t.Errorf("%s: section = %q, want %q", id, tile.Section, sec)
 		}
+	}
+}
+
+// TestPreOpenReReviewIsActive: a merge anchor in the pre-open re-review cadence
+// carries a converse takeaway, so the gather admits it as BOTH a `parked` row
+// (gc.takeaway) and a `merge` row (merge_result). It is forward-moving — the
+// cadence recorded pr.machine=progressing and a fresh review is armed — so it
+// must survive dedup as the `merge` row and band ACTIVE, not as a parked/stalled
+// LOW row.
+func TestPreOpenReReviewIsActive(t *testing.T) {
+	md := map[string]string{
+		"merge_result": "pre_open_gate",
+		"branch":       "polecat/tk-8u81bo",
+		"pr.machine":   "progressing@1d2ff83b@2026-09-15T02:41:48Z",
+		"gc.takeaway":  "Cap retired; pre-open cadence re-reviews with fresh budget.",
+	}
+	rev := []Blocker{{ID: "tk-rev", Status: "open", TaskKind: "review"}}
+	// The two rows one bead reaches the board as, exactly as the gather emits.
+	parkedRow := Anchor{ID: "tk-8u81bo", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(1), UpdatedAt: fixtureNow, Metadata: md, Takeaway: md["gc.takeaway"], Blockers: rev}
+	mergeRow := Anchor{ID: "tk-8u81bo", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(1), UpdatedAt: fixtureNow, Metadata: md, Blockers: rev}
+
+	b := BuildBoard([]Anchor{parkedRow, mergeRow}, fixtureNow, false, nil, Facts{})
+	tl, ok := tileByID(b, "tk-8u81bo")
+	if !ok {
+		t.Fatal("tk-8u81bo missing from board")
+	}
+	if tl.Kind == "parked" {
+		t.Errorf("a live merge anchor must not read as parked; kind=%q", tl.Kind)
+	}
+	if tl.Section != SectionActive {
+		t.Errorf("a progressing pre-open re-review anchor bands active; got %q (sev %s, needs %q)", tl.Section, tl.Severity, tl.Needs)
+	}
+	if tl.PreOpenStalled {
+		t.Error("a progressing anchor is not a pre-open stall")
+	}
+}
+
+// TestPreOpenGateStallSurfaces: a pre-open gate aged past the grace window with
+// no review armed, nothing in flight, and nobody owed bands STALLED at ELEVATED,
+// and its frontier/needs name the codex gate. A fresh gate in the same shape
+// does not.
+func TestPreOpenGateStallSurfaces(t *testing.T) {
+	stall := Anchor{ID: "tk-or0ha2", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(2), UpdatedAt: daysAgo(7),
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-or0ha2"}}
+	fresh := Anchor{ID: "tk-fresh-gate", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(2), UpdatedAt: fixtureNow,
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-fresh-gate"}}
+
+	b := BuildBoard([]Anchor{stall, fresh}, fixtureNow, false, nil, Facts{})
+
+	tl, ok := tileByID(b, "tk-or0ha2")
+	if !ok {
+		t.Fatal("tk-or0ha2 missing from board")
+	}
+	if !tl.PreOpenStalled {
+		t.Fatal("an aged pre-open gate with no review and nothing in flight is stalled")
+	}
+	if tl.Section != SectionStalled {
+		t.Errorf("a stalled pre-open gate bands stalled; got %q", tl.Section)
+	}
+	if tl.Severity != SevElevated {
+		t.Errorf("a stalled pre-open gate is ELEVATED, out of the LOW floor; got %s", tl.Severity)
+	}
+	if !strings.Contains(tl.Needs, "codex gate") {
+		t.Errorf("needs must name the codex gate; got %q", tl.Needs)
+	}
+	if !strings.Contains(tl.Frontier, "stalled") {
+		t.Errorf("frontier must show the stall; got %q", tl.Frontier)
+	}
+
+	// A fresh gate in the same shape is a healthy park, not a stall.
+	if ft, _ := tileByID(b, "tk-fresh-gate"); ft.PreOpenStalled || ft.Section == SectionStalled {
+		t.Errorf("a fresh pre-open gate is healthy, not stalled; section=%q pre_open_stalled=%v", ft.Section, ft.PreOpenStalled)
 	}
 }
 

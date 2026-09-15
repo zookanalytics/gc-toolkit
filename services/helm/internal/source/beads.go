@@ -826,12 +826,14 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 		}
 		md := decodeMetadata(iss.Metadata)
 		blockers = append(blockers, board.Blocker{
-			ID:        iss.ID,
-			Title:     iss.Title,
-			Status:    strings.ToLower(string(iss.Status)),
-			RoutedTo:  md["gc.routed_to"],
-			IssueType: strings.ToLower(string(iss.IssueType)),
-			CreatedAt: iss.CreatedAt,
+			ID:           iss.ID,
+			Title:        iss.Title,
+			Status:       strings.ToLower(string(iss.Status)),
+			RoutedTo:     md["gc.routed_to"],
+			ExecRoutedTo: md["gc.execution_routed_to"],
+			IssueType:    strings.ToLower(string(iss.IssueType)),
+			TaskKind:     md["task_kind"],
+			CreatedAt:    iss.CreatedAt,
 		})
 	}
 	return blockers, all, closed, false

@@ -195,9 +195,19 @@ type Blocker struct {
 	// actor will, and the two are not distinguished here because neither makes
 	// the anchor `progressing`.
 	RoutedTo string `json:"routed_to,omitempty"`
+	// ExecRoutedTo is gc.execution_routed_to. A graph.v2 rework or rebase child
+	// clears gc.routed_to and stamps this instead once it is dispatched, so a
+	// child pool-routed under that shape is invisible to RoutedTo alone. Read
+	// alongside RoutedTo so an in-flight cadence child is recognised whichever
+	// route field carries its pool.
+	ExecRoutedTo string `json:"exec_routed_to,omitempty"`
 	// IssueType is what the bead IS. A `decision` is a demand by construction,
 	// the way the board's own `decision` kind is.
-	IssueType string    `json:"issue_type,omitempty"`
+	IssueType string `json:"issue_type,omitempty"`
+	// TaskKind is the `task_kind` metadata. A dispatched signoff review carries
+	// `review`; it is how a live or armed review child is told apart from a
+	// rework child or an ordinary prerequisite, since only the review carries it.
+	TaskKind  string    `json:"task_kind,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
@@ -408,6 +418,15 @@ type Tile struct {
 	// Empty is the common case — a row with an LLM-authored takeaway is unique
 	// and never clusters — so the field is omitted when it does not apply.
 	ClusterKey string `json:"cluster_key,omitempty"`
+
+	// PreOpenStalled marks a merge anchor stuck at the pre-open codex gate that
+	// nothing is moving and nobody owes: past the grace window, no review armed
+	// or in flight, no rework in flight, and not progressing. It is what tells a
+	// genuine gate stall apart from a healthy hold — a fresh park, a live
+	// re-review, or a wedge the operator already owns — so the stalled band
+	// carries only the first. Its own row is banded ELEVATED and named for the
+	// gate rather than sinking to the bottom of review as an unlabelled LOW row.
+	PreOpenStalled bool `json:"pre_open_stalled,omitempty"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
