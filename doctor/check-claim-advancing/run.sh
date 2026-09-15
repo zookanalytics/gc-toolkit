@@ -40,9 +40,10 @@
 # arm 1 does not see it, and gate-ensure's pour_spent reads any open step as
 # "still driven" and declines the question by design. Per store, an open step
 # that `bd ready` is offering, carrying a route, with no assignee and no
-# gc.claimed_at ever stamped, untouched past the same bound, is judged against
-# the agent its route names:
+# gc.claimed_at ever stamped, offered past the same bound, is judged against the
+# agent its route names:
 #
+#   control-dispatcher route  -> note   (advanced in-process, never claimed)
 #   route names no agent      -> note   (an unreachable address is I3's finding)
 #   the agent is suspended    -> note   (parked on purpose)
 #   pool max is 0             -> note   (nothing is meant to claim it)
@@ -50,7 +51,19 @@
 #   every session is busy     -> note   (a queue behind a full pool is backpressure)
 #   a running session is free -> error  (an idle worker and an offered step)
 #
-# Only the last is a fault, and it is the one shape a backlog cannot explain.
+# "Offered past the bound" is timed from the close of the step's last blocking
+# predecessor, not from when it was poured: a step waits `blocked` behind its
+# predecessor for the molecule's whole life, and only becomes the pool's to
+# claim when that predecessor closes. Timing from created_at reports a step 30m
+# stale the instant it becomes offerable. The bead stamp is kept as the cheap
+# candidate ceiling — offer-age is never older than it — and the predecessor
+# close prices the survivors exactly; a step with no resolvable predecessor (a
+# first step, or an unreadable one) falls back to the stamp. A control-routed
+# step is advanced by the control-dispatcher in-process, so gc.claimed_at is
+# empty on it by construction and the pool remedies do not address what runs it.
+#
+# Only the free-worker case is a fault, and it is the one shape a backlog
+# cannot explain.
 # Occupancy counts a session holding ANY in-progress bead, not just a formula
 # step, because a singleton agent's work usually is not one. That is why the
 # in-progress listing is filtered for gc.step_ref here rather than server-side:
@@ -92,6 +105,7 @@ HELD='((($m["gc.takeaway"] // "") | tostring) != "")
 errors=(); warnings=(); notes=()
 unclaimed=(); occupied_list=(); occupancy_partial=0
 declare -A root_held=() root_seen=() held_count=() held_age=(); holds_ok=1; holds_missing=0
+declare -A pred_closed=(); NOW=0
 # >>> doctor-budget
 # One deadline for the whole check, anchored at process start. `gc doctor
 # --check-timeout` (default 60s) abandons an overrunning check and discards
@@ -167,6 +181,34 @@ resolve_holds() {
         [ -n "$r" ] || continue
         [ -n "${root_seen[$r]:-}" ] || holds_missing=$((holds_missing + 1))
     done <<< "$(printf '%s' "$ids" | tr ',' '\n' | LC_ALL=C sort -u)"
+    return 0
+}
+
+# When each of a store's candidate steps became offerable: the latest close
+# among its blocking predecessors. A step sits `blocked` behind its predecessor
+# for the molecule's whole life, so its created_at over-counts the wait by
+# exactly that span; the honest clock starts when the last blocker closed. The
+# predecessor's row carries closed_at but the step's own dependency edge does
+# not, so the ids are resolved in ONE listing, keyed by id like the hold lookup.
+# --all because a predecessor closes before the step it unblocks is judged, and
+# a closed row is exactly the one whose closed_at is wanted. A lookup that fails
+# or omits an id leaves that predecessor absent, and a step with no resolvable
+# predecessor falls back to its own stamp — never to silence.
+resolve_offer_times() {
+    local db="$1" ids="$2" raw
+    unset -v pred_closed; declare -gA pred_closed=()
+    [ -n "$ids" ] || return 0
+    raw=$(run_bounded gc bd list --db "$db" --id "$ids" --all --json --limit 0 2>/dev/null)
+    [ $? -eq 0 ] && [ -n "$raw" ] || return 0
+    while IFS="$SEP" read -r pid pepoch; do
+        [ -n "$pid" ] && [ -n "$pepoch" ] && pred_closed["$pid"]="$pepoch"
+    done <<< "$(printf '%s' "$raw" | scrub | jq -r '.[]? | select(type == "object")
+        | ((((.id // "") | tostring)) | gsub("[[:cntrl:]]"; " ")) as $pid
+        | select($pid != "")
+        | (((.closed_at // "") | tostring) | sub("\\.[0-9]+"; "")
+           | (try fromdateiso8601 catch null)) as $ce
+        | select($ce != null)
+        | [$pid, ($ce | tostring)] | join("")' 2>/dev/null)"
     return 0
 }
 
@@ -370,12 +412,27 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         | (if $rt != "" then $rt else $ert end) as $route
         | select($route != "")
         | ((($b.updated_at // $b.created_at // "") | trim) | ep) as $ue
+        # The bead stamp is the age ceiling, not the age. A step becomes
+        # offerable when its last blocking predecessor closes, never before it
+        # was created, so its offer-age can only be younger than this. The cheap
+        # filter on the ceiling narrows the candidates the predecessor lookup
+        # then prices exactly, and drops none: a step inside the bound here is
+        # inside it by offer too.
         | select($ue != null and (now - $ue) > $stall)
+        # The blocking predecessors, whose latest close is when this step was
+        # offered. `blocks` is the sequencing edge and the row lists this step as
+        # the dependent, so its predecessors are the depends_on ids.
+        | ([ ($b.dependencies // [])[]? | select(type == "object")
+             | select(((.type // "") | tostring) == "blocks")
+             | ((.depends_on_id // "") | tostring) | select(. != "" and . != $raw) ]
+           | unique | join(",")) as $preds
         | [ ($raw | gsub("[[:cntrl:]]"; " ")), ($route | gsub("[[:cntrl:]]"; " ")),
             ($ref | gsub("[[:cntrl:]]"; " ")),
             (((now - $ue) / 60 | floor) | tostring),
             (if '"$HELD"' then "1" else "0" end),
-            ((($m["gc.root_bead_id"] // "") | tostring) | gsub("[[:cntrl:]]"; " ")) ]
+            ((($m["gc.root_bead_id"] // "") | tostring) | gsub("[[:cntrl:]]"; " ")),
+            ($preds | gsub("[[:cntrl:]]"; " ")),
+            ($ue | tostring) ]
         | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: the open step listing from $db could not be parsed — never-claimed steps there were NOT checked")
@@ -405,19 +462,43 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
     # Narrowed to the offered rows before the roots are read: every downstream
     # step of every live molecule is open, routed and unclaimed, and only the
     # offered ones are ever judged.
-    orows=""; oroots=""
-    while IFS="$SEP" read -r uid uroute uref uage uhm uroot; do
+    orows=""; oroots=""; opreds=""
+    while IFS="$SEP" read -r uid uroute uref uage uhm uroot upreds ucreated; do
         [ -n "$uid" ] || continue
         [ -n "${offerable[$uid]:-}" ] || continue
-        orows="${orows}${uid}${SEP}${uroute}${SEP}${uref}${SEP}${uage}${SEP}${uhm}${SEP}${uroot}"$'\n'
+        orows="${orows}${uid}${SEP}${uroute}${SEP}${uref}${SEP}${uage}${SEP}${uhm}${SEP}${uroot}${SEP}${upreds}${SEP}${ucreated}"$'\n'
         [ "$uhm" = "0" ] && [ -n "$uroot" ] && oroots="${oroots}${uroot},"
+        [ -n "$upreds" ] && opreds="${opreds}${upreds},"
     done <<< "$urows"
     [ -n "$orows" ] || continue
     resolve_holds "$db" "${oroots%,}"
     [ "$holds_ok" = "1" ] || warnings+=("$label: the roots named by this store's unclaimed step(s) could not be read — a deliberate hold cannot be told from a strand there, so those steps were NOT judged")
     [ "$holds_ok" != "1" ] || [ "$holds_missing" -eq 0 ] || warnings+=("$label: $holds_missing of the roots named by this store's unclaimed step(s) returned no row. An id the lookup cannot resolve is a root that went unread, not a root without a hold, so those steps were NOT judged")
-    while IFS="$SEP" read -r uid uroute uref uage uhm uroot; do
+    # When each candidate became offerable, from the close of its blocking
+    # predecessors. A failed or partial lookup just leaves a step on its bead
+    # stamp below — the pre-fix behaviour — never on silence.
+    resolve_offer_times "$db" "${opreds%,}"
+    NOW=$(budget_now)
+    while IFS="$SEP" read -r uid uroute uref uage uhm uroot upreds ucreated; do
         [ -n "$uid" ] || continue
+        # Age from the offer, not the pour: the latest predecessor close, or the
+        # bead stamp when no predecessor is resolvable. A step offered less than
+        # the bound ago is waiting no longer than a working claim would, so it
+        # leaves both the held note and the unclaimed verdict.
+        offer_epoch="$ucreated"
+        if [ -n "$upreds" ]; then
+            best=""; oldIFS="$IFS"; IFS=','; read -ra _preds <<< "$upreds"; IFS="$oldIFS"
+            for p in "${_preds[@]}"; do
+                pe="${pred_closed[$p]:-}"; [ -n "$pe" ] || continue
+                { [ -z "$best" ] || [ "$pe" -gt "$best" ]; } && best="$pe"
+            done
+            [ -n "$best" ] && offer_epoch="$best"
+        fi
+        case "$offer_epoch" in ''|*[!0-9]*) offer_epoch="$ucreated" ;; esac
+        case "$offer_epoch" in ''|*[!0-9]*) continue ;; esac
+        offer_age=$(( NOW - offer_epoch ))
+        [ "$offer_age" -gt "$STALL" ] || continue
+        uage=$(( offer_age / 60 ))
         if [ "$uhm" = "1" ] || { [ -n "$uroot" ] && [ -n "${root_held[$uroot]:-}" ]; }; then
             held_note "$label" open "$uage"
             continue
@@ -480,6 +561,17 @@ if [ "${#unclaimed[@]}" -ne 0 ]; then
     while IFS="$SEP" read -r label bid route ref age; do
         [ -n "$bid" ] || continue
         case "$age" in *[!0-9]*|"") age=0 ;; esac
+        # A control-routed step (workflow-finalize) is advanced in-process by the
+        # control-dispatcher, which never calls `gc hook --claim`, so gc.claimed_at
+        # is empty on it by construction rather than by neglect. The pool remedies
+        # below — nudge a worker to claim, re-sling the root — are addressed to a
+        # pool that does not run it, so it is judged on the dispatcher's own terms:
+        # reported, not offered to a pool that cannot claim it.
+        case "$route" in
+            *control-dispatcher)
+                quiet "$label" "$route" "the control-dispatcher advances it in-process and never claims through \`gc hook --claim\`, so gc.claimed_at cannot register its progress and nudging a pool cannot help" "$age"
+                continue ;;
+        esac
         case "${agent_state[$route]:-unknown}" in
             suspended)
                 quiet "$label" "$route" "it is suspended, so work waiting on it is parked on purpose" "$age" ;;
