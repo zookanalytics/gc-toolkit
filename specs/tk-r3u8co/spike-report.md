@@ -63,10 +63,17 @@ derivation breaks that framing on three points:
 1. It is not only a sum-versus-per-db mismatch. lx breaches the 2 GiB per-db
    line on its own (2.4 GiB), so a single database is genuinely over, whether
    the check sums or reads the largest.
-2. gc-3yz9y does not cover this check. Its three findings are
-   stale-routed-config, bd-backup-freshness, and
-   check-finalized-molecule-step-reoffer. The "tracked on gc-3yz9y"
-   cross-reference in the tk-iy430k spec is stale.
+2. gc-3yz9y tracks a different arm of the same check, not this breach. Its
+   notes carry a "Finding 4 — dolt-noms-size, aggregate arm" (2026-09-02)
+   diagnosing the check's aggregate comparison: it sums all five stores against
+   the same 2 GiB per-database constant, so it fires on a healthy
+   multi-database city even when every single store is under the line (gc-3yz9y
+   measured the largest at 1.55 GiB then). That is a threshold-design bug whose
+   remedy is fixing the aggregate arm in the gascity binary. lx has since
+   crossed the per-db line on its own (2.4 GiB), a real footprint the
+   aggregate-arm fix does not touch. So "tracked on gc-3yz9y" points at a live
+   tracker, but that tracker owns the aggregate-arm design, not lx's growth. It
+   is the growth, not the sum, that makes this warning actionable.
 3. tk-iy430k itself anticipated regrowth ("re-running this verb is the remedy,
    which is why it is a verb") but no cadence re-runs anything. The 2026-09-03
    purge brought lx to 941 MiB; it has regrown ~1.5 GiB in the 12 days since.
@@ -134,6 +141,8 @@ gc doctor 2>&1 | grep -i dolt-noms-size
 ```
 
 Until step 2 runs, the doctor warning recurs each patrol cycle; that recurrence
-is the correct signal that the reclaim is still owed, and it now settles on
+is the correct signal that the reclaim is still owed, and it settles on
 tk-5rh0v2 (stamped `doctor_check=dolt-noms-size`) rather than routing a fresh
-spike.
+spike. Reclaiming lx clears today's warning on both arms, but the aggregate
+arm's low threshold will re-escalate on a healthy multi-store city regardless;
+that design side stays on gc-3yz9y.
