@@ -132,6 +132,30 @@ unresolved_threads() { # <pr-number>
   printf '%s' "$n"
 }
 
+# Branch-protection facts for <branch>, read from its active rules: whether an
+# unresolved review thread blocks a merge (required_review_thread_resolution)
+# and how many approving reviews are required. Sets PROT_STATE=known|unknown;
+# when known, PROT_THREAD_REQ=true|false and PROT_APPROVALS to the required
+# count. An unreadable read is `unknown`, never a zero requirement — naming a
+# BLOCKED cause off `unknown` would be a guess.
+review_gates_for() { # <branch>
+  local b="$1" rules rrc
+  PROT_STATE=""; PROT_THREAD_REQ="false"; PROT_APPROVALS="0"
+  rules=$(gh_api_origin "repos/$ORIGIN_REPO/rules/branches/$b" 2>/dev/null); rrc=$?
+  if [ "$rrc" -ne 0 ] || ! printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    PROT_STATE="unknown"; return 0
+  fi
+  PROT_THREAD_REQ=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_review_thread_resolution // false ] | any')
+  PROT_APPROVALS=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_approving_review_count // 0 ] | max // 0')
+  case "$PROT_THREAD_REQ" in true|false) : ;; *) PROT_THREAD_REQ="false" ;; esac
+  case "$PROT_APPROVALS" in ''|*[!0-9]*) PROT_APPROVALS="0" ;; esac
+  PROT_STATE="known"
+}
+
 # Record the machine axis this pass reached, at the head it was read at. Every
 # hold below already decides it and spends the answer on a log line; this keeps
 # it, so a reader learns whether an anchor is moving without re-implementing
@@ -625,24 +649,40 @@ while IFS= read -r row; do
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
     BLOCKED)
-      # Branch protection holds a PR whose city-side gates are all green (those
-      # are checked above). Two ruleset conditions do it — an unresolved review
-      # thread (required_review_thread_resolution) and a missing approval — and
-      # reviewDecision cannot tell them apart: it reads EMPTY while threads are
-      # unresolved and resolves only once they clear. So read reviewThreads
-      # directly and name which holds. This changes nothing about the merge (it
-      # is still `settled`, waiting on a person); it replaces the catch-all's
-      # unnamed hold with its cause, which takes no new authority.
+      # Branch protection holds a PR whose city-side gates (checked above) are
+      # all green. The blocking condition is read from the branch's own rules:
+      # an unresolved review thread is the gate only where thread resolution is
+      # required (required_review_thread_resolution), otherwise a missing
+      # approval is. reviewDecision cannot name it alone — it reads EMPTY while
+      # threads are unresolved and resolves only once they clear. The merge stays
+      # held whatever the cause; only the log names it.
       review_decision=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
       record_machine "$id" "settled" "$head_oid" "$aroute"
-      if u=$(unresolved_threads "$num"); then
-        if [ "$u" -gt 0 ]; then
-          echo "$PROG: PR#$num is BLOCKED by branch protection: $u unresolved review thread(s) hold required_review_thread_resolution (reviewDecision reads '${review_decision:-empty}', masked while threads are open); merge held (anchor $id)"
-        else
-          echo "$PROG: PR#$num is BLOCKED by branch protection: all review threads resolved; waiting on an approving review (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
-        fi
+      review_gates_for "$base"
+      if [ "$PROT_STATE" != "known" ]; then
+        echo "$PROG: PR#$num is BLOCKED by branch protection but the rules for '$base' could not be read to name the cause (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
       else
-        echo "$PROG: PR#$num is BLOCKED by branch protection but its reviewThreads could not be read to name the cause (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
+        bcause=""; bu=0
+        if [ "$PROT_THREAD_REQ" = "true" ]; then
+          if bu=$(unresolved_threads "$num"); then
+            [ "$bu" -gt 0 ] && bcause="threads"
+          else
+            bu=0; bcause="threads-unreadable"
+          fi
+        fi
+        if [ -z "$bcause" ]; then
+          if [ "$PROT_APPROVALS" -ge 1 ] && [ "$review_decision" != "APPROVED" ]; then bcause="approval"; else bcause="other"; fi
+        fi
+        case "$bcause" in
+          threads)
+            echo "$PROG: PR#$num is BLOCKED by branch protection: $bu unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          threads-unreadable)
+            echo "$PROG: PR#$num is BLOCKED by branch protection: review-thread resolution is required but its reviewThreads could not be read to count them (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          approval)
+            echo "$PROG: PR#$num is BLOCKED by branch protection: waiting on an approving review ($PROT_APPROVALS required, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          other)
+            echo "$PROG: PR#$num is BLOCKED by branch protection by a rule other than an unresolved required thread or a missing approval (thread-resolution required=$PROT_THREAD_REQ, approvals required=$PROT_APPROVALS, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+        esac
       fi
       held=$((held + 1)); continue ;;
     *)

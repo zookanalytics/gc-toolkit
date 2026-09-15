@@ -322,34 +322,57 @@ printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha
 out=$("$SUT" 2>&1)
 has "$out" "standing CHANGES_REQUESTED" "the veto holds a codex-only anchor too"
 
-echo "# mergeStateStatus: BLOCKED names its cause (thread resolution) and holds"
+echo "# BLOCKED where thread resolution is required names the unresolved-thread cause"
 store "[$(anchor U1 30), $(rev U1)]"
 printf '%s' "$(prview 30 OPEN BLOCKED)" > "$GH_DIR/pr_view_30.json"
 echo '[]' > "$GH_DIR/reviews_30.json"
 echo '{"threads":[{"id":"t1","isResolved":false},{"id":"t2","isResolved":false}]}' > "$GH_DIR/threads_30.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
 has "$out" "PR#30 is BLOCKED by branch protection: 2 unresolved review thread(s) hold required_review_thread_resolution" "BLOCKED names the unresolved-thread cause and how many"
 has "$out" "merge held (anchor U1)" "…and still holds"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and a BLOCKED PR is never merged"
 
+echo "# BLOCKED where thread resolution is OFF names the approval, never the open thread"
+store "[$(anchor U1a 39), $(rev U1a)]"
+printf '%s' "$(prview 39 OPEN BLOCKED)" > "$GH_DIR/pr_view_39.json"
+echo '[]' > "$GH_DIR/reviews_39.json"
+echo '{"threads":[{"id":"t1","isResolved":false},{"id":"t2","isResolved":false}]}' > "$GH_DIR/threads_39.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+has "$out" "PR#39 is BLOCKED by branch protection: waiting on an approving review (1 required" "an open thread is not the cause when required_review_thread_resolution is off"
+hasnt "$out" "PR#39 is BLOCKED by branch protection: 2 unresolved review thread(s) hold" "…and the open threads are never named as the gate"
+
 echo "# BLOCKED with every thread resolved names the approval wait instead"
 store "[$(anchor U1b 33), $(rev U1b)]"
 printf '%s' "$(prview 33 OPEN BLOCKED)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_33.json"
 echo '[]' > "$GH_DIR/reviews_33.json"
 echo '{"threads":[{"id":"t1","isResolved":true}]}' > "$GH_DIR/threads_33.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$("$SUT" 2>&1)
-has "$out" "all review threads resolved; waiting on an approving review (reviewDecision='REVIEW_REQUIRED')" "BLOCKED with resolved threads names the approval wait"
+has "$out" "waiting on an approving review (1 required, reviewDecision='REVIEW_REQUIRED')" "BLOCKED with resolved threads names the approval wait"
 has "$out" "merge held (anchor U1b)" "…and still holds"
 
-echo "# BLOCKED whose reviewThreads cannot be read is named as such, never guessed"
+echo "# BLOCKED whose reviewThreads cannot be read (thread resolution required) is named, never guessed"
 store "[$(anchor U1c 34), $(rev U1c)]"
 printf '%s' "$(prview 34 OPEN BLOCKED)" > "$GH_DIR/pr_view_34.json"
 echo '[]' > "$GH_DIR/reviews_34.json"
 echo '{"threads":[{"id":"t1","isResolved":false}]}' > "$GH_DIR/threads_34.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 out=$(STUB_GQL_READ_FAIL=1 "$SUT" 2>&1)
-has "$out" "its reviewThreads could not be read to name the cause" "an unreadable connection is named, not guessed"
+has "$out" "review-thread resolution is required but its reviewThreads could not be read to count them" "an unreadable connection is named, not guessed"
 has "$out" "merge held (anchor U1c)" "…and still holds"
+
+echo "# BLOCKED whose branch rules cannot be read is named as such, never guessed"
+store "[$(anchor U1e 45), $(rev U1e)]"
+printf '%s' "$(prview 45 OPEN BLOCKED)" > "$GH_DIR/pr_view_45.json"
+echo '[]' > "$GH_DIR/reviews_45.json"
+printf '{"message":"Not Found"}' > "$GH_DIR/rules_main.json"
+out=$("$SUT" 2>&1)
+has "$out" "the rules for 'main' could not be read to name the cause" "unreadable branch rules are named, not guessed"
+has "$out" "merge held (anchor U1e)" "…and still holds"
+rm -f "$GH_DIR/rules_main.json"
 
 store "[$(anchor U2 31), $(rev U2)]"
 printf '%s' "$(prview 31 OPEN UNSTABLE ',"statusCheckRollup":[]')" > "$GH_DIR/pr_view_31.json"

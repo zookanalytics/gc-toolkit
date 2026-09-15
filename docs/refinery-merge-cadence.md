@@ -187,10 +187,13 @@ the cadence — the arms run whether or not any refinery session is awake.
 5. **pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + visit), base changed
    (→ `retargeted` + visit), CONFLICTING (one rework child per head), `BLOCKED`
-   (→ a visit under a cause-specific key — `merge-blocked-threads` when review
-   threads are unresolved, `merge-blocked-approval` when they are all resolved
-   and only an approval is missing, read from `reviewThreads` because
-   `reviewDecision` is masked while threads are open),
+   (→ a visit under a cause-specific key read from the branch's own rules —
+   `merge-blocked-threads` only where `required_review_thread_resolution` is on
+   and a thread is unresolved, `merge-blocked-approval` when an approving review
+   is required and missing; a cause the rules cannot name — an unmodeled rule,
+   or unreadable rules or thread count — escalates nothing and the next reconcile
+   retries. `reviewDecision` cannot name the cause alone, reading EMPTY while
+   threads are unresolved, so the rules are read directly),
    hold-resolved retraction. It re-reviews no moved head: a lane state is a
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the

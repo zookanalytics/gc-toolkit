@@ -273,6 +273,29 @@ unresolved_threads() { # <pr-number>
   case "$n" in ''|*[!0-9]*) return 1 ;; esac
   printf '%s' "$n"
 }
+# Branch-protection facts for <branch>, read from its active rules: whether an
+# unresolved review thread blocks a merge (required_review_thread_resolution)
+# and how many approving reviews are required. Sets PROT_STATE=known|unknown;
+# when known, PROT_THREAD_REQ=true|false and PROT_APPROVALS to the required
+# count. An unreadable read is `unknown`, never a zero requirement — escalating
+# a BLOCKED cause named off `unknown` would be a guess.
+review_gates_for() { # <branch>
+  local b="$1" rules rrc
+  PROT_STATE=""; PROT_THREAD_REQ="false"; PROT_APPROVALS="0"
+  rules=$(gh_api_origin "repos/$ORIGIN_REPO/rules/branches/$b" 2>/dev/null); rrc=$?
+  if [ "$rrc" -ne 0 ] || ! printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    PROT_STATE="unknown"; return 0
+  fi
+  PROT_THREAD_REQ=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_review_thread_resolution // false ] | any')
+  PROT_APPROVALS=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_approving_review_count // 0 ] | max // 0')
+  case "$PROT_THREAD_REQ" in true|false) : ;; *) PROT_THREAD_REQ="false" ;; esac
+  case "$PROT_APPROVALS" in ''|*[!0-9]*) PROT_APPROVALS="0" ;; esac
+  PROT_STATE="known"
+}
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 ALL_STATUSES="$LIVE_STATUSES,closed"
@@ -1195,35 +1218,51 @@ $CBODY"
     continue
   fi
 
-  # --- BLOCKED: name the cause and escalate it — nothing else does ---------------
+  # --- BLOCKED: name the cause from the branch's rules and escalate it -----------
   # A PR whose city-side feedback is all routed can still sit on branch
-  # protection: an unresolved review thread (required_review_thread_resolution)
-  # or a missing approval. merge.sh holds on it, and before this arm nothing
-  # said why — the witness patrol guessed "merge conflict" and sent a converse
-  # sitting to rebase PRs that did not conflict. reviewDecision cannot tell the
-  # two causes apart: it reads EMPTY while threads are unresolved and resolves
-  # only once they clear, so read reviewThreads directly and escalate under a
-  # cause-specific key. CHANGES_REQUESTED is active feedback the arms above and
-  # the dismissal below own, not a stuck gate; an operator merge_hold is their
-  # own gate. Leave both. A cause that cannot be read is not escalated as a
-  # guess — the next pass retries once the connection answers.
+  # protection. Only two causes are actionable to escalate: an unresolved review
+  # thread where thread resolution is required (required_review_thread_resolution),
+  # and a missing approving review where one is required. Both are read from the
+  # branch's own rules; reviewDecision cannot name them alone, reading EMPTY while
+  # threads are unresolved and resolving only once they clear. Anything else — a
+  # rule this cadence does not model, unreadable rules, or a required thread count
+  # that could not be read — is escalated as nothing rather than a guess; the next
+  # reconcile retries. CHANGES_REQUESTED is active feedback the arms above and the
+  # dismissal below own; an operator merge_hold is their own gate; leave both.
   if [ "$merge_state" = "BLOCKED" ] && ! is_held "$hold" && [ "$rd" != "CHANGES_REQUESTED" ]; then
-    if bthreads=$(unresolved_threads "$num"); then
-      if [ "$bthreads" -gt 0 ]; then
-        escalate "$id" "merge-blocked-threads" \
-          "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (reviewDecision reads '${rd:-empty}' while threads are open). Resolve the thread(s), or say why the block should lift."
-        echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); escalated (merge-blocked-threads)"
+    review_gates_for "$base"
+    bcause="unnameable"; bthreads=0
+    if [ "$PROT_STATE" = "known" ]; then
+      threads_gate=0
+      if [ "$PROT_THREAD_REQ" = "true" ]; then
+        if bthreads=$(unresolved_threads "$num"); then
+          if [ "$bthreads" -gt 0 ]; then bcause="threads"; else threads_gate=1; fi
+        else
+          bthreads=0   # unreadable — do not fall to approval, threads are not ruled out
+        fi
       else
-        escalate "$id" "merge-blocked-approval" \
-          "PR#$num ($live_url) is BLOCKED by branch protection: every review thread is resolved and it is waiting on an approving review (reviewDecision='${rd:-empty}'). Approve it, or say why not."
-        echo "$PROG: $id — PR#$num BLOCKED awaiting approval (reviewDecision='${rd:-empty}'); escalated (merge-blocked-approval)"
+        threads_gate=1   # thread resolution off — an open thread is never the gate
       fi
-      flagged=$((flagged + 1)); continue
+      if [ "$bcause" = "unnameable" ] && [ "$threads_gate" = "1" ] \
+         && [ "$PROT_APPROVALS" -ge 1 ] && [ "$rd" != "APPROVED" ]; then
+        bcause="approval"
+      fi
     fi
-    # reviewThreads unreadable this pass: the cause cannot be named, so escalate
-    # nothing — a guessed cause is exactly what the witness patrol got wrong.
-    # merge.sh logs the same unreadability from its own pass, and the next
-    # reconcile (about two minutes) retries the read.
+    case "$bcause" in
+      threads)
+        escalate "$id" "merge-blocked-threads" \
+          "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (required_review_thread_resolution is on). Resolve the thread(s), or say why the block should lift."
+        echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); escalated (merge-blocked-threads)"
+        flagged=$((flagged + 1)); continue ;;
+      approval)
+        escalate "$id" "merge-blocked-approval" \
+          "PR#$num ($live_url) is BLOCKED by branch protection: it is waiting on an approving review ($PROT_APPROVALS required, reviewDecision='${rd:-empty}'). Approve it, or say why not."
+        echo "$PROG: $id — PR#$num BLOCKED awaiting approval (reviewDecision='${rd:-empty}'); escalated (merge-blocked-approval)"
+        flagged=$((flagged + 1)); continue ;;
+    esac
+    # bcause=unnameable: the cause is not one this cadence can name and escalate,
+    # so escalate nothing — merge.sh logs it and the next reconcile retries. Fall
+    # through, leaving the dismissal arm below to act if it applies.
   fi
 
   # --- dismiss our OWN superseded CHANGES_REQUESTED when the gate is green -------
