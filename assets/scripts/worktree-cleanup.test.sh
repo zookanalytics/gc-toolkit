@@ -2,18 +2,19 @@
 # Hermetic test for the witness-patrol WORKTREE CLEANUP (part 5 of
 # recover-orphaned-beads).
 #
-# THE BUG: cleanup ran `git worktree remove "$WORKTREE" --force` for any owned
-# bead with a nonempty work_dir. A husk work_dir (git worktree removed, the
-# directory left behind) and an already-removed path both name no registered
-# worktree, so `git worktree remove` exits 128; under the step's `set -e` that
-# aborted recover-orphaned-beads before `orphan-dispose.sh` could release or
-# skip the bead — one husk stalled the whole patrol pass.
+# Invariant: cleanup is best-effort and never aborts the patrol pass. A
+# work_dir can name no registered worktree: a husk (the git worktree is gone,
+# the directory remains), or an already-removed path. Either makes `git
+# worktree remove` exit 128, and under the step's `set -e` an uncaught 128
+# stops recover-orphaned-beads before `orphan-dispose.sh` can release or skip
+# the bead. So the removal is caught and execution always falls through to
+# prune and disposal; a genuine registered worktree is still removed, and the
+# OWNED gate still decides whether the worktree is the witness's to touch.
 #
-# THE FIX: catch the failed removal so cleanup stays best-effort, then prune and
-# fall through to disposal. This test EXECUTES the real block extracted verbatim
-# from the formula (between the `worktree-cleanup` markers) under `set -e`
-# against REAL git repos, so it cannot drift from the shipped instruction. No
-# live city, Dolt, network, or PRs — only git and a tmpdir.
+# This test EXECUTES the real block extracted verbatim from the formula
+# (between the `worktree-cleanup` markers) under `set -e` against REAL git
+# repos, so it cannot drift from the shipped instruction. It uses only git and
+# a tmpdir: no live city, Dolt, network, or PRs.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,9 +90,9 @@ mkdir -p "$HUSK"
 GONE="$TMP/gone"
 
 # --- Premise: the hazard is real. --------------------------------------------
-# `git worktree remove` on the husk exits non-zero, so without the catch the
-# block would abort under `set -e`. If this ever stops being true the fix is
-# moot — assert the premise so the test explains itself.
+# `git worktree remove` on the husk exits non-zero, which is why the block's
+# catch is load-bearing: under `set -e` an uncaught failure aborts the step.
+# Assert the premise so a reader sees what the catch absorbs.
 PREMISE_RC=0
 git -C "$RIG" worktree remove "$HUSK" --force >/dev/null 2>&1 || PREMISE_RC=$?
 [ "$PREMISE_RC" -ne 0 ] \
@@ -101,9 +102,9 @@ git -C "$RIG" worktree remove "$HUSK" --force >/dev/null 2>&1 || PREMISE_RC=$?
 # --- Behavioral matrix. Each run asserts the block did NOT abort (sentinel
 #     present, exit 0) and that the intended side effect held. ---------------
 
-# (A) THE FIX: a husk must not abort cleanup — this is the case that stalled the
-#     whole patrol pass. The husk directory is left standing (removing a path
-#     that resolves to an enclosing repo is the hazard the husk guard forbids).
+# (A) A husk work_dir must not abort cleanup. The husk directory is left in
+#     place: the block only asks `git worktree remove` to drop a registered
+#     worktree, and a husk is not one, so nothing here deletes the directory.
 A_OUT=""; A_RC=0
 A_OUT="$(run_cleanup 1 "$HUSK" "$RIG")" || A_RC=$?
 eq "$A_RC" "0" "(A) husk work_dir -> block exits 0 (no abort)"
@@ -114,7 +115,7 @@ grep -q "__CLEANUP_DONE__" <<< "$A_OUT" \
   && ok "(A) husk directory is left standing (not deleted by cleanup)" \
   || bad "(A) cleanup deleted the husk directory"
 
-# (B) Non-regression: a genuine registered worktree is still removed.
+# (B) A genuine registered worktree is still removed.
 B_OUT=""; B_RC=0
 B_OUT="$(run_cleanup 1 "$LIVE_B" "$RIG")" || B_RC=$?
 eq "$B_RC" "0" "(B) genuine worktree -> block exits 0"
@@ -151,8 +152,8 @@ eq "$E_RC" "0" "(E) OWNED=0 -> block exits 0"
   && ok "(E) OWNED=0 -> worktree left intact (OWNED gate preserved)" \
   || bad "(E) OWNED=0 removed a worktree the guard refused to own"
 
-# --- The formula must still parse as TOML after the edit (the block lives in a
-#     multi-line basic string, where a stray escape would corrupt it). --------
+# --- The formula must still parse as TOML: the block lives in a multi-line
+#     basic string, where a stray escape would corrupt it. -------------------
 if command -v python3 >/dev/null 2>&1; then
   python3 - "$TOML" <<'PY' && ok "(F) formula still parses as TOML" || bad "(F) formula failed to parse as TOML"
 import sys, tomllib
