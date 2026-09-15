@@ -222,7 +222,7 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 eq "$RC" "4" "(BLKEDGE) a dropped edge fails the verb — the bead is recorded as waiting and nothing holds it"
 has "not held by tk-blk1" "$ERR" "(BLKEDGE) …the missing edge is named"
 has "gc bd dep add tk-sub tk-blk1 -t blocks" "$ERR" "(BLKEDGE) …with the repair spelled out"
-has "still ready" "$ERR" "(BLKEDGE) …and the failure says what it costs"
+has "parked on prose alone" "$ERR" "(BLKEDGE) …and the failure says what it costs"
 hasnt "disposed as blocked" "$OUT" "(BLKEDGE) …and the run does not report a disposition"
 
 # A partial landing is still a failure: one edge holds, the other does not, and
@@ -303,7 +303,12 @@ has "PROACTIVE deliverable gc-toolkit/gc-toolkit.nosuchpool" "$LOG" \
 hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every reconcile pass"
 unset FAKE_POOL_DEAD FAKE_SHOW_JSON FAKE_DEPS_JSON
 
-# ── ruling: the visit stays the exit for a question only a human answers ─────
+# ── ruling: the visit is the wait, named as a blocks edge on the subject ─────
+# The visit re-asks the question, so the subject waits on it: the ruling exit
+# passes --waiting-on <visit>, and the edge is verified to have landed the way
+# the blocked exit's is. The FAKE dep list answers with the visit so the
+# verification passes (a dropped edge is the (BLKEDGE) case, on the blocked exit).
+export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
     --takeaway "needs a ruling: which default" --visit tk-visit1
 eq "$RC" "0" "(RUL) a ruling disposition succeeds"
@@ -311,10 +316,10 @@ has "gc.first_reaction_target=tk-visit1" "$LOG" "(RUL) the visit it filed is rec
 has "HELM takeaway tk-sub needs a ruling: which default --by proactive --release" "$LOG" \
    "(RUL) the bead is released back to the human"
 hasnt "--route" "$LOG" "(RUL) …not routed to a pool"
-hasnt "--waiting-on" "$LOG" "(RUL) …and not held by an edge"
-# A ruling claims no disposition, and that is the true one: the bead waits on a
-# person, the visit is what re-asks, and the headline stays a hold that
-# doctor/check-wait-is-an-edge reports until the question is answered.
+has "--waiting-on tk-visit1" "$LOG" "(RUL) …and held by the visit edge"
+# A ruling names the visit as its wait: the subject waits on a person, the visit
+# bead is what re-asks, and --waiting-on records that wait as a blocks edge so
+# doctor/check-wait-is-an-edge reads a graph state rather than reporting prose.
 hasnt "--no-wait" "$LOG" "(RUL) …and never claims nothing is waiting"
 
 run tk-sub --disposition ruling --reason "r" --takeaway "t"

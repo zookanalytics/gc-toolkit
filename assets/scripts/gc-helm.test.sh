@@ -338,7 +338,7 @@ unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
-OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release 2>"$TMP/err" || true)"
+OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
 
@@ -674,6 +674,29 @@ grep -q 'contradicts' "$TMP/berr" \
   && ok "(BOTH) …and the refusal says why" \
   || bad "(BOTH) the refusal does not name the contradiction (stderr: $(cat "$TMP/berr"))"
 
+# (NEITHERPARK) a --release that PARKS for a person (no --route) a bead with NO
+# open blocker (A-PARKED) would leave a prose-only hold, so it must state its
+# disposition — refused before anything is written, no edge wired. A bead already
+# held by an open blocker is exempt (DELEGBARE, below); a --release --route
+# DISPATCHES and is exempt (ROUTEOK/ROUTEFIX pass neither flag and land); a bare
+# headline (no --release) parks nothing (NEITHERBARE).
+: > "$TMP/updates"; : > "$TMP/deps"
+NPRC=0
+sh "$SCRIPT" takeaway A-PARKED "parked on prose alone" --by proactive --release >/dev/null 2>"$TMP/nperr" || NPRC=$?
+eq "$NPRC" "2" "(NEITHERPARK) a --release park with neither --waiting-on nor --no-wait is refused"
+eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(NEITHERPARK) …before anything is written"
+eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(NEITHERPARK) …and no edge is wired"
+grep -q 'states its disposition' "$TMP/nperr" \
+  && ok "(NEITHERPARK) …and the refusal says why" \
+  || bad "(NEITHERPARK) the refusal does not explain itself (stderr: $(cat "$TMP/nperr"))"
+# (NEITHERBARE) a bare headline (no --release) parks nothing, so it is unaffected
+# — it still stamps the headline and clears the settled key with neither flag.
+: > "$TMP/updates"
+sh "$SCRIPT" takeaway A-PARKED "a headline beside a demand" --by converse >/dev/null 2>"$TMP/nberr" || true
+grep -q -- '--set-metadata gc.takeaway=a headline beside a demand' "$TMP/updates" \
+  && ok "(NEITHERBARE) a bare takeaway with neither flag still lands" \
+  || bad "(NEITHERBARE) a bare takeaway was refused or dropped: $(cat "$TMP/updates") / $(cat "$TMP/nberr")"
+
 : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-PARKED "actionable — slung to the pool" \
    --release --route "gc-toolkit/gc-toolkit.polecat" --no-wait >/dev/null 2>&1 || true
@@ -787,7 +810,7 @@ esac
 
 # (ROUTECLR) the plain release is untouched: it still hands the bead back.
 : > "$TMP/updates"; : > "$TMP/routed"
-sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release >/dev/null 2>&1 || true
+sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release --no-wait >/dev/null 2>&1 || true
 grep -q -- '--set-metadata gc.routed_to= ' "$TMP/updates" \
   && ok "(ROUTECLR) no --route still clears the route" \
   || bad "(ROUTECLR) the plain release changed shape: $(cat "$TMP/updates")"

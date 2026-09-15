@@ -506,6 +506,14 @@ quiesce_release_molecule_steps() (
 # sitting would answer for the next one — a settled sign-off would silence the
 # park that followed it. lifecycle/lifecycle.toml [holds] settled_keys is where
 # doctor/check-wait-is-an-edge reads the pairing.
+#
+# A --release that PARKS an open anchor for a person (no --route) must carry one
+# of --waiting-on or --no-wait — the wait as an edge, or the settled mark that
+# says there is none — UNLESS the bead already carries an open blocker whose edge
+# holds it. Neither flag on a bead with no blocker is the silent prose-only park
+# refused below, the unedged hold the I1 backlog exists to drain. A --release
+# --route DISPATCHES to a pool instead (moving, not held), a closed anchor takes
+# only the quiesce, and a bare headline (no --release) parks nothing — all exempt.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; npos=0
     waiting_ids=""; no_wait=""; subj_branch=""; real_waits=""; skipped_riders=""
@@ -601,6 +609,35 @@ cmd_takeaway() {
         fi
     fi
     # <<< takeaway-release-closed-anchor
+
+    # A park for a person states its disposition, UNLESS the bead is already held
+    # by an open blocker — then the wait is an existing edge and a bare --release
+    # parks it beside that edge, not a prose-only hold. --release reopens a
+    # standing anchor and either DISPATCHES it (a --route to a pool, moving) or
+    # PARKS it for a person (no route: open, unassigned, at rest). A held park
+    # names its wait: --waiting-on writes it as a `blocks` edge, --no-wait says
+    # nothing waits and stamps gc.takeaway_settled. Neither, on a bead carrying NO
+    # open blocker, is the silent prose-only park — a headline holding it with no
+    # edge and no settled mark, the shape doctor/check-wait-is-an-edge reports and
+    # the I1 backlog drains, refilled by parks faster than closes drain it. Any
+    # open blocker counts, its own demand included: a demand is an edge that holds.
+    # An unreadable probe allows the park (a bd that will not answer must not cost
+    # a sitting its disposition, and the check still reports a truly edgeless one).
+    # A dispatch is moving; a closed anchor took no park (release_park cleared
+    # above); a bare headline (no --release) parks nothing; a converse sitting
+    # stamps one beside a demand that holds it.
+    if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        park_held=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
+            | jq -er 'if type == "array" then
+                   [ .[] | select((.dependency_type // "") == "blocks")
+                         | select((.status // "") != "closed") | .id ] | join(" ")
+                 else error("not an edge array") end' 2>/dev/null) || park_held="__unreadable__"
+        if [ -z "$park_held" ]; then
+            echo "$PROG: takeaway: --release parks $bead for a person, and a park states its disposition: --waiting-on <bead> for the wait it holds on (written as a blocks edge), or --no-wait when nothing waits on it. $bead carries no open blocker to hold it, so neither flag leaves the headline an unedged hold — the shape doctor/check-wait-is-an-edge reports and the I1 backlog drains. Nothing was written." >&2
+            exit 2
+        fi
+    fi
 
     # A pool route promises a claim some session can perform. A bead blocked by
     # anything other than its own demand has its method somewhere else: no pool
