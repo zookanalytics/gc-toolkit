@@ -310,7 +310,10 @@ PAYLOAD=$(printf '%s' "$SWEEP" | sed -n 's/^payload=//p')
 - `failed`, `exceeded` or `blocked`: a FAILED scan. File it as a finding with
   the recipe below — `--key doctor-sweep-failed`, the whole `state=` block as
   the message. `failed` and `exceeded` carry `elapsed=`, and `exceeded` names
-  the check the sweep was inside when its bound stopped it. `blocked` carries
+  the check the sweep was inside when its bound stopped it. A `failed` sweep
+  that vanished (`reason=sweep-vanished`) carries `cause=`: the signal that
+  ended it, or `unknown` for an untrappable kill, with `launch=`/`unit=` to
+  find the run's own journal. `blocked` carries
   `reason=` instead: the runner could not sweep at all, because the state
   directory is unwritable, the run directory is contended, or `gc` is not on
   PATH. Nothing was started, and the next cycle meets the same wall. Do not run

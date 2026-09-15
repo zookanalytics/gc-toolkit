@@ -244,6 +244,59 @@ printf '%s' "$DEAD" > "$STATE/current/pid"
 run
 has "$OUT" "state=failed" "a sweep whose process is gone with no rc is a failed scan"
 eq "$(field "$OUT" reason)" "sweep-vanished" "  ... named as the vanished process"
+eq "$(field "$OUT" cause)" "unknown" "  ... cause=unknown when it left no death note (an untrappable kill)"
+
+# --- a vanished sweep names the signal that killed it, when it could catch one
+# systemd counts SIGTERM/SIGHUP/SIGINT/SIGPIPE as a clean stop and logs no
+# failure line, so a reap that uses one is invisible everywhere but here: the
+# wrapper's trap records which signal ended it before it dies.
+new_state vanished_signal
+: > "$STUB_LOG"; export STUB_SLEEP=15 STUB_RC=1 STUB_PAYLOAD="$TMP/payload.json"
+GC_DOCTOR_SWEEP_NO_SYSTEMD=1 "$SUT" >/dev/null
+await_sweeps 1                       # the wrapper has set its traps and the sweep is running
+WPID=$(cat "$STATE/current/pid")
+# Signal the whole group: the wrapper's trap fires and the detached child dies
+# with it, so nothing is orphaned. Fall back to the wrapper alone off setsid.
+kill -TERM -- -"$WPID" 2>/dev/null || kill -TERM "$WPID" 2>/dev/null
+await_until test -s "$STATE/current/cause"
+run
+has "$OUT" "state=failed" "a sweep killed by a catchable signal is a failed scan"
+eq "$(field "$OUT" reason)" "sweep-vanished" "  ... still named as the vanished process"
+eq "$(field "$OUT" cause)" "signal:TERM" "  ... now carrying the signal that ended it"
+LV=$(field "$OUT" launch)
+if [ "$LV" = setsid ] || [ "$LV" = nohup ]; then
+  ok "  ... and the launcher ($LV), to find the run's own journal"
+else bad "  ... and the launcher (got '$LV')"; fi
+export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
+
+# --- the detached sweep sheds the caller's session identity -----------------
+# The city-wide session-orphan reaper matches a detached process by the
+# GC_SESSION_ID in its environ and kills its group, through the systemd-user
+# isolation. So the sweep must not carry the launching session's id, or that
+# session's next teardown reaps it mid-run. The check reads the child's own
+# environ, in whichever mode launched it.
+environ_has_session() { local e; e=$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null); grep -q '^GC_SESSION_ID=' <<< "$e"; }
+new_state no_session_id
+: > "$STUB_LOG"; export STUB_SLEEP=15 STUB_RC=1 STUB_PAYLOAD="$TMP/payload.json"
+GC_SESSION_ID=reaper-sentinel GC_DOCTOR_SWEEP_NO_SYSTEMD=1 "$SUT" >/dev/null
+await_sweeps 1
+WPID=$(cat "$STATE/current/pid")
+if environ_has_session "$WPID"; then bad "the setsid/nohup sweep sheds GC_SESSION_ID (the reaper's match key)"
+else ok "the setsid/nohup sweep sheds GC_SESSION_ID (the reaper's match key)"; fi
+kill -TERM -- -"$WPID" 2>/dev/null || kill -TERM "$WPID" 2>/dev/null
+
+if command -v systemd-run >/dev/null 2>&1 && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+  new_state no_session_id_systemd
+  : > "$STUB_LOG"; export STUB_SLEEP=15 STUB_RC=1 STUB_PAYLOAD="$TMP/payload.json"
+  GC_SESSION_ID=reaper-sentinel "$SUT" >/dev/null
+  await_sweeps 1
+  WPID=$(cat "$STATE/current/pid")
+  if environ_has_session "$WPID"; then bad "the transient user service sheds GC_SESSION_ID too"
+  else ok "the transient user service sheds GC_SESSION_ID too"; fi
+  UNIT=$(cat "$STATE/current/unit" 2>/dev/null); [ -n "$UNIT" ] && systemctl --user stop "$UNIT" >/dev/null 2>&1
+  kill -TERM -- -"$WPID" 2>/dev/null || kill -TERM "$WPID" 2>/dev/null
+fi
+export STUB_SLEEP=0 STUB_RC=0 STUB_PAYLOAD=""
 
 new_state never
 mkdir -p "$STATE/current"
