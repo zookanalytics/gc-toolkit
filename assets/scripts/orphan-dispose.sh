@@ -178,7 +178,15 @@ open_bead() {
 # orphan recovery already established this owner is gone.
 release_assignee() {
     [ -z "$ASSIGNEE" ] && return 0
-    if gc bd update "$BEAD" --assignee "" --if-assignee "$GUARD" >/dev/null 2>&1; then
+    # Attach the guard value (--if-assignee=$GUARD), never space-separate it. A
+    # spaced value is its own argv element, and the gc wrapper's store-scope
+    # scanner reads any element that does not begin with '-' as a candidate bead
+    # id; a session-id assignee resolves as a real session bead in the city
+    # store, so the whole command retargets there and $BEAD, which lives in the
+    # rig store, reports as not found. The =form keeps the value behind a leading
+    # '-' so only $BEAD selects the store. bare bd below parses flags directly
+    # and is unaffected, so its guard stays space-separated.
+    if gc bd update "$BEAD" --assignee "" --if-assignee="$GUARD" >/dev/null 2>&1; then
         note_landed assignee
         return 0
     fi

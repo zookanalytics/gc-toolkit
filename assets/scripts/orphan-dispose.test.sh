@@ -160,7 +160,12 @@ ORDER=$(grep -- "update tk-step" "$STUB_GC_LOG" \
   | sed -e 's/.*--unset-metadata.*/meta/' -e 's/.*--status.*/status/' -e 's/.*--assignee.*/assignee/' \
   | tr '\n' ',')
 eq "$ORDER" "meta,status,assignee," "metadata first, status next, assignee last"
-has "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "assignee clear is guarded on the assignee snapshot"
+has "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "assignee clear is guarded on the assignee snapshot"
+# The guard value is attached (=form), never space-separated. A spaced session-id
+# value is read as a bead id by the gc wrapper's store-scope scanner and retargets
+# the command to the city store, where the rig bead is not found; the release then
+# silently falls through to the forced bare-bd retry instead of the sanctioned CAS.
+hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "guard uses the attached =form, not the mis-scoping spaced form"
 
 echo "--- the owner is not the assignee guard ---"
 # The shape orphan recovery most often hands over: the dead owner is the step's
@@ -175,9 +180,9 @@ OUT=$("$SCRIPT" tk-slot --owner lx-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a step whose owner differs from its assignee still releases"
 eq "$(bassignee tk-slot)" "" "the slot assignee is cleared"
 eq "$(meta tk-slot gc.session_id)" "<absent>" "the dead session id is cleared"
-has "$(cat "$STUB_GC_LOG")" "--if-assignee gc-toolkit/gc-toolkit.polecat" \
+has "$(cat "$STUB_GC_LOG")" "--if-assignee=gc-toolkit/gc-toolkit.polecat" \
   "the guard is the ASSIGNEE, not the --owner"
-hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "the owner is never used as the guard"
+hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "the owner is never used as the guard"
 
 echo "--- step arm: a step with no route says so ---"
 store '[{"id":"tk-unrouted","status":"in_progress","assignee":"lx-dead","title":"step",
