@@ -19,8 +19,9 @@ cannot tell "the pool is empty" from "the store could not be read."
 ## The fix is in the gascity binary, not this pack
 
 `gc hook --claim` is a Go command in the gascity repo
-(`github.com/zookanalytics/gascity`). This pack has no `go.mod` and no code
-that decides the hook's response, so tk-45jao has no gc-toolkit diff. The
+(`github.com/zookanalytics/gascity`). gc-toolkit carries Go modules of its own
+under `services/` (`services/gctk`, `services/helm`), but no gc-toolkit code
+decides the `gc hook --claim` response, so tk-45jao has no gc-toolkit diff. The
 binary-side fix is filed as **gascity gc-9o705**, which carries the full
 mechanism, the patch sites by symbol, and the missing test.
 
@@ -68,6 +69,6 @@ unconditionally.
 
 The honest pack-side deliverable here is this record plus gc-9o705, not a test.
 A pack test that asserts the fixed behavior would fail until gc-9o705 lands, and
-`assets/scripts/run-tests.sh` auto-discovers every tracked `*.test.sh`, so a
+`tools/run-tests.sh` auto-discovers every tracked `*.test.sh`, so a
 red-until-fixed test breaks the suite for everyone. No gc-toolkit surface
 decides the hook response, so there is nothing pack-local to defend in code.
