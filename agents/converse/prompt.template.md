@@ -543,15 +543,15 @@ Rules:
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own
   judgment. Executing an operator ruling that a subject should close is
-  yours, and a recommend-close visit is the common trigger: `mol-first-reaction`
-  files one and stamps `recommend close: <why>` as the subject's takeaway when
+  yours, and a recommend-close visit is the common trigger: a proactive first
+  reaction files one and stamps `recommend close: <why>` as the subject's takeaway when
   it finds nothing to do, leaving the close to the operator. The operator must
   have agreed, in this sitting, that the subject should close; what the ruling
   licenses then follows the subject's state. A **no-work** subject you dispose
   directly: its `merge_result` empty or absent, or `merged`, unassigned,
   holding no branch or PR still in flight to a pool, and not a review, step, or
-  workflow bead. This is the no-work shape `duplicate-sweep.sh` already
-  disposes, proved there by `gc.work_outcome=no-op` or no work-product key (the
+  workflow bead. This is the no-work shape `bead-rehome.sh` re-checks itself
+  before it closes, proved by `gc.work_outcome=no-op` or no work-product key (the
   `Close-with-successor` row of `docs/authority-map.md`); record
   `gc.work_outcome=no-op` on the subject, then close it through the one writer:
   `assets/scripts/bead-rehome.sh --origin <subject> --successor <bead> --kind

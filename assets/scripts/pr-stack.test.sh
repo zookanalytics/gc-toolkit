@@ -5,10 +5,9 @@
 # an open PR's branch and the body names it); each of the three ledger keys;
 # the single-bead PR that stays untouched; idempotence across a second pass;
 # the title never being edited; a closed or foreign PR being left alone; a row
-# that recorded no work — a closed duplicate, a no-op outcome carrying the
-# anchor branch, or a rework child still routed to a pool before its fix is
-# pushed — never entering the ledger; and every unreadable read leaving the
-# body exactly as it stands.
+# that recorded no work — a no-op outcome carrying the anchor branch, or a
+# rework child still routed to a pool before its fix is pushed — never entering
+# the ledger; and every unreadable read leaving the body exactly as it stands.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -112,30 +111,43 @@ has "$(body 20)" '- `D1` — Rework PR#20: address signoff findings' "the rework
 hasnt "$(body 20)" 'D1` — Rework PR#20: address signoff findings _(merged in' \
     "…and is NOT marked as merged in — its commits are on this branch"
 
-echo "# an open rework child still routed to a pool is not yet on the branch"
+echo "# a graph.v2 rework child, routed by gc.execution_routed_to, is not yet on the branch"
 # signoff.sh stamps branch=<this head> on the rework child at CREATION, before
-# any polecat claims it. Open and still routed to a pool, its fix has not been
-# pushed; listing it would tell a reviewer that approving the PR approves work
-# the branch does not carry. The ledger drops it, the anchor stands alone, and
-# the one-bead body pr-open.sh wrote is left byte-identical.
+# any polecat claims it. The live mol-polecat-work dispatch retires gc.routed_to
+# and stamps gc.execution_routed_to=<pool>, so a cleared gc.routed_to is no
+# longer proof of a push; the non-empty gc.execution_routed_to is what marks the
+# child in-flight. Listing it would tell a reviewer that approving the PR
+# approves work the branch does not carry. The ledger drops it, the anchor
+# stands alone, and the one-bead body pr-open.sh wrote is left byte-identical.
+store "[$(anchor T polecat/T 100),
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat","rejection_reason":"signoff requested changes"}}')]"
+pr 100 OPEN polecat/T "$OPENER_BODY"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "1 single-bead" "the graph.v2 routed child drops out and the anchor stands alone"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so the one-bead body is never written"
+eq "$(body 100)" "$OPENER_BODY" "the body is byte-identical"
+
+echo "# a bare gc.routed_to route (pre-graph.v2 dispatch) drops the same way"
 store "[$(anchor T polecat/T 100),
         $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","rejection_reason":"signoff requested changes"}}')]"
 pr 100 OPEN polecat/T "$OPENER_BODY"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "1 single-bead" "the routed child drops out and the anchor stands alone"
-hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so the one-bead body is never written"
+has "$out" "1 single-bead" "the bare-route child drops out too"
 eq "$(body 100)" "$OPENER_BODY" "the body is byte-identical"
 
-echo "# the route is the discriminator: once the child's push clears it, it joins"
-# The same child, its submit-and-exit route now cleared — the very signal
-# merge.sh reads to tell a pushed hand-back from one a pool has yet to claim.
-# Its commits are on the branch, so it enters the ledger and the body names both.
+echo "# the route is the discriminator: with neither key naming a pool, it joins"
+# A settled hand-back keyed on the branch, with both gc.routed_to and
+# gc.execution_routed_to clear, is one no pool will claim; its commits are on the
+# branch, so it enters the ledger and the body names both. Only
+# gc.execution_routed_to differs from the graph.v2 in-flight case above, so it is
+# the discriminator.
 store "[$(anchor T polecat/T 100),
-        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","rejection_reason":"signoff requested changes"}}')]"
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"","gc.execution_routed_to":"","rejection_reason":"signoff requested changes"}}')]"
 pr 100 OPEN polecat/T "$OPENER_BODY"
 out=$("$SUT" 2>&1)
-has "$out" "names 2 beads" "the hand-back joins once its route is cleared"
+has "$out" "names 2 beads" "the hand-back joins once neither route names a pool"
 has "$(body 100)" '- `T1` — Rework branch polecat/T' "…and is listed as a contributor"
 
 echo "# an ordinary one-bead PR is left exactly as pr-open.sh composed it"
@@ -262,12 +274,13 @@ has "$out" "no well-formed marker pair" "two pairs are refused"
 eq "$(body 120)" "$before" "…and the body is untouched"
 
 echo "# a closed no-op duplicate carrying the anchor branch is not a contributor"
-# duplicate-sweep closes a rework or rebase twin as a no-op, and that row keeps
-# metadata.branch naming this head. It committed nothing, so listing it would
-# tell a reviewer to approve work that is not on the branch — the fidelity gap
-# this arm exists to close, turned into over-reporting.
+# A polecat whose work another bead already delivered stamps gc.work_outcome=no-op
+# and closes the bead through bead-rehome; that row keeps metadata.branch naming
+# this head. It committed nothing, so listing it would tell a reviewer to approve
+# work that is not on the branch — the fidelity gap this arm exists to close,
+# turned into over-reporting.
 store "[$(anchor Q polecat/Q 130),
-        $(printf '{"id":"Q1","status":"closed","title":"Rework PR#130: address signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Q","duplicate_of":"Q","gc.work_outcome":"no-op"}}')]"
+        $(printf '{"id":"Q1","status":"closed","title":"Rework PR#130: address signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Q","gc.work_outcome":"no-op"}}')]"
 pr 130 OPEN polecat/Q "$OPENER_BODY"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1); rc=$?
@@ -277,22 +290,21 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so nothing is written"
 eq "$(body 130)" "$OPENER_BODY" "the body is byte-identical to what pr-open.sh composed"
 
 echo "# each no-op marker keeps a row out of the ledger, on its own"
-# duplicate_of, work_outcome=no-op, and gc.work_outcome=no-op each drop a row
-# that carries the anchor branch but committed nothing.
+# work_outcome=no-op and gc.work_outcome=no-op each drop a row that carries the
+# anchor branch but committed nothing.
 store "[$(anchor S polecat/S 150),
-        $(printf '{"id":"S1","status":"closed","title":"dup by duplicate_of","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/S","duplicate_of":"S"}}'),
         $(printf '{"id":"S2","status":"closed","title":"no-op by work_outcome","created_at":"2026-03-01T00:00:00Z","metadata":{"branch":"polecat/S","work_outcome":"no-op"}}'),
         $(printf '{"id":"S3","status":"closed","title":"no-op by gc.work_outcome","created_at":"2026-04-01T00:00:00Z","metadata":{"branch":"polecat/S","gc.work_outcome":"no-op"}}')]"
 pr 150 OPEN polecat/S "$OPENER_BODY"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "1 single-bead" "all three no-op rows are filtered, leaving only the anchor"
+has "$out" "1 single-bead" "both no-op rows are filtered, leaving only the anchor"
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so nothing is written"
 
 echo "# the filter discriminates: a real stacker survives beside a no-op duplicate"
 store "[$(anchor R polecat/R 140),
         $(printf '{"id":"R1","status":"closed","title":"Lane-B migration impl","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Rb","merged_target":"polecat/R","merge_result":"merged"}}'),
-        $(printf '{"id":"R2","status":"closed","title":"duplicate rework no-op","created_at":"2026-03-01T00:00:00Z","metadata":{"branch":"polecat/R","duplicate_of":"R","gc.work_outcome":"no-op"}}')]"
+        $(printf '{"id":"R2","status":"closed","title":"duplicate rework no-op","created_at":"2026-03-01T00:00:00Z","metadata":{"branch":"polecat/R","gc.work_outcome":"no-op"}}')]"
 pr 140 OPEN polecat/R "## Summary"
 out=$("$SUT" 2>&1)
 has "$out" "names 2 beads" "the anchor and the real stacker are named"

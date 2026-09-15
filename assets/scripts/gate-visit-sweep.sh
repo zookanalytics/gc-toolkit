@@ -2,7 +2,7 @@
 # gate-visit-sweep — file one converse visit on the bead each open human gate
 # blocks. The gate is the pack's human-escalation STATE; the visit is its
 # RESOLUTION (the conversation that settles it). A human gate created by any
-# producer — gc-helm.sh demand, mol-first-reaction — gets a visit here, in one
+# producer — gc-helm.sh demand, a proactive first reaction — gets a visit here, in one
 # place, so the visit-on-gate rule and its operator control live together.
 #
 # ONE VISIT PER GATE. The sweep's idempotence key is the gate itself: once a

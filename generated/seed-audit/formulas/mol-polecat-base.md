@@ -13,11 +13,12 @@ then add a terminal step (submit, commit, etc).
 |----------|--------|-------------|
 | convoy_id | runtime | Input convoy tracking the single work bead |
 | base_branch | caller | Base branch to rebase on (default: main) |
-| setup_command | rig `formula_vars` | Setup/install command. Empty = skip. |
-| typecheck_command | rig `formula_vars` | Type check command. Empty = skip. |
-| test_command | rig `formula_vars` | Test command. Empty = skip. |
-| lint_command | rig `formula_vars` | Lint command. Empty = skip. |
-| build_command | rig `formula_vars` | Build command. Empty = skip. |
+| setup_command | rig `formula_vars` | Setup/install command. Empty = skip; if ALL are empty, falls back to repo instructions. |
+| typecheck_command | rig `formula_vars` | Type check command. Empty = skip; if ALL are empty, falls back to repo instructions. |
+| test_command | rig `formula_vars` | Test command. Empty = skip; if ALL are empty, falls back to repo instructions. |
+| lint_command | rig `formula_vars` | Lint command. Empty = skip; if ALL are empty, falls back to repo instructions. |
+| build_command | rig `formula_vars` | Build command. Empty = skip; if ALL are empty, falls back to repo instructions. |
+| escalation_target | caller / rig `formula_vars` | Mail recipient for help/blocked escalations (default: `human`) |
 
 Steps run in independent shell contexts, so each step that needs the work
 bead re-derives it from the input convoy:
@@ -29,11 +30,16 @@ WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 
 
 Variables:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
-  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip. (default=)
-  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip. (default=)
-  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip. (default=)
-  {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip. (default=)
-  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip. (default=)
+  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{escalation_target}}: Mail recipient for help and escalation mail. Defaults to the reserved `human`
+alias, which resolves in every city. Cities that staff a work-health role
+(e.g. the gastown pack's witness) can point this at it, for example
+`escalation_target = "<rig>/witness"`.
+ (default=human)
+  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
 
 Steps (6):
   ├── mol-polecat-base.load-context: Load context and verify assignment

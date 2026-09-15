@@ -8,9 +8,9 @@
 #
 #   (DIRECT)    --no-react files the visit NOW, through gc-helm.sh open —
 #               the script must never hand-roll a gate-visit block of its own.
-#   (SINGLE)    the react path files NO visit: mol-first-reaction's
-#               advance-and-drain step files it, and a second one would split
-#               the conversation into two sittings of the same subject.
+#   (SINGLE)    the react path files NO visit: the proactive reaction's ruling
+#               exit files it, and a second one would split the conversation
+#               into two sittings of the same subject.
 #   (SHED)      the whole reason the fallback exists. `gc sling` is
 #               fire-and-forget and returns 0 whether or not anything will
 #               ever pick the bead up, so an unguarded react path leaves the
