@@ -120,6 +120,13 @@ openstep() { printf '{"id":"%s","status":"open","assignee":"","updated_at":"%s",
 unheld() { printf '{"id":"%s","status":"in_progress","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin"%s}}' "$1" "$(ago "$2")" "${3:+,$3}"; }
 # openstep_md <id> <route> <seconds-ago> <extra-metadata-json>
 openstep_md() { printf '{"id":"%s","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"%s",%s}}' "$1" "$(ago "$3")" "$2" "$4"; }
+# openstep_pred <id> <route> <created-seconds-ago> <predecessor-id> — an open
+# step carrying one blocking predecessor, the edge arm 2 times the offer from.
+# updated_at is the pour stamp; the offer is timed from the predecessor's close.
+openstep_pred() { printf '{"id":"%s","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"%s"},"dependencies":[{"issue_id":"%s","depends_on_id":"%s","type":"blocks"}]}' "$1" "$(ago "$3")" "$2" "$1" "$4"; }
+# closed_pred <id> <closed-seconds-ago> — a closed predecessor whose closed_at
+# is when the step it blocks became offerable. Reached only by the id lookup.
+closed_pred() { printf '{"id":"%s","status":"closed","closed_at":"%s","metadata":{}}' "$1" "$(ago "$2")"; }
 # root <id> <status> <metadata-json> — the molecule root a step names. Neither
 # arm's listing returns it; only the hold lookup, which asks for it by id.
 root() { printf '{"id":"%s","status":"%s","assignee":"","metadata":%s}' "$1" "$2" "$3"; }
@@ -743,6 +750,76 @@ OUT=$(SESSIONS_JSON="$TMP/sessions-noliveness.json" run_check); RC=$?
 eq "$RC" "1" "a roster with neither state nor running WARNS, never mass-reports DEAD"
 has "$OUT" "cannot determine" "the warning says the check declined to judge"
 hasnt "$OUT" "not active" "no holder is classified DEAD against the absent field"
+clear_stores
+
+# --- 18. arm 2 ages from the offer, not the pour --------------------------
+# A successor step is created when the molecule is poured and waits `blocked`
+# behind its predecessor for the molecule's whole life. It becomes offerable
+# only when that predecessor closes, so timing its age from created_at reports
+# it stale the instant it is offered. The age is timed from the predecessor's
+# close instead.
+agents "$(agent rig/pool.polecat false 2)"
+sessions "$(live lx-1 pool-1 "" 30 rig/pool.polecat)"
+
+# Poured 2h ago, predecessor closed 30s ago: offered for 30s, not 2h.
+store alpha "$(openstep_pred a-succ rig/pool.polecat 7200 a-pred)" "$(closed_pred a-pred 30)"
+ready alpha '{"id":"a-succ"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step offered 30s ago is silent though it was poured 2h ago"
+hasnt "$OUT" "a-succ" "the freshly-offered step is not named"
+clear_stores
+
+# Predecessor closed well past the bound: the step has genuinely been offered
+# that long and the finding stands, reporting the offer age not the pour age.
+store alpha "$(openstep_pred a-succ rig/pool.polecat 9000 a-pred)" "$(closed_pred a-pred 7200)"
+ready alpha '{"id":"a-succ"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a step whose predecessor closed 2h ago is still the error"
+has "$OUT" "a-succ" "the genuinely-stale offer is named"
+AGE=$(printf '%s' "$OUT" | sed -n 's/.*a-succ.*NEVER claimed for \([0-9]*\)m.*/\1/p')
+between "$AGE" 118 126 "the error reports the offer age, not the older pour age"
+clear_stores
+
+# A predecessor the store cannot return leaves the step on its bead stamp — the
+# pre-fix age — never on silence: an unreadable offer time fails toward the alarm.
+store alpha "$(openstep_pred a-succ rig/pool.polecat 7200 a-gone)"
+ready alpha '{"id":"a-succ"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an unresolvable predecessor falls back to the pour age and still flags"
+has "$OUT" "a-succ" "the fallback still names the step"
+clear_stores
+
+# The newest of several predecessors is the offer time: an older sibling that
+# closed long ago must not age the step past a recent one that unblocked it.
+store alpha "$(printf '{"id":"a-succ","status":"open","assignee":"","updated_at":"%s","metadata":{"gc.step_ref":"mol-review.pin","gc.routed_to":"rig/pool.polecat"},"dependencies":[{"issue_id":"a-succ","depends_on_id":"a-old","type":"blocks"},{"issue_id":"a-succ","depends_on_id":"a-new","type":"blocks"}]}' "$(ago 9000)")" \
+            "$(closed_pred a-old 7200)" "$(closed_pred a-new 30)"
+ready alpha '{"id":"a-succ"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the offer is timed from the LAST predecessor to close, not the first"
+clear_stores
+
+# --- 19. a control-routed step is judged on the dispatcher's terms --------
+# workflow-finalize is advanced in-process by the control-dispatcher, which
+# never calls `gc hook --claim`, so gc.claimed_at is empty on it by construction.
+# The pool remedies cannot apply, so it is a note and never the never-claimed
+# error — even when it has genuinely been offered past the bound.
+store alpha "$(openstep a-fin rig/core.control-dispatcher 7200)"
+ready alpha '{"id":"a-fin"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a stale control-dispatcher step is a note, not the never-claimed error"
+has "$OUT" "control-dispatcher" "the note names the dispatcher route"
+has "$OUT" "in-process" "the note explains the step is advanced in-process"
+hasnt "$OUT" "nudge the pool" "the pool is never nudged at a control step"
+hasnt "$OUT" "NEVER claimed" "the never-claimed error is withheld from a control step"
+clear_stores
+
+# The healthy finalize is doubly covered: aged from a just-closed predecessor,
+# it is silent before the control note is even reached.
+store alpha "$(openstep_pred a-fin rig/core.control-dispatcher 7200 a-pred)" "$(closed_pred a-pred 20)"
+ready alpha '{"id":"a-fin"}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a freshly-offered control step is silent"
+hasnt "$OUT" "a-fin" "nothing names the healthy finalize"
 clear_stores
 
 echo
