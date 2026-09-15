@@ -38,6 +38,40 @@ name the city's own store at all: `gc --rig <hq-rig> bd list` answers empty
 where `gc bd --db <city>/.beads list` answers. Only a `--db` path reaches
 every store, the city's included.
 
+## A flag's value can select the store
+
+Resolution reads the id out of the command's arguments. It walks them left to
+right, skips every argument that begins with `-`, and retargets the whole
+command to the store owning the first remaining argument that resolves as a
+bead. A positional id is found this way, which is how `gc bd show
+<foreign-id>` reaches another rig at all.
+
+A flag's value is its own argument, so the same walk reads it, and the store
+moves on the shape of the value rather than the flag it belongs to. A value
+that is itself id-shaped is taken as the id to resolve and moves the command
+to that id's store; a value that is not, and the `--flag=value` spelling whose
+whole token begins with `-`, are both passed over.
+
+The two spellings fail in opposite directions, and each fails the way this
+document is about — a silent empty result on exit 0, shaped exactly like a
+real miss:
+
+- A value flag carrying an id-shaped value in the **spaced** form reads from
+  the wrong store. `gc bd list --assignee <session-id>` is the one that bites:
+  a session id is a bead in the city's own store, so the query retargets there
+  and reports no matches for a session that holds beads in its rig.
+  `-a` and `-l` take a value the same way. `--assignee=<session-id>` stays in
+  the rig and answers correctly.
+- `--id`, whose job is to name a bead that may live elsewhere, reaches that
+  store only in the **spaced** form. `gc bd list --id=<foreign-id>` is skipped
+  by the walk, never leaves the local store, and answers empty; `gc bd list
+  --id <foreign-id>` resolves the prefix and answers.
+
+So there is no single safe habit. Give `--id` its value spaced, pass every
+other value flag as `--flag=value`, and read a positional id as the
+store-selecting argument it is. `--metadata-field key=value` is unaffected:
+its `key=value` argument never parses as a bare id.
+
 ## Absence has to be earned
 
 The failure is not the empty answer. It is a gate that reads one as
