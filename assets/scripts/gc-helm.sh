@@ -1708,22 +1708,46 @@ cmd_engage() {
     #
     # gc says WHY a spawn failed only on stderr (template not found in this rig,
     # alias already held, transport down), so it is kept for the message.
-    spawn_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-engage-spawn.XXXXXX" 2>/dev/null || printf '')
-    if [ -n "$spawn_errf" ]; then
-        spawn=$(GC_DIR="$path" gc session new "$template" --alias "$VISIT" --no-attach --json 2>"$spawn_errf" | scrub)
-        spawn_why=$(tr '\n' ' ' < "$spawn_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
-        rm -f "$spawn_errf" 2>/dev/null || true
-    else
-        spawn=$(GC_DIR="$path" gc session new "$template" --alias "$VISIT" --no-attach --json 2>/dev/null | scrub)
-        spawn_why=""
+    # One spawn attempt under the alias in $1: capture the identity JSON on
+    # stdout and gc's reason on stderr (into spawn_why), then parse sid/sname.
+    engage_spawn() {
+        spawn_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-engage-spawn.XXXXXX" 2>/dev/null || printf '')
+        if [ -n "$spawn_errf" ]; then
+            spawn=$(GC_DIR="$path" gc session new "$template" --alias "$1" --no-attach --json 2>"$spawn_errf" | scrub)
+            spawn_why=$(tr '\n' ' ' < "$spawn_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
+            rm -f "$spawn_errf" 2>/dev/null || true
+        else
+            spawn=$(GC_DIR="$path" gc session new "$template" --alias "$1" --no-attach --json 2>/dev/null | scrub)
+            spawn_why=""
+        fi
+        sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
+        sname=$(printf '%s' "$spawn" | jq -r '.session_name // ""' 2>/dev/null || true)
+    }
+
+    # Spawn under the bare visit id first — it is the alias other engages read
+    # back as a display hint. gascity's ValidateAlias runs before any session is
+    # created and refuses an alias matching the session-id syntax `^gc-[0-9]+$`,
+    # the reserved `human`, an `s-` prefix, or the 64-char cap, every rejection
+    # carrying the sentinel "invalid session alias". A visit on the gascity rig,
+    # whose bead prefix is `gc`, can get an all-numeric id (gc-62297) that reads
+    # as a session id and is refused, leaving the visit un-engageable. On that
+    # sentinel, retry once under a `v-` prefix no rule can match. Keying on gc's
+    # message rather than re-testing ValidateAlias's rules in shell keeps the two
+    # from drifting, and covers every rejection reason with one retry.
+    session_alias=$VISIT
+    engage_spawn "$session_alias"
+    if [ -z "$sname" ] || [ -z "$sid" ]; then
+        case "$spawn_why" in
+            *"invalid session alias"*)
+                session_alias="v-$VISIT"
+                engage_spawn "$session_alias" ;;
+        esac
     fi
-    sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
-    sname=$(printf '%s' "$spawn" | jq -r '.session_name // ""' 2>/dev/null || true)
     if [ -z "$sname" ] || [ -z "$sid" ]; then
         spawn_hint=""
         case "$spawn_why" in
             *"not found"*) spawn_hint=" The converse templates are rig-scoped: rig '${rig:-?}' ($path) does not carry $template, so a visit on a bead there cannot be engaged from that rig." ;;
-            *"alias already"*) spawn_hint=" A session still holds the alias '$VISIT' — a sitting from an earlier engage that never bound; close it (gc session close <id>) and re-run." ;;
+            *"alias already"*) spawn_hint=" A session still holds the alias '$session_alias' — a sitting from an earlier engage that never bound; close it (gc session close <id>) and re-run." ;;
         esac
         echo "$PROG: engage: 'gc session new $template' did not return a session identity — nothing assigned.${spawn_why:+ gc said: $spawn_why.}$spawn_hint Output: ${spawn:-<empty>}" >&2
         exit 4
