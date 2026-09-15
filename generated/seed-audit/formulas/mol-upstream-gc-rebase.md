@@ -78,17 +78,22 @@ is the durable holder.
 
 Variables:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
-  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip. (default=)
+  {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{check_command}}: Post-rebase quality gate command. The default `make check` in gascity is fmt-check + lint + vet + test — the authoritative safety net for the kept set, since conflict resolutions are committed by `git rebase --continue` without the pre-commit hook. Operators can scope down (e.g. --var check_command='make test'); the default is intentionally the full gate. (default=make check)
+  {{escalation_target}}: Mail recipient for help and escalation mail. Defaults to the reserved `human`
+alias, which resolves in every city. Cities that staff a work-health role
+(e.g. the gastown pack's witness) can point this at it, for example
+`escalation_target = "<rig>/witness"`.
+ (default=human)
   {{install_command}}: Command that rebuilds and installs the gc binary locally (default=make install)
-  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip. (default=)
+  {{lint_command}}: Command to run linting. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{notify_recipient}}: Mail target for completion and abort notifications (default=human)
   {{origin_remote}}: Git remote name pointing at the city's fork (default=origin)
   {{requesting_keeper}}: Keeper agent address (e.g., gascity/gascity-keeper.keeper) for abort handbacks. Optional; falls back to notify_recipient, but a keeper-aware operator should stamp metadata.requesting_keeper at dispatch. (default=)
-  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip. (default=)
+  {{setup_command}}: Setup/install command (e.g., pnpm install). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{tagged_check_command}}: Compile-only gate for build-tagged code, run alongside check_command. gascity's `make check` chain is untagged from end to end, so a break behind a `//go:build` constraint compiles clean under the main gate and only surfaces as red CI after the force-push. Compile-only on purpose: the tagged suites are long, and what this catches is a build failure. Empty skips it. (default=go vet -tags integration ./...)
-  {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip. (default=)
-  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip. (default=)
+  {{test_command}}: Command to run tests. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
+  {{typecheck_command}}: Type check command (e.g., tsc --noEmit). From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{upstream_branch}}: Branch to rebase onto and push back to (default=main)
   {{upstream_remote}}: Git remote name pointing at the upstream gascity repository (default=upstream)
 

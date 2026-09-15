@@ -17,20 +17,27 @@ to the destination, close the bead, drain.
 | meta_prompt_path  | caller  | Absolute path to the rendered meta-prompt file (input)   |
 | dest_path         | caller  | Absolute path where the generated prompt template goes   |
 | synth_role        | caller  | Name of the role being designed (for the trace header)   |
+| escalation_target | caller  | Mail recipient for stuck escalations (default: `human`)  |
 
 ## Failure Modes
 
 | Situation                          | Action                                                |
 |------------------------------------|-------------------------------------------------------|
-| meta_prompt_path does not exist    | Mail Witness, mark stuck, do not write a partial file |
-| dest_path is unwritable            | Mail Witness, mark stuck, do not silently swallow     |
-| Generated output is empty          | Re-run once; if still empty, mail Witness             |
+| meta_prompt_path does not exist    | Mail the escalation target, mark stuck; no partial file |
+| dest_path is unwritable            | Mail the escalation target, mark stuck, do not swallow  |
+| Generated output is empty          | Re-run once; if still empty, mail the escalation target |
 
 
 Required vars:
   {{dest_path}}: Absolute path where the generated prompt template will be written
   {{meta_prompt_path}}: Absolute path to the rendered meta-prompt file (input)
   {{synth_role}}: Role name being designed (used in the file header for traceability)
+
+Optional vars:
+  {{escalation_target}}: Mail recipient for escalations when synthesis cannot proceed. Defaults to the
+reserved `human` alias, which resolves in every city. Cities that staff a
+work-health role (e.g. the gastown pack's witness) can point this at it.
+ (default=human)
 
 Steps (4):
   ├── mol-prompt-synth.read-meta-prompt: Read the meta-prompt that describes what to generate

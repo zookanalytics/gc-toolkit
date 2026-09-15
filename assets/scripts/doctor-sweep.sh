@@ -268,8 +268,18 @@ if [ "$IN_FLIGHT" -eq 1 ]; then
 
   if ! kill -0 "$PID" 2>/dev/null; then
     collect failed
-    report failed "reason=sweep-vanished" "elapsed=$ELAPSED" "pid=$PID" \
-      "stderr=$RUN/stderr.log"
+    # The wrapper names the signal that ended it when it could catch one; an
+    # untrappable kill (SIGKILL, OOM) leaves no file, so say so rather than
+    # nothing. launch/unit point a reader at the run's own journal.
+    CAUSE="$(read_file "$RUN/cause")"
+    LAUNCH="$(read_file "$RUN/launch")"
+    UNIT="$(read_file "$RUN/unit")"
+    VANISHED=("reason=sweep-vanished" "cause=${CAUSE:-unknown}" \
+      "elapsed=$ELAPSED" "pid=$PID")
+    [ -n "$LAUNCH" ] && VANISHED+=("launch=$LAUNCH")
+    [ -n "$UNIT" ] && VANISHED+=("unit=$UNIT")
+    VANISHED+=("stderr=$RUN/stderr.log")
+    report failed "${VANISHED[@]}"
     exit 0
   fi
 
@@ -384,16 +394,33 @@ printf '%s' "$NOW" > "$RUN/started_at"
 # file, sh sees the body unexpanded. The wrapper records its own pid before the
 # sweep and writes `rc` LAST, by rename, so a reader never sees a half-written
 # payload behind a finished marker.
+#
+# It also names its own cause of death. systemd counts SIGHUP/SIGINT/SIGTERM/
+# SIGPIPE as a clean stop and logs no failure line for them, so a sweep a reap
+# ends with one of those leaves no trace in the journal either; the trap records
+# which signal it was. The sweep runs in the background and the wrapper `wait`s,
+# so a trapped signal fires the handler at once instead of after doctor returns.
+# SIGKILL and OOM cannot be trapped and leave no cause file, which the reader
+# reports as `unknown`.
 SWEEP_BODY="$RUN/sweep.sh"
 cat > "$SWEEP_BODY" <<'BODY'
-printf %s "$$" > "$5"
-"$1" doctor --json > "$2" 2> "$3"
+gc=$1; payload=$2; errlog=$3; rcfile=$4; pidfile=$5; finfile=$6; causefile=$7
+printf %s "$$" > "$pidfile"
+_died() { printf 'signal:%s' "$1" > "$causefile.tmp" && mv "$causefile.tmp" "$causefile"; exit "$2"; }
+trap '_died HUP 129'  HUP
+trap '_died INT 130'  INT
+trap '_died QUIT 131' QUIT
+trap '_died PIPE 141' PIPE
+trap '_died TERM 143' TERM
+"$gc" doctor --json > "$payload" 2> "$errlog" &
+sweep_pid=$!
+wait "$sweep_pid"
 rc=$?
-date +%s > "$6"
-printf %s "$rc" > "$4.tmp" && mv "$4.tmp" "$4"
+date +%s > "$finfile"
+printf %s "$rc" > "$rcfile.tmp" && mv "$rcfile.tmp" "$rcfile"
 BODY
 SWEEP_ARGV=(sh "$SWEEP_BODY" "$GC_BIN" "$RUN/payload.json" "$RUN/stderr.log" \
-  "$RUN/rc" "$RUN/pid" "$RUN/finished_at")
+  "$RUN/rc" "$RUN/pid" "$RUN/finished_at" "$RUN/cause")
 
 launched=0
 if [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] \
@@ -401,23 +428,40 @@ if [ -z "${GC_DOCTOR_SWEEP_NO_SYSTEMD:-}" ] \
    && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
   # Forward the caller's environment faithfully: env -0 keeps values that hold
   # spaces or newlines whole, and only POSIX-named vars pass so a shell-function
-  # export cannot make systemd reject the whole launch.
+  # export cannot make systemd reject the whole launch. GC_SESSION_ID is the one
+  # exception, dropped on purpose: the city-wide session-orphan reaper finds a
+  # detached process by the GC_SESSION_ID in its /proc/<pid>/environ and kills
+  # its whole process group, which this unit's cgroup does not shield it from.
+  # Carry the caller's id and the sweep looks like the deacon session it was
+  # launched from, so that session's next teardown reaps it mid-run. gc doctor
+  # needs the city context this forwards, never the session id.
   SETENV=()
   while IFS= read -r -d '' kv; do
-    case ${kv%%=*} in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+    case ${kv%%=*} in
+      ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*|GC_SESSION_ID) continue ;;
+    esac
     SETENV+=(--setenv="$kv")
   done < <(env -0 2>/dev/null)
+  # A named unit is what lets a later reader pull this run's own journal after
+  # the transient unit is collected; the start second keeps the name unique.
+  UNIT="gc-doctor-sweep-$NOW.service"
   if [ "${#SETENV[@]}" -gt 0 ] \
-     && systemd-run --user --collect --quiet \
+     && systemd-run --user --collect --quiet --unit="$UNIT" \
           --description="gc doctor sweep (survives session teardown)" \
           "${SETENV[@]}" "${SWEEP_ARGV[@]}" >/dev/null 2>&1; then
     launched=1
+    printf 'systemd' > "$RUN/launch"
+    printf '%s' "$UNIT" > "$RUN/unit"
   fi
 fi
 if [ "$launched" -eq 0 ]; then
   LAUNCH=(setsid)
   command -v setsid >/dev/null 2>&1 || LAUNCH=(nohup)
-  "${LAUNCH[@]}" "${SWEEP_ARGV[@]}" </dev/null >/dev/null 2>&1 &
+  printf '%s' "${LAUNCH[0]}" > "$RUN/launch"
+  # `env -u GC_SESSION_ID` for the same reason as the systemd branch: shed the
+  # caller's session identity so the reaper cannot claim the detached sweep by
+  # it. Here the child inherits the caller's env directly, so drop it at exec.
+  "${LAUNCH[@]}" env -u GC_SESSION_ID "${SWEEP_ARGV[@]}" </dev/null >/dev/null 2>&1 &
 fi
 
 printf '%s' "$NOW" > "$STAMP"
