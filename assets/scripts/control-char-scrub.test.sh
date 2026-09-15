@@ -78,7 +78,7 @@ echo "── 3. the byte set, executed ──"
 # authority on the byte set rather than a second copy of it.
 gen_bytes() { local i; for i in $(seq 0 31) 127; do printf "\\$(printf '%03o' "$i")"; done; }
 SURVIVORS="$(gen_bytes | ( eval "$BLOCK"; scrub ) | od -An -tu1 | tr -s ' ' '\n' | grep -v '^$' | tr '\n' ' ' | sed 's/ *$//')"
-eq "$SURVIVORS" "10 127" "of every C0 byte and DEL, exactly LF (10) and DEL (127) survive"
+eq "$SURVIVORS" "127" "of every C0 byte and DEL, only DEL (127) survives — JSON forbids raw C0 (U+0000–U+001F), LF included, and permits DEL"
 
 echo "── 4. the rescue property ──"
 # doctor/check-state-space/run.test.sh §8 feeds a bead whose notes carry a raw
@@ -94,6 +94,19 @@ GOT_TAB="$( tr -d "$KEEP_TAB" < "$TMP/payload.json" | jq -r '.[0].id' 2>/dev/nul
 if [ "$GOT_TAB" != "a-10" ]; then ok "a TAB-preserving set loses that same payload (control)"
 else bad "a TAB-preserving set loses that same payload (control)" \
         "it parsed as '$GOT_TAB' — the fixture no longer carries a raw TAB, so §3 is unguarded"; fi
+# A raw LF inside a string is invalid JSON the same way a raw TAB is, and the
+# scrub deletes it the same way. bd emits one when it fails to escape a
+# multi-paragraph note, which aborts jq and reads a whole list as empty.
+printf '[{"id":"a-11","notes":"line one\nline two"}]' > "$TMP/lf.json"
+GOT_LF="$( ( eval "$BLOCK"; scrub ) < "$TMP/lf.json" | jq -r '.[0].id' 2>/dev/null )"
+eq "$GOT_LF" "a-11" "a raw LF in a JSON string still parses after the scrub"
+# The control: a set that spares LF loses that same payload, so deleting LF is
+# load-bearing.
+KEEP_LF='\000-\011\013-\037'
+GOT_KEPT_LF="$( tr -d "$KEEP_LF" < "$TMP/lf.json" | jq -r '.[0].id' 2>/dev/null )"
+if [ "$GOT_KEPT_LF" != "a-11" ]; then ok "an LF-preserving set loses that same payload (control)"
+else bad "an LF-preserving set loses that same payload (control)" \
+        "it parsed as '$GOT_KEPT_LF' — the fixture no longer carries a raw LF, so the LF rescue is unguarded"; fi
 
 echo "── 5. no in-script scrub outside the fence ──"
 # The detector holds the matcher. A second copy of it here would drift from

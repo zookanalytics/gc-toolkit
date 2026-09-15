@@ -8,9 +8,11 @@ import (
 	"testing"
 )
 
-func TestScrubKeepsOnlyLF(t *testing.T) {
-	in := []byte("a\x00b\x1fc\td\ne\rf")
-	if got, want := string(Scrub(in)), "abcd\nef"; got != want {
+func TestScrubDeletesEveryC0Byte(t *testing.T) {
+	// Every C0 byte (U+0000–U+001F) goes, LF included; DEL (0x7f) and ordinary
+	// text stay, because JSON forbids raw only the C0 range inside a string.
+	in := []byte("a\x00b\x1fc\td\ne\rf\x7fg")
+	if got, want := string(Scrub(in)), "abcdef\x7fg"; got != want {
 		t.Fatalf("Scrub = %q, want %q", got, want)
 	}
 }
@@ -18,14 +20,15 @@ func TestScrubKeepsOnlyLF(t *testing.T) {
 // The scrubbers are interchangeable or they are not: lifecycle.sh execs this
 // binary when one is available and falls back to shell when it is not, so a
 // payload one accepts and the other rejects is a difference the caller cannot
-// see. Raw TAB and CR are the two bytes where the implementations last drifted.
+// see. A raw TAB, LF, or CR inside a string is invalid JSON, and both must strip it.
 func TestScrubAcceptsWhatTheShellFallbackAccepts(t *testing.T) {
 	for _, tc := range []struct{ name, raw string }{
 		{"raw tab in a JSON string", `[{"id":"b-1","notes":"col\tcol","metadata":{}}]`},
+		{"raw LF in a JSON string", `[{"id":"b-1","notes":"line\nline","metadata":{}}]`},
 		{"raw CR in a JSON string", `[{"id":"b-1","notes":"line\rline","metadata":{}}]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := []byte(strings.NewReplacer(`\t`, "\t", `\r`, "\r").Replace(tc.raw))
+			raw := []byte(strings.NewReplacer(`\t`, "\t", `\n`, "\n", `\r`, "\r").Replace(tc.raw))
 			if err := json.Unmarshal(raw, &[]Bead{}); err == nil {
 				t.Fatal("fixture is not actually invalid JSON; the scrubber would prove nothing")
 			}

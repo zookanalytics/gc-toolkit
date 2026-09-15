@@ -25,7 +25,7 @@ PROG="review-sweep"
 # A raw C0 byte inside a JSON string aborts jq on the whole payload. All but
 # LF go: raw TAB and CR do not occur in bd/gh output, and the TAB-splitting
 # consumers downstream split jq's own @tsv, emitted after this runs.
-scrub() { tr -d '\000-\011\013-\037'; }
+scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
 # A review is dispatched into any of these; closed ones need no sweeping.
