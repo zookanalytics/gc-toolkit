@@ -716,6 +716,31 @@ cmd_takeaway() {
             echo "$PROG: takeaway: $bead still reads gc.takeaway_settled='$settled_got', not '$no_wait' — the headline is stamped, but the disposition beside it is the one the sitting before it left, so the wait check answers for this bead from a stamp nobody wrote for it. Stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.takeaway_settled=$no_wait" >&2
         fi
     fi
+    # The completion proof is read back like the route beside it. Two readers key
+    # on gc.proactive_reaction=1 as "the release landed": first-reaction-dispose's
+    # retry guard (assets/scripts/first-reaction-dispose.sh) and the proactive
+    # sling loop, which skips a bead already stamped it
+    # (tools/proactive-first-reaction-fixture.sh). It rides the same multi-pair
+    # write as the route, so the same silent drop can leave it empty; a park whose
+    # proof lands empty reads to both as a partial that never completed, and the
+    # next dispose re-releases a bead a worker may already hold. Read it back and
+    # repair it — a repair that also misses is a verb failure, because a caller
+    # reading a zero exit as "released, proof durable" would be wrong.
+    proactive_missed=""
+    if [ -n "$release_park" ]; then
+        proactive_got=$(meta_now "$bead" gc.proactive_reaction)
+        if [ "$proactive_got" != "1" ]; then
+            echo "$PROG: takeaway: gc.proactive_reaction on $bead read back as '$proactive_got', expected '1' — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 || true
+            proactive_got=$(meta_now "$bead" gc.proactive_reaction)
+            if [ "$proactive_got" = "1" ]; then
+                echo "$PROG: takeaway: the proactive-reaction repair landed on $bead" >&2
+            else
+                proactive_missed=1
+            fi
+        fi
+    fi
     # The pour stamp is cleared best-effort: gc.execution_routed_to names the pool
     # the pour dispatched this bead to, and a release ends that pour. No arm or
     # reconcile guard reads it (reconcile keys on its own
@@ -767,6 +792,14 @@ cmd_takeaway() {
     # Reported at its read-back above; the exit waits until here so the edges
     # and the quiesce still run, the way the route miss does.
     if [ -n "$settled_missed" ]; then
+        exit 4
+    fi
+    # The completion proof is exit-4, not a warn: unlike the pour stamp below, it
+    # HAS readers, and a missing proof causes the exact re-release the guards it
+    # feeds exist to prevent. The release and edges are kept and named, so a hand
+    # repair finishes it.
+    if [ -n "$proactive_missed" ]; then
+        echo "$PROG: takeaway: $bead is released but gc.proactive_reaction did not stamp as '1' — the completion proof first-reaction-dispose and cmd_sling read to refuse a second release is missing, so a re-offered dispose would re-release this bead. The headline, release and edges are written; stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.proactive_reaction=1" >&2
         exit 4
     fi
     # A surviving pour stamp is cosmetic — no arm or reconcile guard reads it — so
