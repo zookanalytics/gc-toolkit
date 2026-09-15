@@ -967,11 +967,18 @@ func openReviewChild(blockers []Blocker) bool {
 //     moving the gate even when the machine axis has not caught up to it.
 //   - the grace window keeps a fresh park — a gate between review rounds whose
 //     next step has not been dispatched yet — from reading as stalled.
+//   - an unread edge set is excluded. hasReview and hasInFlight both come off
+//     a.Blockers, so when the source could not read this anchor's edges
+//     ([Anchor.WaitingUnknown]) the two report false without having proven the
+//     gate unattended. Firing the stall on that absence would drop progressing
+//     gate work into STALLED on a degraded read — the same fail-open [ruled]
+//     refuses on its own side, a band asserted on what was never established.
 //
 // stale is the anchor's own age in days: a gate that has genuinely stopped is
 // not being touched, so its updated_at ages while a live one's does not.
 func preOpenStalled(a Anchor, machine string, owed, hasReview, hasInFlight bool, stale int) bool {
 	return a.Metadata[mdMergeResult] == mergePreOpenGate &&
+		!a.WaitingUnknown &&
 		!owed && machine != MachineProgressing && !hasReview && !hasInFlight &&
 		stale >= preOpenGraceDays
 }
