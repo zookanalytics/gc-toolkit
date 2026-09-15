@@ -522,17 +522,22 @@ that stamp. It asserts nothing about the sentence and blanks nothing —
   edge at. The stamp is a record, not a gate.
 - **A stand-down (`takeaway … --release --no-wait`).** The dispatch's premise
   is falsified and the work should NOT happen. That is a disposal: the anchor
-  is parked, and both of the molecule's pool-routed doors are quiesced so the
-  dead chain stops re-offering. Those are its step beads and its workflow
-  root. An edge would assert a wait that does not exist.
+  is parked, and the molecule beneath it — no live session will ever close its
+  chain — is REAPED, every step and its workflow root force-closed. A mere
+  de-route cannot end it: an open step, even unrouted, keeps workflow-finalize
+  blocked, so the molecule never reaps and its held steps keep drawing
+  re-dispatches. A stood-down molecule should die, not park. The one molecule
+  spared is the releasing session's own — a mol-first-reaction terminal step
+  disposing the anchor it runs on — which closes its chain the normal way and
+  only sheds its husk pins. An edge would assert a wait that does not exist.
 
   An anchor CLOSED before the stand-down reaches it — a fold that landed after
-  the pour, leaving the molecule routed behind it — takes the quiesce without
-  the park. Reopening it would make work whose disposition already landed
-  visible as open again, so the verb keeps the disposition, skips the reopen,
-  the unassign and the route stamp, and walks the molecule anyway. `--route`
-  is refused there and exits non-zero: a pool that claimed a disposed bead
-  would cut a branch for superseded work.
+  the pour, leaving the molecule routed behind it — takes the reap without the
+  park. Reopening it would make work whose disposition already landed visible
+  as open again, so the verb keeps the disposition, skips the reopen, the
+  unassign and the route stamp, and reaps the molecule anyway. `--route` is
+  refused there and exits non-zero: a pool that claimed a disposed bead would
+  cut a branch for superseded work.
 
 Everywhere else the takeaway carries its wait as an edge —
 `--waiting-on` for work a pool owes, a demand bead for what a person owes.
