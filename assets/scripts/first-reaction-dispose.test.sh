@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic tests for first-reaction-dispose.sh — the three exits
-# mol-first-reaction's terminal step chooses between. Runs the REAL script
-# with a stubbed `gc`, a stubbed gc-helm.sh and a stubbed deferred-dispatch.sh
-# (both reached through the tool-override env vars), so no live city, Dolt or
-# network is touched. What each block guards is named above it.
+# Hermetic tests for first-reaction-dispose.sh — the four exits the proactive
+# reaction chooses between. Runs the REAL script with a stubbed `gc`, a stubbed
+# gc-helm.sh, a stubbed deferred-dispatch.sh and a stubbed bead-rehome.sh (all
+# reached through the tool-override env vars), so no live city, Dolt or network
+# is touched. What each block guards is named above it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,10 +91,26 @@ exit 0
 DD
 chmod +x "$TMP/deferred"
 
+# bead-rehome stub: the superseded exit --checks first, then closes. --check
+# refuses under FAKE_REHOME_CHECK_FAILS; a real close refuses under
+# FAKE_REHOME_FAILS. Both paths log, so order and gating are observable.
+cat > "$TMP/rehome" <<'RE'
+#!/usr/bin/env bash
+printf 'REHOME %s\n' "$*" >> "$FAKE_LOG"
+case " $* " in
+  *" --check "*)
+    [ -n "${FAKE_REHOME_CHECK_FAILS:-}" ] && { echo "bead-rehome: --check refused: origin carries unlanded work" >&2; exit 1; }
+    exit 0 ;;
+esac
+[ -n "${FAKE_REHOME_FAILS:-}" ] && { echo "bead-rehome: the close was refused" >&2; exit 5; }
+exit 0
+RE
+chmod +x "$TMP/rehome"
+
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/log"
 export GC_HELM_TOOL="$TMP/helm" GC_DEFERRED_DISPATCH_TOOL="$TMP/deferred" \
-       GC_PROACTIVE_TOOL="$TMP/proactive"
+       GC_PROACTIVE_TOOL="$TMP/proactive" GC_BEAD_REHOME_TOOL="$TMP/rehome"
 
 run() { : > "$FAKE_LOG"; RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"; }
 
@@ -338,6 +354,10 @@ has "the visit IS the answer" "$ERR" "(ORIGIN) …and the refusal names the cont
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1
 eq "$RC" "2" "(ORIGIN) …and the blocked exit too"
 
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-fix
+eq "$RC" "2" "(ORIGIN) …and the superseded exit too"
+hasnt "REHOME" "$LOG" "(ORIGIN) …with no close attempted"
+
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "0" "(ORIGIN) …while the ruling exit is exactly what it wants"
 
@@ -346,14 +366,14 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "0" "(ORIGIN) an unreadable bead is not evidence of a commission"
 unset FAKE_SHOW_JSON
 
-# ── A LANDED first reaction refuses a second dispose ─────────────────────────
-# gc-helm.sh takeaway --release stamps gc.proactive_reaction=1 in the write that
-# parks the subject (reopen, unassign, route), so that stamp proves the release
-# LANDED. A re-offered advance-and-drain that runs this again on a landed
-# reaction would re-release a bead a worker has since claimed, so the guard
-# refuses on that stamp and names the prior reaction. It sits ahead of the
-# disposition switch, so it guards every exit.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.proactive_reaction":"1","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
+# ── A first reaction happens once — a second dispose is refused ───────────────
+# The first disposition stamped gc.first_reaction* and RELEASED the subject
+# (reopened, unassigned, routed). A re-offered reaction that runs this again
+# would re-release a bead a worker has since claimed, so the guard refuses and
+# names the prior reaction. It keys on gc.first_reaction alone — the record the
+# first run leaves — and sits ahead of the disposition switch, so it guards
+# every exit.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "2" "(REACTED) a subject already carrying a first reaction refuses a second dispose"
 hasnt "UPDATE" "$LOG" "(REACTED) …and re-writes no record"
@@ -369,34 +389,10 @@ run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
 eq "$RC" "2" "(REACTED) …the ruling exit too"
 hasnt "HELM" "$LOG" "(REACTED) …with no re-release"
 
-# gc.proactive_reaction=1 alone (the record stamps absent) still proves the
-# release landed, so a second dispose is refused.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.proactive_reaction":"1"}}]'
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
-eq "$RC" "2" "(REACTED) gc.proactive_reaction=1 alone also refuses a second dispose"
-
 # Positive finding only: an unreadable bead is not evidence of a prior reaction.
 export FAKE_SHOW_JSON='not json'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "0" "(REACTED) an unreadable bead is not evidence of a prior reaction"
-unset FAKE_SHOW_JSON
-
-# ── A PARTIAL record resumes — it does not block the retry ────────────────────
-# The record is written BEFORE the act, so a bead can carry gc.first_reaction
-# while the release never landed (gc-helm.sh failed, or a guard fired after the
-# record). Only gc.proactive_reaction=1 — which takeaway --release stamps as it
-# parks — proves the act landed, so the guard keys on it, not on the pre-act
-# record: a partial resumes and re-attempts the act, which is the retry the die
-# messages promise.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
-run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
-eq "$RC" "0" "(RESUME) a partial record with no gc.proactive_reaction resumes rather than refusing"
-has "HELM takeaway tk-sub" "$LOG" "(RESUME) …and re-attempts the act"
-has "the prior act did not land" "$ERR" "(RESUME) …announcing the resume"
-# The same partial on the ruling exit resumes too — the guard is ahead of the switch.
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
-eq "$RC" "0" "(RESUME) …and every exit resumes, not just actionable"
-has "HELM takeaway tk-sub" "$LOG" "(RESUME) …the ruling act is re-attempted"
 unset FAKE_SHOW_JSON
 
 # ── The store is pinned to the subject's own rig ─────────────────────────────
@@ -412,12 +408,15 @@ has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --reason first r
     "$LOG" "(PIN) …and to the deferred dispatch it arms"
 unset FAKE_RIG_PATH
 
-# ── The invariant that outranks all three ────────────────────────────────────
-# A first reaction advances the bead; it never finishes it.
+# ── The close invariant ──────────────────────────────────────────────────────
+# actionable, blocked and ruling advance the bead without finishing it; only
+# superseded closes, and only through bead-rehome — never a direct bd close.
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
-hasnt "CLOSE" "$LOG" "(NEVERCLOSE) no exit closes the work bead"
-grep -q 'status=closed' "$SCRIPT" && bad "(NEVERCLOSE) the script can set a closed status" \
-                                 || ok "(NEVERCLOSE) …and the script has no close path at all"
+hasnt "CLOSE" "$LOG" "(NEVERCLOSE) the actionable exit does not close the work bead"
+hasnt "REHOME" "$LOG" "(NEVERCLOSE) …and does not reach the close writer"
+grep -qE 'gc_bd close|gc bd close|status=closed' "$SCRIPT" \
+  && bad "(NEVERCLOSE) the script closes a bead directly" \
+  || ok "(NEVERCLOSE) …and no exit closes a bead except through bead-rehome"
 
 # ── A failed act leaves the record and refers to the cause ───────────────────
 # gc-helm.sh exits non-zero for a release that did not write AND for a release
@@ -431,6 +430,63 @@ has "what landed and what did not" "$ERR" "(HELMFAIL) …and the failure refers 
 hasnt "disposed as actionable" "$OUT" "(HELMFAIL) …and nothing reports a disposition"
 unset FAKE_HELM_FAILS
 
+# ── superseded: another bead already carries this one's work ─────────────────
+#   (SUP)      --check runs FIRST, then record, then release (no route), then close
+#   (SUPCHECK) a --check refusal writes nothing and names the ruling fallback
+#   (SUPKIND)  --kind defaults to fixed-upstream; only fixed-upstream|duplicate
+#   (SUPARGS)  the other exits' flags, a missing successor, and self are refused
+#   (SUPCLOSE) a close that fails after the release is a runtime failure
+run tk-sub --disposition superseded --reason "already fixed by tk-fix" \
+    --takeaway "closing: fixed upstream by tk-fix" --successor tk-fix
+eq "$RC" "0" "(SUP) a superseded disposition succeeds"
+has "gc.first_reaction=superseded" "$LOG" "(SUP) the choice is recorded"
+has "gc.first_reaction_target=tk-fix" "$LOG" "(SUP) …naming the successor"
+has "HELM takeaway tk-sub closing: fixed upstream by tk-fix --by proactive --release --no-wait" "$LOG" \
+    "(SUP) the subject is released with no route"
+hasnt "--route" "$LOG" "(SUP) …not routed to a pool"
+has "REHOME --origin tk-sub --successor tk-fix --kind fixed-upstream --note already fixed by tk-fix" "$LOG" \
+    "(SUP) …then closed through the one writer"
+# Order: --check < record < release < close, so a released subject is never left
+# unclosed and a close is never attempted before the evidence is checked.
+CHK=$(grep -n -m1 'REHOME --check' "$FAKE_LOG" | cut -d: -f1)
+UPD=$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1)
+HLM=$(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1)
+CLS=$(grep -n -m1 'REHOME --origin' "$FAKE_LOG" | cut -d: -f1)
+[ "$CHK" -lt "$UPD" ] && [ "$UPD" -lt "$HLM" ] && [ "$HLM" -lt "$CLS" ] \
+  && ok "(SUP) --check before record before release before close" \
+  || bad "(SUP) order was check=$CHK update=$UPD helm=$HLM close=$CLS"
+
+export FAKE_REHOME_CHECK_FAILS=1
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-fix
+eq "$RC" "4" "(SUPCHECK) a --check refusal fails the exit"
+hasnt "UPDATE" "$LOG" "(SUPCHECK) …and records nothing"
+hasnt "HELM" "$LOG" "(SUPCHECK) …and does not release the subject"
+eq "$(grep -c '^REHOME' "$FAKE_LOG")" "1" "(SUPCHECK) …and never reaches the closing call"
+has "Take --disposition ruling instead" "$ERR" "(SUPCHECK) …and names the fallback"
+unset FAKE_REHOME_CHECK_FAILS
+
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-fix --kind duplicate
+has "REHOME --check --origin tk-sub --successor tk-fix --kind duplicate" "$LOG" "(SUPKIND) --kind duplicate is honored"
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-fix --kind re-homed
+eq "$RC" "2" "(SUPKIND) a judgment kind is not a reaction's call — refused"
+has "fixed-upstream or duplicate" "$ERR" "(SUPKIND) …and the refusal names the allowed kinds"
+
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-fix --route gc-toolkit/x
+eq "$RC" "2" "(SUPARGS) superseded refuses the other exits' flags"
+run tk-sub --disposition superseded --reason "r" --takeaway "t"
+eq "$RC" "2" "(SUPARGS) superseded with no successor is refused"
+has "needs --successor" "$ERR" "(SUPARGS) …and says which pointer is missing"
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-sub
+eq "$RC" "2" "(SUPARGS) a bead cannot supersede itself"
+
+export FAKE_REHOME_FAILS=1
+run tk-sub --disposition superseded --reason "r" --takeaway "t" --successor tk-fix
+eq "$RC" "4" "(SUPCLOSE) a close that fails after the release is a runtime failure"
+has "gc.first_reaction=superseded" "$LOG" "(SUPCLOSE) …the record stands"
+has "HELM" "$LOG" "(SUPCLOSE) …the release happened"
+has "finish the close by hand" "$ERR" "(SUPCLOSE) …and the failure says what to do"
+unset FAKE_REHOME_FAILS
+
 echo ""
-echo "first-reaction-dispose (three exits, one record): $PASS passed, $FAIL failed"
+echo "first-reaction-dispose (four exits, one record): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

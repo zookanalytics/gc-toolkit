@@ -167,11 +167,6 @@ case "$1 ${2:-}" in
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
-    # What gc.proactive_reaction reads back as. The release stamps it =1 as the
-    # completion proof two guards key on; FAKE_PROACTIVE holds it so a test models
-    # the stamp LANDING and landing empty (the silent drop a multi-pair update can
-    # produce) with the same stub, the way FAKE_SETTLED does for the settled key.
-    proactive="$(cat "${FAKE_PROACTIVE:-/dev/null}" 2>/dev/null || true)"
     # What gc.outcome reads back as, per visit. dismiss stamps it on a visit and
     # reads it back before closing, so a stamp that lands empty is caught before
     # the irreversible close. FAKE_OUTCOME_DIR/<id> holds it; absent reads empty,
@@ -201,8 +196,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -236,16 +231,6 @@ case "$1 ${2:-}" in
             1)     ;;
             multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
             *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
-          esac ;;
-        # gc.proactive_reaction=1 is the release's completion proof, read back the
-        # way gc.takeaway_settled is. FAKE_PROACTIVE_DROP=1 loses every one of them
-        # (no repair recovers it); =multi loses it only out of a multi-pair release
-        # write, the shape the lone repair write recovers.
-        gc.proactive_reaction=*)
-          case "${FAKE_PROACTIVE_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
-            *)     printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
           esac ;;
         # gc.outcome lands per visit so the dismiss read-back sees the stamp.
         # FAKE_OUTCOME_DROP=1 loses every one of them though the call exits 0,
@@ -297,7 +282,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" FAKE_DEPLISTS="$TMP/deplists" \
+       FAKE_SETTLED="$TMP/settled" FAKE_EXEC="$TMP/exec" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
@@ -374,8 +359,9 @@ A="$(line_for A-PARKED)"
 [ -n "$A" ] && ok "(RELEASE) anchor A-PARKED was updated" || bad "(RELEASE) anchor never updated"
 grep -q -- '--status=open' <<< "$A" \
   && ok "(RELEASE) anchor reopened (--status=open)" || bad "(RELEASE) anchor --status=open (got: $A)"
-grep -q 'gc.proactive_reaction=1' <<< "$A" \
-  && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
+grep -q 'gc.proactive_reaction' <<< "$A" \
+  && bad "(RELEASE) the release wrote the retired proactive-reaction marker ($A)" \
+  || ok "(RELEASE) …and no retired proactive-reaction marker is written"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
@@ -847,7 +833,7 @@ esac
 # (ROUTECLR) the plain release is untouched: it still hands the bead back.
 : > "$TMP/updates"; : > "$TMP/routed"
 sh "$SCRIPT" takeaway A-PARKED "back to the human" --by proactive --release --no-wait >/dev/null 2>&1 || true
-grep -q -- '--set-metadata gc.routed_to= ' "$TMP/updates" \
+grep -qE -- '--set-metadata gc.routed_to=($| )' "$TMP/updates" \
   && ok "(ROUTECLR) no --route still clears the route" \
   || bad "(ROUTECLR) the plain release changed shape: $(cat "$TMP/updates")"
 
@@ -985,72 +971,6 @@ grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/
   || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
 : > "$TMP/exec"
 
-# ── takeaway --release: the completion-proof read-back ────────────────────────
-# gc.proactive_reaction=1 is the stamp two guards downstream key on to refuse a
-# SECOND release — first-reaction-dispose's retry guard and cmd_sling's
-# already-reacted skip — so a park whose stamp lands empty reads to both as a
-# partial that never completed, and the next dispose re-releases a bead a worker
-# may already hold. It rides the multi-pair release write, so the same silent
-# drop can hit it; it is read back and repaired like the route beside it, and —
-# unlike the cosmetic pour stamp — a repair that also misses is a verb failure.
-# Covered:
-#   (PROACTOK)   a stamp that reads back "1" is written once, no repair, exit 0
-#   (PROACTFIX)  a stamp dropped from the multi-pair write is re-stamped, exit 0
-#   (PROACTDEAD) a stamp that will not land is a verb failure, writes kept
-
-# (PROACTOK) the stamp lands: the release's own set is the only one written.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PORC=0
-sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
-  >/dev/null 2>"$TMP/perr" || PORC=$?
-eq "$PORC" "0" "(PROACTOK) a completion stamp that reads back exits 0"
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "1" \
-   "(PROACTOK) …and is written once, with no repair"
-grep -q 'gc.proactive_reaction on' "$TMP/perr" \
-  && bad "(PROACTOK) a landed stamp should say nothing (stderr: $(cat "$TMP/perr"))" \
-  || ok "(PROACTOK) …and says nothing about a read-back"
-
-# (PROACTFIX) the stamp dropped from the multi-pair release write, recovered by
-# the lone repair set.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PFRC=0
-FAKE_PROACTIVE_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/perr" || PFRC=$?
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "2" \
-   "(PROACTFIX) a stamp that did not land is re-stamped"
-grep -q "gc.proactive_reaction on A-PARKED read back as ''" "$TMP/perr" \
-  && ok "(PROACTFIX) …and the miss is reported with the value that stood" \
-  || bad "(PROACTFIX) the dropped stamp was silent (stderr: $(cat "$TMP/perr"))"
-grep -q 'the proactive-reaction repair landed' "$TMP/perr" \
-  && ok "(PROACTFIX) …and the repair that fixed it says so" \
-  || bad "(PROACTFIX) the repair did not report landing (stderr: $(cat "$TMP/perr"))"
-eq "$PFRC" "0" "(PROACTFIX) …and a repaired stamp is not a verb failure"
-eq "$(cat "$TMP/proactive")" "1" "(PROACTFIX) …the bead ends carrying the completion proof"
-
-# (PROACTDEAD) the store that will not take the stamp at all. The bead is
-# released, so a zero exit would report a park whose completion proof — the thing
-# that stops the next dispose re-releasing it — never landed.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PDRC=0
-FAKE_PROACTIVE_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/pout" 2>"$TMP/perr" || PDRC=$?
-eq "$PDRC" "4" "(PROACTDEAD) a completion stamp that will not land is a verb runtime failure"
-grep -q "did not stamp as '1'" "$TMP/perr" \
-  && ok "(PROACTDEAD) …and the message names what was missing" \
-  || bad "(PROACTDEAD) the persistent miss is unexplained (stderr: $(cat "$TMP/perr"))"
-grep -q -- '--set-metadata gc.proactive_reaction=1' "$TMP/perr" \
-  && ok "(PROACTDEAD) …and carries the by-hand repair" \
-  || bad "(PROACTDEAD) no repair spelled out (stderr: $(cat "$TMP/perr"))"
-grep -q 'takeaway set on' "$TMP/pout" \
-  && bad "(PROACTDEAD) the verb reported success on a bead missing its completion proof" \
-  || ok "(PROACTDEAD) …and does not report the takeaway as set"
-PD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$PD" in
-  *"--status=open"*"--assignee="*) ok "(PROACTDEAD) …the release it already wrote is kept, not rolled back" ;;
-  *) bad "(PROACTDEAD) the release write was lost: ${PD:-<none>}" ;;
-esac
-: > "$TMP/proactive"
-
 # ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────
 # A fold that lands after the pour leaves a molecule routed under an anchor
 # that is already disposed. --release is the only writer that walks that
@@ -1073,8 +993,8 @@ grep -q -- '--status=open' <<< "$FA" \
 grep -q -- '--assignee' <<< "$FA" \
   && bad "(FOLDED) the closed anchor was unassigned ($FA)" || ok "(FOLDED) …not unassigned"
 grep -q 'gc.proactive_reaction' <<< "$FA" \
-  && bad "(FOLDED) a landed disposition was re-marked as a fresh reaction ($FA)" \
-  || ok "(FOLDED) …and not re-marked as a reaction release"
+  && bad "(FOLDED) the release wrote the retired proactive-reaction marker ($FA)" \
+  || ok "(FOLDED) …and no retired proactive-reaction marker is written"
 grep -q 'gc.routed_to' <<< "$FA" \
   && bad "(FOLDED) the closed anchor's route was rewritten ($FA)" || ok "(FOLDED) …its route left alone"
 grep -q 'gc.takeaway=folded into CARRIER-1' <<< "$FA" \
@@ -1692,13 +1612,14 @@ eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
 # ── The releasing session's own step survives the release ────────────────────
-# mol-first-reaction's terminal step disposes by calling `takeaway --release` on
-# the bead its own molecule is anchored to, and then has to close its own step
-# bead. step-close.sh resolves that bead within its molecule and corroborates
-# it by the assignee; this live step carries no gc.session_id stamp, so the
-# assignee is the only handle that proves the bead is this session's, and a
-# quiesce that cleared it would land the disposition but strand the molecule:
-# the step stays open and is re-offered forever. This section runs
+# A session executing a molecule's terminal step can dispose by calling
+# `takeaway --release` on the bead its own molecule is anchored to, and then has
+# to close its own step bead (mol-example below is a synthetic stand-in for any
+# such molecule). step-close.sh resolves that bead within its molecule and
+# corroborates it by the assignee; this live step carries no gc.session_id
+# stamp, so the assignee is the only handle that proves the bead is this
+# session's, and a quiesce that cleared it would land the disposition but strand
+# the molecule: the step stays open and is re-offered forever. This section runs
 # the real release and then the real step-close.sh against ONE mutating store —
 # a logging-only stub cannot show the second command failing on what the first
 # wrote.
@@ -1723,10 +1644,10 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
- {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-first-reaction","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
- {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-example","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+ {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-example.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-example.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-example.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
@@ -1846,7 +1767,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 # release, by the same resolution the formula's terminal block uses.
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
-  bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+  bash "$HERE/step-close.sh" --step mol-example.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
@@ -1869,7 +1790,7 @@ eq "$(field A-FOLD assignee)" "gc-toolkit__polecat-lx-old" \
 eq "$(field A-FOLD gc.routed_to)" "human" \
    "(FOLDSTORE) …and its route survives the release"
 eq "$(field A-FOLD gc.proactive_reaction)" "" \
-   "(FOLDSTORE) …with no fresh reaction marker over a landed disposition"
+   "(FOLDSTORE) …with no retired proactive-reaction marker written"
 eq "$(field A-FOLD gc.superseded_by)" "A-CARRIER" \
    "(FOLDSTORE) …and the fold record itself untouched"
 eq "$(field A-FOLD gc.takeaway)" "superseded by A-CARRIER; the pour raced the fold" \
