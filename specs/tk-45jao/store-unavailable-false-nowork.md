@@ -35,8 +35,9 @@ prompt, not code. tk-45jao states plainly that an agent distrusting the answer
 The reachable-vs-empty decision is made purely on the work-query subprocess
 exit code. Read at gascity f09d38557:
 
-- `shellWorkQueryWithEnv` (cmd/gc/cmd_hook.go:901-936) returns `("", nil)` for
-  any exit-0, empty or not, discarding the child's stderr on the success path.
+- `shellWorkQueryWithEnv` (cmd/gc/cmd_hook.go:901-936) returns `(string(out),
+  nil)` for any exit-0; when stdout is empty that becomes `("", nil)`, and the
+  child's stderr is discarded on the success path.
 - `workQueryHasReadyWork` (cmd/gc/cmd_hook.go:1003-1024) maps empty / `[]` /
   `null` to "no ready work."
 - `bestStoreWithWork` (cmd/gc/hook_cross_store.go) returns a nil error when the
