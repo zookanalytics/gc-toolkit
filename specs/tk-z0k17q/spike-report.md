@@ -321,7 +321,12 @@ operator's convenience after this PR merges. They confirm §4's static verdict.
 cd /home/zook/loomington
 
 # 0. Baseline: the finding exists, and count the population it covers.
-gc doctor --check session-model 2>&1 | grep -c stale-routed-config || true
+#    gc doctor has no per-check flag, and the per-bead finding lines print only
+#    under --verbose (default output shows just a count). The run is slow but
+#    read-only. Before the fix this prints one or more human stale-routed-config
+#    lines; an empty result here is itself a signal — investigate rather than
+#    proceed.
+gc doctor --verbose 2>&1 | grep 'stale-routed-config:.*human' || echo "NO human stale-routed-config finding — unexpected before the fix; is human already configured, or did the check not run?"
 gc bd list --metadata-field gc.routed_to=human --limit 0 --json | jq length          # rig
 gc bd list --db /home/zook/loomington/.beads --metadata-field gc.routed_to=human --limit 0 --json | jq length   # city
 # Guard for the finding-trade (must stay 0 before adoption):
@@ -336,11 +341,23 @@ gc bd list --db /home/zook/loomington/.beads --assignee human --status open,in_p
 $EDITOR city.toml
 gc reload
 
-# 2. PASS 1 — the finding is gone.
-gc doctor --check session-model 2>&1 | grep stale-routed-config && echo "STILL PRESENT — investigate" || echo "cleared"
+# 2. PASS 1 — the human finding is gone. "cleared" is reported only when the
+#    session-model check actually produced a verdict: a run that errored or
+#    timed out prints no finding line either, and must not read as success.
+#    `session-model —` (em-dash) is the check's own summary line; a bare
+#    `session-model` also matches unrelated bead titles in --verbose output.
+DOCTOR_OUT=$(gc doctor --verbose 2>&1)
+SM=$(printf '%s\n' "$DOCTOR_OUT" | grep 'session-model —')
+if printf '%s\n' "$DOCTOR_OUT" | grep 'stale-routed-config:.*human'; then
+  echo "STILL PRESENT — investigate"
+elif [ -z "$SM" ] || printf '%s\n' "$SM" | grep -qi -e 'timed out' -e abandoned; then
+  echo "INCONCLUSIVE — session-model did not complete (timed out, errored, or absent); raise --check-timeout and re-run"
+else
+  echo "cleared"
+fi
 
 # 3. PASS 2 — nothing named human was spawned. All three must be empty.
-gc session list --json | jq -r '.[]? | select((.alias // "")=="human" or (.name // "")=="human" or (.template // "")|test("(^|[./])human$")) | .name'
+gc session list --json | jq -r '.sessions[]? | select((.alias // "")=="human" or (.name // "")=="human" or ((.template // "") | test("(^|[./])human$"))) | .name'
 gc agent list --json | jq -r '.agents[]? | select((.qualified_name // .name)=="human") | "\(.qualified_name // .name) active=\(.active_sessions // 0)"'
 # expect: the agent is listed as a valid target with active=0, and NO session row.
 
