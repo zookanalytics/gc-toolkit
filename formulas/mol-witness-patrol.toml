@@ -541,18 +541,26 @@ fi
 # <<< owning-store-guard
 ```
 
-Remove the worktree only under the guard, only when the bead recorded one,
-and from the rig root. A visit, a graph.v2 step and a graph.v2 root carry no
-`metadata.work_dir`, so `WORKTREE` is empty for them, and
-`git worktree remove "" --force` exits 128; under `set -e` that aborts the step
-before `orphan-dispose.sh` can release the bead. The rig root is required
-because a husk resolves the worktree list from the wrong repo:
+Remove the worktree only under the guard, only when the bead recorded one, and
+from the rig root, and never let a failed removal abort the step. `git worktree
+remove` exits 128 for any path that names no registered worktree: a visit, a
+graph.v2 step and a graph.v2 root carry no `metadata.work_dir`, so `WORKTREE` is
+empty for them, while a husk work_dir (worktree removed, directory left behind)
+or an already-pruned path is nonempty but unregistered. Under `set -e` an
+uncaught 128 aborts the step before `orphan-dispose.sh` can release or skip the
+bead. The `[ -n "$WORKTREE" ]` test covers the empty shapes and a caught removal
+covers the rest, so cleanup stays best-effort and disposal always runs. The rig
+root is required because a husk resolves the worktree list from the wrong repo:
 
 ```bash
+# >>> worktree-cleanup
 if [ "$OWNED" = "1" ] && [ -n "$WORKTREE" ]; then
-  git -C "${GC_RIG_ROOT:-.}" worktree remove "$WORKTREE" --force
+  if ! git -C "${GC_RIG_ROOT:-.}" worktree remove "$WORKTREE" --force; then
+    echo "witness: 'git worktree remove $WORKTREE' failed — a husk or already-removed path names no registered worktree; continuing to prune and disposal." >&2
+  fi
   git -C "${GC_RIG_ROOT:-.}" worktree prune
 fi
+# <<< worktree-cleanup
 ```
 
 A refusal leaves the worktree standing and escalates

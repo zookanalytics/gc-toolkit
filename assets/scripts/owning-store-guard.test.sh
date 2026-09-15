@@ -99,9 +99,10 @@ case "$RM_IF" in
 esac
 
 # No `git worktree remove` may appear before the guard is defined. Anchored to
-# line start so the prose that mentions the command does not match.
+# line start, with the optional `if ! ` catch-wrapper, so the prose and the echo
+# diagnostic that mention the command do not match.
 GUARD_LINE=$(grep -nE '^OWNED=0' "$TOML" | head -1 | cut -d: -f1)
-FIRST_RM=$(grep -nE '^[[:space:]]*git .*worktree remove' "$TOML" | head -1 | cut -d: -f1)
+FIRST_RM=$(grep -nE '^[[:space:]]*(if ! )?git .*worktree remove' "$TOML" | head -1 | cut -d: -f1)
 [ -n "$GUARD_LINE" ] && [ -n "$FIRST_RM" ] && [ "$GUARD_LINE" -lt "$FIRST_RM" ] \
   && ok "the guard is defined before the first 'git worktree remove' in the formula" \
   || bad "the guard must precede any 'git worktree remove' (guard@${GUARD_LINE:-none} rm@${FIRST_RM:-none})"
