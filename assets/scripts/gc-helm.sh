@@ -1788,7 +1788,17 @@ cmd_engage() {
                     # re-strands the visit. A mismatch writes nothing and exits 13;
                     # re-read and defer to whoever won.
                     reclaim_rc=0
-                    gc bd update "$VISIT" --if-assignee "$visit_owner" --if-status open --assignee "" --set-metadata gc.routed_to=human >/dev/null 2>&1 || reclaim_rc=$?
+                    # A human-routed bead with no gc.takeaway renders as "no
+                    # question recorded" on the board, so the re-park co-writes
+                    # the headline the human-route-takeaway guard requires of
+                    # every raw park writer, in the same guarded update.
+                    gc bd update "$VISIT" --if-assignee "$visit_owner" --if-status open --assignee "" \
+                        --set-metadata gc.routed_to=human \
+                        --set-metadata "gc.takeaway=Reclaimed from a gone sitting; re-parked for re-engagement." \
+                        --set-metadata "gc.takeaway_at=$(iso_now)" \
+                        --set-metadata gc.takeaway_by=host \
+                        --set-metadata gc.takeaway_settled= \
+                        >/dev/null 2>&1 || reclaim_rc=$?
                     if [ "$reclaim_rc" -eq 13 ]; then
                         winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
                         if [ -n "$winner" ]; then

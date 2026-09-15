@@ -121,6 +121,11 @@ while IFS=: read -r f n _; do
   [ -n "$f" ] || continue
   skip_file "$f" && continue
   stmt=$(statement "$f" "$n")
+  # A park marker inside an echoed or printed message is prose quoting the
+  # recovery command for an operator, not a writer running it. A real raw
+  # writer is a `gc bd update` (or a `set --` that builds its args) and never
+  # leads with echo/printf, so a statement that does is a message, not a park.
+  if [[ "$stmt" =~ ^[[:space:]]*(echo|printf)[[:space:]] ]]; then continue; fi
   raw_checked=$((raw_checked + 1))
   has "$stmt" "gc.takeaway=" "$f:$n writes the takeaway in the same update"
 done < <(grep -rn 'gc\.routed_to="\?human"\?' --include='*.sh' --include='*.toml' --include='*.md' . 2>/dev/null \
