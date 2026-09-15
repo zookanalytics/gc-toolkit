@@ -108,6 +108,54 @@ canon_pr_url() {
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
+# reviewThreads is GraphQL-only (gh pr view has no such field), so it is read
+# apart from the pinned pr view, in the one arm that needs it. Paginated to
+# exhaustion: a count read from a truncated connection decides wrongly.
+THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}'
+# Count of unresolved review threads on <pr-number>, echoed as a non-negative
+# integer. Returns non-zero without output when the connection could not be
+# read — an unreadable connection is never zero, and a BLOCKED diagnosis has to
+# say which it is.
+unresolved_threads() { # <pr-number>
+  local raw n
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$1" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  n=$(printf '%s' "$raw" | scrub | jq -s '
+    ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
+    | if ($rt | length) == 0 then error("no reviewThreads in response")
+      else [ $rt[].nodes[]? | select((.isResolved // false) == false) ] | length end' 2>/dev/null) || return 1
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
+
+# Branch-protection facts for <branch>, read from its active rules: whether an
+# unresolved review thread blocks a merge (required_review_thread_resolution)
+# and how many approving reviews are required. Sets PROT_STATE=known|unknown;
+# when known, PROT_THREAD_REQ=true|false and PROT_APPROVALS to the required
+# count. An unreadable read is `unknown`, never a zero requirement — naming a
+# BLOCKED cause off `unknown` would be a guess.
+review_gates_for() { # <branch>
+  local b="$1" rules rrc
+  PROT_STATE=""; PROT_THREAD_REQ="false"; PROT_APPROVALS="0"
+  rules=$(gh_api_origin "repos/$ORIGIN_REPO/rules/branches/$b" 2>/dev/null); rrc=$?
+  if [ "$rrc" -ne 0 ] || ! printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    PROT_STATE="unknown"; return 0
+  fi
+  PROT_THREAD_REQ=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_review_thread_resolution // false ] | any')
+  PROT_APPROVALS=$(printf '%s' "$rules" | jq -r '
+    [ .[] | select(type == "object") | select((.type // "") == "pull_request")
+      | .parameters.required_approving_review_count // 0 ] | max // 0')
+  case "$PROT_THREAD_REQ" in true|false) : ;; *) PROT_THREAD_REQ="false" ;; esac
+  case "$PROT_APPROVALS" in ''|*[!0-9]*) PROT_APPROVALS="0" ;; esac
+  PROT_STATE="known"
+}
+
 # Record the machine axis this pass reached, at the head it was read at. Every
 # hold below already decides it and spends the answer on a log line; this keeps
 # it, so a reader learns whether an anchor is moving without re-implementing
@@ -600,6 +648,43 @@ while IFS= read -r row; do
         fi
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
+    BLOCKED)
+      # Branch protection holds a PR whose city-side gates (checked above) are
+      # all green. The blocking condition is read from the branch's own rules:
+      # an unresolved review thread is the gate only where thread resolution is
+      # required (required_review_thread_resolution), otherwise a missing
+      # approval is. reviewDecision cannot name it alone — it reads EMPTY while
+      # threads are unresolved and resolves only once they clear. The merge stays
+      # held whatever the cause; only the log names it.
+      review_decision=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
+      record_machine "$id" "settled" "$head_oid" "$aroute"
+      review_gates_for "$base"
+      if [ "$PROT_STATE" != "known" ]; then
+        echo "$PROG: PR#$num is BLOCKED by branch protection but the rules for '$base' could not be read to name the cause (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
+      else
+        bcause=""; bu=0
+        if [ "$PROT_THREAD_REQ" = "true" ]; then
+          if bu=$(unresolved_threads "$num"); then
+            [ "$bu" -gt 0 ] && bcause="threads"
+          else
+            bu=0; bcause="threads-unreadable"
+          fi
+        fi
+        if [ -z "$bcause" ]; then
+          if [ "$PROT_APPROVALS" -ge 1 ] && [ "$review_decision" != "APPROVED" ]; then bcause="approval"; else bcause="other"; fi
+        fi
+        case "$bcause" in
+          threads)
+            echo "$PROG: PR#$num is BLOCKED by branch protection: $bu unresolved review thread(s) hold required_review_thread_resolution (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          threads-unreadable)
+            echo "$PROG: PR#$num is BLOCKED by branch protection: review-thread resolution is required but its reviewThreads could not be read to count them (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          approval)
+            echo "$PROG: PR#$num is BLOCKED by branch protection: waiting on an approving review ($PROT_APPROVALS required, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+          other)
+            echo "$PROG: PR#$num is BLOCKED by branch protection by a rule other than an unresolved required thread or a missing approval (thread-resolution required=$PROT_THREAD_REQ, approvals required=$PROT_APPROVALS, reviewDecision='${review_decision:-empty}'); merge held (anchor $id)" ;;
+        esac
+      fi
+      held=$((held + 1)); continue ;;
     *)
       # The cadence has nothing left to do; GitHub is not ready. Still `settled`.
       record_machine "$id" "settled" "$head_oid" "$aroute"

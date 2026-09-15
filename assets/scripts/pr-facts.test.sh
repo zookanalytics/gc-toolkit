@@ -2,7 +2,10 @@
 # Hermetic test for assets/scripts/pr-facts.sh — external PR facts, no merge
 # authority. Covers: recording an out-of-band merge (never with an empty
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
-# cleared, human-routed); CONFLICTING -> one rework child per head (dedup on
+# cleared, human-routed); BLOCKED -> escalate under a cause-specific key
+# (merge-blocked-threads vs merge-blocked-approval, read from reviewThreads
+# because reviewDecision is masked while threads are open; no guess when the
+# read fails, and an operator merge_hold left alone); CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds and a live demand veto, unstamped orphans adopted),
 # classified rebase or merge by the head branch and stamped prepare_mode,
 # counted as dispatched only once that stamp AND the route read back, with a
@@ -578,6 +581,72 @@ out=$(run)
 hasnt "$out" "filed re-review" "no re-review child is filed"
 hasnt "$out" "is stale" "…and nothing here calls a moved head stale"
 hasnt "$(cat "$STUB_GC_LOG")" "--on mol-review" "…and no review formula is poured from this arm"
+
+echo "# BLOCKED on unresolved threads (thread resolution required): merge-blocked-threads"
+store "[$(anchor B1 35)]"
+printf '%s' "$(prview 35 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_35.json"
+echo '{"threads":[{"id":"tb1a","isResolved":false},{"id":"tb1b","isResolved":true}]}' > "$GH_DIR/threads_35.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$out" "PR#35 BLOCKED on 1 unresolved review thread(s)" "the arm names the unresolved-thread cause and counts only the open ones"
+has "$(cat "$STUB_ESC_LOG")" "--subject B1 --key merge-blocked-threads" "escalated under the thread-cause key"
+
+echo "# BLOCKED where thread resolution is OFF escalates the approval, never the open thread"
+store "[$(anchor B5 41)]"
+printf '%s' "$(prview 41 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_41.json"
+echo '{"threads":[{"id":"tb5","isResolved":false}]}' > "$GH_DIR/threads_41.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$(cat "$STUB_ESC_LOG")" "--subject B5 --key merge-blocked-approval" "an open thread is not the gate when required_review_thread_resolution is off"
+hasnt "$(cat "$STUB_ESC_LOG")" "merge-blocked-threads" "…and the thread key is never sent for it"
+
+echo "# BLOCKED with every thread resolved escalates under merge-blocked-approval"
+store "[$(anchor B2 36)]"
+printf '%s' "$(prview 36 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_36.json"
+echo '{"threads":[{"id":"tb2","isResolved":true}]}' > "$GH_DIR/threads_36.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$out" "PR#36 BLOCKED awaiting approval (reviewDecision='REVIEW_REQUIRED')" "the arm names the approval cause when threads are all resolved"
+has "$(cat "$STUB_ESC_LOG")" "--subject B2 --key merge-blocked-approval" "escalated under the approval-cause key"
+hasnt "$(cat "$STUB_ESC_LOG")" "merge-blocked-threads" "…never the thread key when every thread is resolved"
+
+echo "# BLOCKED that neither a required thread nor a required approval explains escalates nothing"
+store "[$(anchor B6 43)]"
+printf '%s' "$(prview 43 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_43.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":0}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(cat "$STUB_ESC_LOG")" "" "an unmodeled cause is not escalated as a guess"
+
+echo "# BLOCKED whose reviewThreads cannot be read (thread resolution required) escalates no guessed cause"
+store "[$(anchor B3 37)]"
+printf '%s' "$(prview 37 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_37.json"
+echo '{"threads":[{"id":"tb3","isResolved":false}]}' > "$GH_DIR/threads_37.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(STUB_GQL_READ_FAIL=1 run)
+eq "$(cat "$STUB_ESC_LOG")" "" "an unreadable connection escalates nothing — never a guessed cause"
+
+echo "# BLOCKED whose branch rules cannot be read escalates no guessed cause"
+store "[$(anchor B7 44)]"
+printf '%s' "$(prview 44 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_44.json"
+printf '{"message":"Not Found"}' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(cat "$STUB_ESC_LOG")" "" "unreadable branch rules escalate nothing, not a guess"
+
+echo "# a BLOCKED PR under an operator merge_hold is their gate, left unescalated"
+store "[$(anchor B4 38 ',"merge_hold":"true"')]"
+printf '%s' "$(prview 38 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_38.json"
+echo '{"threads":[{"id":"tb4","isResolved":false}]}' > "$GH_DIR/threads_38.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(cat "$STUB_ESC_LOG")" "" "an operator merge_hold leaves the BLOCKED escalation unsent"
+rm -f "$GH_DIR/rules_main.json"
 
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"
