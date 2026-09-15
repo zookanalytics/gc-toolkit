@@ -167,6 +167,33 @@ func TestPreOpenGateStallSurfaces(t *testing.T) {
 	}
 }
 
+// TestPreOpenGateStallSkipsUnreadEdges: a pre-open gate aged past the grace
+// window bands stalled only when the board READ its edges. hasReview and
+// hasInFlight are both derived from the blocker set, so an anchor whose edges
+// the source could not read (WaitingUnknown, empty Blockers) reports neither —
+// an absence that proves nothing about a live review or rework. Firing the
+// stall on it would drop progressing gate work into STALLED during a degraded
+// read, the fail-open ruled() guards against on its own side.
+func TestPreOpenGateStallSkipsUnreadEdges(t *testing.T) {
+	unread := Anchor{ID: "tk-unread-gate", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(2), UpdatedAt: daysAgo(7),
+		Metadata:       map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-unread-gate"},
+		WaitingUnknown: true}
+
+	b := BuildBoard([]Anchor{unread}, fixtureNow, false, nil, Facts{})
+
+	tl, ok := tileByID(b, "tk-unread-gate")
+	if !ok {
+		t.Fatal("tk-unread-gate missing from board")
+	}
+	if tl.PreOpenStalled {
+		t.Error("an aged pre-open gate whose edges could not be read is not a proven stall")
+	}
+	if tl.Section == SectionStalled {
+		t.Errorf("an unread pre-open gate must not band stalled on an unproven absence; got %q", tl.Section)
+	}
+}
+
 // TestVisitFoldsIntoSubjectTile: a visit whose subject has a row of its own
 // leaves ONE row — the subject, now owed, held, and carrying the visit's ask —
 // and the visit's own row is gone.
