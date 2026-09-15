@@ -21,9 +21,10 @@ cannot tell "the pool is empty" from "the store could not be read."
 `gc hook --claim` is a Go command in the gascity repo
 (`github.com/zookanalytics/gascity`). gc-toolkit carries Go modules of its own
 under `services/` (`services/gctk`, `services/helm`), but no gc-toolkit code
-decides the `gc hook --claim` response, so tk-45jao has no gc-toolkit diff. The
-binary-side fix is filed as **gascity gc-9o705**, which carries the full
-mechanism, the patch sites by symbol, and the missing test.
+or behavior surface decides the `gc hook --claim` response, so there is no
+pack-local code remedy. The binary-side fix is filed as **gascity gc-9o705**,
+which carries the full mechanism, the patch sites by symbol, and the missing
+test.
 
 The polecat's *reaction* to the response is governed by the agent doctrine, a
 prompt, not code. tk-45jao states plainly that an agent distrusting the answer
