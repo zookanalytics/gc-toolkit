@@ -213,6 +213,23 @@ th {
   padding: 0.5rem 0.75rem;
 }
 
+/* Collapsed-by-default terminal: the summary is the affordance that opens it,
+   and the tile keeps its own bordered box once expanded. */
+.terminal-details {
+  margin-top: 1.5rem;
+}
+
+.terminal-details summary {
+  cursor: pointer;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.terminal-details .terminal-tile {
+  margin-top: 0.5rem;
+}
+
 /*
  * Drill-in plane (U8). Same posture as the rest of this file: enough structure
  * to read the panel, no visual language — that arrives with U6.

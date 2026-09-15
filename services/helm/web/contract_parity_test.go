@@ -427,7 +427,7 @@ func TestSeverityParity(t *testing.T) {
 // the tiles instead of demanding every tile be complete.
 func fixtureBoard() board.Board {
 	no := false
-	p1, p3 := 1, 3
+	p1, p2, p3 := 1, 2, 3
 	takeaway := "the drill-in plane needs an operator decision on tile density"
 	takeawayAt := "2026-08-07T09:31:00Z"
 	takeawayBy := "host"
@@ -635,6 +635,68 @@ func fixtureBoard() board.Board {
 				// A merge anchor is a pull request's row, so it bands review even
 				// while it is wedged on the operator.
 				Section: board.SectionReview,
+			},
+			// A pre-open codex gate stalled past the grace window with nothing
+			// moving it and nobody owed. It surfaces into the stalled band at
+			// ELEVATED with an age and a needs line that names the gate — rather
+			// than sinking to the bottom of review as a LOW row — and carries
+			// pre_open_stalled, the one field only this shape sets, into the check.
+			{
+				ID:       "tk-or0ha2",
+				Rig:      "gc-toolkit",
+				Kind:     "merge",
+				Title:    "A branch abandoned at the pre-open codex gate",
+				Severity: board.SevElevated,
+
+				Owed:   false,
+				Weight: 2,
+				Held:   false,
+
+				NClosed:    0,
+				MTotal:     0,
+				Open:       0,
+				InProgress: 0,
+				Assigned:   0,
+
+				InProgressLive: 0,
+				InProgressDead: 0,
+				DeadOwner:      false,
+
+				InFlight:      0,
+				InFlightHeads: []string{},
+
+				Owned: nil,
+
+				Stranded:         false,
+				Empty:            false,
+				Complete:         false,
+				ProgressMismatch: false,
+
+				StaleDays:      7,
+				Priority:       &p2,
+				CrossRigRefs:   []string{},
+				OpenHeads:      []string{},
+				DeadOwnerHeads: []string{},
+				ParkedHeads:    []string{},
+
+				Takeaway:   nil,
+				TakeawayAt: nil,
+				TakeawayBy: nil,
+
+				UpdatedAt: time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC),
+				Frontier:  "pre-open codex gate · stalled 7d",
+				Needs:     "pre-open codex gate stalled 7d — never reviewed, none in flight",
+				RankScore: 2002007, // ELEVATED lane: weight 2, stale 7
+
+				PRNumber:       0,
+				PRURL:          "",
+				PRBranch:       "polecat/tk-or0ha2",
+				PRMachine:      board.AxisUnknown,
+				PRConversation: board.ConversationUnknown,
+				PRApproval:     board.AxisUnknown,
+
+				Section:        board.SectionStalled,
+				PreOpenStalled: true,
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into
