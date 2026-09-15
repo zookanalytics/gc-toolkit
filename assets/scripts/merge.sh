@@ -108,6 +108,30 @@ canon_pr_url() {
 }
 is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 0 ;; esac; }
 
+# reviewThreads is GraphQL-only (gh pr view has no such field), so it is read
+# apart from the pinned pr view, in the one arm that needs it. Paginated to
+# exhaustion: a count read from a truncated connection decides wrongly.
+THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}'
+# Count of unresolved review threads on <pr-number>, echoed as a non-negative
+# integer. Returns non-zero without output when the connection could not be
+# read — an unreadable connection is never zero, and a BLOCKED diagnosis has to
+# say which it is.
+unresolved_threads() { # <pr-number>
+  local raw n
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$1" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  n=$(printf '%s' "$raw" | scrub | jq -s '
+    ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
+    | if ($rt | length) == 0 then error("no reviewThreads in response")
+      else [ $rt[].nodes[]? | select((.isResolved // false) == false) ] | length end' 2>/dev/null) || return 1
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
+
 # Record the machine axis this pass reached, at the head it was read at. Every
 # hold below already decides it and spends the answer on a log line; this keeps
 # it, so a reader learns whether an anchor is moving without re-implementing
@@ -600,6 +624,27 @@ while IFS= read -r row; do
         fi
       fi
       echo "$PROG: PR#$num is UNSTABLE but no required check on '$base' is red (the rest are advisory); proceeding (anchor $id)" ;;
+    BLOCKED)
+      # Branch protection holds a PR whose city-side gates are all green (those
+      # are checked above). Two ruleset conditions do it — an unresolved review
+      # thread (required_review_thread_resolution) and a missing approval — and
+      # reviewDecision cannot tell them apart: it reads EMPTY while threads are
+      # unresolved and resolves only once they clear. So read reviewThreads
+      # directly and name which holds. This changes nothing about the merge (it
+      # is still `settled`, waiting on a person); it replaces the catch-all's
+      # unnamed hold with its cause, which takes no new authority.
+      review_decision=$(printf '%s' "$PR_JSON" | jq -r '.reviewDecision // ""')
+      record_machine "$id" "settled" "$head_oid" "$aroute"
+      if u=$(unresolved_threads "$num"); then
+        if [ "$u" -gt 0 ]; then
+          echo "$PROG: PR#$num is BLOCKED by branch protection: $u unresolved review thread(s) hold required_review_thread_resolution (reviewDecision reads '${review_decision:-empty}', masked while threads are open); merge held (anchor $id)"
+        else
+          echo "$PROG: PR#$num is BLOCKED by branch protection: all review threads resolved; waiting on an approving review (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
+        fi
+      else
+        echo "$PROG: PR#$num is BLOCKED by branch protection but its reviewThreads could not be read to name the cause (reviewDecision='${review_decision:-empty}'); merge held (anchor $id)"
+      fi
+      held=$((held + 1)); continue ;;
     *)
       # The cadence has nothing left to do; GitHub is not ready. Still `settled`.
       record_machine "$id" "settled" "$head_oid" "$aroute"

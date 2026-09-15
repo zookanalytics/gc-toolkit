@@ -252,6 +252,27 @@ gh_graphql() { # <query> [gh -f/-F args...]; non-zero = "could not tell"
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   printf '%s' "$raw" | scrub
 }
+# Count of unresolved review threads on <pr-number>, echoed as a non-negative
+# integer. Returns non-zero without output when the connection could not be
+# read — an unreadable connection is never zero, and the BLOCKED arm below must
+# not escalate a guessed cause. Paginated to exhaustion: a count read from a
+# truncated connection decides wrongly.
+BLOCKED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}'
+unresolved_threads() { # <pr-number>
+  local raw n
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$BLOCKED_THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$1" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  n=$(printf '%s' "$raw" | scrub | jq -s '
+    ([ .[] | .data.repository.pullRequest.reviewThreads ] | map(select(. != null))) as $rt
+    | if ($rt | length) == 0 then error("no reviewThreads in response")
+      else [ $rt[].nodes[]? | select((.isResolved // false) == false) ] | length end' 2>/dev/null) || return 1
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 ALL_STATUSES="$LIVE_STATUSES,closed"
@@ -1172,6 +1193,37 @@ $CBODY"
       skipped=$((skipped + 1))
     fi
     continue
+  fi
+
+  # --- BLOCKED: name the cause and escalate it — nothing else does ---------------
+  # A PR whose city-side feedback is all routed can still sit on branch
+  # protection: an unresolved review thread (required_review_thread_resolution)
+  # or a missing approval. merge.sh holds on it, and before this arm nothing
+  # said why — the witness patrol guessed "merge conflict" and sent a converse
+  # sitting to rebase PRs that did not conflict. reviewDecision cannot tell the
+  # two causes apart: it reads EMPTY while threads are unresolved and resolves
+  # only once they clear, so read reviewThreads directly and escalate under a
+  # cause-specific key. CHANGES_REQUESTED is active feedback the arms above and
+  # the dismissal below own, not a stuck gate; an operator merge_hold is their
+  # own gate. Leave both. A cause that cannot be read is not escalated as a
+  # guess — the next pass retries once the connection answers.
+  if [ "$merge_state" = "BLOCKED" ] && ! is_held "$hold" && [ "$rd" != "CHANGES_REQUESTED" ]; then
+    if bthreads=$(unresolved_threads "$num"); then
+      if [ "$bthreads" -gt 0 ]; then
+        escalate "$id" "merge-blocked-threads" \
+          "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (reviewDecision reads '${rd:-empty}' while threads are open). Resolve the thread(s), or say why the block should lift."
+        echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); escalated (merge-blocked-threads)"
+      else
+        escalate "$id" "merge-blocked-approval" \
+          "PR#$num ($live_url) is BLOCKED by branch protection: every review thread is resolved and it is waiting on an approving review (reviewDecision='${rd:-empty}'). Approve it, or say why not."
+        echo "$PROG: $id — PR#$num BLOCKED awaiting approval (reviewDecision='${rd:-empty}'); escalated (merge-blocked-approval)"
+      fi
+      flagged=$((flagged + 1)); continue
+    fi
+    # reviewThreads unreadable this pass: the cause cannot be named, so escalate
+    # nothing — a guessed cause is exactly what the witness patrol got wrong.
+    # merge.sh logs the same unreadability from its own pass, and the next
+    # reconcile (about two minutes) retries the read.
   fi
 
   # --- dismiss our OWN superseded CHANGES_REQUESTED when the gate is green -------
