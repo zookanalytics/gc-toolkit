@@ -191,6 +191,46 @@ EOF
 OUT=$(run); RC=$?
 eq "$RC" "0" "an unplaceable external store path is not a finding (the no-other-rig fallback holds)"
 
+# --- 4c. the session env itself names another rig; the running pane does not --
+# Arm 1 reads the pane process and Arm 2 reads the server global, so a wrong
+# store scope SET in the session environment — what respawn-pane hands the next
+# process — is caught by neither. The pane here still holds the right scope, so
+# the finding is the session env's alone.
+healthy
+cat > "$TMP/sessions/alpha--city__witness.env" <<EOF
+GC_AGENT=alpha/city.witness
+GC_ALIAS=alpha/city.witness
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+GC_RIG_ROOT=$CITY/rigs/beta
+BEADS_DIR=$CITY/rigs/beta/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "a rig-scoped session whose session env names another rig is an ERROR"
+has "$OUT" "alpha--city__witness is scoped to rig alpha" "the session is judged against its derived scope"
+has "$OUT" "session environment sets GC_RIG=beta" "the wrong session-env value is named"
+has "$OUT" "respawn-pane" "the finding names the path that would inherit it"
+has "$OUT" "gc session reset alpha/city.witness" "the finding carries the remedy"
+hasnt "$OUT" "running process holds GC_RIG=beta" "the still-correct pane is not the source of the finding"
+
+# --- 4d. a correct session env is not flagged, even when the pane is wrong ----
+# The session-env arm keys on the session's derived scope, not on the pane, so a
+# session env that agrees with its scope stays silent while Arm 1 reports the
+# pane. This pins the arm to session-env-set values and off the pane's.
+healthy
+pane 200 <<EOF
+GC_AGENT=alpha/city.witness
+GC_ALIAS=alpha/city.witness
+GC_CITY_PATH=$CITY
+GC_RIG=beta
+GC_RIG_ROOT=$CITY/rigs/beta
+BEADS_DIR=$CITY/rigs/beta/.beads
+EOF
+OUT=$(run); RC=$?
+eq "$RC" "2" "a wrong pane with a correct session env is still an ERROR (Arm 1)"
+has "$OUT" "running process holds GC_RIG=beta" "Arm 1 reports the pane"
+hasnt "$OUT" "session environment sets GC_RIG=beta" "a correct session env is not flagged by the session-env arm"
+
 # --- 5. a rig-scoped agent that lost its scope entirely ----------------------
 healthy
 pane 200 <<EOF
