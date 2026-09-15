@@ -344,13 +344,13 @@ has "…and it is the claimable subject"                 "claimable-input" "$dem
 rm -rf "$CHURN"
 
 echo "── graph.v2 steps are never claimable: work_query / scale_check / demand ──"
-# The finding this locks out (tk-zdndkv): a graph.v2 STEP bead carries
+# A graph.v2 STEP bead is never a claimable first-reaction subject. It carries
 # gc.step_ref/gc.step_id/gc.root_bead_id but NO gc.kind, so a filter that only
 # rejects topology ROOTS (gc.kind in workflow/scope/spec) lets it through. Routed
-# to this pool it is then handed to gc hook --claim and reacted to as a subject —
-# the worker writes or disposes a formula step instead of advancing its molecule.
-# All three demand surfaces must drop it on the step metadata, not only the
-# root's gc.kind. Driven against the real step shape a live claim carries:
+# to this pool it is then handed to gc hook --claim and reacted to as a subject,
+# and the worker writes or disposes a formula step instead of advancing its
+# molecule. All three demand surfaces must drop it on the step metadata, not only
+# the root's gc.kind. Driven against the real step shape a live claim carries:
 # gc.step_ref/gc.step_id/gc.root_bead_id set, gc.kind absent.
 STEPD="$(mktemp -d "${TMPDIR:-/tmp}/gctk-proactive-first-reaction-fixture.XXXXXX")"
 cat > "$STEPD/ready.json" <<'JSON'
