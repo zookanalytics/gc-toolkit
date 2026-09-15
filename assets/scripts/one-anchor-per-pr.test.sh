@@ -248,7 +248,31 @@ TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-
 [ -n "$TERMINAL" ] \
   && ok "(9a) terminal snippet extracted for execution" \
   || bad "(9a) terminal snippet extraction EMPTY"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/git"
+# Ref-aware git stub for the terminal arm's origin read-back gate. `fetch`
+# exits $STUB_FETCH_RC (0 unless set) to model a read-back that fails; `rev-parse`
+# of HEAD echoes $STUB_PREPARED_HEAD and of any origin/* ref echoes
+# $STUB_REMOTE_HEAD — an empty env var models an absent ref (empty output).
+# -C <dir> is ignored: the arm's PREP_WT is unset under test, so the stub answers
+# from the environment, not a real repository. Anything else exits 0 with no
+# output, as the dumb stub did.
+cat > "$TMP/bin/git" <<'GIT'
+#!/usr/bin/env bash
+op=""
+for a in "$@"; do
+  case "$a" in
+    fetch)     exit "${STUB_FETCH_RC:-0}" ;;
+    rev-parse) op="rev-parse" ;;
+  esac
+done
+[ "$op" = "rev-parse" ] || exit 0
+for a in "$@"; do
+  case "$a" in
+    HEAD)     printf '%s\n' "${STUB_PREPARED_HEAD:-}"; exit 0 ;;
+    origin/*) printf '%s\n' "${STUB_REMOTE_HEAD:-}";   exit 0 ;;
+  esac
+done
+exit 0
+GIT
 chmod +x "$TMP/bin/git"
 export LCLOG="$TMP/lc.log"
 cat > "$TMP/bin/lc-stub" <<'L'
@@ -288,9 +312,12 @@ esac
 # conditional on the transition.
 run_rework() { # <lc-rc> -> "<lifecycle calls>#<gc bd calls>"
   : > "$LCLOG"; : > "$TMP/gc.log"
+  # origin holds exactly the prepared head, so the read-back gate passes and the
+  # arm proceeds to record + close (10f/10g cover the mismatch).
   EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
     LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" \
     LCRC="$1" GCLOG="$TMP/gc.log" \
+    STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
     bash "$TMP/terminal.sh" >/dev/null 2>&1
   printf '%s#%s' "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")"
 }
@@ -317,6 +344,7 @@ esac
 : > "$LCLOG"; : > "$TMP/gc.log"
 refused_out=$(EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
   LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 \
+  STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
   GCLOG="$TMP/gc.log" GCUPDRC=1 bash "$TMP/terminal.sh" 2>&1 >/dev/null)
 case "$refused_out" in
   *"did not close"*|*"close was refused"*) ok "(10b3) a refused close is reported" ;;
@@ -343,6 +371,66 @@ case "$REWORK_REFUSED" in
   *"#"*"w1 --status=closed"*|*"#"*"close w1"*)
     bad "(10e) a refused transition must not close the child (got: $REWORK_REFUSED)" ;;
   *) ok "(10e) a refused transition leaves the child open for the next pass" ;;
+esac
+
+# --- The landing is provable against origin, never asserted from local. -------
+# The rework hand-back closes landed-on-branch, so the recorded sha must come
+# from origin. When origin/$BRANCH does not hold the prepared head — the mr push
+# rejected, skipped, or lost — the arm must record NO landing (no anchor note),
+# close NOTHING, and exit non-zero, leaving $WORK routed. That is the exact
+# false-done the arm exists to prevent: a rework closed as "landed at <sha>" over
+# a branch the fix never reached, while origin/$BRANCH still points at the pre-fix
+# tip.
+run_gate() { # <prepared-head> <remote-head> [fetch-rc] -> "<rc>#<lifecycle>;<gc>"
+  : > "$LCLOG"; : > "$TMP/gc.log"; local rc
+  if EXISTING_ANCHOR=anchor-po WORK=w1 BRANCH=polecat/parent TARGET=main CHECK_SET=codex \
+       LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 GCLOG="$TMP/gc.log" \
+       STUB_PREPARED_HEAD="$1" STUB_REMOTE_HEAD="$2" STUB_FETCH_RC="${3:-0}" \
+       bash "$TMP/terminal.sh" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+  printf '%s#%s;%s' "$rc" "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")"
+}
+
+# origin holds a DIFFERENT sha than the prepared head (stale ref: push never landed).
+GATE_MISMATCH="$(run_gate deadbeef feedface)"
+case "$GATE_MISMATCH" in
+  *"transition w1"*|*"update w1 --status=closed"*|*"update anchor-po"*)
+    bad "(10f) a mismatched origin recorded a landing or closed the child (got: $GATE_MISMATCH)" ;;
+  1#*) ok "(10f) origin != prepared head -> no anchor note, no transition, no close; arm exits non-zero" ;;
+  *) bad "(10f) mismatched origin must fail closed non-zero, mutating nothing (got: $GATE_MISMATCH)" ;;
+esac
+
+# origin has no such ref at all (branch absent on the remote).
+GATE_ABSENT="$(run_gate deadbeef '')"
+case "$GATE_ABSENT" in
+  *"transition w1"*|*"update w1 --status=closed"*|*"update anchor-po"*)
+    bad "(10g) an absent origin ref recorded a landing or closed the child (got: $GATE_ABSENT)" ;;
+  1#*) ok "(10g) origin ref absent -> no anchor note, no transition, no close; arm exits non-zero" ;;
+  *) bad "(10g) absent origin ref must fail closed non-zero, mutating nothing (got: $GATE_ABSENT)" ;;
+esac
+
+# origin holds exactly the prepared head: the landing IS recorded and $WORK
+# closes, with the sha read back from the remote tip (not the local prep HEAD).
+GATE_MATCH="$(run_gate cafe1234 cafe1234)"
+case "$GATE_MATCH" in
+  *"transition w1 --to unanchored"*) ok "(10h) origin == prepared head -> the child leaves the anchor class and closes" ;;
+  *) bad "(10h) a verified landing must transition the child (got: $GATE_MATCH)" ;;
+esac
+case "$GATE_MATCH" in
+  *"update anchor-po"*"landed on polecat/parent at cafe1234"*) ok "(10i) the anchor note records the sha read back from origin" ;;
+  *) bad "(10i) the anchor note must carry the origin-read sha (got: $GATE_MATCH)" ;;
+esac
+
+# The read-back fetch can itself fail, leaving origin/$BRANCH at whatever the
+# local remote-tracking ref last cached. When that stale value coincides with
+# the prepared head, an equality check that trusted it would record a landing
+# the fetch never proved. A failed fetch must fail closed regardless of what the
+# stale ref says: no anchor note, no transition, no close, non-zero exit.
+GATE_FETCH_FAIL="$(run_gate cafef00d cafef00d 42)"
+case "$GATE_FETCH_FAIL" in
+  *"transition w1"*|*"update w1 --status=closed"*|*"update anchor-po"*)
+    bad "(10j) a failed fetch recorded a landing or closed the child off a stale ref (got: $GATE_FETCH_FAIL)" ;;
+  1#*) ok "(10j) fetch failure -> no anchor note, no transition, no close; arm exits non-zero even when the stale origin ref equals HEAD" ;;
+  *) bad "(10j) a failed fetch must fail closed non-zero, mutating nothing (got: $GATE_FETCH_FAIL)" ;;
 esac
 
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining

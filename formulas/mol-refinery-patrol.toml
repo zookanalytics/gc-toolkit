@@ -717,7 +717,28 @@ GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
 if [ -n "$EXISTING_ANCHOR" ]; then
-  REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short HEAD 2>/dev/null || echo "")
+  # This arm closes the rework landed-on-branch, so the landing must be provable
+  # against origin: the mr push above can be rejected or skipped and leave
+  # origin/$BRANCH at its pre-fix tip, and a sha read from the local prep
+  # worktree would then close the rework and note it landed over a branch the
+  # fix never reached. A stale local origin/$BRANCH is the same trap — a failed
+  # fetch leaves it at its last cached value, which can coincidentally equal the
+  # prepared head. So fail closed on the fetch first, then require the refreshed
+  # remote tip to equal the prepared head; on either failure record nothing,
+  # close nothing, and leave $WORK routed for the next pass to re-push.
+  if ! git -C "$PREP_WT" fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+    echo "merge-push: could not fetch origin/$BRANCH to read back the rework landing; recording no landing and closing nothing. $WORK stays routed for the next pass to re-push." >&2
+    gc runtime drain-ack
+    exit 1
+  fi
+  PREPARED_HEAD=$(git -C "$PREP_WT" rev-parse HEAD 2>/dev/null || echo "")
+  REMOTE_HEAD=$(git -C "$PREP_WT" rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+  if [ -z "$PREPARED_HEAD" ] || [ -z "$REMOTE_HEAD" ] || [ "$PREPARED_HEAD" != "$REMOTE_HEAD" ]; then
+    echo "merge-push: origin/$BRANCH is '${REMOTE_HEAD:-absent}', want prepared head '${PREPARED_HEAD:-absent}' — the rework fix is not on origin; recording no landing and closing nothing. $WORK stays routed for the next pass to re-push." >&2
+    gc runtime drain-ack
+    exit 1
+  fi
+  REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
     if ! gc bd update "$WORK" --status=closed --append-notes "Rework landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; gating continues on anchor $EXISTING_ANCHOR"; then
