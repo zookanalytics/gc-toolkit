@@ -431,6 +431,9 @@ func fixtureBoard() board.Board {
 	takeaway := "the drill-in plane needs an operator decision on tile density"
 	takeawayAt := "2026-08-07T09:31:00Z"
 	takeawayBy := "host"
+	settledTakeaway := "resolved — no human action was needed"
+	settledTakeawayAt := "2026-08-09T09:00:00Z"
+	settledTakeawayBy := "gc-toolkit__converse-3"
 
 	return board.Board{
 		GeneratedAt: time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
@@ -697,6 +700,68 @@ func fixtureBoard() board.Board {
 
 				Section:        board.SectionStalled,
 				PreOpenStalled: true,
+			},
+			// A pre-open gate a sitting stood down: gc.takeaway_settled is set, so
+			// the row is disposed and bands into the quiet cleanup tail at LOW
+			// rather than reading as active in-flight work — even though pr.machine
+			// still says progressing off a blocker the quiesce has not cleared. It
+			// carries `settled`, the one field only this shape sets, into the check.
+			{
+				ID:       "tk-settl",
+				Rig:      "gc-toolkit",
+				Kind:     "merge",
+				Title:    "A pre-open gate a sitting stood down",
+				Severity: board.SevLow,
+
+				Owed:   false,
+				Weight: 2,
+				Held:   false,
+
+				NClosed:    0,
+				MTotal:     0,
+				Open:       0,
+				InProgress: 0,
+				Assigned:   0,
+
+				InProgressLive: 0,
+				InProgressDead: 0,
+				DeadOwner:      false,
+
+				InFlight:      0,
+				InFlightHeads: []string{},
+
+				Owned: nil,
+
+				Stranded:         false,
+				Empty:            false,
+				Complete:         false,
+				ProgressMismatch: false,
+
+				StaleDays:      2,
+				Priority:       &p2,
+				CrossRigRefs:   []string{},
+				OpenHeads:      []string{},
+				DeadOwnerHeads: []string{},
+				ParkedHeads:    []string{},
+
+				Takeaway:   &settledTakeaway,
+				TakeawayAt: &settledTakeawayAt,
+				TakeawayBy: &settledTakeawayBy,
+
+				UpdatedAt: time.Date(2026, 8, 9, 9, 0, 0, 0, time.UTC),
+				Frontier:  "pre-open gate settled — stood down",
+				Needs:     "resolved — no human action was needed",
+				RankScore: 2002, // LOW lane (rank 0): weight 2, stale 2
+
+				PRNumber:       0,
+				PRURL:          "",
+				PRBranch:       "polecat/tk-settl",
+				PRMachine:      board.MachineProgressing,
+				PRConversation: board.ConversationUnknown,
+				PRApproval:     board.AxisUnknown,
+
+				Section: board.SectionCleanup,
+				Settled: true,
 			},
 			// The DONE row: an anchor whose own bead has closed. It is here to
 			// carry closed_at — the one field only this band ever sets — into

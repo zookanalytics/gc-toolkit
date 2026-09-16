@@ -419,6 +419,14 @@ type Tile struct {
 	// and never clusters — so the field is omitted when it does not apply.
 	ClusterKey string `json:"cluster_key,omitempty"`
 
+	// Settled marks a merge anchor a sitting stood down: gc.takeaway_settled is
+	// stamped when a takeaway ends the wait rather than moving it, quiescing the
+	// molecule. The gate is disposed, so the row bands into the quiet cleanup
+	// tail at LOW rather than reading as active in-flight work — which it would
+	// otherwise, since pr.machine can still say progressing off a blocker the
+	// quiesce has not yet cleared. Omitted when the gate is not settled.
+	Settled bool `json:"settled,omitempty"`
+
 	// PreOpenStalled marks a merge anchor stuck at the pre-open codex gate that
 	// nothing is moving and nobody owes: past the grace window, no review armed
 	// or in flight, no rework in flight, and not progressing. It is what tells a

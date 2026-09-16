@@ -337,10 +337,11 @@ func humanGated(a Anchor) bool {
 // the board and not the reverse; a marker added on one side has to be added on
 // the other, or the two disagree about which beads have a row.
 const (
-	mdRoutedTo  = "gc.routed_to"
-	mdTakeaway  = "gc.takeaway"
-	mdDemandFor = "gc.demand_for"
-	routedHuman = "human"
+	mdRoutedTo        = "gc.routed_to"
+	mdTakeaway        = "gc.takeaway"
+	mdTakeawaySettled = "gc.takeaway_settled"
+	mdDemandFor       = "gc.demand_for"
+	routedHuman       = "human"
 )
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
@@ -484,7 +485,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, preOpen bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, preOpen, isSettled bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -499,16 +500,19 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, preOpe
 	// A merge anchor is banded by its pull-request phase, not by the
 	// childless-empty fall-through below: it is a branch the city is landing,
 	// not an empty container, and the review/rework beads that move it are its
-	// blockers rather than a child roll-up (m_total is 0). A genuine pre-open
-	// stall is surfaced ELEVATED so it leaves the LOW floor a childless anchor
-	// would otherwise sink to; every other live merge anchor is healthy
-	// in-flight work at NORMAL. Keyed on the `merge` KIND, not [isMergeAnchor]:
-	// a wedged anchor is gathered as its `human` twin too, and that row must
-	// keep the ELEVATED band the branch below gives it.
+	// blockers rather than a child roll-up (m_total is 0). A settled gate is
+	// disposed and sinks to the LOW floor a ruled row gets; a genuine pre-open
+	// stall is surfaced ELEVATED so it leaves that floor; every other live merge
+	// anchor is healthy in-flight work at NORMAL. Keyed on the `merge` KIND, not
+	// [isMergeAnchor]: a wedged anchor is gathered as its `human` twin too, and
+	// that row must keep the ELEVATED band the branch below gives it.
 	case a.Source == "merge":
-		if preOpen {
+		switch {
+		case isSettled:
+			sev0 = SevLow
+		case preOpen:
 			sev0 = SevElevated
-		} else {
+		default:
 			sev0 = SevNormal
 		}
 	case isRuled && r.mTotal == 0:
@@ -567,7 +571,7 @@ func rankScore(sev Severity, w, stale, closedDays int) int {
 // rank_score. The kinds that describe themselves do so instead of reporting a
 // roll-up they do not have.
 func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []string, dispDue, isRuled, preOpen bool,
-	closedDays, stale int, owedSince, now time.Time) string {
+	closedDays, gateStale int, owedSince, now time.Time) string {
 	inProgressLive := len(r.liveHeads)
 	dead := len(r.deadOwnerHeads)
 	parked := len(r.parkedHeads)
@@ -601,7 +605,13 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 	// in-flight PR. The pr column already carries the branch, so this line
 	// spends itself on the fact that column cannot show.
 	case preOpen:
-		return fmt.Sprintf("pre-open codex gate · stalled %dd", stale)
+		return fmt.Sprintf("pre-open codex gate · stalled %dd", gateStale)
+	// A settled gate names the disposition a sitting recorded, ahead of the
+	// pull-request identity below, which would read as live in-flight work. The
+	// ruling text itself rides in `takeaway`; this line says the gate is stood
+	// down, not which branch it was.
+	case settled(a):
+		return "pre-open gate settled — stood down"
 	// A merge anchor names the pull request instead, and OUTRANKS the
 	// human-routed phrase below, which is not a competing fact but a less
 	// specific version of the same one: a wedged anchor is routed to a person
@@ -671,7 +681,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, preOpen bool, stale int,
+func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, preOpen bool, gateStale int,
 	machine, approval string, ask *Blocker, prIsOwed bool) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
@@ -709,7 +719,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, pre
 	// an answer a person already gave, and this is the state that says one has
 	// gone stale.
 	if preOpen {
-		return fmt.Sprintf("pre-open codex gate stalled %dd — %s, none in flight", stale, preOpenStallReason(a.Blockers))
+		return fmt.Sprintf("pre-open codex gate stalled %dd — %s, none in flight", gateStale, preOpenStallReason(a.Blockers))
 	}
 	if takeaway != "" {
 		return takeaway
@@ -848,6 +858,18 @@ const (
 // read" are different answers and only the second counts against coverage.
 func isMergeAnchor(a Anchor) bool { return a.Metadata[mdMergeResult] != "" }
 
+// settled reports whether a sitting stood this merge anchor down. gc-helm.sh's
+// takeaway --no-wait stamps gc.takeaway_settled when the ruling ENDED the wait
+// rather than moving it, quiescing the molecule; every other headline blanks the
+// key, so a non-empty value is the settled disposition and an empty or absent one
+// is not — the same reading lifecycle.toml [holds] and doctor/check-wait-is-an-edge
+// give it. The gate is disposed, so the board reads it as quiet even while
+// pr.machine still says progressing off a blocker the quiesce has not yet cleared.
+// Scoped to merge anchors: a settled human or parked row is [ruled] instead.
+func settled(a Anchor) bool {
+	return isMergeAnchor(a) && a.Metadata[mdTakeawaySettled] != ""
+}
+
 // splitDated reads the <value>@<oid>@<since> shape lifecycle.sh writes. The
 // instant lives INSIDE the value rather than in a key beside it, so a reader
 // that trusts the value has already trusted the instant; a value in any other
@@ -974,13 +996,33 @@ func openReviewChild(blockers []Blocker) bool {
 //     gate work into STALLED on a degraded read — the same fail-open [ruled]
 //     refuses on its own side, a band asserted on what was never established.
 //
-// stale is the anchor's own age in days: a gate that has genuinely stopped is
-// not being touched, so its updated_at ages while a live one's does not.
-func preOpenStalled(a Anchor, machine string, owed, hasReview, hasInFlight bool, stale int) bool {
+// gateStale is how long the gate's HEAD has sat unmoved, from [gateStaleDays]:
+// the instant the merge cadence pinned pr.machine at the live head, which ages
+// with the BRANCH, not with the bead. gateStaleKnown is false when no dated
+// pr.machine records that head — an unread head-recency the stall must not fire
+// on, the same fail-open the WaitingUnknown clause gives an unread edge set, a
+// band asserted on what was never established. updated_at is deliberately NOT
+// the clock: a reconcile touch bumps it and would hide an abandoned branch, and
+// an untouched bead would make recent branch work read as stalled.
+func preOpenStalled(a Anchor, machine string, owed, hasReview, hasInFlight bool, gateStale int, gateStaleKnown bool) bool {
 	return a.Metadata[mdMergeResult] == mergePreOpenGate &&
-		!a.WaitingUnknown &&
+		!a.WaitingUnknown && gateStaleKnown &&
 		!owed && machine != MachineProgressing && !hasReview && !hasInFlight &&
-		stale >= preOpenGraceDays
+		gateStale >= preOpenGraceDays
+}
+
+// gateStaleDays is the pre-open stall clock: whole days since the merge cadence
+// last pinned pr.machine at the current head. [datedSince] keeps that instant
+// while the head oid holds and restamps it when the head moves, so it measures
+// how long the BRANCH has sat rather than how long since the bead was written.
+// ok is false when pr.machine carries no dated instant to read, which the caller
+// treats as an unproven stall rather than a zero-age one.
+func gateStaleDays(a Anchor, now time.Time) (int, bool) {
+	_, _, since, ok := splitDated(a.Metadata[mdPRMachine])
+	if !ok {
+		return 0, false
+	}
+	return staleDays(since, now), true
 }
 
 // preOpenStallReason names WHY a pre-open gate stalled, cheaply, from the review
@@ -1369,22 +1411,27 @@ var SectionOrder = []string{
 // re-run it after flipping a folded subject to owed without re-deriving the
 // anchor. Every input is a field the tile already carries: PRMachine is
 // non-empty exactly on a merge anchor, and Stranded/DeadOwner/Kind/Owed/Severity
-// /PreOpenStalled are the same values severity() and computeTile() set.
+// /Settled/PreOpenStalled are the same values severity() and computeTile() set.
 func classifySection(t Tile) string {
 	switch {
 	case t.Severity == SevDone:
 		return SectionDone
 	case t.PRMachine != "":
 		// A merge anchor bands by what its pull-request phase asks of a person,
-		// not by being a pull request at all. review is where the operator's own
-		// PRs go — a wedge to rule on, a question to answer, a green branch
-		// waiting on their review — which is exactly the owed set. A genuine
-		// pre-open gate stall is stuck work nobody is moving, so it bands with
-		// the other stalled rows. Everything else — a progressing cadence, a
-		// green branch waiting only on the merge pass — is healthy in-flight
-		// work the operator does not have to touch, and reading as "a pull
-		// request wants you" is the noise that made the board untrustworthy.
+		// not by being a pull request at all. A settled gate — one a sitting
+		// stood down — is disposed, so it bands with the quiet cleanup tail and
+		// leads here because that disposition outranks whatever phase the cadence
+		// last recorded. review is where the operator's own PRs go — a wedge to
+		// rule on, a question to answer, a green branch waiting on their review —
+		// which is exactly the owed set. A genuine pre-open gate stall is stuck
+		// work nobody is moving, so it bands with the other stalled rows.
+		// Everything else — a progressing cadence, a green branch waiting only on
+		// the merge pass — is healthy in-flight work the operator does not have
+		// to touch, and reading as "a pull request wants you" is the noise that
+		// made the board untrustworthy.
 		switch {
+		case t.Settled:
+			return SectionCleanup
 		case t.Owed:
 			return SectionReview
 		case t.PreOpenStalled:
@@ -1432,10 +1479,14 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	ask := askingDemand(a.Blockers)
 	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
 	owed := a.ClosedAt.IsZero() && ((humanGated(a) && !isRuled) || dispDue || prIsOwed)
-	preOpen := preOpenStalled(a, machine, owed,
-		openReviewChild(a.Blockers), anyCadenceChildInFlight(a.Blockers), stale)
+	gateStale, gateStaleKnown := gateStaleDays(a, now)
+	isSettled := settled(a)
+	// A settled gate is disposed, not stalled: the sitting that stood it down is
+	// the very attention the stall test looks for, so settled outranks the stall.
+	preOpen := !isSettled && preOpenStalled(a, machine, owed,
+		openReviewChild(a.Blockers), anyCadenceChildInFlight(a.Blockers), gateStale, gateStaleKnown)
 
-	sev := severity(a, r, held, stale, dispDue, isRuled, preOpen)
+	sev := severity(a, r, held, stale, dispDue, isRuled, preOpen, isSettled)
 	w := weight(r, a.Priority, xrefs)
 
 	// progress_mismatch: the convoy's own closed/total claim disagrees with the
@@ -1511,8 +1562,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
-		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, preOpen, closedDays, stale, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, preOpen, stale, machine, approval, ask, prIsOwed),
+		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, preOpen, closedDays, gateStale, owedSince, now),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, preOpen, gateStale, machine, approval, ask, prIsOwed),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -1524,6 +1575,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PROwedSince:    owedSince,
 
 		PreOpenStalled: preOpen,
+		Settled:        isSettled,
 	}
 	// The band is a function of the finished tile, so the visit fold can re-run
 	// it after flipping a folded subject to owed. ClusterKey stays empty here;
@@ -1712,7 +1764,7 @@ const mdContinuationGroup = "gc.continuation_group"
 func visitAsk(title string) string {
 	s := collapseWS(title)
 	s = strings.TrimSpace(strings.TrimPrefix(s, "visit:"))
-	for _, sep := range []string{" — ", " - " } {
+	for _, sep := range []string{" — ", " - "} {
 		if i := strings.Index(s, sep); i >= 0 && i <= 16 {
 			s = strings.TrimSpace(s[i+len(sep):])
 			break

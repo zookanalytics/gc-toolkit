@@ -49,11 +49,14 @@ func TestSectionClassification(t *testing.T) {
 		{ID: "tk-pr-active", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
 			Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "8",
 				"pr.machine": "progressing@def456@2026-09-01T00:00:00Z"}},
-		// A pre-open gate nothing is moving and nobody owes, aged past the grace
-		// window → stalled. No review armed, nothing in flight.
+		// A pre-open gate nothing is moving and nobody owes, its head unmoved
+		// past the grace window → stalled. No review armed, nothing in flight.
+		// updated_at is fresh — a reconcile touched the bead — but the stall reads
+		// the head-recency in pr.machine, not the bead clock.
 		{ID: "tk-preopen-stall", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
-			UpdatedAt: daysAgo(5),
-			Metadata:  map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-preopen-stall"}},
+			UpdatedAt: fixtureNow,
+			Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-preopen-stall",
+				"pr.machine": dated(MachineSettled, headOld, daysAgo(5))}},
 		// A decision → gate (a person must answer).
 		{ID: "tk-dec", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1)},
 		// A stranded epic → stalled.
@@ -133,11 +136,13 @@ func TestPreOpenReReviewIsActive(t *testing.T) {
 // does not.
 func TestPreOpenGateStallSurfaces(t *testing.T) {
 	stall := Anchor{ID: "tk-or0ha2", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
-		Priority: ptr(2), UpdatedAt: daysAgo(7),
-		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-or0ha2"}}
+		Priority: ptr(2), UpdatedAt: fixtureNow,
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-or0ha2",
+			"pr.machine": dated(MachineSettled, headOld, daysAgo(7))}}
 	fresh := Anchor{ID: "tk-fresh-gate", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
 		Priority: ptr(2), UpdatedAt: fixtureNow,
-		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-fresh-gate"}}
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-fresh-gate",
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow)}}
 
 	b := BuildBoard([]Anchor{stall, fresh}, fixtureNow, false, nil, Facts{})
 
@@ -176,8 +181,9 @@ func TestPreOpenGateStallSurfaces(t *testing.T) {
 // read, the fail-open ruled() guards against on its own side.
 func TestPreOpenGateStallSkipsUnreadEdges(t *testing.T) {
 	unread := Anchor{ID: "tk-unread-gate", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
-		Priority: ptr(2), UpdatedAt: daysAgo(7),
-		Metadata:       map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-unread-gate"},
+		Priority: ptr(2), UpdatedAt: fixtureNow,
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-unread-gate",
+			"pr.machine": dated(MachineSettled, headOld, daysAgo(7))},
 		WaitingUnknown: true}
 
 	b := BuildBoard([]Anchor{unread}, fixtureNow, false, nil, Facts{})
@@ -191,6 +197,88 @@ func TestPreOpenGateStallSkipsUnreadEdges(t *testing.T) {
 	}
 	if tl.Section == SectionStalled {
 		t.Errorf("an unread pre-open gate must not band stalled on an unproven absence; got %q", tl.Section)
+	}
+}
+
+// TestSettledMergeAnchorIsQuiet: a pre-open gate a sitting stood down carries
+// gc.takeaway_settled, and the board reads it as disposed even while pr.machine
+// still says progressing off a blocker the quiesce has not cleared. Without
+// consuming the settled disposition the row banded ACTIVE at NORMAL — healthy
+// in-flight work — which is the noise this removes.
+func TestSettledMergeAnchorIsQuiet(t *testing.T) {
+	gate := Anchor{ID: "tk-settled-gate", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(2), UpdatedAt: fixtureNow,
+		Metadata: map[string]string{
+			"merge_result":        "pre_open_gate",
+			"branch":              "polecat/tk-settled-gate",
+			"pr.machine":          dated(MachineProgressing, headLive, fixtureNow),
+			"gc.takeaway":         "resolved — no human action was needed",
+			"gc.takeaway_settled": "1",
+		}}
+
+	b := BuildBoard([]Anchor{gate}, fixtureNow, false, nil, Facts{})
+	tl, ok := tileByID(b, "tk-settled-gate")
+	if !ok {
+		t.Fatal("tk-settled-gate missing from board")
+	}
+	if !tl.Settled {
+		t.Error("a gate carrying gc.takeaway_settled is settled")
+	}
+	if tl.PreOpenStalled {
+		t.Error("a settled gate is disposed, not stalled")
+	}
+	if tl.Section != SectionCleanup {
+		t.Errorf("a settled gate bands into the quiet cleanup tail; got %q (machine %q)", tl.Section, tl.PRMachine)
+	}
+	if tl.Severity != SevLow {
+		t.Errorf("a settled gate sinks to the LOW floor; got %s", tl.Severity)
+	}
+	if !strings.Contains(tl.Frontier, "settled") {
+		t.Errorf("frontier names the disposition; got %q", tl.Frontier)
+	}
+}
+
+// TestPreOpenStallReadsHeadRecencyNotBeadClock is the regression for the stall
+// clock: the pre-open stall reads branch-head recency (pr.machine's pinned
+// instant), not the bead's updated_at, so the two failure modes where they
+// disagree resolve correctly.
+//
+//   - abandoned: a reconcile touched the bead (updated_at fresh) but the head has
+//     not moved in a week — the branch is abandoned and reads STALLED.
+//   - working: the head moved today (recent branch work) but nothing touched the
+//     bead (updated_at weeks old) — live work that does NOT read stalled.
+func TestPreOpenStallReadsHeadRecencyNotBeadClock(t *testing.T) {
+	abandoned := Anchor{ID: "tk-abandoned", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(2), UpdatedAt: fixtureNow, // a reconcile just touched it
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-abandoned",
+			"pr.machine": dated(MachineSettled, headOld, daysAgo(7))}}
+	working := Anchor{ID: "tk-working", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+		Priority: ptr(2), UpdatedAt: daysAgo(21), // nothing has touched the bead
+		Metadata: map[string]string{"merge_result": "pre_open_gate", "branch": "polecat/tk-working",
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow)}}
+
+	b := BuildBoard([]Anchor{abandoned, working}, fixtureNow, false, nil, Facts{})
+
+	ab, ok := tileByID(b, "tk-abandoned")
+	if !ok {
+		t.Fatal("tk-abandoned missing from board")
+	}
+	if !ab.PreOpenStalled {
+		t.Error("an abandoned gate (head unmoved a week) is stalled even though a reconcile freshened updated_at")
+	}
+	if !strings.Contains(ab.Frontier, "stalled 7d") {
+		t.Errorf("the stall age is the head recency (7d), not the bead age (0d); got %q", ab.Frontier)
+	}
+
+	wk, ok := tileByID(b, "tk-working")
+	if !ok {
+		t.Fatal("tk-working missing from board")
+	}
+	if wk.PreOpenStalled {
+		t.Error("a gate whose head moved today is not stalled even though its bead is weeks stale")
+	}
+	if wk.Section == SectionStalled {
+		t.Errorf("recent branch work does not band stalled; got %q", wk.Section)
 	}
 }
 

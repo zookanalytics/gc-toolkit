@@ -228,6 +228,15 @@ export interface Tile {
    */
   cluster_key?: string;
   /**
+   * A merge anchor a sitting stood down: gc.takeaway_settled is stamped when a
+   * takeaway ends the wait rather than moving it, quiescing the molecule. The
+   * gate is disposed, so the row bands into the quiet cleanup tail at LOW rather
+   * than reading as active in-flight work — which it would otherwise, since
+   * pr.machine can still say progressing off a blocker the quiesce has not yet
+   * cleared. Absent (Go `omitempty`) on every row that is not settled.
+   */
+  settled?: boolean;
+  /**
    * A merge anchor stuck at the pre-open codex gate that nothing is moving and
    * nobody owes — past the grace window, no review armed or in flight, no rework
    * running, not progressing. It is what tells a genuine gate stall apart from a
