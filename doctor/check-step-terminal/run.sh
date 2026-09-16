@@ -5,15 +5,17 @@
 #
 # Under a root CLOSED past the settle grace, the verdict turns on whether the
 # pool can still hand the step out. A step is offerable when its own status is
-# open, it carries a dispatch path — a gc.routed_to a pool queue consumes, or a
-# gc.dispatch_when_ready arm the deferred-dispatch order slings — and every
-# blocking dependency has closed. That is an error, in two shapes because they
-# are different defects: REOPENED carries gc.outcome, so it completed and was
-# reset, and the pool re-offers it against a dead molecule; NEVER-CLOSED never
-# completed and the molecule finalized around it. A step that is parked, that
-# carries no dispatch path (an unrouted, unarmed husk no queue can reach), or
-# that still waits on a live blocker, is inert. Nothing can offer it, so it is a
-# note.
+# open, it carries a dispatch path a worker pool consumes — a gc.routed_to a
+# pool queue serves, or a gc.dispatch_when_ready arm the deferred-dispatch order
+# slings — every blocking dependency has closed, and it is not the
+# control-dispatcher's own workflow-finalize step (routed to an order, not a
+# pool, and closed by the dispatcher once its siblings do). That is an error, in
+# two shapes because they are different defects: REOPENED carries gc.outcome, so
+# it completed and was reset, and the pool re-offers it against a dead molecule;
+# NEVER-CLOSED never completed and the molecule finalized around it. A step that
+# is parked, that carries no dispatch path (an unrouted, unarmed husk no queue
+# can reach), that is the finalize step routed to the dispatcher, or that still
+# waits on a live blocker, is inert. Nothing can offer it, so it is a note.
 #
 # Offerability is measured, not assumed, and the listing therefore selects open
 # AND blocked. A chain quiesced at its frontier parks that frontier at
@@ -21,9 +23,12 @@
 # parked row and then report the dep-blocked steps sitting behind it — the ones
 # whose blocker it had just discarded.
 #
-# Under a root that is OPEN, a step untouched past the stall bound (default 48h,
-# GC_DOCTOR_STEP_STALL_HOURS) is a warning, the stalled-frontier signal. A
-# parked step is not a frontier and raises none. A root resolving nowhere in
+# Under a root that is OPEN, an offerable step untouched past the stall bound
+# (default 48h, GC_DOCTOR_STEP_STALL_HOURS) is a warning, the stalled-frontier
+# signal: a pool is routed to it, yet nothing has claimed it. A stale step no
+# pool can reach — unrouted, still waiting on a live blocker, or the
+# control-dispatcher's finalize step — is inert residue, a note, not a frontier.
+# A parked step is not a frontier and raises none. A root resolving nowhere in
 # this store is a note; cross-store roots are legitimate.
 #
 # Nothing store-sized is ever held. The step listing is consumed as a
@@ -35,10 +40,11 @@
 # through `--status closed` plus a `bd count` existence probe, both
 # defect-shaped: a healthy window answers with an empty list and a full count,
 # and no root body is read. Blocker statuses resolve by the same id-scoped
-# lookup, and only for the rows a closed root already condemns, so a store with
-# nothing stranded never asks for one. Peak argv is one window of ids, peak
-# memory is one window of rows, and findings are the only structure that grows,
-# so neither the molecule count nor the step count can walk into an exec limit.
+# lookup, for the rows whose offerability a verdict reads: those a closed root
+# condemns and the stale open steps under an open root. Peak argv is one window
+# of ids, peak memory is one window of rows, and findings are the only structure
+# that grows, so neither the molecule count nor the step count can walk into an
+# exec limit.
 # `bd list --offset` is proxied-server-only, so the listing cannot be split at
 # the CLI; consuming it as events is what bounds this reader instead.
 #
@@ -63,7 +69,7 @@ errors=(); warnings=(); notes=()
 declare -A root_closed=() root_missing=() window_seen=() blocker_live=()
 declare -A f_count=() f_steps=() f_extra=()
 batch=()
-w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_dep=(); w_route=()
+w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_dep=(); w_route=(); w_final=()
 
 # >>> doctor-budget
 # One deadline for the whole check, anchored at process start. `gc doctor
@@ -133,9 +139,10 @@ JQ_META='def m($k): (((.metadata[$k] // "") | tostring)
 
 # One row per non-terminal step, unconditionally: root, step, whether it carries
 # an outcome, whether it is past the stall bound, the two values a finding
-# quotes, and the three an offerability verdict reads — the step's own status,
-# whether it carries a dispatch path, and the ids it is blocked by. Only
-# `blocks` edges count; a step tracks its root
+# quotes, and the four an offerability verdict reads — the step's own status,
+# whether it carries a dispatch path, whether it is the control-dispatcher's
+# finalize step, and the ids it is blocked by. Only `blocks` edges count; a
+# step tracks its root
 # through an edge of its own, and reading that one as a blocker would make every
 # step in the store look held. A blank root names no molecule and is dropped by
 # the reader rather than here, so the row count stays the count of non-terminal
@@ -158,7 +165,8 @@ step_row_stream() {
             ([ .dependencies[]? | select(((.type // \"\") | tostring) == \"blocks\")
                | ((.depends_on_id // \"\") | tostring) | gsub(\"[[:cntrl:]]\"; \" \")
                | select(. != \"\") ] | join(\",\")),
-            (if m(\"gc.routed_to\") != \"\" or m(\"gc.dispatch_when_ready\") != \"\" then \"1\" else \"0\" end) ]
+            (if m(\"gc.routed_to\") != \"\" or m(\"gc.dispatch_when_ready\") != \"\" then \"1\" else \"0\" end),
+            (if m(\"gc.kind\") == \"workflow-finalize\" then \"1\" else \"0\" end) ]
         | join(\"\u001f\")" 2>/dev/null
     printf '%s%s%s\n' "$END" "$SEP" "${PIPESTATUS[*]}"
 }
@@ -231,13 +239,14 @@ flush_batch() {
     return 0
 }
 
-# Which of this window's blocking dependencies are still live. Asked only about
-# rows a closed root already condemns, and never inside its settle grace, so a
-# healthy store never reaches the probe. A blocker can be any bead, not only a
-# sibling step, so the store is asked rather than the window: a step waiting on
-# an ordinary open bead is held just as firmly as one waiting on its own chain.
-# An id that resolves nowhere stays out of the set — a dependency that no longer
-# exists holds nothing, and reporting its step is the conservative reading.
+# Which of this window's blocking dependencies are still live. Asked about the
+# rows whose offerability a verdict reads: a row a closed root condemns (outside
+# its settle grace) and a stale open step under an open root. A blocker can be
+# any bead, not only a sibling step, so the store is asked rather than the
+# window: a step waiting on an ordinary open bead is held just as firmly as one
+# waiting on its own chain. An id that resolves nowhere stays out of the set — a
+# dependency that no longer exists holds nothing, and reporting its step is the
+# conservative reading.
 resolve_blockers() {   # db
     local db="$1" i n rid ids raw out id st dep
     n="${#w_root[@]}"
@@ -245,8 +254,17 @@ resolve_blockers() {   # db
     i=0
     while [ "$i" -lt "$n" ]; do
         rid="${w_root[$i]}"
-        if [ -z "${root_missing[$rid]:-}" ] && [ -n "${root_closed[$rid]:-}" ] \
-           && [ "${root_closed[$rid]%%"$SEP"*}" != "settle" ]; then
+        # The two branches that call offerable() in classify_window, and only
+        # those: a row under a closed root past its settle grace, and a stale
+        # open step under an open root. A row offerable() never judges needs no
+        # blocker map, so leaving it out keeps the probe to the defect surface.
+        if [ -n "${root_missing[$rid]:-}" ]; then
+            :
+        elif [ -n "${root_closed[$rid]:-}" ]; then
+            if [ "${root_closed[$rid]%%"$SEP"*}" != "settle" ]; then
+                for dep in ${w_dep[$i]//,/ }; do want["$dep"]=1; done
+            fi
+        elif [ "${w_stale[$i]}" = "1" ] && [ "${w_status[$i]}" = "open" ]; then
             for dep in ${w_dep[$i]//,/ }; do want["$dep"]=1; done
         fi
         i=$((i + 1))
@@ -266,16 +284,20 @@ resolve_blockers() {   # db
     return 0
 }
 
-# A step the pool can still hand out: open in its own right, carrying a dispatch
-# path — a gc.routed_to a queue consumes, or a gc.dispatch_when_ready arm — with
-# nothing live left to wait on. Everything else is residue that no pass can
-# reach, and a finding that calls it loose spends a human on a chain that cannot
-# move. An unrouted, unarmed husk is the common shape: it sits in `bd ready`
-# forever yet the pool query (unassigned + routed) never serves it.
+# A step a worker pool can still hand out: open in its own right, carrying a
+# dispatch path — a gc.routed_to a queue consumes, or a gc.dispatch_when_ready
+# arm — with nothing live left to wait on, and not the control-dispatcher's own
+# workflow-finalize step. Everything else is residue that no pass can reach, and
+# a finding that calls it loose spends a human on a chain that cannot move. An
+# unrouted, unarmed husk is the common shape: it sits in `bd ready` forever yet
+# the pool query (unassigned + routed) never serves it. The finalize step is the
+# other: routed to an order, not a pool, it is closed by the control-dispatcher
+# once its siblings do, so no pool ever offers it.
 offerable() {   # window index
     local i="$1" dep
     [ "${w_status[$i]}" = "open" ] || return 1
     [ "${w_route[$i]}" = "1" ] || return 1
+    [ "${w_final[$i]}" != "1" ] || return 1
     for dep in ${w_dep[$i]//,/ }; do
         [ -z "${blocker_live[$dep]:-}" ] || return 1
     done
@@ -315,11 +337,12 @@ classify_window() {   # db
             elif [ "${w_oc[$i]}" = "1" ]; then record reopened "$rid" "${w_step[$i]}" "$ca"
             else                               record stranded "$rid" "${w_step[$i]}" "$ca"; fi
         elif [ "${w_stale[$i]}" = "1" ] && [ "${w_status[$i]}" = "open" ]; then
-            record stall "$rid" "${w_step[$i]}" "${w_ua[$i]}"
+            if offerable "$i"; then record stall       "$rid" "${w_step[$i]}" "${w_ua[$i]}"
+            else                    record stall_inert "$rid" "${w_step[$i]}" "${w_ua[$i]}"; fi
         fi
         i=$((i + 1))
     done
-    w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_dep=(); w_route=()
+    w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_dep=(); w_route=(); w_final=()
     return 0
 }
 
@@ -346,17 +369,17 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     declare -A root_closed=() root_missing=() window_seen=() blocker_live=()
     declare -A f_count=() f_steps=() f_extra=()
     batch=(); w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=()
-    w_status=(); w_dep=(); w_route=()
+    w_status=(); w_dep=(); w_route=(); w_final=()
     resolve_ok=1; probe_rc=""; seen_any=0
 
-    while IFS="$SEP" read -r rid sid oc stale ua ref st dep route; do
+    while IFS="$SEP" read -r rid sid oc stale ua ref st dep route final; do
         case "$rid" in "$END") probe_rc="$sid"; continue ;; esac
         [ -n "$sid" ] || continue
         seen_any=1
         [ -n "$rid" ] || continue
         w_root+=("$rid"); w_step+=("$sid"); w_oc+=("$oc")
         w_stale+=("$stale"); w_ua+=("$ua"); w_ref+=("$ref")
-        w_status+=("$st"); w_dep+=("$dep"); w_route+=("$route")
+        w_status+=("$st"); w_dep+=("$dep"); w_route+=("$route"); w_final+=("$final")
         if [ -z "${window_seen[$rid]:-}" ]; then window_seen["$rid"]=1; batch+=("$rid"); fi
         if [ "${#w_root[@]}" -ge "$CHUNK" ]; then
             classify_window "$db" || { resolve_ok=0; break; }
@@ -394,7 +417,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             reopened) errors+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) yet $count step(s) are offerable AND already carry gc.outcome — $sids. They completed and were RESET; the pool re-offers each one against a dead molecule.") ;;
             stranded) errors+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) yet $count step(s) never closed — $sids. The molecule finalized around them; each is open, routed, with every blocker closed, so the pool can still offer them.") ;;
             inert)    notes+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) with $count non-terminal step(s) — $sids. Each is parked, waiting on a live blocker, or carries no dispatch path (unrouted and unarmed), so no pool can offer them: residue to sweep, not a strand.") ;;
-            stall)    warnings+=("$label: molecule $rid is OPEN but $count of its open step(s) have not been touched in over ${STALL_HOURS}h — $sids (last update $ex). The frontier is stalled: nothing is claiming or advancing this workflow.") ;;
+            stall)    warnings+=("$label: molecule $rid is OPEN but $count of its open step(s), routed to a pool, have not been touched in over ${STALL_HOURS}h — $sids (last update $ex). The frontier is stalled: a worker pool is routed to them, yet nothing is claiming or advancing this workflow.") ;;
+            stall_inert) notes+=("$label: molecule $rid is OPEN with $count stale step(s) no pool can advance — $sids. Each is unrouted, held by a still-live dependency, or is the control-dispatcher's finalize step: residue, not a stalled frontier.") ;;
             settle)   notes+=("$label: molecule $rid closed within the ${GRACE}s settle window and still has $count non-terminal step(s) ($sids) — finalize in progress, not a strand") ;;
             orphan)   notes+=("$label: non-terminal step(s) $sids name root $rid, which resolves nowhere in $db (gc.root_store_ref=${ex:-<unset>}) — a cross-store root is legitimate, a deleted one is not; reported, not judged") ;;
         esac
@@ -417,6 +441,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: no offerable step under a closed root, and no open frontier stalled past ${STALL_HOURS}h"
+echo "OK: no offerable step under a closed root, and no routed open frontier stalled past ${STALL_HOURS}h"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
