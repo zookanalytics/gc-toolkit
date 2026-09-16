@@ -858,16 +858,27 @@ const (
 // read" are different answers and only the second counts against coverage.
 func isMergeAnchor(a Anchor) bool { return a.Metadata[mdMergeResult] != "" }
 
-// settled reports whether a sitting stood this merge anchor down. gc-helm.sh's
-// takeaway --no-wait stamps gc.takeaway_settled when the ruling ENDED the wait
-// rather than moving it, quiescing the molecule; every other headline blanks the
-// key, so a non-empty value is the settled disposition and an empty or absent one
-// is not — the same reading lifecycle.toml [holds] and doctor/check-wait-is-an-edge
-// give it. The gate is disposed, so the board reads it as quiet even while
-// pr.machine still says progressing off a blocker the quiesce has not yet cleared.
-// Scoped to merge anchors: a settled human or parked row is [ruled] instead.
+// settled reports whether a sitting stood this merge anchor down and the gate is
+// actually disposed. gc-helm.sh's takeaway --no-wait stamps gc.takeaway_settled
+// when the ruling ENDED the wait rather than moving it, quiescing the molecule;
+// every other headline blanks the key, so a non-empty value is the settled
+// disposition and an empty or absent one is not — the same reading lifecycle.toml
+// [holds] and doctor/check-wait-is-an-edge give it. Scoped to merge anchors: a
+// settled human or parked row is [ruled] instead.
+//
+// The marker can outlive its disposition: an operator retires a signoff cap and
+// the gate re-enters the codex pre-open cadence with gc.takeaway_settled still
+// stamped. Live cadence evidence on the anchor's own edges — a review armed or
+// running, or any cadence child in flight — outranks the marker, because a gate an
+// actor is actively moving is not disposed. The recorded pr.machine is not that
+// evidence: the merge cadence leaves it saying progressing off a blocker the
+// quiesce has not cleared, so a genuinely settled gate keeps that value while its
+// edges carry no live child, and the marker stands.
 func settled(a Anchor) bool {
-	return isMergeAnchor(a) && a.Metadata[mdTakeawaySettled] != ""
+	if !isMergeAnchor(a) || a.Metadata[mdTakeawaySettled] == "" {
+		return false
+	}
+	return !openReviewChild(a.Blockers) && !anyCadenceChildInFlight(a.Blockers)
 }
 
 // splitDated reads the <value>@<oid>@<since> shape lifecycle.sh writes. The

@@ -130,6 +130,63 @@ func TestPreOpenReReviewIsActive(t *testing.T) {
 	}
 }
 
+// TestStaleSettledMarkerYieldsToLiveReReview: gc.takeaway_settled can outlive the
+// disposition that wrote it — an operator retires a signoff cap and the gate
+// re-enters the codex pre-open cadence with the marker still stamped. The marker
+// alone would sink the row into the quiet cleanup tail below the attention bands,
+// hiding a live re-review. Live cadence evidence on the anchor's edges outranks
+// the stale marker whichever form it takes: a review armed or running, or a rework
+// child dispatched to a pool (which clears gc.routed_to and carries its pool on
+// gc.execution_routed_to). Both are the shape anchor tk-mq9bvj reached live. A
+// genuinely settled gate — the same marker with no live child — stays quiet in
+// TestSettledMergeAnchorIsQuiet.
+func TestStaleSettledMarkerYieldsToLiveReReview(t *testing.T) {
+	rows := func(blockers []Blocker) []Anchor {
+		md := map[string]string{
+			"merge_result":        "pre_open_gate",
+			"branch":              "polecat/tk-8u81bo",
+			"pr.machine":          "progressing@1d2ff83b@2026-09-15T02:41:48Z",
+			"gc.takeaway":         "Cap retired; pre-open cadence re-reviews with fresh budget.",
+			"gc.takeaway_settled": "1",
+		}
+		// One bead reaches the board as both rows, exactly as the gather emits it.
+		return []Anchor{
+			{ID: "tk-8u81bo", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+				Priority: ptr(1), UpdatedAt: fixtureNow, Metadata: md, Takeaway: md["gc.takeaway"], Blockers: blockers},
+			{ID: "tk-8u81bo", Kind: "merge", Source: "merge", Rig: "gc-toolkit", Prefix: "tk",
+				Priority: ptr(1), UpdatedAt: fixtureNow, Metadata: md, Blockers: blockers},
+		}
+	}
+	cases := []struct {
+		name     string
+		blockers []Blocker
+	}{
+		{"armed review child", []Blocker{{ID: "tk-rev", Status: "open", TaskKind: "review"}}},
+		{"dispatched rework child", []Blocker{{ID: "tk-rwork", Status: "open", ExecRoutedTo: "gc-toolkit/gc-toolkit.polecat"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := BuildBoard(rows(tc.blockers), fixtureNow, false, nil, Facts{})
+			tl, ok := tileByID(b, "tk-8u81bo")
+			if !ok {
+				t.Fatal("tk-8u81bo missing from board")
+			}
+			if tl.Settled {
+				t.Error("a stale settled marker must not read as disposed while a live child moves the gate")
+			}
+			if tl.Kind == "parked" {
+				t.Errorf("a live merge anchor must not read as parked; kind=%q", tl.Kind)
+			}
+			if tl.PreOpenStalled {
+				t.Error("a gate with a live child in flight is not a pre-open stall")
+			}
+			if tl.Section != SectionActive {
+				t.Errorf("a live pre-open re-review bands active despite gc.takeaway_settled; got %q (sev %s, needs %q)", tl.Section, tl.Severity, tl.Needs)
+			}
+		})
+	}
+}
+
 // TestPreOpenGateStallSurfaces: a pre-open gate aged past the grace window with
 // no review armed, nothing in flight, and nobody owed bands STALLED at ELEVATED,
 // and its frontier/needs name the codex gate. A fresh gate in the same shape
