@@ -402,11 +402,14 @@ type Tile struct {
 	// dashboard from each inventing their own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
-	// how-badly: review (a pull request), gate (a person must answer), stalled
-	// (open work nothing is moving), active (healthy in-flight), cleanup (a
-	// finished or empty row to dispose of), done (the anchor itself closed). One
-	// row lands in exactly one section; [classifySection] is the total mapping,
-	// and [SectionOrder] is the order a surface reads them in.
+	// how-badly: review (a pull request the operator owes), gate (a person must
+	// answer), stalled (open work nothing is moving), active (healthy
+	// in-flight), cleanup (a finished, empty or disposed row), done (the anchor
+	// itself closed). A merge anchor bands by what its PR phase asks of a
+	// person, so it can land in review, active, cleanup or stalled — being a
+	// pull request is not itself the band. One row lands in exactly one section;
+	// [classifySection] is the total mapping, and [SectionOrder] is the order a
+	// surface reads them in.
 	Section string `json:"section"`
 
 	// ClusterKey groups rows that are instances of ONE template — the same

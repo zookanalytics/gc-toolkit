@@ -208,14 +208,17 @@ export interface Tile {
   pr_owed_since?: string;
 
   /**
-   * The KIND of attention this row wants — `'review'` (a pull request),
-   * `'gate'` (a person must answer), `'stalled'` (open work nothing is moving),
-   * `'active'` (healthy in-flight), `'cleanup'` (a finished or empty row to
-   * dispose of), or `'done'` (the anchor itself closed). Orthogonal to
-   * `severity`'s how-badly. A surface groups by this and reads the bands in the
-   * order model.go's `SectionOrder` fixes; it is on the wire so the CLI and this
-   * app cannot each invent their own split. The Go type is a plain string, so an
-   * unknown value is representable even though this union is not exhaustive here.
+   * The KIND of attention this row wants — `'review'` (a pull request the
+   * operator owes), `'gate'` (a person must answer), `'stalled'` (open work
+   * nothing is moving), `'active'` (healthy in-flight), `'cleanup'` (a
+   * finished, empty or disposed row), or `'done'` (the anchor itself closed).
+   * A merge anchor bands by what its PR phase asks of a person, so it can land
+   * in review, active, cleanup or stalled — being a pull request is not itself
+   * the band. Orthogonal to `severity`'s how-badly. A surface groups by this
+   * and reads the bands in the order model.go's `SectionOrder` fixes; it is on
+   * the wire so the CLI and this app cannot each invent their own split. The Go
+   * type is a plain string, so an unknown value is representable even though
+   * this union is not exhaustive here.
    */
   section: string;
   /**
