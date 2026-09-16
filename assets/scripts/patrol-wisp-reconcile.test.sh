@@ -11,12 +11,15 @@
 #      leaves a wisp owned by nobody.
 #   2. AN --assignee-SCOPED RECONCILE CANNOT SEE THAT WISP. It matches no
 #      query on this restart or any later one, so it is unreachable garbage.
-#      Reconcile stays assignee-BLIND and matches by TITLE, then narrows to
-#      THIS rig: several rigs run this pack and pour the same patrol title
-#      into one shared store, so title alone collides across rigs. A wisp is
-#      this rig's when its assignee segment or pour-stamped gc.rig names this
-#      rig, or when it names no rig yet (a fresh orphan); one naming another
-#      rig is left for that rig.
+#      Reconcile stays assignee-BLIND and matches by TITLE. The per-rig
+#      witness and refinery then narrow to THIS rig: several rigs run this
+#      pack and pour the same patrol title into one shared store, so title
+#      alone collides across rigs. A wisp is this rig's when its assignee
+#      segment or pour-stamped gc.rig names this rig, or when it names no rig
+#      yet (a fresh orphan); one naming another rig is left for that rig. The
+#      deacon is a city singleton with no rig, so it reconciles by title alone
+#      and takes no rig scope: GC_RIG arrives unset for it and its assignee
+#      carries no rig segment, so a rig filter could never match its own wisp.
 #   3. A WISP IS AN EPHEMERAL MOLECULE. `--include-infra` is required or every
 #      wisp query reads empty, and `--type=wisp` is not an issue type at all —
 #      it errors. Either way the caller concludes "no wisp" and the row it was
@@ -151,7 +154,7 @@ run_reconcile() {
   : > "$TMP/burned"; : > "$TMP/wisp"
   ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
-           GC_RIG="$THIS_RIG"
+           GC_RIG="$AGENT_RIG"
     # shellcheck disable=SC1091
     . "$TMP/reconcile.sh"
     printf '%s' "$WISP" > "$TMP/wisp" )
@@ -166,7 +169,7 @@ run_pour() {
   local script="${6:-$TMP/pour.sh}" rc=0
   ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
-           GC_RIG="$THIS_RIG" GC_BEAD_ID="${4:-}" \
+           GC_RIG="$AGENT_RIG" GC_BEAD_ID="${4:-}" \
            GC_ASSIGN_FAILS="${1:-0}" GC_POUR_EMPTY="${2:-0}" GC_BURN_FAILS="${3:-0}"
     bash "$script" >/dev/null 2>&1 ) || rc=$?
   printf '%s|%s|%s' "$rc" \
@@ -232,20 +235,33 @@ fx() {
 }
 
 # --- Per-agent contracts. ----------------------------------------------------
-# Fields: agent | expected happy-path pour result | does the pour snippet also
-# resolve and burn the CURRENT wisp? The refinery does it in the same block; the
-# witness and deacon burn theirs from a later formula step, so their snippet
-# burns nothing on the happy path.
+# Fields: agent | scope (rig|city) | happy-path pour result | assign-fails
+# rollback result | does the pour snippet also resolve and burn the CURRENT
+# wisp? The refinery does it in the same block; the witness and deacon burn
+# theirs from a later formula step, so their snippet burns nothing on the happy
+# path. The per-rig witness and refinery stamp gc.rig before the assign (two
+# updates); the city-singleton deacon takes no rig scope, so it only assigns
+# (one update).
 AGENTS=(
-  "witness  0||w-new,w-new      no"
-  "deacon   0||w-new,w-new      no"
-  "refinery 0|w-cur|w-new,w-new yes"
+  "witness  rig  0||w-new,w-new      1|w-new|w-new,w-new no"
+  "deacon   city 0||w-new            1|w-new|w-new       no"
+  "refinery rig  0|w-cur|w-new,w-new 1|w-new|w-new,w-new yes"
 )
 
 for SPEC in "${AGENTS[@]}"; do
-  read -r AGENT POUR_OK BURNS_CURRENT <<<"$SPEC"
+  read -r AGENT SCOPE POUR_OK POUR_FAIL BURNS_CURRENT <<<"$SPEC"
   TITLE="mol-$AGENT-patrol"
-  AGENT_ID="$THIS_RIG/$AGENT-1"
+  # A per-rig agent (witness, refinery) runs with GC_RIG set and a rig-prefixed
+  # assignee. The deacon is a city singleton: GC_RIG arrives unset and its
+  # assignee carries no rig segment — the exact shape its reconcile must handle
+  # and the shape a rig-scoped sweep silently drops.
+  if [ "$SCOPE" = city ]; then
+    AGENT_RIG=""
+    AGENT_ID="bind.$AGENT"
+  else
+    AGENT_RIG="$THIS_RIG"
+    AGENT_ID="$THIS_RIG/$AGENT-1"
+  fi
   PROMPT="$ROOT/agents/$AGENT/prompt.template.md"
   TOML="$ROOT/formulas/$TITLE.toml"
   echo
@@ -293,17 +309,26 @@ for SPEC in "${AGENTS[@]}"; do
 
   eq "$(run_reconcile '[]')" "|" "$AGENT: empty store yields no wisp and no burn"
 
-  # Cross-rig: a foreign rig's patrol wisp in the shared store is neither kept
-  # as the survivor nor burned — this rig's in_progress wisp survives and its
-  # orphan is the only surplus. This is the reported collision: a title-only
-  # sweep kept the foreign wisp and burned this rig's.
-  eq "$(run_reconcile "$(fx "$FX_CROSS_RIG")")" "w-mine|w-orph" \
-     "$AGENT: REGRESSION: a foreign rig's patrol wisp is left untouched; this rig's is reconciled"
+  # Cross-rig scoping is only the per-rig agents' concern. The witness and
+  # refinery coexist across rigs in one store, so each must leave a foreign
+  # rig's wisp alone. The city-singleton deacon has no sibling and no rig, so
+  # it has no cross-rig case; its regression is the FX_LEAK check above run
+  # with GC_RIG unset and a rig-less assignee — the shape a rig sweep drops —
+  # where it keeps its own in_progress wisp instead of stranding it to adopt
+  # the orphan.
+  if [ "$SCOPE" = rig ]; then
+    # A foreign rig's patrol wisp in the shared store is neither kept as the
+    # survivor nor burned — this rig's in_progress wisp survives and its orphan
+    # is the only surplus. This is the reported collision: a title-only sweep
+    # kept the foreign wisp and burned this rig's.
+    eq "$(run_reconcile "$(fx "$FX_CROSS_RIG")")" "w-mine|w-orph" \
+       "$AGENT: REGRESSION: a foreign rig's patrol wisp is left untouched; this rig's is reconciled"
 
-  # The orphan signal is the pour-stamped gc.rig, since an unassigned wisp has
-  # no assignee segment to read: a foreign gc.rig is skipped, this rig's adopted.
-  eq "$(run_reconcile "$(fx "$FX_CROSS_RIG_ORPHAN")")" "w-mine|" \
-     "$AGENT: REGRESSION: a foreign gc.rig orphan is skipped; this rig's gc.rig orphan is adopted"
+    # The orphan signal is the pour-stamped gc.rig, since an unassigned wisp has
+    # no assignee segment to read: a foreign gc.rig is skipped, this rig's adopted.
+    eq "$(run_reconcile "$(fx "$FX_CROSS_RIG_ORPHAN")")" "w-mine|" \
+       "$AGENT: REGRESSION: a foreign gc.rig orphan is skipped; this rig's gc.rig orphan is adopted"
+  fi
 
   # --- Pour guard. -----------------------------------------------------------
   eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
@@ -311,7 +336,7 @@ for SPEC in "${AGENTS[@]}"; do
 
   # THE CORE GUARD: a failed assign must roll the pour back and report failure,
   # so the current wisp is never burned. Leaking w-new here IS the bug.
-  eq "$(run_pour 1 0 0 w-cur)" "1|w-new|w-new,w-new" \
+  eq "$(run_pour 1 0 0 w-cur)" "$POUR_FAIL" \
      "$AGENT: REGRESSION: a failed assign rolls the poured wisp back, exits non-zero, and burns no current wisp"
 
   # A pour that yields no id must not be assigned, must not be burned, and must
@@ -322,7 +347,7 @@ for SPEC in "${AGENTS[@]}"; do
   # Rollback is best-effort: if the burn also fails, the guard still exits
   # non-zero. The stray is then the title-scoped reconcile's problem — which is
   # exactly why that half of the fix has to be assignee-blind.
-  eq "$(run_pour 1 0 1 w-cur)" "1|w-new|w-new,w-new" \
+  eq "$(run_pour 1 0 1 w-cur)" "$POUR_FAIL" \
      "$AGENT: a failed rollback burn still exits non-zero (reconcile is the backstop)"
 
   # --- Resolving the CURRENT wisp, for the snippet that burns it itself. ------
@@ -369,7 +394,11 @@ for SPEC in "${AGENTS[@]}"; do
   eq "${TITLED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is still scoped to $TITLE"
   eq "${INFRA:-0}"  "${TOTAL:-0}" "$AGENT: every wisp query still carries --include-infra"
   RIGGED=$(printf '%s\n' "$Q" | grep -c -- "GC_RIG" || true)
-  eq "${RIGGED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is rig-scoped (passes \$GC_RIG to jq)"
+  if [ "$SCOPE" = rig ]; then
+    eq "${RIGGED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is rig-scoped (passes \$GC_RIG to jq)"
+  else
+    eq "${RIGGED:-0}" "0" "$AGENT: no wisp query is rig-scoped (the city singleton matches by title alone)"
+  fi
 done
 
 echo

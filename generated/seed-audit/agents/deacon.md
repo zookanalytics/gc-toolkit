@@ -57,22 +57,21 @@ same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 
 ```bash
 # >>> patrol-wisp-reconcile
-# Scope to THIS rig. Several rigs run this pack and pour the same patrol
-# title into one shared store, so a title-only sweep collides across rigs —
-# keeping a foreign rig's wisp and burning this rig's as surplus. Keep a
-# wisp only when its rig — the assignee's rig segment, or the gc.rig its
-# pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
-# neither and is still collected.
+# The deacon is a city singleton, so it owns every mol-deacon-patrol wisp in
+# the store and reconciles by title alone. GC_RIG arrives unset in a city
+# session and the deacon's assignee carries no rig segment, so the rig filter
+# the per-rig witness and refinery apply would never match the deacon's own
+# wisp. The query stays assignee-blind so an orphan left by an interrupted
+# pour is still collected.
 WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-deacon-patrol") | select(mine($rig)) | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-deacon-patrol") | select(mine($rig)) | .id'
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
 )
 WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
 for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='gc-toolkit.' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
-  gc bd update "$WISP" --set-metadata gc.rig="$GC_RIG"  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
 ```
