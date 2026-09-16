@@ -528,6 +528,32 @@ has "$OUT" "s-fz, s-hk" "the unrouted husk and the finalize step are the note"
 has "$OUT" "residue, not a stalled frontier" "the inert siblings are a note"
 clear_fixtures
 
+# --- 33. open-root stall: a step held by a LIVE blocker is not a stalled frontier --
+# The open-root path reads offerable() too, and offerable() calls a step held by
+# a live dependency unreachable. A stale, routed open step whose predecessor is
+# still in progress is an ordinary graph step waiting its turn, not a frontier
+# nobody advances — inert residue, a note. resolve_blockers must probe the open
+# root's blockers for this: an empty blocker map would read the step offerable
+# and escalate every step queued behind a live sibling as a stall.
+steps "$(step s-lb1 r-lb "$ROUTE" ",\"updated_at\":\"$STALE\"$(blocks live-b1)")"
+roots "{\"id\":\"r-lb\",\"status\":\"open\"}" \
+      "{\"id\":\"live-b1\",\"status\":\"in_progress\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a stale routed open-root step behind a live blocker is inert, not a stall"
+has "$OUT" "residue, not a stalled frontier" "the step held by a live predecessor is a note"
+hasnt "$OUT" "frontier is stalled" "a step waiting on a live predecessor is not a stalled frontier"
+has "$OUT" "s-lb1" "the held open-root step is named in the note"
+# Flip only the blocker's status: once the predecessor closes, the same stale
+# routed step is offerable again — a pool can claim it — so it is the stalled
+# frontier the warning is for. The live-vs-closed blocker is the sole discriminator.
+steps "$(step s-lb1 r-lb "$ROUTE" ",\"updated_at\":\"$STALE\"$(blocks live-b1)")"
+roots "{\"id\":\"r-lb\",\"status\":\"open\"}" \
+      "{\"id\":\"live-b1\",\"status\":\"closed\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the same step with its blocker CLOSED is a stall WARNING again"
+has "$OUT" "s-lb1" "the now-offerable frontier is named in the warning"
+clear_fixtures
+
 echo
 echo "check-step-terminal: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

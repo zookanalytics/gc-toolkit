@@ -26,10 +26,10 @@
 # Under a root that is OPEN, an offerable step untouched past the stall bound
 # (default 48h, GC_DOCTOR_STEP_STALL_HOURS) is a warning, the stalled-frontier
 # signal: a pool is routed to it, yet nothing has claimed it. A stale step no
-# pool can reach — unrouted, or the control-dispatcher's finalize step — is
-# inert residue, a note, not a frontier. A parked step is not a frontier and
-# raises none. A root resolving nowhere in this store is a note; cross-store
-# roots are legitimate.
+# pool can reach — unrouted, still waiting on a live blocker, or the
+# control-dispatcher's finalize step — is inert residue, a note, not a frontier.
+# A parked step is not a frontier and raises none. A root resolving nowhere in
+# this store is a note; cross-store roots are legitimate.
 #
 # Nothing store-sized is ever held. The step listing is consumed as a
 # stream of parse events, so no whole-document value exists here, and the rows
@@ -40,10 +40,11 @@
 # through `--status closed` plus a `bd count` existence probe, both
 # defect-shaped: a healthy window answers with an empty list and a full count,
 # and no root body is read. Blocker statuses resolve by the same id-scoped
-# lookup, and only for the rows a closed root already condemns, so a store with
-# nothing stranded never asks for one. Peak argv is one window of ids, peak
-# memory is one window of rows, and findings are the only structure that grows,
-# so neither the molecule count nor the step count can walk into an exec limit.
+# lookup, for the rows whose offerability a verdict reads: those a closed root
+# condemns and the stale open steps under an open root. Peak argv is one window
+# of ids, peak memory is one window of rows, and findings are the only structure
+# that grows, so neither the molecule count nor the step count can walk into an
+# exec limit.
 # `bd list --offset` is proxied-server-only, so the listing cannot be split at
 # the CLI; consuming it as events is what bounds this reader instead.
 #
@@ -238,13 +239,14 @@ flush_batch() {
     return 0
 }
 
-# Which of this window's blocking dependencies are still live. Asked only about
-# rows a closed root already condemns, and never inside its settle grace, so a
-# healthy store never reaches the probe. A blocker can be any bead, not only a
-# sibling step, so the store is asked rather than the window: a step waiting on
-# an ordinary open bead is held just as firmly as one waiting on its own chain.
-# An id that resolves nowhere stays out of the set — a dependency that no longer
-# exists holds nothing, and reporting its step is the conservative reading.
+# Which of this window's blocking dependencies are still live. Asked about the
+# rows whose offerability a verdict reads: a row a closed root condemns (outside
+# its settle grace) and a stale open step under an open root. A blocker can be
+# any bead, not only a sibling step, so the store is asked rather than the
+# window: a step waiting on an ordinary open bead is held just as firmly as one
+# waiting on its own chain. An id that resolves nowhere stays out of the set — a
+# dependency that no longer exists holds nothing, and reporting its step is the
+# conservative reading.
 resolve_blockers() {   # db
     local db="$1" i n rid ids raw out id st dep
     n="${#w_root[@]}"
@@ -252,8 +254,17 @@ resolve_blockers() {   # db
     i=0
     while [ "$i" -lt "$n" ]; do
         rid="${w_root[$i]}"
-        if [ -z "${root_missing[$rid]:-}" ] && [ -n "${root_closed[$rid]:-}" ] \
-           && [ "${root_closed[$rid]%%"$SEP"*}" != "settle" ]; then
+        # The two branches that call offerable() in classify_window, and only
+        # those: a row under a closed root past its settle grace, and a stale
+        # open step under an open root. A row offerable() never judges needs no
+        # blocker map, so leaving it out keeps the probe to the defect surface.
+        if [ -n "${root_missing[$rid]:-}" ]; then
+            :
+        elif [ -n "${root_closed[$rid]:-}" ]; then
+            if [ "${root_closed[$rid]%%"$SEP"*}" != "settle" ]; then
+                for dep in ${w_dep[$i]//,/ }; do want["$dep"]=1; done
+            fi
+        elif [ "${w_stale[$i]}" = "1" ] && [ "${w_status[$i]}" = "open" ]; then
             for dep in ${w_dep[$i]//,/ }; do want["$dep"]=1; done
         fi
         i=$((i + 1))
@@ -407,7 +418,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             stranded) errors+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) yet $count step(s) never closed — $sids. The molecule finalized around them; each is open, routed, with every blocker closed, so the pool can still offer them.") ;;
             inert)    notes+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) with $count non-terminal step(s) — $sids. Each is parked, waiting on a live blocker, or carries no dispatch path (unrouted and unarmed), so no pool can offer them: residue to sweep, not a strand.") ;;
             stall)    warnings+=("$label: molecule $rid is OPEN but $count of its open step(s), routed to a pool, have not been touched in over ${STALL_HOURS}h — $sids (last update $ex). The frontier is stalled: a worker pool is routed to them, yet nothing is claiming or advancing this workflow.") ;;
-            stall_inert) notes+=("$label: molecule $rid is OPEN with $count stale step(s) no pool can advance — $sids. Each is unrouted, or is the control-dispatcher's finalize step: residue, not a stalled frontier.") ;;
+            stall_inert) notes+=("$label: molecule $rid is OPEN with $count stale step(s) no pool can advance — $sids. Each is unrouted, held by a still-live dependency, or is the control-dispatcher's finalize step: residue, not a stalled frontier.") ;;
             settle)   notes+=("$label: molecule $rid closed within the ${GRACE}s settle window and still has $count non-terminal step(s) ($sids) — finalize in progress, not a strand") ;;
             orphan)   notes+=("$label: non-terminal step(s) $sids name root $rid, which resolves nowhere in $db (gc.root_store_ref=${ex:-<unset>}) — a cross-store root is legitimate, a deleted one is not; reported, not judged") ;;
         esac
