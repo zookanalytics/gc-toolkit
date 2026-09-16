@@ -350,19 +350,25 @@ The actionable subset:
 jq -c '.results[] | select(.status != "ok")' "$PAYLOAD"
 ```
 For each finding: act directly on the simple ones (stale locks, temp
-cleanup, `gc doctor --fix`-able); file the rest, one situation key per
-check so repeats land on one bead:
+cleanup, `gc doctor --fix`-able); file the rest. `--check` derives the
+situation key from the check's own name, so every recurrence lands on one
+bead:
 ```bash
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 FINDING=$(jq -c '.results[] | select(.name=="<check>")' "$PAYLOAD")
+CHECK=$(printf '%s' "$FINDING" | jq -r '.name')
+VERDICT=$(printf '%s' "$FINDING" | jq -r '.message')
 # GC_RIG is bound because the deacon is city-scoped: it selects the store the
 # finding bead lands in, and it rig-qualifies the proactive pool whose worker
 # reacts to it.
 ESC_RIG="${GC_RIG:-gc-toolkit}"
-GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key "doctor-<check-name>" --title "doctor <check-name>: <the one-line verdict>" --message "$FINDING"
+GC_RIG="$ESC_RIG" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --check "$CHECK" --title "doctor $CHECK: $VERDICT" --message "$FINDING"
 ```
+Pass the finding's `.name` verbatim through `--check`; it derives the key
+`doctor-<check>`, stripping the `<rig>:` prefix the doctor JSON carries, so
+every rendering of one check's name dedups to one bead.
 Do not hand-search for an existing bead first. The key is what decides
 whether this finding already has one, and a bead filed elsewhere for the
 same cause is the reaction's judgment to make: it reads the bead's

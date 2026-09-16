@@ -371,6 +371,35 @@ eq "$(beads)" "0" "(dry-run) nothing filed"
 eq "$(cat "$STUB_PROACTIVE_LOG")" "" "(dry-run) nothing slung"
 has "$OUT" "key=doctor-dry" "(dry-run) prints what it would file"
 
+# ── 15. --check derives the doctor key from the check name ───────────
+# The doctor JSON names a check `<rig>:<check>`, and dedup is exact-match on the
+# key, so the key must not vary with how the `<rig>:` prefix is rendered. --check
+# strips the prefix, resolving every rendering of one check to one key.
+reset
+"$SUT" --check "gc-toolkit:check-step-terminal" --scope deacon-findings \
+  --title "doctor gc-toolkit:check-step-terminal: I8 holds" --message "step-terminal I8" >/dev/null 2>&1
+eq "$(meta fnd-1 'finding.key')" "doctor-check-step-terminal" "(check) the <rig>: prefix is stripped to one canonical key"
+
+# A bare check name (no `<rig>:` prefix) passes through unchanged.
+reset
+"$SUT" --check "fork-rate" --title "doctor fork-rate: high" --message "240 forks/s" >/dev/null 2>&1
+eq "$(meta fnd-1 'finding.key')" "doctor-fork-rate" "(check) a prefix-less name yields doctor-<name>"
+
+# One check is one bead: the derived key is stable, so a recurrence lands on the
+# open bead instead of filing another.
+reset
+"$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
+"$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
+eq "$(beads)" "1" "(check) one check is one bead across recurrences"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(check) the recurrence counted on it"
+
+# --key and --check name the same slot; giving both is ambiguous and refused.
+reset
+OUT=$("$SUT" --key doctor-x --check "gc-toolkit:check-x" --title t --message m 2>&1); RC=$?
+eq "$RC" "2" "(check) --key and --check together are refused"
+has "$OUT" "mutually exclusive" "(check) says why"
+eq "$(beads)" "0" "(check) nothing filed on the ambiguous call"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
