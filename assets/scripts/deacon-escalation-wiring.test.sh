@@ -37,10 +37,12 @@ grep -q -- '--key' "$TOML" \
   || bad "patrol-finding.sh calls must carry --key"
 
 # The doctor sweep's key varies per check; a single shared key would fold every
-# check's finding into one bead.
-grep -q -- '--key "doctor-<check-name>"' "$TOML" \
-  && ok "the doctor sweep keys each finding by its check name" \
-  || bad "the doctor sweep must key per check, not once for the whole sweep"
+# check's finding into one bead. --check derives that per-check key from the
+# check's own name, so it is not hand-typed and cannot vary by how the name is
+# rendered.
+grep -qF -- '--scope deacon-findings --check "$CHECK"' "$TOML" \
+  && ok "the doctor sweep derives each finding's key from its check name (--check)" \
+  || bad "the doctor sweep must derive the key per check via --check, not a hand-typed placeholder"
 
 # The doctor sweep's FAILED path — failed, exceeded, blocked, an unnamed state,
 # or a non-zero runner RC — carries no payload to filter, so it never reaches

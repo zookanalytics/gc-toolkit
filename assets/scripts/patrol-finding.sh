@@ -50,6 +50,11 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               Two findings that need separate work need separate keys, so
               encode what distinguishes them (`doctor-<check>`,
               `dolt-backup-<db>`)
+  --check     a doctor check name — the sweep payload's `.name`, e.g.
+              `gc-toolkit:check-step-terminal`. Derives the key `doctor-<check>`
+              with the `<rig>:` prefix stripped, so every rendering of one
+              check's name dedups to one bead. Mutually exclusive with --key;
+              give exactly one
   --title     the board label for the bead; cut at a word boundary past 200
   --message   the finding, verbatim — it becomes the bead body, and it is
               what the first reaction reads
@@ -69,11 +74,12 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
 U
 }
 
-KEY=""; TITLE=""; MESSAGE=""; ABOUT=""; SCOPE=""; TYPE="bug"
+KEY=""; CHECK=""; TITLE=""; MESSAGE=""; ABOUT=""; SCOPE=""; TYPE="bug"
 PRIORITY=""; RIG_ARG=""; NO_REACT=""; DRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)      KEY="${2:-}";      shift 2 || { usage; exit 2; } ;;
+    --check)    CHECK="${2:-}";    shift 2 || { usage; exit 2; } ;;
     --title)    TITLE="${2:-}";    shift 2 || { usage; exit 2; } ;;
     --message)  MESSAGE="${2:-}";  shift 2 || { usage; exit 2; } ;;
     --about)    ABOUT="${2:-}";    shift 2 || { usage; exit 2; } ;;
@@ -87,8 +93,20 @@ while [ $# -gt 0 ]; do
     *) warn "unknown argument '$1'"; usage; exit 2 ;;
   esac
 done
+# --check derives the key from a doctor check's name so the caller never hand-types
+# it. The doctor JSON names a check `<rig>:<check>`; dedup is exact-match on the key,
+# so a key that varies with how the `<rig>:` prefix is rendered splits one check
+# across several beads. Stripping the prefix yields one key, `doctor-<check>`, for
+# every rendering of the name.
+if [ -n "$CHECK" ]; then
+  if [ -n "$KEY" ]; then
+    warn "--key and --check are mutually exclusive; --check derives the key"
+    usage; exit 2
+  fi
+  KEY="doctor-${CHECK##*:}"
+fi
 if [ -z "$KEY" ] || [ -z "$TITLE" ] || [ -z "$MESSAGE" ]; then
-  warn "--key, --title and --message are all required"; usage; exit 2
+  warn "--key (or --check) and --title and --message are all required"; usage; exit 2
 fi
 # A '=' or metacharacter in the key breaks the exact-match dedup read.
 case "$KEY" in
