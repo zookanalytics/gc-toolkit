@@ -57,6 +57,12 @@ same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 
 ```bash
 # >>> patrol-wisp-reconcile
+# The deacon is a city singleton, so it owns every mol-deacon-patrol wisp in
+# the store and reconciles by title alone. GC_RIG arrives unset in a city
+# session and the deacon's assignee carries no rig segment, so the rig filter
+# the per-rig witness and refinery apply would never match the deacon's own
+# wisp. The query stays assignee-blind so an orphan left by an interrupted
+# pour is still collected.
 WISP_IDS=$(
   gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
   gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
