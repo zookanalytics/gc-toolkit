@@ -148,11 +148,14 @@ roots "{\"id\":\"r-5\",\"status\":\"closed\",\"closed_at\":\"not-a-time\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an unreadable closed_at does not buy the settle exemption"
 
-# --- 6. STALL: open root, step untouched past the bound ----------------------------
-steps "$(step s-7 r-6 ",\"x\":\"y\"" ",\"updated_at\":\"$STALE\"")"
+# --- 6. STALL: open root, ROUTED step untouched past the bound ---------------------
+# The open-root path measures offerability too, so a stalled frontier has to
+# carry a pool route to read as a stall; an unrouted or finalize-only stale step
+# is inert (cases 29-30 below).
+steps "$(step s-7 r-6 "$ROUTE" ",\"updated_at\":\"$STALE\"")"
 roots "{\"id\":\"r-6\",\"status\":\"open\"}"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an open step under an OPEN root untouched past the bound is a WARNING"
+eq "$RC" "1" "an open, routed step under an OPEN root untouched past the bound is a WARNING"
 has "$OUT" "48h" "the stall bound is named"
 has "$OUT" "s-7" "the stalled step is named"
 OUT=$(GC_DOCTOR_STEP_STALL_HOURS=100 RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1); RC=$?
@@ -468,6 +471,61 @@ roots "{\"id\":\"r-a\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an armed (deferred-dispatch) step under a closed root is still an ERROR"
 has "$OUT" "s-a1" "the armed strand is named"
+clear_fixtures
+
+# --- 29. open-root stall measures offerability: routing is the discriminator ------
+# The open-root path was routing-blind — a stale open step warned whether or not
+# a pool could claim it. The pool query is unassigned + routed, so a routeless
+# husk step, open and stale but unreachable, is inert: a note, not a stalled
+# frontier. Toggling only the route flips the verdict.
+steps "$(step s-or1 r-or "$ROUTE" ",\"updated_at\":\"$STALE\"")"
+roots "{\"id\":\"r-or\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an open, routed, stale step under an open root IS a stall WARNING"
+steps "$(step s-or1 r-or "" ",\"updated_at\":\"$STALE\"")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the same step, unrouted, is inert — routing is the sole discriminator"
+has "$OUT" "residue, not a stalled frontier" "the unrouted open husk is a note"
+hasnt "$OUT" "frontier is stalled" "the check does not call an unrouted step a stalled frontier"
+clear_fixtures
+
+# --- 30. open-root stall: the control-dispatcher's finalize step is not a frontier -
+# Every molecule's workflow-finalize step is routed to core.control-dispatcher and
+# closed by it once the work steps close — never claimed from a pool. Under a husk
+# whose work steps never ran it sits open and stale, but it is not a worker
+# frontier: gc.kind marks it, so it reads inert even carrying a (non-pool) route.
+steps "$(step s-fin r-fin ',"gc.kind":"workflow-finalize","gc.routed_to":"alpha/core.control-dispatcher"' ",\"updated_at\":\"$STALE\"")"
+roots "{\"id\":\"r-fin\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a stale, routed workflow-finalize step under an open root is inert, not a stall"
+has "$OUT" "residue, not a stalled frontier" "the finalize husk is a note"
+hasnt "$OUT" "frontier is stalled" "the control-dispatcher's finalize step is not a stalled frontier"
+clear_fixtures
+
+# --- 31. the finalize exclusion holds under a CLOSED root too ----------------------
+# offerable() is shared: a workflow-finalize step left open under a closed
+# molecule is routed to the dispatcher, not a pool, so no pool re-offers it
+# against the dead molecule. It is inert residue, not a stranded ERROR.
+steps "$(step s-cf r-cf ',"gc.kind":"workflow-finalize","gc.routed_to":"alpha/core.control-dispatcher"')"
+roots "{\"id\":\"r-cf\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a workflow-finalize step open under a closed root is inert, not a stranded ERROR"
+has "$OUT" "residue to sweep, not a strand" "the closed-root finalize husk is a note"
+clear_fixtures
+
+# --- 32. a routed frontier still stalls even beside inert husk siblings ------------
+# A live molecule can hold a genuine stalled frontier (routed, unclaimed) next to
+# unrouted husk steps and its dispatcher-routed finalize. The frontier must still
+# warn; the unreachable siblings are the note, not a silencer.
+steps "$(step s-fr r-mix "$ROUTE" ",\"updated_at\":\"$STALE\"")" \
+      "$(step s-hk r-mix "" ",\"updated_at\":\"$STALE\"")" \
+      "$(step s-fz r-mix ',"gc.kind":"workflow-finalize","gc.routed_to":"alpha/core.control-dispatcher"' ",\"updated_at\":\"$STALE\"")"
+roots "{\"id\":\"r-mix\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a routed frontier beside inert husks is still a WARNING"
+has "$OUT" "s-fr" "the routed frontier is named in the stall warning"
+has "$OUT" "s-fz, s-hk" "the unrouted husk and the finalize step are the note"
+has "$OUT" "residue, not a stalled frontier" "the inert siblings are a note"
 clear_fixtures
 
 echo
