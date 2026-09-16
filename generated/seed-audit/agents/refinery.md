@@ -44,15 +44,22 @@ collect.
 ```bash
 # One patrol wisp: adopt in-progress first, then open; burn any surplus.
 # >>> patrol-wisp-reconcile
+# Scope to THIS rig. Several rigs run this pack and pour the same patrol
+# title into one shared store, so a title-only sweep collides across rigs —
+# keeping a foreign rig's wisp and burning this rig's as surplus. Keep a
+# wisp only when its rig — the assignee's rig segment, or the gc.rig its
+# pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
+# neither and is still collected.
 WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-refinery-patrol") | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-refinery-patrol") | .id'
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-refinery-patrol") | select(mine($rig)) | .id'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-refinery-patrol") | select(mine($rig)) | .id'
 )
 WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
 for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch=main --var rig_name=gc-toolkit --var binding_prefix='gc-toolkit.' --json | jq -r '.new_epic_id')
+  gc bd update "$WISP" --set-metadata gc.rig="$GC_RIG"  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
 ```

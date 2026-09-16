@@ -782,6 +782,7 @@ if [ -z "$NEXT" ]; then
   echo "Could not pour next witness wisp; NOT burning this one."
   exit 1
 fi
+gc bd update "$NEXT" --set-metadata gc.rig="$GC_RIG" || true  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
   echo "Could not assign poured wisp $NEXT; rolling it back and NOT burning this one."
   gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile will collect it."
