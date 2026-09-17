@@ -40,7 +40,11 @@
 # routing reads back. It routes under posture `commented` and equally under a
 # human `changes_requested`, which holds the merge but answers nothing; a
 # dismissed review is in neither state, so a dismissal takes it and the inline
-# comments under it out of the batch.
+# comments under it out of the batch. A review posted under our OWN login leaves
+# unresolved finding threads that arm never counts, so the posture pass also
+# folds an unengaged self-login thread into `commented` — the merge-hold has to
+# be recorded before merge.sh runs — and the full pass files the one visit it
+# stands for.
 # Such a batch also resets signoff.sh's review-round cap, once per batch: it is
 # review the branch has never been answered against, not a round of the loop the
 # cap measures. The reset retires the dispatch tally with it, and the cap's own
@@ -389,6 +393,98 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 }
 # <<< unanswered-feedback-body
 
+# >>> unengaged-threads-body
+# The gap the login filter above leaves open. arm 4 counts only comments
+# authored by a login other than ours (unanswered-feedback-body), so a review
+# posted UNDER our own login — an outside review agent, an operator-run review, a
+# reviewer using the automation's credential — sets no `unanswered` and routes
+# nowhere, and the gate stays green across it (lane-state reads the finding and
+# review-outcome beads, never a thread), so nothing re-reviews it. This reads the
+# review THREADS instead of the comment authors. A thread counts as an unengaged
+# finding when it is unresolved, carries a comment that is not one of our own
+# write-back replies, and holds no write-back reply of ours: a thread we replied
+# into is arm 4's or the write-back's to finish, and a resolved one is done.
+# `comments(first:100)` caps a thread at a page, so a thread longer than that
+# whose only write-back reply sits past the cap reads as unengaged — a
+# dismissable visit, never a dropped finding.
+UNENGAGED_THREADS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$num){
+    reviewThreads(first:100,after:$endCursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{isResolved comments(first:100){nodes{body}}}}}}}'
+unengaged_thread_count() { # <pr-number> — count on stdout; non-zero = could not tell
+  local num="$1" raw
+  raw=$(gh api graphql --hostname "$ORIGIN_HOST" --paginate -f query="$UNENGAGED_THREADS_QUERY" \
+    -f owner="${ORIGIN_REPO%%/*}" -f repo="${ORIGIN_REPO#*/}" -F num="$num" 2>/dev/null) || return 1
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | scrub | jq -s --arg marker "$WB_MARKER" '
+    [ .[].data.repository.pullRequest.reviewThreads.nodes[]?
+      | (.comments.nodes // []) as $cs
+      | select((.isResolved // false) == false)
+      | select([ $cs[] | select(((.body // "") | contains($marker)) | not) ] | length > 0)
+      | select([ $cs[] | select((.body // "") | contains($marker)) ] | length == 0)
+    ] | length' 2>/dev/null
+}
+# Does an unengaged self-login thread hold this PR's merge right now? merge.sh
+# reads posture off the bead and never reads threads, so this is decided in the
+# pre-merge posture pass and folded into `commented`; the visit it warrants is
+# the full pass's. Answers in three, because a read that will not run is not
+# proof of zero unengaged threads — the caller keeps the posture uncurrent on the
+# third so the merge holds for the pass rather than reading a stale one:
+#   0  an unengaged self-login thread holds the merge (caller folds into `commented`)
+#   1  the reads ran and none holds
+#   2  a read would not run — the in-flight ledger or the thread API did not answer
+# On the FIRST pass that reads the threads it sets UT_COUNT so the full pass files
+# the one visit without a second read; a later pass holds off the standing visit
+# and leaves UT_COUNT empty.
+UT_COUNT=""
+unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
+  local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf g m grn=1 stamp inflight utc
+  [ -n "$head" ] && [ -n "$num" ] && [ -n "$SELF_LOGIN" ] && [ -n "$cmts" ] || return 1
+  # Cheap pre-gate off the comments already fetched: the gap is a review under OUR
+  # OWN login (arm 4 counts only other logins), so a self-login comment that is
+  # not one of our write-back replies is one it filtered and left unrouted. Absent
+  # any, no thread here is a finding we own the miss on.
+  sf=$(printf '%s' "$cmts" | jq --arg self "$SELF_LOGIN" --arg marker "$WB_MARKER" \
+    '[ .[] | select(((.user.login // "") | tostring) == $self)
+           | select(((.body // "") | contains($marker)) | not) ] | length' 2>/dev/null)
+  case "$sf" in ''|*[!0-9]*) sf=0 ;; esac
+  [ "$sf" -gt 0 ] || return 1
+  # Only a green gate hides findings: a red lane is already re-reviewing.
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    case "$(printf '%s' "$g" | tr '[:upper:]' '[:lower:]')" in none|off|approval) continue ;; esac
+    m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
+    [ "$m" = "green" ] || grn=0
+  done <<UTGATES
+$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
+UTGATES
+  [ "$grn" = 1 ] || return 1
+  stamp=$(printf '%s' "$row" | jq -r '(.metadata.pr_unengaged_threads // "") | tostring')
+  if [ "$stamp" = "$head" ]; then
+    # This head was flagged already. The hold stands while its visit is open, and
+    # the operator's close of it releases the merge; a new commit re-runs the
+    # detection below. Cheap and self-clearing — no thread read.
+    [ -n "$(visit_for "$id" "pr-unengaged-threads.$num.$head")" ] && return 0
+    return 1
+  fi
+  # First detection. A review or rework child already open on this anchor owns the
+  # follow-up and holds the merge by its own blocks edge; do not stack a second
+  # one. A ledger that will not read is not proof nothing is in flight, so it holds
+  # the merge for the pass (return 2) rather than waving the anchor through; only a
+  # clean, empty read spends the thread count.
+  inflight=$(bd_list --status="$LIVE_STATUSES" --metadata-field anchor_bead="$id") || return 2
+  [ "$(printf '%s' "$inflight" | jq 'length' 2>/dev/null)" = 0 ] || return 1
+  # A thread read that did not answer, or answered with no usable count, is the
+  # gap this function exists to close: return 2 so the caller holds, never 1.
+  utc=$(unengaged_thread_count "$num") || return 2
+  case "$utc" in ''|*[!0-9]*) return 2 ;; esac
+  [ "$utc" -gt 0 ] || return 1
+  UT_COUNT="$utc"
+  return 0
+}
+# <<< unengaged-threads-body
+
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
@@ -606,7 +702,8 @@ CHILDREN_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; revs_raw=""; cmts_raw=""; cmts_live=""
+  posture=""; max_c=0; max_r=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  revs_raw=""; cmts_raw=""; cmts_live=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
@@ -660,11 +757,31 @@ CHILDREN_EOF
       case "$max_r" in ''|*[!0-9]*) max_r=0 ;; esac
       case "$max_c" in ''|*[!0-9]*) max_c=0 ;; esac
       if [ "$max_c" -gt "$cwm" ] || [ "$max_r" -gt "$rwm" ]; then unanswered=1; fi
+      # A review posted under OUR OWN login leaves unresolved finding threads arm 4
+      # never counts — it reads other logins — so `unanswered` stays 0 while the
+      # gate stays green, and the posture would read review_required/none. merge.sh
+      # reads posture off the bead and never reads threads, and the full pass that
+      # would file the visit runs after merge, so the hold has to be recorded HERE,
+      # in the pre-merge pass. Fold a confirmed hold into `commented`; a read that
+      # would not run (rc 2) is not proof of zero, so it leaves the posture
+      # uncurrent below and the merge holds for the pass. The visit is dispatched
+      # below.
+      if [ "$rd" != "CHANGES_REQUESTED" ] && [ "$unanswered" != 1 ]; then
+        unengaged_holds "$id" "$num" "$head_oid" "$row" "$cmts_live"; uh_rc=$?
+        if [ "$uh_rc" = 0 ]; then unengaged=1
+        elif [ "$uh_rc" = 2 ]; then unengaged_unreadable=1
+        fi
+      fi
       # The posture is what merge.sh reads, and a standing CHANGES_REQUESTED
       # outranks the batch underneath it: the veto stands whether or not that
       # feedback has been routed yet. What routes is `unanswered`, below.
       if [ "$rd" = "CHANGES_REQUESTED" ]; then posture="changes_requested"
-      elif [ "$unanswered" = 1 ]; then posture="commented"
+      elif [ "$unanswered" = 1 ] || [ "$unengaged" = 1 ]; then posture="commented"
+      elif [ "$unengaged_unreadable" = 1 ]; then
+        # The thread read did not answer. Recording review_required/none here would
+        # be current and let merge.sh through on a fact we do not have; leave the
+        # posture uncurrent so --posture-only holds the merge, and retry next pass.
+        echo "$PROG: $id — PR#$num unengaged-thread read did not answer; posture not recorded (retry next pass)" >&2
       elif [ "$rd" = "APPROVED" ]; then posture="approved"
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
@@ -1384,6 +1501,44 @@ GATES
       else
         echo "$PROG: $id — dismissal of review $stale_rid failed; marker stays recorded, retry next pass" >&2
         skipped=$((skipped + 1))
+      fi
+    fi
+  fi
+
+  # --- unengaged review-thread findings: the visit the posture hold stands for --
+  # The merge-hold itself is the `commented` posture the section above records in
+  # the pre-merge pass — merge.sh reads posture off the bead and never reads
+  # threads, and this full pass runs after merge. This is the dispatch that hold
+  # is for: when the posture pass first read the threads it set UT_COUNT, so file
+  # ONE visit and watermark the head. The hold then stands off that open visit
+  # until it closes; the watermark keeps a closed visit from re-raising until a
+  # new commit. It files a visit, not rework — telling a finding from our own
+  # answer well enough to drive an auto-fix loop is arm 4's watermark machinery,
+  # and running that off a raw thread read would loop on our own replies.
+  if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
+    UTKEY="pr-unengaged-threads.$num.$head_oid"
+    escalate "$id" "$UTKEY" \
+      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login (an outside review agent, or an operator-run review), so the comment-routing arm never counted them and the green gate triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
+    UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
+    if [ -z "$UTVID" ]; then
+      echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
+      skipped=$((skipped + 1))
+    else
+      gc bd update "$UTVID" \
+        --set-metadata anchor_bead="$id" \
+        --set-metadata pr_url="$live_url" \
+        --set-metadata pr_number="$num" >/dev/null 2>&1 \
+        || echo "$PROG: WARN visit $UTVID not stamped with PR#$num — stamp it by hand" >&2
+      utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
+      if [ "$utvgot" != "$num" ]; then
+        echo "$PROG: WARN $id — PR#$num visit $UTVID did not record pr_number; NOT watermarking the head (it re-raises next pass, deduped on the same visit)" >&2
+        skipped=$((skipped + 1))
+      elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+             --set "pr_unengaged_threads=$head_oid" >/dev/null; then
+        flagged=$((flagged + 1))
+        echo "$PROG: $id — PR#$num has $UT_COUNT unengaged review-thread finding(s); filed visit $UTVID (merge held)"
+      else
+        echo "$PROG: WARN $id — PR#$num visit $UTVID filed and stamped, but the head watermark did not record; it re-raises next pass (deduped on the same visit)" >&2
       fi
     fi
   fi
