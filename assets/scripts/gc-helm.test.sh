@@ -2290,7 +2290,7 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 
 rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
 eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
-grep -q "already carries a first reaction" "$TMP/rerr" \
+grep -q "already carries a landed first reaction" "$TMP/rerr" \
   && ok "(REACT) …and names the no-op cause" \
   || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
 grep -q "failed" "$TMP/rerr" \

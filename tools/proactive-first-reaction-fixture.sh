@@ -409,22 +409,25 @@ has "an already-qualified pool target needs no GC_RIG" "altrig/gc-toolkit.proact
     "$(env -u GC_RIG GC_PROACTIVE_FIXTURE="$FXDIR" GC_PROACTIVE_POOL=altrig/gc-toolkit.proactive \
         "$PROACTIVE" sling px-1 --dry-run 2>&1 || true)"
 
-echo "── a first reaction happens once: a reacted bead is not re-routed ──"
-# A completed reaction leaves gc.first_reaction (stamped by the dispose before
-# it acts). Routing that bead again re-offers a done reaction to the pool, so
-# the sling skips it, keyed on gc.first_reaction. A bead without it still routes.
-# beads.json feeds the guard the subject state the way agents.json feeds the
-# deliverable probe; it lists only these beads, so every other sling test above
-# (px-1) reads as un-reacted and is unaffected.
+echo "── a first reaction happens once: a landed reaction is not re-routed ──"
+# A completed reaction stamps gc.first_reaction_landed (only after its act).
+# Routing that bead again re-offers a done reaction to the pool, so the sling
+# skips it, keyed on gc.first_reaction_landed. A bead without the landed proof
+# still routes — including a partial disposition (gc.first_reaction recorded, no
+# landed proof), which must re-offer so a worker can complete the act it left
+# unfinished. beads.json feeds the guard the subject state the way agents.json
+# feeds the deliverable probe; it lists only these beads, so every other sling
+# test above (px-1) reads as un-reacted and is unaffected.
 cat > "$FXDIR/beads.json" <<'JSON'
 {
-  "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+  "px-reacted":  {"metadata": {"gc.first_reaction": "actionable", "gc.first_reaction_landed": "2026-05-01T00:00:01Z", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+  "px-partial":  {"metadata": {"gc.first_reaction": "actionable"}},
   "px-fresh":    {"metadata": {}}
 }
 JSON
 REACTED_OUT="$(P sling px-reacted --dry-run 2>&1 || true)"
-absent "a reacted bead is NOT re-routed (no sling command emitted)" "gc sling" "$REACTED_OUT"
-has    "…and the skip names the cause"                              "already carries a first reaction" "$REACTED_OUT"
+absent "a landed reaction is NOT re-routed (no sling command emitted)" "gc sling" "$REACTED_OUT"
+has    "…and the skip names the cause"                              "already carries a landed first reaction" "$REACTED_OUT"
 # The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so
 # a cross-process caller (gc-helm react, gc-visit-open) can tell it from a
 # dispatch and file its own visit rather than wait for a reaction that never
@@ -432,6 +435,12 @@ has    "…and the skip names the cause"                              "already c
 # does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-reacted --dry-run >/dev/null 2>&1 || rec=$?
 eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
+# The partial disposition is the fix's positive case: recorded but not landed,
+# so the guard must route it (not skip it) for a worker to complete the act.
+has    "a partial disposition (recorded, not landed) still routes"  "--no-formula" \
+       "$(P sling px-partial --dry-run 2>&1 || true)"
+pec=0; P sling px-partial --dry-run >/dev/null 2>&1 || pec=$?
+eq     "…and the partial's sling exits 0 (a dispatch, not a skip)"  "0" "$pec"
 has    "an un-reacted bead still routes raw"                       "--no-formula" \
        "$(P sling px-fresh --dry-run 2>&1 || true)"
 fec=0; P sling px-fresh --dry-run >/dev/null 2>&1 || fec=$?
@@ -488,20 +497,25 @@ ec=0; GC_PROACTIVE_SLING_CAP=many P scan --sling >/dev/null 2>&1 || ec=$?
 eq  "a non-numeric cap fails closed rather than sweeping unbounded" "1" "$ec"
 has "the tool names the cap in its usage" "GC_PROACTIVE_SLING_CAP" "$(P --help 2>&1 || true)"
 
-echo "── a reacted bead never spends the sling cap (filter + loop) ──"
-# The bug: a bead carrying gc.first_reaction reached the loop; cmd_sling's guard
-# skipped it but returned success, and the loop counted the skip against the cap.
-# Enough stale reacted records could spend the whole cap every sweep while no new
-# reaction was slung. Two layers close it: the filter drops a reacted bead
-# (common case), and the loop refuses to count a guard-skip (the race).
+echo "── a landed reaction never spends the sling cap; a partial re-offers ──"
+# The bug: a bead carrying a completed reaction reached the loop; cmd_sling's
+# guard skipped it but returned success, and the loop counted the skip against
+# the cap. Enough stale reacted records could spend the whole cap every sweep
+# while no new reaction was slung. Two layers close it: the filter drops a landed
+# reaction (common case), and the loop refuses to count a guard-skip (the race).
+# The filter keys on gc.first_reaction_landed, so a partial disposition
+# (gc.first_reaction recorded, no landed proof) is KEPT — it must re-offer for a
+# worker to complete the act it left unfinished.
 cat > "$FXDIR/scan.json" <<'JSON'
 [
-  {"id":"px-fr-only","title":"reacted: gc.first_reaction stamped, release pending","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable"}},
+  {"id":"px-landed","title":"reacted: disposition landed","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_landed":"2026-05-01T00:00:01Z"}},
+  {"id":"px-partial","title":"partial: gc.first_reaction stamped, release pending","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.first_reaction":"actionable"}},
   {"id":"px-clean","title":"an un-reacted input","description":"has a body","priority":1,"created_at":"2026-05-01T00:00:00Z","issue_type":"task"}
 ]
 JSON
 FR_SCAN="$(P scan --json | jq -r '.[].id' | tr '\n' ' ')"
-absent "the precision filter drops a gc.first_reaction-only candidate" "px-fr-only" "$FR_SCAN"
+absent "the precision filter drops a landed-reaction candidate"        "px-landed"  "$FR_SCAN"
+has    "…and keeps a partial (recorded, not landed) for a re-offer"    "px-partial" "$FR_SCAN"
 has    "…and keeps the un-reacted input"                               "px-clean"   "$FR_SCAN"
 
 # The race the filter cannot close: a candidate is clean when the scan selects
@@ -517,7 +531,7 @@ cat > "$FXDIR/scan.json" <<'JSON'
 JSON
 cat > "$FXDIR/beads.json" <<'JSON'
 {
-  "px-race":   {"metadata": {"gc.first_reaction": "actionable"}},
+  "px-race":   {"metadata": {"gc.first_reaction": "actionable", "gc.first_reaction_landed": "2026-05-01T00:00:01Z"}},
   "px-fresh2": {"metadata": {}}
 }
 JSON

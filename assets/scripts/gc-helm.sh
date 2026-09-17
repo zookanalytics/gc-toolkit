@@ -19,7 +19,7 @@
 # unenumerable — each failure names its own operator move, tk-lzdty),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route or a takeaway disposition that will not stamp),
-# 5 react no-op: the subject already carries a first reaction, so nothing was
+# 5 react no-op: the subject's first reaction has already landed, so nothing was
 # slung (a first reaction happens once) — distinct from 4 so an intake caller
 # files its own visit instead of reading a skip as a dispatched reaction.
 
@@ -1414,7 +1414,7 @@ cmd_react() {
     else
         sling_rc=$?
         if [ "$sling_rc" -eq 3 ]; then
-            echo "$PROG: react: $bead already carries a first reaction — nothing slung (a first reaction happens once). Clear the reaction marker to re-react, or file the visit directly." >&2
+            echo "$PROG: react: $bead already carries a landed first reaction — nothing slung (a first reaction happens once). Clear gc.first_reaction* to re-react, or file the visit directly." >&2
             exit 5
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2

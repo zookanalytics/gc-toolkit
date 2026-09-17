@@ -39,24 +39,31 @@ gc runtime drain-ack
 exit
 ```
 
-**Two re-offer cases — check the subject's state before you react:**
+**Re-offer recovery — check the subject's state before you react.** The dispose
+records `gc.first_reaction*` BEFORE it acts and stamps `gc.first_reaction_landed`
+only AFTER the act (the release, edge, or close) completes, so the landed stamp,
+not the record, is the proof a reaction is done. Two cases:
 
-- **A card is already written but no disposition landed** (the subject's notes
-  carry a `# First reaction` card, but `gc.first_reaction` is unset — a prior
-  session died between writing the card and disposing). Do NOT write a second
-  card. Read the card's `## Disposition` line and perform that exit directly
-  (the dispose step below), then drain.
-- **A reaction is already recorded** (`gc.first_reaction` is set — the record the
-  dispose writes before it acts). It is not yours to redo; you are a re-offer.
-  Release the subject without re-reacting, and clear its route as you release —
-  demand claims open, unassigned beads still routed to this pool, so a release
-  that leaves `gc.routed_to` set re-offers the subject every cycle:
+- **The reaction has landed** (`gc.first_reaction_landed` is set). It is done and
+  not yours to redo; you are a re-offer. Release the subject without re-reacting,
+  and clear its route as you release — demand claims open, unassigned beads still
+  routed to this pool, so a release that leaves `gc.routed_to` set re-offers the
+  subject every cycle:
   ```bash
   gc bd update <id> --status open --assignee "" \
     --set-metadata gc.routed_to= --unset-metadata gc.execution_routed_to \
-    --append-notes "Re-offered after a recorded first reaction (gc.first_reaction already set); released without re-reacting, route cleared."
+    --append-notes "Re-offered after a landed first reaction (gc.first_reaction_landed set); released without re-reacting, route cleared."
   gc runtime drain-ack
   ```
+- **A disposition is unfinished** (`gc.first_reaction_landed` is unset, but either
+  `gc.first_reaction` is recorded or the notes carry a `# First reaction` card with
+  a `## Disposition` line — a prior session died after choosing and before its act
+  landed). Do NOT release it untouched and do NOT write a second card: the act
+  never happened, so a release leaves the subject open, unrouted, and unheld. Take
+  the disposition from `gc.first_reaction*` when it is recorded, otherwise from the
+  card's `## Disposition` line, and re-run that exit from the dispose step below.
+  `first-reaction-dispose.sh` re-attempts a partial rather than refusing it and
+  stamps the landed proof once the act completes. Then drain.
 
 ## The First Reaction
 
@@ -88,6 +95,28 @@ exit
      successor, and only if it is fixed upstream or a duplicate (a re-home or
      fold is the operator's call — take `ruling`). This is the line the dispose
      step acts on, so decide it while the bead is in front of you.
+
+   Append the card to the bead's notes with these literal headings — the
+   re-offer recovery reads the `# First reaction` heading and the `## Disposition`
+   line, so a card without them is not recognized as the prior reaction:
+   ```markdown
+   # First reaction
+
+   ## Understanding
+   <what this bead is, in a line or two>
+
+   ## Found
+   <what the slice and any cheap reach tell you, each fact stamped "as of <ISO time>">
+
+   ## Proposal
+   <the single next move you recommend>
+
+   ## Decision needed
+   <what the human must accept or redirect; "none — <what happens next>" when routing or holding>
+
+   ## Disposition
+   <actionable | blocked | ruling | superseded> — <one line on why>
+   ```
 4. **Perform the disposition — ONE of four exits.**
    `assets/scripts/first-reaction-dispose.sh` performs all four. It records what
    you chose and why on the bead (`gc.first_reaction*`) before it acts, and folds

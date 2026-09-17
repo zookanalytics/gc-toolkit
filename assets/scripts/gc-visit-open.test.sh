@@ -250,7 +250,7 @@ eq "$RC" "0" "(REACTED) exits 0 — the visit is filed"
 has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
 has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the visit"
 has "$OUT" "visit filed" "(REACTED) the summary reports a filed visit"
-has "$ERR" "already carries a first reaction" "(REACTED) the reason names the no-op skip"
+has "$ERR" "already carries a landed first reaction" "(REACTED) the reason names the no-op skip"
 hasnt "$ERR" "sling FAILED" "(REACTED) it is NOT reported as a sling failure"
 unset FAKE_HELM_REACT_RC
 

@@ -476,8 +476,9 @@ keys = [
 # disposition is still auditable. gc.first_reaction_landed is stamped only AFTER
 # the act completes; the script's re-dispose guard keys on it, so a completed
 # reaction is refused while a partial re-attempts. gc-proactive.sh's sling guard
-# and scan filter read gc.first_reaction to keep an already-reacted bead out of a
-# fresh offer.
+# and scan filter read gc.first_reaction_landed the same way, so a landed reaction
+# is kept out of a fresh offer while a partial (recorded, not landed) stays
+# offerable until it completes.
 keys = [
   "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
   "gc.first_reaction_at", "gc.first_reaction_landed",

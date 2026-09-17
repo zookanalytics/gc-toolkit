@@ -33,9 +33,9 @@ task/bug/feature/spike passes.
   (`tools/gc-proactive.sh` `cmd_sling`, the `set -- … --no-formula` line).
   `--no-formula` is load-bearing: the city's `default_sling_formula` is
   `mol-polecat-work`, so a bare sling would pour that formula instead of leaving
-  a raw routed claim. `sling_first_reaction_guard` refuses a bead already
-  carrying `gc.first_reaction` (`tools/gc-proactive.sh`
-  `sling_first_reaction_guard`).
+  a raw routed claim. `sling_first_reaction_guard` refuses a bead whose reaction
+  has landed (`gc.first_reaction_landed`) and leaves a partial disposition
+  offerable (`tools/gc-proactive.sh` `sling_first_reaction_guard`).
 
 - **Claim + reaction.** The pool worker's `gc hook --claim` returns the subject
   (assignee = the worker, `in_progress`), and `agents/proactive/prompt.template.md`
@@ -44,10 +44,12 @@ task/bug/feature/spike passes.
   Found · Proposal · Decision needed · Disposition) to notes, dispose through
   `first-reaction-dispose.sh`, drain. One bead per reaction, a ≤140-char
   takeaway, mr-only for any code, and `gc.origin=operator` forces `ruling`. Two
-  re-offer cases: a subject whose notes carry a `# First reaction` card but no
-  `gc.first_reaction` (a session died before disposing) is disposed per the
-  card's `## Disposition` line without a second card; a subject already carrying
-  a `gc.first_reaction` record is released untouched and drained.
+  re-offer cases key on `gc.first_reaction_landed`, the proof stamped only after
+  the act: a subject whose reaction has landed is released untouched and drained;
+  a subject with an unfinished disposition (no landed proof — its choice in the
+  `gc.first_reaction` record, else the notes' `# First reaction` card `##
+  Disposition` line) re-runs the dispose from that choice rather than writing a
+  second card.
 
 - **Dispose.** `assets/scripts/first-reaction-dispose.sh` has four exits, each a
   release write plus one core operation. `actionable` releases to a pool;

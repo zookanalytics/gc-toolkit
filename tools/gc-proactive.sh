@@ -89,16 +89,19 @@ rig_beads_db() {
 }
 
 # sling_first_reaction_guard — a first reaction happens once, so refuse to
-# route a bead for one when it already carries a completed reaction. Routing an
-# already-reacted bead re-offers a done reaction to the pool, and a fresh worker
+# route a bead for one when its reaction has already landed. Routing a
+# landed-reaction bead re-offers a done reaction to the pool, and a fresh worker
 # re-derives the same disposition on a bead whose disposition already landed.
-# gc.first_reaction is stamped by the dispose before it acts and is the record
-# of that completed reaction. The subject is read from the fixture under test,
-# live otherwise; an unreadable
-# bead is not proof of a reaction, so it proceeds. Returns non-zero when the
-# bead is already reacted, so the caller skips the sling.
+# gc.first_reaction_landed is stamped by the dispose only after its act
+# completes, so it is the proof the reaction is done. gc.first_reaction is the
+# record, written BEFORE the act, so it is present on a partial disposition whose
+# act never finished — refusing on it would strand that half-disposed bead
+# instead of letting it re-offer so a worker can complete it. The subject is read
+# from the fixture under test, live otherwise; an unreadable bead is not proof of
+# a landed reaction, so it proceeds. Returns non-zero when the bead's reaction has
+# landed, so the caller skips the sling.
 sling_first_reaction_guard() {
-    local bead="$1" meta fr
+    local bead="$1" meta landed
     if [ -n "$FIXTURE" ]; then
         [ -f "$FIXTURE/beads.json" ] || return 0
         meta="$(jq -c --arg id "$bead" '.[$id].metadata // {}' "$FIXTURE/beads.json" 2>/dev/null || printf '{}')"
@@ -108,9 +111,9 @@ sling_first_reaction_guard() {
         meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null \
             | jq -c 'if type=="array" then (.[0].metadata // {}) else {} end' 2>/dev/null || printf '{}')"
     fi
-    fr="$(printf '%s' "$meta" | jq -r '."gc.first_reaction" // ""' 2>/dev/null || printf '')"
-    [ -n "$fr" ] || return 0
-    log "$PROG: sling: $bead already carries a first reaction (gc.first_reaction=$fr) — not re-routing. A first reaction happens once; routing an already-reacted bead re-offers a done reaction to the pool. Clear gc.first_reaction to re-react."
+    landed="$(printf '%s' "$meta" | jq -r '."gc.first_reaction_landed" // ""' 2>/dev/null || printf '')"
+    [ -n "$landed" ] || return 0
+    log "$PROG: sling: $bead already carries a landed first reaction (gc.first_reaction_landed=$landed) — not re-routing. A first reaction happens once; routing a landed-reaction bead re-offers a done reaction to the pool. Clear gc.first_reaction* to re-react."
     return 1
 }
 
@@ -306,11 +309,13 @@ cmd_demand() {
 #   - top-level only — a parent-child CHILD carries the edge in its own
 #     .dependencies; a convoy's tracks edge lives on the convoy, so this
 #     catches parented beads, not every convoy member.
-# Plus a state predicate: not already reacted, not routed, has a description;
-# deduped by id. "Not already reacted" drops the gc.first_reaction a completed
-# reaction leaves — the same marker sling_first_reaction_guard refuses, so a
-# reacted bead is dropped here and never reaches the sling loop to spend a cap
-# slot.
+# Plus a state predicate: reaction not yet landed, not routed, has a
+# description; deduped by id. "Reaction not yet landed" drops the
+# gc.first_reaction_landed a completed reaction leaves — the same proof
+# sling_first_reaction_guard refuses, so a landed-reaction bead is dropped here
+# and never reaches the sling loop to spend a cap slot. A partial disposition
+# (gc.first_reaction recorded, no landed proof) is kept, so a re-offer can
+# complete the act it left unfinished.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -320,7 +325,7 @@ scan_precision_filter() {
     markers_json='["branch","merge_result","work_dir","pr_url","pr_number","check_name","anchor_bead"]'
     jq --argjson types "$types_json" --argjson markers "$markers_json" '
         map(select(
-            ((.metadata["gc.first_reaction"] // "") == "")
+            ((.metadata["gc.first_reaction_landed"] // "") == "")
             and ((.metadata["gc.routed_to"] // "") == "")
             and ((.description // "") != "")
             and ((.issue_type // "") as $it | ($types | index($it)) != null)

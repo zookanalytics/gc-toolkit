@@ -13,7 +13,7 @@
 # reaction files the visit); FALLBACK files the visit directly — taken on --no-react, whenever
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
 # a sling into a downed pool fails invisibly; today's tool always says yes),
-# and when the subject already carries a first reaction so the sling is a no-op
+# and when the subject's first reaction has already landed so the sling is a no-op
 # that dispatches nothing (gc-helm react exit 5): nothing would file the visit,
 # so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
@@ -288,8 +288,8 @@ if [ -n "$REACT" ]; then
     # sling failure: name the actual cause so the visit body the converse
     # session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT already carries a first reaction — no new reaction was slung; filing the visit directly"
-        REACT_WHY="no: subject already carries a first reaction (a first reaction happens once)"
+        note "$PROG: subject $SUBJECT already carries a landed first reaction — no new reaction was slung; filing the visit directly"
+        REACT_WHY="no: subject already carries a landed first reaction (a first reaction happens once)"
     else
         note "$PROG: first reaction sling FAILED — falling back to filing the visit directly"
         REACT_WHY="no: the first-reaction sling failed"
