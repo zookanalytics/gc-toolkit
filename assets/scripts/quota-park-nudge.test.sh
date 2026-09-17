@@ -307,6 +307,9 @@ case "$1 $2" in
   # nothing, a failed one is no pass at all.
   "session list")
     [ "${FAKE_FAIL_LIST:-0}" = "1" ] && exit 3
+    # A list fetch slow enough to spend a whole sweep budget before the peek
+    # loop starts — the load case the sweep clock must not count against itself.
+    [ -n "${FAKE_SLOW_LIST:-}" ] && sleep "$FAKE_SLOW_LIST"
     cat "$FAKE_SESSIONS" ;;
   # `exec` so the sleep REPLACES this process: timeout signals its direct child,
   # and an orphaned sleep would hold the caller's command-substitution pipe open
@@ -397,8 +400,9 @@ if [ "$FAST_BOUNDS" = 1 ]; then
     B_DEFER=0.5    # a single hang that must overrun B_BUD1 on its own (run 9)
     B_BUD1=0.2     # sweep budget one B_DEFER hang overruns
     B_BUD2=0.5     # sweep budget a two-to-three B_HANG prefix overruns (16, 21)
+    B_SLOWLIST=0.75 # a session-list fetch that outlasts B_BUD2 (16b)
 else
-    B_HANG=1; B_KILL=1; B_DEFER=1; B_BUD1=1; B_BUD2=2
+    B_HANG=1; B_KILL=1; B_DEFER=1; B_BUD1=1; B_BUD2=2; B_SLOWLIST=3
 fi
 
 # --- Run 1: both parks nudged, nothing else touched. ------------------------
@@ -930,6 +934,20 @@ grep -q '^session=\.sweep-cursor' "$TMP/status16" \
     && bad "the cursor file must not be reported as a parked session" \
     || ok "the cursor file is not reported as a parked session"
 fi
+
+# --- Run 16b: a setup that spends the whole budget before the loop must not ---
+# starve the sweep. SWEEP_BUDGET bounds the per-session peek loop, and the sweep
+# clock starts at that loop — not at process start, where a slow session-list
+# fetch (the load case) would draw the budget to nothing and defer every session
+# on a pass that peeked no one, leaving the round-robin cursor unmoved and the
+# same prefix re-swept every cycle. One park, no hangs: the only thing under test
+# is that a pass whose setup outran the budget still attempts a session.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+: > "$TMP/nudges"
+FAKE_SESSIONS="$TMP/sessions-one.json" FAKE_SLOW_LIST=$B_SLOWLIST \
+    QUOTA_PARK_SWEEP_BUDGET=$B_BUD2 bash "$SCRIPT" > "$TMP/out16b"
+eq "$(nudges_for lx-codex)" "1" \
+    "a session-list fetch that outlasts the sweep budget still leaves the park behind it nudged, not deferred"
 
 # --- Run 17: an escalation whose bound expired is not sent twice. -----------
 # `gc mail send` writes durable mail through Dolt — the layer most likely to be
@@ -1798,8 +1816,11 @@ done
 UNWRITABLE="$TMP/unwritable-state"
 rm -rf "$UNWRITABLE"; mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
 # `chmod 500` does not stop root, and a suite running as root would assert the
-# opposite of what it means to. Probed rather than assumed.
-if : > "$UNWRITABLE/.probe" 2>/dev/null; then
+# opposite of what it means to. Probed rather than assumed — `2>/dev/null` ahead
+# of the `>` so a refused open is silent, not a stray "Permission denied" on the
+# suite's stderr (a failed redirect is reported through whatever fd 2 is when it
+# runs, and redirections apply left to right).
+if : 2>/dev/null > "$UNWRITABLE/.probe"; then
     rm -f "$UNWRITABLE/.probe"
     echo "skip - unwritable-state-dir test (this user can write it anyway)"
     BROKEN_DIRS=("$TMP/not-a-dir/child")
