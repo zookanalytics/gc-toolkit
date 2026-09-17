@@ -317,8 +317,9 @@ eq "$(run_resolve polecat/tk-work main '{"target":""}')" \
 
 # --- 3. The atomic handoff. -----------------------------------------------------
 # ONE gc bd update carries the whole transition — resolved target, refinery
-# assignee, cleared route, APPENDED notes — so a partial handoff cannot strand
-# the bead between writes, and --notes can never erase the dispatch note.
+# assignee, cleared route, cleared session pins, APPENDED notes — so a partial
+# handoff cannot strand the bead between writes, and --notes can never erase
+# the dispatch note.
 # {{binding_prefix}} is substituted the way the materializer does; GC_RIG is
 # controlled per case.
 # ROSTER_OK is the shape `gc agent list --json` returns: every agent carries a
@@ -345,15 +346,15 @@ bash -n "$TMP/consume.sh" \
   || bad "extracted handoff failed bash -n"
 
 eq "$(run_consume main)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "one atomic write: target + refinery assignee + cleared route + APPENDED notes"
 
 eq "$(run_consume integration/tk-c1)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=integration/tk-c1 --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=integration/tk-c1 --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "carries an integration-branch target through to the bead"
 
 eq "$(run_consume main myrig)" \
-   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "rig sessions get the rig-qualified refinery address"
 
 # A partial re-run that skips step 1b must not write target="". An empty
@@ -413,11 +414,11 @@ eq "$(run_consume main gc-toolkit typo.)" \
 # correct. A call that fails and a roster that is genuinely empty arrive by
 # different routes and must both write.
 eq "$(run_consume main myrig gc-toolkit. UNREADABLE)" \
-   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "unreadable roster: hands off rather than stalling on what it cannot check"
 
 eq "$(run_consume main myrig gc-toolkit. '[]')" \
-   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=myrig/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "empty roster: hands off rather than stalling on what it cannot check"
 
 # --- 3b. The PR summary the handoff carries. ----------------------------------
@@ -443,7 +444,7 @@ run_consume_file() {
 
 printf 'Compares heads instead of names.' > "$TMP/summary.txt"
 eq "$(run_consume_file "$TMP/summary.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
    "a carried summary rides the one atomic write as pr_summary"
 
 # A real summary is prose, not a line. The fake logs argv verbatim, so an
@@ -451,7 +452,7 @@ eq "$(run_consume_file "$TMP/summary.txt")" \
 # the value reaches gc unmangled rather than truncated at the first line.
 printf 'Line one.\nLine two.' > "$TMP/summary-multiline.txt"
 eq "$(run_consume_file "$TMP/summary-multiline.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Line one.;Line two. --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Line one.;Line two. --append-notes Implemented: <brief summary>;" \
    "a multi-line summary reaches the write whole"
 
 # Both no-summary shapes fall back to the unsummarized handoff
@@ -461,11 +462,11 @@ eq "$(run_consume_file "$TMP/summary-multiline.txt")" \
 # write the key.
 : > "$TMP/summary-empty.txt"
 eq "$(run_consume_file "$TMP/summary-empty.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "an empty summary file writes no pr_summary key at all"
 
 eq "$(run_consume_file "$TMP/summary-absent.txt")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "a PR_SUMMARY_FILE naming no file hands off unsummarized rather than halting"
 
 # The step's own blocks run before this one under one shell, and a polecat that
@@ -479,11 +480,11 @@ NOSUM_RC=0
 LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" \
   bash "$TMP/nosummary.sh" > "$TMP/out" 2>&1 || NOSUM_RC=$?
 eq "$NOSUM_RC|$(tr '\n' ';' < "$TMP/log")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "strict shell, PR_SUMMARY_FILE never set: hands off unsummarized, no set -u crash"
 
 eq "$(run_consume_file "$TMP/summary.txt" strict)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
    "strict shell: a carried summary still writes"
 
 # The polecat pastes this block into a live shell, and `bash "$TMP/consume.sh"`
@@ -516,11 +517,11 @@ ROSTER_BIG="$(jq -cn '[{qualified_name:"gc-toolkit/gc-toolkit.refinery"}]
   + [range(1200) | {qualified_name:("filler-rig-\(.)/gc-toolkit.polecat-padding-entry")}]')"
 
 eq "$(run_strict_consume main gc-toolkit "$ROSTER_BIG")" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "strict shell: a matching address in an oversized roster still writes (the pipe form takes SIGPIPE here)"
 
 eq "$(run_strict_consume main gc-toolkit UNREADABLE)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit/gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "strict shell: a failed roster call still reaches the permissive arm rather than killing the step"
 
 eq "$(run_strict_consume main gc-toolkit '[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]')" \
@@ -625,7 +626,7 @@ run_consume_anchor() {
 # pr-open.sh enumerates — and the claimed bead's handoff carries no pr_summary,
 # because writing it there would assert a summary nothing reads.
 eq "$(run_consume_anchor "$TMP/summary.txt" tk-anchor)" \
-   "0|UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "child: the summary is stamped on the anchor, and the handoff stays otherwise atomic"
 
 # The anchor write comes FIRST. It is metadata on a bead this session does not
@@ -637,20 +638,20 @@ eq "$(run_consume_anchor "$TMP/summary.txt" tk-anchor | tr ';' '\n' | sed -n '1p
 
 # Prose reaches the anchor whole, the same as it does the claimed bead.
 eq "$(run_consume_anchor "$TMP/summary-multiline.txt" tk-anchor)" \
-   "0|UPDATE|tk-anchor --set-metadata pr_summary=Line one.;Line two.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-anchor --set-metadata pr_summary=Line one.;Line two.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "a multi-line summary reaches the anchor whole"
 
 # No summary composed: nothing is written to the anchor at all. An empty
 # metadata value round-trips as set-but-empty, which would assert a summary the
 # polecat never wrote and suppress pr-open.sh's own description fallback.
 eq "$(run_consume_anchor "$TMP/summary-empty.txt" tk-anchor)" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "no summary: the anchor is not touched"
 
 # An empty GATING_ANCHOR is the fresh-work case and must be byte-identical to
 # the pre-change behavior: one write, carrying the summary.
 eq "$(run_consume_anchor "$TMP/summary.txt" '')" \
-   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
+   "0|UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata pr_summary=Compares heads instead of names. --append-notes Implemented: <brief summary>;" \
    "fresh work: unchanged single atomic write carrying the summary"
 
 # A hold that did not land must not drain. molecule-hold.sh exits non-zero when
@@ -704,7 +705,7 @@ eq "$(sed -n 's/^landing target: //p' "$TMP/out")" "main" \
 # The only write is the atomic handoff: metadata.branch already agreed, so
 # nothing rewrites it, and target lands on main rather than the self-merge.
 eq "$(tr '\n' ';' < "$TMP/log")" \
-   "UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "composed run writes only the atomic handoff, with target=main"
 
 # The same four snippets on the shape the whole change is for: a rework child
@@ -721,7 +722,7 @@ FAKE_BRANCH=polecat/su-uzy9.5 FAKE_META='{"branch":"polecat/su-uzy9.5","target":
   GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_LOG="$TMP/log" bash "$TMP/four.sh" > "$TMP/out" 2>&1 || FOUR_RC=$?
 eq "$FOUR_RC" "0" "composed rework run exits 0"
 eq "$(tr '\n' ';' < "$TMP/log")" \
-   "UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --append-notes Implemented: <brief summary>;" \
+   "UPDATE|tk-anchor --set-metadata pr_summary=Compares heads instead of names.;UPDATE|tk-work --status=open --assignee=gc-toolkit.refinery --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;" \
    "composed rework run: summary to the anchor, handoff to the claimed bead"
 
 # --- 5. Step-chain close. -----------------------------------------------------
