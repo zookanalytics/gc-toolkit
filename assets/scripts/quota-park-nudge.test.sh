@@ -123,9 +123,8 @@ mkdir -p "$TMP/panes" "$TMP/state" "$TMP/bin"
 : > "$TMP/nudges"; : > "$TMP/mail"; : > "$TMP/mailbody"
 
 # --- Session list. One attached; one with `running: null`, which is what an
-# active session looks like during controller churn (same shape the helm's
-# owner-liveness fixture pins, tools/helm-surface-fixture.sh) — it must be
-# treated as live, or the parked agents we most need to reach are invisible.
+# active session looks like during controller churn — it must be treated as
+# live, or the parked agents we most need to reach are invisible.
 cat > "$TMP/sessions.json" <<'JSON'
 {"sessions":[
  {"id":"lx-claude","alias":"gc-toolkit/gc-toolkit.witness","state":"active","running":true,"attached":false},

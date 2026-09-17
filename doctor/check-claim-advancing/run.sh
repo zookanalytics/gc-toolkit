@@ -245,7 +245,7 @@ stale_roster=0
 
 # Liveness is read from `.state` (a holder is live iff state == "active"), the
 # field both `gc session list --json` schemas carry — the same rule
-# quota-park-nudge.sh and helm-surface-fixture.sh follow, because `.running` is
+# quota-park-nudge.sh follows, because `.running` is
 # null during controller churn and absent from the CLI-fallback shape, so a
 # filter on it drops exactly the live sessions. If the roster carries neither
 # `state` nor `running` on any session, its schema has drifted past what
