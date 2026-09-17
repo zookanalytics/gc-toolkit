@@ -163,7 +163,21 @@ POOL_ROUTE="$SELF_DIR/pool-route.sh"
 # script did not write.
 route_verdict() { "$POOL_ROUTE" --verdict "$1"; }
 
-HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1 | cut -c1-100)
+# The headline is the first line of the message, capped so a long paragraph
+# does not run into the visit title. When it overruns, cut back to the last
+# word boundary near the cap (a bare byte cut severs a word, e.g. "…un" from
+# "until") and mark the cut with an ellipsis so the title says it was shortened.
+HEADLINE=$(printf '%s' "$MESSAGE" | head -n 1)
+HEADLINE_MAX=100
+if [ "${#HEADLINE}" -gt "$HEADLINE_MAX" ]; then
+  keep=$(( HEADLINE_MAX - 1 ))          # leave room for the ellipsis
+  cut=${HEADLINE:0:$keep}
+  atword=${cut% *}                       # drop back to the last space
+  if [ "$atword" != "$cut" ] && [ "${#atword}" -ge $(( keep / 2 )) ]; then
+    cut=$atword                          # take the word boundary unless it loses most of the text
+  fi
+  HEADLINE="${cut}…"
+fi
 
 # >>> gate-visit
 # Canonical gate-visit shape (formulas/mol-visit.toml); gate-visit.test.sh
