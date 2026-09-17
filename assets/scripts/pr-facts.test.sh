@@ -386,6 +386,9 @@ store "[$(anchor F4 13)]"
 printf '%s' "$(prview 13 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_13.json"
 out=$(run)
 has "$out" "filed rebase-mode rework new-2 routed to $FIX" "a rework child was filed, classified, and routed"
+eq "$(meta new-2 task_kind)" "rework" "child carries the rework role marker"
+eq "$(meta new-2 anchor_bead)" "F4" "child names the anchor it belongs to"
+eq "$(meta F4 task_kind)" "<absent>" "…and the anchor carries none, so the marker discriminates"
 eq "$(meta new-2 branch)" "polecat/x13" "child carries the branch"
 eq "$(meta new-2 target)" "main" "child carries the target"
 eq "$(meta new-2 merge_strategy)" "mr" "child is mr-mode"
@@ -535,6 +538,78 @@ echo "# …once routed, the child dedups normally again"
 out=$(run)
 has "$out" "already covers branch" "a routed child suppresses a twin as before"
 
+echo "# …a role-marker stamp that does not persist leaves the child UNROUTED, like the mode"
+# task_kind=rework + anchor_bead sit in the same write as prepare_mode. A child
+# routed with the marker dropped is a live rework on the anchor's OWN branch that
+# a metadata read cannot tell from the anchor — the defect this bead prevents.
+store "[$(anchor RM 35)]"
+printf '%s' "$(prview 35 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_35.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:task_kind,anchor_bead" run)
+has "$out" "did not record task_kind=rework/anchor_bead=RM; left unrouted" "a dropped role marker is caught by the read-back, before the route"
+eq "$(meta new-2 task_kind)" "<absent>" "the marker stamp really was dropped"
+eq "$(meta new-2 anchor_bead)" "<absent>" "…both halves of it"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the unmarked child is never routed"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+hasnt "$out" "filed rebase-mode rework new-2 routed to" "…nor is it reported as dispatched"
+
+echo "# …and the NEXT pass re-stamps it through the stranded arm, then routes"
+out=$(run)
+has "$out" "re-routing stranded rework new-2" "the unrouted child is adopted by the stranded arm, not buried"
+eq "$(meta new-2 task_kind)" "rework" "…which re-stamps the role marker"
+eq "$(meta new-2 anchor_bead)" "RM" "…and the anchor it belongs to"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only now is it routed"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…with no twin minted"
+
+echo "# …a covering rework that lacks the role marker is re-stamped, never left as its anchor's twin"
+# A routed-but-unclaimed child from a pass before this marker existed (or one
+# whose stamp half-landed) is treated as already covering the conflict, so it
+# never flows through the creation stamp. Re-stamp it in place rather than leave
+# a live rework on the anchor's own branch a metadata read cannot tell apart.
+cov='{"id":"cov-rw","status":"open","assignee":"","notes":"",'
+cov="$cov"'"title":"Rebase PR#36 onto main: base rewritten, PR conflicts",'
+cov="$cov"'"metadata":{"branch":"polecat/x36","gc.routed_to":"'"$FIX"'","rejection_reason":"stale base at head sha-36: x"}}'
+store "[$(anchor CV 36), $cov]"
+printf '%s' "$(prview 36 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_36.json"
+eq "$(meta cov-rw task_kind)" "<absent>" "the covering child starts with no role marker"
+out=$(run)
+has "$out" "re-stamped role marker on covering rework cov-rw" "the dedup re-stamps the marker instead of only vetoing"
+has "$out" "already covers branch 'polecat/x36' at this head, no new child" "…and still mints no twin"
+eq "$(meta cov-rw task_kind)" "rework" "the covering child now carries task_kind=rework"
+eq "$(meta cov-rw anchor_bead)" "CV" "…and names the anchor it reworks"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "no child was minted"
+
+echo "# …a covering-child restamp that does not persist is reported UNMARKED (retry next pass), never done"
+# The covering-child restamp shares gc bd update's return-0-without-writing
+# failure with the create path: a marker that silently drops must leave the
+# child reported unmarked so the next pass retries, never claimed re-stamped — a
+# live rework left unmarked on the anchor's own branch is the misread the marker
+# exists to stop.
+covd='{"id":"cov-drop","status":"open","assignee":"","notes":"",'
+covd="$covd"'"title":"Rebase PR#38 onto main: base rewritten, PR conflicts",'
+covd="$covd"'"metadata":{"branch":"polecat/x38","gc.routed_to":"'"$FIX"'","rejection_reason":"stale base at head sha-38: x"}}'
+store "[$(anchor CX 38), $covd]"
+printf '%s' "$(prview 38 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_38.json"
+eq "$(meta cov-drop task_kind)" "<absent>" "the covering child starts with no role marker"
+out=$(STUB_DROP_KEYS="cov-drop:task_kind,anchor_bead" run)
+hasnt "$out" "re-stamped role marker on covering rework cov-drop" "a restamp that half-lands is not reported as done"
+has "$out" "could not re-stamp role marker on covering rework cov-drop (retry next pass)" "…the read-back catches the dropped marker and defers to the next pass"
+eq "$(meta cov-drop task_kind)" "<absent>" "the marker really was dropped"
+eq "$(meta cov-drop anchor_bead)" "<absent>" "…both halves of it"
+has "$out" "already covers branch 'polecat/x38' at this head, no new child" "…while it still dedups the conflict"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "no child was minted"
+
+echo "# …a CLOSED covering child is dispositioned; its absent marker is left alone"
+cov2='{"id":"cov-closed","status":"closed","assignee":"","notes":"",'
+cov2="$cov2"'"title":"Rebase PR#37 onto main: base rewritten, PR conflicts",'
+cov2="$cov2"'"metadata":{"branch":"polecat/x37","rejection_reason":"stale base at head sha-37: x"}}'
+store "[$(anchor CW 37), $cov2]"
+printf '%s' "$(prview 37 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_37.json"
+out=$(run)
+hasnt "$out" "re-stamped role marker" "a closed dup is read by no live gate, so it is not re-stamped"
+eq "$(meta cov-closed task_kind)" "<absent>" "…and its marker stays absent"
+has "$out" "already covers branch" "…while it still dedups the conflict"
+
 echo "# …a stranded rework a polecat has since claimed is never re-stamped under them"
 held='{"id":"held-rw","status":"in_progress","assignee":"rig/gc-toolkit.polecat-2","notes":"",'
 held="$held"'"title":"Rebase PR#33 onto main: base rewritten, PR conflicts",'
@@ -544,6 +619,7 @@ printf '%s' "$(prview 33 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_33.json"
 out=$(run)
 has "$out" "already covers branch" "a claimed child still suppresses the arm"
 eq "$(meta held-rw 'gc.routed_to')" "<absent>" "…and nothing is written under the holder"
+eq "$(meta held-rw task_kind)" "<absent>" "…not even the role marker: the route read-back refuses to route an unmarked child, so a claimed one predates the stamp and is backfilled out of band, never written under its holder"
 
 echo "# …a strand never overrides a LIVE sibling's claim on the force-push"
 strand='{"id":"strand-rw","status":"open","assignee":"","notes":"",'
@@ -727,6 +803,7 @@ eq "$(meta P1 pr_comment_disposition)" "rework:new-2" "…and the choice is reco
 eq "$(meta P1 pr_comment_watermark)" "5001" "the watermark advanced to the routed comment"
 eq "$(meta P1 pr_review_watermark)" "0" "…and the review id space stayed put (two spaces, never merged)"
 eq "$(meta new-2 anchor_bead)" "P1" "the child names the anchor — this arm's dedup key"
+eq "$(meta new-2 task_kind)" "rework" "…and its role, so a metadata read can tell it from the anchor"
 eq "$(meta new-2 pr_number)" "40" "…and the PR, so merge.sh counts it in flight"
 eq "$(meta new-2 branch)" "polecat/x40" "the child resumes the PR's own branch"
 eq "$(meta new-2 prepare_mode)" "rebase" "a polecat/* head is classified rebase"
@@ -874,6 +951,29 @@ has "$out" "NOT watermarking" "the unrouted child holds the mark"
 ctmp=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-facts-test.XXXXXX"); jq -c 'map(if .id == "new-2" then .status = "closed" else . end)' "$STUB_STORE" > "$ctmp" && mv "$ctmp" "$STUB_STORE"
 out=$(run)
 eq "$(meta W5 pr_comment_watermark)" "9400" "a closed child answers the batch even unrouted — refusing forever could not converge"
+
+echo "# …a child whose task_kind stamp drops is never routed nor watermarked past, then re-stamped"
+# anchor_bead is the dedup key and lands, so the create-path read-back passes;
+# task_kind is the role marker, and a dropped one would leave a routed comment
+# rework on the anchor's own branch that a metadata read cannot tell apart.
+store "[$(anchor W7 51)]"
+printf '%s' "$(prview 51 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_51.json"
+echo '[]' > "$GH_DIR/reviews_51.json"
+printf '[{"id":9700,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_51.json"
+: > "$STUB_SESSION_LOG"
+out=$(STUB_DROP_KEYS="new-2:task_kind" run)
+has "$out" "did not record task_kind=rework; left unmarked and NOT watermarking" "a dropped role marker refuses the watermark"
+eq "$(meta new-2 task_kind)" "<absent>" "the marker really was dropped"
+eq "$(meta new-2 anchor_bead)" "W7" "…while the dedup key (anchor_bead) still landed"
+eq "$(meta new-2 'gc.routed_to')" "<absent>" "…so the unmarked child is never routed"
+eq "$(meta W7 pr_comment_watermark)" "<absent>" "…and the comment stays above the mark"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
+out=$(run)
+has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child by anchor_bead"
+eq "$(meta new-2 task_kind)" "rework" "…re-stamps the role marker on the recheck"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(meta W7 pr_comment_watermark)" "9700" "…and only then does the mark move"
 
 echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
 # merge.sh reads pr_posture off the bead and never asks GitHub. The full arm

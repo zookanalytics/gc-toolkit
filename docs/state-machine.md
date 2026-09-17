@@ -408,10 +408,11 @@ that way is not one the arm holds the pass over.
 **The watermarks** separate a comment already routed from a new one. Each is the
 highest id routed in its own id space, and each advances only after the routing
 reads back, so a comment nothing answered cannot fall below the mark. For a
-rework child that is two stamps: the `prepare_mode` it must resume in, and the
-route that makes it claimable. The two spaces are never merged: a reply can land
-on an old review, so review ids cannot stand in for comment ids. They rest on
-one assumption — that ids rise with visibility.
+rework child that is three stamps: the `prepare_mode` it must resume in, the
+`task_kind` and `anchor_bead` role marker that tells the child from its anchor,
+and the route that makes it claimable. The two spaces are never merged: a reply
+can land on an old review, so review ids cannot stand in for comment ids. They
+rest on one assumption — that ids rise with visibility.
 
 Both spaces are review spaces: the inline comments on `pulls/N/comments`, and
 the bodies of COMMENTED and CHANGES_REQUESTED reviews on `pulls/N/reviews`. An
@@ -506,6 +507,15 @@ sequenceDiagram
 ```
 
 ## Rejection and rework loops
+
+A rework child is discriminable by metadata alone. It carries
+`task_kind=rework` and `anchor_bead=<anchor>`, stamped by whichever component
+files it, and it resumes the anchor's own branch. Without those two keys its
+metadata is the anchor's, and the title prefix is the only thing telling them
+apart. A review bead carries `task_kind=review`. An anchor carries
+`merge_result` and neither key. Every consumer that selects on `anchor_bead`
+also narrows by `task_kind=review` or by title, so a marked child joins no
+review's result set.
 
 - **Rejection** (refinery judgment): the anchor's branch is not accepted —
   `mol-refinery-patrol` writes `rejection_reason` and re-routes the bead to
