@@ -65,19 +65,28 @@ at all.
 
 ### Why families scatter
 
-Only six bead *kinds* become tiles. Three are selected by issue type — epic,
-decision, convoy (`typedAnchorKinds`,
+Six bead *kinds* are selected as tiles. Three are selected by issue type —
+epic, decision, convoy (`typedAnchorKinds`,
 `services/helm/internal/source/beads.go:455`) — and three by metadata: human
 (`gc.routed_to=human`), parked (`gc.takeaway` present), and merge (a
 `merge_result`, i.e. a pull request)
 (`services/helm/internal/source/beads.go:499-523`).
 
+A selected convoy the city does not own renders as a seventh kind, `unowned`.
+`applyConvoyOwnership` (`services/helm/internal/source/beads.go:950`) flips its
+`Kind` from `convoy` to `unowned` after selection, so `unowned` is a
+convoy-derived rendered kind rather than a separate selection. It follows the
+convoy grouping rules below: it keeps the `tracks` children gathered before the
+flip, and it gathers no `blocks` edges until the source change in the build
+plan. Like any convoy tile it can be a family root, a child, or a blocker, so
+the grouping and the build must carry it as a convoy that reads `unowned`.
+
 A parent's ordinary children are not tiles. They roll up into that parent's
 counts (`rollUp`), read at all statuses so `n_closed` is real
 (`services/helm/internal/source/beads.go:538`). A child surfaces as its *own*
 tile only when it is
-independently one of the six kinds — and that is exactly when a family breaks
-apart. An epic with two children where one has opened a PR and the other is
+independently one of the six selected kinds — and that is exactly when a family
+breaks apart. An epic with two children where one has opened a PR and the other is
 routed to a human produces three tiles: the epic (active or stalled), the PR
 child (review), and the human child (gate). `classifySection` bands each on
 its own facts, so the three land in three sections and read as three
@@ -255,8 +264,10 @@ Once a shape is chosen, one build bead implements, in this order:
    step the blocked → blocker edge is invisible for those kinds and the join
    groups only their children.
 2. The grouping-key derivation and `Tile.GroupRoot` in `derive.go`, with the
-   one-root rule for the three edge cases. This is the shape-independent core,
-   behind its own tests in `derive_test.go`.
+   one-root rule for the three edge cases. The walk keys on the parent and
+   blocker edges, not on `Tile.Kind`, so a convoy that renders `unowned` groups
+   as the convoy it is: its `tracks` children are its family. This is the
+   shape-independent core, behind its own tests in `derive_test.go`.
 3. The chosen render in both surfaces: `GroupBySection` and
    `services/helm/cmd/helm-svc/board.go` for the CLI, the `tile.section`
    bucketing in `services/helm/web/src/App.tsx` for the dashboard.
@@ -268,7 +279,9 @@ The row cap (`CapRows`, `CapQueue`) and the template-cluster fold
 (`tagClusters`, `ClusterRows`) both count flat rows today and must be
 re-derived against families; the build bead owns that. Tests to update:
 `derive_test.go`, `sections_test.go`, `services/helm/web/src/App.test.tsx`,
-and the fixtures.
+and the fixtures. The `derive_test.go` cases include an `unowned` convoy as a
+family root, as a child, and as a blocker, so the grouping is exercised across
+the full rendered-kind set.
 
 ## Open sub-decisions
 
