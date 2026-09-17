@@ -47,13 +47,15 @@
 # folds an unengaged self-login thread into `commented` — the merge-hold has to
 # be recorded before merge.sh runs — and the full pass files the one visit it
 # stands for.
-# Such a batch also opens one validation pass on the anchor, once per batch: it
-# is review the branch has never been answered against, so it enters the graph
-# as a task_kind=validation bead from which gate-ensure's quiescence holds a
-# fresh whole-diff review off the anchor while the validator rules the batch.
-# The pass is opened unrouted here and dispatched to mol-validate by
-# gate-ensure; the once-per-batch dedup is the live human-LANE pass on the
-# anchor, since a pass on another lane never rules the human findings.
+# Such a batch also ensures a live check_name=human validation pass on the
+# anchor: it is review the branch has never been answered against, so it enters
+# the graph as a task_kind=validation bead from which gate-ensure's quiescence
+# holds a fresh whole-diff review off the anchor while the validator rules the
+# batch. The pass is opened unrouted here and dispatched to mol-validate by
+# gate-ensure. One live human-lane pass rules every open human finding on the
+# anchor, so the dedup reuses that pass while it stays open and a later batch
+# watermarks behind it rather than opening another; a pass on another lane never
+# rules the human findings.
 # After the dispatch arms, a write-back sweep gives the operator an
 # acknowledgement trail where they are already reading. An anchor carrying
 # pr_comment_disposition has a bead covering its comments, so every comment at
@@ -1293,17 +1295,16 @@ $CBODY"
       DISP="visit:$VID"
     fi
 
-    # --- operator feedback opens a validation pass on the anchor -----------------
-    # The batch just routed to a fix or a visit above; it also opens one
-    # validation pass on the anchor. A human feedback batch is review the branch
-    # has never been answered against, so it enters the graph the way a reviewer's
-    # findings do: gate-ensure.sh's quiescence reads the open pass and holds a
-    # fresh whole-diff review off the anchor while the validator rules the batch,
-    # so the batch buys no re-review of its own
+    # --- operator feedback ensures a validation pass on the anchor ---------------
+    # The batch just routed to a fix or a visit above; it also ensures a live
+    # check_name=human validation pass on the anchor. A human feedback batch is
+    # review the branch has never been answered against, so it enters the graph
+    # the way a reviewer's findings do: gate-ensure.sh's quiescence reads the open
+    # pass and holds a fresh whole-diff review off the anchor while the validator
+    # rules the batch, so the batch buys no re-review of its own
     # (specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards").
-    # This replaces the review-round-cap reset the batch used to perform:
-    # signoff.sh's cap, floor and park are retired on signoff.sh's own side, so
-    # this arm no longer touches them.
+    # This arm does not touch signoff.sh's cap, floor or park; those are retired
+    # on signoff.sh's own side.
     #
     # The pass is a task_kind=validation bead anchored to $id — the shape
     # gate-ensure.sh's open_validation_pass reads — carrying check_name=human and
@@ -1315,14 +1316,14 @@ $CBODY"
     # lane no finding carries and no anchor declares, so the validator would match
     # no findings and back a lane that does not exist. It is left unrouted: a
     # validating lane is dispatched to mol-validate by gate-ensure.sh, so the bead
-    # is opened here and armed there. The once-per-batch dedup is the live
+    # is opened here and armed there. The dedup is the live
     # human-lane pass: it selects a task_kind=validation bead carrying
     # check_name=human, not any validation bead. gate-ensure's quiescence
     # (open_validation_pass) reads any lane, so a codex pass on this anchor holds
     # the merge but never rules the human findings; counting it here would
     # watermark the batch with no human-lane pass behind it. One live human pass
     # rules every open human finding on the anchor, so a second reconcile over the
-    # same anchor opens none. Opening it fails closed like the routing
+    # same anchor reuses that pass and opens none. Opening it fails closed like the routing
     # above: a probe or write that cannot complete warns and skips the watermark so
     # the batch retries next pass, and the routing's own dedup re-adopts the child
     # it already filed rather than twinning it. The routing above already holds the

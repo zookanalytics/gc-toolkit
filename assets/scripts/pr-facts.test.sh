@@ -25,13 +25,14 @@
 # read back, a comment above the mark re-firing while one below it stays
 # answered, and the reads that record nothing rather than clear a standing
 # `commented`.
-# Also covers the validation pass such a batch opens: once per batch, a
-# task_kind=validation bead anchored to the PR carrying check_name=human (the lane
-# the validator rules, never the whole check_set — a multi-lane anchor still opens
-# one human-lane pass) and the head, blocking the anchor so an already-green PR
-# cannot merge until the validator closes it, left unrouted for gate-ensure to
-# dispatch, deduped by the live human-lane pass (a codex pass on the anchor does
-# not stand in for it) and adopted by title when a prior stamp dropped. Opening it
+# Also covers the validation pass such a batch ensures: a live check_name=human
+# task_kind=validation bead anchored to the PR (the lane the validator rules,
+# never the whole check_set — a multi-lane anchor still gets one human-lane pass)
+# pinned to the head, blocking the anchor so an already-green PR cannot merge
+# until the validator closes it, left unrouted for gate-ensure to dispatch,
+# deduped by the live human-lane pass so a later batch reuses the open one rather
+# than opening another (a codex pass on the anchor does not stand in for it) and
+# adopted by title when a prior stamp dropped. Opening it
 # fails closed: a pass that did not record the shape the validator consumes
 # (anchor_bead, check_name=human, the head pin) or an unattachable blocks edge
 # holds the batch unwatermarked to retry. A capped anchor
@@ -1131,13 +1132,12 @@ eq "$(meta H3 pr_comment_disposition)" "visit:new-2" "silence is never the answe
 
 # --- operator feedback opens a validation pass on the anchor --------------------
 # A human feedback batch is review the branch has never been answered against, so
-# it enters the graph the way a reviewer's findings do: one validation pass on the
-# anchor — a task_kind=validation bead gate-ensure's quiescence reads to hold a
-# fresh whole-diff review off the anchor while the validator rules the batch. This
-# replaces the round-cap reset the batch used to perform; signoff.sh's cap, floor
-# and park are retired on signoff.sh's own side, so this arm no longer touches
-# them. See specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane
-# backwards".
+# it enters the graph the way a reviewer's findings do: a live check_name=human
+# validation pass on the anchor — a task_kind=validation bead gate-ensure's
+# quiescence reads to hold a fresh whole-diff review off the anchor while the
+# validator rules the batch. This arm does not touch signoff.sh's cap, floor or
+# park; those are retired on signoff.sh's own side. See
+# specs/tk-ztapg/review-cycle-architecture.md, "What moves a lane backwards".
 CAP_STATE=',"merge_hold":"signoff_cap","signoff_cap":"codex","gc.routed_to":"human","blocked_reason":"signoff did not converge after 3 rework rounds (cap 3)"'
 
 echo "# a human feedback batch opens one validation pass on the anchor, left unrouted"
