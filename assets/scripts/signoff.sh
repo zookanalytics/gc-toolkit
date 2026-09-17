@@ -14,14 +14,17 @@
 # marker, returning the lane to unreviewed, and file ONE routed rework child —
 # or, at the round cap, park the anchor under merge_hold and route it to a
 # human instead.
-# The cap counts rework rounds since the last operator feedback, not since the
-# branch was cut: pr-facts.sh records each batch of feedback on the anchor, and
-# the rounds spent before it become a floor this script subtracts. An anchor
-# capped before its PR was opened has no review conversation whose next comment
-# could record such a batch, so the cap also has a verb:
+# The cap bounds one thing — the city failing to converge against its own
+# reviewer — so a round is an attempted rework child, never a review dispatch,
+# and operator feedback is not one either. pr-facts.sh keeps a feedback batch out
+# of the cap's budget by opening a validation pass on the anchor rather than
+# spending a round (docs/state-machine.md, "The round cap and operator
+# feedback"). A cap already spent is retired under a ruling by
 #   signoff.sh reset <anchor> --reason <why>
-# advances the floor to the rounds already spent and retires the park the cap
-# wrote, in one audited write, with the ruling recorded on the anchor.
+# which advances signoff_round_floor to the rounds already filed and retires the
+# park the cap wrote, in one audited write with the ruling recorded on the
+# anchor. An anchor capped before its PR was opened has no conversation to carry
+# feedback, so that verb is its only release.
 # The city never approves its own PRs: nothing here ever passes --approve.
 # A lane state is a state of the lane, never a claim about a commit: the marker
 # is one bare word, a verdict binds to no oid, and a commit landing on the
