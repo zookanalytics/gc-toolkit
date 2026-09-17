@@ -1335,7 +1335,7 @@ $CBODY"
         [ .[] | select(((.metadata.task_kind // "") | tostring) == "validation")
               | select(((.metadata.check_name // "") | tostring) == "human") | .id ] | .[0] // empty' 2>/dev/null)
       if [ -n "$VPASS" ]; then
-        echo "$PROG: $id — PR#$num already carries a human-lane validation pass $VPASS; not opening another"
+        echo "$PROG: $id — PR#$num already carries a human-lane validation pass $VPASS; re-checking its shape before watermarking"
       else
         vtitle="Validate PR#$num feedback (through review $max_r, comment $max_c)"
         # A prior pass that created the bead but failed to stamp anchor_bead left
@@ -1360,33 +1360,45 @@ $CBODY"
         if [ -z "$VPASS" ]; then
           echo "$PROG: WARN $id — PR#$num could not open a validation pass; nothing watermarked (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
-        else
-          gc bd update "$VPASS" \
-            --set-metadata task_kind=validation \
-            --set-metadata anchor_bead="$id" \
-            --set-metadata check_name=human \
-            ${head_oid:+--set-metadata reviewed_oid="$head_oid"} >/dev/null 2>&1
-          # Watermark only once the pass the validator will actually consume is on
-          # the anchor. mol-validate reads three fields: anchor_bead scopes the
-          # findings, check_name is the lane it selects them by (a missing one
-          # defaults to codex, so the human findings would go unruled), and
-          # reviewed_oid is the pin it needs to back the lane. Read all three back
-          # and skip the watermark unless each landed — anchor_bead alone is a proxy
-          # that would mark the batch handled behind a pass the validator cannot
-          # rule. Skipping holds the batch to retry; the rework child is already
-          # filed, so it costs nothing.
-          vmeta=$(gc bd show "$VPASS" --json 2>/dev/null | scrub)
-          v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
-          v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
-          v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
-          if [ "$v_anchor" != "$id" ] || [ "$v_lane" != "human" ] || { [ -n "$head_oid" ] && [ "$v_oid" != "$head_oid" ]; }; then
-            echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record the batch shape (want anchor_bead=$id check_name=human${head_oid:+ reviewed_oid=$head_oid}; got anchor_bead=${v_anchor:-<absent>} check_name=${v_lane:-<absent>} reviewed_oid=${v_oid:-<absent>}); nothing watermarked, the batch retries next pass" >&2
-            skipped=$((skipped + 1)); continue
-          else
-            echo "$PROG: $id — PR#$num opened validation pass $VPASS for the feedback batch (review $max_r, comment $max_c)"
-          fi
         fi
       fi
+      # Watermark only once the pass the validator will actually consume carries
+      # the shape mol-validate reads: anchor_bead scopes the findings, check_name
+      # is the lane it selects them by (a missing one defaults to codex, so the
+      # human findings would go unruled), and reviewed_oid is the pin it needs to
+      # back the lane. Every source of $VPASS reaches this one check — the probe's
+      # existing pass, an adopted orphan, a freshly minted bead — so a pass whose
+      # reviewed_oid write dropped on an earlier pass cannot slip past by matching
+      # the (task_kind, anchor_bead, check_name) probe on a later reconcile: it is
+      # re-read and repaired here, not trusted on the probe's word. Repair a field
+      # the pass lacks, read all three back, and skip the watermark unless each
+      # holds — a proxy check on anchor_bead alone would mark the batch handled
+      # behind a pass the validator cannot rule. Skipping holds the batch to retry;
+      # the rework child is already filed, so it costs nothing. reviewed_oid is
+      # only ADDED when absent, never overwritten: head_oid is the live PR head,
+      # not a per-batch constant, and a live human pass adopted across batches
+      # keeps the head it was opened at so a validator mid-rule does not have its
+      # back-lane pin moved under it.
+      vmeta=$(gc bd show "$VPASS" --json 2>/dev/null | scrub)
+      v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
+      v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
+      v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
+      vfix=()
+      [ "$v_anchor" != "$id" ] && vfix+=(--set-metadata anchor_bead="$id")
+      [ "$v_lane" != "human" ] && vfix+=(--set-metadata check_name=human)
+      [ -z "$v_oid" ] && [ -n "$head_oid" ] && vfix+=(--set-metadata reviewed_oid="$head_oid")
+      if [ "${#vfix[@]}" -gt 0 ]; then
+        gc bd update "$VPASS" --set-metadata task_kind=validation "${vfix[@]}" >/dev/null 2>&1
+        vmeta=$(gc bd show "$VPASS" --json 2>/dev/null | scrub)
+        v_anchor=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.anchor_bead // empty')
+        v_lane=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.check_name // empty')
+        v_oid=$(printf '%s' "$vmeta" | jq -r '.[0].metadata.reviewed_oid // empty')
+      fi
+      if [ "$v_anchor" != "$id" ] || [ "$v_lane" != "human" ] || { [ -n "$head_oid" ] && [ -z "$v_oid" ]; }; then
+        echo "$PROG: WARN $id — PR#$num validation pass $VPASS did not record the batch shape (want anchor_bead=$id check_name=human${head_oid:+ reviewed_oid set}; got anchor_bead=${v_anchor:-<absent>} check_name=${v_lane:-<absent>} reviewed_oid=${v_oid:-<absent>}); nothing watermarked, the batch retries next pass" >&2
+        skipped=$((skipped + 1)); continue
+      fi
+      echo "$PROG: $id — PR#$num human-lane validation pass $VPASS carries the feedback batch shape (review $max_r, comment $max_c)"
       # The pass must HOLD the anchor, not merely sit beside it. merge.sh reads
       # every live blocks blocker of the anchor into its in-flight hold and bd
       # refuses to close a blocked anchor, so a blocks edge from the pass keeps an

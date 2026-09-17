@@ -974,7 +974,7 @@ out=$(run)
 has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child by anchor_bead"
 eq "$(meta new-2 task_kind)" "rework" "…re-stamps the role marker on the recheck"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "…and only then routes it"
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "…without minting a twin"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "…without minting a twin rework child (the batch's own validation pass is a separate bead)"
 eq "$(meta W7 pr_comment_watermark)" "9700" "…and only then does the mark move"
 
 echo "# --posture-only: the record merge.sh reads, written before merge.sh runs"
@@ -1319,6 +1319,38 @@ out=$(STUB_DROP_KEYS="new-3:reviewed_oid" run)
 has "$out" "did not record the batch shape" "the dropped head pin is reported, not swallowed"
 has "$out" "reviewed_oid=<absent>" "…naming the field that did not land"
 eq "$(meta Vp pr_comment_disposition)" "<absent>" "…the batch is not watermarked, so it retries"
+
+echo "# an existing human-lane pass whose reviewed_oid dropped is repaired, not trusted on the probe's word"
+# The dedup probe matches a pass on (task_kind=validation, anchor_bead, check_name=human)
+# alone, so a prior pass whose reviewed_oid write dropped matches it on the next
+# reconcile. Trusting the probe would watermark the batch behind a pass mol-validate
+# cannot pin (its back-lane needs reviewed_oid). The shape is re-read for the existing
+# pass too: a missing pin is repaired to the live head, and only then does the mark go.
+NOPIN_VP='{"id":"vp-82","status":"open","assignee":"","title":"Validate PR#82 feedback (through review 0, comment 8820)","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vn","check_name":"human"}}'
+store "[$(anchor Vn 82),$NOPIN_VP]"
+printf '%s' "$(prview 82 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_82.json"
+echo '[]' > "$GH_DIR/reviews_82.json"
+printf '[{"id":8820,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_82.json"
+out=$(run)
+has "$out" "already carries a human-lane validation pass vp-82" "the existing pass is the dedup target, no twin minted"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Vn")] | length' "$STUB_STORE")" "1" "…and exactly one pass stands on the anchor"
+eq "$(meta vp-82 reviewed_oid)" "sha-82" "…its dropped head pin is repaired to the live head before the mark"
+has "$(meta Vn pr_comment_disposition)" "rework:" "…and only then does the batch watermark"
+
+echo "# an existing human-lane pass keeps the head it was opened at; a later batch does not re-pin it"
+# head_oid is the live PR head, not a per-batch constant. One live human-lane pass rules
+# every open human finding on the anchor, so a batch arriving after the head moved rides
+# the open pass — but re-pinning it to the new head would move the commit a validator is
+# ruling against out from under it. A present reviewed_oid is preserved; only a missing
+# one is filled.
+OLDPIN_VP='{"id":"vp-83","status":"open","assignee":"","title":"Validate PR#83 feedback (through review 0, comment 8830)","notes":"","metadata":{"task_kind":"validation","anchor_bead":"Vh","check_name":"human","reviewed_oid":"sha-OLD"}}'
+store "[$(anchor Vh 83),$OLDPIN_VP]"
+printf '%s' "$(prview 83 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_83.json"
+echo '[]' > "$GH_DIR/reviews_83.json"
+printf '[{"id":8830,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_83.json"
+out=$(run)
+eq "$(meta vp-83 reviewed_oid)" "sha-OLD" "the in-flight pass keeps its head; the batch does not move the validator's pin"
+has "$(meta Vh pr_comment_disposition)" "rework:" "…and the batch still watermarks behind the open pass"
 
 echo "# a COMMENTED review body with no inline comment is still a human waiting"
 store "[$(anchor P3 42)]"
