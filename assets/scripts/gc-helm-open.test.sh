@@ -57,8 +57,10 @@ cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
   "rig list")
-    # Path has no .beads dir, so gc-helm resolves db="" and issues un-scoped
-    # bd calls (the stub ignores --db). Only the prefix mapping matters here.
+    # This stub's opens are all bead ids, which pass through the resolver with no
+    # PR search; the existence gate and visit lookups run unscoped (the stub
+    # ignores --db), so the path needs no .beads dir and only the prefix mapping
+    # matters here.
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   "bd show")
     case "$FAKE_SHOW_MODE" in
@@ -432,15 +434,15 @@ grep -q '|| true' < <(awk '/^enumerate_rigs\(\)/{f=1} f&&/^\}/{f=0} f&&/rigs_raw
 mkdir -p "$TMP/resbin"
 cat > "$TMP/resbin/gc" <<'RESGC'
 #!/usr/bin/env bash
-# One rig, prefix tk, path with no .beads — so the resolver's PR search and the
-# existence gate issue unscoped bd calls this stub answers (as the note in the
-# EXISTS stub explains). `bd show` branches on the id so a supersede chain and a
-# live bead read differently; `bd list` tells the PR search (which carries
-# `blocked` in --status) apart from the already-held visit lookup (which does
-# not), so neither reads as the other.
+# One rig, prefix tk, with a real .beads store (created below as $RESRIG) so the
+# resolver can pin --db for its cross-store PR search; the stub ignores the --db
+# value and answers by argv pattern. `bd show` branches on the id so a supersede
+# chain and a live bead read differently; `bd list` tells the PR search (which
+# carries `blocked` in --status) apart from the already-held visit lookup (which
+# does not), so neither reads as the other.
 case "$1 ${2:-}" in
   "rig list")
-    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+    jq -n '{rigs:[{name:"gc-toolkit", path:env.RESRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
       tk-pred)    jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ","gc.superseded_by_store":"rig:gc-toolkit"}}]' ;;
@@ -474,6 +476,11 @@ esac
 exit 0
 RESGC
 chmod +x "$TMP/resbin/gc"
+# The rig's ledger must exist as a real .beads dir: the resolver now fails closed
+# on any listed rig it cannot pin with --db, so a no-.beads path would refuse
+# every PR resolution below rather than exercise it.
+mkdir -p "$TMP/resrig/.beads"
+export RESRIG="$TMP/resrig"
 # FAKE_DEFERRED_ROWS is intentionally left UNSET by default so the widened PR
 # query falls back to FAKE_PR_ROWS and every narrow-query PR case is unaffected;
 # the deferred case exports it to model an anchor only the widened query sees.
@@ -698,6 +705,48 @@ grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
   || bad "(RESOLVE-PR-UNREADABLE-CONTROL) match not announced (err: $ERR)"
 unset FAKE_PR_ROWS
 
+# --- (RESOLVE-PR-NO-LEDGER) a listed rig with no .beads store fails CLOSED ------
+# Distinct from the non-zero-exit and non-array reads above: here the ledger is
+# simply absent, so it cannot be pinned with --db and the per-rig read would fall
+# back to the session default store — one store read twice, this rig never read.
+# That leaves the cross-store uniqueness proof silently incomplete, and a number
+# the unread rig also records could open a visit on the wrong anchor. rigA has no
+# .beads dir and is scanned first; rigB records #615 but is never reached.
+mkdir -p "$TMP/noledger/rigA" "$TMP/noledger/rigB/.beads" "$TMP/noledger/bin"
+cat > "$TMP/noledger/bin/gc" <<NOLEDGERGC
+#!/usr/bin/env bash
+case "\$1 \${2:-}" in
+  "rig list")
+    jq -n '{rigs:[{name:"riga",path:"$TMP/noledger/rigA",prefix:"aa"},{name:"rigb",path:"$TMP/noledger/rigB",prefix:"tk"}]}' ;;
+  "bd list")
+    case "\$*" in
+      *"$TMP/noledger/rigB/.beads"*) printf '%s' "\${FAKE_PR_ROWS:-[]}" ;;
+      *) printf '[]' ;;
+    esac ;;
+  "bd show")
+    case "\$3" in
+      tk-prbead) jq -n '[{id:"tk-prbead",status:"open",title:"the PR anchor"}]' ;;
+      *)         printf '{"error":"no issues found"}\n'; exit 1 ;;
+    esac ;;
+  "bd create") printf 'bd create %s\n' "\$*" >> "\$FAKE_CALLS"; jq -n '{id:"tk-visitN"}' ;;
+  "bd update") printf 'bd update %s\n' "\$*" >> "\$FAKE_CALLS" ;;
+esac
+exit 0
+NOLEDGERGC
+chmod +x "$TMP/noledger/bin/gc"
+export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+: > "$FAKE_CALLS"
+set +e
+OUT="$(PATH="$TMP/noledger/bin:$PATH" sh "$SCRIPT" open 615 2>"$TMP/err")"; RC=$?
+set -e
+ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "4" "(RESOLVE-PR-NO-LEDGER) a rig with no .beads store fails the resolution closed"
+[ -z "$CALLS" ] && ok "(RESOLVE-PR-NO-LEDGER) nothing filed when a rig ledger is missing" \
+  || bad "(RESOLVE-PR-NO-LEDGER) filed despite a missing ledger (calls: $CALLS)"
+grep -q 'riga' <<< "$ERR" && ok "(RESOLVE-PR-NO-LEDGER) names the rig whose ledger is missing" \
+  || bad "(RESOLVE-PR-NO-LEDGER) does not name the missing ledger (err: $ERR)"
+unset FAKE_PR_ROWS
+
 # --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
 # react and engage resolve the same reference open does, then act on the LIVE
 # bead: react slings it through gc-proactive.sh, engage spawns a sitting on a
@@ -715,7 +764,7 @@ cat > "$TMP/rebin/gc" <<'REBIN'
 # new` returns a fixed identity; nudge is a no-op. Mutations append to $FAKE_CALLS.
 case "$1 ${2:-}" in
   "rig list")
-    jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
+    jq -n '{rigs:[{name:"gc-toolkit", path:env.REBINRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
       tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
@@ -752,6 +801,10 @@ printf 'proactive %s\n' "$*" >> "$FAKE_SLING"
 exit 0
 PROACTIVE
 chmod +x "$TMP/rebin/gc-proactive.sh"
+# A real .beads store for the rig, so the resolver can pin --db for the PR search
+# react/engage run; without it the resolver fails closed before resolving.
+mkdir -p "$TMP/rebinrig/.beads"
+export REBINRIG="$TMP/rebinrig"
 export FAKE_SLING="$TMP/slung" VISIT_STATE="$TMP/visit_state"
 
 # run_react <arg> — drive the REAL cmd_react; the fake gc-proactive.sh records

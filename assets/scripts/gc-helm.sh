@@ -458,10 +458,11 @@ resolve_live_subject() {
 # The status set is the pack's live-PR set (pr-facts.sh:247, merge.sh:126):
 # an anchor is live in deferred/hooked/pinned too, so a narrower query would
 # fail to resolve a PR whose bead sits in one of those states. The number's
-# uniqueness holds only across EVERY live store, so a per-rig list that will not
-# read — a non-zero exit, or an answer that is not a JSON array — refuses the
-# whole resolution (exit 4) naming that ledger, rather than resolve from the
-# stores that answered while a dropped one may also record the number.
+# uniqueness holds only across EVERY live store, so any rig the search cannot
+# fully read refuses the whole resolution (exit 4) naming that ledger, rather
+# than resolve from the stores that answered while a dropped one may also record
+# the number: a rig with no .beads ledger to pin with --db, a list that exits
+# non-zero, and an answer that is not a JSON array.
 _resolve_pr_reference() {
     _pr_num="$1"; _pr_url="$2"
     # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
@@ -474,20 +475,28 @@ _resolve_pr_reference() {
     IFS='
 '
     for _pr_p in $_pr_paths; do
-        _pr_db=""
-        [ -n "$_pr_p" ] && [ -d "$_pr_p/.beads" ] && _pr_db="$_pr_p/.beads"
+        _pr_rig=$(printf '%s' "$RIGS" | jq -r --arg p "$_pr_p" '.[] | select(.path == $p) | .name' 2>/dev/null | head -n1)
+        # A listed rig whose ledger cannot be pinned with --db would make the
+        # per-rig read fall back to the session default store: one store read
+        # twice, this rig never read. That is the same incomplete cross-store
+        # proof a non-zero or non-array read leaves below, so refuse it the same
+        # way. Resolving a bare number while a live rig went unread could file on
+        # the wrong repo's anchor.
+        if [ -z "$_pr_p" ] || [ ! -d "$_pr_p/.beads" ]; then
+            echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} (${_pr_p:-<no path>}) has no readable .beads store to pin with --db, so the search would fall back to the session default store and never read this rig. A bare PR number is unique only across every live store, so resolving it with a rig unread could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
+            exit 4
+        fi
+        _pr_db="$_pr_p/.beads"
         # Capture bd's OWN exit status — a pipe to scrub would report scrub's. A
         # store that will not read (non-zero exit) or answers with something that
         # is not a JSON array (an error object, a wedged empty answer) leaves the
         # cross-store uniqueness proof incomplete, so refuse rather than resolve
         # from the stores that answered.
         _pr_rc=0
-        # shellcheck disable=SC2086  # ${_pr_db:+--db "$_pr_db"} expands to 0 or 2 space-free fields
-        _pr_raw=$(gc bd list ${_pr_db:+--db "$_pr_db"} --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null) || _pr_rc=$?
+        _pr_raw=$(gc bd list --db "$_pr_db" --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null) || _pr_rc=$?
         _pr_rows=$(printf '%s' "$_pr_raw" | scrub)
         if [ "$_pr_rc" -ne 0 ] || ! printf '%s' "$_pr_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            _pr_led="${_pr_db:-the session default store}"
-            _pr_rig=$(printf '%s' "$RIGS" | jq -r --arg p "$_pr_p" '.[] | select(.path == $p) | .name' 2>/dev/null | head -n1)
+            _pr_led="$_pr_db"
             if [ "$_pr_rc" -ne 0 ]; then _pr_why="gc bd list exited $_pr_rc"; else _pr_why="its answer was not a JSON array"; fi
             echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} ($_pr_led) did not read ($_pr_why). A bare PR number is unique only across every live store, so resolving it from the stores that answered could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
             exit 4
