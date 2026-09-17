@@ -93,7 +93,6 @@ now_ns() {
     case "$t" in '' | *[!0-9]* ) t="$(( $(date +%s) * 1000000000 ))" ;; esac
     printf '%s' "$t"
 }
-START_NS="$(now_ns)"
 
 # Ownership marker: first line of every file this order writes; every
 # read/delete/prune path tests it before treating a file as its own (shape is
@@ -573,6 +572,14 @@ if [ -n "$cursor" ]; then
                     printf '%s\n' "$sessions" | head -n "$cursor_at")"
     fi
 fi
+
+# The sweep clock starts here, not at process start, so SWEEP_BUDGET bounds only
+# the per-session peek loop below — not startup or the CALL_TIMEOUT-bounded
+# session-list fetch above. This keeps the elapsed at the first session near
+# zero, so every pass attempts at least one session and the round-robin cursor
+# always advances; a budget already spent when the loop begins would attempt
+# nothing and re-sweep the same slow prefix forever instead of rotating past it.
+START_NS="$(now_ns)"
 
 while IFS=$'\t' read -r id alias; do
     [ -n "${id:-}" ] || continue
