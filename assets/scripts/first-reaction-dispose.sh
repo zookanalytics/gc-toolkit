@@ -19,7 +19,10 @@
 #               nothing is written and the caller takes ruling instead.
 #
 # The route/edge/visit/close is the act; gc.first_reaction* is the record of it,
-# and is written FIRST so a disposition that dies half-way is still auditable.
+# written FIRST so a disposition that dies half-way is still auditable.
+# gc.first_reaction_landed is stamped only AFTER the act completes; the
+# re-dispose guard keys on it, so a partial disposition — record written, act
+# unfinished — re-attempts rather than being refused as though it were done.
 # Callers: agents/proactive/prompt.template.md, operators by hand.
 # Exit: 0 disposed · 2 usage · 4 runtime failure (including a refused --check).
 set -u
@@ -214,18 +217,30 @@ subject_meta() {
         | jq -r --arg k "$1" 'if type == "array" then ((.[0].metadata // {})[$k] // "") else "" end' 2>/dev/null || printf ''
 }
 
-# ── A first reaction happens once ────────────────────────────────────
-# The act below stamps gc.first_reaction* and releases the subject through
-# gc-helm.sh takeaway --release, which reopens and unassigns it. A re-offered
-# reaction that runs this a second time re-releases a bead a worker has since
-# claimed, yanking live work back to the pool. gc.first_reaction is the record
-# the first run leaves, and it describes the disposition fully, so refuse and
-# name it — a second dispose is never correct.
-PRIOR_REACTION=$(subject_meta "gc.first_reaction")
-if [ -n "$PRIOR_REACTION" ]; then
+# ── A first reaction lands once ──────────────────────────────────────
+# The act below releases the subject through gc-helm.sh takeaway --release,
+# which reopens and unassigns it, and on the actionable exit routes it to a
+# pool. A re-offered reaction that re-runs the act once it landed re-releases a
+# bead a worker has since claimed, yanking live work back to the pool.
+#
+# gc.first_reaction_landed is stamped only after the act completes (below), so
+# it is the proof the reaction is done — the guard keys on it and refuses a
+# re-dispose that carries it. gc.first_reaction is the record, written BEFORE
+# the act, so it is present on a partial disposition whose act never finished:
+# the exact state the failure messages below send the worker back to re-run.
+# Keying the refusal on the record would refuse that documented re-run and
+# strand the subject half-disposed, so a partial (record present, no landed
+# proof) falls through here and re-attempts.
+PRIOR_LANDED=$(subject_meta "gc.first_reaction_landed")
+if [ -n "$PRIOR_LANDED" ]; then
+    PRIOR_REACTION=$(subject_meta "gc.first_reaction")
     PRIOR_AT=$(subject_meta "gc.first_reaction_at")
     PRIOR_TARGET=$(subject_meta "gc.first_reaction_target")
-    usage_die "$BEAD already carries a first reaction (gc.first_reaction=${PRIOR_REACTION}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
+    usage_die "$BEAD already carries a landed first reaction (gc.first_reaction=${PRIOR_REACTION}${PRIOR_AT:+ at $PRIOR_AT}${PRIOR_TARGET:+ -> $PRIOR_TARGET}, landed $PRIOR_LANDED). A second dispose re-releases a bead a worker may already hold; the reaction is done, so drain this re-offered run rather than re-disposing."
+fi
+PRIOR_REACTION=$(subject_meta "gc.first_reaction")
+if [ -n "$PRIOR_REACTION" ]; then
+    note "$BEAD carries a first-reaction record (gc.first_reaction=$PRIOR_REACTION) with no landed proof: a prior dispose recorded the choice but its act did not finish. Re-attempting to complete it."
 fi
 
 # ── Route only where something can claim ─────────────────────────────
@@ -403,5 +418,15 @@ if [ "$DISPOSITION" = "superseded" ]; then
     "$REHOME" --origin "$BEAD" --successor "$SUCCESSOR" --kind "$KIND" --note "$REASON" \
         || die "bead-rehome could not close $BEAD as $KIND of $SUCCESSOR after the release; its message above names what stuck. The subject is open, unassigned and route-cleared; judge the refusal and finish the close by hand."
 fi
+
+# ── The landed proof, after the act ──────────────────────────────────
+# Everything the disposition owes has landed: the record, the release, the
+# hold edge (blocked/ruling) and the close (superseded). Stamp the proof the
+# re-dispose guard reads, so a re-offered run of a completed reaction drains
+# rather than re-releasing the subject, while a partial — recorded but never
+# landed — stays free to re-attempt.
+LANDED_AT=$(now_utc)
+gc_bd update "$BEAD" --set-metadata "gc.first_reaction_landed=$LANDED_AT" >/dev/null 2>&1 \
+    || note "WARNING: could not stamp gc.first_reaction_landed=$LANDED_AT on $BEAD after the act landed. The disposition stands, but a re-offered run will re-attempt it rather than drain; stamp it by hand: gc bd update $BEAD${DB:+ --db $DB} --set-metadata gc.first_reaction_landed=$LANDED_AT"
 
 printf '%s: %s disposed as %s (%s)\n' "$PROG" "$BEAD" "$DISPOSITION" "${TARGET:-no target}"

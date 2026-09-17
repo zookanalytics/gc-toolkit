@@ -46,15 +46,15 @@ exit
   session died between writing the card and disposing). Do NOT write a second
   card. Read the card's `## Disposition` line and perform that exit directly
   (the dispose step below), then drain.
-- **A disposition already landed** (`gc.first_reaction` is set). The reaction is
-  done; you are a re-offer. Release the subject without re-reacting, and clear
-  its route as you release — demand claims open, unassigned beads still routed to
-  this pool, so a release that leaves `gc.routed_to` set re-offers the completed
-  subject every cycle:
+- **A reaction is already recorded** (`gc.first_reaction` is set — the record the
+  dispose writes before it acts). It is not yours to redo; you are a re-offer.
+  Release the subject without re-reacting, and clear its route as you release —
+  demand claims open, unassigned beads still routed to this pool, so a release
+  that leaves `gc.routed_to` set re-offers the subject every cycle:
   ```bash
   gc bd update <id> --status open --assignee "" \
     --set-metadata gc.routed_to= --unset-metadata gc.execution_routed_to \
-    --append-notes "Re-offered after a completed first reaction (gc.first_reaction already set); released without re-reacting, route cleared."
+    --append-notes "Re-offered after a recorded first reaction (gc.first_reaction already set); released without re-reacting, route cleared."
   gc runtime drain-ack
   ```
 

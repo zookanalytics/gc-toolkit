@@ -150,6 +150,14 @@ has "HELM takeaway tk-sub routed to the polecat pool --by proactive --release --
 # and the sitting says so where it stamps the sentence — nothing downstream can
 # tell a settled headline from a park after the fact.
 has "--no-wait" "$LOG" "(ACTROUTE) …and says nothing is waiting on it"
+# The landed proof is stamped only after the act, so a partial (record written,
+# release never made) can never be mistaken for a completed reaction.
+has "gc.first_reaction_landed=" "$LOG" "(ACTLAND) the landed proof is stamped once the act completes"
+LAND_LINE=$(grep -n -m1 'gc.first_reaction_landed=' "$FAKE_LOG" | cut -d: -f1)
+HELM_LINE=$(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1)
+{ [ -n "$LAND_LINE" ] && [ "$LAND_LINE" -gt "$HELM_LINE" ]; } \
+  && ok "(ACTLAND) …after the release, never before" \
+  || bad "(ACTLAND) landed proof not after the act (landed=$LAND_LINE helm=$HELM_LINE)"
 LOG_ACT="$LOG"
 
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --waiting-on tk-other
@@ -366,19 +374,18 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "0" "(ORIGIN) an unreadable bead is not evidence of a commission"
 unset FAKE_SHOW_JSON
 
-# ── A first reaction happens once — a second dispose is refused ───────────────
-# The first disposition stamped gc.first_reaction* and RELEASED the subject
-# (reopened, unassigned, routed). A re-offered reaction that runs this again
-# would re-release a bead a worker has since claimed, so the guard refuses and
-# names the prior reaction. It keys on gc.first_reaction alone — the record the
-# first run leaves — and sits ahead of the disposition switch, so it guards
-# every exit.
-export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
+# ── A first reaction lands once — a second dispose of a LANDED one is refused ──
+# A completed disposition stamped gc.first_reaction_landed after it RELEASED the
+# subject (reopened, unassigned, routed). A re-offered reaction that ran this
+# again would re-release a bead a worker has since claimed, so the guard refuses
+# a subject carrying the landed proof and names the prior reaction. It sits ahead
+# of the disposition switch, so it guards every exit.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat","gc.first_reaction_landed":"2026-09-03T04:45:06Z"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
-eq "$RC" "2" "(REACTED) a subject already carrying a first reaction refuses a second dispose"
+eq "$RC" "2" "(REACTED) a subject carrying a LANDED first reaction refuses a second dispose"
 hasnt "UPDATE" "$LOG" "(REACTED) …and re-writes no record"
 hasnt "HELM" "$LOG" "(REACTED) …and does not re-release the bead"
-has "already carries a first reaction" "$ERR" "(REACTED) …and the refusal says so"
+has "already carries a landed first reaction" "$ERR" "(REACTED) …and the refusal says so"
 has "gc.first_reaction=actionable" "$ERR" "(REACTED) …naming the prior disposition"
 has "at 2026-09-03T04:45:05Z" "$ERR" "(REACTED) …its timestamp"
 has "-> gc-toolkit/gc-toolkit.polecat" "$ERR" "(REACTED) …and its target"
@@ -394,6 +401,33 @@ export FAKE_SHOW_JSON='not json'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "0" "(REACTED) an unreadable bead is not evidence of a prior reaction"
 unset FAKE_SHOW_JSON
+
+# ── A partial disposition re-attempts — the documented re-run is not refused ──
+# The record is written before the act, so a disposition whose act failed leaves
+# gc.first_reaction set with NO gc.first_reaction_landed. Every failure message
+# in the act sends the worker back to "re-run this command"; keying the guard on
+# the landed proof (not the record) is what lets that re-run through. This is the
+# regression for the retry hazard #722 fixed: a failed release, and a blocked-edge
+# miss, both re-run to completion.
+
+# A prior actionable release failed (record present, no landed proof). The re-run
+# notes the partial, re-writes the record, re-runs the act — which now succeeds —
+# and stamps the landed proof.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"actionable","gc.first_reaction_at":"2026-09-03T04:45:05Z","gc.first_reaction_target":"gc-toolkit/gc-toolkit.polecat"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "0" "(RETRY) a partial (record, no landed proof) re-runs the release rather than refusing"
+has "no landed proof" "$ERR" "(RETRY) …and says it is completing a partial"
+has "HELM takeaway tk-sub" "$LOG" "(RETRY) …the act is re-attempted"
+has "gc.first_reaction_landed=" "$LOG" "(RETRY) …and the completed re-run stamps the landed proof"
+
+# A prior blocked disposition released but its hold edge missed (record present,
+# no landed proof). With the edge now landing, the re-run completes and stamps it.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"blocked","gc.first_reaction_target":"tk-blk1"}}]'
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1
+eq "$RC" "0" "(RETRY) a blocked-edge miss re-runs and completes once the edge lands"
+has "gc.first_reaction_landed=" "$LOG" "(RETRY) …stamping the landed proof only after the edge is verified"
+unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 
 # ── The store is pinned to the subject's own rig ─────────────────────────────
 # A blocker filed into another store makes the hold a cross-store edge, which
@@ -428,6 +462,7 @@ eq "$RC" "4" "(HELMFAIL) a failed release is a runtime failure"
 has "gc.first_reaction=actionable" "$LOG" "(HELMFAIL) …the record was written first and stands"
 has "what landed and what did not" "$ERR" "(HELMFAIL) …and the failure refers to the cause gc-helm.sh named"
 hasnt "disposed as actionable" "$OUT" "(HELMFAIL) …and nothing reports a disposition"
+hasnt "gc.first_reaction_landed" "$LOG" "(HELMFAIL) …and stamps no landed proof, so the documented re-run is not refused"
 unset FAKE_HELM_FAILS
 
 # ── superseded: another bead already carries this one's work ─────────────────
