@@ -464,6 +464,10 @@ resolve_live_subject() {
 # stores that answered while a dropped one may also record the number.
 _resolve_pr_reference() {
     _pr_num="$1"; _pr_url="$2"
+    # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
+    # or carry a query string, but pr-open.sh stores and merge.sh compares the
+    # canonical …/pull/<number> form, so canonicalize the paste before matching.
+    _pr_url=$(printf '%s' "$_pr_url" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
     _pr_hits=""
     _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
     _pr_saved_ifs=$IFS
@@ -491,7 +495,7 @@ _resolve_pr_reference() {
         _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
             [ .[]? | objects
               | select(((.metadata.pr_number // "") | tostring) == $n)
-              | select($u == "" or ((.metadata.pr_url // "") == $u))
+              | select($u == "" or (((.metadata.pr_url // "") | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p)) == $u))
               | .id ] | .[]' 2>/dev/null) || _pr_found=""
         for _pr_id in $_pr_found; do
             [ -n "$_pr_id" ] && _pr_hits="$_pr_hits$_pr_id

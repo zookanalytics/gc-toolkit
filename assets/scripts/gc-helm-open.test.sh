@@ -559,6 +559,34 @@ grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
   && ok "(RESOLVE-PR-URL-DISAMBIG) the repo in the URL selects one bead" \
   || bad "(RESOLVE-PR-URL-DISAMBIG) filed elsewhere (calls: $CALLS)"
 
+# (RESOLVE-PR-URL-SUBPAGE) a browser URL from a PR subpage (…/pull/615/files)
+# resolves the same anchor: the stored pr_url is the canonical …/pull/<number>,
+# so the paste is canonicalized before the comparison.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+run_resolve 'https://github.com/o/r/pull/615/files'
+eq "$RC" "0" "(RESOLVE-PR-URL-SUBPAGE) a PR subpage URL resolves and files"
+grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-URL-SUBPAGE) filed on the anchor whose canonical pr_url matches" \
+  || bad "(RESOLVE-PR-URL-SUBPAGE) filed elsewhere (calls: $CALLS)"
+
+# (RESOLVE-PR-URL-QUERY) a URL carrying a query string (…/pull/615?diff=split)
+# resolves the same anchor for the same reason.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
+run_resolve 'https://github.com/o/r/pull/615?diff=split'
+eq "$RC" "0" "(RESOLVE-PR-URL-QUERY) a PR URL with a query string resolves and files"
+grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-URL-QUERY) filed on the anchor whose canonical pr_url matches" \
+  || bad "(RESOLVE-PR-URL-QUERY) filed elsewhere (calls: $CALLS)"
+
+# (RESOLVE-PR-URL-SUBPAGE-DISAMBIG) canonicalizing the paste keeps the repo, so
+# a subpage URL still pins one bead among a shared number.
+FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r1/pull/615"}},{"id":"tk-prbead2","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r2/pull/615"}}]'
+run_resolve 'https://github.com/o/r1/pull/615/files'
+eq "$RC" "0" "(RESOLVE-PR-URL-SUBPAGE-DISAMBIG) a subpage URL disambiguates a shared number"
+grep -q 'gc.continuation_group=tk-prbead' <<< "$CALLS" \
+  && ok "(RESOLVE-PR-URL-SUBPAGE-DISAMBIG) the repo in the subpage URL selects one bead" \
+  || bad "(RESOLVE-PR-URL-SUBPAGE-DISAMBIG) filed elsewhere (calls: $CALLS)"
+
 # (RESOLVE-PR-MISSING) a PR no bead records fails closed, nothing filed.
 FAKE_PR_ROWS='[]'; run_resolve 999
 eq "$RC" "4" "(RESOLVE-PR-MISSING) an unrecorded PR exits 4"
