@@ -4,10 +4,10 @@
 # THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads must not recover a
 # bead whose work has ALREADY REACHED a downstream court. Orphan recovery returns
 # LOST work to the pool, but a bead in the refinery's landing pipeline or on a
-# person's board is not lost. The polecat handoff and the human-gate handoff both
-# leave the dead session's gc.session_id/gc.session_name on the bead, so the
-# owner filter (host-bead-skip) resolves that dead owner and the liveness loop
-# false-orphans it — even though its branch is pushed and its PR is in flight.
+# person's board is not lost. Such a bead still names an owner: the refinery that
+# will land it, or the person it is parked on. Host-bead-skip drops only the beads
+# that name no owner, so this one reaches the liveness loop, where a drained owner
+# would false-orphan it.
 # Returning it to the pool re-dispatches finished work AND stamps a recovery, and
 # the downstream crash-loop signal reads that stamp as a RATE off
 # recovered_at/recovered_count, so a bead that keeps arriving here escalates a
