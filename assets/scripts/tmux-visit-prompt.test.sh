@@ -710,12 +710,30 @@ if [ -n "$LIVE_TERM" ]; then
 
     : > "$LIVE_CALLS"
     press "$HOSTILE" "$MULTI" "third one's here; yes"
+    # Each press backgrounds its intake on the tmux server (run-shell -b), so
+    # the calls log is written AFTER press() returns. The full parallel suite
+    # loads the host, so those intakes are starved and the last one is still
+    # mid-write when a fixed post-press sleep expires. An immediate read then
+    # sees an empty log, and every assertion below fails with an empty
+    # "(in: )" and a count of 0. Wait for the three calls to land before
+    # reading. A genuinely lost press still fails, now after the wait rather
+    # than racing it.
+    for _ in $(seq 1 100); do
+        [ "$(grep -c '=== call ===' "$LIVE_CALLS" 2>/dev/null)" -ge 3 ] && break
+        sleep 0.1
+    done
     live=$(cat "$LIVE_CALLS" 2>/dev/null)
 
     has "$live" "argv=[$HOSTILE]" "ROUNDTRIP: apostrophe, semicolon and quotes survive a real key press"
     has "$live" "argv=[$MULTI]" "MULTILINE: a paragraph typed into the popup arrives whole"
     has "$live" "argv=[third one's here; yes]" "THREE: the third press lands"
     eq "$(grep -c '=== call ===' <<< "$live")" "3" "THREE: three presses, three independent invocations"
+    # The outcome say is emitted by the same backgrounded intake, after its
+    # calls-log write, so it reaches show-messages later still. Poll for it too.
+    for _ in $(seq 1 100); do
+        grep -q 'visit tk-vis01 filed' < <(tmux -L "$SOCKET" show-messages 2>/dev/null) && break
+        sleep 0.1
+    done
     msgs=$(tmux -L "$SOCKET" show-messages 2>/dev/null || true)
     has "$msgs" "visit tk-vis01 filed" "ROUNDTRIP: the outcome reaches the operator's client"
 
