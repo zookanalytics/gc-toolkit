@@ -50,12 +50,59 @@
 # JSON store, and the script itself.
 set -uo pipefail
 
+# Host-reaper resilience (outer supervisor). A city process reaper occasionally
+# SIGTERMs a process wearing a live pool worker's identity. This test invokes
+# molecule-hold.sh with such an identity (a pool GC_SESSION_NAME,
+# mol-polecat-work.load-context args) AND exports that GC_SESSION_NAME into its
+# own environment, so the kill can land on a molecule-hold.sh subprocess (the
+# shim below records it in the marker) or on the test process itself (seen here
+# as the body exiting on a signal). This outer pass carries none of that
+# identity, so it survives to re-run the whole body from scratch, bounded,
+# whenever a run is reaped. molecule-hold.sh and the body exit only with small
+# codes on a real run, so an exit >=128 is unambiguously the reaper, and a clean
+# run trips neither branch — the happy path runs the body exactly once.
+if [ "${HOLD_TEST_INNER:-0}" != 1 ]; then
+  reap_marker="$(mktemp -u "${TMPDIR:-/tmp}/gctk-hold-reap.XXXXXX")"
+  body_out=""; body_rc=0
+  for _attempt in 1 2 3 4 5 6; do
+    : > "$reap_marker"
+    body_out="$(HOLD_TEST_INNER=1 HOLD_REAP_MARKER="$reap_marker" bash "$0" "$@" 2>&1)"
+    body_rc=$?
+    if { [ "$body_rc" -ge 128 ] || [ -s "$reap_marker" ]; } && [ "$_attempt" -lt 6 ]; then
+      echo "molecule-hold.test.sh: host reaper struck (attempt $_attempt, rc=$body_rc); re-running the whole file from scratch" >&2
+      continue
+    fi
+    break
+  done
+  rm -f "$reap_marker"
+  printf '%s\n' "$body_out"
+  exit "$body_rc"
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-SCRIPT="$HERE/molecule-hold.sh"
+REAL_HOLD="$HERE/molecule-hold.sh"
 TOML="$ROOT/formulas/mol-polecat-work.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-molecule-hold-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+
+# Route every molecule-hold.sh call through a shim that records a reap — whether
+# the SIGTERM lands on molecule-hold.sh or on the shim waiting for it — into the
+# marker the outer supervisor reads. The supervisor then re-runs the whole file;
+# this shim only records, so the assertions below never run against a signalled
+# invocation.
+export REAL_HOLD REAP_MARKER="${HOLD_REAP_MARKER:-$TMP/.host-reaped}"
+cat > "$TMP/hold-reap-shim.sh" <<'SHIM'
+#!/usr/bin/env bash
+set -u
+trap 'echo 1 >> "${REAP_MARKER:?}"; exit 143' TERM
+out=$("${REAL_HOLD:?}" "$@" 2>&1); rc=$?
+[ "$rc" -ge 128 ] && echo 1 >> "${REAP_MARKER:?}"
+printf '%s' "$out"
+exit "$rc"
+SHIM
+chmod +x "$TMP/hold-reap-shim.sh"
+SCRIPT="$TMP/hold-reap-shim.sh"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
@@ -69,7 +116,7 @@ has()   { if hasin "$1" "$2"; then ok "$3"; else bad "$3 (missing '$2' in: $1)";
 hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2' in: $1)"; else ok "$3"; fi; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
-[ -x "$SCRIPT" ] || { echo "not executable: $SCRIPT" >&2; exit 1; }
+[ -x "$REAL_HOLD" ] || { echo "not executable: $REAL_HOLD" >&2; exit 1; }
 [ -f "$TOML" ]   || { echo "formula not found: $TOML" >&2; exit 1; }
 
 mkdir -p "$TMP/bin"
