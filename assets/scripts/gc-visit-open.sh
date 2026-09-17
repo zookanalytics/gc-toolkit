@@ -206,20 +206,24 @@ else
     [ -n "$RIG_PATH" ] || die "unknown rig '$RIG' (try one of: $(printf '%s' "$RIGS" | jq -r '[.[].name] | join(", ")' 2>/dev/null))" 2
     [ -d "$RIG_PATH/.beads" ] || die "rig '$RIG' has no .beads ledger at $RIG_PATH/.beads" 3
 
-    # ── Never mint a subject in a suspended or not-running rig ───────────
-    # A suspended rig has its agents skipped by the reconciler and its store is
-    # not gathered by `gc bd list`, so a report filed there is silently lost;
-    # a rig with no agents running has nothing to triage it. Refuse before
-    # creating anything and name the operator's move. suspended/running come
-    # from the enumeration above; a gc that reports neither leaves the field
-    # null, read here as unknown — which never refuses, so this guards today's
-    # stores without becoming a new precondition when the flag is absent.
+    # ── Filing into a paused rig is allowed; say the report will wait ────
+    # A suspended rig has its agents skipped by the reconciler, and a rig with
+    # no agents running has nothing to triage yet — but `gc rig suspend` leaves
+    # the beads store accessible, so the report is recorded now and triaged
+    # when the rig resumes. Suspend means paused, not gone: refusing would deny
+    # a legitimate target (a rig paused on purpose, filed into to process
+    # later). So do not refuse — just note that the report waits. suspended and
+    # running come from the enumeration above; a gc that reports neither leaves
+    # the field null, read here as unknown, which says nothing.
     RIG_SUSPENDED=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
         '.[] | select(.name==$n) | if (.suspended==null) then "" else (.suspended|tostring) end' 2>/dev/null | head -n1)
     RIG_RUNNING=$(printf '%s' "$RIGS" | jq -r --arg n "$RIG" \
         '.[] | select(.name==$n) | if (.running==null) then "" else (.running|tostring) end' 2>/dev/null | head -n1)
-    [ "$RIG_SUSPENDED" = "true" ] && die "rig '$RIG' is suspended — a report filed there lands in a store nothing gathers and would silently vanish. Resume it, then re-file: gc rig resume $RIG" 3
-    [ "$RIG_RUNNING" = "false" ] && die "rig '$RIG' has no agents running, so nothing would pick up or triage a report filed there. Start it first ('gc rig status $RIG' shows why it is down), then re-file." 3
+    if [ "$RIG_SUSPENDED" = "true" ]; then
+        note "$PROG: rig '$RIG' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $RIG)."
+    elif [ "$RIG_RUNNING" = "false" ]; then
+        note "$PROG: rig '$RIG' has no agents running — the report is recorded now and triaged once the rig is running (gc rig status $RIG shows why it is down)."
+    fi
 
     # A question is a decision, everything else a task; --type overrides.
     if [ -z "$SUBJ_TYPE" ]; then

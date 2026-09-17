@@ -6,9 +6,9 @@
 # response is re-parsed as a tmux command, tk-7z8c6); the submitted text goes
 # through a per-press DRAFT FILE to gc-visit-open.sh, which mints the subject
 # and queues the conversation. A second popup then picks the target rig —
-# defaulted to the pane's own rig, offering only live ones — and passes it as
-# --rig; gc-visit-open.sh validates the choice and refuses a suspended rig, so a
-# report can never vanish into a store nothing reads. The draft is removed at
+# defaulted to the pane's own rig, offering every rig and marking any that is
+# paused — and passes it as --rig. A suspended rig keeps its beads store, so a
+# report filed there is recorded and triaged on resume. The draft is removed at
 # exactly two moments —
 # the intake CONFIRMS an id, or the file is provably empty — and every other
 # path keeps it and names its path (tk-w4dp4: this key's whole purpose is
@@ -210,11 +210,12 @@ if [ -z "$(printf '%s' "$TOPIC" | tr -d '[:space:]')" ]; then
     exit 0
 fi
 
-# 4b. Pick the target rig — default the board-context rig, override to any LIVE
-# one (prefix+a → confirm). Suspended / not-running rigs are left out: a report
-# filed there vanishes into a store nothing gathers, and the intake refuses one
-# regardless. A broken or empty `gc rig list` skips the chooser and lets the
-# intake apply its own default; an Esc keeps the draft, like the message popup.
+# 4b. Pick the target rig — default the board-context rig, override to any rig
+# (prefix+a → confirm). Every rig is offered; a suspended or not-running one is
+# tagged, not withheld: gc rig suspend keeps its beads store, so a report filed
+# there is recorded and triaged on resume, and the intake allows it. A broken or
+# empty `gc rig list` skips the chooser and lets the intake apply its own
+# default; an Esc keeps the draft, like the message popup.
 # Withheld entirely for a bead id: gc-visit-open.sh treats an id-shaped argument
 # whose prefix names a rig as an existing bead — the bead's own rig is
 # authoritative and the intake refuses --rig for it — so offering a rig here
@@ -246,18 +247,24 @@ case "$TOPIC" in
         fi ;;
 esac
 RIG_LIST=$(printf '%s' "$RIG_LIST_JSON" \
-    | jq -r '.rigs[]? | select((.suspended != true) and (.running != false)) | .name' 2>/dev/null || true)
+    | jq -r '.rigs[]? | .name' 2>/dev/null || true)
 if [ -z "$TOPIC_IS_BEADREF" ] && [ -n "$RIG_LIST" ]; then
     # The context rig leads the list so gum highlights it and Enter confirms it,
-    # then the other live rigs follow. When the context rig is the only live one
-    # the tail is empty and grep exits 1 — a legitimate result that must not trip
-    # set -e and kill the script after the operator already typed the report.
+    # then the rest follow. When it is the only rig the tail is empty and grep
+    # exits 1 — a legitimate result that must not trip set -e and kill the
+    # script after the operator already typed the report.
     RIG_CHOICES="$RIG_LIST"
     if [ -n "$CONTEXT_RIG" ] && printf '%s\n' "$RIG_LIST" | grep -qxF -- "$CONTEXT_RIG"; then
         RIG_CHOICES=$(printf '%s\n' "$CONTEXT_RIG"; printf '%s\n' "$RIG_LIST" | grep -vxF -- "$CONTEXT_RIG" || true)
     fi
+    # A paused rig stays in the list, tagged so the choice is informed; the tag
+    # is a display suffix stripped off the selection before it reaches --rig.
     RIG_ARGS=""
-    for _r in $RIG_CHOICES; do RIG_ARGS="$RIG_ARGS $(sq "$_r")"; done
+    for _r in $RIG_CHOICES; do
+        _tag=$(printf '%s' "$RIG_LIST_JSON" | jq -r --arg n "$_r" \
+            '.rigs[]? | select(.name==$n) | if .suspended==true then " (suspended)" elif .running==false then " (not running)" else "" end' 2>/dev/null | head -n1)
+        RIG_ARGS="$RIG_ARGS $(sq "$_r$_tag")"
+    done
     RIG_FILE="$DRAFT_FILE.rig"
     CHOOSE_RC=0
     # shellcheck disable=SC2086 # ${CLIENT:+…} and the pre-quoted $RIG_ARGS both expand deliberately
@@ -271,7 +278,9 @@ if [ -z "$TOPIC_IS_BEADREF" ] && [ -n "$RIG_LIST" ]; then
         keep_draft 10000 "gc visit: rig not chosen${CHOOSE_ERR:+ ($CHOOSE_ERR)} — nothing filed"
         exit 0
     fi
-    CHOSEN_RIG=$(tr -d '[:space:]' < "$RIG_FILE" 2>/dev/null || true)
+    # The label carried a tag for a paused rig; a rig name has no spaces, so the
+    # first field is the name the intake wants.
+    CHOSEN_RIG=$(cut -d' ' -f1 "$RIG_FILE" 2>/dev/null | tr -d '[:space:]' || true)
     rm -f "$RIG_FILE"
 fi
 

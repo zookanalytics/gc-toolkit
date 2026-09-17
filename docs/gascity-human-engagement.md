@@ -270,9 +270,10 @@ destination that varies silently with the shell's directory is the worst
 failure mode an intake path can have.
 
 **The `prefix+a` keybinding picks the rig rather than defaulting it.** After the
-message popup, `tmux-visit-prompt.sh` shows a chooser of the live rigs —
-suspended or not-running rigs are left out, since `gc-visit-open` refuses one
-anyway — defaulted to the rig of the pane the key was pressed in (its `GC_RIG`,
+message popup, `tmux-visit-prompt.sh` shows a chooser of every rig — a suspended
+or not-running one is tagged, not withheld, since `gc rig suspend` keeps the
+beads store accessible and a report filed there is recorded and triaged on
+resume — defaulted to the rig of the pane the key was pressed in (its `GC_RIG`,
 else the `<rig>__<agent>` session-name prefix; absent on a pane that names no
 rig, where the operator just picks). Enter confirms that default or the operator
 picks another, and the choice rides through as `--rig`. This is board context,

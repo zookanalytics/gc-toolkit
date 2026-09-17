@@ -395,9 +395,9 @@ has "$(cat "$TMP/calls.log")" "argv=[$MULTI]" "MULTILINE: a multi-line message r
 eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as one topic, not one per line"
 
 # (CHOOSER) prefix+a picks the target rig: default from board context, override
-# to any LIVE rig, suspended rigs left out. The chooser only runs when `gc rig
-# list` offers rigs; the default stub offers none, so every case elsewhere in
-# this suite is untouched. These cases populate it.
+# to any rig — a suspended or not-running one is offered too, tagged. The chooser
+# only runs when `gc rig list` offers rigs; the default stub offers none, so
+# every case elsewhere in this suite is untouched. These cases populate it.
 CHOOSER_RIGS='[{"name":"gc-toolkit","prefix":"tk","suspended":false,"running":true},
                {"name":"gascity","prefix":"gc","suspended":true,"running":true},
                {"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
@@ -413,27 +413,24 @@ export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
 unset FAKE_CHOSEN_RIG
 run_handler "$CFG_OK" "a report from the signal-loom pane"
 ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
-has "$cgum" "gum choose" "CHOOSER: a live-rig picker is shown"
+has "$cgum" "gum choose" "CHOOSER: the rig picker is shown"
 hasnt "$cgum" "gum input" "CHOOSER: the picker is a choose list, not a single-line input"
 has "$ccalls" "argv=[--rig]" "CHOOSER: the chosen rig is forwarded to the intake"
 has "$ccalls" "argv=[signal-loom]" "CHOOSER: the board-context rig is the confirmed default"
-hasnt "$cgum" "gascity" "CHOOSER: a suspended rig is left out of the picker"
+has "$cgum" "gascity (suspended)" "CHOOSER: a suspended rig is offered, tagged so the choice is informed"
 
-# Sole live rig: when the context rig is the ONLY live one (every other rig
-# suspended or not running — a normal state for "offer only live rigs"), the
-# choice list narrows to just it. The context-first ordering then filters the
-# one-line list down to an empty tail, and grep exits 1; that must not trip
-# set -e and kill the script after the operator already typed the report. The
-# picker still opens on the sole rig and the report still files.
-export FAKE_RIGS_JSON='[{"name":"signal-loom","prefix":"sl","suspended":false,"running":true},
-                        {"name":"gascity","prefix":"gc","suspended":true,"running":true},
-                        {"name":"gc-toolkit","prefix":"tk","suspended":false,"running":false}]'
-run_handler "$CFG_OK" "a report when signal-loom is the only live rig"
+# Sole rig: when the city has exactly one rig, it is the context rig and the only
+# choice. The context-first ordering then filters the one-line list down to an
+# empty tail, and grep exits 1; that must not trip set -e and kill the script
+# after the operator already typed the report. The picker still opens on the sole
+# rig and the report still files.
+export FAKE_RIGS_JSON='[{"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
+run_handler "$CFG_OK" "a report when signal-loom is the only rig"
 ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
-has "$cgum" "gum choose" "CHOOSERSOLE: the picker still opens when the context rig is the only live one"
+has "$cgum" "gum choose" "CHOOSERSOLE: the picker still opens when the city has one rig"
 has "$ccalls" "argv=[--rig]" "CHOOSERSOLE: ...and the chosen rig is forwarded"
-has "$ccalls" "argv=[signal-loom]" "CHOOSERSOLE: ...the sole live rig"
-has "$ccalls" "argv=[a report when signal-loom is the only live rig]" "CHOOSERSOLE: ...and the report is filed, not dropped by a set -e exit"
+has "$ccalls" "argv=[signal-loom]" "CHOOSERSOLE: ...the sole rig"
+has "$ccalls" "argv=[a report when signal-loom is the only rig]" "CHOOSERSOLE: ...and the report is filed, not dropped by a set -e exit"
 export FAKE_RIGS_JSON="$CHOOSER_RIGS"
 
 # Override: the operator picks a different LIVE rig; that is what the intake
@@ -444,6 +441,17 @@ ccalls=$(cat "$TMP/calls.log")
 has "$ccalls" "argv=[--rig]" "CHOOSER: an override still forwards --rig"
 has "$ccalls" "argv=[gc-toolkit]" "CHOOSER: the intake receives the overridden rig"
 hasnt "$ccalls" "argv=[signal-loom]" "CHOOSER: the context default is replaced, not appended"
+unset FAKE_CHOSEN_RIG
+
+# Override to a SUSPENDED rig: the operator deliberately files into a paused rig
+# (its store survives suspension), and the intake receives the BARE name — the
+# picker strips the ' (suspended)' tag off the label before it reaches --rig.
+export FAKE_CHOSEN_RIG="gascity (suspended)"
+run_handler "$CFG_OK" "a report parked in suspended gascity"
+ccalls=$(cat "$TMP/calls.log")
+has "$ccalls" "argv=[--rig]" "CHOOSERSUSP: a suspended-rig override still forwards --rig"
+has "$ccalls" "argv=[gascity]" "CHOOSERSUSP: the intake receives the bare rig name, tag stripped"
+hasnt "$ccalls" "argv=[gascity (suspended)]" "CHOOSERSUSP: the display tag never reaches the intake"
 unset FAKE_CHOSEN_RIG
 
 # Cancel at the picker keeps the draft (the message is already typed) and files

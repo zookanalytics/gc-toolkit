@@ -286,40 +286,43 @@ GC_VISIT_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/nu
 set -e
 has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_VISIT_DEFAULT_RIG moves the default"
 
-# --- (LIVENESS) never mint a subject in a suspended or not-running rig ---------
-# The reported failure: a report filed into a suspended rig lands in a store
-# nothing gathers and silently vanishes. The guard must refuse BEFORE the
-# subject bead is created — a bead minted in a dead store is itself the loss —
-# so every case below also asserts that nothing was created.
+# --- (LIVENESS) filing into a paused rig is recorded, not refused -------------
+# Suspend means paused processing, not a dead store: gc rig suspend leaves the
+# beads database accessible, so a report filed into a suspended (or not-yet-
+# running) rig is recorded now and triaged on resume. The intake mints the
+# subject and notes that it will wait — it never refuses, which would deny a rig
+# paused on purpose and filed into to process later.
 export GASCITY_SUSPENDED=true
 run no "a report for a suspended rig" --rig gascity
-[ "$RC" != "0" ] && ok "(LIVENESS) a suspended target rig is refused" || bad "(LIVENESS) a suspended rig should be refused (rc=$RC)"
-eq "$CALLS" "" "(LIVENESS) a suspended rig mints no subject and files nothing"
-has "$ERR" "suspended" "(LIVENESS) the refusal names the suspension"
-has "$ERR" "gc rig resume gascity" "(LIVENESS) the refusal names the operator's move"
+eq "$RC" "0" "(LIVENESS) a suspended target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the suspended rig"
+has "$ERR" "suspended" "(LIVENESS) and the note names the suspension"
+has "$ERR" "gc rig resume gascity" "(LIVENESS) and names the resume that processes it"
 unset GASCITY_SUSPENDED
 
 export GASCITY_RUNNING=false
 run no "a report for a downed rig" --rig gascity
-[ "$RC" != "0" ] && ok "(LIVENESS) a not-running target rig is refused" || bad "(LIVENESS) a not-running rig should be refused (rc=$RC)"
-eq "$CALLS" "" "(LIVENESS) a not-running rig mints no subject and files nothing"
-has "$ERR" "no agents running" "(LIVENESS) the refusal names the downed runtime"
+eq "$RC" "0" "(LIVENESS) a not-running target rig files normally"
+has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) the subject lands in the not-running rig"
+has "$ERR" "no agents running" "(LIVENESS) and the note names the downed runtime"
 unset GASCITY_RUNNING
 
-# Explicit-live is allowed — the positive control that proves the guard refuses
-# the dead case, not every case.
+# Explicit-live files with no note — the control that proves the note fires on
+# the paused case, not every case.
 export GASCITY_SUSPENDED=false GASCITY_RUNNING=true
 run no "a report for a live rig" --rig gascity
 eq "$RC" "0" "(LIVENESS) an explicitly live rig files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and the subject lands in that rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note for a live rig"
 unset GASCITY_SUSPENDED GASCITY_RUNNING
 
-# A gc that reports neither flag leaves them null: unknown, never refused. This
-# is the default-stub path every other case runs on, asserted here explicitly so
-# the guard can never harden into a precondition on a flag the data plane omits.
+# A gc that reports neither flag leaves them null: unknown, no note. This is the
+# default-stub path every other case runs on, asserted here explicitly so the
+# note can never harden into a claim about a flag the data plane omits.
 run no "a report when liveness is unknown" --rig gascity
-eq "$RC" "0" "(LIVENESS) an unknown (null) liveness never refuses"
+eq "$RC" "0" "(LIVENESS) an unknown (null) liveness files normally"
 has "$CALLS" "--db $TMP/rigs/gascity/.beads" "(LIVENESS) and files into the chosen rig"
+hasnt "$ERR" "recorded now" "(LIVENESS) and emits no wait-note"
 
 # --- (SUBJECT) an existing bead is its own subject ----------------------------
 run no tk-abc12
