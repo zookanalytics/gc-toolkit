@@ -107,9 +107,11 @@ these edges:
 - **blocked → blocker**: an id in the anchor's `WaitingOn` / `Blockers` that
   has a tile. The source gathers these `blocks` edges for only some anchor
   kinds today; the join below and the build plan address the gap.
-- **rework / review child**: a pool-routed child carrying a `merge_result`
-  or routed to a human — a tile today, reached through the same child and
-  blocker edges above.
+- **rework / review child**: a `task_kind=review` or `task_kind=rework` bead
+  that names the family root in `metadata.anchor_bead`. One that has landed a
+  `merge_result` or is routed to a human is already a tile; an in-flight one is
+  not, and the source must select it — the paragraph below and the build plan
+  address the gap.
 - **folded wrapper**: a visit or demand bead. `foldWrappers` already collapses
   these onto their subject, so a family inherits that fold rather than
   redoing it.
@@ -129,6 +131,22 @@ by another tile reaches `BuildBoard` with an empty `WaitingOn`, and the join
 cannot see that blocker. Grouping those kinds by blocker needs a source change
 — extend the edge gather so epic and convoy anchors also collect their `blocks`
 edges — which the build plan sequences before the derivation that consumes it.
+
+The rework / review edge needs a source selector, not only an edge gather. An
+in-flight review or rework bead is an ordinary `task` whose one routing marker
+is `gc.execution_routed_to`; it carries no `merge_result` until it lands and no
+`gc.routed_to=human`, so it matches neither the typed kinds
+(`services/helm/internal/source/beads.go:455`) nor the metadata kinds
+(`services/helm/internal/source/beads.go:497`) and reaches `BuildBoard` with no
+tile. The acceptance criteria name rework and review beads as family members, so
+the source selects them: a not-closed bead carrying `metadata.anchor_bead` with
+`task_kind` in `{review, rework}` becomes a tile. It joins through the blocked →
+blocker edge it already carries — a review or rework child `blocks` its anchor,
+and that anchor is a `merge` anchor, which `needsWaitingEdges` already selects,
+so its `WaitingOn` holds the child once the child is a tile.
+`metadata.anchor_bead` names the same root directly, so a partial edge gather
+still resolves it. Such a child is always a member, never a root: it hangs off
+the anchor it blocks.
 
 ## The grouping-key derivation
 
@@ -263,25 +281,34 @@ Once a shape is chosen, one build bead implements, in this order:
    edges it already returns; an epic must be added to that read. Without this
    step the blocked → blocker edge is invisible for those kinds and the join
    groups only their children.
-2. The grouping-key derivation and `Tile.GroupRoot` in `derive.go`, with the
+2. The source-side selector for in-flight review and rework children in
+   `services/helm/internal/source/beads.go`: admit a not-closed bead carrying
+   `metadata.anchor_bead` with `task_kind` in `{review, rework}` as a tile,
+   behind tests in `services/helm/internal/source/beads_test.go`. Without it
+   these beads reach `BuildBoard` with no tile and the join cannot place them,
+   so the family misses the review and rework children the acceptance criteria
+   name.
+3. The grouping-key derivation and `Tile.GroupRoot` in `derive.go`, with the
    one-root rule for the three edge cases. The walk keys on the parent and
    blocker edges, not on `Tile.Kind`, so a convoy that renders `unowned` groups
    as the convoy it is: its `tracks` children are its family. This is the
    shape-independent core, behind its own tests in `derive_test.go`.
-3. The chosen render in both surfaces: `GroupBySection` and
+4. The chosen render in both surfaces: `GroupBySection` and
    `services/helm/cmd/helm-svc/board.go` for the CLI, the `tile.section`
    bucketing in `services/helm/web/src/App.tsx` for the dashboard.
    `services/helm/web/src/contract.ts` and
    `services/helm/web/src/board.fixture.json` gain `group_root`.
-4. E and B folded into the new model, per the section above.
+5. E and B folded into the new model, per the section above.
 
 The row cap (`CapRows`, `CapQueue`) and the template-cluster fold
 (`tagClusters`, `ClusterRows`) both count flat rows today and must be
 re-derived against families; the build bead owns that. Tests to update:
-`derive_test.go`, `sections_test.go`, `services/helm/web/src/App.test.tsx`,
-and the fixtures. The `derive_test.go` cases include an `unowned` convoy as a
-family root, as a child, and as a blocker, so the grouping is exercised across
-the full rendered-kind set.
+`derive_test.go`, `sections_test.go`,
+`services/helm/cmd/helm-svc/board_render_test.go`,
+`services/helm/cmd/helm-svc/board_test.go`,
+`services/helm/web/src/App.test.tsx`, and the fixtures. The `derive_test.go`
+cases include an `unowned` convoy as a family root, as a child, and as a
+blocker, so the grouping is exercised across the full rendered-kind set.
 
 ## Open sub-decisions
 
