@@ -39,7 +39,9 @@ document is the evidence for that pick and the build it implies.
 
 ## What the board does now
 
-The pipeline is `services/helm/internal/board`. `BuildBoard`
+The pipeline is `services/helm/internal/board`; a bare Go filename below
+(`derive.go`, `model.go`, a `*_test.go`) lives in that package, and every
+other path is written from the repo root. `BuildBoard`
 (`derive.go:1566`) turns each gathered `Anchor` into one `Tile` through
 `computeTile` (`derive.go:1424`), ranks and deduplicates them, folds visit
 and demand wrappers onto their subject (`foldWrappers`, `derive.go:1630`),
@@ -56,20 +58,24 @@ A tile carries two grouping classifications, both on the wire (`model.go`):
 
 Both renderers group by `Section` and nothing else. The CLI iterates
 `GroupBySection` (`derive.go:1828`) one band at a time
-(`cmd/helm-svc/board.go:499`). The web dashboard buckets client-side on
-`tile.section` (`web/src/App.tsx:432`). Section is the top-level axis on both
-surfaces; dependency structure is not an axis at all.
+(`services/helm/cmd/helm-svc/board.go:499`). The web dashboard buckets
+client-side on `tile.section` (`services/helm/web/src/App.tsx:432`). Section
+is the top-level axis on both surfaces; dependency structure is not an axis
+at all.
 
 ### Why families scatter
 
 Only six bead *kinds* become tiles. Three are selected by issue type — epic,
-decision, convoy (`typedAnchorKinds`, `source/beads.go:455`) — and three by
-metadata: human (`gc.routed_to=human`), parked (`gc.takeaway` present), and
-merge (a `merge_result`, i.e. a pull request) (`source/beads.go:499-523`).
+decision, convoy (`typedAnchorKinds`,
+`services/helm/internal/source/beads.go:455`) — and three by metadata: human
+(`gc.routed_to=human`), parked (`gc.takeaway` present), and merge (a
+`merge_result`, i.e. a pull request)
+(`services/helm/internal/source/beads.go:499-523`).
 
 A parent's ordinary children are not tiles. They roll up into that parent's
 counts (`rollUp`), read at all statuses so `n_closed` is real
-(`source/beads.go:538`). A child surfaces as its *own* tile only when it is
+(`services/helm/internal/source/beads.go:538`). A child surfaces as its *own*
+tile only when it is
 independently one of the six kinds — and that is exactly when a family breaks
 apart. An epic with two children where one has opened a PR and the other is
 routed to a human produces three tiles: the epic (active or stalled), the PR
@@ -89,8 +95,9 @@ these edges:
 
 - **parent → child**: a child id in an epic's or convoy's rolled-up
   `Anchor.Children` that also has a tile of its own.
-- **blocked → blocker**: an id in the anchor's `WaitingOn` / `Blockers`
-  (`derive.go` reads these from the same `blocks` query) that has a tile.
+- **blocked → blocker**: an id in the anchor's `WaitingOn` / `Blockers` that
+  has a tile. The source gathers these `blocks` edges for only some anchor
+  kinds today; the join below and the build plan address the gap.
 - **rework / review child**: a pool-routed child carrying a `merge_result`
   or routed to a human — a tile today, reached through the same child and
   blocker edges above.
@@ -98,11 +105,21 @@ these edges:
   these onto their subject, so a family inherits that fold rather than
   redoing it.
 
-The join needs no new gather. `Anchor.Children` already carries child ids
-(`model.go:77`) and `Anchor.WaitingOn` already carries blocker ids
-(`model.go:148`). Every edge a family needs is present in the anchors
-`BuildBoard` already holds; the grouping is a new derivation over existing
-data, not a new read.
+The parent → child edge needs no new gather. `Anchor.Children`
+(`model.go:108`) is already populated for every parent kind that becomes a
+tile: an epic from its parent-child dependents, a convoy from its `tracks`
+members.
+
+The blocked → blocker edge needs one. `Anchor.WaitingOn` and `Anchor.Blockers`
+(`model.go:148`, `model.go:162`) are gathered only for the kinds
+`needsWaitingEdges` selects — decision, human, parked, merge
+(`services/helm/internal/source/beads.go:640`). Epic and convoy anchors gather
+no `blocks` edges: an epic receives only its parent-child children, and a
+convoy spends its one dependency read on `tracks`. So an epic or convoy blocked
+by another tile reaches `BuildBoard` with an empty `WaitingOn`, and the join
+cannot see that blocker. Grouping those kinds by blocker needs a source change
+— extend the edge gather so epic and convoy anchors also collect their `blocks`
+edges — which the build plan sequences before the derivation that consumes it.
 
 ## The grouping-key derivation
 
@@ -110,7 +127,9 @@ This computation is shared by all three render models, so it is settled
 before the shape is:
 
 1. Build a child-to-parent map from every anchor's `Children`, and a
-   blocker-to-blocked map from every anchor's `WaitingOn`.
+   blocker-to-blocked map from every anchor's `WaitingOn` — the blocker map
+   complete only once the source gathers `blocks` edges for epic and convoy
+   anchors, per the build plan.
 2. For each tile, walk parent and blocked edges upward to its **group root**:
    the top-most ancestor that is itself a tile and has no parent of its own.
    A tile with no such ancestor is its own root.
@@ -227,19 +246,29 @@ The coupling note arms two sibling fixes on the new model:
 
 Once a shape is chosen, one build bead implements, in this order:
 
-1. The grouping-key derivation and `Tile.GroupRoot` in `derive.go`, with the
-   one-root rule for the three edge cases. This is the shape-independent core
-   and lands first, behind its own tests in `derive_test.go`.
-2. The chosen render in both surfaces: `GroupBySection` and
-   `cmd/helm-svc/board.go` for the CLI, the `tile.section` bucketing in
-   `web/src/App.tsx` for the dashboard. `contract.ts` and `board.fixture.json`
-   gain `group_root`.
-3. E and B folded into the new model, per the section above.
+1. The source-side blocker gather in `services/helm/internal/source/beads.go`:
+   extend `needsWaitingEdges` and `attachEdges` so epic and convoy anchors
+   collect their `blocks` edges into `WaitingOn` / `Blockers`, behind tests in
+   `services/helm/internal/source/beads_test.go`. A convoy already issues the
+   dependency read for its `tracks` members, so this extracts the `blocks`
+   edges it already returns; an epic must be added to that read. Without this
+   step the blocked → blocker edge is invisible for those kinds and the join
+   groups only their children.
+2. The grouping-key derivation and `Tile.GroupRoot` in `derive.go`, with the
+   one-root rule for the three edge cases. This is the shape-independent core,
+   behind its own tests in `derive_test.go`.
+3. The chosen render in both surfaces: `GroupBySection` and
+   `services/helm/cmd/helm-svc/board.go` for the CLI, the `tile.section`
+   bucketing in `services/helm/web/src/App.tsx` for the dashboard.
+   `services/helm/web/src/contract.ts` and
+   `services/helm/web/src/board.fixture.json` gain `group_root`.
+4. E and B folded into the new model, per the section above.
 
 The row cap (`CapRows`, `CapQueue`) and the template-cluster fold
 (`tagClusters`, `ClusterRows`) both count flat rows today and must be
 re-derived against families; the build bead owns that. Tests to update:
-`derive_test.go`, `sections_test.go`, `App.test.tsx`, and the fixtures.
+`derive_test.go`, `sections_test.go`, `services/helm/web/src/App.test.tsx`,
+and the fixtures.
 
 ## Open sub-decisions
 
