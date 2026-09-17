@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-stack — arm 8 of the merge cadence: keep an open PR's body naming every
+# pr-stack — arm 7 of the merge cadence: keep an open PR's body naming every
 # bead whose work is on its head branch.
 # A PR body is composed once, by pr-open.sh, out of one anchor. Commits keep
 # arriving on the branch afterwards — a fold, a rework or rebase hand-back, a
