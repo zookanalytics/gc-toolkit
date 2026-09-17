@@ -39,10 +39,9 @@ func tileByID(b Board, id string) (Tile, bool) {
 	return Tile{}, false
 }
 
-// TestFourAnchorBoard reproduces the primary golden case from
-// tools/helm-surface-fixture.sh: three epics (two stranded, one with a
-// closed child) and a decision. The assertions mirror the fixture's
-// eq/has checks for the fields this port carries.
+// TestFourAnchorBoard is the board's primary golden case: three epics (two
+// stranded, one with a closed child) and a decision — the stranded epic opens
+// the board at HIGH and outranks the ELEVATED decision.
 func TestFourAnchorBoard(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-one", Title: "CI mystery", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Children: []Child{
