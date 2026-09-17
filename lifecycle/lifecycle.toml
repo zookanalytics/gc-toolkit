@@ -433,6 +433,20 @@ keys = [
   "gc.pr_close_disposition_successor_store",
 ]
 
+[metadata.rehome]
+# Close-with-successor. bead-rehome.sh is the sole writer of the pointer pair:
+# gc.superseded_by + _store on the origin (the bead being closed), gc.supersedes
+# + _store on the successor that carries its work. gc.work_outcome is the
+# evidence its close gate reads, not a re-home pointer: `shipped` says the bead's
+# own work landed and `no-op` that it produced no commit — the polecat
+# done-sequence and converse stamp it, and bead-rehome.sh --check and
+# pr-stack.sh's ledger read it (a bare `work_outcome` bd field is a fallback).
+keys = [
+  "gc.superseded_by", "gc.superseded_by_store",
+  "gc.supersedes", "gc.supersedes_store",
+  "gc.work_outcome",
+]
+
 [metadata.holds]
 keys = ["merge_hold", "rebase_hold", "tracking_only"]
 
@@ -452,6 +466,21 @@ keys = [
   "gc.continuation_group",
   "gc.origin", "escalation_key", "visit.recheck",
   "sweep.*", "triage.*", "stall_root",
+]
+
+[metadata.first_reaction]
+# The proactive first reaction's disposition record, written by
+# assets/scripts/first-reaction-dispose.sh on the subject bead: gc.first_reaction
+# is the disposition (actionable|blocked|ruling|superseded), _reason and _target
+# beside it, _at the timestamp — all written BEFORE the act so a half-finished
+# disposition is still auditable. gc.first_reaction_landed is stamped only AFTER
+# the act completes; the script's re-dispose guard keys on it, so a completed
+# reaction is refused while a partial re-attempts. gc-proactive.sh's sling guard
+# and scan filter read gc.first_reaction to keep an already-reacted bead out of a
+# fresh offer.
+keys = [
+  "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
+  "gc.first_reaction_at", "gc.first_reaction_landed",
 ]
 
 [metadata.findings]
