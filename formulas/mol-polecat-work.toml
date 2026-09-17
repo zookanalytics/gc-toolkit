@@ -783,11 +783,18 @@ unreadable probe resolves to empty and the step behaves as it did before this
 block existed — degraded to the dispatch-text fallback, never stranded.
 
 **5. ONE atomic handoff.** A single `gc bd update` carries the whole
-transition — target, PR summary, notes, refinery assignee, cleared route — so
-no partial handoff can strand the bead between writes. `--append-notes`, never
-`--notes` (which REPLACES and erases the dispatch note). The empty
-`gc.routed_to` is deliberate: the direct assignment IS the handoff, and
-named-session work must not read as pool demand.
+transition — target, PR summary, notes, refinery assignee, cleared route,
+cleared session pins — so no partial handoff can strand the bead between
+writes. `--append-notes`, never `--notes` (which REPLACES and erases the
+dispatch note). The empty `gc.routed_to` is deliberate: the direct assignment
+IS the handoff, and named-session work must not read as pool demand.
+
+The handoff clears the polecat's `gc.session_id`/`gc.session_name`: once it
+lands the refinery holds the bead and this session does not. The witness
+resolves a bead's owner from `gc.session_id` ahead of the assignee, so a pin
+left in place names a session that has since drained, and a bead the live
+refinery holds reads as an absent orphan. Only these two pins are cleared —
+they are the ones the owner filter reads.
 
 The summary is the one field addressed to a bead other than the claimed one.
 When 4b named an anchor, it is stamped there in its own write, before the
@@ -824,7 +831,7 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
 fi
 PR_SUMMARY=""
 if [ -s "${PR_SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$PR_SUMMARY_FILE"); fi
-HANDOFF=(--status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="")
+HANDOFF=(--status=open --assignee="$REFINERY_TARGET" --set-metadata target="$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
 if [ -n "$PR_SUMMARY" ]; then
     if [ -n "${GATING_ANCHOR:-}" ]; then
         gc bd update "$GATING_ANCHOR" --set-metadata pr_summary="$PR_SUMMARY" || echo "pr_summary did not reach anchor $GATING_ANCHOR; its PR body falls back to the dispatch text"

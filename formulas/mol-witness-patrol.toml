@@ -230,12 +230,11 @@ jq -c '[ .[]
 ```
 Two more exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
-  configured named sessions) — the controller owns their lifecycle. Recognise
-  one by the bead's live `.assignee`, not the derived `.owner`: `.owner` ranks
-  gc.session_id ahead of the assignee, and the polecat→refinery handoff clears
-  neither session pin, so a bead a live refinery holds while it still carries the
-  dead polecat's session_id resolves to that dead owner and reads as an absent
-  orphan.
+  configured named sessions) — the controller owns their lifecycle. `.owner`
+  ranks gc.session_id ahead of the assignee, and the polecat→refinery handoff
+  clears the departing session's `gc.session_id`/`gc.session_name`, so a bead a
+  live refinery holds carries no drained polecat pin and resolves its owner to
+  the live refinery assignee.
 - **Dispatcher-routed control beads** (`gc.routed_to=control-dispatcher`,
   `gc.kind=workflow-finalize`/`ralph`) — infrastructure, not orphans; the
   serve loop picks them up.
