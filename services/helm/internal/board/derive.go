@@ -475,7 +475,7 @@ func dispositionDue(a Anchor, waiting, waitingOpen []string) bool {
 // is a question already asked on its own row, so [rollup.idle] excludes it. An
 // anchor whose every open child is parked that way falls through to NORMAL:
 // the asks are all live, none of them are its own.
-func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) Severity {
+func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, stalledGate bool) Severity {
 	// A closed anchor is not competing for attention, so no attention branch
 	// below applies to it and none of them may run: a closed epic with open
 	// children would otherwise band HIGH and sit at the top of the board.
@@ -507,6 +507,13 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled bool) S
 		sev0 = SevNormal
 	}
 	if sev0 == SevNormal && stale > staleThresholdDays {
+		sev0 = SevElevated
+	}
+	// A stalled pre-open codex gate is at least ELEVATED. Childless it would
+	// otherwise land in the LOW branch above and sink to the bottom, where a
+	// stalled gate is indistinguishable from a settled one; the bump never lowers
+	// a row that a stronger branch already banded HIGH or ELEVATED.
+	if stalledGate && (sev0 == SevLow || sev0 == SevNormal) {
 		return SevElevated
 	}
 	return sev0
@@ -641,7 +648,7 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool,
-	machine, approval string, ask *Blocker, prIsOwed bool) string {
+	machine, approval string, ask *Blocker, prIsOwed bool, stallReason string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
 	// nothing now — it ages out of the DONE band on its own once it has been
@@ -680,6 +687,12 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 	dead := len(r.deadOwnerHeads)
 
 	switch {
+	// A stalled pre-open codex gate names the gate and why it is stuck, ahead of
+	// the merge-anchor position phrase below: the position is exactly what has
+	// gone stale ("in the merge cadence" while no review runs), and stallReason is
+	// non-empty only for that shape, so this case cannot fire on any other row.
+	case stallReason != "":
+		return preOpenStallNeeds(stallReason)
 	case a.Source == "unowned":
 		return "unowned — assign an owning bead"
 	case a.Source == "decision":
@@ -780,6 +793,7 @@ const (
 // The anchor metadata the axes are read from.
 const (
 	mdMergeResult = "merge_result"
+	mdCheckSet    = "check_set"
 	mdPRMachine   = "pr.machine"
 	mdPRPosture   = "pr_posture"
 	mdPRNumber    = "pr_number"
@@ -1180,6 +1194,154 @@ func prNeeds(machine, approval string, ask *Blocker) string {
 	}
 }
 
+// The pre-open codex gate the stall signal reads. mergeResultPreOpenGate is the
+// merge_result of an anchor parked at that gate, before any PR exists;
+// checkSetCodex is the only gate set this city runs there; mdCheckPrefix+the set
+// names the gate marker (check.codex); and checkGreen is the settled marker value
+// on which pre-open-resolve opens the PR.
+const (
+	mergeResultPreOpenGate = "pre_open_gate"
+	checkSetCodex          = "codex"
+	mdCheckPrefix          = "check."
+	checkGreen             = "green"
+
+	stallReasonNeverReviewed       = "never-reviewed"
+	stallReasonFindingsOpen        = "findings-open"
+	stallReasonReviewedNotAdvanced = "reviewed-not-advanced"
+)
+
+// preOpenStaleThresholdDays is how long a pre-open codex gate may hold before the
+// board reads it as STALLED rather than in-flight. Three days is the floor below
+// which a hold is still plausibly a fresh, healthy park. It is deliberately far
+// tighter than staleThresholdDays: that clock stale-bumps an already-NORMAL row,
+// while a childless pre-open gate bands LOW and never reaches the bump at all.
+const preOpenStaleThresholdDays = 3
+
+// preOpenCodexStall reports whether a merge anchor is stuck at the pre-open codex
+// gate with nothing moving it, and dates the stall for the owed clock.
+//
+// It fires only on the bare held shape — the one prOwed leaves with no cause of
+// its own. A recorded wedge, a demand, or a settled-and-unapproved position each
+// already owns the row: prOwed dates it and prNeeds names it. This adds a cause
+// for what is left, the anchor whose position reads "in the merge cadence" (a
+// stale progressing marker) or "position unknown" while no review is actually
+// running. The caller keeps the stronger surfacings — disposition, ruling,
+// takeaway, human route — out by not calling here for them.
+//
+// A LIVE review or rework suppresses it; a routed-but-unclaimed one does not.
+// Routed-ness alone is what prMachine already reads as "progressing", and a pool
+// nothing is draining is exactly the invisible stall this signal exists to show,
+// so the suppression turns on a live worker, not on a route.
+//
+// since is the anchor's own updated_at: the signal fires only once that is old,
+// and a genuinely stalled anchor is touched by nothing, so the last-touch instant
+// is when it went quiet. An anchor a reconcile pass still writes is fresh and
+// never reaches the threshold, which is the correct non-fire.
+func preOpenCodexStall(a Anchor, machine string, blockers []Blocker, stale int, f Facts) (stalled bool, since time.Time, reason string) {
+	if a.Metadata[mdMergeResult] != mergeResultPreOpenGate || a.Metadata[mdCheckSet] != checkSetCodex {
+		return false, time.Time{}, ""
+	}
+	// A recorded wedge already owns the row — owed, dated, named — so leave it to
+	// prOwed/prNeeds rather than restating it in weaker words.
+	if isWedge(machine) {
+		return false, time.Time{}, ""
+	}
+	// The gate has gone green: pre-open-resolve opens the PR on its next pass, so
+	// the anchor is about to leave this state, not stalled in it. The lane marker
+	// carries a bare state word, so a settled gate is an exact "green".
+	if a.Metadata[mdCheckPrefix+checkSetCodex] == checkGreen {
+		return false, time.Time{}, ""
+	}
+	// A live review or rework is the healthy hold — something is moving it.
+	if liveReviewOrRework(blockers, f) {
+		return false, time.Time{}, ""
+	}
+	if stale < preOpenStaleThresholdDays {
+		return false, time.Time{}, ""
+	}
+	return true, a.UpdatedAt, preOpenStallReason(blockers)
+}
+
+// liveReviewOrRework reports whether an open review or rework child of a merge
+// anchor is actually being WORKED: one the cadence titled "Review …"/"Rework …"
+// whose worker is a live session, or which a live workflow stands over.
+//
+// It reads the title shape, not gc.routed_to. A real mol-review child is not
+// route-stamped — `gc sling` leaves the child open and puts the in-flight state
+// on the workflow, visible only through [Facts.Inflight] — and a rework child
+// carries no task_kind either, so a route key would miss exactly the live
+// reviews this suppression exists to honor and read them as stalls.
+// preOpenStallReason reads the same titles. A review or rework no live session is
+// draining is NOT in flight — that is the dead-pool hold the stall signal exists
+// to surface — so liveness, not the child's mere existence, is the gate.
+func liveReviewOrRework(blockers []Blocker, f Facts) bool {
+	for _, b := range blockers {
+		if !isReviewOrRework(b) {
+			continue
+		}
+		if f.ownerLive(b.Assignee) || f.wfLive(b.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+// isReviewOrRework reports whether a blocker is one of the cadence's open review
+// or rework children — the beads that legitimately hold a merge anchor at the
+// pre-open gate while one runs. signoff.sh and pr-facts.sh title them "Review …"
+// and "Rework …"; the title is the discriminator because neither the route nor
+// the type identifies the pair (a mol-review child is not route-stamped and a
+// rework child carries no task_kind).
+func isReviewOrRework(b Blocker) bool {
+	return b.Status != "closed" &&
+		(strings.HasPrefix(b.Title, "Review ") || strings.HasPrefix(b.Title, "Rework "))
+}
+
+// preOpenStallReason names WHY the gate is stuck, for the NEEDS line. It reads
+// the blocker titles the cadence writes (signoff.sh / pr-facts.sh file "Review
+// branch …" / "Review PR#…" and "Rework branch …"): an open rework child means
+// findings are filed and unaddressed; a review that has run with no open rework
+// means the branch was reviewed but never advanced to a PR; neither means no
+// review has run at all. It is a best-effort hint, so it degrades to
+// never-reviewed rather than guessing when a title does not match.
+func preOpenStallReason(blockers []Blocker) string {
+	openRework, reviewed := false, false
+	for _, b := range blockers {
+		switch {
+		case strings.HasPrefix(b.Title, "Rework "):
+			if b.Status != "closed" {
+				openRework = true
+			} else {
+				reviewed = true // a rework exists only after a review filed findings
+			}
+		case strings.HasPrefix(b.Title, "Review "):
+			reviewed = true
+		}
+	}
+	switch {
+	case openRework:
+		return stallReasonFindingsOpen
+	case reviewed:
+		return stallReasonReviewedNotAdvanced
+	default:
+		return stallReasonNeverReviewed
+	}
+}
+
+// preOpenStallNeeds is the NEEDS sentence for a stalled pre-open codex gate. It
+// names the codex gate rather than reading "in the merge cadence"; the age rides
+// the frontier's owed clock, so it is not repeated here.
+func preOpenStallNeeds(reason string) string {
+	switch reason {
+	case stallReasonFindingsOpen:
+		return "codex gate stalled — findings open, none in flight"
+	case stallReasonReviewedNotAdvanced:
+		return "codex gate stalled — reviewed, not advanced"
+	default:
+		return "codex gate stalled — no review has run"
+	}
+}
+
 // nilIfEmpty renders an absent string field as a JSON null rather than "". The
 // takeaway triple is always-present-but-nullable in the bash contract, and a
 // consumer tells "no takeaway" from "field gone" by the null.
@@ -1269,13 +1431,35 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	takeaway := collapseWS(a.Takeaway)
 	dispDue := dispositionDue(a, waiting, waitingOpen)
 	isRuled := ruled(a, takeaway, waitingOpen)
-	sev := severity(a, r, held, stale, dispDue, isRuled)
-	w := weight(r, a.Priority, xrefs)
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
 	ask := askingDemand(a.Blockers)
 	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
+
+	// A pre-open codex gate that nothing is advancing — no live review, no
+	// in-flight rework, past the staleness floor — bands LOW when childless, its
+	// position reading "in the merge cadence" indistinguishably from a healthy
+	// hold. Give it an owed cause so it carries its age and leaves the floor. Only
+	// for the bare held shape, though: a disposition, a ruling, a takeaway, a
+	// human route, or an open demand already owns the row and names it — the
+	// demand as its own `asking: <title>`, the operator's actual question — so
+	// those are excluded before the gate is read, not overwritten with the gate's
+	// generic wording.
+	stalled, stalledReason := false, ""
+	if a.ClosedAt.IsZero() && !dispDue && !isRuled && !humanGated(a) && takeaway == "" && ask == nil {
+		var stalledSince time.Time
+		stalled, stalledSince, stalledReason = preOpenCodexStall(a, machine, a.Blockers, stale, f)
+		if stalled {
+			prIsOwed = true
+			if owedSince.IsZero() || (!stalledSince.IsZero() && stalledSince.Before(owedSince)) {
+				owedSince = stalledSince
+			}
+		}
+	}
+
+	sev := severity(a, r, held, stale, dispDue, isRuled, stalled)
+	w := weight(r, a.Priority, xrefs)
 
 	// progress_mismatch: the convoy's own closed/total claim disagrees with the
 	// membership actually rolled up. Only meaningful where the source supplied
@@ -1351,7 +1535,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed),
+		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, machine, approval, ask, prIsOwed, stalledReason),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
