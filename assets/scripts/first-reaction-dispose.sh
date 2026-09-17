@@ -425,8 +425,27 @@ fi
 # re-dispose guard reads, so a re-offered run of a completed reaction drains
 # rather than re-releasing the subject, while a partial — recorded but never
 # landed — stays free to re-attempt.
+#
+# This proof is the only thing that stops a re-offer of a completed reaction
+# from re-running the act, which for an actionable exit re-releases a bead the
+# pool may already have handed to a worker. A write that cannot record it fails
+# closed rather than warning: the record and the act stand, so the operator
+# stamps the proof by hand rather than leaving the subject one re-offer away
+# from a double release. A write can also report success without persisting (a
+# store behind its DB, disk pressure), so the proof is read back — a readable
+# subject that does not carry it is positive evidence it did not stick and fails
+# closed the same way. An unreadable read-back is not evidence of anything, and
+# the write already reported success, so it falls through: the positive-finding-
+# only rule the guards above follow.
 LANDED_AT=$(now_utc)
-gc_bd update "$BEAD" --set-metadata "gc.first_reaction_landed=$LANDED_AT" >/dev/null 2>&1 \
-    || note "WARNING: could not stamp gc.first_reaction_landed=$LANDED_AT on $BEAD after the act landed. The disposition stands, but a re-offered run will re-attempt it rather than drain; stamp it by hand: gc bd update $BEAD${DB:+ --db $DB} --set-metadata gc.first_reaction_landed=$LANDED_AT"
+if ! gc_bd update "$BEAD" --set-metadata "gc.first_reaction_landed=$LANDED_AT" >/dev/null 2>&1; then
+    die "recorded and performed the $DISPOSITION disposition on $BEAD, but the write of gc.first_reaction_landed=$LANDED_AT was refused. The act has landed, so a re-offered run would re-run it and re-release a bead the pool may already hold. Stamp the proof by hand before $BEAD is re-offered: gc bd update $BEAD${DB:+ --db $DB} --set-metadata gc.first_reaction_landed=$LANDED_AT"
+fi
+LANDED_JSON=$(gc_bd show "$BEAD" --json 2>/dev/null | scrub || printf '')
+if printf '%s' "$LANDED_JSON" | jq -e 'type == "array" and (.[0] != null)' >/dev/null 2>&1; then
+    LANDED_BACK=$(printf '%s' "$LANDED_JSON" | jq -r '(.[0].metadata // {})["gc.first_reaction_landed"] // ""' 2>/dev/null || printf '')
+    [ "$LANDED_BACK" = "$LANDED_AT" ] \
+        || die "recorded and performed the $DISPOSITION disposition on $BEAD, but gc.first_reaction_landed did not persist (read back '${LANDED_BACK:-<none>}', wrote '$LANDED_AT'). The act has landed, so a re-offered run would re-run it and re-release a bead the pool may already hold. Stamp the proof by hand before $BEAD is re-offered: gc bd update $BEAD${DB:+ --db $DB} --set-metadata gc.first_reaction_landed=$LANDED_AT"
+fi
 
 printf '%s: %s disposed as %s (%s)\n' "$PROG" "$BEAD" "$DISPOSITION" "${TARGET:-no target}"

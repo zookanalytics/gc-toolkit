@@ -29,7 +29,20 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
-  "bd update") printf 'UPDATE %s\n' "$*" >> "$FAKE_LOG" ;;
+  "bd update")
+    printf 'UPDATE %s\n' "$*" >> "$FAKE_LOG"
+    # Model the landed-proof write-back so the script's read-back is exercised: a
+    # landed write records its value (reflected by `bd show` below) unless it is
+    # forced to fail (FAKE_LANDED_WRITE_FAILS) or to report success without
+    # persisting (FAKE_LANDED_NOPERSIST). Other keys are unaffected.
+    case " $* " in
+      *" gc.first_reaction_landed="*)
+        [ -n "${FAKE_LANDED_WRITE_FAILS:-}" ] && exit 1
+        if [ -z "${FAKE_LANDED_NOPERSIST:-}" ]; then
+          __lv="$*"; __lv="${__lv##*gc.first_reaction_landed=}"; __lv="${__lv%% *}"
+          printf '%s' "$__lv" > "$FAKE_LANDED_FILE"
+        fi ;;
+    esac ;;
   "bd create")
     printf 'CREATE %s\n' "$*" >> "$FAKE_LOG"
     [ -n "${FAKE_CREATE_FAILS:-}" ] && { printf '{"error":"nope"}\n'; exit 0; }
@@ -40,7 +53,20 @@ case "$1 ${2:-}" in
     printf '{"rigs":[{"name":"gc-toolkit","path":"%s","prefix":"tk"}]}\n' "${FAKE_RIG_PATH:-/nonexistent-rig}" ;;
   "bd show")
     printf 'SHOW %s\n' "$*" >> "$FAKE_LOG"
-    printf '%s\n' "${FAKE_SHOW_JSON:-[{\"id\":\"tk-sub\",\"metadata\":{}}]}" ;;
+    # A `${:-default}` with braces in the default mis-parses under bash, so pick
+    # the default in two steps and keep the JSON well-formed.
+    __base=${FAKE_SHOW_JSON:-}
+    [ -n "$__base" ] || __base='[{"id":"tk-sub","metadata":{}}]'
+    # A landed write recorded above is reflected here, so the script reads back
+    # gc.first_reaction_landed the way a real store would return it.
+    if [ -s "$FAKE_LANDED_FILE" ]; then
+      __lv="$(cat "$FAKE_LANDED_FILE")"
+      printf '%s\n' "$__base" | jq -c --arg v "$__lv" \
+        'if type == "array" and (.[0] != null) then (.[0].metadata = ((.[0].metadata // {}) + {"gc.first_reaction_landed": $v})) else . end' 2>/dev/null \
+        || printf '%s\n' "$__base"
+    else
+      printf '%s\n' "$__base"
+    fi ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
@@ -109,10 +135,13 @@ chmod +x "$TMP/rehome"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/log"
+# The subject's landed-proof value, written by the `bd update` stub and read back
+# by the `bd show` stub — reset before every run so it never leaks across tests.
+export FAKE_LANDED_FILE="$TMP/landed"; : > "$FAKE_LANDED_FILE"
 export GC_HELM_TOOL="$TMP/helm" GC_DEFERRED_DISPATCH_TOOL="$TMP/deferred" \
        GC_PROACTIVE_TOOL="$TMP/proactive" GC_BEAD_REHOME_TOOL="$TMP/rehome"
 
-run() { : > "$FAKE_LOG"; RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"; }
+run() { : > "$FAKE_LOG"; : > "$FAKE_LANDED_FILE"; RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"; }
 
 # ── Usage: refuse before writing ─────────────────────────────────────────────
 # Every refusal below happens with an empty log: a disposition that cannot be
@@ -174,13 +203,13 @@ hasnt "HELM" "$LOG" "(ACTPOOL) …and the bead is not released"
 has "File the visit instead" "$ERR" "(ACTPOOL) …and the refusal names the exit that does work"
 unset FAKE_POOL_DEAD
 
-: > "$FAKE_LOG"; RC=0
+: > "$FAKE_LOG"; : > "$FAKE_LANDED_FILE"; RC=0
 OUT="$(GC_RIG=gc-toolkit "$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" 2>"$TMP/err")" || RC=$?
 LOG="$(cat "$FAKE_LOG")"
 eq "$RC" "0" "(ACTRIG) with GC_RIG set, the pool target needs no flag"
 has "--route gc-toolkit/gc-toolkit.polecat" "$LOG" "(ACTRIG) …and defaults to this rig's polecat pool"
 
-: > "$FAKE_LOG"; RC=0
+: > "$FAKE_LOG"; : > "$FAKE_LANDED_FILE"; RC=0
 ERR="$(env -u GC_RIG "$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" 2>&1 >/dev/null)" || RC=$?
 eq "$RC" "2" "(ACTRIG) with no GC_RIG and no --route it fails closed"
 eq "$(cat "$FAKE_LOG")" "" "(ACTRIG) …and writes nothing"
@@ -428,6 +457,38 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 eq "$RC" "0" "(RETRY) a blocked-edge miss re-runs and completes once the edge lands"
 has "gc.first_reaction_landed=" "$LOG" "(RETRY) …stamping the landed proof only after the edge is verified"
 unset FAKE_SHOW_JSON FAKE_DEPS_JSON
+
+# ── The landed proof must persist, or the exit fails closed ──────────────────
+# The proof is what stops a re-offered completed reaction from re-running the act
+# and re-releasing a bead the pool may already hold, so a write that cannot record
+# it is a runtime failure, not a warning: the record and the act stand, and the
+# message names the by-hand write that closes the window before a re-offer.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{}}]'
+export FAKE_LANDED_WRITE_FAILS=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "4" "(LANDFAIL) a refused landed-proof write fails the exit closed"
+has "HELM takeaway tk-sub" "$LOG" "(LANDFAIL) …after the act has already landed"
+has "was refused" "$ERR" "(LANDFAIL) …and the failure names the refused write"
+has "gc bd update tk-sub" "$ERR" "(LANDFAIL) …with the by-hand command to record it"
+hasnt "disposed as actionable" "$OUT" "(LANDFAIL) …and reports no clean disposition"
+unset FAKE_LANDED_WRITE_FAILS
+
+# A write can report success yet not persist (a store behind its DB, disk
+# pressure). The read-back catches it — a readable subject that does not carry the
+# proof is positive evidence — so the exit fails closed there too.
+export FAKE_LANDED_NOPERSIST=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "4" "(LANDDROP) a landed-proof write that does not persist fails the exit closed"
+has "did not persist" "$ERR" "(LANDDROP) …and the failure says the read-back found it missing"
+unset FAKE_LANDED_NOPERSIST FAKE_SHOW_JSON
+
+# An unreadable read-back is not evidence the write failed — it already reported
+# success — so a completed disposition is not failed over it (positive finding only).
+export FAKE_SHOW_JSON='not json'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "0" "(LANDUNREAD) an unreadable read-back does not fail a completed disposition"
+has "disposed as actionable" "$OUT" "(LANDUNREAD) …the disposition still reports done"
+unset FAKE_SHOW_JSON
 
 # ── The store is pinned to the subject's own rig ─────────────────────────────
 # A blocker filed into another store makes the hold a cross-store edge, which
