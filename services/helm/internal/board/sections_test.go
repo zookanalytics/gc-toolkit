@@ -107,8 +107,9 @@ func TestVisitFoldsIntoSubjectTile(t *testing.T) {
 }
 
 // TestVisitKeptWhenSubjectHasNoTile: a visit whose subject is no anchor keeps
-// its row — dropping it would erase the attention — but states the ask from its
-// title rather than the empty "no question recorded".
+// its row — dropping it would erase the attention — stating the ask in NEEDS.
+// Its TITLE names the visit and its subject, not the ask, so a surface that
+// prints both columns does not repeat the same sentence in each.
 func TestVisitKeptWhenSubjectHasNoTile(t *testing.T) {
 	anchors := []Anchor{visitAnchor("tk-vis2", "tk-ghost", "investigate the flake")}
 	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
@@ -118,7 +119,13 @@ func TestVisitKeptWhenSubjectHasNoTile(t *testing.T) {
 		t.Fatalf("a visit with no subject row must be kept")
 	}
 	if vis.Needs != "investigate the flake" {
-		t.Errorf("kept visit states the ask from its title: got %q", vis.Needs)
+		t.Errorf("kept visit states the ask in NEEDS: got %q", vis.Needs)
+	}
+	if vis.Title != "visit: tk-ghost" {
+		t.Errorf("kept visit titles by kind and subject, not the ask: got %q", vis.Title)
+	}
+	if vis.Title == vis.Needs || strings.Contains(vis.Title, vis.Needs) {
+		t.Errorf("NEEDS must not repeat TITLE: title=%q needs=%q", vis.Title, vis.Needs)
 	}
 	if vis.Section != SectionGate {
 		t.Errorf("kept visit is a gate: got %q", vis.Section)

@@ -1669,7 +1669,13 @@ func foldWrappers(tiles []Tile, anchors []Anchor) []Tile {
 			drop[a.ID] = true
 		} else if ask != "" {
 			// Kept wrapper: no LIVE subject row carries this attention, so the
-			// wrapper stays and states the ask from its own title.
+			// wrapper states the ask itself. The ask is the NEEDS — the only
+			// prose column the CLI board prints — and the TITLE names the
+			// wrapper's kind and subject, so a surface that prints both columns
+			// (the web board renders title beside needs) does not repeat the
+			// same sentence in each. The raw title is "<kind>: <subject> —
+			// <ask>", of which visitAsk already recovered the tail as the ask.
+			tiles[i].Title = kind + ": " + subj
 			tiles[i].Needs = ask
 			tiles[i].Section = classifySection(tiles[i])
 		}
