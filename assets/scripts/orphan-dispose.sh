@@ -2,7 +2,7 @@
 # orphan-dispose.sh — dispose of ONE bead that orphan recovery classified as
 # orphaned, by the kind of thing the bead is.
 #
-# Four kinds reach this script and only two are returned to the pool — and a
+# Six kinds reach this script and only two are returned to the pool — and a
 # source bead only when its work has not already reached a downstream court:
 #
 #   visit          release the assignee and NOTHING else. A visit's metadata
@@ -16,6 +16,15 @@
 #                  step keeps gc.routed_to, gc.step_ref, gc.root_bead_id and
 #                  its dependency edges, so the molecule resumes at the same
 #                  step under whichever pool member claims it next.
+#   workflow-step-dead
+#                  the step's root has CLOSED, so there is no molecule left to
+#                  resume and releasing it would offer a finished chain to a
+#                  pool as fresh work. Delegate to dead-molecule-dispose.sh,
+#                  which de-routes the whole chain before it closes anything.
+#   workflow-step-unresolved
+#                  the step names a root that will not read. An unreadable root
+#                  is not a live one, so nothing is written: the step stays
+#                  owned and returns next cycle.
 #   source         delegate to `gc workflow delete-source --apply` plus
 #                  `gc workflow reopen-source`, the contract those commands were
 #                  built for, then clear the session pins so the pooled bead
@@ -24,6 +33,10 @@
 #                  pre_open_gate/pull_request) the refinery owns landing, or a
 #                  human gate (gc.routed_to=human) a person owns clearing:
 #                  reopening would return that work to the pool — skip it.
+#
+# The root read is what separates the two step arms, and it is a read of the
+# root itself — not of the input convoy, and not of the anchors it tracks. A
+# closed root cannot produce work whatever those say.
 #
 # `delete-source` matches workflow roots on gc.source_bead_id. A root poured
 # from an input convoy never carries that key, so it reports already_clean for
@@ -92,6 +105,10 @@ scrub() { tr -d '\000-\037'; }
 
 read_bead() { gc bd show "$1" --json 2>/dev/null | scrub; }
 
+# Resolved from $0 so a copy of this script runs against the copy beside it.
+HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+DEAD_DISPOSE="${GC_DEAD_MOLECULE_TOOL:-$HERE/dead-molecule-dispose.sh}"
+
 BEAD_JSON="$(read_bead "$BEAD")"
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     echo "orphan-dispose: cannot read $BEAD — nothing disposed" >&2
@@ -123,6 +140,23 @@ elif [ -n "$STEP_REF" ]; then
     CLASS="workflow-step"
 else
     CLASS="source"
+fi
+
+# A step is only worth resuming while its molecule can still produce work, and
+# the root's own status settles that. Releasing a step whose root has CLOSED
+# does not resume anything — it hands a finished molecule back to a pool as
+# fresh work. So the root is read before the release arm, and an unreadable
+# root is not a live one: it withholds the release rather than guessing.
+ROOT_STATUS=""
+if [ "$CLASS" = "workflow-step" ] && [ -n "$ROOT_ID" ]; then
+    ROOT_JSON="$(read_bead "$ROOT_ID")"
+    if printf '%s' "$ROOT_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+        ROOT_STATUS="$(printf '%s' "$ROOT_JSON" | jq -r '.[0].status // ""')"
+        [ "$ROOT_STATUS" = "closed" ] && CLASS="workflow-step-dead"
+    else
+        ROOT_STATUS="unreadable"
+        CLASS="workflow-step-unresolved"
+    fi
 fi
 
 # The assignee guard is the assignee read a moment ago, never --owner. Orphan
@@ -255,6 +289,69 @@ case "$CLASS" in
             verify
         fi
         ;;
+    workflow-step-dead)
+        # The molecule is over. The chain, not this bead, is the disposal unit:
+        # closing one step readies the next, so a per-bead close here would be
+        # the partial teardown that offers a successor of a finished molecule
+        # to a pool. dead-molecule-dispose.sh de-routes the whole chain before
+        # it closes anything, and refuses a chain holding a work bead.
+        #
+        # A 0 exit does not by itself mean the chain is gone. The disposer
+        # exits 0 for a real teardown (result=disposed) or an already-empty
+        # chain (result=clean), and equally for a refusal that wrote nothing:
+        # result=refused when the chain still holds a work bead, result=live_root
+        # when the root was no longer closed on re-read. Reading every 0 as a
+        # landed disposal reports a recovery that never happened and loses the
+        # reason it was refused. Discriminate on result — only disposed/clean is
+        # a landing; a refusal is a skip that carries the disposer's result and
+        # detail, leaving the bead owned to be re-examined next cycle.
+        #
+        # Exit 3 is a chain left half torn down — some members de-routed or
+        # closed, some not. The witness patrol escalates that partial write
+        # (witness-partial-release) rather than retrying, so it must survive the
+        # wrapper as this script's own exit-3 partial carrying the member detail
+        # the disposer named. Any other nonzero is a plain failed=dead-chain.
+        ACTION="dispose-dead-chain"
+        DETAIL="root_closed"
+        if [ "$APPLY" = "1" ]; then
+            if [ -x "$DEAD_DISPOSE" ]; then
+                DEAD_OUT="$("$DEAD_DISPOSE" "$BEAD" --apply --json 2>/dev/null)"
+                DEAD_RC=$?
+                DEAD_RESULT="$(printf '%s' "$DEAD_OUT" | jq -r '.result // ""' 2>/dev/null)"
+                DEAD_DETAIL="$(printf '%s' "$DEAD_OUT" | jq -r '(.detail // .members // "") | select(. != "")' 2>/dev/null)"
+                case "$DEAD_RC" in
+                    0)
+                        case "$DEAD_RESULT" in
+                            disposed|clean) note_landed dead-chain ;;
+                            *)
+                                ACTION="skip"
+                                DETAIL="root_closed;not-disposed=${DEAD_RESULT:-no-result}"
+                                [ -n "$DEAD_DETAIL" ] && DETAIL="$DETAIL;$DEAD_DETAIL"
+                                ;;
+                        esac
+                        ;;
+                    3)
+                        note_landed dead-chain
+                        note_failed dead-chain-incomplete
+                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
+                        ;;
+                    *)
+                        note_failed dead-chain
+                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
+                        ;;
+                esac
+            else
+                note_failed "dead-molecule-dispose-missing"
+            fi
+        fi
+        ;;
+    workflow-step-unresolved)
+        # Root named but unreadable. Releasing would resume a molecule that may
+        # already be over; the step stays owned and returns next cycle, which
+        # is the recoverable direction.
+        ACTION="skip"
+        DETAIL="root_unreadable"
+        ;;
     source)
         # A source work bead whose work already reached a downstream court is not
         # lost, so delete-source + reopen-source must not return it to the pool
@@ -322,15 +419,18 @@ if [ "$WANT_JSON" = "1" ]; then
         --arg bead "$BEAD" --arg class "$CLASS" --arg action "$ACTION" \
         --arg result "$RESULT" --arg root "$ROOT_ID" --arg step_ref "$STEP_REF" \
         --arg routed "$ROUTED" --arg owner "$REPORT_OWNER" \
+        --arg root_status "$ROOT_STATUS" \
         --arg landed "$LANDED" --arg failed "$FAILED" --arg detail "$DETAIL" \
         '{bead: $bead, class: $class, action: $action, result: $result,
-          root: $root, step_ref: $step_ref, routed: $routed, owner: $owner,
+          root: $root, root_status: ($root_status | select(. != "") // null),
+          step_ref: $step_ref, routed: $routed, owner: $owner,
           landed: ($landed | select(. != "") // null),
           failed: ($failed | select(. != "") // null),
           detail: ($detail | select(. != "") // null)}'
 else
     printf 'result=%s bead=%s class=%s action=%s' "$RESULT" "$BEAD" "$CLASS" "$ACTION"
     [ -n "$ROOT_ID" ] && printf ' root=%s' "$ROOT_ID"
+    [ -n "$ROOT_STATUS" ] && printf ' root_status=%s' "$ROOT_STATUS"
     [ -n "$STEP_REF" ] && printf ' step_ref=%s' "$STEP_REF"
     [ -n "$LANDED" ] && printf ' landed=%s' "$LANDED"
     [ -n "$FAILED" ] && printf ' failed=%s' "$FAILED"
