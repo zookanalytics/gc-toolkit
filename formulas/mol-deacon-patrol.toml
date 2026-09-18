@@ -339,11 +339,14 @@ One key spans every failed cycle, so a sweep that keeps failing updates the one
 bead the first reaction disposes instead of filing another.
 
 The script validates `.results` before it will say `complete`, so a drifted
-schema arrives as `failed` and can never read as clean. `abandoned=` above zero
-on a complete sweep means those checks hit their own `--check-timeout` and
-returned no verdict; `abandoned_checks=` names them. Such a sweep is not a
-clean one, and the missing verdicts are not passes. Report the count alongside
-the findings.
+schema arrives as `failed` and can never read as clean. A check that hit its
+own `--check-timeout` is reported as a finding: a non-`ok` status carrying
+`timed_out: true`. The actionable-subset filter below already selects it, and
+the `--check` recipe files it on the check's one canonical bead. So
+`abandoned=` and `abandoned_checks=` are a summary to report in the step's
+output, not a second finding to file. Never hand-key an abandoned check under
+`doctor.<check>` or any other spelling; that splits the check `--check`
+already tracks. The missing verdicts are not passes, so say so in the report.
 
 The actionable subset:
 ```bash

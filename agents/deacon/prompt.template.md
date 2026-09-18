@@ -108,11 +108,13 @@ finding lands in and rig-qualifies the proactive pool whose worker reacts to
 it, so bind it. A finding about a bead in another rig's store is filed with
 that rig's name, so the key meets its earlier occurrences.
 
-File systemic findings (a Dolt outage, an unrestorable backup, a doctor
-finding); handle the routine directly (stale locks, orphan processes,
-`gc doctor --fix`-able findings). Do not hand-search for an existing bead
-first: the key decides whether this finding already has one, and a bead
-filed elsewhere for the same cause is the reaction's `blocked` exit to find.
+File systemic findings (a Dolt outage, an unrestorable backup); handle the
+routine directly (stale locks, orphan processes, `gc doctor --fix`-able
+findings). A doctor check's finding is filed by the doctor-sweep step through
+`--check`, which derives its key, so never hand-key one under this `--key`
+recipe. Do not hand-search for an existing bead first: the key decides whether
+this finding already has one, and a bead filed elsewhere for the same cause is
+the reaction's `blocked` exit to find.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — still goes straight to a
