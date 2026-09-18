@@ -4,7 +4,8 @@
 # blank / unknown), the sentinel and empty exemptions, the widened assignee
 # arm, the folded rig-scoped-order arm, the reachability arm (stranded /
 # legitimate wait / parent shape / dependency shape / excluded type), and
-# every fail-closed probe.
+# every fail-closed probe — including that a failing probe surfaces its
+# stderr, not just its rc.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -37,9 +38,9 @@ printf '{"orders":[]}' > "$TMP/orders.json"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "agent list") rc="${AGENTS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$AGENTS_JSON" ;;
-  "rig list")   rc="${RIGS_RC:-0}";   [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
-  "order list") rc="${ORDERS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$ORDERS_JSON" ;;
+  "agent list") rc="${AGENTS_RC:-0}"; [ "$rc" -eq 0 ] || { [ -n "${AGENTS_ERR:-}" ] && printf '%s\n' "$AGENTS_ERR" >&2; exit "$rc"; }; cat "$AGENTS_JSON" ;;
+  "rig list")   rc="${RIGS_RC:-0}";   [ "$rc" -eq 0 ] || { [ -n "${RIGS_ERR:-}" ] && printf '%s\n' "$RIGS_ERR" >&2; exit "$rc"; }; cat "$RIGS_JSON" ;;
+  "order list") rc="${ORDERS_RC:-0}"; [ "$rc" -eq 0 ] || { [ -n "${ORDERS_ERR:-}" ] && printf '%s\n' "$ORDERS_ERR" >&2; exit "$rc"; }; cat "$ORDERS_JSON" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -52,14 +53,15 @@ cat > "$TMP/bin/bd" <<'BD'
 sub="$1"; db=""; prev=""
 for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
 name=$(basename "$(dirname "$db")")
-[ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
+bd_die() { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
+[ "$name" = "${BD_FAIL_STORE:-}" ] && bd_die
 case "$sub" in
   list)    f="$STORES/$name.json" ;;
   # A healthy store offers every open bead, so `ready` serves the `list`
   # fixture unless a case overrides it, and `blocked` is empty unless one does.
-  ready)   [ "$name" = "${BD_FAIL_READY:-}" ] && exit 3
+  ready)   [ "$name" = "${BD_FAIL_READY:-}" ] && bd_die
            f="$STORES/$name.ready.json"; [ -f "$f" ] || f="$STORES/$name.json" ;;
-  blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && exit 3
+  blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && bd_die
            f="$STORES/$name.blocked.json" ;;
   *) printf '[]'; exit 0 ;;
 esac
@@ -163,6 +165,41 @@ eq "$RC" "1" "an unreadable store warns"
 has "$OUT" "NOT checked" "the warning says the store was skipped, not clean"
 OUT=$(ORDERS_RC=1 run_check); RC=$?
 eq "$RC" "1" "an unreadable order registry warns (the arm did not run)"
+
+# --- 8b. a failing probe surfaces its stderr, not just its rc ----------------
+# The rc alone does not say WHY a probe failed, so a transient I3 recurs
+# undiagnosable; every fail-closed arm carries the failing command's first
+# stderr line.
+OUT=$(AGENTS_RC=1 AGENTS_ERR="dolt: cannot open database: connection refused" run_check); RC=$?
+eq "$RC" "1" "a failed \`gc agent list\` still warns"
+has "$OUT" "connection refused" "the agent-list I3 detail carries the probe's stderr"
+
+OUT=$(RIGS_RC=1 RIGS_ERR="rig registry: permission denied" run_check); RC=$?
+eq "$RC" "1" "a failed \`gc rig list\` still warns"
+has "$OUT" "permission denied" "the rig-list I3 detail carries the probe's stderr"
+
+store alpha "$(routed a-1 alpha/pack.polecat)"
+OUT=$(BD_FAIL_STORE=alpha BD_ERR="dolt: relation \"issues\" does not exist" run_check); RC=$?
+eq "$RC" "1" "an unreadable store still warns"
+has "$OUT" "NOT checked" "the store-skip warning still says the store was skipped"
+has "$OUT" "does not exist" "the store-skip warning carries \`gc bd list\` stderr"
+clear_stores
+
+store alpha "$(routed n-1 alpha/pack.polecat)"
+ready_store alpha "$(routed n-1 alpha/pack.polecat)"; blocked_store alpha
+OUT=$(BD_FAIL_READY=alpha BD_ERR="dolt: query timed out" run_check); RC=$?
+eq "$RC" "1" "an unreadable \`bd ready\` still warns"
+has "$OUT" "query timed out" "the reachability warning carries the probe's stderr"
+clear_stores
+
+OUT=$(ORDERS_RC=1 ORDERS_ERR="order registry: socket unavailable" run_check); RC=$?
+eq "$RC" "1" "a failed \`gc order list\` still warns"
+has "$OUT" "socket unavailable" "the order-registry warning carries the probe's stderr"
+
+# A probe that fails with no stderr adds no empty, dangling stderr line.
+OUT=$(AGENTS_RC=1 run_check); RC=$?
+eq "$RC" "1" "a failed \`gc agent list\` with no stderr still warns"
+hasnt "$OUT" "stderr:" "no stderr line is printed when the probe emitted none"
 
 # --- 9. an ERROR outranks a WARNING -----------------------------------------
 store beta "$(routed b-1 pack.polecat)"
