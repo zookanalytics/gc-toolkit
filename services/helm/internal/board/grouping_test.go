@@ -111,6 +111,27 @@ func TestGroupRootUnownedConvoyGroupsByItsEdges(t *testing.T) {
 	}
 }
 
+func TestReviewReworkLeafBandsInFlight(t *testing.T) {
+	// A childless review/rework leaf bands as in-flight work, not the empty-LOW
+	// arm meant for a decomposed container that lost its children.
+	anchors := []Anchor{
+		{ID: "tk-rev", Title: "Review branch polecat/tk-anc -> main", Kind: "review", Source: "review",
+			Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{"anchor_bead": "tk-anc", "task_kind": "review"}},
+		{ID: "tk-rwk", Title: "Rework branch polecat/tk-anc", Kind: "rework", Source: "rework",
+			Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{"anchor_bead": "tk-anc", "task_kind": "rework"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	rev := mustTile(t, b, "tk-rev")
+	if rev.Section != SectionActive || rev.Empty || rev.Frontier != "in review" || rev.Needs != "review in flight" {
+		t.Errorf("review leaf: section=%q empty=%v frontier=%q needs=%q", rev.Section, rev.Empty, rev.Frontier, rev.Needs)
+	}
+	rwk := mustTile(t, b, "tk-rwk")
+	if rwk.Section != SectionActive || rwk.Empty || rwk.Frontier != "in rework" || rwk.Needs != "rework in flight" {
+		t.Errorf("rework leaf: section=%q empty=%v frontier=%q needs=%q", rwk.Section, rwk.Empty, rwk.Frontier, rwk.Needs)
+	}
+}
+
 func TestGroupByFamilyOrdersFamiliesAndMembers(t *testing.T) {
 	// Two families. The input is rank-ordered; the family whose strongest member
 	// appears first leads. Within a family, members read in SectionOrder and the

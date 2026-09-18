@@ -272,6 +272,63 @@ func TestClusterTagging(t *testing.T) {
 	}
 }
 
+// TestParkedParentBandsGateNotActive: a roll-up whose every open child is parked
+// for the operator is waiting on the operator to rule those child rows, not
+// active work — so it bands gate rather than masquerading as in-flight
+// (tk-ibx654). Its own route markers are empty, which used to drop it to active.
+func TestParkedParentBandsGateNotActive(t *testing.T) {
+	anchors := []Anchor{
+		{ID: "tk-parent", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
+			Children: []Child{{ID: "tk-child", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}}}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	tile, ok := tileByID(b, "tk-parent")
+	if !ok {
+		t.Fatal("tk-parent missing")
+	}
+	if tile.Section != SectionGate {
+		t.Errorf("a parent whose only open child is parked for the operator bands gate, got %q", tile.Section)
+	}
+}
+
+// TestTakeawayRowsDoNotCluster: a row carrying a takeaway never clusters, however
+// many share its needs — a deterministic signoff-cap headline templated across
+// anchors no longer folds into a count-plus-id soup that loses the per-bead
+// content (tk-9tqj9h). A deterministic STATE phrase, which no bead authored,
+// still clusters.
+func TestTakeawayRowsDoNotCluster(t *testing.T) {
+	tmpl := "signoff did not converge after 3 rework rounds (cap 3)"
+	anchors := []Anchor{
+		// Three parked beads with the SAME templated takeaway → must not cluster.
+		{ID: "tk-t1", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.takeaway": tmpl}, Takeaway: tmpl},
+		{ID: "tk-t2", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.takeaway": tmpl}, Takeaway: tmpl},
+		{ID: "tk-t3", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.takeaway": tmpl}, Takeaway: tmpl},
+		// Three human beads with no takeaway and one shared state phrase → cluster.
+		{ID: "tk-c1", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "tk-c2", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "tk-c3", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{"gc.routed_to": "human"}},
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	for _, id := range []string{"tk-t1", "tk-t2", "tk-t3"} {
+		tile, _ := tileByID(b, id)
+		if tile.ClusterKey != "" {
+			t.Errorf("%s carries a takeaway and must not cluster, got key %q", id, tile.ClusterKey)
+		}
+	}
+	for _, id := range []string{"tk-c1", "tk-c2", "tk-c3"} {
+		tile, _ := tileByID(b, id)
+		if tile.ClusterKey == "" {
+			t.Errorf("%s is a takeaway-less state phrase shared by 3 and must still cluster", id)
+		}
+	}
+}
+
 // TestClusterRowsCollapse: ClusterRows folds a cluster to one line with every
 // member, and leaves unclustered rows on their own line, in first-seen order.
 func TestClusterRowsCollapse(t *testing.T) {
