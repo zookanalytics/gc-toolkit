@@ -34,7 +34,7 @@ city="${GC_CITY_PATH:-${GC_CITY:-}}"
 check_only=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --city) city="${2:-}"; shift 2 ;;
+        --city) [ $# -ge 2 ] || { echo "ensure-human-route-agent: --city needs a path" >&2; exit 2; }; city="$2"; shift 2 ;;
         --check) check_only=1; shift ;;
         -h|--help)
             echo "Usage: ensure-human-route-agent.sh [--city <path>] [--check]"

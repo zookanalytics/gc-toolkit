@@ -93,6 +93,9 @@ eq "$RC" "2" "no city in scope is an error, not a silent pass"
 OUT=$(GC_CITY_PATH="$TMP/does-not-exist" bash "$SCRIPT" 2>&1); RC=$?
 eq "$RC" "2" "a city with no city.toml is an error"
 has "$OUT" "no city.toml" "it names what was missing"
+OUT=$(env -u GC_CITY_PATH -u GC_CITY bash "$SCRIPT" --city 2>&1); RC=$?
+eq "$RC" "2" "--city with no value is an error, not an infinite loop"
+has "$OUT" "needs a path" "it names the missing --city value"
 
 # --- 6. --city overrides the environment --------------------------------------
 C="$TMP/c6"; fresh_city "$C"
