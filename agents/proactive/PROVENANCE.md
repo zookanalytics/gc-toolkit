@@ -6,12 +6,14 @@
 
 ## Goals
 
-The dedicated, small, mr-only pool that runs slung first reactions — Phase 4
-of the Bead-Universe Operating Model (specs/bead-universe/design-doc.md — Key
-Components 5-6). A proactive worker takes one bead, gives it a cheap first
-reaction (read the body, write a first-reaction card to the notes, then
-dispose: route the bead to the pool that does that work, hold it on the bead it
-waits for, or file a visit), and drains. It is the city's first-level triage:
+The dedicated, small, mr-only pool that runs first reactions — Phase 4 of the
+Bead-Universe Operating Model (specs/bead-universe/design-doc.md — Key
+Components 5-6), in the reaction-bead model
+(specs/tk-5n01ns/reaction-bead-first-reaction.md). A proactive worker claims one
+reaction bead R, gives its subject a cheap first reaction (read the body, write a
+first-reaction card to the notes, then dispose the subject: route it to the pool
+that does that work, hold it on the bead it waits for, file a visit, or supersede
+it), closes R, and drains. It is the city's first-level triage:
 it makes the human arrive at *advanced* work — a bead that already moved one
 step — and it keeps the beads it can schedule out of the human's queue
 entirely.
@@ -23,13 +25,13 @@ before citing the rest of it.
 
 ## Why we built this
 
-"Proactive" in v1 is deliberately NOT a resident loop (the operator deferred
-that). It is a `mol-first-reaction` (formulas/mol-first-reaction.toml) slung at
-a bead — operator/board one-shot, or the `tools/gc-proactive.sh scan --sling`
-process form over movable-forward beads. This pool is where those reactions
-execute. It is a sibling of the impl polecat pool (same worktree/refinery
-machinery) with three deliberate differences, all from the design's budget +
-security commitments:
+"Proactive" is deliberately NOT a resident loop (the operator deferred that). A
+reaction is its own leased bead R, filed per subject — by `tools/gc-proactive.sh
+sling` (operator/board one-shot, via `gc-helm react`) or the `scan --sling`
+process form over movable-forward beads — and routed here. This pool is where
+those reactions execute. It is a sibling of the impl polecat pool (same
+worktree/refinery machinery) with three deliberate differences, all from the
+design's budget + security commitments:
 
 **Update (2026-08-25):** the enable gate (`GC_PROACTIVE_ENABLED`) and the
 city-wide shed clamp (item 2 below) were removed at operator direction in
@@ -64,25 +66,28 @@ design record.
 ## Notes
 
 Rig-scoped (each rig gets its own small proactive pool, like polecat-codex).
-Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
---merge mr` (operator/board one-shot) or `tools/gc-proactive.sh scan --sling`
-(process-scan). NOT a resident loop either way.
+Triggered by `tools/gc-proactive.sh sling <bead>` (operator/board one-shot, via
+`gc-helm react`) or `scan --sling` (process-scan), both of which file a reaction
+bead routed here. NOT a resident loop either way.
 
-The first reaction NEVER closes the target work bead — every disposition
-advances it and leaves it open. `assets/scripts/first-reaction-dispose.sh`
-performs the three and records which one and why (`gc.first_reaction*`), so a
-wrong call is visible rather than silent. The `gc.proactive_reaction` marker
-stops the scan from re-reacting. The card shape (Understanding · Found ·
-Proposal · Decision needed · Disposition) is the same one a converse session
+The first reaction never closes its subject except through the evidence-gated
+`bead-rehome.sh` (the `superseded` exit); the other three exits advance the
+subject and leave it open. `assets/scripts/first-reaction-dispose.sh` performs
+all four, stamps `gc.reacted_by=<R>` on the subject as the completion marker, and
+closes the reaction bead R — exactly-once is the substrate's, keyed on R's
+identity, not a done-marker on the subject. The card shape (Understanding · Found
+· Proposal · Decision needed · Disposition) is the same one a converse session
 opens with and the board's pick-a-row visit lands the human on.
 
 One bead is never triaged on its merits: a subject carrying `gc.origin=operator`
 came from `gc-visit-open`, where a human typed a topic and is waiting to talk
 about it, so the visit is the only disposition the script will perform on it.
 
-Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — demand flows
-unconditionally; the mr-invariant refuses `direct`; the formula writes the card
-and ends in one of three recorded dispositions without closing; one `scan
---sling` sweep is capped; the slice tool fences reached content.
-`assets/scripts/first-reaction-dispose.test.sh` covers the exits themselves.
-Design refs: design-doc.md Key Components 5-6, Phase 4.
+Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — `sling` files a
+reaction bead tracking the subject and routes it here; the create-R-once dedup
+skips a subject that already has an open reaction; scan/demand drop graph-structural
+beads; one `scan --sling` sweep is capped; the slice tool fences reached content.
+`assets/scripts/first-reaction-dispose.test.sh` covers the four exits themselves,
+and `assets/scripts/bead-rehome.test.sh` the evidence-gated close. Design refs:
+specs/tk-5n01ns/reaction-bead-first-reaction.md; design-doc.md Key Components 5-6,
+Phase 4.
