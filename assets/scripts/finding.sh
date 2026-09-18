@@ -6,7 +6,7 @@
 # one objection cannot be filed twice, because the cardinality is many findings
 # to one fix unit — one work bead may answer three related findings and close
 # them together. The bead's shape (docs/component-model.md, lifecycle.toml
-# [metadata.findings]):
+# [metadata.review_findings]):
 #
 #   task_kind            finding
 #   anchor_bead          the gating anchor
