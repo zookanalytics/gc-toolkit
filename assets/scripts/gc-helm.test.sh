@@ -172,6 +172,12 @@ case "$1 ${2:-}" in
     # the stamp LANDING and landing empty (the silent drop a multi-pair update can
     # produce) with the same stub, the way FAKE_SETTLED does for the settled key.
     proactive="$(cat "${FAKE_PROACTIVE:-/dev/null}" 2>/dev/null || true)"
+    # What gc.session_name / gc.session_id read back as: the executor identity a
+    # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them, so a
+    # test models the clear LANDING (empty) and being DROPPED (the pin still
+    # standing) with one stub, the way FAKE_EXEC does for the pour stamp.
+    sname="$(cat "${FAKE_SNAME:-/dev/null}" 2>/dev/null || true)"
+    sid="$(cat "${FAKE_SID:-/dev/null}" 2>/dev/null || true)"
     # What gc.outcome reads back as, per visit. dismiss stamps it on a visit and
     # reads it back before closing, so a stamp that lands empty is caught before
     # the irreversible close. FAKE_OUTCOME_DIR/<id> holds it; absent reads empty,
@@ -201,8 +207,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -267,6 +273,23 @@ case "$1 ${2:-}" in
             multi) [ "$pairs" -le 1 ] && : > "$FAKE_EXEC" ;;
             *)     : > "$FAKE_EXEC" ;;
           esac ;;
+        # gc.session_name / gc.session_id are CLEARED via --unset-metadata, bare
+        # like the pour stamp. A landed clear empties the pin file so the read-back
+        # reads absent. FAKE_SNAME_DROP/FAKE_SID_DROP=1 lose every clear (no repair
+        # recovers it); =multi loses it only out of the multi-pair release write,
+        # the shape the lone repair unset clears.
+        gc.session_name)
+          case "${FAKE_SNAME_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && : > "$FAKE_SNAME" ;;
+            *)     : > "$FAKE_SNAME" ;;
+          esac ;;
+        gc.session_id)
+          case "${FAKE_SID_DROP:-}" in
+            1)     ;;
+            multi) [ "$pairs" -le 1 ] && : > "$FAKE_SID" ;;
+            *)     : > "$FAKE_SID" ;;
+          esac ;;
       esac
     done ;;
   "bd dep")
@@ -297,7 +320,8 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" FAKE_DEPLISTS="$TMP/deplists" \
+       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
+       FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
@@ -385,6 +409,15 @@ grep -q 'gc.routed_to=' <<< "$A" \
 # parked or re-routed bead does not linger advertising a finished pour's pool.
 grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
   && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
+# The unassign takes the departing executor's identity with it: a gc.session_name
+# left on an open bead that later carries a mismatched route is what
+# doctor/executor-identity-residue reports, and a gc.session_id left behind is a
+# stale orphan-recovery pin. Both are cleared in the release write, beside the
+# assignee.
+grep -q -- '--unset-metadata gc.session_name' <<< "$A" \
+  && ok "(RELEASE) anchor identity pointer gc.session_name cleared" || bad "(RELEASE) anchor gc.session_name cleared (got: $A)"
+grep -q -- '--unset-metadata gc.session_id' <<< "$A" \
+  && ok "(RELEASE) anchor identity pointer gc.session_id cleared" || bad "(RELEASE) anchor gc.session_id cleared (got: $A)"
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
@@ -1050,6 +1083,120 @@ case "$PD" in
   *) bad "(PROACTDEAD) the release write was lost: ${PD:-<none>}" ;;
 esac
 : > "$TMP/proactive"
+
+# ── takeaway --release: the executor-identity read-back ───────────────────────
+# The unassign takes the departing executor's identity with it, so the release
+# clears gc.session_name and gc.session_id via --unset-metadata. Both have
+# readers: a surviving gc.session_name is the residue doctor/executor-identity-
+# residue reports on the next route, and a surviving gc.session_id lets orphan
+# recovery resolve a dead owner for a bead nobody holds. So — unlike the cosmetic
+# pour stamp — each is read back, a lone unset retried, and a persistent miss is a
+# verb failure, the way the route and completion proof are. orphan-dispose.sh
+# verifies the same pair after its own release. Covered:
+#   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
+#   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
+#   (SNAMEDEAD/SIDDEAD)  a clear that will not land is a verb failure, writes kept
+SNAME="gc-toolkit__polecat-lx-gone"
+SID="lx-gone"
+
+# (SNAMEOK/SIDOK) both pins clear: the release's own unset is the only write for
+# each, and a read-back that finds them gone says nothing.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+printf '%s' "$SNAME" > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
+IORC=0
+sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
+  >/dev/null 2>"$TMP/ierr" || IORC=$?
+eq "$IORC" "0" "(SNAMEOK) pins that read back cleared exit 0"
+eq "$(grep -c -- '--unset-metadata gc.session_name' "$TMP/updates" || true)" "1" \
+   "(SNAMEOK) …and gc.session_name is cleared once, with no repair"
+eq "$(grep -c -- '--unset-metadata gc.session_id' "$TMP/updates" || true)" "1" \
+   "(SIDOK) …and gc.session_id is cleared once, with no repair"
+grep -qE 'gc.session_name on|gc.session_id on' "$TMP/ierr" \
+  && bad "(SNAMEOK) a landed clear should say nothing (stderr: $(cat "$TMP/ierr"))" \
+  || ok "(SNAMEOK) …and says nothing about a read-back"
+
+# (SNAMEFIX) the identity clear dropped from the multi-pair release write, carried
+# by the lone repair unset. The pin stood after the first write, so the read-back
+# re-issues the clear and the release still exits 0.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+printf '%s' "$SNAME" > "$TMP/sname"; : > "$TMP/sid"
+SFRC=0
+FAKE_SNAME_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/ierr" || SFRC=$?
+eq "$(grep -c -- '--unset-metadata gc.session_name' "$TMP/updates" || true)" "2" \
+   "(SNAMEFIX) a clear that did not land is re-issued"
+grep -q "gc.session_name on A-PARKED read back as '$SNAME'" "$TMP/ierr" \
+  && ok "(SNAMEFIX) …and the miss is reported with the pin that stood" \
+  || bad "(SNAMEFIX) the dropped clear was silent (stderr: $(cat "$TMP/ierr"))"
+grep -q 'session-name repair landed' "$TMP/ierr" \
+  && ok "(SNAMEFIX) …and the repair that fixed it says so" \
+  || bad "(SNAMEFIX) the repair did not report landing (stderr: $(cat "$TMP/ierr"))"
+eq "$SFRC" "0" "(SNAMEFIX) …and a repaired pin is not a verb failure"
+eq "$(cat "$TMP/sname")" "" "(SNAMEFIX) …the bead ends with the identity cleared"
+
+# (SNAMEDEAD) the store that will not take the clear at all. The bead is released,
+# so a zero exit would report a park still carrying the executor identity this
+# release exists to remove — the next route reproduces the residue. So the
+# persistent miss is a verb failure, with its writes kept and named.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+printf '%s' "$SNAME" > "$TMP/sname"; : > "$TMP/sid"
+SDRC=0
+FAKE_SNAME_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/iout" 2>"$TMP/ierr" || SDRC=$?
+eq "$SDRC" "4" "(SNAMEDEAD) an identity pin that will not clear is a verb runtime failure"
+grep -q "still carries gc.session_name='$SNAME'" "$TMP/ierr" \
+  && ok "(SNAMEDEAD) …and the message names the pin left standing" \
+  || bad "(SNAMEDEAD) the persistent miss does not name the stale pin (stderr: $(cat "$TMP/ierr"))"
+grep -q -- '--unset-metadata gc.session_name' "$TMP/ierr" \
+  && ok "(SNAMEDEAD) …and carries the by-hand repair" \
+  || bad "(SNAMEDEAD) no repair spelled out (stderr: $(cat "$TMP/ierr"))"
+grep -q 'takeaway set on' "$TMP/iout" \
+  && bad "(SNAMEDEAD) the verb reported success on a bead still carrying the identity" \
+  || ok "(SNAMEDEAD) …and does not report the takeaway as set"
+IDLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$IDLINE" in
+  *"--status=open"*"--assignee="*) ok "(SNAMEDEAD) …the release it already wrote is kept, not rolled back" ;;
+  *) bad "(SNAMEDEAD) the release write was lost: ${IDLINE:-<none>}" ;;
+esac
+: > "$TMP/sname"
+
+# (SIDFIX) the same silent drop on gc.session_id: the multi-pair write drops it,
+# the lone repair unset carries it, and the release still exits 0.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+: > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
+DFRC=0
+FAKE_SID_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/ierr" || DFRC=$?
+eq "$(grep -c -- '--unset-metadata gc.session_id' "$TMP/updates" || true)" "2" \
+   "(SIDFIX) a clear that did not land is re-issued"
+grep -q "gc.session_id on A-PARKED read back as '$SID'" "$TMP/ierr" \
+  && ok "(SIDFIX) …and the miss is reported with the pin that stood" \
+  || bad "(SIDFIX) the dropped clear was silent (stderr: $(cat "$TMP/ierr"))"
+grep -q 'session-id repair landed' "$TMP/ierr" \
+  && ok "(SIDFIX) …and the repair that fixed it says so" \
+  || bad "(SIDFIX) the repair did not report landing (stderr: $(cat "$TMP/ierr"))"
+eq "$DFRC" "0" "(SIDFIX) …and a repaired pin is not a verb failure"
+eq "$(cat "$TMP/sid")" "" "(SIDFIX) …the bead ends with the pin cleared"
+
+# (SIDDEAD) the store that will not take the gc.session_id clear at all. A stale
+# pin lets orphan recovery resolve a dead owner for a released bead, so the miss
+# is a verb failure, with its writes kept and named.
+: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
+: > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
+DDRC=0
+FAKE_SID_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
+  --by proactive --release --route "$POOL" >"$TMP/iout" 2>"$TMP/ierr" || DDRC=$?
+eq "$DDRC" "4" "(SIDDEAD) an orphan-recovery pin that will not clear is a verb runtime failure"
+grep -q "still carries gc.session_id='$SID'" "$TMP/ierr" \
+  && ok "(SIDDEAD) …and the message names the pin left standing" \
+  || bad "(SIDDEAD) the persistent miss does not name the stale pin (stderr: $(cat "$TMP/ierr"))"
+grep -q -- '--unset-metadata gc.session_id' "$TMP/ierr" \
+  && ok "(SIDDEAD) …and carries the by-hand repair" \
+  || bad "(SIDDEAD) no repair spelled out (stderr: $(cat "$TMP/ierr"))"
+grep -q 'takeaway set on' "$TMP/iout" \
+  && bad "(SIDDEAD) the verb reported success on a bead still carrying the pin" \
+  || ok "(SIDDEAD) …and does not report the takeaway as set"
+: > "$TMP/sid"
 
 # ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────
 # A fold that lands after the pour leaves a molecule routed under an anchor

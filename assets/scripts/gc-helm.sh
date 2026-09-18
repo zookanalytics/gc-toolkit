@@ -1027,8 +1027,22 @@ cmd_takeaway() {
     # refuses on a live route (gc.routed_to) or that marker, so neither reads
     # gc.execution_routed_to. A release drops it best-effort, so a finished pour's
     # provenance does not linger on a bead the pour no longer drives.
+    #
+    # The park unassigns the bead, so the identity the last executor stamped goes
+    # with the assignee: gc.session_name and gc.session_id name the session that
+    # held it, and an unassigned bead has no executor for them to name. A
+    # gc.session_name left behind is residue the moment the bead next carries a
+    # route its stamp does not match — the shape doctor/executor-identity-residue
+    # reports on an open, routed bead — and a gc.session_id left behind is the
+    # stale pin the runtime's orphan recovery resolves an owner from.
+    # converse-claim.sh's release_turn clears the same pair when it puts a turn
+    # back. Both are read back after this write and a lone unset retried, the way
+    # the route and the completion proof beside them are: a silent multi-pair drop
+    # would otherwise report a successful release while the very residue
+    # doctor/executor-identity-residue exists to catch survives on the bead.
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee= \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
+               --unset-metadata gc.session_name --unset-metadata gc.session_id \
                --set-metadata "gc.proactive_reaction=1"
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
     gc bd update "$bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1 \
@@ -1126,6 +1140,47 @@ cmd_takeaway() {
             fi
         fi
     fi
+    # The executor identity the unassign takes with it is read back like the route
+    # and the proof above, and fails the verb the same way: both keys have readers.
+    # A gc.session_name left on the now-open bead is the residue
+    # doctor/executor-identity-residue reports the moment the bead next carries a
+    # route its stamp does not match — the finding this release exists to close. It
+    # rides the same multi-pair write, so the same silent drop can leave it
+    # standing; read it back, retry a lone unset, and fail if it survives.
+    # orphan-dispose.sh verifies the same pair after its own release.
+    sname_missed=""
+    if [ -n "$release_park" ]; then
+        sname_got=$(meta_now "$bead" gc.session_name)
+        if [ -n "$sname_got" ]; then
+            echo "$PROG: takeaway: gc.session_name on $bead read back as '$sname_got', expected empty — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.session_name >/dev/null 2>&1 || true
+            sname_got=$(meta_now "$bead" gc.session_name)
+            if [ -z "$sname_got" ]; then
+                echo "$PROG: takeaway: the session-name repair landed on $bead" >&2
+            else
+                sname_missed=1
+            fi
+        fi
+    fi
+    # gc.session_id is the pin the runtime's orphan recovery resolves an owner
+    # from, so one left behind lets it resolve a dead owner for a bead nobody
+    # holds. Same write, same silent drop, same read-back-and-fail.
+    sid_missed=""
+    if [ -n "$release_park" ]; then
+        sid_got=$(meta_now "$bead" gc.session_id)
+        if [ -n "$sid_got" ]; then
+            echo "$PROG: takeaway: gc.session_id on $bead read back as '$sid_got', expected empty — repairing" >&2
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            gc bd update "$bead" ${db:+--db "$db"} --unset-metadata gc.session_id >/dev/null 2>&1 || true
+            sid_got=$(meta_now "$bead" gc.session_id)
+            if [ -z "$sid_got" ]; then
+                echo "$PROG: takeaway: the session-id repair landed on $bead" >&2
+            else
+                sid_missed=1
+            fi
+        fi
+    fi
     # Edges AFTER the stamp: a failure here degrades to prose-only, never
     # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
     # <blocker>", so the edge lands on <bead> — what the board reads. Only the
@@ -1162,6 +1217,20 @@ cmd_takeaway() {
     # repair finishes it.
     if [ -n "$proactive_missed" ]; then
         echo "$PROG: takeaway: $bead is released but gc.proactive_reaction did not stamp as '1' — the completion proof first-reaction-dispose and cmd_sling read to refuse a second release is missing, so a re-offered dispose would re-release this bead. The headline, release and edges are written; stamp it by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.proactive_reaction=1" >&2
+        exit 4
+    fi
+    # A surviving session pin is exit-4 like the route and the proof above, not a
+    # warn like the cosmetic pour stamp below: both have readers. A caller reading
+    # a zero exit as "released, identity cleared" would route the bead onward — the
+    # exact next step that turns a surviving gc.session_name into the residue
+    # doctor/executor-identity-residue reports. The release and edges are kept and
+    # named, so a hand repair finishes it.
+    if [ -n "$sname_missed" ]; then
+        echo "$PROG: takeaway: $bead still carries gc.session_name='$sname_got' after release — the executor identity the unassign was meant to take with it, so doctor/executor-identity-residue re-fires the moment this bead next carries a route. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_name" >&2
+        exit 4
+    fi
+    if [ -n "$sid_missed" ]; then
+        echo "$PROG: takeaway: $bead still carries gc.session_id='$sid_got' after release — a stale orphan-recovery pin, so the runtime resolves a dead owner for a bead nobody holds. The headline, release and edges are written; clear it by hand: gc bd update $bead${db:+ --db $db} --unset-metadata gc.session_id" >&2
         exit 4
     fi
     # A surviving pour stamp is cosmetic — no arm or reconcile guard reads it — so
