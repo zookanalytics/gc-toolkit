@@ -63,12 +63,18 @@ same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
 # the per-rig witness and refinery apply would never match the deacon's own
 # wisp. The query stays assignee-blind so an orphan left by an interrupted
 # pour is still collected.
-WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | .id'
+WISP_ROWS=$(
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r '.[] | select(.title == "mol-deacon-patrol") | "\(.created_at)\t\(.id)"'
 )
-WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')
-for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do gc bd mol burn "$extra" --force; done
+# Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
+# awaiting burn beside the fresh successor it poured, the successor is always
+# the newer created_at — a cycle pours its successor only at its terminal step.
+# Selecting by status adopts the completed (in_progress) cycle and drops the
+# fresh (open) successor.
+WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
+WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
+for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
