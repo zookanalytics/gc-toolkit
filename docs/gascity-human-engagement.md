@@ -231,7 +231,7 @@ the alert model rather than duplicating them.
 ## How a conversation starts: operator-origin intake (2026-08-14)
 
 Every other visit producer in the pack is **agent-origin** and attaches to a
-bead that already exists — `mol-first-reaction` files one when its reaction
+bead that already exists — a first reaction files one when its reaction
 concludes the next move is the operator's,
 `liveness-sweep.sh` files one on a stall, `gc-helm.sh open` files one
 on a row the operator picked off the board. None of them answers "I need an
@@ -282,17 +282,17 @@ confirms the target in the chooser rather than having it vary under them. A
 broken or empty `gc rig list` skips the chooser and leaves the intake on the CLI
 default.
 
-**Two paths, and the choice is not a preference.** The preferred path slings
-`mol-first-reaction` at the new subject, and *that formula files the visit*
-from its `advance-and-drain` step — so the operator arrives at a framed
-conversation with a first-reaction card already written, not a blank one. The
-script files nothing on that path; a second visit would split one conversation
-into two sittings of the same subject.
+**Two paths, and the choice is not a preference.** The preferred path files a
+first reaction at the new subject, and *the reaction files the visit* from its
+`ruling` exit — so the operator arrives at a framed conversation with a
+first-reaction card already written, not a blank one. The intake files nothing
+itself on that path; a second visit would split one conversation into two
+sittings of the same subject.
 
-That step has three dispositions, and only one of them files a visit — but a
+The reaction has four dispositions, and only one of them files a visit — but a
 subject this intake creates always gets it. `gc.origin=operator`, stamped here,
-is what `first-reaction-dispose.sh` reads to refuse the routing and holding
-exits: the operator typed a topic because they want the conversation, so
+is what `first-reaction-dispose.sh` reads to refuse the routing, holding, and
+superseding exits: the operator typed a topic because they want the conversation, so
 answering it with a dispatch would leave them with a topic that looks filed and
 is silently forgotten. Beads that reach the reaction any other way are triaged
 on their merits.
@@ -540,8 +540,8 @@ that stamp. It asserts nothing about the sentence and blanks nothing —
   de-route cannot end it: an open step, even unrouted, keeps workflow-finalize
   blocked, so the molecule never reaps and its held steps keep drawing
   re-dispatches. A stood-down molecule should die, not park. The one molecule
-  spared is the releasing session's own — a mol-first-reaction terminal step
-  disposing the anchor it runs on — which closes its chain the normal way and
+  spared is the releasing session's own — a sitting disposing the anchor it runs
+  on — which closes its chain the normal way and
   only sheds its husk pins. An edge would assert a wait that does not exist.
 
   An anchor CLOSED before the stand-down reaches it — a fold that landed after

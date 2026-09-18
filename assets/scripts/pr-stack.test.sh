@@ -262,12 +262,12 @@ has "$out" "no well-formed marker pair" "two pairs are refused"
 eq "$(body 120)" "$before" "…and the body is untouched"
 
 echo "# a closed no-op duplicate carrying the anchor branch is not a contributor"
-# duplicate-sweep closes a rework or rebase twin as a no-op, and that row keeps
-# metadata.branch naming this head. It committed nothing, so listing it would
-# tell a reviewer to approve work that is not on the branch — the fidelity gap
-# this arm exists to close, turned into over-reporting.
+# bead-rehome closes a superseded rework or rebase twin as a no-op, and that row
+# keeps metadata.branch naming this head. It committed nothing, so listing it
+# would tell a reviewer to approve work that is not on the branch — the fidelity
+# gap this arm exists to close, turned into over-reporting.
 store "[$(anchor Q polecat/Q 130),
-        $(printf '{"id":"Q1","status":"closed","title":"Rework PR#130: address signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Q","duplicate_of":"Q","gc.work_outcome":"no-op"}}')]"
+        $(printf '{"id":"Q1","status":"closed","title":"Rework PR#130: address signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Q","gc.superseded_by":"Q","gc.work_outcome":"no-op"}}')]"
 pr 130 OPEN polecat/Q "$OPENER_BODY"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1); rc=$?
@@ -277,22 +277,22 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so nothing is written"
 eq "$(body 130)" "$OPENER_BODY" "the body is byte-identical to what pr-open.sh composed"
 
 echo "# each no-op marker keeps a row out of the ledger, on its own"
-# duplicate_of, work_outcome=no-op, and gc.work_outcome=no-op each drop a row
-# that carries the anchor branch but committed nothing.
+# work_outcome=no-op and gc.work_outcome=no-op each drop a row that carries the
+# anchor branch but committed nothing. (A superseded twin bead-rehome closes
+# carries gc.work_outcome=no-op, so it drops the same way.)
 store "[$(anchor S polecat/S 150),
-        $(printf '{"id":"S1","status":"closed","title":"dup by duplicate_of","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/S","duplicate_of":"S"}}'),
         $(printf '{"id":"S2","status":"closed","title":"no-op by work_outcome","created_at":"2026-03-01T00:00:00Z","metadata":{"branch":"polecat/S","work_outcome":"no-op"}}'),
         $(printf '{"id":"S3","status":"closed","title":"no-op by gc.work_outcome","created_at":"2026-04-01T00:00:00Z","metadata":{"branch":"polecat/S","gc.work_outcome":"no-op"}}')]"
 pr 150 OPEN polecat/S "$OPENER_BODY"
 : > "$STUB_GH_LOG"
 out=$("$SUT" 2>&1)
-has "$out" "1 single-bead" "all three no-op rows are filtered, leaving only the anchor"
+has "$out" "1 single-bead" "both no-op rows are filtered, leaving only the anchor"
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so nothing is written"
 
 echo "# the filter discriminates: a real stacker survives beside a no-op duplicate"
 store "[$(anchor R polecat/R 140),
         $(printf '{"id":"R1","status":"closed","title":"Lane-B migration impl","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Rb","merged_target":"polecat/R","merge_result":"merged"}}'),
-        $(printf '{"id":"R2","status":"closed","title":"duplicate rework no-op","created_at":"2026-03-01T00:00:00Z","metadata":{"branch":"polecat/R","duplicate_of":"R","gc.work_outcome":"no-op"}}')]"
+        $(printf '{"id":"R2","status":"closed","title":"superseded rework no-op","created_at":"2026-03-01T00:00:00Z","metadata":{"branch":"polecat/R","gc.superseded_by":"R","gc.work_outcome":"no-op"}}')]"
 pr 140 OPEN polecat/R "## Summary"
 out=$("$SUT" 2>&1)
 has "$out" "names 2 beads" "the anchor and the real stacker are named"

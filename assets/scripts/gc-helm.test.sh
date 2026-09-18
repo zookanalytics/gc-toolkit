@@ -398,8 +398,8 @@ A="$(line_for A-PARKED)"
 [ -n "$A" ] && ok "(RELEASE) anchor A-PARKED was updated" || bad "(RELEASE) anchor never updated"
 grep -q -- '--status=open' <<< "$A" \
   && ok "(RELEASE) anchor reopened (--status=open)" || bad "(RELEASE) anchor --status=open (got: $A)"
-grep -q 'gc.proactive_reaction=1' <<< "$A" \
-  && ok "(RELEASE) anchor marks the proactive reaction" || bad "(RELEASE) anchor proactive_reaction"
+grep -q 'gc.proactive_reaction' <<< "$A" \
+  && bad "(RELEASE) anchor still stamps the retired proactive_reaction" || ok "(RELEASE) anchor no longer stamps the retired proactive_reaction"
 grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
@@ -1017,72 +1017,6 @@ grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/
   && ok "(EXECWARN) …the headline write is kept" \
   || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
 : > "$TMP/exec"
-
-# ── takeaway --release: the completion-proof read-back ────────────────────────
-# gc.proactive_reaction=1 is the stamp two guards downstream key on to refuse a
-# SECOND release — first-reaction-dispose's retry guard and cmd_sling's
-# already-reacted skip — so a park whose stamp lands empty reads to both as a
-# partial that never completed, and the next dispose re-releases a bead a worker
-# may already hold. It rides the multi-pair release write, so the same silent
-# drop can hit it; it is read back and repaired like the route beside it, and —
-# unlike the cosmetic pour stamp — a repair that also misses is a verb failure.
-# Covered:
-#   (PROACTOK)   a stamp that reads back "1" is written once, no repair, exit 0
-#   (PROACTFIX)  a stamp dropped from the multi-pair write is re-stamped, exit 0
-#   (PROACTDEAD) a stamp that will not land is a verb failure, writes kept
-
-# (PROACTOK) the stamp lands: the release's own set is the only one written.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PORC=0
-sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
-  >/dev/null 2>"$TMP/perr" || PORC=$?
-eq "$PORC" "0" "(PROACTOK) a completion stamp that reads back exits 0"
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "1" \
-   "(PROACTOK) …and is written once, with no repair"
-grep -q 'gc.proactive_reaction on' "$TMP/perr" \
-  && bad "(PROACTOK) a landed stamp should say nothing (stderr: $(cat "$TMP/perr"))" \
-  || ok "(PROACTOK) …and says nothing about a read-back"
-
-# (PROACTFIX) the stamp dropped from the multi-pair release write, recovered by
-# the lone repair set.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PFRC=0
-FAKE_PROACTIVE_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/perr" || PFRC=$?
-eq "$(grep -c -- '--set-metadata gc.proactive_reaction=1' "$TMP/updates" || true)" "2" \
-   "(PROACTFIX) a stamp that did not land is re-stamped"
-grep -q "gc.proactive_reaction on A-PARKED read back as ''" "$TMP/perr" \
-  && ok "(PROACTFIX) …and the miss is reported with the value that stood" \
-  || bad "(PROACTFIX) the dropped stamp was silent (stderr: $(cat "$TMP/perr"))"
-grep -q 'the proactive-reaction repair landed' "$TMP/perr" \
-  && ok "(PROACTFIX) …and the repair that fixed it says so" \
-  || bad "(PROACTFIX) the repair did not report landing (stderr: $(cat "$TMP/perr"))"
-eq "$PFRC" "0" "(PROACTFIX) …and a repaired stamp is not a verb failure"
-eq "$(cat "$TMP/proactive")" "1" "(PROACTFIX) …the bead ends carrying the completion proof"
-
-# (PROACTDEAD) the store that will not take the stamp at all. The bead is
-# released, so a zero exit would report a park whose completion proof — the thing
-# that stops the next dispose re-releasing it — never landed.
-: > "$TMP/updates"; : > "$TMP/proactive"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-PDRC=0
-FAKE_PROACTIVE_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/pout" 2>"$TMP/perr" || PDRC=$?
-eq "$PDRC" "4" "(PROACTDEAD) a completion stamp that will not land is a verb runtime failure"
-grep -q "did not stamp as '1'" "$TMP/perr" \
-  && ok "(PROACTDEAD) …and the message names what was missing" \
-  || bad "(PROACTDEAD) the persistent miss is unexplained (stderr: $(cat "$TMP/perr"))"
-grep -q -- '--set-metadata gc.proactive_reaction=1' "$TMP/perr" \
-  && ok "(PROACTDEAD) …and carries the by-hand repair" \
-  || bad "(PROACTDEAD) no repair spelled out (stderr: $(cat "$TMP/perr"))"
-grep -q 'takeaway set on' "$TMP/pout" \
-  && bad "(PROACTDEAD) the verb reported success on a bead missing its completion proof" \
-  || ok "(PROACTDEAD) …and does not report the takeaway as set"
-PD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$PD" in
-  *"--status=open"*"--assignee="*) ok "(PROACTDEAD) …the release it already wrote is kept, not rolled back" ;;
-  *) bad "(PROACTDEAD) the release write was lost: ${PD:-<none>}" ;;
-esac
-: > "$TMP/proactive"
 
 # ── takeaway --release: the executor-identity read-back ───────────────────────
 # The unassign takes the departing executor's identity with it, so the release
@@ -1839,8 +1773,8 @@ eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
 # ── The releasing session's own step survives the release ────────────────────
-# mol-first-reaction's terminal step disposes by calling `takeaway --release` on
-# the bead its own molecule is anchored to, and then has to close its own step
+# A releasing session may itself own a step of a molecule anchored to the bead it
+# disposes by `takeaway --release`, and then has to close its own step
 # bead. step-close.sh resolves that bead within its molecule and corroborates
 # it by the assignee; this live step carries no gc.session_id stamp, so the
 # assignee is the only handle that proves the bead is this session's, and a
@@ -1870,10 +1804,10 @@ POOL="gc-toolkit/gc-toolkit.polecat"
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
- {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-first-reaction","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
- {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-first-reaction.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-first-reaction.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-first-reaction.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"root-LIVE","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-sample","gc.input_convoy_id":"convoy-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive"}},
+ {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-sample.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-lx-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
+ {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-lx-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-lx-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
@@ -1993,7 +1927,7 @@ eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 # release, by the same resolution the formula's terminal block uses.
 SCRC=0
 SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
-  bash "$HERE/step-close.sh" --step mol-first-reaction.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+  bash "$HERE/step-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
 eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
 eq "$(field L-live status)" "closed" \
    "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
@@ -2516,7 +2450,7 @@ export GC_PROACTIVE_TOOL="$TMP/bin/gc-proactive.sh"
 
 rrc=0; FAKE_SLING_RC=3 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr" || rrc=$?
 eq "$rrc" "5" "(REACT) an already-reacted skip (sling exit 3) becomes react exit 5"
-grep -q "already carries a first reaction" "$TMP/rerr" \
+grep -q "already has an open first reaction" "$TMP/rerr" \
   && ok "(REACT) …and names the no-op cause" \
   || bad "(REACT) react no-op message missing: $(cat "$TMP/rerr")"
 grep -q "failed" "$TMP/rerr" \

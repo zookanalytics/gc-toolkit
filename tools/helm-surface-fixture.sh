@@ -81,15 +81,15 @@ echo "── hermetic: react is the front-door over gc-proactive.sh sling (mr pa
 # react <id> is a THIN wrapper over tools/gc-proactive.sh `sling` — it owns no
 # sling logic. Driven through the REAL gc-proactive.sh on its --dry-run path
 # (GC_PROACTIVE_FIXTURE makes that path echo the resolved command instead of
-# calling gc), so this proves the WIRING end-to-end: react → sling →
-# mol-first-reaction on the mr path, never direct.
+# calling gc), so this proves the WIRING end-to-end: react → sling → files a
+# reaction bead tracking the subject, routed to the proactive pool.
 PROACTIVE_TOOL_REAL="$HERE/gc-proactive.sh"
 if [ -x "$PROACTIVE_TOOL_REAL" ]; then
     RX="$(GC_RIG=gc-toolkit GC_PROACTIVE_TOOL="$PROACTIVE_TOOL_REAL" GC_PROACTIVE_FIXTURE="$FXDIR" \
           GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
-    has    "react slings mol-first-reaction"          "--on mol-first-reaction"         "$RX"
-    has    "react pins the codex-gated mr path"       "--merge mr"                      "$RX"
-    absent "react never routes direct"                "--merge direct"                  "$RX"
+    has    "react files a reaction bead"              "gc bd create"                    "$RX"
+    has    "react stamps the reaction subject"        "gc.reaction_subject"             "$RX"
+    absent "react no longer pins a merge path"        "--merge"                         "$RX"
     has    "react targets the rig-qualified pool"     "gc-toolkit/gc-toolkit.proactive" "$RX"
     has    "react passes the bead through to sling"   "tk-epic"                         "$RX"
     # --reason is accepted as operator intent but NOT forwarded (sling has none).
@@ -110,8 +110,8 @@ if [ -x "$PROACTIVE_TOOL_REAL" ]; then
             GC_HELM_FIXTURE="$FXDIR" "$TOOL" react tk-epic --dry-run 2>&1 || true)"
     has    "react self-supplies the rig (no GC_RIG → still rig-qualified)" \
            "gc-toolkit/gc-toolkit.proactive" "$RXNR"
-    has    "react (no GC_RIG) still slings mol-first-reaction" "--on mol-first-reaction" "$RXNR"
-    has    "react (no GC_RIG) still pins the codex-gated mr path" "--merge mr"           "$RXNR"
+    has    "react (no GC_RIG) still files a reaction bead"     "gc bd create"            "$RXNR"
+    has    "react (no GC_RIG) still stamps the subject"        "gc.reaction_subject"     "$RXNR"
     has    "react (no GC_RIG) passes the bead through"         "tk-epic"                 "$RXNR"
     absent "react (no GC_RIG) never hits the fail-closed guard" "rig-qualify"            "$RXNR"
 else
@@ -197,13 +197,10 @@ if [ -n "${GC_HELM_SMOKE_BEAD:-}" ]; then
         "$(printf '%s' "$RELJSON" | jq -r '.[0].assignee // ""')"
     eq "release clears the pool route (gc.routed_to)" "" \
         "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.routed_to"] // ""')"
-    eq "release marks the proactive reaction"         "1" \
-        "$(printf '%s' "$RELJSON" | jq -r '.[0].metadata["gc.proactive_reaction"] // ""')"
-    # Restore the prior lifecycle fields + unset the smoke takeaway/marker.
+    # Restore the prior lifecycle fields + unset the smoke takeaway.
     gc bd update "$bead" --status="$PRIOR_STATUS" --assignee="$PRIOR_ASSIGNEE" \
         --set-metadata gc.routed_to="$PRIOR_ROUTE" \
-        --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at --unset-metadata gc.takeaway_by \
-        --unset-metadata gc.proactive_reaction >/dev/null 2>&1 \
+        --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at --unset-metadata gc.takeaway_by >/dev/null 2>&1 \
         && ok "restore lifecycle + unset the release smoke (cleanup)" || bad "restore the release smoke" "exit 0" "non-zero"
 else
     printf '  skip  live takeaway round-trip (set GC_HELM_SMOKE_BEAD=<id> to run)\n'

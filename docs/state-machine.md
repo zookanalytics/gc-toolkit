@@ -560,13 +560,15 @@ review's result set.
   the review with `gc.outcome=moot` and records the reason on it, and writes
   nothing to the anchor. It requires both the closed anchor and the absent
   branch, so an unfetched branch and a still-gating anchor each hold.
-- **Duplicate disposal** (`duplicate-sweep.sh`, cadence arm 8): a duplicate
-  dispatch a polecat diagnosed and parked has no other way out, since polecats
-  never close work beads. The arm closes it through `bead-rehome.sh --kind
-  duplicate` only when the named successor resolves and is closed or shipped
-  AND the duplicate is proved to have recorded no work, by `work_outcome=no-op`
-  or by carrying no work-product key at all. It writes nothing to the
-  successor's branch or PR, and holds on anything it cannot establish.
+- **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
+  close-with-successor writer): a bead that duplicates another or was fixed
+  upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
+  gates its own evidence — the named successor resolves and is closed or shipped
+  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
+  work-product key at all) — and holds on anything it cannot establish. A
+  proactive first reaction takes this exit (`--check` first, then the close, so
+  a refused check falls back to a ruling); converse and operator dispositions
+  use the same writer.
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared gate that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -595,8 +597,8 @@ typically the visit bead from the sitting that ruled. The pointer is required
 under every kind, because it is the whole of that distinction. The read side
 searches every store before concluding a close was false. Consumers: the
 mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`), and any patrol judging a closed bead.
+(`template-fragments/bead-disposition.template.md`), a proactive first
+reaction's `superseded` exit, and any patrol judging a closed bead.
 
 A subject whose PR is still in flight is disposed by **retiring** it, on the
 operator's ruling in a sitting to close it: the PR is closed and the anchor is
