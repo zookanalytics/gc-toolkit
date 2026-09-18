@@ -385,15 +385,15 @@ func TestBoardFlagParsing(t *testing.T) {
 	}
 }
 
-// TestTheQueueIsNotRationedLikeTheOverview: `parked` rows draw on a small
-// separate budget in the OVERVIEW because they are floored to LOW and would
-// otherwise be pushed off the end of a ranked board. A parked row that is also
-// owed to the operator is not a straggler — it is a conversation waiting on
-// them — so spending that budget on the queue would cut the queue's own tail.
-func TestTheQueueIsNotRationedLikeTheOverview(t *testing.T) {
+// TestTheQueueAndOverviewCapDifferently: the queue stays FLAT and owed-first, so
+// CapQueue keeps every owed row up to the limit — a parked row owed to the
+// operator is a conversation waiting on them, not a straggler to ration. The
+// overview groups by dependency family, so CapFamilies keeps WHOLE families up to
+// a row budget, never splitting one.
+func TestTheQueueAndOverviewCapDifferently(t *testing.T) {
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	var anchors []board.Anchor
-	for i := 0; i < board.DefaultMaxParked+5; i++ {
+	for i := 0; i < 20; i++ {
 		anchors = append(anchors, board.Anchor{
 			ID: fmt.Sprintf("tk-p%02d", i), Title: "parked on the operator", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: now,
@@ -409,8 +409,10 @@ func TestTheQueueIsNotRationedLikeTheOverview(t *testing.T) {
 	if got := len(selectView(b, false, board.DefaultMaxRows).rows); got != len(anchors) {
 		t.Errorf("the queue kept %d of %d rows owed to the operator", got, len(anchors))
 	}
-	if got := len(selectView(b, true, board.DefaultMaxRows).rows); got != board.DefaultMaxParked {
-		t.Errorf("the overview still rations parked rows: kept %d, want %d", got, board.DefaultMaxParked)
+	// Each parked conversation is its own family, so a small overview budget caps
+	// to that many whole families — here 5 of the 20.
+	if got := len(selectView(b, true, 5).rows); got != 5 {
+		t.Errorf("the overview caps whole families to its budget: kept %d, want 5", got)
 	}
 }
 

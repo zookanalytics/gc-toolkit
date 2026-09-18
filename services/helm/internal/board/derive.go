@@ -1447,6 +1447,14 @@ func classifySection(t Tile) string {
 		// Empty, complete, ruled, or a childless parked conversation — nothing is
 		// asking, the row only wants disposing of or ages out on its own.
 		return SectionCleanup
+	case len(t.ParkedHeads) > 0 && t.Open == len(t.ParkedHeads) && t.InProgressLive == 0:
+		// Every open child is parked for the operator and nothing else is moving.
+		// The parent is not active work — it is waiting on the operator to rule
+		// those child rows — so it bands gate rather than masquerading as
+		// in-flight (tk-ibx654). Under family grouping this only reorders the
+		// parent within its family; before it, a stale-bumped parent whose own
+		// route markers are empty dropped to the default active arm.
+		return SectionGate
 	default:
 		return SectionActive
 	}
@@ -1780,7 +1788,7 @@ const mdContinuationGroup = "gc.continuation_group"
 func visitAsk(title string) string {
 	s := collapseWS(title)
 	s = strings.TrimSpace(strings.TrimPrefix(s, "visit:"))
-	for _, sep := range []string{" — ", " - " } {
+	for _, sep := range []string{" — ", " - "} {
 		if i := strings.Index(s, sep); i >= 0 && i <= 16 {
 			s = strings.TrimSpace(s[i+len(sep):])
 			break
@@ -1839,17 +1847,29 @@ func applyFold(t *Tile, folded []foldedAsk) {
 // clusterThreshold rows sharing a section and a needs sentence. The DONE band is
 // left alone: it is already capped and recency-ordered, and its rows are not
 // attention the grouping exists to thin.
+//
+// A row carrying a TAKEAWAY never clusters, however many share its needs. The
+// takeaway is per-bead content the operator has to read one at a time, and
+// folding those rows into a count-plus-id-list loses it (tk-9tqj9h). This holds
+// whether the takeaway is a unique LLM sentence — which used to be assumed not
+// to recur, and so not to cluster — or a deterministic one a script templated
+// across anchors (a signoff-cap headline), which recurs identically and did
+// cluster. Only a deterministic STATE phrase, which no bead authored, clusters
+// now; those the renderer folds with per-bead context, not an id soup.
 func tagClusters(tiles []Tile) {
 	type key struct{ section, needs string }
+	clusterable := func(t Tile) bool {
+		return t.Section != SectionDone && t.Needs != "" && t.Takeaway == nil
+	}
 	count := make(map[key]int, len(tiles))
 	for _, t := range tiles {
-		if t.Section == SectionDone || t.Needs == "" {
+		if !clusterable(t) {
 			continue
 		}
 		count[key{t.Section, t.Needs}]++
 	}
 	for i := range tiles {
-		if tiles[i].Section == SectionDone || tiles[i].Needs == "" {
+		if !clusterable(tiles[i]) {
 			continue
 		}
 		if count[key{tiles[i].Section, tiles[i].Needs}] >= clusterThreshold {
@@ -2307,7 +2327,7 @@ func OperatorQueue(tiles []Tile) []Tile {
 //
 // Board.Tiles leaves [BuildBoard] partitioned owed-first, which is the default
 // view's order and the opposite of the question the overview answers. Feeding
-// that slice to [CapRows] costs twice: the overview leads with the operator's
+// that slice to [CapFamilies] costs twice: the overview leads with the operator's
 // queue instead of the city's highest-ranked row, and the cap then drops
 // whatever the hoisted queue pushed past the limit.
 func CityOverview(tiles []Tile) []Tile {
@@ -2317,74 +2337,58 @@ func CityOverview(tiles []Tile) []Tile {
 	return out
 }
 
-// DefaultMaxRows and DefaultMaxParked mirror gc-helm.sh's GC_HELM_MAX_ROWS=50
-// and GC_HELM_MAX_PARKED=15. DefaultMaxDone is the third budget, for the
-// terminal band.
+// DefaultMaxRows mirrors gc-helm.sh's GC_HELM_MAX_ROWS=50. DefaultMaxDone is the
+// separate budget for the terminal band, which the overview groups into its own
+// closed-anchor families.
 const (
-	DefaultMaxRows   = 50
-	DefaultMaxParked = 15
-	DefaultMaxDone   = 10
+	DefaultMaxRows = 50
+	DefaultMaxDone = 10
 )
 
-// CapRows applies gc-helm.sh's SPLIT row cap and returns one globally ranked
-// slice. limit<=0 means uncapped (both kinds), which is what tooling asks for.
+// CapFamilies bounds the grouped overview WITHOUT ever splitting a family, so a
+// member is never shown without the root that heads it. It admits whole families
+// in the input's order (rank order, so the strongest-led families come first),
+// counts the live rows of the admitted ones against limit, and rations the
+// terminal DONE families — each a closed anchor — against maxDone. limit<=0
+// means uncapped.
 //
-// A single rank-ordered cap would silently undo half of what the `parked` kind
-// is for. Parked is band-floored to LOW, so it sorts last by construction, and
-// the operator's own surface asks for 36 rows (tmux-pick-helm.sh) against a
-// board whose attention bands alone fill most of that — so every parked row
-// falls off the end, and a bead added to the gather specifically so it could be
-// FOUND is once again absent from the board the operator actually reads.
-//
-// So the budgets are separate: attention rows keep the whole of limit (their
-// budget is not reduced by parked existing) and parked rows draw on maxParked.
-// The three slices are re-merged by rank_score, so the output stays one ranked
-// array and the --json shape is unchanged.
-//
-// The DONE band draws on maxDone for the same reason and one more. It is
-// floored below parked, so a shared budget would drop every closed row before
-// any parked one — and unlike a parked row, a DONE row is on the board
-// precisely because it was about to disappear on its own. Letting the cap take
-// it would restore the vanishing this band exists to stop, one layer down.
-func CapRows(tiles []Tile, limit, maxParked, maxDone int) []Tile {
+// It supersedes the flat, per-band split the board used before it grouped: a
+// `parked` row no longer needs a budget of its own, because it now travels with
+// its family rather than sinking to the end of one rank-ordered list, and the
+// DONE families still get theirs so a week of closures cannot crowd out the live
+// board. A family is counted as DONE by its ROOT: a live family with a closed
+// member still spends the live budget, which is right — the operator is looking
+// at the live anchor, not the closed child.
+func CapFamilies(tiles []Tile, limit, maxDone int) []Tile {
 	if limit <= 0 {
 		return tiles
 	}
-	out := make([]Tile, 0, min(len(tiles), limit+maxParked+maxDone))
-	var attention, parked, done int
-	for _, t := range tiles {
-		switch {
-		case t.Severity == SevDone:
-			if done >= maxDone {
+	out := make([]Tile, 0, len(tiles))
+	liveRows, doneFamilies := 0, 0
+	for _, f := range GroupByFamily(tiles) {
+		rows := append([]Tile{f.Root}, f.Members...)
+		if f.Root.Severity == SevDone {
+			if doneFamilies >= maxDone {
 				continue
 			}
-			done++
-		case t.Kind == "parked":
-			if parked >= maxParked {
+			doneFamilies++
+		} else {
+			if liveRows >= limit {
 				continue
 			}
-			parked++
-		default:
-			if attention >= limit {
-				continue
-			}
-			attention++
+			liveRows += len(rows)
 		}
-		out = append(out, t)
+		out = append(out, rows...)
 	}
-	// tiles arrives ranked and the filter above preserves that order, so the
-	// re-merge gc-helm.sh does with an explicit sort is already done.
 	return out
 }
 
 // CapQueue bounds the operator's queue. limit<=0 means uncapped.
 //
-// Deliberately not [CapRows]. That split exists because `parked` rows are
-// band-floored to LOW and would otherwise be pushed off the end of a
-// rank-ordered board, so it rations them against a small separate budget. In
-// this partition a parked row is not a straggler — it is a conversation waiting
-// on the operator, and it earned its place by age — so that budget would cut
-// the queue precisely where it carries the most.
+// The queue stays FLAT and owed-first — it is not grouped into families — so it
+// is a straight head-truncation, not [CapFamilies]. A parked row here is not a
+// straggler to ration but a conversation waiting on the operator that earned its
+// place by age, so the queue keeps every owed row up to the limit in order.
 func CapQueue(tiles []Tile, limit int) []Tile {
 	if limit <= 0 || len(tiles) <= limit {
 		return tiles

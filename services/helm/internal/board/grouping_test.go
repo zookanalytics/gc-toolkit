@@ -116,10 +116,10 @@ func TestGroupByFamilyOrdersFamiliesAndMembers(t *testing.T) {
 	// appears first leads. Within a family, members read in SectionOrder and the
 	// root is the header.
 	tiles := []Tile{
-		{ID: "tk-a", Section: SectionActive, GroupRoot: "tk-a"},     // root of family A (appears first)
-		{ID: "tk-a2", Section: SectionReview, GroupRoot: "tk-a"},    // member, review — must lead members
-		{ID: "tk-a3", Section: SectionStalled, GroupRoot: "tk-a"},   // member, stalled
-		{ID: "tk-b", Section: SectionGate, GroupRoot: "tk-b"},       // root of family B
+		{ID: "tk-a", Section: SectionActive, GroupRoot: "tk-a"},   // root of family A (appears first)
+		{ID: "tk-a2", Section: SectionReview, GroupRoot: "tk-a"},  // member, review — must lead members
+		{ID: "tk-a3", Section: SectionStalled, GroupRoot: "tk-a"}, // member, stalled
+		{ID: "tk-b", Section: SectionGate, GroupRoot: "tk-b"},     // root of family B
 	}
 	fams := GroupByFamily(tiles)
 	if len(fams) != 2 {

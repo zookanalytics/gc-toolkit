@@ -83,7 +83,7 @@ func TestRenderTableLegendStatesTheWindowBound(t *testing.T) {
 	}
 }
 
-// CapRows fills its live budget and then adds parked and DONE rows on top, so
+// CapFamilies fills its live budget and then adds the DONE families on top, so
 // the slice it returns is a whole board rather than a count of live rows. Read
 // as the numerator against the live total, it can exceed it — a header
 // claiming to show more live anchors than the board holds.
@@ -104,7 +104,7 @@ func TestRenderTableCappedHeaderCountsOnlyTheLiveRowsShown(t *testing.T) {
 		})
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
-	shown := board.CapRows(tiles, 2, 0, 2)
+	shown := board.CapFamilies(tiles, 2, 2)
 
 	var out strings.Builder
 	renderTable(&out, b, shown, b.GeneratedAt, 1)
@@ -118,8 +118,8 @@ func TestRenderTableCappedHeaderCountsOnlyTheLiveRowsShown(t *testing.T) {
 	}
 }
 
-// The DONE band draws on its own budget, so it can be capped while the live
-// rows are not. A header that prints the closed TOTAL beside a capped band
+// The DONE families draw on their own budget, so they can be capped while the
+// live rows are not. A header that prints the closed TOTAL beside a capped band
 // reports a complete record of what closed while showing part of it.
 func TestRenderTableHeaderNamesTheClosedCap(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
@@ -136,7 +136,7 @@ func TestRenderTableHeaderNamesTheClosedCap(t *testing.T) {
 		})
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
-	shown := board.CapRows(tiles, 50, 0, 2)
+	shown := board.CapFamilies(tiles, 50, 2)
 
 	var out strings.Builder
 	renderTable(&out, b, shown, b.GeneratedAt, 1)
@@ -163,40 +163,50 @@ func TestRenderTableHeaderStaysPlainWhenTheBandIsWhole(t *testing.T) {
 	}
 }
 
-// The board is read one band at a time, so each non-empty section prints a
-// labeled banner and the rows in it fall under that banner.
-func TestRenderTableShowsSectionBanners(t *testing.T) {
+// The overview groups by dependency family: each family opens with a banner
+// naming its root, and a ● marks a root whose next move is the operator's
+// (review or gate). The within-family band is a column, no longer the top axis.
+func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	tiles := []board.Tile{
 		{ID: "tk-pr", Rig: "gc-toolkit", Kind: "merge", Title: "a PR", Severity: board.SevElevated,
-			Section: board.SectionReview, PRMachine: "settled", Needs: "green — waiting on the merge pass", RankScore: 2_000_000},
+			Section: board.SectionReview, PRMachine: "settled", Frontier: "PR #9 · owed 2d",
+			Needs: "green — waiting on the merge pass", GroupRoot: "tk-pr", RankScore: 2_000_000},
 		{ID: "tk-strand", Rig: "gc-toolkit", Kind: "epic", Title: "stranded", Severity: board.SevHigh,
-			Section: board.SectionStalled, MTotal: 2, Open: 2, Needs: "decomposed, idle — assign or visit", RankScore: 3_000_000},
+			Section: board.SectionStalled, MTotal: 2, Open: 2, Frontier: "2 open · 0 in flight (stranded)",
+			Needs: "decomposed, idle — assign or visit", GroupRoot: "tk-strand", RankScore: 3_000_000},
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
 	var out strings.Builder
 	renderTable(&out, b, tiles, now, 1)
 	got := out.String()
 
-	for _, want := range []string{"▌ REVIEW", "a pull request wants you", "▌ STALLED"} {
+	for _, want := range []string{"BAND", "▌ tk-pr", "▌ tk-strand"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("missing section banner %q; got:\n%s", want, got)
+			t.Errorf("missing family block element %q; got:\n%s", want, got)
 		}
 	}
-	// The banner order follows SectionOrder: review before stalled.
-	if strings.Index(got, "▌ REVIEW") > strings.Index(got, "▌ STALLED") {
-		t.Errorf("review must band before stalled; got:\n%s", got)
+	// A review family wants the operator, so its header carries the ● glyph; a
+	// stalled family does not.
+	if !strings.Contains(got, "● ▌ tk-pr") {
+		t.Errorf("a review family's header must carry the person glyph; got:\n%s", got)
+	}
+	if strings.Contains(got, "● ▌ tk-strand") {
+		t.Errorf("a stalled family's header must not carry the person glyph; got:\n%s", got)
 	}
 }
 
-// A run of rows sharing one template folds to a single line that names the count
-// and lists the members, instead of N identical peer rows.
-func TestRenderTableCollapsesAClusterToOneLine(t *testing.T) {
+// A run of rows sharing one deterministic template folds to a count line, then
+// ONE line per member carrying its id and its own title — per-bead context, not
+// a bare id soup (tk-9tqj9h). Clustering lives in the flat owed queue; the
+// overview groups by family instead.
+func TestRenderQueueClusterCarriesPerBeadContext(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	var tiles []board.Tile
 	for i := range 4 {
 		tiles = append(tiles, board.Tile{
-			ID: fmt.Sprintf("tk-fr%d", i), Rig: "gc-toolkit", Kind: "human", Title: "first reaction",
+			ID: fmt.Sprintf("tk-fr%d", i), Rig: "gc-toolkit", Kind: "human",
+			Title:    fmt.Sprintf("first reaction on subject %d", i),
 			Severity: board.SevElevated, Section: board.SectionGate, Owed: true,
 			Needs: "first reaction ready: accept or redirect", ClusterKey: "first reaction ready: accept or redirect",
 			RankScore: 2_000_000 - i,
@@ -204,19 +214,22 @@ func TestRenderTableCollapsesAClusterToOneLine(t *testing.T) {
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
 	var out strings.Builder
-	renderTable(&out, b, tiles, now, 1)
+	renderQueue(&out, b, tiles, now, 1)
 	got := out.String()
 
 	if !strings.Contains(got, "4×") {
 		t.Errorf("a cluster of 4 must show its count; got:\n%s", got)
 	}
-	// Every member id is named on the collapsed line, so nothing is hidden.
+	// Every member is named with its id AND its own title, so nothing is hidden.
 	for i := range 4 {
 		if !strings.Contains(got, fmt.Sprintf("tk-fr%d", i)) {
-			t.Errorf("cluster line must list member tk-fr%d; got:\n%s", i, got)
+			t.Errorf("cluster must list member tk-fr%d; got:\n%s", i, got)
+		}
+		if !strings.Contains(got, fmt.Sprintf("first reaction on subject %d", i)) {
+			t.Errorf("each member carries its own title; got:\n%s", got)
 		}
 	}
-	// The shared needs prints once, not four times.
+	// The shared needs prints once, on the count line, not once per member.
 	if n := strings.Count(got, "first reaction ready: accept or redirect"); n != 1 {
 		t.Errorf("the shared needs prints once for the cluster, got %d occurrences", n)
 	}
