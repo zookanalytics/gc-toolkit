@@ -378,7 +378,7 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
-  "pr_summary", "merge_record_failures",
+  "pr_summary", "merge_record_failures", "fold_target",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -460,6 +460,12 @@ keys = [
 #   store busy for a tick from a refusal no later pass will clear. An integer
 #   written by record-failure-cap.sh (absent reads as 0), cleared with `--unset`
 #   by the record that lands.
+# fold_target — the branch a bead's work was folded directly onto, stamped by
+#   the polecat that folds one bead's fix onto another's branch instead of
+#   opening its own PR. pr-stack.sh reads it (`--metadata-field fold_target`) to
+#   count that bead in the branch's PR-body ledger as work already on the branch.
+#   No pack script writes it. Absent means nothing was folded. Never cleared. A
+#   branch name.
 
 [metadata.gates]
 keys = [
@@ -618,9 +624,10 @@ keys = [
 ]
 
 [metadata.holds]
-keys = ["merge_hold", "rebase_hold", "tracking_only"]
-# All three are boolean-ish: empty, `false`, `0` or `null` is not held, anything
-# else is. merge_hold is the merge freeze — signoff.sh writes the literal
+keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
+# merge_hold, rebase_hold and tracking_only are boolean-ish: empty, `false`, `0`
+# or `null` is not held, anything else is. merge_hold is the merge freeze —
+# signoff.sh writes the literal
 # `signoff_cap` (paired with the signoff_cap key) for a round-cap park, and an
 # operator or converse writes a plain truthy value; it is a [holds] marker, so a
 # live bead carrying it owes a blocks edge, and only the cap's own park is
@@ -629,6 +636,14 @@ keys = ["merge_hold", "rebase_hold", "tracking_only"]
 # pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
 # rebasing or dispatching it, and tracking_only opts a PR out of merge.sh's
 # in-flight-holder count. The pack never writes or clears either.
+# hold_reason is a freeform sentence recording why a bead or step was parked in
+# place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
+# owes no blocks edge; it is read only as a "held on purpose" signal.
+# doctor/check-claim-advancing exempts a step or root carrying it (or gc.takeaway)
+# from its stall arms with the remedy status=blocked, and duplicate-sweep.sh notes
+# that a disposed duplicate had been parked, leaving the text on the bead. No pack
+# script writes it — molecule-hold.sh writes blocked_reason instead; an operator or
+# the refinery stamps it by hand when parking a branch. Never cleared. Freeform.
 
 [metadata.proactive]
 # The proactive first-reaction surface. gc.proactive and gc.proactive_reaction
@@ -676,7 +691,7 @@ keys = [
 # treat an already-disposed anchor as a no-op, and the helm board renders it.
 keys = [
   "gc.superseded_by", "gc.superseded_by_store",
-  "gc.supersedes", "gc.supersedes_store", "duplicate_of",
+  "gc.supersedes", "gc.supersedes_store", "duplicate_of", "duplicate_of_store",
 ]
 # gc.superseded_by / _store — on the ORIGIN bead, the successor it retired into
 #   and (only where the id prefix is ambiguous) that successor's store.
@@ -687,6 +702,12 @@ keys = [
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
 #   enumerates by `--has-metadata-key duplicate_of`. A bead id. Never cleared.
+# duplicate_of_store — the store that survivor lives in, the sibling of
+#   gc.superseded_by_store, set only where the survivor's id prefix is ambiguous.
+#   duplicate-sweep.sh reads it to leave a duplicate alone when its survivor sits
+#   in a store this pass cannot resolve; absent reads as this rig's own store.
+#   Stamped beside duplicate_of by hand; no pack script writes it. Never cleared.
+#   A store ref.
 
 [metadata.human_surface]
 keys = [
@@ -871,6 +892,8 @@ keys = [
   "gc.claimed_at", "gc.kind", "gc.step_id", "gc.step_ref", "gc.root_bead_id",
   "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
   "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*", "pin_awake",
+  "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
+  "gc.work_outcome",
 ]
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
@@ -883,3 +906,22 @@ keys = [
 #   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
 #   and pin_awake (settable only by `gc session pin`) — are written by the
 #   runtime; the pack reads them and does not write them.
+# gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
+#   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
+#   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
+#   workflow root — the runtime's own IsWorkflowRoot test, mirrored in the pack.
+# gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-tracking
+#   stamps on a claimed work bead: the worker's checkout, its head commit and its
+#   branch, written by the gascity binary on the claim/close path (gc.work_branch
+#   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
+#   and gc.work_commit — with the pack-written bare work_dir defined in
+#   merge_identity — as proof a run produced work before disposing a duplicate,
+#   and gc.work_branch is the key the runtime's detached-handoff orphan sweep
+#   matches on. Absent means no such product was recorded. A path, a sha, a branch.
+# gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
+#   (produced nothing) or `shipped` (landed work). A pack component stamps
+#   `no-op` — dead-molecule-dispose.sh, and converse by hand — while its meaning
+#   is the runtime's, like gc.outcome. duplicate-sweep.sh reads it to confirm a
+#   no-op duplicate is disposable, pr-stack.sh drops a no-op row from a branch's
+#   ledger, and each falls back to the legacy bare `work_outcome` alias. Absent
+#   leaves the disposition unstated. Never cleared.
