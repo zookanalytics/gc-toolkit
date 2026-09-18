@@ -400,6 +400,42 @@ eq "$RC" "2" "(check) --key and --check together are refused"
 has "$OUT" "mutually exclusive" "(check) says why"
 eq "$(beads)" "0" "(check) nothing filed on the ambiguous call"
 
+# ── The doctor-<check> namespace is derived, never hand-typed ─────────
+# --check derives doctor-<check> with the <rig>: prefix stripped; a hand-typed
+# --key in a rendering the derivation never emits (a '.' after "doctor", or the
+# rig name embedded) splits one check across beads. patrol-finding.sh refuses
+# those renderings and names --check.
+reset
+OUT=$("$SUT" --key doctor.pool-idle-routed-work --scope deacon-findings --title t --message m 2>&1); RC=$?
+eq "$RC" "2" "(doctor-key) a hand-typed dot-form doctor key is refused"
+has "$OUT" "--check" "(doctor-key) the refusal names --check"
+eq "$(beads)" "0" "(doctor-key) nothing filed on the refused dot-form call"
+
+reset
+OUT=$("$SUT" --key doctor-gc-toolkit-check-cadence-live --scope deacon-findings --title t --message m 2>&1); RC=$?
+eq "$RC" "2" "(doctor-key) a hand-typed rig-embedded (dash) doctor key is refused"
+
+reset
+OUT=$("$SUT" --key doctor-gc-toolkit.check-cadence-live --scope deacon-findings --title t --message m 2>&1); RC=$?
+eq "$RC" "2" "(doctor-key) a hand-typed rig-embedded (dot) doctor key is refused"
+
+# The whole-sweep failure names no check, so its key is the one hand-typed
+# doctor key the guard lets through.
+reset
+"$SUT" --key doctor-sweep-failed --scope deacon-findings --title t --message m >/dev/null 2>&1
+eq "$(beads)" "1" "(doctor-key) the doctor-sweep-failed sentinel is allowed"
+
+# The canonical path is untouched: --check still derives and files doctor-<check>.
+reset
+"$SUT" --check "gc-toolkit:pool-idle-routed-work" --scope deacon-findings --title t --message m >/dev/null 2>&1
+eq "$(beads)" "1" "(doctor-key) --check still files the canonical bead"
+eq "$(meta fnd-1 'finding.key')" "doctor-pool-idle-routed-work" "(doctor-key) --check yields doctor-<check>, prefix stripped"
+
+# A non-doctor key that merely contains the rig name is not in the namespace.
+reset
+"$SUT" --key dolt-backup-gc-toolkit --scope deacon-findings --title t --message m >/dev/null 2>&1
+eq "$(beads)" "1" "(doctor-key) a non-doctor key is unaffected"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

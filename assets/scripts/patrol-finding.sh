@@ -48,8 +48,10 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
   --key       names the SITUATION, not the wording: one open bead per key,
               narrowed to --about when that is given. [A-Za-z0-9._-] only.
               Two findings that need separate work need separate keys, so
-              encode what distinguishes them (`doctor-<check>`,
-              `dolt-backup-<db>`)
+              encode what distinguishes them (`dolt-backup-<db>`). A doctor
+              check's key is derived: use --check, not --key. `doctor-<check>`
+              is reserved for that derivation (`doctor-sweep-failed`, a
+              whole-sweep failure, is the one hand-typed doctor key)
   --check     a doctor check name — the sweep payload's `.name`, e.g.
               `gc-toolkit:check-step-terminal`. Derives the key `doctor-<check>`
               with the `<rig>:` prefix stripped, so every rendering of one
@@ -121,6 +123,24 @@ if [ -n "$RIG_ARG" ]; then
 elif [ -z "${GC_RIG:-}" ]; then
   export GC_RIG="$DEFAULT_RIG"
   warn "GC_RIG unset; filing in the '$DEFAULT_RIG' store (--rig names another)"
+fi
+
+# A doctor finding's key is DERIVED, not hand-typed: --check turns a check's
+# name into the one canonical key doctor-<check>, the <rig>: prefix stripped
+# (above). A hand-typed --key that renders the name any other way splits one
+# check across beads — a '.' where the derivation writes a '-'
+# (doctor.<check>), or the <rig> that --check strips left embedded
+# (doctor-<rig>-<check>, doctor-<rig>.<check>). Refuse the renderings a
+# derivation never emits and name --check; the guard reads $GC_RIG, so it must
+# follow its resolution. doctor-sweep-failed is the one hand-typed doctor key:
+# a whole-sweep failure names no check to derive from.
+if [ -z "$CHECK" ]; then
+  case "$KEY" in
+    doctor-sweep-failed) : ;;
+    doctor.* | doctor-"$GC_RIG"-* | doctor-"$GC_RIG".*)
+      warn "'$KEY' is a hand-typed doctor key in a drifted rendering; a doctor check's key comes from --check <name> (yields doctor-<check>). doctor-sweep-failed is the only hand-typed doctor key."
+      exit 2 ;;
+  esac
 fi
 
 # derive_title <text> — one-line board label; an over-long title is cut at a
