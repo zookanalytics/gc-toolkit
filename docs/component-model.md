@@ -153,7 +153,7 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 | **I11** | Every step a pool is meant to run is being run: a claimed step is held by a running session that is still producing output, and an offered step has been claimed at all. | `doctor/check-claim-advancing` (tk-beecuu, tk-08i70x). Claimed: reported when nothing can be advancing it — no assignee, an assignee naming no session, a holder that is not running, or a holder whose `last_active` is past the bound. Unclaimed: an open step `bd ready` is offering, routed, with no assignee and no `gc.claimed_at` ever stamped, is reported only when the agent its route names has a running session holding nothing; a suspended pool, a pool with `max` 0, a pool scaled to zero, and a pool whose every session is busy are all notes, because a queue behind them is backpressure rather than starvation. Held on purpose: a non-empty `gc.takeaway` or `hold_reason`, on the step or on the root `gc.root_bead_id` names, takes a step out of both arms as a note whose remedy is `status=blocked` — releasing a held step to `open` hands it to the pool its route still names, which is what the hold exists to prevent. Holder-clocked, so it is silent for a session that is genuinely working however long the step takes. I8 is the complement: bead-clocked, holder-blind, and scoped to open steps at 48h. |
 | **I12** | A bead's kind is `metadata.task_kind`, and no reader decides a kind from a label ([what kind of bead this is](#what-kind-of-bead-this-is)). Where a reader narrows a listing with `-l <kind>` it re-filters on `task_kind`, and every writer of that kind sets the label — a narrowing on a label some writer omits returns a quietly short answer. | **UNCHECKED** (tk-0i90x5). The reader half is held by construction and by test: every kind branch in the pack reads `task_kind`, and `learning-recurrence.test.sh` pins the one script that narrows by label against a bead carrying the label without the kind. The writer half — for each kind a reader narrows on, no live bead carries the `task_kind` without the label — is the check that does not exist; only `observation` is narrowed on by a reader today, and it is clean at filing, so the check would ship as a forward regression detector. |
 
-Six further checks guard structure that is not an anchor invariant:
+Seven further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
 resolves in the composed config), `doctor/check-seed-audit-current`
 (generated-artifact freshness; warn-only when absent),
@@ -175,8 +175,15 @@ blocked, unassigned, plainly-work bead — an allowlisted work issue_type, not a
 review/step/workflow/demand bead or a merge anchor — must carry a dispatch path,
 `gc.routed_to` or a `gc.dispatch_when_ready` arm, or it strands when its blocker
 closes and no pool is offered it; a bead a live molecule drives is exempt on a
-liveness check, warn-only). That is the whole set: **17 checks, each asserting a
-live structural property** — none greps the source for a past fix.
+liveness check, warn-only), and `doctor/check-human-route-configured` (the bare
+`human` park route resolves to a config agent whose QualifiedName is exactly
+`human`, so core's session-model check never reports stale-routed-config on
+operator-owned work; a rig-imported `gc-toolkit.human` does not match the bare
+route, so the agent is a top-level `[[agent]]` in the town city.toml with
+`max_active_sessions = 0` to spawn no pool, and
+`assets/scripts/ensure-human-route-agent.sh` writes it; warn-only). That is the
+whole set: **18 checks, each asserting a live structural property** — none greps
+the source for a past fix.
 
 ### I1 in full: the hold, the demand, and the shape law
 
