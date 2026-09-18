@@ -60,9 +60,14 @@ tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
 (origin=manual, backstop-exempt), assigns the visit to the session's runtime
 name so the session's own claim adopts it with no pool routing, and attaches;
---model picks the tier (opus default), --no-attach spawns without attaching,
-and --reason is the title tail of the visit engage files when the subject has
-none parked (passed through to open).
+--model picks the tier (opus default), --no-attach spawns without attaching.
+A --reason given with a SUBJECT always files a new visit carrying that reason
+and engages it, even when the subject already has one parked. It passes
+--allow-duplicate through to open, which bypasses the one-visit-per-subject
+dedup. With no --reason, an existing parked visit is engaged, and a fresh
+visit is filed only when the subject has none. A --reason given with an
+explicit visit id is refused, because a new visit needs a subject and the
+reason would otherwise be dropped.
 dismiss ends the sitting. react slings a proactive first reaction via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
