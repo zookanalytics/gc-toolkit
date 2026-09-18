@@ -421,7 +421,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	}
 
 	owners := sessionStates(ctx, s.gc, g)
-	inflight := resolveInflight(ctx, s.gc, roots, owners, g)
+	inflight := resolveInflight(roots, owners)
 
 	return &Result{
 		Anchors:       g.anchors,

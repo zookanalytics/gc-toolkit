@@ -639,13 +639,17 @@ kinds are filtered out of client-side, and whose parent-child edges are inverted
 into those anchors' child roll-ups so they cost no request of their own.
 
 **The `gc` CLI (`internal/source/gccli.go`) — for two facts no bead carries.**
-`gc session list --state all --json` for session liveness, and `gc convoy list`
-/ `gc convoy status` for convoy ownership and the in-flight join. This is the
-same source `gc-helm.sh` reads, so the two boards agree by construction rather
-than by two derivations. It honours the contract for the same reason the other
-two do — a Gas City interface, not raw Dolt — and every call is best-effort: a
-missing or failing `gc` records a partial error and narrows the board (nothing
-reads as held or in flight) instead of aborting the gather. The lost session map
+`gc session list --state all --json` for session liveness (the gate that tells
+work in flight from an abandoned husk), and `gc convoy list` for convoy
+ownership. These are the same reads `gc-helm.sh` makes, so the two boards agree
+by construction rather than by two derivations. The work bead a root's input
+convoy tracks — the other half of the in-flight join — is read in-process from
+that convoy's `tracks` edge in the rig store (`internal/source/facts.go`,
+`convoyMembers`), so it costs no `gc convoy status` per root. It honours the
+contract for the same reason the other two do — a Gas City interface, not raw
+Dolt — and every call is best-effort: a missing or failing `gc` records a
+partial error and narrows the board (nothing reads as held or in flight)
+instead of aborting the gather. The lost session map
 is named explicitly in `partial_errors`, because without it every claim reads as
 a dead owner and a healthy board would otherwise turn red with no explanation.
 
