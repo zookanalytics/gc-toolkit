@@ -53,7 +53,7 @@ POST /helm/open  -> { bead, outcome, visit?, message }   file a visit on a bead
                     — the ONE write route; see *Starting a conversation*
 ```
 
-A `Tile` carries 49 fields, declared in `internal/board/model.go` and mirrored
+A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
 in `web/src/contract.ts`. The order started as the bash board's object literal
 so the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
@@ -67,7 +67,7 @@ stale_days priority cross_rig_refs open_heads dead_owner_heads parked_heads
 waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
-section cluster_key
+section cluster_key group_root
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -84,7 +84,19 @@ longest-waiting first, then everything else by `rank_score` descending.
 request), `gate` (a person must answer), `stalled` (open work nothing is
 moving), `active` (healthy in-flight), `cleanup` (finished/empty), `done`
 (closed) — read in `board.SectionOrder`. It is orthogonal to `severity`'s
-how-badly, and both renderers group by it rather than each re-deriving a split.
+how-badly.
+
+`group_root` is the board's PRIMARY grouping axis, and every tile carries one:
+the id of the dependency family the row belongs to — the top-most anchor its
+parent-child and `blocks` edges climb to, its own id when it climbs to nothing
+(`board.assignGroupRoots`). The city overview groups by it — `helm-svc board
+--all` and the web dashboard body render one block per family
+(`board.GroupByFamily`), the root as the header and its members beneath it in
+`board.SectionOrder`, with `●` on the rows that want a person; there `section`
+is the within-family band. The default operator queue (`helm-svc board`) stays
+flat and owed-first, banded by `section` (`board.GroupBySection`).
+`specs/tk-492ssx/` records the family model.
+
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
 that are one template (a visit family, a signoff cap); a renderer folds them
 into one entry while the wire keeps every member. `specs/tk-9tbbk.4/` records
