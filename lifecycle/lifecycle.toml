@@ -434,10 +434,17 @@ keys = [
 #   pipeline when set (merge_strategy flips to mr) and to count the bead
 #   PR-shaped, and by signoff.sh to verify a rework child's pr_fields. Absent
 #   means no PR to reuse. Never cleared. Value is a PR URL.
-# merge_strategy — how the refinery lands the branch: `mr` (open/merge a PR) is
-#   what pr-facts.sh, signoff.sh, convoy-graduate.sh and pre-open-rebase.sh stamp;
-#   absent defaults to `mr` at the refinery, and the direct-FF path is the other
-#   value. Never cleared here.
+# merge_strategy — how the refinery lands the branch. mol-refinery-patrol.toml
+#   resolves it once, in its merge-strategy-resolve block: `mr` opens and merges
+#   a PR, `direct` fast-forwards and pushes straight to the target, and `pr` is
+#   an alias normalized to `mr` on read. An absent key resolves to the
+#   default_merge_strategy var (default `mr`); an empty value resolves to
+#   `direct`. `mr` is stamped by pr-facts.sh, signoff.sh, convoy-graduate.sh,
+#   pre-open-rebase.sh, mol-feedback-distiller.toml and mol-first-reaction.toml,
+#   and existing_pr forces the resolved mode up from `direct` at the refinery.
+#   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
+#   direct push was rejected for branch protection into the PR pipeline. Read by
+#   mol-refinery-patrol.toml and signoff.sh. Never cleared. Enum `mr | pr | direct`.
 # prepare_mode — the refinery's branch classification, re-stamped on every
 #   prepare: `rebase` for a disposable per-bead branch, `merge` for a shared one
 #   (an integration branch carrying already-merged PRs). Written by pr-facts.sh,
@@ -913,7 +920,7 @@ keys = [
 # components — but their meaning is the runtime's.
 [metadata.runtime_owned]
 keys = [
-  "gc.routed_to", "gc.execution_routed_to", "gc.outcome",
+  "gc.routed_to", "gc.execution_routed_to", "gc.run_target", "gc.outcome",
   "assignee", "gc.session_id", "gc.session_name", "gc.session_affinity",
   "gc.claimed_at", "gc.kind", "gc.synthetic", "gc.step_id", "gc.step_ref",
   "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
@@ -933,6 +940,13 @@ keys = [
 #   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
 #   and pin_awake (settable only by `gc session pin`) — are written by the
 #   runtime; the pack reads them and does not write them.
+# gc.run_target — a third route stamp beside gc.routed_to and
+#   gc.execution_routed_to, written only by the runtime: gascity's
+#   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
+#   bead it finds otherwise unrouted, so the pool re-offers stranded work. No
+#   pack script writes or reads it; dead-molecule-dispose.sh clears it with the
+#   other ROUTE_KEYS when de-routing a dead molecule's members. Absent or empty
+#   means unrouted. A route value, per the ROUTE rule in the preamble.
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
 #   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
