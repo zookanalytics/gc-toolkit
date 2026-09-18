@@ -89,6 +89,13 @@ J
 printf '{"id":"tk-ctrl","title":"ctl\001note","status":"open","issue_type":"task","metadata":{}}\n' \
   > "$R_TK/.beads/tk-ctrl.json"
 
+# tk-nul carries a raw NUL (\000), the one C0 byte that trips grep's binary
+# heuristic: the notice-strip must run in text mode (grep -a) or grep drops the
+# whole payload and the bead reads as unresolved. Distinct from tk-ctrl's SOH,
+# which grep passes through and only scrub must remove.
+printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes":"a\000b","metadata":{}}\n' \
+  > "$R_TK/.beads/tk-nul.json"
+
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 # Only the surface bead-context.sh touches. Every call is logged so the test can
@@ -97,7 +104,11 @@ set -u
 printf '%s\n' "$*" >> "$FAKE_GC_LOG"
 preface() { [ -n "${STUB_PREFACE:-}" ] && echo 'gc bd: answering from the rig "fake" store'; }
 miss() { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; echo "Issue $1 not found" >&2; exit 1; }
-serve() { preface; printf '[%s]\n' "$(cat "$1")"; exit 0; }
+# Stream the payload through `cat`, not `"$(cat)"`: command substitution drops a
+# raw NUL byte (bash: "ignored null byte in input"), and the NUL is exactly the
+# C0 byte real `gc bd show` can emit that the tool must survive. Wrapping in
+# brackets keeps the array shape the tool discriminates on.
+serve() { preface; printf '['; cat "$1"; printf ']\n'; exit 0; }
 case "${1:-} ${2:-}" in
   "rig list") preface; cat "$FAKE_RIGS"; exit 0 ;;
 esac
@@ -137,6 +148,9 @@ export PATH="$TMP/bin:$PATH"
 
 run()  { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 runj() { run "$@" --json; JQ=$(printf '%s' "$OUT" | jq -r "$JQF" 2>/dev/null); }
+# Bounded variant for a call that could spin before a fix: a wedged SUT surfaces
+# as timeout's rc 124 (a test failure) instead of hanging the whole suite.
+runb() { OUT=$(timeout 10 "$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 
 # --- basic resolution + rendering -------------------------------------------
 run tk-main
@@ -206,11 +220,24 @@ run tk-ctrl
 eq "$RC" 0 "a raw C0 byte in notes is scrubbed before jq, not fatal"
 has "$OUT" "Status      open" "  ... and the bead renders"
 
+# A raw NUL is the C0 byte that trips grep's binary heuristic; without a text-mode
+# notice strip grep drops the payload and the bead reads as unresolved (rc 4).
+run tk-nul
+eq "$RC" 0 "a raw NUL in notes does not switch the notice-strip to binary and drop the payload"
+has "$OUT" "Status      open" "  ... and the bead still renders"
+
 # --- usage ------------------------------------------------------------------
 run;                       eq "$RC" 2 "no id is a usage error"
 run tk-main extra-id;      eq "$RC" 2 "a second id is a usage error"
 run tk-main --store nope;  eq "$RC" 2 "a --store that is not rig:<name> is a usage error"
 run --nope tk-main;        eq "$RC" 2 "an unknown flag is a usage error"
+
+# --store / --db with no following value must fail usage, not loop forever: a
+# failed `shift 2` under set -u without set -e leaves $1 unconsumed and the loop
+# re-reads it. runb bounds the call so the pre-fix hang is a failure, not a wedge.
+runb tk-main --store;  eq "$RC" 2 "a --store with no value is a usage error, not a hang"
+has "$ERR" "needs a value" "  ... with a diagnostic"
+runb tk-main --db;     eq "$RC" 2 "a --db with no value is a usage error, not a hang"
 
 # --- the raw-bd regression guard: no probe ever bypassed gc bd --------------
 eq "$(wc -l < "$FAKE_BD_LOG" | tr -d ' ')" "0" \

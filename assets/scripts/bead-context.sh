@@ -58,8 +58,8 @@ U
 BEAD=""; STORE_REF=""; DB=""; JSON_OUT=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --store) STORE_REF="${2:-}"; shift 2 ;;
-    --db)    DB="${2:-}"; shift 2 ;;
+    --store) [ "$#" -ge 2 ] || die "--store needs a value (rig:<name>)" 2; STORE_REF="$2"; shift 2 ;;
+    --db)    [ "$#" -ge 2 ] || die "--db needs a value (<path>/.beads)" 2; DB="$2"; shift 2 ;;
     --json)  JSON_OUT=1; shift ;;
     -h|--help) usage ;;
     -*)      die "unknown argument '$1' (try --help)" 2 ;;
@@ -97,13 +97,17 @@ db_for_rig_name() {
 
 # `gc bd [--db <db>] show <id> --json`, cleaned of the two contaminants that
 # break a naive pipe to jq: the `gc bd:` notice line that can lead stdout, and
-# raw control bytes. Prints the cleaned payload; the caller discriminates shape.
+# raw control bytes. The notice strip runs with `grep -a` (force text mode): a
+# raw NUL byte in the notes otherwise switches grep to binary and drops the
+# whole payload before scrub can remove the byte, so the read must stay text
+# through the filter and let scrub take the C0 bytes out. Prints the cleaned
+# payload; the caller discriminates shape.
 bd_show_clean() {
   local db="$1" id="$2"
   if [ -n "$db" ]; then
-    bounded gc bd --db "$db" show "$id" --json 2>/dev/null | grep -vE '^gc bd:' | scrub || true
+    bounded gc bd --db "$db" show "$id" --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
   else
-    bounded gc bd show "$id" --json 2>/dev/null | grep -vE '^gc bd:' | scrub || true
+    bounded gc bd show "$id" --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
   fi
 }
 
