@@ -360,7 +360,13 @@ END {
         }
         if (c == SQ) { inS = 1; have = 1; continue }
         if (c == DQ) { inD = 1; have = 1; continue }
-        if (c == "\\" && i < n) { i++; tok = tok substr(buf, i, 1); have = 1; continue }
+        if (c == "\\" && i < n) {
+            i++
+            # A backslash-newline is a line continuation Bash removes entirely;
+            # keeping the newline would hide a noun or verb split across lines.
+            if (substr(buf, i, 1) == "\n") continue
+            tok = tok substr(buf, i, 1); have = 1; continue
+        }
         if (c == " " || c == "\t") { push(); continue }
         # A subshell runs with a copy of the shell state, so a cd or an export of
         # GH_REPO inside ( ) must not leak to a later command. Save on "(",

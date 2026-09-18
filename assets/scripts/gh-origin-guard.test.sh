@@ -382,6 +382,24 @@ allowed "time -p wraps an own write"            "$RIG" "time -p gh issue create 
 allowed "command -- wraps an own write"         "$RIG" "command -- gh issue create --repo zookanalytics/gc-toolkit --title 'x'"
 allowed "command -v gh is a lookup, not a send" "$RIG" "command -v gh issue create --repo get-convex/agent --title 'x'"
 
+# --- (24) a backslash-newline is a line continuation ---------------------
+# gh runs `gh issue \<newline>create ...` as one command. The lexer must delete
+# the escaped newline; leaving it glued to the next token hides the noun or verb
+# and an off-origin write on the far side of the split reads as a non-write.
+echo "  -- backslash-newline continuations"
+denied "continuation between gh and the noun" "$RIG" 'gh \
+issue create --repo get-convex/agent --title x'
+denied "continuation between noun and verb"   "$RIG" 'gh issue \
+create --repo get-convex/agent --title x'
+denied "continuation before issue comment"    "$RIG" 'gh issue \
+comment 353 --repo get-convex/agent --body x'
+denied "continuation before pr comment"       "$RIG" 'gh pr \
+comment 12 --repo get-convex/agent --body x'
+denied "continuation before pr review"        "$RIG" 'gh pr \
+review 12 --repo get-convex/agent --approve'
+allowed "continuation into an own write"      "$RIG" 'gh issue \
+create --repo zookanalytics/gc-toolkit --title x'
+
 # --- (14) everything else stays silent -----------------------------------
 echo "  -- non-events"
 allowed "no gh at all"         "$RIG" "git status --short"
