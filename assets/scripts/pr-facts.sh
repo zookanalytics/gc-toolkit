@@ -142,8 +142,9 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 # say) while an orphaned signoff_cap stamp still sits on the anchor from an
 # earlier park the operator already lifted by hand (signoff.sh leaves
 # signoff_cap in place on purpose; see signoff.test.sh's "a signoff_cap
-# standing beside no hold retires nothing"). Both the CONFLICTING arm and the
-# operator-feedback reset arm below key on this same predicate.
+# standing beside no hold retires nothing"). The CONFLICTING arm below keys on
+# this predicate: the cap's park is not an operator's hold, so it falls through
+# to the feedback arm rather than blocking rework outright.
 is_cap_park() { [ "${1:-}" = "signoff_cap" ] && [ -n "${2:-}" ]; }
 
 # >>> takeaway-hold-discriminator
@@ -515,9 +516,9 @@ while IFS= read -r row; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
-  # Read once, off this same row, for is_cap_park below: the CONFLICTING arm's
-  # cap-park carve-out and the operator-feedback reset arm's park retirement
-  # both turn on the identical pairing.
+  # Read once, off this same row, for the CONFLICTING arm's is_cap_park
+  # carve-out below: the cap's park pairs merge_hold=signoff_cap with a
+  # non-empty signoff_cap, and that arm falls through it rather than blocking.
   cap=$(printf '%s' "$row" | jq -r '(.metadata.signoff_cap // "") | tostring')
   # A graduation is the integration-to-main case whatever its branch is named, so
   # the CONFLICTING arm classifies on this as well as on the branch.

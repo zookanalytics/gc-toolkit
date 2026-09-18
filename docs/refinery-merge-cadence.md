@@ -53,13 +53,14 @@ the cadence — the arms run whether or not any refinery session is awake.
    own `merge_hold=true`) with `signoff_cap=<gate>` beside it,
    `gc.routed_to=human`, a `blocked_reason` naming the cap, and
    the shorter `gc.takeaway` headline the helm board renders, in one act. No
-   visit is filed for it, so the anchor is parked rather than queued. What
-   undoes that is new operator feedback, which arm 5 records: the cap counts
-   non-convergence, and a review the branch has never answered is not that
+   visit is filed for it, so the anchor is parked rather than queued. New
+   operator feedback does not undo the park: arm 5 routes the batch and opens a
+   validation pass on the anchor, but leaves the park standing, because the cap
+   counts non-convergence and a review the branch has never answered is not that
    ([state-machine.md](state-machine.md#the-round-cap-and-operator-feedback)).
-   An anchor capped before its PR was opened can receive neither, and says so
-   in its `blocked_reason`; `signoff.sh reset <anchor> --reason <why>` is its
-   release.
+   `signoff.sh reset <anchor> --reason <why>` is the release; an anchor capped
+   before its PR was opened can receive no feedback at all and says so in its
+   `blocked_reason`.
    A review whose only reach is the pour stamp is qualified before it counts
    as in flight: if its workflow is spent — every step closed but
    `workflow-finalize`, which belongs to the control-dispatcher — no verdict

@@ -251,12 +251,13 @@ The floor is written, not re-derived, because that verdict files a child of its
 own, and a floor recomputed each pass would swallow every new round and the cap
 would never trip.
 
-A cap that resets while its own park stands has not reset, so the same write
-retires that park: `merge_hold`, `blocked_reason`, the human route, and the
-`gc.takeaway` the cap wrote for the board. `signoff.sh` parks the anchor by
-stamping `merge_hold=signoff_cap` — the literal string, not `true` — together
-with `signoff_cap=<gate>`, and the reset (here and in `signoff.sh reset`) acts
-only while that exact pairing still stands: `merge_hold`'s value reads
+Retiring the cap and retiring its park are one act, because a cap that resets
+while its own park stands has not reset: `signoff.sh reset` clears `merge_hold`,
+`blocked_reason`, the human route, and the `gc.takeaway` the cap wrote for the
+board in the same write that advances the floor. `signoff.sh` parks the anchor
+by stamping `merge_hold=signoff_cap` — the literal string, not `true` —
+together with `signoff_cap=<gate>`, and `signoff.sh reset` acts only while that
+exact pairing still stands: `merge_hold`'s value reads
 `signoff_cap` AND `signoff_cap` is non-empty. That is the one predicate every
 reader uses — `merge.sh`'s and gate-ensure's `wedged-exception` machine axis
 included — so an anchor a person parked by hand (`merge_hold=true`) is never
@@ -274,16 +275,17 @@ goes with the park it describes, and a sitting's stays. The dispatch tally
 (`dispatch_count` and any `dispatch_backstop.<g>`) goes with the park, since
 rounds nobody may dispatch are no release.
 
-That release reaches only an anchor with a PR. One capped before its PR was
-opened has no conversation to be commented on, so no batch is ever recorded,
-and clearing the exception by hand only lets the next pass recompute the same
-rounds and cap again. The cap says which case it is: `blocked_reason` names the
-rounds as spent pre-open and names the verb that ends them. That verb is
+`signoff.sh reset` is the only path that retires a cap park, and an anchor
+capped before its PR was opened needs it most: it has no conversation to be
+commented on, so no batch and no validation pass ever reach it, and clearing
+the exception by hand only lets the next pass recompute the same rounds and cap
+again. The cap says which case it is: `blocked_reason` names the rounds as
+spent pre-open and names the verb that ends them. That verb is
 `signoff.sh reset <anchor> --reason <why>`. It writes the floor itself —
 `signoff_round_floor=<children now>@<a minted batch>` with
 `signoff_rounds_reset` carrying the same batch, so the next verdict does not
 re-derive it — and retires the park in the same call, under the same
-`signoff_cap` agreement and live-demand guard the feedback reset uses. It reads
+`signoff_cap` agreement and live-demand guard. It reads
 no PR and touches no review bead, records the ruling on the anchor, and
 verifies every key it wrote, the retired tally keys included: `gate-ensure.sh`
 no longer reads `dispatch_count` or `dispatch_backstop.<g>` now that it derives
@@ -296,18 +298,17 @@ such a walk as zero rounds would write a floor of 0 and let the next pass count
 the real children from it and cap again, which is the deadlock the verb exists
 to end.
 
-The verb is the only way back for an anchor whose batch was already recorded,
-too. The feedback reset fires once per batch, and its arm is reached only while
-a comment stands unanswered, so a batch that stamped itself and left the park
-standing is never re-read: the watermark written in that same pass answers those
-comments, and the posture stops being `commented`.
+`pr-facts.sh` records each batch once — it opens the validation pass, routes
+the batch, and advances the watermark — but retires no park: the watermark
+stops the batch being re-read once its comments are answered and the posture
+stops being `commented`, while the park waits for `signoff.sh reset`.
 
-A standing `CHANGES_REQUESTED` from the city's own reviewer resets nothing:
+A standing `CHANGES_REQUESTED` from the city's own reviewer raises no batch:
 every id in a batch is authored by a login other than the city's, so a codex
-veto raises no batch to reset from. A human's does, on the same terms as any
-other feedback — it is the strongest signal an operator has, and the one the cap
-least deserves to outlive. Such an anchor is held by the reviewer directly as
-well as by the cap.
+veto is not operator feedback. A human's is, on the same terms as any other
+feedback — it routes to a rework child or a visit and opens a validation pass,
+though the cap's own park still waits for `signoff.sh reset`. Such an anchor is
+held by the reviewer directly as well as by the cap.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
