@@ -332,6 +332,9 @@ const (
 	mdTakeaway  = "gc.takeaway"
 	mdDemandFor = "gc.demand_for"
 	routedHuman = "human"
+	// mdAnchorBead is the merge anchor a review or rework child names — the
+	// family root it hangs off, used by the grouping walk as a direct edge.
+	mdAnchorBead = "anchor_bead"
 )
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
@@ -349,6 +352,23 @@ func hasOwnRow(md map[string]string) bool {
 	}
 	_, ok := md[mdTakeaway]
 	return ok
+}
+
+// The kinds an in-flight review or rework child surfaces under. They are the
+// task_kind the source selects them by (source.reviewReworkAnchor), restated
+// here because the derivation bands them: a review or rework child is a
+// childless leaf that joins its merge anchor's family through the `blocks` edge
+// it carries, so it must not fall to the empty-LOW arm meant for a decomposed
+// container that lost its children.
+const (
+	kindReview = "review"
+	kindRework = "rework"
+)
+
+// isReviewReworkKind reports whether a source is an in-flight review or rework
+// child.
+func isReviewReworkKind(source string) bool {
+	return source == kindReview || source == kindRework
 }
 
 // isDemand reports whether the anchor is a DEMAND: a bead `gc-helm demand`
@@ -487,6 +507,12 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, stalle
 	switch {
 	case a.Source == "unowned":
 		sev0 = SevHigh
+	// A review or rework child is a childless leaf — the merge anchor it blocks
+	// carries the roll-up. It bands NORMAL as in-flight work; the anchor, not the
+	// child, is where a stalled gate surfaces (preOpenCodexStall). Placed ahead of
+	// the count branches so a childless leaf does not fall to the empty-LOW arm.
+	case isReviewReworkKind(a.Source):
+		sev0 = SevNormal
 	case isRuled && r.mTotal == 0:
 		sev0 = SevLow
 	case !isRuled && humanGated(a):
@@ -571,6 +597,10 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "closed " + agePhrase(closedDays)
 	case a.Source == "unowned":
 		return "unowned convoy — no owning bead"
+	case a.Source == kindReview:
+		return "in review"
+	case a.Source == kindRework:
+		return "in rework"
 	// Parallel to the parked phrase below, and for the same reason: the row is
 	// reporting what it IS, because it has no roll-up to report instead. A
 	// ruled row that decomposed skips this and reports its counts.
@@ -695,6 +725,10 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled bool
 		return preOpenStallNeeds(stallReason)
 	case a.Source == "unowned":
 		return "unowned — assign an owning bead"
+	case a.Source == kindReview:
+		return "review in flight"
+	case a.Source == kindRework:
+		return "rework in flight"
 	case a.Source == "decision":
 		return "operator decision"
 	// A merge anchor whose POSITION is what puts it in the queue answers with
@@ -1513,7 +1547,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		Stranded: r.mTotal > 0 && r.idle() > 0 && len(r.liveHeads) == 0 && !held &&
 			!(humanGated(a) && !isRuled),
 		Empty: r.mTotal == 0 && a.Source != "decision" && a.Source != "unowned" &&
-			a.Source != "human" && a.Source != "parked" && a.Source != "merge",
+			a.Source != "human" && a.Source != "parked" && a.Source != "merge" &&
+			!isReviewReworkKind(a.Source),
 		Complete:         r.mTotal > 0 && r.open == 0,
 		ProgressMismatch: mismatch,
 
@@ -1586,6 +1621,12 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// reconcile, before the owed partition — because a wrapper folds only onto a
 	// subject that has a row, and both facts are settled by here.
 	folded := foldWrappers(deduped, anchors)
+
+	// Stamp each row's dependency family — the group it renders under. This runs
+	// on the folded set, so a dropped wrapper is neither a family root nor a
+	// member, and it reads the anchors' parent-child and blocks edges to climb
+	// each row to its top-most tile.
+	assignGroupRoots(folded, anchors)
 
 	// Tag rows that are instances of one recurring template. This is last of the
 	// derivation passes because it keys on the FINAL section and needs, which the
@@ -1852,6 +1893,224 @@ func GroupBySection(tiles []Tile) []SectionGroup {
 		out = append(out, SectionGroup{Key: k, Tiles: buckets[k]})
 	}
 	return out
+}
+
+// --- the dependency-family grouping (specs/tk-492ssx) -------------------------
+//
+// A family is one top-level anchor and every tile that hangs off it by a
+// parent-child or a `blocks` edge. Grouping by family is the board's primary
+// axis; the attention band orders and highlights WITHIN a family. The grouping
+// key is derived once here, shared by both renderers, so the CLI table and the
+// dashboard cannot each invent their own split — exactly as [Section] is.
+
+// assignGroupRoots stamps [Tile.GroupRoot] on every tile: the id of the
+// top-most tile its edges climb to, or its own id when it climbs to nothing.
+//
+// Two edges climb: the parent-child edge (the anchor that rolls this tile up)
+// and the blocked edge (the anchor this tile `blocks`, read off that anchor's
+// WaitingOn). The walk keys on the EDGES, not on [Tile.Kind], so a convoy that
+// renders `unowned` groups as the convoy it is — its `tracks` children are its
+// family.
+//
+// Three cases the one-root rule settles, so a bead appears in exactly one
+// family:
+//
+//   - A bead in two families — a child of one anchor and a blocker of another,
+//     or a blocker of two. The parent-child edge (containment) is preferred over
+//     a blocked edge, and among edges of the same kind the lowest anchor id wins.
+//     Deterministic, and stated here so the rendered family cannot flap.
+//   - A blocker that is itself a top-level family head. It stays the root of its
+//     OWN family: a tile with tile children never climbs a blocked edge, so a
+//     top-level epic that also blocks another anchor roots its own family and is
+//     only a reference in the family it blocks. It CAN still climb a parent-child
+//     edge — a nested epic joins its parent's family.
+//   - A cross-rig (or otherwise danging) edge whose other end has no tile on this
+//     board leaves the tile a root: the family is what this board can see.
+//
+// It runs on the FINAL tile set — after the visit/demand fold — so a dropped
+// wrapper is neither root nor member, and only edges between surviving tiles
+// count.
+func assignGroupRoots(tiles []Tile, anchors []Anchor) {
+	tileSet := make(map[string]bool, len(tiles))
+	for i := range tiles {
+		tileSet[tiles[i].ID] = true
+	}
+	// childParents[id] is the anchors that roll `id` up as a parent-child child;
+	// blockedParents[id] is the anchors `id` blocks. hasTileChildren marks a tile
+	// that heads a family, which is what stops it climbing a blocked edge. Edges
+	// are unioned across the (possibly twinned) anchor rows for one id.
+	childParents := map[string]map[string]bool{}
+	blockedParents := map[string]map[string]bool{}
+	hasTileChildren := map[string]bool{}
+	addEdge := func(m map[string]map[string]bool, from, to string) {
+		if from == to {
+			return
+		}
+		if m[from] == nil {
+			m[from] = map[string]bool{}
+		}
+		m[from][to] = true
+	}
+	for i := range anchors {
+		a := anchors[i]
+		if !tileSet[a.ID] {
+			continue
+		}
+		for _, c := range a.Children {
+			if tileSet[c.ID] {
+				addEdge(childParents, c.ID, a.ID)
+				hasTileChildren[a.ID] = true
+			}
+		}
+		for _, wid := range a.WaitingOn {
+			if tileSet[wid] {
+				addEdge(blockedParents, wid, a.ID)
+			}
+		}
+		// A review or rework child names its merge anchor directly in
+		// metadata.anchor_bead. It also `blocks` that anchor, so the WaitingOn
+		// climb above usually already links them — but the anchor_bead edge
+		// resolves the child even when the anchor's edge gather was partial.
+		if ab := a.Metadata[mdAnchorBead]; ab != "" && tileSet[ab] {
+			addEdge(blockedParents, a.ID, ab)
+		}
+	}
+
+	// parentFor picks the single anchor a tile climbs to, applying the one-root
+	// rule: parent-child before blocked, lowest id within a kind, and no blocked
+	// climb for a family head. "" means the tile is a root.
+	lowest := func(m map[string]bool) string {
+		best := ""
+		for p := range m {
+			if best == "" || p < best {
+				best = p
+			}
+		}
+		return best
+	}
+	parentFor := func(id string) string {
+		if p := lowest(childParents[id]); p != "" {
+			return p
+		}
+		if hasTileChildren[id] {
+			return ""
+		}
+		return lowest(blockedParents[id])
+	}
+
+	// resolve climbs from a tile to its root, memoized. A cycle — which only a
+	// malformed blocks graph could form — roots at the lowest id among its
+	// members, so the answer does not depend on which tile the walk started from.
+	memo := make(map[string]string, len(tiles))
+	resolve := func(start string) string {
+		var order []string
+		seen := map[string]int{}
+		cur := start
+		for {
+			if r, ok := memo[cur]; ok {
+				for _, id := range order {
+					memo[id] = r
+				}
+				return r
+			}
+			if idx, ok := seen[cur]; ok {
+				root := order[idx]
+				for _, id := range order[idx:] {
+					if id < root {
+						root = id
+					}
+				}
+				for _, id := range order {
+					memo[id] = root
+				}
+				return root
+			}
+			seen[cur] = len(order)
+			order = append(order, cur)
+			p := parentFor(cur)
+			if p == "" {
+				for _, id := range order {
+					memo[id] = cur
+				}
+				return cur
+			}
+			cur = p
+		}
+	}
+	for i := range tiles {
+		tiles[i].GroupRoot = resolve(tiles[i].ID)
+	}
+}
+
+// FamilyGroup is one dependency family: the root anchor it hangs off, and the
+// member tiles beneath it in [SectionOrder]. It is a RENDER helper, not a wire
+// type — [Tile.GroupRoot] is the wire fact, and this only buckets a ranked slice
+// so a surface iterates families rather than re-deriving the split.
+type FamilyGroup struct {
+	// Root is the family's top-most anchor — the block header. It is the tile
+	// whose id equals the shared GroupRoot.
+	Root Tile
+	// Members are the rest of the family, ordered by [SectionOrder] so the
+	// most-pressing member leads. Empty for a family that is only its root.
+	Members []Tile
+}
+
+// GroupByFamily buckets tiles into families, in the first-appearance order of
+// each family in the input — so a caller that passes a rank-ordered slice gets
+// families led by their strongest member, and one member's rank decides where
+// the whole family sits. Within a family the members are ordered by
+// [SectionOrder], the root taken out as the header.
+//
+// A tile whose GroupRoot names no tile in the input (which cannot happen for a
+// board [assignGroupRoots] stamped, but can for a hand-built slice) heads its
+// own family from its first member, so no row is dropped.
+func GroupByFamily(tiles []Tile) []FamilyGroup {
+	order := make([]string, 0)
+	members := map[string][]Tile{}
+	for _, t := range tiles {
+		root := t.GroupRoot
+		if root == "" {
+			root = t.ID
+		}
+		if _, ok := members[root]; !ok {
+			order = append(order, root)
+		}
+		members[root] = append(members[root], t)
+	}
+	out := make([]FamilyGroup, 0, len(order))
+	for _, root := range order {
+		fam := members[root]
+		var head Tile
+		found := false
+		rest := make([]Tile, 0, len(fam))
+		for _, t := range fam {
+			if !found && t.ID == root {
+				head, found = t, true
+				continue
+			}
+			rest = append(rest, t)
+		}
+		if !found {
+			head, rest = fam[0], fam[1:]
+		}
+		sort.SliceStable(rest, func(i, j int) bool {
+			return sectionRank(rest[i].Section) < sectionRank(rest[j].Section)
+		})
+		out = append(out, FamilyGroup{Root: head, Members: rest})
+	}
+	return out
+}
+
+// sectionRank is a section's position in [SectionOrder]; an unknown section
+// sorts after every known one, matching [GroupBySection]'s handling of a band a
+// newer derivation added.
+func sectionRank(section string) int {
+	for i, s := range SectionOrder {
+		if s == section {
+			return i
+		}
+	}
+	return len(SectionOrder)
 }
 
 // ClusterRow is one rendered line: a single tile, or the head of a cluster with

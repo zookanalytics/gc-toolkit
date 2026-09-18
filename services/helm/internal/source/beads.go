@@ -605,6 +605,7 @@ func (s *BeadsSource) gatherAnchors(ctx context.Context, g *gatherState, st bead
 		}
 	}
 	pending = append(pending, s.collectMetadataAnchors(ctx, g, st, r, status, closedAfter)...)
+	pending = append(pending, s.collectReviewReworkAnchors(ctx, g, st, r, closedAfter)...)
 
 	// Phase 2 — resolve every anchor's edges in a fixed number of batched reads,
 	// never one per anchor. Phase 3 — publish.
@@ -634,12 +635,16 @@ func needsParentChildren(kind string) bool {
 	return false
 }
 
-// needsWaitingEdges reports the kinds that spend the `blocks` waits (the
-// stand-down test in board.ruled and the merge row's PR axes): decisions and
-// the metadata-keyed kinds. A convoy is banded by its member roll-up instead.
+// needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
+// Two readers spend them: board.ruled and the merge row's PR axes (decision,
+// human, parked, merge), and the dependency-family grouping (specs/tk-492ssx),
+// which climbs a tile to the anchor it blocks — so epic and convoy anchors now
+// collect their `blocks` edges too, to join a blocked epic or convoy to the
+// family it hangs off. A convoy's edges come from the same outbound read that
+// already fetches its `tracks` members; an epic's are added to that read here.
 func needsWaitingEdges(kind string) bool {
 	switch kind {
-	case "decision", "human", "parked", "merge":
+	case "decision", "human", "parked", "merge", "epic", "convoy":
 		return true
 	}
 	return false
@@ -726,11 +731,13 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 				p.anchor.Children = childrenFromEdges(depyRecs[p.anchor.ID], "tracks", outboundFarEnd, issueByID)
 			}
 			applyConvoyOwnership(&p.anchor, convoys)
-			continue
-		}
-		if needsParentChildren(p.kind) && dependentsOK {
+		} else if needsParentChildren(p.kind) && dependentsOK {
 			p.anchor.Children = childrenFromEdges(depnRecs[p.anchor.ID], "parent-child", inboundFarEnd, issueByID)
 		}
+		// The `blocks` waits come from the SAME outbound read a convoy already
+		// spends on its `tracks`, so a convoy gathers both from one read; an epic
+		// joins that read via needsWaitingEdges. They feed the family grouping for
+		// epic and convoy, and board.ruled and the PR axes for the rest.
 		if needsWaitingEdges(p.kind) {
 			if dependenciesOK {
 				p.anchor.Blockers, p.anchor.WaitingOn, p.anchor.WaitingOnClosed, p.anchor.WaitingUnknown =
@@ -886,6 +893,62 @@ func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState
 				continue
 			}
 			out = append(out, pendingAnchor{anchor: newAnchor(iss, ma.kind, r), kind: ma.kind})
+		}
+	}
+	return out
+}
+
+// reviewReworkKinds are the task_kind values that make a not-closed child its
+// own board tile. Each is a family MEMBER — it joins its merge anchor through
+// the `blocks` edge it carries and through metadata.anchor_bead, and is never a
+// root — so a review or rework in flight earns a row of its own rather than
+// leaving the anchor showing an empty gate (specs/tk-492ssx). The board kind is
+// the task_kind, which board.derive bands as in-flight leaf work.
+var reviewReworkKinds = []string{"review", "rework"}
+
+// collectReviewReworkAnchors gathers the in-flight review and rework children
+// for one rig: a not-closed bead carrying metadata.anchor_bead whose task_kind
+// is review or rework.
+//
+// LIVE pass only (closedAfter nil): a closed review or rework child is a
+// finished round, and the merge anchor it belonged to carries the DONE row, so
+// gathering the closed child would double a row the anchor already answers for.
+//
+// The status scope is open AND in_progress — a review child is slung and stays
+// open, a rework child is claimed and runs in_progress, and both are "in
+// flight". anchor_bead PRESENCE is required and checked client-side: the store
+// filter matches one key=value at a time, so the task_kind query does the
+// coarse cut and the join key is confirmed here. A child with no anchor cannot
+// join a family and is dropped rather than rendered as a rootless orphan.
+func (s *BeadsSource) collectReviewReworkAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, closedAfter *time.Time) []pendingAnchor {
+	if closedAfter != nil {
+		return nil
+	}
+	excluded := make([]beads.IssueType, 0, len(typedAnchorKinds))
+	for _, kind := range typedAnchorKinds {
+		excluded = append(excluded, beads.IssueType(kind))
+	}
+	var out []pendingAnchor
+	for _, kind := range reviewReworkKinds {
+		issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+			Statuses:       []beads.Status{beads.StatusOpen, beads.StatusInProgress},
+			ExcludeTypes:   excluded,
+			MetadataFields: map[string]string{"task_kind": kind},
+			SkipWisps:      true,
+		})
+		if err != nil {
+			g.note(true, []string{kind + "-children@" + r.name + ": " + err.Error()})
+			continue
+		}
+		g.ok()
+		for _, iss := range issues {
+			if iss == nil {
+				continue
+			}
+			if decodeMetadata(iss.Metadata)["anchor_bead"] == "" {
+				continue
+			}
+			out = append(out, pendingAnchor{anchor: newAnchor(iss, kind, r), kind: kind})
 		}
 	}
 	return out
