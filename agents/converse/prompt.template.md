@@ -596,6 +596,8 @@ Rules:
   your subject and visit text.
 - **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
 
+{{ template "needed-fix-stays-on-change" . }}
+
 {{ template "canonical-self-rename" . }}
 
 {{ template "operator-profile" . }}

@@ -132,8 +132,12 @@ itself, with no convoy above it. Catching this shape is a dispatch judgment
 here, not a downstream gate, so seed the artifact on the convoy's integration
 branch as above.
 
+{{ template "needed-fix-stays-on-change" . }}
+
 ## Scope-miss recovery: amend the open PR
 
+Amending the open PR keeps a needed fix on the change: a supplement
+committed before the PR merges is a fold-in, not a post-merge fast-follow.
 Scope you discover while a PR is open belongs on that PR. File a supplement
 bead carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
 its URL, `target` = its `baseRefName` — write that metadata before you sling,
