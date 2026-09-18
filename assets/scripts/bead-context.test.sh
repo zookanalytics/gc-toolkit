@@ -158,6 +158,8 @@ eq "$RC" 0 "a resolvable bead reports (rc)"
 has "$OUT" "Status      open"        "  ... status"
 has "$OUT" "Type        task"        "  ... type from issue_type"
 has "$OUT" "Store       gc-toolkit"  "  ... store resolved from the id prefix"
+has "$(cat "$FAKE_GC_LOG")" "show tk-main --json --brief-deps" \
+  "  ... via a --brief-deps read, so a hub bead's dependency bodies are never fetched"
 
 # --- metadata that decides an anchor's fate ---------------------------------
 has "$OUT" "branch        polecat/tk-main" "branch renders"

@@ -21,11 +21,17 @@
 # reported, not assumed. --json prints the whole context as one object for a
 # machine; the default is a human-readable block.
 #
+# It reports the fields that decide a bead's fate, not its free-text body. Notes,
+# description and comments are left out on purpose, so the context stays bounded
+# and this complements `gc bd show <id>` rather than replacing it.
+#
 # Usage:
 #   bead-context.sh <bead-id> [--store rig:<name> | --db <path>] [--json]
 #
 # Exit: 0 reported · 2 usage · 4 the subject id could not be resolved to a bead.
 # Doctrine: docs/bead-store-resolution.md. Test: bead-context.test.sh.
+# Run on demand to inspect one bead: a triage read, an unblock check, a
+# hand-off. It reports; it does not drive the dispatch loop.
 set -uo pipefail
 
 PROG="bead-context"
@@ -51,6 +57,11 @@ decides its fate, its successor pointer, and whether an open blocks-blocker
 holds it. --store / --db pin the owning store when the id prefix is ambiguous
 or names the city's own store, which no --rig value reaches. --json emits the
 whole context as one object.
+
+Examples:
+  bead-context.sh tk-8kc5dz            human-readable context and verdict
+  bead-context.sh tk-8kc5dz --json     the same context as one JSON object
+  bead-context.sh su-1a2b3c --store rig:shutupandlisten   pin a foreign store
 U
   exit 2
 }
@@ -100,14 +111,17 @@ db_for_rig_name() {
 # raw control bytes. The notice strip runs with `grep -a` (force text mode): a
 # raw NUL byte in the notes otherwise switches grep to binary and drops the
 # whole payload before scrub can remove the byte, so the read must stay text
-# through the filter and let scrub take the C0 bytes out. Prints the cleaned
-# payload; the caller discriminates shape.
+# through the filter and let scrub take the C0 bytes out. `--brief-deps` drops
+# each dependency's description and notes from the payload: only a dep's id,
+# type and status are read here, and a hub bead's dependencies carry large
+# bodies otherwise. `status` survives it, so the same-store fast path below is
+# intact. Prints the cleaned payload; the caller discriminates shape.
 bd_show_clean() {
   local db="$1" id="$2"
   if [ -n "$db" ]; then
-    bounded gc bd --db "$db" show "$id" --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
+    bounded gc bd --db "$db" show "$id" --json --brief-deps 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
   else
-    bounded gc bd show "$id" --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
+    bounded gc bd show "$id" --json --brief-deps 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true
   fi
 }
 
@@ -273,9 +287,9 @@ fi
 DEP_COUNT=$(g '.dependencies | length')
 printf '\n  Dependencies (%s)\n' "$DEP_COUNT"
 if [ "$DEP_COUNT" != "0" ]; then
-  printf '    %-10s %-13s %-12s %s\n' STATUS TYPE STORE ID
+  printf '    %-12s %-13s %-12s %s\n' STATUS TYPE STORE ID
   printf '%s' "$FINAL" | jq -r '.dependencies[] | "\(.status // "unknown")\t\(.type // "?")\t\(.store // "?")\t\(.id)"' \
-    | while IFS=$'\t' read -r s t st i; do printf '    %-10s %-13s %-12s %s\n' "$s" "$t" "$st" "$i"; done
+    | while IFS=$'\t' read -r s t st i; do printf '    %-12s %-13s %-12s %s\n' "$s" "$t" "$st" "$i"; done
 fi
 
 if [ "$ACTIONABLE" = "true" ]; then

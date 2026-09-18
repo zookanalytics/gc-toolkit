@@ -158,9 +158,68 @@ actionable?" in one call, so an agent stops re-running the show/jq/cross-store
 dance to tell whether a blocked bead's blockers have landed. It prints the
 bead's status, title, type, assignee and routing; the metadata that decides an
 anchor's fate (branch, target, PR, merge_result, gate lanes, successor); every
-dependency WITH its own status, read from the store that dependency lives in
+dependency with its own status, read from the store that dependency lives in
 through the prefix binding above; the store the bead itself lives in; and a
-verdict on whether an open `blocks`-blocker — or one whose store cannot be
-placed — holds it. `--json` emits the whole context as one object; `--store
-rig:<name>` and `--db <path>/.beads` pin the owning store when a prefix is
-ambiguous or names the city's own store. It reads only.
+verdict on whether an open `blocks`-blocker, or one whose store cannot be
+placed, holds it. `--store rig:<name>` and `--db <path>/.beads` pin the owning
+store when a prefix is ambiguous or names the city's own store. It reads only,
+and it runs on demand (a triage read, an unblock check, a hand-off) rather than
+driving the dispatch loop; the loop's readiness question is `bd`'s own.
+
+### What it returns, and what it leaves out
+
+The fields it prints are the ones that decide a bead's fate. It leaves out the
+free-text body, notes, description and comments, on purpose: that text is
+unbounded, and returning it proactively is the cost this tool exists to avoid.
+So it complements `gc bd show <id>`, which the reader still runs for the one
+bead whose full body a decision turns on, and does not replace it.
+
+### Dependencies, and what they cost
+
+Every dependency is returned, closed ones included, because the actionable
+verdict is computed over them: a closed `blocks`-dep is the evidence a blocker
+has landed, so dropping closed edges would leave "all blockers cleared"
+unprovable. Only `blocks`-edges gate the verdict; `related`, `tracks` and
+`parent-child` edges are shown as context and never hold a bead.
+
+`.dependencies` is a bead's own outbound edges, not its descendants. A
+`parent-child` edge is stored on the child pointing up to its parent, so an
+epic carries no edge per story: running this on an epic shows the epic's own
+few edges, not its subtree. Dependency lists run to a handful of edges in
+practice.
+
+The cost is one `gc bd show` for the subject plus one more for each dependency
+whose status the subject's store could not embed, which is each cross-store
+dependency. Same-store dependencies carry their status inline and cost nothing
+extra, and the subject read passes `--brief-deps`, so a dependency's body is
+never fetched just to read its status. A bead with many same-store
+dependencies is still a single read.
+
+### What it looks like
+
+```
+$ bead-context.sh tk-4p2c1a
+bead-context: tk-4p2c1a
+
+  Status      open
+  Title       Wire the demand gate into the board renderer
+  Type        task
+  Assignee    (unassigned)
+  Store       gc-toolkit
+
+  Metadata
+    branch        polecat/tk-4p2c1a
+    target        main
+    merge_result  (unanchored)
+    check_set     (default)
+
+  Dependencies (2)
+    STATUS       TYPE          STORE        ID
+    closed       blocks        gc-toolkit   tk-9aa1b2
+    open         blocks        gc-toolkit   tk-77c3d4
+
+  Actionable  NO — open blocks-blocker(s): tk-77c3d4
+```
+
+`--json` returns the same context as one object, keyed the same way, for a
+machine to read.
