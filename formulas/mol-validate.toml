@@ -131,6 +131,7 @@ done
 **Exit criteria:** validation-pass bead derived, anchor and lane and reviewed
 commit pinned, the unvalidated finding batch read, intent read, this step closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "triage-findings"
@@ -231,6 +232,7 @@ done
 **Exit criteria:** every finding in the batch carries a ruled disposition
 (must-fix, deferred, or declined), none left unvalidated, this step closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "rule-convergence"
@@ -295,6 +297,7 @@ done
 (back-lane on converged, supersede-lane on not), the anchor untouched, this step
 closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "finalize-and-drain"
@@ -344,3 +347,4 @@ gc runtime drain-ack
 **Exit criteria:** validation-pass bead closed, step chain closed forward, drain
 acknowledged.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
