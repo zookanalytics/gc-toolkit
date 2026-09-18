@@ -254,6 +254,7 @@ $REPO, $PENDING, $DISTILL_RUN, and the rig set):
 (HQ included), each tagged obs_rig/obs_rig_path; on `gated`, `$PENDING` is
 empty; new vetoes recorded. Bead closed on every path; session NOT drained.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "judge-and-cluster"
@@ -401,6 +402,7 @@ adopted rule; a bounded proposal list with written reasoning; contested
 rules marked; a consumed map `(obs id, obs rig, obs rig path) -> pattern`
 for step 3. Bead closed on every path; session NOT drained.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "file-and-dispatch"
@@ -575,3 +577,4 @@ gc runtime drain-ack
 **Never** close a filed prompt-update bead, and never edit a fragment,
 prompt, or skill here — the worker edits, the refinery opens the PR, the
 operator's merge changes behavior."""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

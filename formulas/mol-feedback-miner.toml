@@ -91,6 +91,7 @@ echo "Mining $REPO_SLUG (window: last {{miner_window_days}} day(s))"
 **Exit criteria:** Environment primed; `$REPO` and `$REPO_SLUG` resolved; gh
 installed and authenticated against a GitHub origin — or a clean no-op drain.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "mine-and-file"
@@ -279,3 +280,4 @@ each corrective-of-a-generalizable-kind comment either filed as one closed
 observation bead (§1 contract, `obs.source=miner`), skipped by §4 pair-key
 dedup, or dropped for the cap with a logged count; the session drained.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

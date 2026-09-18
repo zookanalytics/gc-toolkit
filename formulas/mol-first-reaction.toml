@@ -97,6 +97,7 @@ done
 **Exit criteria:** the bead and its slice are read, and this step bead is
 closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "first-reaction"
@@ -227,6 +228,7 @@ done
 **Exit criteria:** the card is appended to the bead's notes, and this step
 bead is closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "advance-and-drain"
@@ -399,3 +401,4 @@ the refinery, the refinery closes the bead after the merge — you still do not
 close it yourself. Every disposition here leaves the bead open: routed to a
 pool, held on an edge, or waiting on the operator with its visit filed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
