@@ -171,6 +171,36 @@ grep -q 'visit tk-visit0 is already open' <<< "$OUT" \
   && ok "(HELDEDGE) no second visit filed" \
   || bad "(HELDEDGE) filed a duplicate visit (calls: $CALLS)"
 
+# --- (ALLOWDUP) --allow-duplicate bypasses the one-visit-per-subject dedup ------
+# engage --reason files a fresh visit for a distinct concern even when the
+# subject already has one; it routes through open with --allow-duplicate, which
+# skips the already-held short-circuit and files the second visit.
+: > "$FAKE_CALLS"
+export FAKE_SHOW_MODE=found FAKE_SUBJECT=tk-real1 FAKE_VISIT=tk-visit0
+set +e
+OUT="$(sh "$SCRIPT" open tk-real1 --reason "a distinct concern" --allow-duplicate 2>"$TMP/err")"; RC=$?
+set -e
+ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(ALLOWDUP) open --allow-duplicate on a held subject exits 0"
+grep -q 'bd create .*--title visit: tk-real1 — a distinct concern' <<< "$CALLS" \
+  && ok "(ALLOWDUP) a second visit is filed, carrying the reason" \
+  || bad "(ALLOWDUP) second visit filed (calls: $CALLS)"
+grep -q 'is already open' <<< "$OUT$ERR" \
+  && bad "(ALLOWDUP) still short-circuited on the existing visit" \
+  || ok "(ALLOWDUP) the dedup short-circuit is bypassed"
+# CONTROL: without the flag, the same held subject still short-circuits and files
+# nothing — so the bypass is the flag's doing, not the ambient state.
+: > "$FAKE_CALLS"
+set +e
+OUT="$(sh "$SCRIPT" open tk-real1 --reason "a distinct concern" 2>"$TMP/err")"; RC=$?
+set -e
+CALLS="$(cat "$FAKE_CALLS")"
+eq "$RC" "0" "(ALLOWDUP-CONTROL) open without the flag on a held subject exits 0"
+[ -z "$CALLS" ] \
+  && ok "(ALLOWDUP-CONTROL) …and files nothing (dedup still holds by default)" \
+  || bad "(ALLOWDUP-CONTROL) default must still dedup (calls: $CALLS)"
+unset FAKE_VISIT
+
 # --- (MISSING) the bug: a typo must file NOTHING -------------------------------
 run_open missing tk-nope1
 eq "$RC" "4" "(MISSING) an unresolvable id exits 4 (verb runtime failure)"
