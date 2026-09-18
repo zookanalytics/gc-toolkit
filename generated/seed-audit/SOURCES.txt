@@ -42,7 +42,7 @@ agents/proactive/PROVENANCE.md
 agents/proactive/agent.toml
 8661ec7baf3cde70ae5774ce09e8fc5e99ff32726831d060386738740edf5c45
 agents/proactive/prompt.template.md
-91797c24503f5f3cde272c7186f8962d9522aeda9598e8488a936b972e9ad821
+3564b996350e306f81a78c3303a7cda3091f99d406f64eafeb1fb9aaca835678
 agents/refinery/agent.toml
 ccf0fa8747e70a0e268b6041cd5d883cb858295fff27918e85ab64b503aea324
 agents/refinery/prompt.template.md

@@ -30,7 +30,7 @@ gc hook --claim --json     # the bead_id it returns is R
 #    tracks edge R->S is the fallback if the stamp is unreadable.
 gc bd show <R> --json | jq '.[0].metadata'
 SUBJECT=$(gc bd show <R> --json | jq -r '.[0].metadata["gc.reaction_subject"] // ""')
-[ -n "$SUBJECT" ] || SUBJECT=$(gc bd dep list <R> --json | jq -r '[.[]? | select((.type // "")=="tracks") | .depends_on_id // .id] | .[0] // ""')
+[ -n "$SUBJECT" ] || SUBJECT=$(gc bd dep list <R> --json | jq -r '[.[]? | select(((.dependency_type // .type) // "")=="tracks") | (.id // .depends_on_id)] | .[0] // ""')
 ```
 
 If `gc hook` finds **nothing**, another worker claimed the routed bead first. Do

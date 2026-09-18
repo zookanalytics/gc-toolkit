@@ -390,6 +390,8 @@ cat > "$FXDIR/beads.json" <<'JSON'
   "rx-open":        {"status":"open","metadata":{"task_kind":"reaction","gc.reaction_subject":"px-hasreaction"}},
   "px-rereact":     {"status":"open","metadata":{}},
   "rx-closed":      {"status":"closed","metadata":{"task_kind":"reaction","gc.reaction_subject":"px-rereact"}},
+  "px-trackonly":   {"status":"open","metadata":{}},
+  "rx-trackonly":   {"status":"open","metadata":{"task_kind":"reaction"},"dependencies":[{"dependency_type":"tracks","issue_id":"rx-trackonly","depends_on_id":"px-trackonly"}]},
   "px-fresh":       {"status":"open","metadata":{}}
 }
 JSON
@@ -402,6 +404,14 @@ has    "…and the skip names the cause"                             "already ha
 # return-0 no-op that does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-hasreaction --dry-run >/dev/null 2>&1 || rec=$?
 eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
+# A reaction linked to its subject ONLY by a tracks edge — its gc.reaction_subject
+# stamp landed empty or unreadable — still blocks a second reaction. The spec
+# dedups on EITHER signal, so the edge alone is enough (reaction_absent_guard).
+TRACKONLY_OUT="$(P sling px-trackonly --dry-run 2>&1 || true)"
+absent "a subject deduped by a tracks edge alone is NOT re-filed" "gc bd create" "$TRACKONLY_OUT"
+has    "…and that skip names the cause too" "already has an open first reaction" "$TRACKONLY_OUT"
+trec=0; P sling px-trackonly --dry-run >/dev/null 2>&1 || trec=$?
+eq     "…and the tracks-only CLI skip exits RC_ALREADY_REACTED (3)" "3" "$trec"
 # A CLOSED prior reaction does not block a re-reaction.
 has    "a subject whose prior reaction CLOSED can be re-reacted"    "gc bd create -t task" \
        "$(P sling px-rereact --dry-run 2>&1 || true)"

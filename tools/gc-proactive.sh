@@ -100,31 +100,62 @@ rig_store_ref() {
 }
 
 # reaction_absent_guard — a first reaction happens once AT A TIME. Refuse to
-# file a second reaction bead while one is still open for this subject: the
-# dedup key is (subject + kind), an open/in-progress task_kind=reaction bead
-# stamped gc.reaction_subject=<subject>. R carries that stamp from its create
-# call, so the query is reliable. Returns non-zero when such a reaction is
-# already open, so the caller skips filing another. A COMPLETED reaction has
-# closed its bead, so a later re-reaction (the subject became eligible again) is
-# not blocked — the dedup keys on OPEN reactions, not on history. An unreadable
-# store is not proof of absence, so it proceeds only when it can positively read
-# that none is open.
+# file a second reaction bead while one is still open for this subject. The
+# dedup key is (subject + kind): an open/in-progress task_kind=reaction bead
+# that names this subject either by its gc.reaction_subject stamp OR by a tracks
+# edge R --tracks--> subject. R normally carries both — the stamp rides its
+# create call, the edge is wired right after — but the two writes are not atomic,
+# so the stamp can land empty or unreadable while the edge stands; the spec
+# dedups on EITHER signal (specs/tk-5n01ns/reaction-bead-first-reaction.md).
+# Returns non-zero when such a reaction is already open, so the caller skips
+# filing another. A COMPLETED reaction has closed its bead, so a later
+# re-reaction (the subject became eligible again) is not blocked — the dedup
+# keys on OPEN reactions, not on history. An unreadable store is not proof of
+# absence: the guard proceeds only when it can positively read that none is
+# open, and fails CLOSED (refuses to file) when the edge lookup errors.
 reaction_absent_guard() {
     local bead="$1" existing
     if [ -n "$FIXTURE" ]; then
         [ -f "$FIXTURE/beads.json" ] || return 0
+        # Match on the gc.reaction_subject stamp OR a tracks edge to the subject
+        # (fixture edge shape: dependency_type + depends_on_id, as the scan.json
+        # fixtures carry them).
         existing="$(jq -r --arg s "$bead" '
             [ to_entries[] | (.value + {id: .key})
-              | select(((.metadata["gc.reaction_subject"] // "") == $s)
-                       and ((.metadata["task_kind"] // "") == "reaction")
-                       and (((.status // "open")) as $st | ($st == "open" or $st == "in_progress")))
+              | select(((.metadata["task_kind"] // "") == "reaction")
+                       and (((.status // "open")) as $st | ($st == "open" or $st == "in_progress"))
+                       and (((.metadata["gc.reaction_subject"] // "") == $s)
+                            or ([ (.dependencies // [])[]
+                                  | select(((.dependency_type // .type) // "") == "tracks")
+                                  | .depends_on_id ] | index($s) != null)))
               | .id ] | .[0] // ""' "$FIXTURE/beads.json" 2>/dev/null || printf '')"
     else
         local db; db="$(rig_beads_db)"
+        # (a) the primary link: the gc.reaction_subject stamp.
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         existing="$(gc bd list ${db:+--db "$db"} --status open,in_progress \
                         --metadata-field "gc.reaction_subject=$bead" --limit 0 --json 2>/dev/null \
             | jq -r 'if type=="array" then [ .[]? | select((.metadata["task_kind"] // "") == "reaction") | .id ] | .[0] // "" else "" end' 2>/dev/null || printf '')"
+        # (b) the fallback link: a tracks edge R --tracks--> subject, for a
+        # reaction whose stamp landed empty or unreadable. `gc bd dep list
+        # --direction=up` names the beads that track this subject; keep the
+        # open/in-progress reactions. A readable store answers definitively — a
+        # JSON array (the dependents, possibly none), or a "no issue found" error
+        # object when the subject has no bead at all (so nothing tracks it) — and
+        # both let the sling proceed. Anything else (empty output or a non-JSON
+        # error: an unreadable store) is not proof of absence, so fail CLOSED and
+        # refuse rather than risk a duplicate.
+        if [ -z "$existing" ]; then
+            local up
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 fields
+            up="$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=up --type=tracks --json 2>/dev/null || true)"
+            if printf '%s' "$up" | jq -e 'type=="array"' >/dev/null 2>&1; then
+                existing="$(printf '%s' "$up" | jq -r '[ .[]? | select(((.metadata["task_kind"] // "") == "reaction") and ((.status // "") as $st | ($st == "open" or $st == "in_progress"))) | .id ] | .[0] // ""' 2>/dev/null || printf '')"
+            elif ! printf '%s' "$up" | jq -e 'type=="object" and ((.error // "") | test("no issue"; "i"))' >/dev/null 2>&1; then
+                log "$PROG: sling: could not read the tracks-edge dedup for $bead (gc bd dep list --direction=up returned no usable answer) — refusing to file a possible duplicate. Retry when the store is readable."
+                return 1
+            fi
+        fi
     fi
     [ -z "$existing" ] && return 0
     log "$PROG: sling: $bead already has an open first reaction ($existing) — not filing another. A first reaction happens once at a time; it reacts when the pool claims $existing."
