@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Hermetic test for reconcile-rig-checkouts.sh.
 #
-# Uses real temp git repos as stand-in rigs and a fake `gc` (a text-file bead
-# ledger) on PATH. No dependency on the live city, Dolt, the mayor, or the
-# network. Covers: (a) a clean-behind rig advances; (b) a diverged rig is NOT
-# mutated and produces exactly one mayor escalation; (c) a re-run does not
-# duplicate it; (d) the escalation auto-closes once the rig ff-s cleanly;
-# (e) the HQ root is excluded.
+# Uses real temp git repos as stand-in rigs, a fake `gc` (a text-file bead
+# ledger) and a fake escalate.sh (a call recorder) on PATH. No dependency on
+# the live city, Dolt, an agent, or the network. Covers: (a) a clean-behind rig
+# advances; (b) a diverged rig is NOT mutated and files exactly one reconcile
+# bead; (c) a re-run does not duplicate that bead; (d) the bead auto-closes once
+# the rig ff-s cleanly; (e) the HQ root is excluded; (f) a divergence is raised
+# through escalate.sh, an advanced/HQ rig is not, and a recovered rig is not
+# re-escalated; (g) a configured pool that does not route falls back to the
+# human board.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,8 +24,14 @@ bad()  { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()   { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 commit() { echo "$2" > "$1/f.txt"; git -C "$1" add -A; git -C "$1" commit -qm "$2"; }
-# count OPEN escalation beads in the fake ledger for a given rig key.
+# count OPEN reconcile beads in the fake ledger for a given rig key.
 open_count() { awk -F'|' -v k="$1" '$2==k && $3=="open"' "$TMP/ledger" 2>/dev/null | wc -l | tr -d ' '; }
+# id of the OPEN reconcile bead for a rig key (empty if none).
+bead_for()   { awk -F'|' -v k="$1" '$2==k && $3=="open"{print $1; exit}' "$TMP/ledger" 2>/dev/null; }
+# escalate.sh calls recorded for a rig key, and the subject/pool of the first/last.
+esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
+esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
+esc_last_pool() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print p}' "$TMP/escalations" 2>/dev/null; }
 
 # --- Build a remote with two commits, then derive three checkouts. ----------
 SRC="$TMP/src"; git init -q -b main "$SRC"; commit "$SRC" c1; commit "$SRC" c2
@@ -75,25 +84,70 @@ esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
+
+# Fake escalate.sh: record each call as `<key>|<subject>|<pool>` and, so the
+# pool->human fallback can be exercised, exit non-zero for a pool named in
+# FAKE_BAD_POOL — exactly as the real escalate.sh exits non-zero on a route no
+# live agent claims.
+cat > "$TMP/bin/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+subject=""; key=""; pool=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --subject) subject="${2:-}"; shift 2;;
+    --key)     key="${2:-}";     shift 2;;
+    --message) shift 2;;
+    --pool)    pool="${2:-}";    shift 2;;
+    *) shift;;
+  esac
+done
+printf '%s|%s|%s\n' "$key" "$subject" "$pool" >> "$FAKE_ESCALATIONS"
+[ -n "$pool" ] && [ "$pool" = "${FAKE_BAD_POOL:-}" ] && exit 1
+exit 0
+ESC
+chmod +x "$TMP/bin/escalate.sh"
+
 export PATH="$TMP/bin:$PATH" FAKE_RIGS_JSON="$TMP/rigs.json" FAKE_LEDGER="$TMP/ledger"
+export GC_RECONCILE_ESCALATE_TOOL="$TMP/bin/escalate.sh" FAKE_ESCALATIONS="$TMP/escalations"
+: > "$TMP/escalations"
 
 # --- Run 1: alpha advances, beta escalates, hq is skipped. -------------------
 bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/alpha" rev-parse HEAD)" "$REMOTE_HEAD" "clean-behind rig advances to origin"
 eq "$(git -C "$TMP/beta"  rev-parse HEAD)" "$BETA_DIVERGED" "diverged rig is not mutated"
 grep -q c3-local < <(git -C "$TMP/beta" log --oneline) && ok "diverged rig keeps local commit" || bad "diverged rig keeps local commit"
-eq "$(open_count beta)"  "1" "diverged rig produces exactly one escalation"
-eq "$(open_count alpha)" "0" "advanced rig produces no escalation"
+eq "$(open_count beta)"  "1" "diverged rig files exactly one reconcile bead"
+eq "$(open_count alpha)" "0" "advanced rig files no reconcile bead"
 eq "$(open_count loomington)" "0" "HQ root is excluded (not reconciled)"
 
-# --- Run 2: idempotent — no duplicate escalation. ----------------------------
-bash "$SCRIPT" >/dev/null
-eq "$(open_count beta)" "1" "re-run does not duplicate the escalation"
+# The divergence is raised through escalate.sh, on the reconcile bead as subject;
+# an advanced or HQ rig raises nothing.
+eq "$(esc_count beta)"  "1" "diverged rig is escalated through escalate.sh"
+eq "$(esc_subject beta)" "$(bead_for beta)" "escalation subject is the reconcile bead"
+eq "$(esc_last_pool beta)" "" "default escalation names no pool (human helm board)"
+eq "$(esc_count alpha)" "0" "advanced rig is not escalated"
+eq "$(esc_count loomington)" "0" "HQ root is not escalated"
 
-# --- Run 3: rig resolved -> escalation auto-closes. --------------------------
+# --- Run 2: idempotent — no duplicate reconcile bead. ------------------------
+# escalate.sh is called again (it dedups the visit on its own side, proven in
+# its own test); the reconcile bead must not be duplicated.
+bash "$SCRIPT" >/dev/null
+eq "$(open_count beta)" "1" "re-run does not duplicate the reconcile bead"
+
+# --- Run 3: rig resolved -> bead auto-closes, no fresh escalation. -----------
+BETA_ESC_BEFORE="$(esc_count beta)"
 git -C "$TMP/beta" reset --hard -q origin/main
 bash "$SCRIPT" >/dev/null
-eq "$(open_count beta)" "0" "escalation auto-closes after a clean fast-forward"
+eq "$(open_count beta)" "0" "reconcile bead auto-closes after a clean fast-forward"
+eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig is not re-escalated"
+
+# --- Run 4: a configured pool that does not route falls back to human. -------
+git -C "$TMP/beta" reset --hard -q "$BETA_DIVERGED"    # re-diverge beta
+: > "$TMP/escalations"
+RECONCILE_ESCALATION_POOL="rig/absent.pool" FAKE_BAD_POOL="rig/absent.pool" \
+  bash "$SCRIPT" >/dev/null
+eq "$(esc_count beta)" "2" "an unroutable pool triggers a second, fallback escalate call"
+eq "$(esc_last_pool beta)" "" "the fallback escalation carries no pool (human helm board)"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
