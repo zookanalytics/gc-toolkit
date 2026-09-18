@@ -167,11 +167,6 @@ case "$1 ${2:-}" in
     # below, so the default fixture models a store that keeps what it was told;
     # FAKE_SETTLED_DROP models the pair that silently does not land.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
-    # What gc.proactive_reaction reads back as. The release stamps it =1 as the
-    # completion proof two guards key on; FAKE_PROACTIVE holds it so a test models
-    # the stamp LANDING and landing empty (the silent drop a multi-pair update can
-    # produce) with the same stub, the way FAKE_SETTLED does for the settled key.
-    proactive="$(cat "${FAKE_PROACTIVE:-/dev/null}" 2>/dev/null || true)"
     # What gc.session_name / gc.session_id read back as: the executor identity a
     # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them, so a
     # test models the clear LANDING (empty) and being DROPPED (the pin still
@@ -207,8 +202,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'
-    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg pr "$proactive" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.proactive_reaction":$pr,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
+    if [ -n "$convoy" ]; then jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'
+    else jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg sn "$sname" --arg si "$sid" --arg br "$br" --arg oc "$outcome" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br,"gc.outcome":$oc}}]'; fi ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     # Model bd's close-authority guard: a visit HELD by another session is
@@ -242,16 +237,6 @@ case "$1 ${2:-}" in
             1)     ;;
             multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
             *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
-          esac ;;
-        # gc.proactive_reaction=1 is the release's completion proof, read back the
-        # way gc.takeaway_settled is. FAKE_PROACTIVE_DROP=1 loses every one of them
-        # (no repair recovers it); =multi loses it only out of a multi-pair release
-        # write, the shape the lone repair write recovers.
-        gc.proactive_reaction=*)
-          case "${FAKE_PROACTIVE_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
-            *)     printf '%s' "${a#gc.proactive_reaction=}" > "$FAKE_PROACTIVE" ;;
           esac ;;
         # gc.outcome lands per visit so the dismiss read-back sees the stamp.
         # FAKE_OUTCOME_DROP=1 loses every one of them though the call exits 0,
@@ -320,7 +305,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
-       FAKE_SETTLED="$TMP/settled" FAKE_PROACTIVE="$TMP/proactive" FAKE_EXEC="$TMP/exec" \
+       FAKE_SETTLED="$TMP/settled" FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_OUTCOME_DIR="$TMP/outcomes"
