@@ -213,7 +213,7 @@ has already covered.
 SEEN=$(gc bd list -l observation --status open,in_progress,blocked,deferred,closed --json --limit=0 2>/dev/null | jq -r '.[] | select(.metadata.task_kind == "observation") | [(.metadata["obs.provenance"] // ""), (.metadata["obs.category"] // "")] | @tsv')
 
 # Per candidate; $CATEGORY is the slug derived in §3.
-KEY="pr:$REPO_SLUG#$N:comment:$CID"
+KEY="pr:${REPO_SLUG}#${N}:comment:${CID}"
 PAIR=$(printf '%s\\t%s' "$KEY" "$CATEGORY")
 printf '%s\\n' "$SEEN" | grep -Fxq "$PAIR" && { echo "dedup: $KEY + $CATEGORY already recorded — skipping"; continue; }
 ```
@@ -233,7 +233,7 @@ $STATEMENT
 
 ## Quote
 > $QUOTE
-— $USER, https://github.com/$REPO_SLUG/pull/$N (comment $CID)
+— ${USER}, https://github.com/${REPO_SLUG}/pull/${N} (comment ${CID})
 
 ## Proposed norm
 $NORM
@@ -242,7 +242,7 @@ $NORM
 # Optionally append a '## Context' section (what the diff was doing) when it
 # helps the distiller read the quote.
 
-BEAD=$(gc bd create "obs: $STATEMENT_ONE_LINE (pr:$REPO_SLUG#$N)" -t task -l learning -l observation -d "$BODY" --json | jq -r '.id // .[0].id')
+BEAD=$(gc bd create "obs: ${STATEMENT_ONE_LINE} (pr:${REPO_SLUG}#${N})" -t task -l learning -l observation -d "$BODY" --json | jq -r '.id // .[0].id')
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { echo "WARN: could not create observation for $KEY; skipping" >&2; continue; }
 
 # Non-atomic create→update: a crash between the two leaves an observation

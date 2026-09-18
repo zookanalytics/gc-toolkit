@@ -326,7 +326,7 @@ fast-forward only, and stop on divergence — never create a different branch:
 ```bash
 BRANCH=$(gc bd show "$WORK_BEAD_ID" --json | jq -r '.[0].metadata.branch // empty')
 if [ -n "$BRANCH" ]; then
-  git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || echo "Could not fetch metadata.branch=$BRANCH; checking local refs."
+  git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" || echo "Could not fetch metadata.branch=$BRANCH; checking local refs."
   if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
     if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
       git checkout "$BRANCH" || exit 1
