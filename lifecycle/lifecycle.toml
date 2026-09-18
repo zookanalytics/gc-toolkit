@@ -338,8 +338,17 @@ since_format = "RFC 3339 UTC"
 # Four field-vocabulary rules the whole registry rests on, each settled against
 # the code that reads it:
 #
-# ROUTE. gc.routed_to is written only through lifecycle.sh --route, which
-# refuses a direct --set. A route value is a rig-qualified pool identity
+# ROUTE. On a bead making a lifecycle transition, gc.routed_to is written by
+# lifecycle.sh --route in the same atomic update as the --to edge, and a direct
+# --set of the key is refused there, so a transition-coupled route cannot bypass
+# it. Routes on beads outside that state machine are stamped directly with
+# gc bd update --set-metadata by three writers, each on a bead with no --to edge
+# for --route to carry: signoff.sh's round cap parks the anchor with
+# gc.routed_to=human beside merge_hold=signoff_cap and a verified gc.takeaway,
+# leaving merge_result unchanged; escalate.sh stamps the route on the visit it
+# files and repoints a stale visit route at a live pool; doctor-finding-gate.sh
+# routes the finding it creates to its fix pool. A route value is a rig-qualified
+# pool identity
 # (<rig>/<agent>) or the park sentinel `human` ([machine] park_route); the pool
 # offer is exact byte equality (gascity hookClaimMatchesRoute), so a bare,
 # unqualified or padded value matches no pool and doctor/check-routed-work-
@@ -691,13 +700,16 @@ keys = [
 # treat an already-disposed anchor as a no-op, and the helm board renders it.
 keys = [
   "gc.superseded_by", "gc.superseded_by_store",
+  "superseded_by", "superseded_by_store",
   "gc.supersedes", "gc.supersedes_store", "duplicate_of", "duplicate_of_store",
 ]
 # gc.superseded_by / _store — on the ORIGIN bead, the successor it retired into
 #   and (only where the id prefix is ambiguous) that successor's store.
 #   bead-rehome.sh writes and reads them back and refuses to overwrite a
 #   DIFFERENT successor. Flat dotted keys read by bracket access; the non-dotted
-#   `superseded_by` is a legacy fallback read only. Never cleared. Bead id / store.
+#   `superseded_by` and `superseded_by_store` are legacy fallbacks, read only —
+#   bead-rehome.sh and duplicate-sweep.sh fall back to them when the dotted form
+#   is absent, and no pack path writes them. Never cleared. Bead id / store.
 # gc.supersedes / _store — the reverse pointer on the SUCCESSOR bead, naming the
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
@@ -889,11 +901,12 @@ keys = [
 keys = [
   "gc.routed_to", "gc.execution_routed_to", "gc.outcome",
   "assignee", "gc.session_id", "gc.session_name", "gc.session_affinity",
-  "gc.claimed_at", "gc.kind", "gc.step_id", "gc.step_ref", "gc.root_bead_id",
-  "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
-  "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*", "pin_awake",
+  "gc.claimed_at", "gc.kind", "gc.synthetic", "gc.step_id", "gc.step_ref",
+  "gc.root_bead_id", "gc.root_store_ref", "gc.input_convoy_id", "gc.formula_source",
+  "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*",
+  "pin_awake", "configured_named_session",
   "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
-  "gc.work_outcome",
+  "gc.work_outcome", "work_outcome",
 ]
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
@@ -925,3 +938,14 @@ keys = [
 #   no-op duplicate is disposable, pr-stack.sh drops a no-op row from a branch's
 #   ledger, and each falls back to the legacy bare `work_outcome` alias. Absent
 #   leaves the disposition unstated. Never cleared.
+# configured_named_session — on a session bead, the authoritative "standing
+#   named" gate: "true" marks a session the pack's [[named_session]] config
+#   declares standing, applied by the runtime. pin-keepalive.sh reads it beside
+#   pin_awake to decide which conversational sessions to keep pinned; the pack
+#   does not write it. Absent or any value but "true" means the session is not a
+#   standing named one. A boolean-valued string.
+# gc.synthetic — "true" on a machine-minted convoy, written by the runtime that
+#   mints it. liveness-sweep.sh's machine_convoy test reads it, with the sling-
+#   and input-convoy title prefixes, as a signal that a convoy is machine-owned
+#   rather than a person's. The pack does not write it. Absent means the convoy
+#   is not marked synthetic. A boolean-valued string.
