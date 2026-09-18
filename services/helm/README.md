@@ -157,11 +157,14 @@ helm-svc board --all --json --limit=0   # uncapped, for tooling
 `--json` emits a bare **array**, not the service's envelope, because that array
 is what `assets/scripts/tmux-pick-helm.sh` consumes — it runs `jq 'length'` and
 `.[]` over this output, and the `{generated_at,total,tiles}` envelope would make
-every row invisible while still parsing cleanly. Overview rows are capped at 50
-by default with separate budgets of 15 for `parked` rows and 10 for `DONE` rows
-(`--limit=0` opts out of all three); the queue takes the same 50 with neither
-sub-budget, because there a parked row is a conversation waiting on the operator
-rather than a straggler, and no closed row reaches it at all. Exit codes: `0`
+every row invisible while still parsing cleanly. Overview rows are grouped into
+dependency families and capped by `CapFamilies`, which never splits a family. It
+admits whole families in rank order until the live rows reach the limit, 50 by
+default and set by `--limit=N`, and rations the terminal DONE families, each a
+closed anchor, against a separate budget of 10. `--limit=0` opts out of both. The
+queue takes the same 50 as a flat, ungrouped truncation with no DONE budget,
+because there a parked row is a conversation waiting on the operator rather than
+a straggler, and no closed row reaches it at all. Exit codes: `0`
 rendered, `2` usage, `3` gather failed or an empty queue could not be stood
 behind — a failed gather is never rendered as an empty "nothing needs you".
 
