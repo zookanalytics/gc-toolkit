@@ -3,13 +3,12 @@
 # react.
 # Job: write the operator-facing state the helm board renders. The board
 # itself is `helm-svc board` (services/helm); this script renders nothing.
-# Contract:
-#   gc-helm open  <bead-id> [--reason "..."] [--body "..."]   file one visit, parked on the board (one open visit per subject)
-#   gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]   spawn a converse sitting for a parked visit and attach
-#   gc-helm react <bead-id> [--reason "..."]                  sling a proactive first reaction
-#   gc-helm takeaway <bead-id> "<text>" [--by ...] [--waiting-on <id>]... [--release [--route <rig>/<agent>]]
-#   gc-helm demand <gated-bead> "<text>" [--assignee ...] [--also-blocks <id>]...
-#   gc-helm dismiss  [<bead-id>] [--reason "..."]             end the sitting by closing the subject's open visit; the board is untouched, so a DONE row ages out on its own (subject inferred from the current sitting when omitted)
+# Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
+# write verbs open, engage, react, takeaway, demand, dismiss, and the read-only
+# resolve. open, engage and react take a <subject> (a bead id, a PR number or
+# URL, or a superseded id) and resolve it to the live bead that owns the work
+# by metadata and the graph, never a title; an unresolvable or ambiguous
+# reference is refused and nothing is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
@@ -46,9 +45,16 @@ Usage:
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
   gc-helm dismiss  [<bead-id>] [--reason "..."]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted)
+  gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
 
 The board is `helm-svc board` (services/helm). This script carries only the
-write verbs. open files a visit in the picked bead's continuation group and
+write verbs. open, engage and react take the subject as a bead id, a PR number
+or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
+work by metadata and the graph — a PR number/URL to the anchor whose
+pr_number/pr_url records it, a closed+superseded id along gc.superseded_by to
+its successor — never an id scraped from a title. An unresolvable or ambiguous
+reference is refused, naming what it could not resolve; nothing is filed.
+open files a visit in the picked bead's continuation group and
 parks it on the board (gc.routed_to=human); its --reason is the short title
 tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
@@ -389,6 +395,181 @@ $_reap_todo
 REAP
 }
 # <<< reap-release-molecule
+
+# ── Subject resolver: an operator reference to the live bead it owns ──
+# The operator supplies a subject by reading it off whatever is in front of
+# them — a PR, a board row, a bead whose title cites its lineage. A PR/bead
+# title legitimately names OTHER beads (`gc.supersedes`), so an id scraped from
+# one opens the wrong bead: the settled predecessor of a fold, or nothing. The
+# fix is a deterministic resolver keyed on structured metadata and the graph,
+# never on title text, so a PR number or a superseded id cannot open a dead
+# bead.
+#
+# resolve_live_subject <reference> sets RESOLVED_SUBJECT. A live bead id, and
+# any reference this resolver does not recognize (a topic string), pass through
+# unchanged for the caller's own existence gate to judge. It fails CLOSED
+# (exit 4) on a PR that resolves to no live bead or to several, when a store
+# the PR search must read is unreadable, and on a superseded-by cycle, naming
+# what it could not resolve — the alternative is filing on the wrong bead,
+# which is the defect this exists to end.
+#
+#   PR number (615) or URL (…/pull/615)  ->  the anchor whose pr_number / pr_url
+#                                            metadata matches (never a title)
+#   closed + gc.superseded_by            ->  followed to the live successor
+#   live bead id                         ->  unchanged
+RESOLVED_SUBJECT=""
+resolve_live_subject() {
+    _rls_ref="$1"
+    RESOLVED_SUBJECT="$_rls_ref"
+
+    # Rig health first: the PR search reads every rig's store, so validate the
+    # rig list (exit 3) before any read reaches the wire, and cache it here for
+    # the search and for the caller's later rig_path_for_bead.
+    enumerate_rigs
+
+    # Classify without touching the store. A PR URL pins the repo; a bare
+    # number does not. A bead id carries a rig-prefix and a dash; a topic
+    # string is neither and passes through untouched.
+    _rls_prnum=""; _rls_prurl=""
+    case "$_rls_ref" in
+        http://*/pull/[0-9]*|https://*/pull/[0-9]*)
+            _rls_prurl="$_rls_ref"
+            _rls_prnum=$(printf '%s' "$_rls_ref" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p') ;;
+        *[!0-9]*) : ;;                       # a non-digit: not a bare PR number
+        [0-9]*)   _rls_prnum="$_rls_ref" ;;  # all digits: a bare PR number
+    esac
+
+    if [ -n "$_rls_prnum" ]; then
+        _resolve_pr_reference "$_rls_prnum" "$_rls_prurl"
+        return 0
+    fi
+
+    case "$_rls_ref" in
+        *-*) _resolve_superseded_reference "$_rls_ref" ;;
+    esac
+    return 0
+}
+
+# _resolve_pr_reference <number> <url-or-empty> — set RESOLVED_SUBJECT to the
+# LIVE bead that RECORDS this PR, or exit 4 fail-closed. pr_number / pr_url are
+# bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
+# --metadata-field mangles a numeric value into non-JSON here. A URL additionally
+# pins the repo, so a bare number several repos share is disambiguated by it.
+# The status set is the pack's live-PR set (pr-facts.sh:247, merge.sh:126):
+# an anchor is live in deferred/hooked/pinned too, so a narrower query would
+# fail to resolve a PR whose bead sits in one of those states. The number's
+# uniqueness holds only across EVERY live store, so any rig the search cannot
+# fully read refuses the whole resolution (exit 4) naming that ledger, rather
+# than resolve from the stores that answered while a dropped one may also record
+# the number: a rig with no .beads ledger to pin with --db, a list that exits
+# non-zero, and an answer that is not a JSON array.
+_resolve_pr_reference() {
+    _pr_num="$1"; _pr_url="$2"
+    # The URL pins the repo. A browser copy can be a PR subpage (…/pull/615/files)
+    # or carry a query string, but pr-open.sh stores and merge.sh compares the
+    # canonical …/pull/<number> form, so canonicalize the paste before matching.
+    _pr_url=$(printf '%s' "$_pr_url" | tr -d '[:space:]' | sed -e 's#\(/pull/[0-9][0-9]*\).*#\1#' -e 's#/*$##')
+    _pr_hits=""
+    _pr_paths=$(printf '%s' "$RIGS" | jq -r '.[].path // ""' 2>/dev/null) || _pr_paths=""
+    _pr_saved_ifs=$IFS
+    IFS='
+'
+    for _pr_p in $_pr_paths; do
+        _pr_rig=$(printf '%s' "$RIGS" | jq -r --arg p "$_pr_p" '.[] | select(.path == $p) | .name' 2>/dev/null | head -n1)
+        # A listed rig whose ledger cannot be pinned with --db would make the
+        # per-rig read fall back to the session default store: one store read
+        # twice, this rig never read. That is the same incomplete cross-store
+        # proof a non-zero or non-array read leaves below, so refuse it the same
+        # way. Resolving a bare number while a live rig went unread could file on
+        # the wrong repo's anchor.
+        if [ -z "$_pr_p" ] || [ ! -d "$_pr_p/.beads" ]; then
+            echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} (${_pr_p:-<no path>}) has no readable .beads store to pin with --db, so the search would fall back to the session default store and never read this rig. A bare PR number is unique only across every live store, so resolving it with a rig unread could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
+            exit 4
+        fi
+        _pr_db="$_pr_p/.beads"
+        # Capture bd's OWN exit status — a pipe to scrub would report scrub's. A
+        # store that will not read (non-zero exit) or answers with something that
+        # is not a JSON array (an error object, a wedged empty answer) leaves the
+        # cross-store uniqueness proof incomplete, so refuse rather than resolve
+        # from the stores that answered.
+        _pr_rc=0
+        _pr_raw=$(gc bd list --db "$_pr_db" --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json 2>/dev/null) || _pr_rc=$?
+        _pr_rows=$(printf '%s' "$_pr_raw" | scrub)
+        if [ "$_pr_rc" -ne 0 ] || ! printf '%s' "$_pr_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            _pr_led="$_pr_db"
+            if [ "$_pr_rc" -ne 0 ]; then _pr_why="gc bd list exited $_pr_rc"; else _pr_why="its answer was not a JSON array"; fi
+            echo "$PROG: PR #$_pr_num is unverifiable: the ledger for rig ${_pr_rig:-?} ($_pr_led) did not read ($_pr_why). A bare PR number is unique only across every live store, so resolving it from the stores that answered could file a visit on the wrong repo's anchor. Repair that store (gc doctor / Dolt) or pass the live bead id. Nothing filed." >&2
+            exit 4
+        fi
+        _pr_found=$(printf '%s' "$_pr_rows" | jq -r --arg n "$_pr_num" --arg u "$_pr_url" '
+            [ .[]? | objects
+              | select(((.metadata.pr_number // "") | tostring) == $n)
+              | select($u == "" or (((.metadata.pr_url // "") | gsub("[[:space:]]";"") | sub("(?<p>/pull/[0-9]+).*"; .p)) == $u))
+              | .id ] | .[]' 2>/dev/null) || _pr_found=""
+        for _pr_id in $_pr_found; do
+            [ -n "$_pr_id" ] && _pr_hits="$_pr_hits$_pr_id
+"
+        done
+    done
+    IFS=$_pr_saved_ifs
+
+    _pr_uniq=$(printf '%s' "$_pr_hits" | awk 'NF && !seen[$0]++')
+    _pr_count=$(printf '%s\n' "$_pr_uniq" | awk 'NF{c++} END{print c + 0}')
+
+    if [ "$_pr_count" -eq 0 ]; then
+        echo "$PROG: no open bead records PR #$_pr_num${_pr_url:+ ($_pr_url)}. If it merged its anchor is closed and there is nothing live to open a visit on; otherwise pass the live bead id. Nothing filed." >&2
+        exit 4
+    fi
+    if [ "$_pr_count" -gt 1 ]; then
+        echo "$PROG: PR #$_pr_num is ambiguous — recorded by $(printf '%s' "$_pr_uniq" | tr '\n' ' '). Pass the PR URL to pin the repo, or the live bead id directly. Nothing filed." >&2
+        exit 4
+    fi
+    RESOLVED_SUBJECT=$(printf '%s' "$_pr_uniq" | awk 'NF{print; exit}')
+    echo "$PROG: PR #$_pr_num -> $RESOLVED_SUBJECT (matched by pr_number/pr_url metadata, never a title)." >&2
+}
+
+# _resolve_superseded_reference <bead-id> — follow a settled disposition
+# (status closed + gc.superseded_by) to its live successor and set
+# RESOLVED_SUBJECT. bead-rehome.sh stamps gc.superseded_by (+ the legacy bare
+# key) alongside gc.superseded_by_store; the successor is read cross-ledger by
+# its rig-unique id, so that store hint is not needed to find it. A live bead,
+# or one that does not resolve, passes through unchanged for the caller's
+# existence gate; a cycle is refused (exit 4) rather than guessed.
+_resolve_superseded_reference() {
+    _ss_orig="$1"; _ss_cur="$1"; _ss_seen=" $1 "; _ss_hops=0
+    while [ "$_ss_hops" -le 24 ]; do
+        _ss_row=$(gc bd show "$_ss_cur" --json 2>/dev/null | scrub) || _ss_row=""
+        _ss_this=$(printf '%s' "$_ss_row" | jq -c --arg b "$_ss_cur" \
+            'if type == "array" then (first(.[] | objects | select((.id // "") == $b)) // null) else null end' 2>/dev/null) || _ss_this="null"
+        if [ -z "$_ss_this" ] || [ "$_ss_this" = "null" ]; then
+            # The reference ITSELF does not resolve: pass it through unchanged so
+            # the caller's existence gate reports a clean not-found.
+            [ "$_ss_cur" = "$_ss_orig" ] && { RESOLVED_SUBJECT="$_ss_orig"; return 0; }
+            # A SUCCESSOR we followed does not resolve (a broken or cross-store
+            # pointer). Refuse — never fall back to opening the settled predecessor.
+            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken or cross-store pointer). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
+            exit 4
+        fi
+        _ss_status=$(printf '%s' "$_ss_this" | jq -r '.status // ""' 2>/dev/null) || _ss_status=""
+        _ss_succ=$(printf '%s' "$_ss_this" | jq -r '(.metadata["gc.superseded_by"] // .metadata.superseded_by // "")' 2>/dev/null) || _ss_succ=""
+        if [ "$_ss_status" = "closed" ] && [ -n "$_ss_succ" ]; then
+            case "$_ss_seen" in
+                *" $_ss_succ "*)
+                    echo "$PROG: $_ss_orig leads to a superseded-by cycle at $_ss_succ; refusing to guess which is live. Pass the live bead id directly. Nothing filed." >&2
+                    exit 4 ;;
+            esac
+            _ss_seen="$_ss_seen$_ss_succ "
+            _ss_cur="$_ss_succ"
+            _ss_hops=$((_ss_hops + 1))
+            continue
+        fi
+        break
+    done
+    if [ "$_ss_cur" != "$_ss_orig" ]; then
+        echo "$PROG: $_ss_orig is closed and superseded -> resolving to the successor $_ss_cur (never the settled predecessor)." >&2
+    fi
+    RESOLVED_SUBJECT="$_ss_cur"
+}
 
 # ── Release helper: quiesce a released molecule ──────────────────────
 # A molecule whose anchor is out of play — parked by a stand-down, or closed by
@@ -1261,6 +1442,30 @@ cmd_demand() {
     echo "demand $demand blocks $gated (by $by${who:+, for $who}): $text"
 }
 
+# ── Verb: resolve ────────────────────────────────────────────────────
+# resolve <reference> — print the LIVE bead a reference resolves to, the same
+# way open/engage/react resolve their subject: a PR number/URL to the anchor
+# that records it, a closed+superseded id to its successor. A live bead id, or
+# any reference the resolver does not recognize (a topic string), prints
+# unchanged; an unresolvable or ambiguous PR, or a superseded-by cycle, is
+# refused (exit 4) naming what it could not resolve. Read-only — it files
+# nothing. gc-visit-open.sh calls this before it decides a reference is a new
+# topic, so a PR number or URL reaches the resolver instead of becoming a topic
+# bead titled with its number.
+cmd_resolve() {
+    resolve_ref=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: resolve: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$resolve_ref" ] || { echo "$PROG: resolve takes one reference" >&2; exit 2; }; resolve_ref="$1"; shift ;;
+        esac
+    done
+    case "$resolve_ref" in "") echo "$PROG: resolve needs <bead-id|pr-number|pr-url>" >&2; usage; exit 2 ;; esac
+    resolve_live_subject "$resolve_ref"
+    printf '%s\n' "$RESOLVED_SUBJECT"
+}
+
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a VISIT on the bead — a small child bead in the subject's
 # continuation group, parked on the helm board via `gc.routed_to=human` (the
@@ -1285,6 +1490,11 @@ cmd_open() {
         esac
     done
     case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
+
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # BEFORE the rig is derived from the id prefix (a PR number has none).
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
 
     # Pin bd at the bead's rig (cross-rig filing) and export its rig as GC_RIG
     # so the visit is filed in the subject's rig store and the board gathers it
@@ -1422,6 +1632,11 @@ cmd_react() {
     [ -x "$tool" ] || tool="$(command -v gc-proactive.sh 2>/dev/null || true)"
     [ -n "$tool" ] && [ -x "$tool" ] \
         || { echo "$PROG: react: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)" >&2; exit 4; }
+
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # (parity with open), before the rig is derived from the id prefix.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
 
     # Pin bd at the bead's rig (parity with open).
     path=$(rig_path_for_bead "$bead")
@@ -1789,6 +2004,11 @@ cmd_engage() {
     esac
     template="converse-$engage_model"
 
+    # Resolve a PR reference or a settled disposition to the live owning bead
+    # (parity with open), before the rig is derived from the id prefix.
+    resolve_live_subject "$bead"
+    bead="$RESOLVED_SUBJECT"
+
     # Pin bd at the subject's rig, as open/dismiss do, so the visit lookup and
     # assignment read and write the ledger the picked bead lives in. A prefix
     # no rig carries is refused here: the converse templates are rig-scoped, so
@@ -2112,6 +2332,7 @@ case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
     engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
+    resolve)       shift; cmd_resolve "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
