@@ -5,7 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/steveyegge/beads"
@@ -236,10 +235,12 @@ func visitSubjects(sittings []board.Sitting) []string {
 }
 
 // workflowRoot is one graph.v2 molecule root as the in-flight join needs it:
-// the convoy that names its work bead, plus every session stamped on the root
-// or on its steps.
+// the work bead its input convoy tracks, plus every session stamped on the root
+// or on its steps. The member is resolved in-process during the rig gather (see
+// convoyMembers); the convoy id is kept as the key that resolution reads.
 type workflowRoot struct {
 	convoyID string
+	member   string // the convoy's single tracked member, "" if not exactly one
 	sessions []string
 }
 
@@ -287,6 +288,7 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 	}
 
 	var out []workflowRoot
+	var convoyIDs []string
 	for _, iss := range roots {
 		if iss == nil {
 			continue
@@ -301,6 +303,49 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 			continue
 		}
 		out = append(out, workflowRoot{convoyID: convoy, sessions: names})
+		convoyIDs = append(convoyIDs, convoy)
+	}
+
+	// Resolve each convoy to its single tracked member from THIS rig's store,
+	// in one batched read. The input convoy is minted by the sling in its
+	// root's own rig, so its `tracks` edge is always local — no cross-rig read
+	// and no `gc convoy status` subprocess.
+	members := convoyMembers(ctx, st, r, convoyIDs, g)
+	for i := range out {
+		out[i].member = members[out[i].convoyID]
+	}
+	return out
+}
+
+// convoyMembers resolves each convoy to its SINGLE tracked member from the rig
+// store, keyed by convoy id. The one-member rule is a fail-closed gate: a convoy
+// that tracks any other number resolves to no entry, which resolveInflight reads
+// as "no claim about movement" rather than a guess. One batched
+// GetDependencyRecordsForIssues — the read this gather already spends on convoy
+// anchors — serves the whole set, so the in-flight join costs no per-root
+// subprocess. A failed read narrows the join and is noted partial, the same
+// best-effort direction as every other join in this file.
+func convoyMembers(ctx context.Context, st beadStore, r rigRef, convoyIDs []string, g *gatherState) map[string]string {
+	convoyIDs = uniqueStrings(convoyIDs)
+	if len(convoyIDs) == 0 {
+		return nil
+	}
+	recs, err := st.GetDependencyRecordsForIssues(ctx, convoyIDs)
+	if err != nil {
+		g.note(true, []string{"convoy-members@" + r.name + ": " + err.Error()})
+		return nil
+	}
+	out := make(map[string]string, len(convoyIDs))
+	for id, ds := range recs {
+		var members []string
+		for _, d := range ds {
+			if d != nil && string(d.Type) == "tracks" {
+				members = append(members, d.DependsOnID)
+			}
+		}
+		if members = uniqueStrings(members); len(members) == 1 {
+			out[id] = members[0]
+		}
 	}
 	return out
 }
@@ -329,60 +374,30 @@ func uniqueStrings(in []string) []string {
 // Joining on root existence alone would flip every husk to "in flight" and
 // trade a false stall for a false all-clear — strictly the worse failure on a
 // board whose job is to say what needs a human. So a root is resolved only when
-// one of its stamped sessions is live, which also bounds the convoy reads by
-// the number of live polecats rather than by the size of the husk pile.
-func resolveInflight(ctx context.Context, gc gcClient, roots []workflowRoot, ownerState map[string]string, g *gatherState) map[string][]string {
-	type job struct {
-		convoyID string
-		sessions []string
-	}
-	var live []job
+// one of its stamped sessions is live.
+//
+// The work bead each convoy tracks is resolved in-process by convoyMembers
+// during the rig gather, so this join reads it off the root rather than spawning
+// a `gc convoy status` per live root. A root whose convoy did not resolve to
+// exactly one member carries no member and makes no claim about movement,
+// exactly as the one-member rule required before.
+func resolveInflight(roots []workflowRoot, ownerState map[string]string) map[string][]string {
+	out := map[string][]string{}
 	for _, r := range roots {
+		if r.member == "" {
+			continue // not a one-member convoy: no claim about movement
+		}
 		var alive []string
 		for _, n := range r.sessions {
 			if st, ok := ownerState[n]; ok && st != "archived" && st != "closed" {
 				alive = append(alive, n)
 			}
 		}
-		if len(alive) > 0 {
-			live = append(live, job{convoyID: r.convoyID, sessions: alive})
+		if len(alive) == 0 {
+			continue
 		}
+		out[r.member] = uniqueStrings(append(out[r.member], alive...))
 	}
-	if len(live) == 0 {
-		return nil
-	}
-
-	// One `gc convoy status` per live root. They are independent, so run them
-	// concurrently under a small bound: this is the only per-item subprocess in
-	// the gather and it is what a cold CLI run would otherwise serialize.
-	const maxParallel = 8
-	sem := make(chan struct{}, maxParallel)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	out := map[string][]string{}
-
-	for _, j := range live {
-		wg.Add(1)
-		go func(j job) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			member, err := gc.ConvoyMember(ctx, j.convoyID)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				g.note(true, []string{"convoy status " + j.convoyID + ": " + err.Error()})
-				return
-			}
-			if member == "" {
-				return // not a one-member convoy: no claim about movement
-			}
-			out[member] = uniqueStrings(append(out[member], j.sessions...))
-		}(j)
-	}
-	wg.Wait()
-
 	if len(out) == 0 {
 		return nil
 	}

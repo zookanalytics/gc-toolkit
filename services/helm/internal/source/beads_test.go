@@ -429,12 +429,11 @@ func populatedStore() *fakeStore {
 type fakeGC struct {
 	sessions map[string]string
 	convoys  []convoyRow
-	members  map[string]string // convoy id -> single tracked member
-	err      error             // when set, every call fails with it
-	memberN  int               // ConvoyMember call count
-	// sessionsN and convoysN complete the tally. Together with memberN they are
-	// every external command a gather runs, which is what lets a test assert
-	// the cost of the board rather than only its contents.
+	err      error // when set, every call fails with it
+	// sessionsN and convoysN are every external command a gather runs — convoy
+	// membership is an in-process store read now, not a subprocess — which is
+	// what lets a test assert the cost of the board rather than only its
+	// contents.
 	sessionsN int
 	convoysN  int
 }
@@ -442,7 +441,7 @@ type fakeGC struct {
 // externalCalls is every subprocess this gather made. The gather's whole
 // external surface is this interface: the rest is the bead store, opened
 // in-process.
-func (f *fakeGC) externalCalls() int { return f.sessionsN + f.convoysN + f.memberN }
+func (f *fakeGC) externalCalls() int { return f.sessionsN + f.convoysN }
 
 func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 	f.sessionsN++
@@ -458,14 +457,6 @@ func (f *fakeGC) Convoys(context.Context) ([]convoyRow, error) {
 		return nil, f.err
 	}
 	return f.convoys, nil
-}
-
-func (f *fakeGC) ConvoyMember(_ context.Context, id string) (string, error) {
-	f.memberN++
-	if f.err != nil {
-		return "", f.err
-	}
-	return f.members[id], nil
 }
 
 func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore, opts ...BeadsOption) *BeadsSource {
@@ -1168,6 +1159,12 @@ func joinStore() *fakeStore {
 		issue("tk-root3", "mol-polecat-work", "task", 2, testNow,
 			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
 	)
+	// Each input convoy tracks its one work bead. resolveInflight reads the
+	// member from this `tracks` edge in-process, so the fixture carries the
+	// edge a real convoy would rather than stubbing a `gc convoy status`.
+	st.depsDown["tk-icv1"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-work1", "in_progress", testNow, ""), "tracks")}
+	st.depsDown["tk-icv2"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-work2", "in_progress", testNow, ""), "tracks")}
+	st.depsDown["tk-icv3"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-work3", "in_progress", testNow, ""), "tracks")}
 	return st
 }
 
@@ -1177,11 +1174,6 @@ func liveGC() *fakeGC {
 			"gc-toolkit__polecat-lx-live":  "active",
 			"gc-toolkit__polecat-lx-steps": "active",
 			"gc-toolkit__polecat-lx-dead":  "archived",
-		},
-		members: map[string]string{
-			"tk-icv1": "tk-work1",
-			"tk-icv2": "tk-work2",
-			"tk-icv3": "tk-work3",
 		},
 	}
 }
@@ -1211,11 +1203,11 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	if got, ok := res.Facts.Inflight["tk-work3"]; ok {
 		t.Errorf("a husk (archived session) must not read as in flight: got %v", got)
 	}
-	// Liveness is filtered BEFORE the convoy reads, so the husk costs no
-	// subprocess at all — that bound is what keeps the gather proportional to
-	// live polecats rather than to the husk pile.
-	if gc.memberN != 2 {
-		t.Errorf("convoy status called %d times, want 2 (live roots only)", gc.memberN)
+	// Member resolution is an in-process store read now, not a `gc convoy
+	// status` per live root: the only subprocesses a gather spends are the one
+	// session list and the one convoy list, however many roots are in flight.
+	if calls := gc.externalCalls(); calls != 2 {
+		t.Errorf("gather spent %d subprocesses, want 2 (session list + convoy list; member resolution is in-process)", calls)
 	}
 	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
 		t.Errorf("session states carried: %v", res.Facts.OwnerState)

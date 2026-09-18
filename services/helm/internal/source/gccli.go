@@ -22,11 +22,14 @@ import (
 //   - CONVOY OWNERSHIP. `owned` and `progress` are convoy-level facts the
 //     library's issue rows do not carry.
 //
-// This is the same source gc-helm.sh reads (`gcq session list`, `gc convoy
-// list`, `gc convoy status`), so the two boards agree by construction rather
-// than by two independent derivations. It honours the package's data-access
-// contract for the same reason the other two backends do: it is a Gas City
-// interface, not raw Dolt. There is no sql.Open here.
+// These are the same reads gc-helm.sh makes (`gcq session list`, `gc convoy
+// list`), so the two boards agree by construction rather than by two
+// independent derivations. Convoy MEMBERSHIP — the work bead a root's input
+// convoy tracks — is read in-process from the rig store instead (see
+// convoyMembers), the one `tracks` edge being local to the root's own rig. This
+// source honours the package's data-access contract for the same reason the
+// other two backends do: it is a Gas City interface, not raw Dolt. There is no
+// sql.Open here.
 //
 // EVERY CALL IS BEST-EFFORT. A board that loses its liveness join is narrower
 // (nothing reads as in flight) but still correct about what it does show, so a
@@ -47,12 +50,6 @@ type gcClient interface {
 	Sessions(ctx context.Context) (map[string]string, error)
 	// Convoys lists every convoy in the city with its ownership and progress.
 	Convoys(ctx context.Context) ([]convoyRow, error)
-	// ConvoyMember resolves a convoy to its SINGLE tracked member, returning ""
-	// when the convoy tracks any other number. The one-member rule is a
-	// fail-closed gate, not an optimisation: a convoy of another shape is one
-	// this join does not understand, and the safe reading of "not understood"
-	// is "no claim about movement".
-	ConvoyMember(ctx context.Context, convoyID string) (string, error)
 }
 
 // convoyRow is one entry of `gc convoy list --json`.
@@ -196,20 +193,4 @@ func (g *gcExec) Convoys(ctx context.Context) ([]convoyRow, error) {
 		return nil, err
 	}
 	return payload.Convoys, nil
-}
-
-// ConvoyMember implements gcClient.
-func (g *gcExec) ConvoyMember(ctx context.Context, convoyID string) (string, error) {
-	var payload struct {
-		Children []struct {
-			ID string `json:"id"`
-		} `json:"children"`
-	}
-	if err := g.run(ctx, &payload, "convoy", "status", convoyID, "--json"); err != nil {
-		return "", err
-	}
-	if len(payload.Children) != 1 {
-		return "", nil
-	}
-	return payload.Children[0].ID, nil
 }
