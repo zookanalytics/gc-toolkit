@@ -683,7 +683,7 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 keys = [
   "gc.proactive",
   "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
-  "gc.reacted_by",
+  "gc.reacted_by", "gc.proactive_reaction",
   "gc.blocker_key",
 ]
 # gc.proactive — `1`, the standing scan opt-in. Written by patrol-finding.sh when
@@ -705,6 +705,14 @@ keys = [
 #   is not a guard progress is refused on — the write-backs are idempotent — and it
 #   is keyed to R's id, so a marker left by a closed R does not block a later
 #   re-reaction by a different R. Never cleared. A bead id.
+# gc.proactive_reaction — `1`, the legacy landed proof on the SUBJECT S for a
+#   frozen mol-first-reaction molecule, which has no reaction bead R to key on.
+#   Written by first-reaction-dispose.sh's no-`--reaction-bead` path after the
+#   disposition act, in place of gc.reacted_by; read by that molecule's frozen
+#   load-bead REACTED check and by this script's re-offer guard, so a re-offered
+#   frozen step does not re-release a subject a worker already holds. gc.reacted_by
+#   is its replacement for the reaction-bead path; kept until pre-cutover molecules
+#   drain. Never cleared.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an

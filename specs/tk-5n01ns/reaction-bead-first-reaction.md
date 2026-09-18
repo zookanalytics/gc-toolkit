@@ -169,11 +169,13 @@ one contract.
   plain bead R. In-flight molecules poured before the cutover complete on their
   frozen step descriptions (§ Cutover).
 - **The subject-metadata dispatch** — `gc.first_reaction`,
-  `gc.first_reaction_reason`, `gc.first_reaction_target`, `gc.first_reaction_at`,
-  and the completion proof `gc.proactive_reaction` — is retired. S carries none
-  of it. `first-reaction-dispose.sh` no longer writes the record before the act,
-  and the retry guard and fail-closed landed stamp are gone; `gc-helm.sh`'s
-  `takeaway --release` no longer stamps or reads back `gc.proactive_reaction`.
+  `gc.first_reaction_reason`, `gc.first_reaction_target`, `gc.first_reaction_at`
+  — is retired. `first-reaction-dispose.sh` no longer writes the attempt record
+  before the act, and `gc-helm.sh`'s `takeaway --release` no longer stamps or
+  reads back `gc.proactive_reaction`. The reaction-bead path replaces the
+  completion proof with `gc.reacted_by`; `gc.proactive_reaction` survives only on
+  the frozen no-`--reaction-bead` path, where `first-reaction-dispose.sh` stamps
+  it as the legacy landed proof until pre-cutover molecules drain (§ Cutover).
 - **`assets/scripts/duplicate-sweep.sh`** (merge-cadence arm) and the
   `duplicate_of` / `duplicate_of_store` markers are retired. Its evidence gates
   live in `bead-rehome.sh`; its backlog was zero.
@@ -188,10 +190,15 @@ The cutover is one PR, not a two-phase interim. Two facts keep it safe:
   `first-reaction-dispose.sh`.
 - **`first-reaction-dispose.sh` stays backward-compatible.** Called without
   `--reaction-bead` (the frozen invocation), it performs the same four-exit
-  write-back on the claimed subject and skips the close-R step, dropping the
-  retired markers. Because the write-backs are idempotent and no guard
-  deadlocks, an in-flight molecule completes without the subject-metadata
-  machinery it used to rely on.
+  write-back on the claimed subject and skips the close-R step. With no R to key
+  exactly-once on, it stamps the legacy landed proof `gc.proactive_reaction=1`
+  after the act, in place of `gc.reacted_by`. The frozen `advance-and-drain`
+  molecule reads that proof two ways — its own `load-bead` REACTED check and this
+  script's re-offer guard — so a re-offered frozen step stops before the act
+  rather than re-releasing (reopening, unassigning, re-routing) a subject a
+  downstream worker has already claimed. That release is not idempotent, which is
+  why the frozen path keeps a landed proof rather than relying on the step chain
+  alone; the proof is retained until pre-cutover molecules drain.
 
 Newly-scanned subjects take the reaction-bead path from the moment the PR lands;
 the scheduler that runs `scan --sling` on a cadence is a separate, downstream
@@ -214,11 +221,14 @@ On S (written by the write-back):
 | Key | Meaning |
 |---|---|
 | `gc.reacted_by` | the reaction R whose write-back landed — the residual-window self-heal |
+| `gc.proactive_reaction` | `1`, the legacy landed proof the frozen no-R path stamps in place of `gc.reacted_by` |
 
 Retired everywhere (writers, readers, and the `lifecycle.toml` registry):
 `gc.first_reaction`, `gc.first_reaction_reason`, `gc.first_reaction_target`,
-`gc.first_reaction_at`, `gc.proactive_reaction`, `duplicate_of`,
-`duplicate_of_store`. Kept: `gc.proactive` (the standing scan opt-in),
+`gc.first_reaction_at`, `duplicate_of`, `duplicate_of_store`. Kept:
+`gc.proactive` (the standing scan opt-in), `gc.reacted_by` (the reaction-bead
+landed proof), `gc.proactive_reaction` (the legacy landed proof the frozen
+no-`--reaction-bead` path stamps, until pre-cutover molecules drain),
 `gc.superseded_by` / `_store` and `gc.supersedes` / `_store` (the rehome
 pointers), `gc.blocker_key`.
 
@@ -234,7 +244,8 @@ pointers), `gc.blocker_key`.
   routed reaction beads and exclude graph-structural beads.
 - `assets/scripts/first-reaction-dispose.sh` — the four-exit write-back, the
   `gc.reacted_by` marker, the close-R step, and the backward-compatible
-  no-`--reaction-bead` arm.
+  no-`--reaction-bead` arm that stamps and guards on the legacy
+  `gc.proactive_reaction` landed proof for frozen molecules.
 - `assets/scripts/bead-rehome.sh` — the single evidence-gated
   close-with-successor writer with `--check` and the folded-in gates.
 - `assets/scripts/gc-helm.sh` — `takeaway --release` no longer stamps or reads

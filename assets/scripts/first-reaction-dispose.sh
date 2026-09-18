@@ -22,12 +22,17 @@
 # the same R; on re-run it sees gc.reacted_by=R (or, for superseded, S already
 # closed) and closes R without touching S again. Called without --reaction-bead
 # — the frozen invocation of a mol-first-reaction molecule poured before the
-# cutover — it performs the same write-back on the claimed subject and stamps
-# no marker, closes no R.
+# cutover — it performs the same write-back on the claimed subject and, with no
+# R to name, stamps the legacy landed proof gc.proactive_reaction=1 instead,
+# closes no R. That molecule's own load-bead REACTED check and this script's
+# re-offer guard both read the proof, so a re-offered frozen step does not
+# re-release a bead a downstream worker may already hold.
 #
-# The subject-metadata done-marker (gc.first_reaction*, gc.proactive_reaction)
-# is retired: exactly-once for the reaction is the substrate's, keyed on R's
-# identity, not a stamp on S written around the act.
+# The subject-metadata ATTEMPT record (gc.first_reaction*, written before the
+# act) is retired: exactly-once for a reaction bead is the substrate's, keyed on
+# R's identity. The LANDED proof survives — gc.reacted_by=R for a reaction bead,
+# gc.proactive_reaction=1 for the frozen no-R path — written after the act so
+# its presence proves the write-back landed.
 # Callers: agents/proactive/prompt.template.md, in-flight mol-first-reaction
 # molecules (advance-and-drain), operators by hand.
 # Exit: 0 disposed · 2 usage · 4 runtime failure.
@@ -250,12 +255,12 @@ close_reaction() {
 }
 
 # ── A reaction happens once — self-heal the act-on-S -> close-R window ─
-# The write-back stamps gc.reacted_by=R on S as its last act; for superseded
-# the signal is S itself being closed with a successor. A worker re-offered R
-# after a crash in that window reads the marker and closes R without touching S
-# again — S is never re-dispatched, never yanked from a worker that has since
-# claimed a routed S. Without R (a frozen mol-first-reaction call) there is no
-# marker and no self-heal: exactly-once there is the graph.v2 step chain's.
+# The write-back stamps a landed proof on S as its last act (gc.reacted_by=R
+# with a reaction bead, gc.proactive_reaction=1 on the frozen no-R path); for
+# superseded the signal is S itself being closed with a successor. A worker
+# re-offered after a crash in that window reads the proof and does not re-dispose
+# — S is never re-released, never yanked from a worker that has since claimed a
+# routed S.
 if [ -n "$REACTION_BEAD" ]; then
     PRIOR_REACTED_BY=$(subject_meta "gc.reacted_by")
     S_STATUS=$(subject_field "status")
@@ -264,6 +269,19 @@ if [ -n "$REACTION_BEAD" ]; then
        || { [ "$DISPOSITION" = "superseded" ] && [ "$S_STATUS" = "closed" ] && [ -n "$S_SUPERSEDED" ]; }; then
         note "$BEAD already carries this reaction's write-back (gc.reacted_by=${PRIOR_REACTED_BY:-<unset>}${S_SUPERSEDED:+, superseded_by=$S_SUPERSEDED}); closing $REACTION_BEAD without re-disposing."
         close_reaction
+        exit 0
+    fi
+else
+    # The frozen mol-first-reaction call has no R to key exactly-once on, so its
+    # landed proof is the legacy gc.proactive_reaction=1 the release stamps below.
+    # A re-offered frozen step reads it here and stops before the act — a second
+    # release would reopen and re-route a bead a downstream worker may hold.
+    PRIOR_PROACTIVE=$(subject_meta "gc.proactive_reaction")
+    S_STATUS=$(subject_field "status")
+    S_SUPERSEDED=$(subject_meta "gc.superseded_by")
+    if [ "$PRIOR_PROACTIVE" = "1" ] \
+       || { [ "$DISPOSITION" = "superseded" ] && [ "$S_STATUS" = "closed" ] && [ -n "$S_SUPERSEDED" ]; }; then
+        note "$BEAD already carries a landed first reaction (gc.proactive_reaction=${PRIOR_PROACTIVE:-<unset>}${S_SUPERSEDED:+, superseded_by=$S_SUPERSEDED}); not re-disposing. A frozen mol-first-reaction molecule keys exactly-once on this legacy marker, and a second release would yank a bead a worker may already hold."
         exit 0
     fi
 fi
@@ -425,15 +443,21 @@ if [ -n "$HOLD_WAITS" ]; then
 fi
 
 # ── The completion marker, last ──────────────────────────────────────
-# gc.reacted_by=R is the residual-window self-heal, stamped after the act (and
-# after the edge, above) so its presence proves the whole write-back landed. It
-# is not a guard anything refuses progress on — the write-backs are idempotent,
-# so a re-run without it is safe — it only spares the redundant work and keeps a
-# claimed S from being re-dispatched. Without R there is nothing to name, and
-# the frozen molecule's exactly-once is its step chain.
+# The landed proof is stamped after the act (and after any edge, above) so its
+# presence proves the whole write-back landed, and the re-offer guard at the top
+# reads it to skip a second dispose. With a reaction bead it is gc.reacted_by=R;
+# the frozen no-R path has no R to name, so it stamps the legacy
+# gc.proactive_reaction=1 — the same marker that molecule's own load-bead REACTED
+# check reads. A lost R stamp is safe (the write-backs are idempotent and the
+# re-offered R reaches the close again); a lost no-R stamp is the window the
+# frozen molecule's step chain does not cover, so its warning names the by-hand
+# repair.
 if [ -n "$REACTION_BEAD" ]; then
     gc_bd update "$BEAD" --set-metadata "gc.reacted_by=$REACTION_BEAD" >/dev/null 2>&1 \
         || note "WARNING: could not stamp gc.reacted_by=$REACTION_BEAD on $BEAD; the disposition landed, so a re-offer of $REACTION_BEAD re-runs the idempotent write-back and reaches the close again."
+else
+    gc_bd update "$BEAD" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 \
+        || note "WARNING: could not stamp gc.proactive_reaction=1 on $BEAD; the disposition landed, but a re-offered frozen mol-first-reaction step reads no landed proof and would re-dispose, reopening and re-routing a bead a worker may already hold. Stamp it by hand: gc bd update $BEAD --set-metadata gc.proactive_reaction=1"
 fi
 
 close_reaction

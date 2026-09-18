@@ -327,15 +327,27 @@ eq "$RC" "0" "(ORIGIN) …while the ruling exit is exactly what it wants"
 unset FAKE_SHOW_JSON FAKE_DEPS_JSON
 
 # ── Backward compat: the frozen mol-first-reaction call (no --reaction-bead) ──
-# An in-flight molecule calls this without --reaction-bead: the write-back runs,
-# but no reaction bead is closed and no gc.reacted_by is stamped (there is no R
-# to name). Its exactly-once is the graph.v2 step chain's.
+# An in-flight molecule calls this without --reaction-bead, so it has no R to key
+# exactly-once on. The write-back runs and, in place of gc.reacted_by, stamps the
+# legacy landed proof gc.proactive_reaction=1 — the marker that molecule's own
+# load-bead REACTED check reads and this script's re-offer guard keys on.
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "0" "(LEGACY) the frozen call with no --reaction-bead still disposes"
 has "HELM takeaway tk-sub" "$LOG" "(LEGACY) …the act runs"
-hasnt "gc.reacted_by" "$LOG" "(LEGACY) …no marker without an R to name"
+hasnt "gc.reacted_by" "$LOG" "(LEGACY) …no gc.reacted_by marker without an R to name"
+has "gc.proactive_reaction=1" "$LOG" "(LEGACY) …but the legacy landed proof is stamped so a re-offer does not re-dispose"
 hasnt "UPDATE bd update tk-react" "$LOG" "(LEGACY) …and no reaction bead is closed"
-hasnt "gc.first_reaction=" "$LOG" "(LEGACY) …and the retired record is gone"
+hasnt "gc.first_reaction=" "$LOG" "(LEGACY) …and the retired attempt record stays gone"
+
+# A re-offered frozen step: S already carries the landed proof, so the second run
+# is a no-op success — the act does NOT run, so a bead a downstream worker may
+# have claimed is not reopened and re-routed out from under it.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.proactive_reaction":"1"}}]'
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "0" "(LEGACY-REOFFER) a subject already carrying the landed proof disposes as a no-op"
+hasnt "HELM" "$LOG" "(LEGACY-REOFFER) …the subject is not re-released"
+has "already carries a landed first reaction" "$ERR" "(LEGACY-REOFFER) …and it says so"
+unset FAKE_SHOW_JSON
 
 # ── The subject is never closed by a bare gc bd close ────────────────────────
 # Three exits leave the subject open; superseded closes it ONLY through
