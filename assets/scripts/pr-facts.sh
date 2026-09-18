@@ -491,18 +491,17 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
 }
 
 # --- retire the merge-blocked-approval visit category (a required review is state) --
-# A PR waiting on a required approving review is the operator's own review queue,
-# state the board's review section already shows, not a conversation. The BLOCKED
-# arm below no longer files a visit for it, so every open merge-blocked-approval
-# visit is a leftover from before that: its PR merged and the anchor closed, it
-# was approved, or it still waits on the review the board surfaces. Retire each
-# through the same close the pre-recorded-disposition arm uses — the board keeps
-# the PR as state regardless. This runs before the no-anchors early-exit on
-# purpose: a rig whose PRs have all merged still carries these visits and is
-# exactly where the early-exit would otherwise skip the cleanup. It runs in every
-# rig's cadence, so each store cleans its own. Fail closed on an unreadable
-# subject: a visit whose anchor cannot be read this pass is left for the next,
-# never retired on a read that did not land. --posture-only writes nothing here.
+# An open PR awaiting its required approving review is a notification in itself.
+# It sits in the operator's review queue, the state the board's review section
+# surfaces, so the city does no proactive work to flag it: this cadence files no
+# merge-blocked-approval visit, and the category holds no actionable escalation.
+# Retire any that are open, closing each moot through the same close the
+# pre-recorded-disposition arm uses. The board keeps the PR as state regardless.
+# This runs before the no-anchors early-exit so a rig whose PRs have all merged
+# still clears its visits, and in every rig's cadence so each store cleans its own.
+# Fail closed on an unreadable subject: a visit whose anchor cannot be read this
+# pass is left for the next, never retired on a read that did not land.
+# --posture-only writes nothing here.
 if [ "$POSTURE_ONLY" != 1 ]; then
   if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
     while IFS="$(printf '\t')" read -r avid avsubj; do
@@ -516,7 +515,7 @@ if [ "$POSTURE_ONLY" != 1 ]; then
         fi
       fi
       if gc bd update "$avid" --status=closed --set-metadata gc.outcome=moot \
-           --append-notes "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence no longer files merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null 2>&1; then
+           --append-notes "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null 2>&1; then
         echo "$PROG: retired stale merge-blocked-approval visit $avid (subject ${avsubj:-<none>} ${avstate:-none-recorded})"
       else
         echo "$PROG: could not retire stale merge-blocked-approval visit $avid; leaving it for the operator" >&2
