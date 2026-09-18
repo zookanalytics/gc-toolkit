@@ -39,7 +39,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."]  file a visit on the bead, parked on the helm board for the operator to engage
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open
   gc-helm engage <bead-id> [--model opus|fable|codex] [--reason "..."] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach
   gc-helm react <bead-id> [--reason "..."]  sling a first reaction (self-heals a takeaway-less row)
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
@@ -60,9 +60,14 @@ tail and --body the brief the sitting reads at claim time. engage draws a
 parked visit off the board: it spawns a manual converse-<model> sitting
 (origin=manual, backstop-exempt), assigns the visit to the session's runtime
 name so the session's own claim adopts it with no pool routing, and attaches;
---model picks the tier (opus default), --no-attach spawns without attaching,
-and --reason is the title tail of the visit engage files when the subject has
-none parked (passed through to open).
+--model picks the tier (opus default), --no-attach spawns without attaching.
+A --reason given with a SUBJECT always files a new visit carrying that reason
+and engages it, even when the subject already has one parked. It passes
+--allow-duplicate through to open, which bypasses the one-visit-per-subject
+dedup. With no --reason, an existing parked visit is engaged, and a fresh
+visit is filed only when the subject has none. A --reason given with an
+explicit visit id is refused, because a new visit needs a subject and the
+reason would otherwise be dropped.
 dismiss ends the sitting. react slings a proactive first reaction via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
@@ -1544,7 +1549,7 @@ cmd_resolve() {
 # converse session reads at claim time — callers with their own origin
 # (gc-visit-open.sh) pass both rather than misreporting the board wording.
 cmd_open() {
-    bead=""; open_reason=""; open_body=""
+    bead=""; open_reason=""; open_body=""; open_allow_dup=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) open_reason="${1#--reason=}"; shift ;;
@@ -1553,6 +1558,7 @@ cmd_open() {
             --body=*)   open_body="${1#--body=}"; shift ;;
             --body)     shift; [ $# -gt 0 ] || { echo "$PROG: open: --body requires a value" >&2; exit 2; }
                         open_body="$1"; shift ;;
+            --allow-duplicate) open_allow_dup=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: open: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: open takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
@@ -1611,19 +1617,23 @@ cmd_open() {
     # gc.continuation_group stamp and the tracks edge — and only the edge has
     # proved reliable (su-ab9je: the stamp landed empty), so match EITHER.
     # The $s != "" arm keeps an empty stamp from matching an empty subject.
-    existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
-        | jq -r --arg s "$bead" \
-            '[ .[]? | select((.metadata.task_kind // "") == "visit")
-               | select($s != ""
-                        and (((.metadata["gc.continuation_group"] // "") == $s)
-                             or ([ .dependencies[]?
-                                   | select((.type // "") == "tracks")
-                                   | select((.depends_on_id // "") == $s) ] | length > 0)))
-               | .id ] | first // empty' 2>/dev/null || true)
-    if [ -n "$existing" ]; then
-        echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
-        echo "       Engage it when ready: $PROG engage $existing"
-        return 0
+    # --allow-duplicate skips the dedup: engage --reason files a fresh visit for
+    # a distinct concern on purpose, even when the subject already has one.
+    if [ -z "$open_allow_dup" ]; then
+        existing=$(gc bd list --status=open,in_progress --json --limit=0 2>/dev/null \
+            | jq -r --arg s "$bead" \
+                '[ .[]? | select((.metadata.task_kind // "") == "visit")
+                   | select($s != ""
+                            and (((.metadata["gc.continuation_group"] // "") == $s)
+                                 or ([ .dependencies[]?
+                                       | select((.type // "") == "tracks")
+                                       | select((.depends_on_id // "") == $s) ] | length > 0)))
+                   | .id ] | first // empty' 2>/dev/null || true)
+        if [ -n "$existing" ]; then
+            echo "$PROG: visit $existing is already open for $bead — parked on the helm board until an operator engages it."
+            echo "       Engage it when ready: $PROG engage $existing"
+            return 0
+        fi
     fi
 
     # What this sitting is FOR, in the caller's words; resolved outside the
@@ -2140,15 +2150,33 @@ cmd_engage() {
     }
     visit_row=""
     if [ "$bead_kind" = "visit" ]; then
+        # --reason files a NEW visit, which only makes sense for a subject. An
+        # explicit visit id names one exact visit, so a reason has nowhere to go
+        # here, and silently dropping it is the bug this verb exists to stop.
+        # Refuse and point at the subject form rather than fold it into the
+        # named visit.
+        if [ -n "$engage_reason" ]; then
+            echo "$PROG: engage: --reason files a NEW visit, which needs a subject — but '$bead' is an explicit visit id. Engage the subject with --reason to open a fresh visit, or drop --reason to engage this visit as-is. Nothing spawned." >&2
+            exit 2
+        fi
         VISIT="$bead"
         visit_row="$bead_row"
     else
         VISIT=""
         candidates=$(engage_find_visits "$bead")
-        if [ -z "$candidates" ]; then
-            echo "$PROG: engage: no open visit on $bead — filing one to park on the board, then engaging it" >&2
-            set -- "$bead"
-            [ -n "$engage_reason" ] && set -- "$@" --reason "$engage_reason"
+        # --reason names a fresh, likely-distinct concern, so file a NEW visit
+        # for it and engage that — even when the subject already has one.
+        # cmd_open dedups one-visit-per-subject, so --allow-duplicate marks this
+        # second visit deliberate. With no --reason, an existing visit is engaged
+        # and only a subject with none has a visit filed.
+        if [ -n "$engage_reason" ] || [ -z "$candidates" ]; then
+            if [ -n "$engage_reason" ]; then
+                echo "$PROG: engage: --reason given — filing a new visit on $bead to carry it, then engaging that visit" >&2
+                set -- "$bead" --reason "$engage_reason" --allow-duplicate
+            else
+                echo "$PROG: engage: no open visit on $bead — filing one to park on the board, then engaging it" >&2
+                set -- "$bead"
+            fi
             # cmd_open runs in this shell and leaves the new id in VISIT.
             cmd_open "$@" >&2 || { echo "$PROG: engage: could not file a visit for $bead" >&2; exit 4; }
             [ -n "$VISIT" ] || candidates=$(engage_find_visits "$bead")
@@ -2385,6 +2413,11 @@ cmd_engage() {
     # whoever attaches later. A failed kick is not fatal: the visit is bound, so
     # report it and let the operator start it by hand.
     kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
+    # A reason typed at engage time is the operator's framing for this sitting;
+    # carry it into the opening turn so the sitting has it without waiting to read
+    # the visit body. It reaches only the --reason path, which files a fresh visit
+    # whose body also records it.
+    [ -n "$engage_reason" ] && kick="$kick The operator's reason: $engage_reason"
     gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
         || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
 

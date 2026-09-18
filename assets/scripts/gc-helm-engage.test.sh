@@ -16,6 +16,12 @@
 #             converse session holds until a user turn — and (KICK-ORDER) that
 #             turn precedes the attach; a lost/failed bind never kicks
 #   (SUBJECT) engaging a subject resolves the one open visit tracking it
+#   (REASON-NEW) a subject that already has a visit, engaged WITH --reason, gets
+#             a SECOND new visit carrying the reason (title + body), then kicked
+#   (NOREASON-EXISTING) the same subject with NO reason engages the existing
+#             visit, filing nothing
+#   (VISITID-REASON) --reason on an explicit visit id is refused (exit 2): a fresh
+#             visit needs a subject, and the reason is never dropped silently
 #   (MODELFLAG) --model codex spawns converse-codex
 #   (BUSY)    a visit already in_progress under an owner is not re-spawned (exit 4)
 #   (CLOSED)  a closed explicit visit is refused before spawning (exit 4)
@@ -227,6 +233,45 @@ run_engage tk-subj --no-attach
 eq "$RC" 0 "(SUBJECT) engaging a subject with an open visit exits 0"
 has "$CALLED" "session new converse-opus --alias tk-vis --no-attach --json" "(SUBJECT) spawns for the tracking visit"
 unset HAVE_VISIT
+
+echo "# --reason files a fresh visit for a distinct concern, even when one exists"
+# A reason typed at engage time is a likely-distinct concern, so it gets its OWN
+# new visit rather than folding into an existing one — and the reason reaches the
+# sitting: recorded as the new visit's body (its claim-time brief) and carried in
+# the opening-turn kick.
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --reason "a distinct concern" --no-attach
+eq "$RC" 0 "(REASON-NEW) engaging a subject-with-visit WITH --reason exits 0"
+has "$CALLED" "bd create" "(REASON-NEW) …a NEW visit is filed, not the existing one engaged"
+has "$CALLED" "visit: tk-subj — a distinct concern" "(REASON-NEW) …its title tail carries the reason"
+has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and its body (the claim-time brief) too"
+hasnt "$OUT" "already open" "(REASON-NEW) …bypassing the one-visit-per-subject dedup on purpose"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(REASON-NEW) …then spawns a sitting for the new visit"
+has "$CALLED" "The operator's reason: a distinct concern" "(REASON-NEW) …and the reason rides the opening-turn kick"
+unset HAVE_VISIT
+
+echo "# with NO reason, a subject-with-visit engages the EXISTING visit, filing nothing"
+# The other half of the rule: no reason means engage what is already parked.
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --no-attach
+eq "$RC" 0 "(NOREASON-EXISTING) engaging a subject-with-visit and no reason exits 0"
+hasnt "$CALLED" "bd create" "(NOREASON-EXISTING) …no new visit is filed"
+has "$CALLED" "session new converse-opus --alias tk-vis" "(NOREASON-EXISTING) …the existing visit is engaged"
+unset HAVE_VISIT
+
+echo "# --reason on an EXPLICIT visit id is refused — a fresh visit needs a subject"
+# Naming an exact visit and --reason conflict: the reason has nowhere to go, and
+# silently dropping it is the bug this verb exists to stop. Refuse and point at
+# the subject form; never fold the reason into the named visit.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-vis --reason "some reason" --no-attach
+eq "$RC" 2 "(VISITID-REASON) --reason with an explicit visit id is a usage error (exit 2)"
+hasnt "$CALLED" "session new" "(VISITID-REASON) …nothing is spawned"
+hasnt "$CALLED" "bd create" "(VISITID-REASON) …and no visit is filed"
+has "$OUT" "--reason" "(VISITID-REASON) …the message explains the flag conflict"
 
 echo "# a visit already engaged is not re-spawned"
 export BEAD_KIND=visit VIS_OWNER="gc-toolkit__converse-9"
