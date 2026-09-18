@@ -79,7 +79,12 @@ if [ "$check_only" -eq 1 ]; then
     exit 1
 fi
 
-tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-ensure-human-route.XXXXXX")" || { echo "ensure-human-route-agent: mktemp failed" >&2; exit 2; }
+# The temp must live in the same directory as city.toml: the rename below is
+# atomic only within a single filesystem, and the town config can sit on a
+# different filesystem from $TMPDIR, where mv degrades to a non-atomic
+# cross-device copy that can leave city.toml partially written.
+cfg_dir="$(dirname "$cfg")"
+tmp="$(mktemp "$cfg_dir/.gctk-ensure-human-route.XXXXXX")" || { echo "ensure-human-route-agent: mktemp failed" >&2; exit 2; }
 trap 'rm -f "$tmp"' EXIT
 cat "$cfg" > "$tmp" || { echo "ensure-human-route-agent: could not read $cfg" >&2; exit 2; }
 # One blank line before the stanza, only when the file does not already end with

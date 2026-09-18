@@ -122,6 +122,20 @@ else
     ok "tomllib absent — skipped the TOML parse assertion"
 fi
 
+# --- 8. the temp is staged beside city.toml, independent of $TMPDIR -----------
+# The rename that publishes the write is atomic only within one filesystem. The
+# town config can sit on a different filesystem from $TMPDIR, so a temp under
+# $TMPDIR would make `mv` a cross-device copy that can leave city.toml partially
+# written. Proof the temp lives beside city.toml instead: a $TMPDIR that cannot
+# even hold a temp file must not affect the write.
+C="$TMP/c8"; fresh_city "$C"
+OUT=$(GC_CITY_PATH="$C" TMPDIR="$TMP/no-such-tmpdir" bash "$SCRIPT" 2>&1); RC=$?
+eq "$RC" "0" "append succeeds when TMPDIR is unusable (temp staged beside city.toml)"
+has "$OUT" "APPENDED" "it still reports the append"
+eq "$(count_bare_human "$C/city.toml")" "1" "exactly one bare human agent after the append"
+LEFTOVER=$(find "$C" -maxdepth 1 -name '.gctk-ensure-human-route.*' 2>/dev/null)
+eq "$LEFTOVER" "" "no temp file is left beside city.toml after a successful write"
+
 echo
 echo "ensure-human-route-agent: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
