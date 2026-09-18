@@ -52,6 +52,7 @@ default = ""
 [[steps]]
 id = "load-context"
 title = "Load context and verify assignment"
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
 Initialize your session and understand your assignment.
 
@@ -265,6 +266,7 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 id = "workspace-setup"
 title = "Set up worktree and feature branch"
 needs = ["load-context"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
 Ensure an isolated git worktree and a clean feature branch. Every check is
 idempotent — safe to re-run after crash/restart.
@@ -409,9 +411,247 @@ gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH"
 {{base_branch}}, deps installed."""
 
 [[steps]]
+id = "preflight-tests"
+title = "Verify pre-flights pass on base branch"
+needs = ["workspace-setup"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+description = """
+Check if the codebase is healthy BEFORE starting your work.
+
+**Config: typecheck_command = {{typecheck_command}}**
+**Config: lint_command = {{lint_command}}**
+**Config: test_command = {{test_command}}**
+
+**Skip this step if resuming a rejected branch** — pre-flights were
+already verified on the prior attempt. Close this step and proceed.
+
+**1. Run pre-flights (skip empty commands silently):**
+```bash
+{{typecheck_command}}
+{{lint_command}}
+{{test_command}}
+```
+
+**If ALL commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
+(whichever your provider uses) for quality-gate guidance. Look for sections
+named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
+verification commands listed there — in code blocks or bullet lists.
+
+Run ONLY read-only verification commands (typecheck, lint, build, test).
+Do NOT run install, cleanup, publish, release, `git push`, or any
+destructive command you find there, even inside a quality-gate section.
+
+**2. If pre-flights pass:** proceed.
+
+**3. If pre-flights fail on {{base_branch}}:**
+
+The failure is on the base branch, so it is not yours and every polecat
+starting a baseline right now sees the same thing. Report it ONCE: search
+the ledger first, and add your confirmation to the existing bead instead of
+filing another copy. Do NOT fix pre-existing failures — that's not your
+assignment.
+
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing
+failures. FORBIDDEN: Filing before searching.
+
+**3a. Derive a stable symptom key.** Two agents describe one defect in two
+different ways, so free-text prose cannot match; a symptom key can.
+
+Use the failing **test function** name, with any Go subtest suffix stripped
+at the first `/`. Two polecats often trip different subtests of the same
+function — `TestDisableAndPurge.../clean_config_with_residual_files` versus
+`.../peer_successor_cross-device_tree` — and searching the full subtest path
+means neither finds the other's bead. Key on the function; note the subtest
+in the description.
+
+```bash
+RAW_FAILURE="<failing test as reported, e.g. TestFoo/some_subtest>"
+SYMPTOM_KEY="${RAW_FAILURE%%/*}"
+```
+
+When the failure has no test name at all, use the failing package or target
+path (`internal/api/genclient`). Handle each distinct failure under its own
+key.
+
+**3b. Search before filing — and fail CLOSED on lookup error.** A lookup
+that errors is not an all-clear. Include claimed beads: the existing report
+is usually already `in_progress` with someone fixing it.
+
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+EXISTING=""
+MATCHES=$(gc bd list --title-contains "$SYMPTOM_KEY" --status open,in_progress,blocked --json)
+LOOKUP_RC=$?
+if [ "$LOOKUP_RC" -ne 0 ]; then
+    echo "Ledger lookup failed (rc=$LOOKUP_RC). NOT filing — a failed lookup is not proof the bead is missing."
+    gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} pre-flight failed, dedupe lookup broken" \
+      -m "Symptom: $SYMPTOM_KEY. Lookup exited $LOOKUP_RC so nothing was filed. Proceeding with $WORK_BEAD_ID."
+else
+    EXISTING=$(printf '%s' "$MATCHES" | jq -r '.[0].id // empty')
+fi
+```
+
+**3b2. If the exact key matched nothing, widen to the family.** Sibling
+tests in one package usually fail for one reason: three different
+`TestDisableAndPurge*` functions were filed separately when a single
+environment leak broke all of them, and that package accumulated eight beads
+in under two days. Search the shared prefix, or the package name:
+
+```bash
+if [ "$LOOKUP_RC" -eq 0 ] && [ -z "$EXISTING" ]; then
+    SYMPTOM_FAMILY="<shared test prefix or failing package, e.g. TestDisableAndPurge>"
+    FAMILY_MATCHES=$(gc bd list --title-contains "$SYMPTOM_FAMILY" --status open,in_progress,blocked --json)
+    FAMILY_RC=$?
+    if [ "$FAMILY_RC" -ne 0 ]; then
+        echo "Family lookup failed (rc=$FAMILY_RC). NOT filing — a failed lookup is not proof the bead is missing."
+    else
+        printf '%s' "$FAMILY_MATCHES" | jq -r '.[] | "\\(.id)\\t\\(.title)"'
+    fi
+fi
+```
+
+Read what comes back rather than matching on the string alone. A hit whose
+symptom is genuinely the same defect — same package, same failure mode —
+means comment on it as in 3c. Set it by hand — this one is a judgement
+call, so nothing assigns it for you:
+
+```bash
+EXISTING="<the bead id you judged to be the same defect>"
+```
+
+A hit that merely shares a prefix but fails for a different reason is not
+your bead; keep going to 3d.
+
+**3c. If `$EXISTING` is set — comment, do not file:**
+
+```bash
+gc bd comment "$EXISTING" "Also observed on {{base_branch}} while starting $WORK_BEAD_ID."
+```
+
+One bead, N confirmations. Then get on with your own work.
+
+**3d. If the lookup succeeded and matched nothing, check whether the fix
+already landed** and your baseline is simply stale. Re-filing a defect that
+is already fixed puts a ready bead in the pool, and the next sling sends a
+polecat to redo merged work:
+
+```bash
+CUTOFF=$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)
+CLOSED_MATCHES=$(gc bd list --title-contains "$SYMPTOM_KEY" --status closed --closed-after "$CUTOFF" --json)
+CLOSED_RC=$?
+```
+
+On a match — or on a non-zero `$CLOSED_RC`, since a failed lookup is not
+proof the fix has not landed — re-fetch `origin/{{base_branch}}`, reset your
+worktree to the current tip, and re-run the pre-flight before filing
+anything.
+
+**3e. Only now file it** — with the symptom key verbatim in the title, so
+the next polecat's 3b lookup finds your bead. Put the full failure,
+including the subtest you stripped in 3a and the package, in the body:
+
+```bash
+gc bd create --title "Pre-existing failure: $SYMPTOM_KEY — <short description>" \
+  --type bug --priority 1 \
+  --design "Observed on {{base_branch}}. Full failure: $RAW_FAILURE"
+gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} has failing pre-flights" \
+  -m "Filed: <bead-id> for $SYMPTOM_KEY. Proceeding with $WORK_BEAD_ID."
+```
+
+**Exit criteria:** Pre-flights pass, or the failure is recorded exactly once
+— a new bead you filed, or your comment on the bead that already had it —
+or, when the ledger lookup itself was broken, `{{escalation_target}}` has been notified
+instead."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["preflight-tests"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+description = """
+Do the actual implementation work.
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+**If resuming a rejected branch:** Read `metadata.rejection_reason`
+from load-context. Focus on fixing the specific issue that caused
+rejection — don't redo everything.
+
+Derive your work bead in this shell context:
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+```
+
+**Commit frequently with detailed messages.** Every commit gets a
+subject AND a body. The body is what makes the repo navigable a year
+from now — the reviewer (and future-you) needs to understand *why* the
+change exists, not just *what* the diff did. The diff already shows
+the what.
+
+```bash
+git add <files>
+git commit -m "<type>: <imperative subject> ($WORK_BEAD_ID)" -m "$(cat <<'BODY'
+<1-3 paragraph explanation:>
+- The motivation: which bug, regression, design decision, or upstream
+  request drove this commit
+- What the change actually does at a higher level than the diff
+- Anything non-obvious about the approach: trade-offs taken, paths not
+  chosen, hidden constraints honored
+- Validation: which tests/benchmarks/manual checks confirmed correctness
+
+Note any follow-ups, deferred edge cases, or downstream impacts here.
+BODY
+)"
+```
+
+Commit types: feat, fix, refactor, perf, test, docs, chore
+
+**Examples of strong subjects + bodies:**
+- `fix(session): preserve lifecycle metadata during crash adoption (ga-xxxx)`
+  body: explains the stale session projection, the resume path that
+  lost metadata, the projection update, and the focused adoption test
+- `perf(events): batch typed payload registration lookups (ga-xxxx)`
+  body: cites the event fan-out profile, names the registry call site
+  that drove the regression, and notes why the cache stays read-only
+
+**Weak commits to avoid** (refinery/reviewer can't tell what's going on):
+- `fix: stuff (ga-xxxx)`
+- `perf: speed up the slow loop`
+- `refactor` with no body
+
+**Discovered work (outside scope):**
+```bash
+gc bd create --title "Found: <description>" --type bug --priority 2
+```
+Do NOT fix unrelated issues in this branch.
+
+**If stuck (>15 minutes):**
+```bash
+gc mail send {{escalation_target}} -s "HELP: Stuck on implementation" -m "Issue: $WORK_BEAD_ID
+Problem: <what's blocking you>
+Tried: <what you've attempted>"
+```
+
+**If context filling up:**
+```bash
+gc runtime request-restart
+```
+This blocks until the controller kills your session. The next session
+resumes from context (re-reads formula steps, checks git/bead state).
+
+**Exit criteria:** Implementation complete, all changes committed."""
+
+[[steps]]
 id = "self-review"
 title = "Self-review and run tests (affected-aware)"
 needs = ["implement"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
 Review your changes and verify they work before handing off. Overrides the
 base self-review to support affected-test detection.
@@ -463,6 +703,7 @@ addition, formatter run). NEVER discard implementation changes with
 id = "submit-and-exit"
 title = "Submit work to refinery and exit"
 needs = ["self-review"]
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 description = """
 Hand off your work and self-clean. You cease to exist after this step.
 
