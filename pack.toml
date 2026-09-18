@@ -67,10 +67,19 @@ overlay_dir = "overlays/cycle-recycle"
 
 # One bot account backs every agent's gh token, so an agent can write to any
 # repository that token reaches. A PreToolUse hook refuses the gh write verbs
-# aimed outside the origin of a rig we own (docs/gh-origin-guard.md). These three
-# carry no hook of their own; for the rest the same hook rides their overlay.
+# aimed outside the origin of a rig we own (docs/gh-origin-guard.md). The agents
+# listed here carry no hook of their own; for the rest the same hook rides their
+# overlay.
 [[patches.agent]]
 name = "converse"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
+name = "converse-fable"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
+name = "converse-opus"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
