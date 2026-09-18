@@ -345,8 +345,9 @@ since_format = "RFC 3339 UTC"
 # --route to carry — are stamped directly with gc bd update --set-metadata by
 # whichever script or formula owns that bead's dispatch. The recurring shapes: an
 # escalation or visit routed to its handler pool or parked to `human`
-# (escalate.sh, gc-helm.sh, mol-visit.toml, mol-first-reaction.toml,
-# mol-feedback-distiller.toml); a rework child or a doctor finding routed to its
+# (escalate.sh, gc-helm.sh, mol-visit.toml, mol-feedback-distiller.toml); a
+# reaction bead routed to the proactive pool (gc-proactive.sh); a rework child
+# or a doctor finding routed to its
 # fix pool (pr-facts.sh, pre-open-rebase.sh, doctor-finding-gate.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml); and an
 # anchor parked to `human` by signoff.sh's round cap, beside
@@ -440,7 +441,7 @@ keys = [
 #   an alias normalized to `mr` on read. An absent key resolves to the
 #   default_merge_strategy var (default `mr`); an empty value resolves to
 #   `direct`. `mr` is stamped by pr-facts.sh, signoff.sh, convoy-graduate.sh,
-#   pre-open-rebase.sh, mol-feedback-distiller.toml and mol-first-reaction.toml,
+#   pre-open-rebase.sh and mol-feedback-distiller.toml,
 #   and existing_pr forces the resolved mode up from `direct` at the refinery.
 #   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
 #   direct push was rejected for branch protection into the PR pipeline. Read by
@@ -670,43 +671,40 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
 # doctor/check-claim-advancing exempts a step or root carrying it (or gc.takeaway)
-# from its stall arms with the remedy status=blocked, and duplicate-sweep.sh notes
-# that a disposed duplicate had been parked, leaving the text on the bead. No pack
+# from its stall arms with the remedy status=blocked. No pack
 # script writes it — molecule-hold.sh writes blocked_reason instead; an operator or
 # the refinery stamps it by hand when parking a branch. Never cleared. Freeform.
 
 [metadata.proactive]
-# The proactive first-reaction surface. gc.proactive and gc.proactive_reaction
-# answer different questions and are not duplicates: the first is the standing
-# opt-in that makes a bead eligible for a reaction, the second is the completion
-# proof the guards key on.
+# The proactive first-reaction surface. A first reaction is its own leased task
+# bead R that tracks the subject S; exactly-once is the substrate's, keyed on R's
+# identity, not a marker on S
+# (specs/tk-5n01ns/reaction-bead-first-reaction.md).
 keys = [
-  "gc.proactive", "gc.proactive_reaction",
-  "gc.first_reaction", "gc.first_reaction_reason",
-  "gc.first_reaction_target", "gc.first_reaction_at",
+  "gc.proactive",
+  "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
+  "gc.reacted_by",
   "gc.blocker_key",
 ]
 # gc.proactive — `1`, the standing scan opt-in. Written by patrol-finding.sh when
 #   it files a finding; read by tools/gc-proactive.sh, which offers the bead to
 #   the proactive pool by `bd ready --metadata-field gc.proactive=1`. Absent is
 #   not eligible. Never cleared, so a scan that was down picks it up later.
-# gc.proactive_reaction — `1`, the completion proof, written by gc-helm.sh
-#   `takeaway --release` in the same write that parks the subject. It is what
-#   first-reaction-dispose.sh, tools/gc-proactive.sh and mol-first-reaction.toml
-#   read to refuse a SECOND dispose, which would re-release a bead a worker now
-#   holds. Absent means the reaction has not landed. Never cleared.
-# gc.first_reaction — the disposition chosen, `actionable | blocked | ruling`,
-#   written by first-reaction-dispose.sh BEFORE the act. Its presence proves the
-#   reaction was ATTEMPTED, not that it landed: a record present with no
-#   gc.proactive_reaction=1 is a part-way failure, and the run RESUMES rather
-#   than refusing. The completion proof is gc.proactive_reaction, not this key.
-#   Read by that script's own guard, tools/gc-proactive.sh and
-#   mol-first-reaction.toml. Never cleared.
-# gc.first_reaction_reason / _target / _at — the audit record written in the same
-#   update as gc.first_reaction: the reason, the route or waiting-ids or visit it
-#   named, and the timestamp. _target and _at are read only to compose the
-#   "already landed" message; _reason has no reader and is the one collapse
-#   candidate this surface still carries. Never cleared. _at is RFC-3339 UTC.
+# gc.reaction_kind — the reaction sub-type on the reaction bead R, `first-reaction`.
+#   Written by tools/gc-proactive.sh in R's create call. Leaves room for other
+#   reaction kinds without a second dedup dimension. Never cleared.
+# gc.reaction_subject / _store — on the reaction bead R, the subject S it tracks
+#   and (only where the id prefix is ambiguous) that subject's store. Written by
+#   tools/gc-proactive.sh in R's create call, so R is born tracking S; read by the
+#   create-R-once dedup (with task_kind=reaction) and by the reaction worker to
+#   resolve S. A tracks edge R->S mirrors the subject. Never cleared. Bead id / store.
+# gc.reacted_by — on the SUBJECT S, the reaction bead R whose write-back landed.
+#   Written by first-reaction-dispose.sh LAST, after the disposition act and any
+#   edge, so its presence proves the whole write-back landed. Read only by that
+#   script's re-offer recovery, to close a re-claimed R without re-disposing S. It
+#   is not a guard progress is refused on — the write-backs are idempotent — and it
+#   is keyed to R's id, so a marker left by a closed R does not block a later
+#   re-reaction by a different R. Never cleared. A bead id.
 # gc.blocker_key — the dedup handle on the wait bead a blocked first reaction
 #   FILES, so one wait stands per recurring cause rather than one per instance
 #   (first-reaction-dispose.sh stamps it on the created blocker and looks an
@@ -722,25 +720,17 @@ keys = [
 keys = [
   "gc.superseded_by", "gc.superseded_by_store",
   "superseded_by", "superseded_by_store",
-  "gc.supersedes", "gc.supersedes_store", "duplicate_of", "duplicate_of_store",
+  "gc.supersedes", "gc.supersedes_store",
 ]
 # gc.superseded_by / _store — on the ORIGIN bead, the successor it retired into
 #   and (only where the id prefix is ambiguous) that successor's store.
 #   bead-rehome.sh writes and reads them back and refuses to overwrite a
 #   DIFFERENT successor. Flat dotted keys read by bracket access; the non-dotted
 #   `superseded_by` and `superseded_by_store` are legacy fallbacks, read only —
-#   bead-rehome.sh and duplicate-sweep.sh fall back to them when the dotted form
+#   bead-rehome.sh falls back to them when the dotted form
 #   is absent, and no pack path writes them. Never cleared. Bead id / store.
 # gc.supersedes / _store — the reverse pointer on the SUCCESSOR bead, naming the
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
-# duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
-#   enumerates by `--has-metadata-key duplicate_of`. A bead id. Never cleared.
-# duplicate_of_store — the store that survivor lives in, the sibling of
-#   gc.superseded_by_store, set only where the survivor's id prefix is ambiguous.
-#   duplicate-sweep.sh reads it to leave a duplicate alone when its survivor sits
-#   in a store this pass cannot resolve; absent reads as this rig's own store.
-#   Stamped beside duplicate_of by hand; no pack script writes it. Never cleared.
-#   A store ref.
 
 [metadata.human_surface]
 keys = [
@@ -954,16 +944,16 @@ keys = [
 # gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-tracking
 #   stamps on a claimed work bead: the worker's checkout, its head commit and its
 #   branch, written by the gascity binary on the claim/close path (gc.work_branch
-#   by hookClaimIdentityPatch at claim time). duplicate-sweep.sh reads gc.work_dir
+#   by hookClaimIdentityPatch at claim time). bead-rehome.sh reads gc.work_dir
 #   and gc.work_commit — with the pack-written bare work_dir defined in
-#   merge_identity — as proof a run produced work before disposing a duplicate,
-#   and gc.work_branch is the key the runtime's detached-handoff orphan sweep
+#   merge_identity — as proof a run produced work before closing a bead with a
+#   successor, and gc.work_branch is the key the runtime's detached-handoff orphan sweep
 #   matches on. Absent means no such product was recorded. A path, a sha, a branch.
 # gc.work_outcome — a work bead's self-reported disposition, read as `no-op`
 #   (produced nothing) or `shipped` (landed work). A pack component stamps
 #   `no-op` — dead-molecule-dispose.sh, and converse by hand — while its meaning
-#   is the runtime's, like gc.outcome. duplicate-sweep.sh reads it to confirm a
-#   no-op duplicate is disposable, pr-stack.sh drops a no-op row from a branch's
+#   is the runtime's, like gc.outcome. bead-rehome.sh reads it to confirm a
+#   no-op origin is disposable, pr-stack.sh drops a no-op row from a branch's
 #   ledger, and each falls back to the legacy bare `work_outcome` alias. Absent
 #   leaves the disposition unstated. Never cleared.
 # configured_named_session — on a session bead, the authoritative "standing

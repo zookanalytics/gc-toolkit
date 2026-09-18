@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-stack — arm 8 of the merge cadence: keep an open PR's body naming every
+# pr-stack — arm 7 of the merge cadence: keep an open PR's body naming every
 # bead whose work is on its head branch.
 # A PR body is composed once, by pr-open.sh, out of one anchor. Commits keep
 # arriving on the branch afterwards — a fold, a rework or rebase hand-back, a
@@ -81,12 +81,11 @@ bd_list() {
 
 # The branch's bead ledger: the three keys the cadence writes when work reaches
 # a branch, unioned and deduped, then the rows that recorded no work removed. A
-# closed duplicate keeps its metadata.branch — and for a rebase or rework twin
-# that branch names this very head — so it reaches the union by that key while
-# having contributed no commit. A row carrying duplicate_of, or a no-op
-# work_outcome under either key, is dropped, so the section never tells a
-# reviewer to approve work that is not on the branch. Any unreadable half fails
-# the whole ledger.
+# closed no-op duplicate keeps its metadata.branch — and for a rebase or rework
+# twin that branch names this very head — so it reaches the union by that key
+# while having contributed no commit. A row recording a no-op work_outcome under
+# either key is dropped, so the section never tells a reviewer to approve work
+# that is not on the branch. Any unreadable half fails the whole ledger.
 #
 # The branch key alone is not proof of a commit: signoff.sh stamps
 # branch=<this head> on a rework child at CREATION, before any polecat claims
@@ -111,7 +110,6 @@ ledger_of() { # <branch>
   printf '%s\n%s\n%s\n' "$direct" "$folded" "$landed" \
     | jq -s 'add | unique_by(.id)
         | map(select(
-            (((.metadata // {}).duplicate_of // "") | tostring) == "" and
             (((.metadata // {}).work_outcome // "") | tostring) != "no-op" and
             (((.metadata // {})["gc.work_outcome"] // "") | tostring) != "no-op"
           ))' 2>/dev/null
