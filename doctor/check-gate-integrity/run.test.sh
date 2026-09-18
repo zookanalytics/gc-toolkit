@@ -18,7 +18,18 @@ EOF
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+  "rig list")
+    # RIGS_FAIL_TIMES>0 fails the first N calls of a run, then succeeds — a
+    # transient blip the check must retry past. RIGS_RC (persistent) applies to
+    # every call. RIGS_ATTEMPT_FILE counts calls within one run so the transient
+    # window is per-run, not global.
+    ft="${RIGS_FAIL_TIMES:-0}"
+    if [ "$ft" -gt 0 ] && [ -n "${RIGS_ATTEMPT_FILE:-}" ]; then
+      n=0; [ -f "$RIGS_ATTEMPT_FILE" ] && n=$(cat "$RIGS_ATTEMPT_FILE")
+      n=$((n + 1)); printf '%s' "$n" > "$RIGS_ATTEMPT_FILE"
+      [ "$n" -le "$ft" ] && exit 1
+    fi
+    rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -35,8 +46,8 @@ name=$(basename "$(dirname "$db")")
 f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
-export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
-run_check() { RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
+export PATH="$TMP/bin:$PATH" STORES="$TMP/stores" RIGS_ATTEMPT_FILE="$TMP/rigs-attempts.log"
+run_check() { : > "$RIGS_ATTEMPT_FILE"; RIGS_JSON="$TMP/rigs.json" GC_PACK_DIR="$TMP" bash "$CHECK" 2>&1; }
 bead() { printf '{"id":"%s","status":"open","metadata":%s}' "$1" "$2"; }
 store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.json"; }
 OID="0123456789abcdef0123456789abcdef01234567"
@@ -90,7 +101,15 @@ eq "$RC" "0" "human-parked states carry no gate obligations"
 
 # --- 6. fail-CLOSED --------------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?
-eq "$RC" "1" "a failed \`gc rig list\` warns, never passes"
+eq "$RC" "1" "a PERSISTENTLY failing \`gc rig list\` warns, never passes (retries exhausted)"
+# A transient failure — the enumeration fails a few times, then succeeds — is
+# retried, not filed as a blocking all-rigs finding: the scan recovers and
+# reports the real verdict.
+store "$(bead g-12 '{"merge_result":"pull_request","check_set":"codex","branch":"polecat/g-12","check.codex":"green"}')"
+OUT=$(RIGS_FAIL_TIMES=2 run_check); RC=$?
+eq "$RC" "0" "a transient \`gc rig list\` failure is retried, then the scan runs"
+has "$OUT" "OK:" "the recovered run reports the gate-integrity verdict, not the enumeration abort"
+hasnt "$OUT" "cannot determine" "a transient blip is not filed as an all-rigs finding"
 OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable store warns"
 has "$OUT" "NOT checked" "the warning says the store was skipped"
