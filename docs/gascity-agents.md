@@ -1319,7 +1319,7 @@ checkout to see whether the arm is present:
 ```bash
 COMMIT=$(gc version --json | jq -r .commit)  # e.g. 3e629adc4-dirty
 COMMIT=${COMMIT%%-dirty}                     # build-tree marker, not part of the rev
-git -C rigs/gascity show "$COMMIT:cmd/gc/cmd_nudge.go" \
+git -C rigs/gascity show "${COMMIT}:cmd/gc/cmd_nudge.go" \
   | grep -c queuedNudgeEpochRetargetable     # 0 = every drift dead-letters
 ```
 
