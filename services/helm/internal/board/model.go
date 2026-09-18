@@ -420,7 +420,7 @@ type Tile struct {
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
 	// the way both renderers already bucket [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
-	// WITHIN a family (specs/tk-492ssx); [GroupByFamily] is that partition.
+	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
 }
 

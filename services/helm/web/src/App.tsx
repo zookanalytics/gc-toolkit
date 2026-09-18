@@ -238,7 +238,7 @@ function progressCell(tile: Tile): string {
 // ● when the root's own next move is the operator's — and a table of its members
 // beneath, each in the band that says the move it wants, a ● marking the rows
 // that want a person. Dependency structure is the top-level axis; the attention
-// band orders and highlights within a family (specs/tk-492ssx).
+// band orders and highlights within a family.
 function FamilyBlock({
   family,
   drillTarget,

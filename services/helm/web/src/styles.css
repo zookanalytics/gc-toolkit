@@ -77,7 +77,7 @@ th {
 }
 
 /*
- * Dependency families (specs/tk-492ssx). Each family is a titled block — its
+ * Dependency families. Each family is a titled block — its
  * root anchor, then the members that hang off it — bracketed with a left rule so
  * it reads as one thing. The attention band rides a per-row column; a ● marks
  * the rows whose next move is the operator's.

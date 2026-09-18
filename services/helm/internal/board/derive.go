@@ -1451,9 +1451,7 @@ func classifySection(t Tile) string {
 		// Every open child is parked for the operator and nothing else is moving.
 		// The parent is not active work — it is waiting on the operator to rule
 		// those child rows — so it bands gate rather than masquerading as
-		// in-flight (tk-ibx654). Under family grouping this only reorders the
-		// parent within its family; before it, a stale-bumped parent whose own
-		// route markers are empty dropped to the default active arm.
+		// in-flight.
 		return SectionGate
 	default:
 		return SectionActive
@@ -1850,12 +1848,11 @@ func applyFold(t *Tile, folded []foldedAsk) {
 //
 // A row carrying a TAKEAWAY never clusters, however many share its needs. The
 // takeaway is per-bead content the operator has to read one at a time, and
-// folding those rows into a count-plus-id-list loses it (tk-9tqj9h). This holds
-// whether the takeaway is a unique LLM sentence — which used to be assumed not
-// to recur, and so not to cluster — or a deterministic one a script templated
-// across anchors (a signoff-cap headline), which recurs identically and did
-// cluster. Only a deterministic STATE phrase, which no bead authored, clusters
-// now; those the renderer folds with per-bead context, not an id soup.
+// folding those rows into a count-plus-id-list loses it. This holds whether the
+// takeaway is a unique LLM sentence or a deterministic one a script templated
+// across anchors (a signoff-cap headline) that recurs identically across beads.
+// Only a deterministic STATE phrase, which no bead authored, clusters; those the
+// renderer folds with per-bead context, not an id soup.
 func tagClusters(tiles []Tile) {
 	type key struct{ section, needs string }
 	clusterable := func(t Tile) bool {
@@ -1915,7 +1912,7 @@ func GroupBySection(tiles []Tile) []SectionGroup {
 	return out
 }
 
-// --- the dependency-family grouping (specs/tk-492ssx) -------------------------
+// --- the dependency-family grouping ------------------------------------------
 //
 // A family is one top-level anchor and every tile that hangs off it by a
 // parent-child or a `blocks` edge. Grouping by family is the board's primary
@@ -2352,13 +2349,10 @@ const (
 // terminal DONE families — each a closed anchor — against maxDone. limit<=0
 // means uncapped.
 //
-// It supersedes the flat, per-band split the board used before it grouped: a
-// `parked` row no longer needs a budget of its own, because it now travels with
-// its family rather than sinking to the end of one rank-ordered list, and the
-// DONE families still get theirs so a week of closures cannot crowd out the live
-// board. A family is counted as DONE by its ROOT: a live family with a closed
-// member still spends the live budget, which is right — the operator is looking
-// at the live anchor, not the closed child.
+// DONE families get their own budget so a week of closures cannot crowd out the
+// live board. A family is counted as DONE by its ROOT: a live family with a
+// closed member still spends the live budget, which is right — the operator is
+// looking at the live anchor, not the closed child.
 func CapFamilies(tiles []Tile, limit, maxDone int) []Tile {
 	if limit <= 0 {
 		return tiles

@@ -274,8 +274,8 @@ func TestClusterTagging(t *testing.T) {
 
 // TestParkedParentBandsGateNotActive: a roll-up whose every open child is parked
 // for the operator is waiting on the operator to rule those child rows, not
-// active work — so it bands gate rather than masquerading as in-flight
-// (tk-ibx654). Its own route markers are empty, which used to drop it to active.
+// active work — so it bands gate rather than masquerading as in-flight, even
+// when its own route markers are empty.
 func TestParkedParentBandsGateNotActive(t *testing.T) {
 	anchors := []Anchor{
 		{ID: "tk-parent", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", UpdatedAt: fixtureNow,
@@ -293,8 +293,8 @@ func TestParkedParentBandsGateNotActive(t *testing.T) {
 
 // TestTakeawayRowsDoNotCluster: a row carrying a takeaway never clusters, however
 // many share its needs — a deterministic signoff-cap headline templated across
-// anchors no longer folds into a count-plus-id soup that loses the per-bead
-// content (tk-9tqj9h). A deterministic STATE phrase, which no bead authored,
+// anchors does not fold into a count-plus-id soup that loses the per-bead
+// content. A deterministic STATE phrase, which no bead authored,
 // still clusters.
 func TestTakeawayRowsDoNotCluster(t *testing.T) {
 	tmpl := "signoff did not converge after 3 rework rounds (cap 3)"

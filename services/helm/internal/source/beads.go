@@ -636,11 +636,11 @@ func needsParentChildren(kind string) bool {
 }
 
 // needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
-// Two readers spend them: board.ruled and the merge row's PR axes (decision,
-// human, parked, merge), and the dependency-family grouping (specs/tk-492ssx),
-// which climbs a tile to the anchor it blocks — so epic and convoy anchors now
-// collect their `blocks` edges too, to join a blocked epic or convoy to the
-// family it hangs off. A convoy's edges come from the same outbound read that
+// The readers that spend them: board.ruled and the merge row's PR axes
+// (decision, human, parked, merge), and the dependency-family grouping, which
+// climbs a tile to the anchor it blocks — so epic and convoy anchors collect
+// their `blocks` edges to join a blocked epic or convoy to the family it hangs
+// off. A convoy's edges come from the same outbound read that
 // already fetches its `tracks` members; an epic's are added to that read here.
 func needsWaitingEdges(kind string) bool {
 	switch kind {
@@ -902,7 +902,7 @@ func (s *BeadsSource) collectMetadataAnchors(ctx context.Context, g *gatherState
 // own board tile. Each is a family MEMBER — it joins its merge anchor through
 // the `blocks` edge it carries and through metadata.anchor_bead, and is never a
 // root — so a review or rework in flight earns a row of its own rather than
-// leaving the anchor showing an empty gate (specs/tk-492ssx). The board kind is
+// leaving the anchor showing an empty gate. The board kind is
 // the task_kind, which board.derive bands as in-flight leaf work.
 var reviewReworkKinds = []string{"review", "rework"}
 

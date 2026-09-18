@@ -400,7 +400,7 @@ func populatedStore() *fakeStore {
 			"tk-cv": {
 				withDepType(child("tk-m1", "in_progress", testNow, ""), "tracks"),
 				// A convoy's own blocks-edge is a WAIT, not membership: it stays
-				// out of Children and is now gathered into WaitingOn so the family
+				// out of Children and is gathered into WaitingOn so the family
 				// grouping can climb a blocked convoy to what it blocks.
 				withDepType(child("tk-m2", "open", testNow, ""), "blocks"),
 			},
@@ -417,8 +417,8 @@ func populatedStore() *fakeStore {
 			},
 			"tk-human":  {withDepType(child("tk-w3", "open", testNow, ""), "blocks")},
 			"tk-parked": {withDepType(child("tk-w4", "closed", testNow, ""), "blocks")},
-			// An epic now gathers its blocks edges too, so a blocked epic can join
-			// the dependency family it hangs off (specs/tk-492ssx).
+			// An epic gathers its blocks edges, so a blocked epic can join the
+			// dependency family it hangs off.
 			"tk-epic": {withDepType(child("tk-w5", "closed", testNow, ""), "blocks")},
 		},
 	}
@@ -698,10 +698,10 @@ func TestBeadsGatherMetadataKinds(t *testing.T) {
 // stand down anyway. Nothing errors, no field goes missing, and the only
 // visible symptom is a row that quietly stopped asking too early.
 //
-// `epic` and `convoy` now pay it too, for a different consumer: the
-// dependency-family grouping (specs/tk-492ssx) climbs a tile to the anchor it
-// blocks, so a blocked epic or convoy must gather its `blocks` edges to join the
-// family it hangs off. A convoy's come from the same outbound read that already
+// `epic` and `convoy` pay it for a different consumer: the dependency-family
+// grouping climbs a tile to the anchor it blocks, so a blocked epic or convoy
+// must gather its `blocks` edges to join the family it hangs off. A convoy's
+// come from the same outbound read that already
 // fetched its `tracks` members — a blocker there is a wait, not membership.
 func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
@@ -760,7 +760,7 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 }
 
 // TestReviewReworkChildrenAreAdmittedAsTiles pins the in-flight review/rework
-// selector (specs/tk-492ssx): a not-closed bead carrying metadata.anchor_bead
+// selector: a not-closed bead carrying metadata.anchor_bead
 // with task_kind review or rework earns a tile so the operator sees the review
 // or rework in flight as a member of its merge anchor's family. Open OR
 // in_progress — a review is slung open, a rework is claimed — but never closed

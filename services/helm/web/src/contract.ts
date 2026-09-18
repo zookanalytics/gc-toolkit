@@ -231,8 +231,8 @@ export interface Tile {
    * The id of the dependency FAMILY this row belongs to — the top-most anchor
    * its parent-child and `blocks` edges climb to, and equal to the row's own
    * `id` when it climbs to nothing. Dependency structure is the board's primary
-   * grouping axis and the attention band orders and highlights within a family
-   * (specs/tk-492ssx); a surface buckets by this the way it buckets `section`.
+   * grouping axis and the attention band orders and highlights within a family;
+   * a surface buckets by this the way it buckets `section`.
    * Always present.
    */
   group_root: string;

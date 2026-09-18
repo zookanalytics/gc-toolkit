@@ -165,7 +165,7 @@ func TestRenderTableHeaderStaysPlainWhenTheBandIsWhole(t *testing.T) {
 
 // The overview groups by dependency family: each family opens with a banner
 // naming its root, and a ● marks a root whose next move is the operator's
-// (review or gate). The within-family band is a column, no longer the top axis.
+// (review or gate). The within-family band is a column, not the top axis.
 func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	tiles := []board.Tile{
@@ -198,7 +198,7 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 
 // A run of rows sharing one deterministic template folds to a count line, then
 // ONE line per member carrying its id and its own title — per-bead context, not
-// a bare id soup (tk-9tqj9h). Clustering lives in the flat owed queue; the
+// a bare id soup. Clustering lives in the flat owed queue; the
 // overview groups by family instead.
 func TestRenderQueueClusterCarriesPerBeadContext(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)

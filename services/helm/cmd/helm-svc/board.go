@@ -545,7 +545,7 @@ func wantsPerson(t board.Tile) bool {
 // family is a header naming its root, then the members beneath it ordered by the
 // move they want (board.SectionOrder), with a ● on the rows that want a person.
 // Dependency structure is the top-level axis; the attention band orders and
-// highlights within a family (specs/tk-492ssx).
+// highlights within a family.
 func renderFamilyRows(w io.Writer, shown []board.Tile) {
 	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
 	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
@@ -611,8 +611,8 @@ const clusterMemberCap = 8
 
 // renderClusterLine writes a run of rows that share a deterministic template: the
 // count and the shared needs, then ONE line per member carrying its own id, rig
-// and title. A bare id list read as a soup that named nothing actionable
-// (tk-9tqj9h); folding gathers the rows, it must not strip their context.
+// and title. A bare id list is a soup that names nothing actionable; folding
+// gathers the rows, it must not strip their context.
 func renderClusterLine(w io.Writer, cr board.ClusterRow, idW, rigW int) {
 	// The count sits where a band/severity would, so a scan down the column still
 	// finds it; the shared needs is the template.
