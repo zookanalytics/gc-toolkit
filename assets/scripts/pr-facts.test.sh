@@ -2,10 +2,11 @@
 # Hermetic test for assets/scripts/pr-facts.sh — external PR facts, no merge
 # authority. Covers: recording an out-of-band merge (never with an empty
 # merged_sha); abandoned (+ escalate); retargeted (+ escalate, gate markers
-# cleared, human-routed); BLOCKED -> escalate under a cause-specific key
-# (merge-blocked-threads vs merge-blocked-approval, read from reviewThreads
-# because reviewDecision is masked while threads are open; no guess when the
-# read fails, and an operator merge_hold left alone); CONFLICTING -> one rework child per head (dedup on
+# cleared, human-routed); BLOCKED -> escalate only an unresolved-thread block
+# (merge-blocked-threads, read from reviewThreads because reviewDecision is
+# masked while threads are open; no guess when the read fails, and an operator
+# merge_hold left alone) while a pending required approving review files no visit
+# and any stale merge-blocked-approval visit is retired; CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds and a live demand veto, unstamped orphans adopted),
 # classified rebase or merge by the head branch and stamped prepare_mode,
 # counted as dispatched only once that stamp AND the route read back, with a
@@ -672,26 +673,24 @@ out=$(run)
 has "$out" "PR#35 BLOCKED on 1 unresolved review thread(s)" "the arm names the unresolved-thread cause and counts only the open ones"
 has "$(cat "$STUB_ESC_LOG")" "--subject B1 --key merge-blocked-threads" "escalated under the thread-cause key"
 
-echo "# BLOCKED where thread resolution is OFF escalates the approval, never the open thread"
+echo "# BLOCKED with thread resolution OFF escalates nothing — the open thread is not the gate, and a pending approval is state"
 store "[$(anchor B5 41)]"
 printf '%s' "$(prview 41 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_41.json"
 echo '{"threads":[{"id":"tb5","isResolved":false}]}' > "$GH_DIR/threads_41.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "--subject B5 --key merge-blocked-approval" "an open thread is not the gate when required_review_thread_resolution is off"
-hasnt "$(cat "$STUB_ESC_LOG")" "merge-blocked-threads" "…and the thread key is never sent for it"
+eq "$(cat "$STUB_ESC_LOG")" "" "an open thread with thread-resolution off is not the gate, and a required approving review is state, not a visit"
 
-echo "# BLOCKED with every thread resolved escalates under merge-blocked-approval"
+echo "# BLOCKED solely on a required approving review files NO visit (the operator's review queue is state)"
 store "[$(anchor B2 36)]"
 printf '%s' "$(prview 36 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_36.json"
 echo '{"threads":[{"id":"tb2","isResolved":true}]}' > "$GH_DIR/threads_36.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-has "$out" "PR#36 BLOCKED awaiting approval (reviewDecision='REVIEW_REQUIRED')" "the arm names the approval cause when threads are all resolved"
-has "$(cat "$STUB_ESC_LOG")" "--subject B2 --key merge-blocked-approval" "escalated under the approval-cause key"
-hasnt "$(cat "$STUB_ESC_LOG")" "merge-blocked-threads" "…never the thread key when every thread is resolved"
+eq "$(cat "$STUB_ESC_LOG")" "" "a PR blocked only on a required approving review escalates nothing"
+hasnt "$out" "BLOCKED awaiting approval" "…and the removed approval arm no longer names the cause"
 
 echo "# BLOCKED that neither a required thread nor a required approval explains escalates nothing"
 store "[$(anchor B6 43)]"
@@ -727,6 +726,26 @@ printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution
 out=$(run)
 eq "$(cat "$STUB_ESC_LOG")" "" "an operator merge_hold leaves the BLOCKED escalation unsent"
 rm -f "$GH_DIR/rules_main.json"
+
+echo "# the merge-blocked-approval visit category is retired: every open one is swept, even with no live anchors"
+# A store whose PRs have all merged (no open pull_request anchor) is exactly
+# where the no-anchors early-exit would skip a tail sweep, so the retirement runs
+# before it. MC1's anchor is closed (its PR merged); MO1's is a live PR the board
+# still surfaces as state; MX1 is unreadable this pass; ATV is a genuine
+# unresolved-thread block under a different key.
+store "[{\"id\":\"MC1\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, {\"id\":\"MO1\",\"status\":\"open\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"pr_posture\":\"review_required@sha-9@2026-09-18T00:00:00Z\"}}, {\"id\":\"AV1\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC1\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV2\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MO1\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV3\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MX1\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"ATV\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-threads\",\"gc.continuation_group\":\"MO1\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+: > "$STUB_ESC_LOG"
+out=$(run); rc=$?
+eq "$rc" 0 "the pass still exits 0"
+has "$out" "no gating anchors" "the sweep ran ahead of the no-anchors early-exit"
+eq "$(bstatus AV1)" "closed" "a visit whose PR merged (anchor closed) is retired"
+eq "$(meta AV1 'gc.outcome')" "moot" "…closed moot — the premise it asked about is dead"
+has "$out" "retired stale merge-blocked-approval visit AV1" "the retirement is reported"
+eq "$(bstatus AV2)" "closed" "a visit for a still-open PR is retired too — a required approving review is state, not a visit"
+eq "$(bstatus AV3)" "open" "a visit whose subject is unreadable this pass is left, never retired on a read that did not land"
+has "$out" "subject MX1 unreadable" "…and the fail-closed skip is reported"
+eq "$(bstatus ATV)" "open" "a genuine unresolved-thread visit (different key) is untouched by the approval sweep"
+eq "$(cat "$STUB_ESC_LOG")" "" "the sweep files nothing — it only retires"
 
 echo "# dismissal of our OWN superseded CHANGES_REQUESTED"
 store "[$(anchor D1 20)]"
