@@ -489,6 +489,45 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
 }
+
+# --- retire the merge-blocked-approval visit category (a required review is state) --
+# An open PR awaiting its required approving review is a notification in itself.
+# It sits in the operator's review queue, the state the board's review section
+# surfaces, so the city does no proactive work to flag it: this cadence files no
+# merge-blocked-approval visit, and the category holds no actionable escalation.
+# Retire any that are open, closing each moot through the same close the
+# pre-recorded-disposition arm uses. The board keeps the PR as state regardless.
+# This runs before the no-anchors early-exit so a rig whose PRs have all merged
+# still clears its visits, and in every rig's cadence so each store cleans its own.
+# Fail closed on an unreadable subject: a visit whose anchor cannot be read this
+# pass is left for the next, never retired on a read that did not land.
+# --posture-only writes nothing here.
+if [ "$POSTURE_ONLY" != 1 ]; then
+  if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
+    while IFS="$(printf '\t')" read -r avid avsubj; do
+      [ -n "${avid:-}" ] || continue
+      avstate=""
+      if [ -n "$avsubj" ]; then
+        avstate=$(gc bd show "$avsubj" --json 2>/dev/null | scrub | jq -r '.[0].status // empty' 2>/dev/null)
+        if [ -z "$avstate" ]; then
+          echo "$PROG: visit $avid — subject $avsubj unreadable this pass; left for the next" >&2
+          continue
+        fi
+      fi
+      if gc bd update "$avid" --status=closed --set-metadata gc.outcome=moot \
+           --append-notes "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null 2>&1; then
+        echo "$PROG: retired stale merge-blocked-approval visit $avid (subject ${avsubj:-<none>} ${avstate:-none-recorded})"
+      else
+        echo "$PROG: could not retire stale merge-blocked-approval visit $avid; leaving it for the operator" >&2
+      fi
+    done <<AV_EOF
+$(printf '%s' "$av_visits" | jq -r '.[]? | [.id, ((.metadata["gc.continuation_group"]) // "")] | @tsv' 2>/dev/null)
+AV_EOF
+  else
+    echo "$PROG: merge-blocked-approval visit sweep skipped — could not list visits (retry next pass)" >&2
+  fi
+fi
+
 [ "$ANCHORS" != "[]" ] || { echo "$PROG: no gating anchors"; exit 0; }
 
 recorded=0; flagged=0; reworked=0; dismissed_n=0; skipped=0; disposed_n=0
@@ -1409,34 +1448,26 @@ $CBODY"
     continue
   fi
 
-  # --- BLOCKED: name the cause from the branch's rules and escalate it -----------
+  # --- BLOCKED: escalate an unresolved-thread block; a pending approval is not one ----
   # A PR whose city-side feedback is all routed can still sit on branch
-  # protection. Only two causes are actionable to escalate: an unresolved review
+  # protection. The one cause this cadence escalates is an unresolved review
   # thread where thread resolution is required (required_review_thread_resolution),
-  # and a missing approving review where one is required. Both are read from the
-  # branch's own rules; reviewDecision cannot name them alone, reading EMPTY while
-  # threads are unresolved and resolving only once they clear. Anything else — a
-  # rule this cadence does not model, unreadable rules, or a required thread count
-  # that could not be read — is escalated as nothing rather than a guess; the next
-  # reconcile retries. CHANGES_REQUESTED is active feedback the arms above and the
-  # dismissal below own; an operator merge_hold is their own gate; leave both.
+  # read from the branch's own rules. A missing approving review is NOT escalated:
+  # a PR waiting on a required approving review is the operator's own review queue,
+  # state the board's review section already surfaces from the posture recorded
+  # above (pr_posture), not a conversation a visit should open. Anything else — a
+  # rule this cadence does not model, unreadable rules, or a thread count that
+  # could not be read — escalates nothing rather than a guess; the next reconcile
+  # retries. CHANGES_REQUESTED is active feedback the arms above and the dismissal
+  # below own; an operator merge_hold is their own gate; leave both.
   if [ "$merge_state" = "BLOCKED" ] && ! is_held "$hold" && [ "$rd" != "CHANGES_REQUESTED" ]; then
     review_gates_for "$base"
     bcause="unnameable"; bthreads=0
-    if [ "$PROT_STATE" = "known" ]; then
-      threads_gate=0
-      if [ "$PROT_THREAD_REQ" = "true" ]; then
-        if bthreads=$(unresolved_threads "$num"); then
-          if [ "$bthreads" -gt 0 ]; then bcause="threads"; else threads_gate=1; fi
-        else
-          bthreads=0   # unreadable — do not fall to approval, threads are not ruled out
-        fi
+    if [ "$PROT_STATE" = "known" ] && [ "$PROT_THREAD_REQ" = "true" ]; then
+      if bthreads=$(unresolved_threads "$num"); then
+        [ "$bthreads" -gt 0 ] && bcause="threads"
       else
-        threads_gate=1   # thread resolution off — an open thread is never the gate
-      fi
-      if [ "$bcause" = "unnameable" ] && [ "$threads_gate" = "1" ] \
-         && [ "$PROT_APPROVALS" -ge 1 ] && [ "$rd" != "APPROVED" ]; then
-        bcause="approval"
+        bthreads=0   # unreadable — name no cause on a guess
       fi
     fi
     case "$bcause" in
@@ -1445,14 +1476,10 @@ $CBODY"
           "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (required_review_thread_resolution is on). Resolve the thread(s), or say why the block should lift."
         echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); escalated (merge-blocked-threads)"
         flagged=$((flagged + 1)); continue ;;
-      approval)
-        escalate "$id" "merge-blocked-approval" \
-          "PR#$num ($live_url) is BLOCKED by branch protection: it is waiting on an approving review ($PROT_APPROVALS required, reviewDecision='${rd:-empty}'). Approve it, or say why not."
-        echo "$PROG: $id — PR#$num BLOCKED awaiting approval (reviewDecision='${rd:-empty}'); escalated (merge-blocked-approval)"
-        flagged=$((flagged + 1)); continue ;;
     esac
-    # bcause=unnameable: the cause is not one this cadence can name and escalate,
-    # so escalate nothing — merge.sh logs it and the next reconcile retries. Fall
+    # bcause=unnameable: the cause is not one this cadence escalates — an unmodeled
+    # rule, unreadable rules, or a pending approving review (state, not a visit) —
+    # so escalate nothing; merge.sh logs it and the next reconcile retries. Fall
     # through, leaving the dismissal arm below to act if it applies.
   fi
 
