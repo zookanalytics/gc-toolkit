@@ -66,23 +66,40 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# >>> probe-stderr-capture
+# The gc probes below send stderr to $PROBE_ERR, not /dev/null, so a failure the
+# check reports names the reason it failed instead of only its rc. An I3
+# transient reported as "rc=1" alone is undiagnosable and recurs. Each probe's
+# `2>"$PROBE_ERR"` truncates the file, so it never holds a prior probe's stderr.
+# probe_err returns the first non-blank line, control characters stripped to keep
+# it one line and length-capped. mktemp failing degrades to /dev/null (always
+# empty), so probe_err yields nothing and every detail reads as before.
+PROBE_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-check-routed-work-claimable.XXXXXX" 2>/dev/null) || PROBE_ERR=/dev/null
+[ "$PROBE_ERR" = /dev/null ] || trap 'rm -f "$PROBE_ERR"' EXIT
+probe_err() {
+    [ -s "$PROBE_ERR" ] || return 0
+    tr -d '\000-\010\013-\037' < "$PROBE_ERR" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+}
+# <<< probe-stderr-capture
 
-agents_raw=$(run_bounded gc agent list --json 2>/dev/null); agents_rc=$?
+agents_raw=$(run_bounded gc agent list --json 2>"$PROBE_ERR"); agents_rc=$?; agents_err=$(probe_err)
 identities=$(printf '%s' "$agents_raw" \
     | jq -c '[.agents[]? | (.qualified_name // "") | select(. != "")] | unique' 2>/dev/null)
 if [ "$agents_rc" -ne 0 ] || [ -z "$identities" ] || [ "$identities" = "[]" ]; then
     echo "cannot determine whether routed/assigned work is claimable (I3)"
     detail "\`gc agent list --json\` failed (rc=$agents_rc) or listed no qualified identities; with no identity set every route looks dead."
+    [ -n "$agents_err" ] && detail "\`gc agent list\` stderr: $agents_err"
     exit 1
 fi
 city_path=$(printf '%s' "$agents_raw" | jq -r '.city_path // ""' 2>/dev/null)
 
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+rigs_raw=$(run_bounded gc rig list --json 2>"$PROBE_ERR"); rigs_rc=$?; rigs_err=$(probe_err)
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path] | join("\u001f")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether routed/assigned work is claimable (I3)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
+    [ -n "$rigs_err" ] && detail "\`gc rig list\` stderr: $rigs_err"
     exit 1
 fi
 
@@ -91,9 +108,9 @@ while IFS=$'\037' read -r rig_name rig_path; do
     label="${rig_name:-<city>}"
     qualifier="$rig_name"
     [ -n "$city_path" ] && [ "$rig_path" = "$city_path" ] && qualifier=""
-    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>/dev/null); rc=$?
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open --json --limit 0 2>"$PROBE_ERR"); rc=$?; list_err=$(probe_err)
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
-        warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked")
+        warnings+=("$label: could not list open beads in $rig_path/.beads (rc=$rc) — this store was NOT checked${list_err:+; \`gc bd list\` stderr: $list_err}")
         continue
     fi
     rows=$(printf '%s' "$raw" | scrub | jq -r \
@@ -136,10 +153,11 @@ while IFS=$'\037' read -r rig_name rig_path; do
     # Arm 4 — reachability. A valid address is not an offer: a pool offers what
     # `bd ready` returns, so a routed bead in neither `bd ready` nor `bd blocked`
     # is offered by nobody and shows its wait to nobody.
-    ready_raw=$(run_bounded gc bd ready --db "$rig_path/.beads" --json --limit 0 2>/dev/null); ready_rc=$?
-    blocked_raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>/dev/null); blocked_rc=$?
+    ready_raw=$(run_bounded gc bd ready --db "$rig_path/.beads" --json --limit 0 2>"$PROBE_ERR"); ready_rc=$?; ready_err=$(probe_err)
+    blocked_raw=$(run_bounded gc bd blocked --db "$rig_path/.beads" --json 2>"$PROBE_ERR"); blocked_rc=$?; blocked_err=$(probe_err)
     if [ "$ready_rc" -ne 0 ] || [ -z "$ready_raw" ] || [ "$blocked_rc" -ne 0 ] || [ -z "$blocked_raw" ]; then
-        warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability")
+        reach_err="$ready_err${ready_err:+${blocked_err:+; }}$blocked_err"
+        warnings+=("$label: could not read \`bd ready\` (rc=$ready_rc) or \`bd blocked\` (rc=$blocked_rc) in $rig_path/.beads — routed work there was NOT checked for reachability${reach_err:+; stderr: $reach_err}")
         continue
     fi
     offered=$(printf '%s\n%s\n' "$ready_raw" "$blocked_raw" | scrub \
@@ -189,9 +207,9 @@ done <<< "$scopes"
 
 # Arm 3 — a live registration with no rig bound whose order declares scope="rig".
 declares_rig_scope() { grep -qE '^[[:space:]]*scope[[:space:]]*=[[:space:]]*"rig"' "$1" 2>/dev/null; }
-orders_raw=$(run_bounded gc order list --json 2>/dev/null); orders_rc=$?
+orders_raw=$(run_bounded gc order list --json 2>"$PROBE_ERR"); orders_rc=$?; orders_err=$(probe_err)
 if [ "$orders_rc" -ne 0 ] || ! printf '%s' "$orders_raw" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
-    warnings+=("could not read the order registry (\`gc order list --json\`, rc=$orders_rc) — the rig-scoped-order arm did not run, so an unbound rig-scoped order would not be visible here")
+    warnings+=("could not read the order registry (\`gc order list --json\`, rc=$orders_rc) — the rig-scoped-order arm did not run, so an unbound rig-scoped order would not be visible here${orders_err:+; \`gc order list\` stderr: $orders_err}")
 else
     while IFS=$'\t' read -r oname osrc; do
         [ -n "$oname" ] || continue
