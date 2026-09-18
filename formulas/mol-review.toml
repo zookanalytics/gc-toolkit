@@ -126,6 +126,7 @@ done
 **Exit criteria:** shape discriminated, base and branch pinned (never a
 guessed main), REVIEWED_OID pinned, intent read, this step bead closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 # Adopted review-rubric entries — the lifecycle record the retirement pass
 # reads through learning-recurrence.sh --inventory. Anchors live here, not
@@ -363,6 +364,7 @@ out-of-scope findings filed or named unfiled, findings.md written in the
 verdict shape, findings.json written as the structured finding set (`[]` on
 approve), this step bead closed.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "verdict-and-drain"
@@ -448,3 +450,4 @@ touch the anchor. Done means gone.
 appended and, after the chain closed, the bead's route is restored so the
 pool can re-claim it), step chain closed forward, drain acknowledged.
 """
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
