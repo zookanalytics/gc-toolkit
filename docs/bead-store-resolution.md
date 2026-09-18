@@ -150,3 +150,17 @@ reference to a dozen live beads.
 
 A gate that concludes absence without going through it is reporting on
 whichever store it happened to be standing in.
+
+## Reading a bead's whole context
+
+`assets/scripts/bead-context.sh <id>` answers "what is this bead, and is it
+actionable?" in one call, so an agent stops re-running the show/jq/cross-store
+dance to tell whether a blocked bead's blockers have landed. It prints the
+bead's status, title, type, assignee and routing; the metadata that decides an
+anchor's fate (branch, target, PR, merge_result, gate lanes, successor); every
+dependency WITH its own status, read from the store that dependency lives in
+through the prefix binding above; the store the bead itself lives in; and a
+verdict on whether an open `blocks`-blocker — or one whose store cannot be
+placed — holds it. `--json` emits the whole context as one object; `--store
+rig:<name>` and `--db <path>/.beads` pin the owning store when a prefix is
+ambiguous or names the city's own store. It reads only.
