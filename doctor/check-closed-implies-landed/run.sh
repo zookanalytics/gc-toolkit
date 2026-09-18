@@ -67,13 +67,33 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+# `gc rig list` names the stores this check scans, and it can fail
+# transiently: a momentary Dolt or lock blip returns a non-zero rc that a
+# later call clears. Since this check files an all-rigs BLOCKING finding when
+# it cannot enumerate, a single blip must not stand in for "stores
+# unscannable" — retry a non-zero rc a bounded number of times, pausing
+# briefly so the blip can clear, each attempt drawn from the same doctor
+# budget as every probe. An rc of 0 is never retried: rc=0 with no rigs is a
+# genuinely empty city, and a retry would return the same nothing. A
+# persistent failure and a true empty city both fall through to the
+# fail-closed exit below — a check that cannot name the stores has not proven
+# the invariant.
+RIGS_MAX_ATTEMPTS=3
+rigs_attempt=0
+while : ; do
+    rigs_attempt=$((rigs_attempt + 1))
+    rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+    [ "$rigs_rc" -eq 0 ] && break
+    [ "$rigs_attempt" -ge "$RIGS_MAX_ATTEMPTS" ] && break
+    budget_spent && break
+    sleep 1
+done
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)]
     | join("\u001f")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether closed anchors landed (I5)"
-    detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
+    detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths after $rigs_attempt attempt(s); there is no set of bead stores to scan."
     exit 1
 fi
 
