@@ -341,15 +341,18 @@ since_format = "RFC 3339 UTC"
 # ROUTE. On a bead making a lifecycle transition, gc.routed_to is written by
 # lifecycle.sh --route in the same atomic update as the --to edge, and a direct
 # --set of the key is refused there, so a transition-coupled route cannot bypass
-# it. Routes on beads outside that state machine are stamped directly with
-# gc bd update --set-metadata by three writers, each on a bead with no --to edge
-# for --route to carry: signoff.sh's round cap parks the anchor with
-# gc.routed_to=human beside merge_hold=signoff_cap and a verified gc.takeaway,
-# leaving merge_result unchanged; escalate.sh stamps the route on the visit it
-# files and repoints a stale visit route at a live pool; doctor-finding-gate.sh
-# routes the finding it creates to its fix pool. A route value is a rig-qualified
-# pool identity
-# (<rig>/<agent>) or the park sentinel `human` ([machine] park_route); the pool
+# it. Routes on beads outside that state machine — a bead with no --to edge for
+# --route to carry — are stamped directly with gc bd update --set-metadata by
+# whichever script or formula owns that bead's dispatch. The recurring shapes: an
+# escalation or visit routed to its handler pool or parked to `human`
+# (escalate.sh, gc-helm.sh, mol-visit.toml, mol-first-reaction.toml,
+# mol-feedback-distiller.toml); a rework child or a doctor finding routed to its
+# fix pool (pr-facts.sh, pre-open-rebase.sh, doctor-finding-gate.sh); a review
+# bead's pool route restored after an abandoned round (mol-review.toml); and an
+# anchor parked to `human` by signoff.sh's round cap, beside
+# merge_hold=signoff_cap and a verified gc.takeaway, leaving merge_result
+# unchanged. A route value is a rig-qualified pool identity (<rig>/<agent>) or
+# the park sentinel `human` ([machine] park_route); the pool
 # offer is exact byte equality (gascity hookClaimMatchesRoute), so a bare,
 # unqualified or padded value matches no pool and doctor/check-routed-work-
 # claimable reports it. Absent and empty mean the same thing — unrouted — and
@@ -400,10 +403,17 @@ keys = [
 #   match it), pr-open.sh, pr-facts.sh and gate-ensure.sh. Absent leaves those
 #   checks unarmed and pr-open skips the anchor. Never cleared. Shape
 #   `polecat/<bead-id>` for fresh work.
-# target — the caller-set landing branch the polecat records at submit, and the
-#   base pr-facts.sh stamps on a rework child. Read only as the fallback alias
-#   for merged_target (pr-open.sh, gate-ensure.sh), defaulting to the rig's
-#   default branch when both are absent.
+# target — the landing branch the work merges into: the polecat records it at
+#   submit, the refinery stamps it on a rework child (pr-facts.sh,
+#   pre-open-rebase.sh, signoff.sh), and convoy-graduate.sh writes it on
+#   graduation. Read two ways — as the fallback alias for merged_target before a
+#   PR opens (pr-open.sh, gate-ensure.sh, both defaulting to the rig's default
+#   branch when both are absent), and directly as the landing branch by the
+#   polecat's submit target-resolve (mol-polecat-work.toml), the refinery's
+#   prepare and merge-push (mol-refinery-patrol.toml), the pre-open review base
+#   derived from the anchor (mol-review.toml), and signoff.sh verifying a rework
+#   child. Absent, the merged_target readers fall through to the default branch
+#   and submit falls back to base_branch. Never cleared. A branch name.
 # merged_target — where the PR actually lands, resolved onto the anchor when the
 #   PR opens (pr-open.sh) and read by merge.sh, pr-facts.sh and gate-ensure.sh to
 #   catch a base moved out from under a validated PR. Absent falls back to
@@ -417,9 +427,13 @@ keys = [
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
-# existing_pr — a PR the refinery should reuse rather than open, left for it to
-#   validate; pr-facts.sh stamps it on a rework child equal to that child's
-#   pr_url. The pack writes it and does not read it back here. Value is a PR URL.
+# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
+#   stamps it on a rework child equal to that child's pr_url and signoff.sh on
+#   the child it files; the refinery's rejection transition carries it through
+#   (mol-refinery-patrol.toml). Read by mol-refinery-patrol.toml to force the PR
+#   pipeline when set (merge_strategy flips to mr) and to count the bead
+#   PR-shaped, and by signoff.sh to verify a rework child's pr_fields. Absent
+#   means no PR to reuse. Never cleared. Value is a PR URL.
 # merge_strategy — how the refinery lands the branch: `mr` (open/merge a PR) is
 #   what pr-facts.sh, signoff.sh, convoy-graduate.sh and pre-open-rebase.sh stamp;
 #   absent defaults to `mr` at the refinery, and the direct-FF path is the other
