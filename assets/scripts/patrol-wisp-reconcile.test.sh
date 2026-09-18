@@ -149,6 +149,7 @@ chmod +x "$TMP/bin/gc"
 # run_reconcile <fixture-json> -> "<survivor>|<burned,ids>"
 run_reconcile() {
   printf '%s' "$1" > "$TMP/fixture.json"
+  local script="${2:-$TMP/reconcile.sh}"
   # Clear both sinks: a snippet that dies before writing $TMP/wisp would
   # otherwise be scored against the previous agent's survivor.
   : > "$TMP/burned"; : > "$TMP/wisp"
@@ -156,7 +157,7 @@ run_reconcile() {
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
            GC_RIG="$AGENT_RIG"
     # shellcheck disable=SC1091
-    . "$TMP/reconcile.sh"
+    . "$script"
     printf '%s' "$WISP" > "$TMP/wisp" )
   printf '%s|%s' "$(cat "$TMP/wisp")" "$(sort "$TMP/burned" | paste -sd, -)"
 }
@@ -181,48 +182,69 @@ run_pour() {
 # address, @O@ a foreign agent address, @R@/@X@ this/other rig name. Every wisp
 # row carries the shape bd returns for one: issue_type `molecule`, ephemeral true.
 
-# The exact live situation from the bug report.
-# w-run   in_progress patrol wisp, owned      -> SURVIVOR (in_progress first)
+# The exact live situation from the bug report. created_at orders the sweep:
+# the survivor is the NEWEST pour, since a cycle pours its successor after it.
+# w-run   in_progress patrol wisp, owned      -> SURVIVOR (newest of ours)
 # w-orph  open patrol wisp, NO assignee       -> the LEAK: must be BURNED, not
 #                                                skipped as "not mine"
 # w-other open molecule root, different title -> untouched (not ours to adopt
-#                                                OR to burn)
+#                                                OR to burn) even though it is
+#                                                newest — the title filter runs
+#                                                before the recency pick
 FX_LEAK='[
-  {"id":"w-run",   "status":"in_progress","title":"@T@","assignee":"@A@","issue_type":"molecule","ephemeral":true},
-  {"id":"w-orph",  "status":"open",       "title":"@T@","assignee":"",   "issue_type":"molecule","ephemeral":true},
-  {"id":"w-other", "status":"open",       "title":"mol-doc-keeper-drift-audit","assignee":"@A@","issue_type":"molecule","ephemeral":true}
+  {"id":"w-run",   "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-orph",  "status":"open",       "title":"@T@","assignee":"",   "created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-other", "status":"open",       "title":"mol-doc-keeper-drift-audit","assignee":"@A@","created_at":"2026-09-18T03:09:00Z","issue_type":"molecule","ephemeral":true}
 ]'
 FX_ONLY_ORPHAN='[
-  {"id":"w-orph","status":"open","title":"@T@","assignee":"","issue_type":"molecule","ephemeral":true}
+  {"id":"w-orph","status":"open","title":"@T@","assignee":"","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true}
 ]'
 FX_NO_PATROL='[
-  {"id":"w-other","status":"open","title":"mol-doc-keeper-drift-audit","assignee":"@A@","issue_type":"molecule","ephemeral":true}
+  {"id":"w-other","status":"open","title":"mol-doc-keeper-drift-audit","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true}
 ]'
+# Surplus reduces to exactly one — the newest pour (w-a) — and the older wisps
+# are burned regardless of status.
 FX_SURPLUS='[
-  {"id":"w-a","status":"in_progress","title":"@T@","assignee":"@A@","issue_type":"molecule","ephemeral":true},
-  {"id":"w-b","status":"open",       "title":"@T@","assignee":"@A@","issue_type":"molecule","ephemeral":true},
-  {"id":"w-c","status":"open",       "title":"@T@","assignee":"",   "issue_type":"molecule","ephemeral":true}
+  {"id":"w-a","status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:09:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-b","status":"open",       "title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-c","status":"open",       "title":"@T@","assignee":"",   "created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
+]'
+# The reported failure: a completed cycle awaiting burn (w-done, in_progress,
+# older) coexists with the fresh successor it poured (w-fresh, open, newer).
+# Adopt the successor and burn the completed cycle, never the reverse.
+FX_COMPLETED_SUCCESSOR='[
+  {"id":"w-done", "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-fresh","status":"open",       "title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
+]'
+# A partial reconcile can leave BOTH the completed cycle and its successor
+# in_progress (the successor was adopted, the completed one never burned).
+# created_at still separates them: adopt the newer, burn the older.
+FX_TWO_INPROGRESS='[
+  {"id":"w-stale","status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-live", "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
 ]'
 # For the pour snippet that resolves the current wisp itself: w-cur is ours,
 # w-orph is an unowned wisp of the same title, w-decoy is ours but not a patrol.
 FX_CURRENT='[
-  {"id":"w-orph", "status":"in_progress","title":"@T@","assignee":"",   "issue_type":"molecule","ephemeral":true},
-  {"id":"w-decoy","status":"in_progress","title":"mol-doc-keeper-drift-audit","assignee":"@A@","issue_type":"molecule","ephemeral":true},
-  {"id":"w-cur",  "status":"in_progress","title":"@T@","assignee":"@A@","issue_type":"molecule","ephemeral":true}
+  {"id":"w-orph", "status":"in_progress","title":"@T@","assignee":"",   "created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-decoy","status":"in_progress","title":"mol-doc-keeper-drift-audit","assignee":"@A@","created_at":"2026-09-18T03:01:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-cur",  "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:02:00Z","issue_type":"molecule","ephemeral":true}
 ]'
 # Cross-rig: several rigs pour the same title into one shared store. A foreign
 # rig's wisp — assignee names @O@ — must be neither adopted as the survivor nor
 # burned as surplus; only this rig's wisps (w-mine, w-orph) are reconciled.
+# w-foreign is newest of the three, to prove the rig filter runs before the
+# recency pick.
 FX_CROSS_RIG='[
-  {"id":"w-foreign","status":"in_progress","title":"@T@","assignee":"@O@","issue_type":"molecule","ephemeral":true},
-  {"id":"w-mine",   "status":"in_progress","title":"@T@","assignee":"@A@","issue_type":"molecule","ephemeral":true},
-  {"id":"w-orph",   "status":"open",       "title":"@T@","assignee":"",   "issue_type":"molecule","ephemeral":true}
+  {"id":"w-foreign","status":"in_progress","title":"@T@","assignee":"@O@","created_at":"2026-09-18T03:09:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-mine",   "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-orph",   "status":"open",       "title":"@T@","assignee":"",   "created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true}
 ]'
 # A not-yet-assigned orphan carries no assignee, so the pour stamps its rig as
 # gc.rig. A foreign stamp (@X@) is skipped; this rig's (@R@) is adopted.
 FX_CROSS_RIG_ORPHAN='[
-  {"id":"w-foreign","status":"open","title":"@T@","assignee":"","metadata":{"gc.rig":"@X@"},"issue_type":"molecule","ephemeral":true},
-  {"id":"w-mine",   "status":"open","title":"@T@","assignee":"","metadata":{"gc.rig":"@R@"},"issue_type":"molecule","ephemeral":true}
+  {"id":"w-foreign","status":"open","title":"@T@","assignee":"","metadata":{"gc.rig":"@X@"},"created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true},
+  {"id":"w-mine",   "status":"open","title":"@T@","assignee":"","metadata":{"gc.rig":"@R@"},"created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true}
 ]'
 
 fx() {
@@ -292,6 +314,29 @@ for SPEC in "${AGENTS[@]}"; do
   eq "$(run_reconcile "$(fx "$FX_LEAK")")" "w-run|w-orph" \
      "$AGENT: REGRESSION: the unassigned orphan is collected and burned; the running wisp survives"
 
+  # A completed cycle awaiting burn (in_progress, older) beside the fresh
+  # successor it poured (open, newer). Adopt the successor and burn the completed
+  # cycle. Selecting by status adopts the completed cycle and burns the fresh
+  # successor instead.
+  eq "$(run_reconcile "$(fx "$FX_COMPLETED_SUCCESSOR")")" "w-fresh|w-done" \
+     "$AGENT: REGRESSION: adopts the fresh successor and burns the completed-awaiting-burn cycle"
+
+  # CONTROL, so the assertion above cannot pass for the wrong reason: drop the
+  # created_at sort and the snippet falls back to in_progress-first order, which
+  # adopts the completed cycle and burns the fresh successor — the reported bug.
+  sed 's/ | sort -r / | cat /' "$TMP/reconcile.sh" > "$TMP/reconcile-nosort.sh"
+  if cmp -s "$TMP/reconcile.sh" "$TMP/reconcile-nosort.sh"; then
+    bad "$AGENT: control did not mutate the created_at sort — its shape changed, re-check the sed"
+  else
+    eq "$(run_reconcile "$(fx "$FX_COMPLETED_SUCCESSOR")" "$TMP/reconcile-nosort.sh")" "w-done|w-fresh" \
+       "$AGENT: CONTROL: the pre-fix in_progress-first order adopts the completed cycle and burns the fresh successor"
+  fi
+
+  # The same discrimination when a partial reconcile left BOTH in_progress — the
+  # fix reads created_at, not status, so the newer is adopted either way.
+  eq "$(run_reconcile "$(fx "$FX_TWO_INPROGRESS")")" "w-live|w-stale" \
+     "$AGENT: REGRESSION: with two in_progress wisps, adopts the newer and burns the older"
+
   # The orphan is collected even when it is the ONLY wisp left — the restart
   # case where the pouring session died before assigning and never came back.
   # Under an --assignee filter this returns nothing, the agent concludes "no
@@ -305,7 +350,7 @@ for SPEC in "${AGENTS[@]}"; do
      "$AGENT: an unrelated molecule root is neither adopted nor burned"
 
   eq "$(run_reconcile "$(fx "$FX_SURPLUS")")" "w-a|w-b,w-c" \
-     "$AGENT: reconciles surplus to exactly one, preferring the in_progress wisp"
+     "$AGENT: reconciles surplus to exactly one, preferring the newest pour"
 
   eq "$(run_reconcile '[]')" "|" "$AGENT: empty store yields no wisp and no burn"
 

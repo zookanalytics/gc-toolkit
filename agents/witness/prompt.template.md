@@ -56,14 +56,18 @@ on your hook.
 # wisp only when its rig — the assignee's rig segment, or the gc.rig its
 # pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
 # neither and is still collected.
-WISP_IDS=$(
-  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | .id'
-  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | .id'
+WISP_ROWS=$(
+  gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
+  gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
 )
-WISP=$(printf '%s\n' $WISP_IDS | sed -n '1p')           # keep one (prefers in_progress)
-for extra in $(printf '%s\n' $WISP_IDS | sed '1d'); do  # burn any surplus
-  gc bd mol burn "$extra" --force
-done
+# Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
+# awaiting burn beside the fresh successor it poured, the successor is always
+# the newer created_at — a cycle pours its successor only at its terminal step.
+# Selecting by status adopts the completed (in_progress) cycle and drops the
+# fresh (open) successor.
+WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
+WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
+for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
   WISP=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.new_epic_id')
