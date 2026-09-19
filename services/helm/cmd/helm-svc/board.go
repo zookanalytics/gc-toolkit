@@ -468,7 +468,7 @@ func renderCoverage(c board.PRCoverage, rigCount int) string {
 		gaps = append(gaps, fmt.Sprintf("%d of %d have no position recorded by the merge cadence", c.MachineUnknown, c.Rows))
 	}
 	if c.ConversationUnknown > 0 {
-		gaps = append(gaps, fmt.Sprintf("%d cannot say where the conversation stands (the acknowledgement watermarks are not built yet)", c.ConversationUnknown))
+		gaps = append(gaps, fmt.Sprintf("%d cannot say where the conversation stands (the merge cadence has not recorded it)", c.ConversationUnknown))
 	}
 	if c.ApprovalUnanswered > 0 {
 		gaps = append(gaps, fmt.Sprintf("%d are green with no readable answer on whether GitHub wants a review", c.ApprovalUnanswered))

@@ -312,6 +312,25 @@ machines = ["progressing", "settled", "wedged-exception", "wedged-veto"]
 # anchor wedges the same way, and most wedged anchors are in that state.
 writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle.sh)"
 
+[conversation]
+# Where the exchange with the operator stands, recorded on the anchor by
+# pr-facts.sh against the [posture] watermarks. A dated key,
+# `<value>@<oid>@<since>`: it is head-pinned so a value read before the branch
+# moved on never reads as current, and the board's board.prConversation gates it
+# on the pr.machine head the same way the approval clause gates the posture.
+conversation_key = "pr.conversation"
+# The values pr-facts.sh records, derived from the watermarks each pass:
+#   quiet        no human utterance in any of the three id spaces
+#   outstanding  a human utterance sits above its space's watermark, or the city
+#                is working one and the head has not moved past it yet — the
+#                coarser truth, never collapsed into quiet
+#   answered     every watermark stands at its space's high water and the head
+#                has moved since, so the city's reply is there to look at
+# asking is NOT here: it is the demand edge, read from the graph with no key of
+# its own. covered is NOT here: it waits on a comment-to-bead link nothing
+# records yet, so an utterance the city works reads outstanding until then.
+conversations = ["quiet", "outstanding", "answered"]
+
 [dated_keys]
 # Keys in the shape <value>@<oid>@<since>. The queue the helm board renders is
 # ordered by how long a row has been owed, so a cause of an owed row has to
@@ -319,7 +338,7 @@ writers = "assets/scripts/gate-ensure.sh, assets/scripts/merge.sh (via lifecycle
 # rather than in a key beside it: a timestamp that can be written when the value
 # is not ends up dating a state that no longer holds, with nothing in either key
 # saying so.
-keys = ["pr.machine", "pr_posture"]
+keys = ["pr.machine", "pr.conversation", "pr_posture"]
 # lifecycle.sh --set-dated is the only writer, and it applies one rule: preserve
 # the existing instant while the value and the oid both hold, stamp the current
 # one when either differs. Set, preserve and clear all fall out of it — the
@@ -641,7 +660,10 @@ keys = [
 ]
 
 [metadata.pr_round_trip]
-keys = ["pr.machine"]
+# pr.machine and pr.conversation are the two round-trip axes, both dated keys
+# (see [machine_axis], [conversation], [dated_keys]). pr-facts.sh writes
+# pr.conversation; gate-ensure.sh and merge.sh write pr.machine.
+keys = ["pr.machine", "pr.conversation"]
 
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the

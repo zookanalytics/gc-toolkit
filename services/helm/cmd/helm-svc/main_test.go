@@ -344,10 +344,10 @@ func TestEmptyQueueWithholdsTheAllClearWhileAPRPositionIsUnread(t *testing.T) {
 		t.Errorf("…and say how much was unread:\n%s", out)
 	}
 
-	// Read on the machine axis and the approval clause. The conversation axis is
-	// unread on every row in this phase, so the row still holds the sentence
-	// open — and names the reason rather than letting the silence pass for an
-	// answer.
+	// Read on the machine axis and the approval clause, but the merge cadence
+	// has recorded no conversation position for this row, so the row still holds
+	// the sentence open — and names the reason rather than letting the silence
+	// pass for an answer.
 	clear := board.BuildBoard([]board.Anchor{mergeAnchor("tk-green", map[string]string{
 		"pr.machine": "settled@" + head + "@2026-08-28T04:05:06Z",
 		"pr_posture": "none@" + head + "@2026-08-28T04:05:06Z",
@@ -355,7 +355,7 @@ func TestEmptyQueueWithholdsTheAllClearWhileAPRPositionIsUnread(t *testing.T) {
 	buf.Reset()
 	renderQueue(&buf, clear, nil, now, 5)
 	out = buf.String()
-	if !strings.Contains(out, "acknowledgement watermarks are not built yet") {
+	if !strings.Contains(out, "the merge cadence has not recorded it") {
 		t.Errorf("the conversation gap has to name itself:\n%s", out)
 	}
 	if strings.Contains(out, "no position recorded") {

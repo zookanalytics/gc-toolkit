@@ -650,7 +650,7 @@ it('withholds the all-clear while a PR position is unread', async () => {
 
   const sub = within(owedCover()).getByRole('status');
   expect(sub.textContent).toMatch(/1 of 1 have no position recorded/);
-  expect(sub.textContent).toMatch(/acknowledgement watermarks are not built yet/);
+  expect(sub.textContent).toMatch(/where the conversation stands \(the merge cadence has not recorded it\)/);
   expect(sub.textContent).not.toMatch(/^Nothing is owed by you\./);
 });
 

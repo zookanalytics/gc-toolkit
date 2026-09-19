@@ -177,11 +177,13 @@ export interface Tile {
    */
   pr_machine: string;
   /**
-   * Where the exchange with the operator stands. Reads `'unknown'` on every row
-   * today: its other values all resolve to acknowledgement watermarks nothing
-   * records yet, and every failed guess resolves to silence — the one answer
-   * that tells the operator to stop looking. It ships now so this contract does
-   * not change shape when the watermarks land.
+   * Where the exchange with the operator stands: `'quiet'`, `'outstanding'`,
+   * `'answered'`, `'asking'`, or `'unknown'`. `'asking'` is the demand edge;
+   * `'quiet'`, `'outstanding'` and `'answered'` are read off the position the
+   * merge cadence records against the acknowledgement watermarks. `'covered'`
+   * is not reachable yet — it waits on a comment-to-bead link nothing records —
+   * so an utterance the city is working reads the coarser `'outstanding'`.
+   * `'unknown'` is a RENDERED value, never a fallback to the quiet end.
    */
   pr_conversation: string;
   /**

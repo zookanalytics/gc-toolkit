@@ -360,13 +360,14 @@ type Tile struct {
 	// city rather than an all-clear.
 	PRMachine string `json:"pr_machine"`
 
-	// PRConversation is where the exchange with the operator stands. It reads
-	// `unknown` on every row today: its other values all resolve to
-	// acknowledgement watermarks that do not exist yet, and a surface that
-	// guesses is wrong in the one direction that matters — every failed
-	// derivation looks like silence, which is the answer that tells the
-	// operator to stop looking. It ships now so the wire contract does not
-	// change shape when the watermarks land.
+	// PRConversation is where the exchange with the operator stands: quiet,
+	// outstanding, answered, asking, or unknown. asking is the demand edge;
+	// quiet, outstanding and answered are read off the position pr-facts.sh
+	// records against the acknowledgement watermarks. covered is not reachable
+	// yet — it waits on a comment-to-bead link nothing records — so an utterance
+	// the city is working reads the coarser outstanding. `unknown` is a rendered
+	// value, not a fallback to the quiet end: an unread axis and a clear one are
+	// not interchangeable.
 	PRConversation string `json:"pr_conversation"`
 
 	// PRApproval is whether GitHub is withholding the merge for a human review:

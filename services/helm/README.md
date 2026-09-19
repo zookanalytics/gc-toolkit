@@ -485,7 +485,7 @@ field would be lying on a normal day.
 | field | values | read from |
 |---|---|---|
 | `pr_machine` | `progressing`, `settled`, `wedged-exception`, `wedged-veto`, `unknown` | `pr.machine` on the anchor |
-| `pr_conversation` | `unknown` (see below) | — |
+| `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `not_required`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
@@ -534,12 +534,17 @@ wedge, a demand, a takeaway or a human route already owns the row and names it, 
 the signal defers to each; it is a merge anchor either way, so it reads in the
 `review` band beside the wedged pre-open rows.
 
-**`pr_conversation` is a constant `unknown`.** Its other values — `quiet`,
-`outstanding`, `covered`, `answered` — all resolve to acknowledgement watermarks
-the city does not record. Deriving them without those marks means guessing, and
-every failed guess resolves to silence, which is the one answer that tells the
-operator to stop looking. The field is on the wire so the contract does not
-change shape once the marks exist.
+**`pr_conversation` reads the recorded position.** `asking` is the demand edge,
+rendered wherever it is there. `quiet`, `outstanding` and `answered` are read
+off `pr.conversation`, which `pr-facts.sh` records each pass against the
+acknowledgement watermarks: `quiet` when no human has spoken, `outstanding`
+while a human utterance sits above its space's watermark, `answered` once every
+watermark stands at its space's high water and the head has moved since. A batch
+the city is working reads the coarser `outstanding` rather than `quiet`, because
+`covered` — `outstanding` with a bead on the utterance — waits on a
+comment-to-bead link nothing records yet. The recorded value is current only at
+the head `pr.machine` was last resolved at; pinned to any other head it reads
+`unknown`, which is a rendered value and never a fallback to the quiet end.
 
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false

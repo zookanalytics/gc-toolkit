@@ -2626,30 +2626,75 @@ func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
 	}
 }
 
-// TestConversationAxisIsHonestlyUnknown. Its other values all resolve to
-// acknowledgement watermarks nothing records yet. Shipping a guess would render
-// `quiet` for a pull request the operator commented on, which is the one
-// mistake this axis exists to prevent, so the field ships as `unknown` and the
-// coverage sentence carries the reason.
-func TestConversationAxisIsHonestlyUnknown(t *testing.T) {
+// TestConversationAxisRendersTheRecordedPosition. Phase 2a fills the axis from
+// the position pr-facts.sh records against the watermarks. Each recorded value
+// renders; asking wins from the demand edge ahead of any recorded position; and
+// a position pinned to a head the cadence has moved past reads unknown rather
+// than a stale value — the same currency check the approval clause makes.
+func TestConversationAxisRendersTheRecordedPosition(t *testing.T) {
+	askedAt := fixtureNow.Add(-2 * time.Hour)
+	live := func(v string) map[string]string {
+		return map[string]string{
+			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
+			"pr.conversation": dated(v, headLive, fixtureNow),
+		}
+	}
+	cases := []struct {
+		id   string
+		md   map[string]string
+		blk  []Blocker
+		want string
+	}{
+		{"tk-quiet", live(ConversationQuiet), nil, ConversationQuiet},
+		{"tk-out", live(ConversationOutstanding), nil, ConversationOutstanding},
+		{"tk-ans", live(ConversationAnswered), nil, ConversationAnswered},
+		// asking is the edge, and it renders ahead of the recorded position.
+		{"tk-ask", live(ConversationOutstanding),
+			[]Blocker{{ID: "tk-dem", Title: "Which base?", Status: "open",
+				RoutedTo: "human", CreatedAt: askedAt}}, ConversationAsking},
+		// Pinned to a head the cadence has moved past: unknown, never the stale value.
+		{"tk-stale", map[string]string{
+			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
+			"pr.conversation": dated(ConversationOutstanding, headOld, fixtureNow),
+		}, nil, ConversationUnknown},
+		// Recorded, but no machine head to verify it against: unknown.
+		{"tk-noref", map[string]string{
+			"pr.conversation": dated(ConversationAnswered, headLive, fixtureNow),
+		}, nil, ConversationUnknown},
+	}
+	anchors := make([]Anchor, 0, len(cases))
+	for _, c := range cases {
+		anchors = append(anchors, mergeAnchor(c.id, c.md, c.blk...))
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	for _, c := range cases {
+		if got := mustTile(t, b, c.id).PRConversation; got != c.want {
+			t.Errorf("%s: pr_conversation = %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
+// TestReadableConversationIsNotACoverageGap. A recorded position is a fact, not
+// a gap: only an unread axis holds the all-clear open. A settled, quiet,
+// approval-not-required row with no demand is genuinely nobody's move.
+func TestReadableConversationIsNotACoverageGap(t *testing.T) {
 	b := BuildBoard([]Anchor{
-		mergeAnchor("tk-c", map[string]string{
-			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
-			"pr_posture": dated(postureNone, headLive, fixtureNow),
+		mergeAnchor("tk-clear", map[string]string{
+			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
+			"pr.conversation": dated(ConversationQuiet, headLive, fixtureNow),
+			"pr_posture":      dated(postureNone, headLive, fixtureNow),
 		}),
 	}, fixtureNow, false, nil, Facts{})
 
-	tile := mustTile(t, b, "tk-c")
-	if tile.PRConversation != ConversationUnknown {
-		t.Errorf("pr_conversation = %q, want unknown in this phase", tile.PRConversation)
+	tile := mustTile(t, b, "tk-clear")
+	if tile.PRConversation != ConversationQuiet {
+		t.Errorf("pr_conversation = %q, want quiet", tile.PRConversation)
 	}
-	// This row is settled, approved-not-required and owed by nobody. It is
-	// still not an all-clear, because where the conversation stands is unread.
 	if tile.Owed {
-		t.Error("nothing here makes the row owed")
+		t.Error("a settled, quiet, approval-not-required row is nobody's move")
 	}
-	if c := Coverage(b.Tiles); c.Complete() || c.ConversationUnknown != 1 {
-		t.Errorf("the unread conversation has to reach the coverage sentence: %+v", c)
+	if c := Coverage(b.Tiles); !c.Complete() || c.ConversationUnknown != 0 {
+		t.Errorf("a recorded conversation clears the gap it would otherwise hold: %+v", c)
 	}
 }
 

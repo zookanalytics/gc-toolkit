@@ -266,6 +266,13 @@ close_cap_demand() { # <anchor> <note>; 0 = no signoff demand holds, non-zero = 
 # Listed in the precedence the derivation applies, strongest human signal first.
 PR_POSTURES="changes_requested commented approved review_required none"
 # <<< pr-posture-vocabulary
+# >>> pr-conversation-vocabulary
+# Mirrors lifecycle/lifecycle.toml [conversation]; pr-facts.test.sh fails on drift.
+# The values this script records against the watermarks. asking is the demand
+# edge and carries no key; covered waits on a comment-to-bead link nothing
+# writes yet — neither is recorded here.
+PR_CONVERSATIONS="quiet outstanding answered"
+# <<< pr-conversation-vocabulary
 # >>> pr-writeback-contract
 # The acknowledgement trail the operator reads in the PR. EYES marks a comment
 # the city picked up. The marker identifies our own reply, so a later pass can
@@ -780,11 +787,12 @@ CHILDREN_EOF
   # still gets its posture written; merge.sh reads the result off the bead
   # rather than asking GitHub. Written only when the value changes: this runs
   # for every anchor every 60s and an unchanged re-write is pure ledger churn.
-  posture=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
+  posture=""; conv=""; max_c=0; max_r=0; max_i=0; pinned=0; unanswered=0; unengaged=0; unengaged_unreadable=0; UT_COUNT=""
   revs_raw=""; cmts_raw=""; cmts_live=""; icmts_raw=""
   cwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_watermark // "") | tostring')
   rwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_review_watermark // "") | tostring')
   iwm=$(printf '%s' "$row" | jq -r '(.metadata.pr_issue_comment_watermark // "") | tostring')
+  have_c=$(printf '%s' "$row" | jq -r '(.metadata["pr.conversation"] // "") | tostring')
   obatch=$(printf '%s' "$row" | jq -r '(.metadata.pr_comment_batch // "") | tostring')
   case "$cwm" in ''|*[!0-9]*) cwm=0 ;; esac
   case "$rwm" in ''|*[!0-9]*) rwm=0 ;; esac
@@ -878,6 +886,27 @@ CHILDREN_EOF
       elif [ "$rd" = "REVIEW_REQUIRED" ]; then posture="review_required"
       else posture="none"
       fi
+      # --- conversation position: where the exchange with the operator stands --
+      # Read off the same watermarks, lists and head this block already has.
+      # quiet is nothing said; outstanding is an utterance above its space's
+      # watermark. A batch the city has dispositioned but the head has not moved
+      # past is the city still working it, which stays outstanding rather than
+      # collapsing to quiet. answered is every watermark at its space's high water
+      # with the head moved since — the transition --set-dated stamps when it
+      # re-pins a caught-up value to the new head.
+      have_cv=""; have_ch=""
+      case "$have_c" in *@*@*) cvrest="${have_c%@*}"; have_cv="${cvrest%@*}"; have_ch="${cvrest#*@}" ;; esac
+      if [ "$max_c" = 0 ] && [ "$max_r" = 0 ] && [ "$max_i" = 0 ]; then
+        conv="quiet"
+      elif [ "$unanswered" = 1 ]; then
+        conv="outstanding"
+      elif [ "$have_cv" = "answered" ]; then
+        conv="answered"
+      elif [ "$have_cv" = "outstanding" ] && [ -n "$have_ch" ] && [ "$have_ch" != "$head_oid" ]; then
+        conv="answered"
+      else
+        conv="outstanding"
+      fi
     fi
   fi
   case " $PR_POSTURES " in
@@ -924,6 +953,30 @@ CHILDREN_EOF
   # earlier pass: it writes the posture and stops here, leaving every dispatch
   # arm below to the full pass that runs after merge.
   [ "$POSTURE_ONLY" != 1 ] || continue
+
+  # --- conversation position record: beside the posture, at the same head ------
+  # Recorded in the full pass — the board reads it, merge.sh does not. A dated
+  # key like pr_posture: lifecycle.sh preserves the instant while the value and
+  # head both hold and re-stamps it when the value or head changes, so a
+  # reconcile re-deriving the same position leaves the clock alone.
+  if [ -n "$conv" ]; then
+    case " $PR_CONVERSATIONS " in
+      *" $conv "*) : ;;
+      *) echo "$PROG: $id — refusing to record undeclared conversation '$conv'" >&2; conv="" ;;
+    esac
+  fi
+  if [ -n "$conv" ] && [ -n "$head_oid" ]; then
+    want_c="$conv@$head_oid"; have_cvh=""
+    case "$have_c" in *@*@*) have_cvh="${have_c%@*}" ;; esac
+    if [ "$have_cvh" = "$want_c" ]; then
+      : # unchanged at this head — lifecycle.sh would preserve the instant
+    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+           --set-dated "pr.conversation=$want_c" >/dev/null; then
+      echo "$PROG: $id — PR#$num conversation $want_c"
+    else
+      echo "$PROG: $id conversation record failed for PR#$num; retry next pass" >&2
+    fi
+  fi
 
   # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')

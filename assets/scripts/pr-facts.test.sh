@@ -157,6 +157,13 @@ eval "$BLOCK"
 TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
 eq "$PR_POSTURES" "$TOML_POSTURES" "postures match lifecycle.toml [posture]"
 
+echo "# conversation vocabulary drift against lifecycle.toml"
+CBLOCK="$(awk '/# >>> pr-conversation-vocabulary/{f=1;next} /# <<< pr-conversation-vocabulary/{f=0} f' "$HERE/pr-facts.sh")"
+[ -n "$CBLOCK" ] && ok "conversation-vocabulary block extracted" || bad "conversation-vocabulary markers missing"
+eval "$CBLOCK"
+TOML_CONVERSATIONS=$(sed -n 's/^conversations = \[\(.*\)\]/\1/p' "$ROOT/lifecycle/lifecycle.toml" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' ')
+eq "$PR_CONVERSATIONS" "$TOML_CONVERSATIONS" "conversations match lifecycle.toml [conversation]"
+
 echo "# the takeaway-hold discriminator is one block, shared with signoff.sh"
 xd() { awk '/^[[:space:]]*# >>> takeaway-hold-discriminator[[:space:]]*$/{inb=1; next} /^[[:space:]]*# <<< takeaway-hold-discriminator[[:space:]]*$/{inb=0} inb' "$1"; }
 [ -n "$(xd "$HERE/pr-facts.sh")" ] && ok "block present here" || bad "block missing from pr-facts.sh"
@@ -851,6 +858,38 @@ eq "$(meta_pinned P1 pr_posture)" "commented@sha-40" "a comment above the mark i
 eq "$(meta P1 pr_comment_watermark)" "5009" "the watermark advanced past it"
 eq "$(meta P1 pr_comment_disposition)" "rework:new-3" "the new batch got its own child"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "2" "…and the first child was not reused"
+
+echo "# conversation axis — quiet: no human utterance in any of the three spaces"
+store "[$(anchor CQ 70)]"
+printf '%s' "$(prview 70 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_70.json"
+out=$(run)
+eq "$(meta_pinned CQ pr.conversation)" "quiet@sha-70" "nothing said reads quiet, pinned to the head"
+
+echo "# conversation axis — outstanding: a human utterance sits above its space's watermark"
+store "[$(anchor CO 71)]"
+printf '%s' "$(prview 71 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_71.json"
+printf '[{"id":7100,"user":{"login":"human1"},"body":"please fix"}]' > "$GH_DIR/comments_71.json"
+out=$(run)
+eq "$(meta_pinned CO pr.conversation)" "outstanding@sha-71" "an utterance above the mark reads outstanding"
+
+echo "# conversation axis — the interval rule: a dispositioned comment the head has not moved past stays outstanding, never quiet"
+# watermark caught up to the comment (unanswered = 0), and the recorded position
+# was outstanding at THIS head: the city is still working it, so it reads the
+# coarser outstanding rather than collapsing to quiet.
+store "[$(anchor CI 72 ',"pr_comment_watermark":"7200","pr.conversation":"outstanding@sha-72@2026-08-20T00:00:00Z"')]"
+printf '%s' "$(prview 72 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_72.json"
+printf '[{"id":7200,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_72.json"
+out=$(run)
+eq "$(meta_pinned CI pr.conversation)" "outstanding@sha-72" "the city working a dispositioned comment reads outstanding, not quiet"
+
+echo "# conversation axis — answered: watermark caught up AND the head has moved since"
+# The recorded outstanding was pinned to an older head; the branch has since
+# moved, so the city's reply is there to look at.
+store "[$(anchor CA 73 ',"pr_comment_watermark":"7300","pr.conversation":"outstanding@sha-OLD@2026-08-20T00:00:00Z"')]"
+printf '%s' "$(prview 73 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_73.json"
+printf '[{"id":7300,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/comments_73.json"
+out=$(run)
+eq "$(meta_pinned CA pr.conversation)" "answered@sha-73" "the watermark caught up and the head moved since reads answered"
 
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"

@@ -126,7 +126,7 @@ function prCoverage(tiles: Tile[]): { rows: number; gaps: string[] } {
   }
   if (noConversation > 0) {
     gaps.push(
-      `${noConversation} cannot say where the conversation stands (the acknowledgement watermarks are not built yet)`,
+      `${noConversation} cannot say where the conversation stands (the merge cadence has not recorded it)`,
     );
   }
   if (noApproval > 0) {
