@@ -325,6 +325,40 @@ hasnt "--no-wait" "$LOG" "(RUL) …and never claims nothing is waiting"
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "2" "(RUL) a ruling with no visit is refused"
 
+# ── ruling + a recommendation: the visit offers Accept ───────────────────────
+# A ruling that names a determinable action (converse/operator authority) passes
+# --recommended-formula, and the exit stamps gc.recommended_formula on the
+# subject. That stamp is the whole difference between a plain Discuss-only visit
+# and a recommendation visit the operator can Accept, and it rides the record
+# write — before the act — so a half-written recommendation is still visible.
+export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+run tk-sub --disposition ruling --reason "retire the PR, supersede its anchor — operator authority" \
+    --takeaway "recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" \
+    --visit tk-visit1 --recommended-formula mol-x
+eq "$RC" "0" "(RECO) a ruling that carries a recommendation succeeds"
+has "gc.recommended_formula=mol-x" "$LOG" "(RECO) the recommended formula is stamped on the subject"
+has "gc.first_reaction=ruling" "$LOG" "(RECO) …alongside the disposition record"
+eq "$(grep -n -m1 '^UPDATE' "$FAKE_LOG" | cut -d: -f1)" "$(( $(grep -n -m1 '^HELM' "$FAKE_LOG" | cut -d: -f1) - 1 ))" \
+   "(RECO) …in the record write, before the act"
+has "--waiting-on tk-visit1" "$LOG" "(RECO) …and the visit still holds the subject"
+
+# Discuss-only ruling: no --recommended-formula, nothing is stamped, the visit
+# stays plain (no Accept). This is the path the change leaves untouched.
+run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
+    --takeaway "needs a ruling: which default" --visit tk-visit1
+eq "$RC" "0" "(RECO) a Discuss-only ruling succeeds"
+hasnt "gc.recommended_formula" "$LOG" "(RECO) …and stamps no recommendation, so the visit offers no Accept"
+
+# --recommended-formula belongs to the ruling exit only: the other two route or
+# hold the bead, neither gates a visit the operator Accepts.
+run tk-sub --disposition actionable --reason "r" --takeaway "t" \
+    --route gc-toolkit/gc-toolkit.polecat --recommended-formula mol-x
+eq "$RC" "2" "(RECO) actionable refuses --recommended-formula"
+eq "$LOG" "" "(RECO) …and writes nothing"
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --recommended-formula mol-x
+eq "$RC" "2" "(RECO) blocked refuses --recommended-formula"
+eq "$LOG" "" "(RECO) …and writes nothing"
+
 # ── An operator's commissioned topic is always the conversation ──────────────
 # gc-visit-open stamps gc.origin=operator on a topic a human typed and is
 # waiting to talk about. Routing or holding that answers a question nobody

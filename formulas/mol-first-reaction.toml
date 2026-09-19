@@ -167,11 +167,15 @@ is in front of you. It is one of exactly three:
   to the pool that does that work.
 - **blocked** — the bead cannot move until something else does. Name that
   something. The exit records it as an edge.
-- **ruling** — the operator's judgment is the next move, in one of two shapes.
-  One is a question whose answer changes what gets built. The other is a
-  conclusion that there is nothing to do: you verified the thing is already
-  fixed with nothing left to merge, or the bead should not exist. Both file a
-  visit; the second is a recommend-close (step 1c).
+- **ruling** — the operator's judgment is the next move, in one of three shapes.
+  One is a question whose answer changes what gets built. One is a conclusion
+  that there is nothing to do: you verified the thing is already fixed with
+  nothing left to merge, or the bead should not exist — a recommend-close. The
+  third is a recommendation: a determinable action only converse/operator
+  authority may take (retire an in-flight PR, supersede its anchor;
+  authority-map rows 28-30), where you can name the execution mol. All three
+  file a visit (step 1c); a recommendation also stamps that mol so the operator
+  can Accept it, while the other two are Discuss-only.
 
 Prefer **actionable** when you can state the done condition. Take **ruling**
 when you cannot name the work without an answer first, or when the honest
@@ -186,8 +190,14 @@ the same visit rather than closing the bead: a reaction never closes a work
 bead, and confirming the recommendation costs the operator one glance.
 
 "The operator would probably want to see this" is still not a ruling. A ruling
-is a question whose answer changes what gets built, or a recommend-close the
-operator only has to confirm.
+is a question whose answer changes what gets built, a recommend-close the
+operator only has to confirm, or a determinable converse/operator-authority
+action you recommend by naming its execution mol.
+
+When the ruling is a recommendation, its card is what the execution worker
+reads via `bd show` if the operator Accepts: broad direction, not a spec — the
+bead's own content plus `execute via <mol>`, naming the formula that action
+takes.
 
 Freshness-stamp every fact you fetched (PR/CI), because a slung reaction acts
 on a snapshot that may have moved by the time the human reads it (design Risk
@@ -316,13 +326,21 @@ doctor/check-blocked-work-armed flags. Omit `--then-route` only when the bead is
 not work a pool takes — a decision, a ruling, or a research note.
 
 **1c. NEEDS A RULING — the next move is the operator's judgment, so file the
-visit.** Two shapes reach here: a question whose answer changes what gets built,
-and a recommend-close (you verified there is nothing to do, or the bead should
-not exist). It should be the minority case: if you can name the work, take 1a
-instead. The visit is the same for both; a recommend-close differs only in the
-dispose call below — a `--takeaway` that reads `recommend close: <why>` and a
-`--reason` that names the counter-case, over the card you wrote in
-`first-reaction`. The visit form is mol-visit's, spelled inline:
+visit.** Three shapes reach here: a question whose answer changes what gets
+built; a recommend-close (you verified there is nothing to do, or the bead
+should not exist); and a recommendation — a determinable action only
+converse/operator authority may take (retire an in-flight PR, supersede its
+anchor; authority-map rows 28-30) where you can name the execution mol. It
+should be the minority case: if you can route the work to a pool, take 1a
+instead. The visit is the same for all three, filed by the block below. A
+recommend-close differs only in the dispose call — a `--takeaway` that reads
+`recommend close: <why>` and a `--reason` that names the counter-case. A
+recommendation adds `--recommended-formula <mol>`, which stamps
+`gc.recommended_formula` on the subject so the operator can Accept it from the
+visit; its `--takeaway` carries the recommendation and its card (from
+`first-reaction`) is the execution guidance. Omit `--recommended-formula` for
+the other two — no stamp is a plain Discuss-only visit. The visit form is
+mol-visit's, spelled inline:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -363,7 +381,11 @@ if [ "$GROUP_GOT" != "$WORK_BEAD_ID" ]; then
   fi
 fi
 # <<< gate-visit
+# A question, or a recommend-close (Discuss-only — no --recommended-formula):
 "$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the question only the operator can answer, or for a recommend-close why there is no work and the counter-case>" --takeaway "<the ≤140-char headline; a recommend-close reads 'recommend close: <why>'>" --visit "$VISIT"
+# A recommendation — a determinable converse/operator-authority action, naming
+# the execution mol so the operator can Accept it from the visit:
+"$DISPOSE" "$WORK_BEAD_ID" --disposition ruling --by proactive --reason "<the action, and why it is converse/operator authority>" --takeaway "<the ≤140-char headline, e.g. 'recommend: <action>; execute via <mol>'>" --visit "$VISIT" --recommended-formula <execution-mol>
 ```
 
 **2. Close THIS step bead, then drain.** Run this only after the exit block

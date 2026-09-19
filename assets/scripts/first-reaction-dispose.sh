@@ -10,7 +10,11 @@
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts.
-#   ruling      only the operator can answer -> the visit its caller filed.
+#   ruling      only the operator can answer -> the visit its caller filed. A
+#               ruling that names a determinable action also passes
+#               --recommended-formula, which stamps gc.recommended_formula on
+#               the subject so the operator can Accept the recommendation from
+#               the visit; a Discuss-only ruling omits it.
 #
 # The route/edge/visit is the act; gc.first_reaction* is the record of it, and
 # is written FIRST so a disposition that dies half-way is still auditable.
@@ -46,7 +50,7 @@ Usage:
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
-                            --visit <visit-bead-id>
+                            --visit <visit-bead-id> [--recommended-formula <mol>]
   common: [--by <who>] [--db <path>] [--dry-run]
 
   --reason is required on every exit: a disposition nobody can second-guess is
@@ -59,12 +63,16 @@ Usage:
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
   blocker closes (assets/scripts/deferred-dispatch.sh).
+  --recommended-formula (ruling only) names the execution mol a
+  determinable-action ruling recommends; it stamps gc.recommended_formula on
+  the subject, which is what offers the operator Accept on the visit. Omit it
+  for a Discuss-only ruling.
 EOF
 }
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
-DB=""; DRY=""
+DB=""; DRY=""; RECOMMENDED_FORMULA=""
 WAITING=""          # space-separated bead ids
 
 while [ $# -gt 0 ]; do
@@ -89,6 +97,8 @@ while [ $# -gt 0 ]; do
         --blocker-key=*) BLOCKER_KEY="${1#--blocker-key=}"; shift ;;
         --visit)    shift; [ $# -gt 0 ] || usage_die "--visit needs a bead id"; VISIT="$1"; shift ;;
         --visit=*)  VISIT="${1#--visit=}"; shift ;;
+        --recommended-formula)   shift; [ $# -gt 0 ] || usage_die "--recommended-formula needs a mol name"; RECOMMENDED_FORMULA="$1"; shift ;;
+        --recommended-formula=*) RECOMMENDED_FORMULA="${1#--recommended-formula=}"; shift ;;
         --db)       shift; [ $# -gt 0 ] || usage_die "--db needs a path"; DB="$1"; shift ;;
         --db=*)     DB="${1#--db=}"; shift ;;
         --dry-run|-n) DRY=1; shift ;;
@@ -115,8 +125,8 @@ same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
 
 case "$DISPOSITION" in
     actionable)
-        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE" ] \
-            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$RECOMMENDED_FORMULA" ] \
+            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit/--recommended-formula belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
@@ -124,7 +134,7 @@ case "$DISPOSITION" in
         esac
         ;;
     blocked)
-        [ -z "$ROUTE$VISIT" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route and --visit belong to the other exits)"
+        [ -z "$ROUTE$VISIT$RECOMMENDED_FORMULA" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route/--visit/--recommended-formula belong to the other exits)"
         [ -n "$WAITING" ] || [ -n "$BLOCKER_TITLE" ] \
             || usage_die "blocked needs --waiting-on <bead-id> or --blocker \"<title>\": the wait IS the edge, and prose about it holds nothing"
         if [ -n "$BLOCKER_TITLE" ]; then
@@ -144,7 +154,7 @@ case "$DISPOSITION" in
         fi
         ;;
     ruling)
-        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE" ] || usage_die "ruling takes --visit only"
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE" ] || usage_die "ruling takes --visit, and optionally --recommended-formula"
         [ -n "$VISIT" ] || usage_die "ruling needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
         [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
         same_store "$VISIT" "$BEAD" \
@@ -251,7 +261,7 @@ if [ -n "$DRY" ]; then
     case "$DISPOSITION" in
         actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
-        ruling)     printf 'would record visit %s on %s\n' "$VISIT" "$BEAD" ;;
+        ruling)     printf 'would record visit %s on %s%s\n' "$VISIT" "$BEAD" "${RECOMMENDED_FORMULA:+ recommending $RECOMMENDED_FORMULA}" ;;
     esac
     exit 0
 fi
@@ -290,18 +300,23 @@ fi
 
 # ── The record, before the act ───────────────────────────────────────
 # What was chosen, why, and what it names. Written first so a run that dies
-# part-way leaves the classification visible instead of an unexplained bead.
+# part-way leaves the classification visible instead of an unexplained bead. A
+# ruling that recommends an execution stamps gc.recommended_formula in the same
+# write: it is the field that turns a plain visit into a recommendation visit
+# (the operator's Accept reads it), so a half-written recommendation stays
+# visible rather than leaving a bare visit that lost its recommendation.
 TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="$ROUTE" ;;
     blocked)    TARGET="$(printf '%s' "${WAITING# }" | tr -s ' ' ',')" ;;
     ruling)     TARGET="$VISIT" ;;
 esac
-gc_bd update "$BEAD" \
-    --set-metadata "gc.first_reaction=$DISPOSITION" \
-    --set-metadata "gc.first_reaction_reason=$REASON" \
-    --set-metadata "gc.first_reaction_target=$TARGET" \
-    --set-metadata "gc.first_reaction_at=$(now_utc)" >/dev/null 2>&1 \
+set -- --set-metadata "gc.first_reaction=$DISPOSITION" \
+       --set-metadata "gc.first_reaction_reason=$REASON" \
+       --set-metadata "gc.first_reaction_target=$TARGET" \
+       --set-metadata "gc.first_reaction_at=$(now_utc)"
+[ -n "$RECOMMENDED_FORMULA" ] && set -- "$@" --set-metadata "gc.recommended_formula=$RECOMMENDED_FORMULA"
+gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
 
 # ── The act ──────────────────────────────────────────────────────────
