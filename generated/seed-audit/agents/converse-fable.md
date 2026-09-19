@@ -690,6 +690,14 @@ visit, say) keeps that format. Operator-initiated form: the
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
+<!-- rule:tk-0slk80 src:pr:zookanalytics/gc-toolkit#473:review:r-changes-requested-2026-08-27 (operator, endorsed), pr:#616:review:5108240026, pr:#592:review:5105818489, bead:tk-qu01om:turn:2026-09-18 adopted:2026-09-19 -->
+- A design or verification bead's deliverable is the behaviour it decides or
+  verifies, in the smallest form that runs, not a specs/ record or a
+  document-only PR that defers to an unbuilt component or exists only to give
+  the refinery something to merge. When the honest answer is "already fixed" or
+  "we will not build it", record that disposition; a deferral is an answer only
+  when a bead tracks the component and names the cost of waiting.
+
 
 
 ## Scratch is reclaimed
