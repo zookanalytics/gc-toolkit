@@ -106,6 +106,95 @@ func TestVisitFoldsIntoSubjectTile(t *testing.T) {
 	}
 }
 
+// recommendationSubject is a subject a reaction has stamped with a recommended
+// execution formula — the key that makes its visit a recommendation (Accept +
+// Discuss) rather than a plain one (Discuss only).
+func recommendationSubject(id, formula string) Anchor {
+	return Anchor{
+		ID: id, Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+		Title: "t " + id,
+		Metadata: map[string]string{
+			"gc.routed_to":           "human",
+			"gc.recommended_formula": formula,
+		},
+	}
+}
+
+// openSitting / engagedSitting are a visit's sitting as facts carries it: open
+// is parked and un-engaged, in_progress is a converse holding it.
+func openSitting(subject string) Sitting { return Sitting{Subject: subject, Status: "open"} }
+func engagedSitting(subject string) Sitting {
+	return Sitting{Subject: subject, Status: "in_progress", Session: "converse-1"}
+}
+
+// TestRecommendationSubjectIsAcceptable: a subject carrying a recommended
+// formula whose visit stands un-engaged is Acceptable, and names the formula
+// Accept would dispatch. The visit wrapper folds away and never carries it.
+func TestRecommendationSubjectIsAcceptable(t *testing.T) {
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-subj", "retire the wedged PR"),
+		recommendationSubject("tk-subj", "mol-dispose-pr"),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{openSitting("tk-subj")}})
+
+	subj, ok := tileByID(b, "tk-subj")
+	if !ok {
+		t.Fatalf("the subject row must survive the fold")
+	}
+	if !subj.Acceptable {
+		t.Errorf("a recommendation subject with an un-engaged visit is acceptable: got Acceptable=%v", subj.Acceptable)
+	}
+	if subj.AcceptFormula != "mol-dispose-pr" {
+		t.Errorf("the accept formula names what accepting dispatches: got %q", subj.AcceptFormula)
+	}
+	if v, ok := tileByID(b, "tk-vis"); ok {
+		t.Errorf("the visit wrapper should fold away, never carry Accept itself; got a tile Acceptable=%v", v.Acceptable)
+	}
+}
+
+// TestRecommendationWithLiveSittingIsNotAcceptable: a converse engaging the
+// visit (in_progress) suppresses Accept while the operator is deciding by hand.
+// An engaged visit is not gathered as an anchor, so only the subject row and its
+// live sitting are on the board.
+func TestRecommendationWithLiveSittingIsNotAcceptable(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{engagedSitting("tk-subj")}})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable || subj.AcceptFormula != "" {
+		t.Errorf("a live sitting suppresses Accept: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
+	}
+}
+
+// TestSubjectWithoutRecommendedFormulaIsDiscussOnly: a visit with no
+// gc.recommended_formula on its subject is discuss-only, exactly as today —
+// Accept is absent whether or not the visit is un-engaged.
+func TestSubjectWithoutRecommendedFormulaIsDiscussOnly(t *testing.T) {
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-subj", "let's talk it through"),
+		humanKid("tk-subj"),
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Sittings: []Sitting{openSitting("tk-subj")}})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable || subj.AcceptFormula != "" {
+		t.Errorf("no gc.recommended_formula is discuss-only: Acceptable=%v formula=%q", subj.Acceptable, subj.AcceptFormula)
+	}
+}
+
+// TestRecommendationWithNoVisitIsNotAcceptable: the recommendation key is
+// present but no visit stands open on the subject (none filed, or it was
+// dismissed), so there is nothing to accept-and-dismiss.
+func TestRecommendationWithNoVisitIsNotAcceptable(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-subj", "mol-dispose-pr")}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+
+	subj := mustTile(t, b, "tk-subj")
+	if subj.Acceptable {
+		t.Errorf("a recommendation with no open visit is not acceptable: got Acceptable=%v", subj.Acceptable)
+	}
+}
+
 // TestVisitKeptWhenSubjectHasNoTile: a visit whose subject is no anchor keeps
 // its row — dropping it would erase the attention — stating the ask in NEEDS.
 // Its TITLE names the visit and its subject, not the ask, so a surface that
