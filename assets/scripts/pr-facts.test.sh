@@ -2153,7 +2153,9 @@ grep -qxF "$CID|blocks|IC1" "$STUB_DEPS" && ok "…and it holds the merge via a 
 
 echo "# …idempotent: the same conversation batch mints no twin and moves no mark"
 out=$(run)
-eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "still exactly one child"
+# The batch also opens a validation pass, a second new- bead, so count only the
+# rework child — the twin this guards against — not every new- bead.
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "1" "still exactly one child (the validation pass is a separate bead)"
 eq "$(meta IC1 pr_issue_comment_watermark)" "770001" "…and the mark holds"
 
 echo "# …a newer conversation comment above the mark re-fires"
