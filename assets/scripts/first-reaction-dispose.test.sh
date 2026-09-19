@@ -436,12 +436,17 @@ ARM_LINE=$(printf '%s\n' "$LOG" | grep -n 'DEFERRED arm' | head -1 | cut -d: -f1
   && ok "(CLOSEDEFER) the record is written before the arm" \
   || bad "(CLOSEDEFER) the record is written before the arm (rec=$REC_LINE arm=$ARM_LINE)"
 
-# The gate is best-effort: a hold that does not land still arms the dispatch
-# (reconcile slings when the routing layer permits it, or retries), so a missing
-# hold is never a lost dispatch.
+# The gate is a REQUIRED write: reconcile dispatches from `bd list --ready`, so a
+# hold that does not land leaves the bead reading ready and mol-validate-close
+# would sling beside the still-live reaction — the two-live-surfaces shape this
+# exit prevents. So a failed hold fails closed: the exit refuses to arm, the
+# disposition record stands, and the landed marker is left unstamped so the
+# documented re-run resumes.
 FAKE_DEP_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow tk-root
-eq "$RC" "0" "(CLOSEDEFER) a hold that did not land still arms the dispatch"
-has "DEFERRED arm tk-sub" "$LOG" "(CLOSEDEFER) …the deferred dispatch is armed regardless"
+eq "$RC" "4" "(CLOSEDEFER) a hold that did not land fails the exit closed"
+has "gc.first_reaction=close" "$LOG" "(CLOSEDEFER) …the disposition record was written first and stands"
+hasnt "DEFERRED arm" "$LOG" "(CLOSEDEFER) …and the ungated dispatch is NOT armed"
+hasnt "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and the landed marker is not stamped"
 unset FAKE_DEP_FAILS
 
 # An arm that fails to record IS a runtime failure: no closer would be

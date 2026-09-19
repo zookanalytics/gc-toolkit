@@ -365,12 +365,14 @@ gc_bd update "$BEAD" \
 if [ "$DISPOSITION" = "close" ]; then
     if [ -n "$AFTER_WORKFLOW" ]; then
         # Gate the deferred dispatch: hold the bead on the live reaction root so
-        # reconcile does not sling until it closes. Best-effort — a missing hold
-        # only means reconcile may attempt the sling before the reaction retires,
-        # which the routing layer either permits as concurrent work or refuses and
-        # retries the next pass; it is never a lost dispatch.
+        # reconcile does not sling until it closes. The hold is a REQUIRED write.
+        # Reconcile dispatches from `bd list --ready`, so a bead left unheld reads
+        # ready and mol-validate-close slings beside the still-live reaction, the
+        # two-live-surfaces shape this exit exists to prevent (formula-spec-v2 §3).
+        # A hold that does not land therefore fails closed: refuse to arm, leave
+        # the disposition record standing, and let the documented re-run resume.
         gc_bd dep add "$BEAD" "$AFTER_WORKFLOW" -t blocks >/dev/null 2>&1 \
-            || note "could not hold $BEAD on the reaction root $AFTER_WORKFLOW; the closer dispatch is armed ungated and reconcile will sling it once $BEAD is ready"
+            || die "could not hold $BEAD on the reaction root $AFTER_WORKFLOW; refusing to arm the closer dispatch ungated (reconcile would sling mol-validate-close beside the live reaction). The disposition record stands — clear the cause and re-run this command."
         # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
         "$DEFERRED" arm "$BEAD" --target "$ROUTE" --sling-arg --on --sling-arg mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
             || die "could not arm the validating-closer dispatch on $BEAD (deferred-dispatch arm --on mol-validate-close failed). The disposition record stands — clear the cause and re-run this command."

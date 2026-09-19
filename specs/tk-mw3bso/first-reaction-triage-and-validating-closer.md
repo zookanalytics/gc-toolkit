@@ -112,11 +112,14 @@ reaction's `gc.first_reaction_reason` as a claim to verify, not a verdict.
 ### Never a double-sling
 
 `close` records `gc.first_reaction=close` before the act, hands off the closer
-(arms the deferred dispatch, or slings directly when run by hand with no live
-workflow), and only then stamps `gc.proactive_reaction=1` — the marker the
-second-dispose guard and the scan read. A handoff that fails leaves the record
-without that marker, so the documented re-run resumes rather than queuing a
-second closer.
+(holds the bead on the live reaction root, then arms the deferred dispatch
+behind that hold — or slings directly when run by hand with no live workflow),
+and only then stamps `gc.proactive_reaction=1` — the marker the second-dispose
+guard and the scan read. The hold is a required write, not best-effort:
+reconcile dispatches from `bd list --ready`, so an unheld bead reads ready and
+the closer would sling beside the still-live reaction. A handoff that fails at
+either the hold or the arm leaves the record without that marker, so the
+documented re-run resumes rather than queuing a second closer.
 
 ## Acceptance mapping
 
