@@ -95,6 +95,7 @@ const SITTINGS: Sitting[] = [
     session: 'gc-toolkit__converse-1',
     opened_at: '2026-08-21T18:34:00Z',
     takeaway: '',
+    subject_title: 'the attention-canvas epic topic',
   },
   {
     id: 'tk-vst02',
@@ -107,6 +108,7 @@ const SITTINGS: Sitting[] = [
     opened_at: '2026-08-21T17:20:00Z',
     closed_at: '2026-08-21T17:54:00Z',
     takeaway: 'the path was the launcher’s, not the board’s',
+    subject_title: 'the raw-path launcher finding',
   },
 ];
 
@@ -434,11 +436,17 @@ it('shows running sittings and recently closed ones with their outcome', async (
   expect(within(live).getByText('running')).toBeTruthy();
   expect(within(live).getByText('40m')).toBeTruthy();
   expect(within(live).getByText('—')).toBeTruthy();
+  // No takeaway: the headline is the subject's title (the topic), not the visit
+  // bead's own generic title. The topic also labels the subject cell.
+  expect(within(live).getAllByText(/the attention-canvas epic topic/).length).toBeGreaterThan(0);
+  expect(within(live).queryByText(/what the canvas owes the operator/)).toBeNull();
 
   const done = within(section).getByText('tk-vst02').closest('tr') as HTMLElement;
   expect(within(done).getByText('closed')).toBeTruthy();
   expect(within(done).getByText('diagnosed')).toBeTruthy();
+  // A takeaway wins the headline; the subject title labels the subject cell.
   expect(within(done).getByText(/the path was the launcher/)).toBeTruthy();
+  expect(within(done).getByText('the raw-path launcher finding')).toBeTruthy();
 });
 
 it('shows the outcome on a running sitting a dismissal stamped but could not close', async () => {
@@ -455,6 +463,7 @@ it('shows the outcome on a running sitting a dismissal stamped but could not clo
         session: 'gc-toolkit__converse-9',
         opened_at: '2026-08-21T18:34:00Z',
         takeaway: '',
+        subject_title: 'the attention-canvas epic topic',
       },
     ],
   };
@@ -475,7 +484,11 @@ it('drills into a sitting by its subject', async () => {
   render(<App />);
   await waitFor(() => expect(region('converse sittings')).toBeTruthy());
 
-  fireEvent.click(within(region('converse sittings')).getByRole('button', { name: 'tk-epic' }));
+  // The subject cell is labelled by its topic (the subject's title) but still
+  // drills by the subject id — the id rides along as the button's hover title.
+  fireEvent.click(
+    within(region('converse sittings')).getByRole('button', { name: 'the attention-canvas epic topic' }),
+  );
   expect(screen.getByRole('complementary', { name: /detail for tk-epic/i })).toBeTruthy();
 });
 

@@ -679,7 +679,14 @@ func renderLegend(w io.Writer) {
 // truncated outcome word are both unreadable, and HEADLINE is last and unpadded
 // so a wide cell costs nothing.
 const (
-	colSubjectMin  = 12
+	colSubjectMin = 12
+	// colSubjectMax bounds the SUBJECT cell now that it renders the subject's
+	// TITLE (the topic) rather than the bare id: a title runs to any length, and
+	// unbounded it would push every column after it off the row. The cell is
+	// clipped with an ellipsis so a cut topic says it was cut; the full title is
+	// still on the wire, and a takeaway-less row repeats it unclipped in the
+	// HEADLINE.
+	colSubjectMax  = 44
 	colAge         = 7
 	colOutcomeMin  = 10
 	colHeadlineMax = 96
@@ -715,7 +722,7 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 	for _, s := range shown {
 		idW = max(idW, len([]rune(s.ID))+1)
 		rigW = max(rigW, len([]rune(s.Rig))+1)
-		subjW = max(subjW, len([]rune(s.Subject))+1)
+		subjW = max(subjW, len([]rune(clip(s.Topic(), colSubjectMax)))+1)
 		outW = max(outW, len([]rune(s.Outcome))+1)
 	}
 
@@ -732,16 +739,14 @@ func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
 			// such value, rather than a value that happens to be empty.
 			outcome = "—"
 		}
-		// The takeaway is what the sitting concluded; the title is what it was
-		// called. Preferring the conclusion means a row says something even
-		// when its title is a truncated escalation subject.
-		headline := s.Takeaway
-		if headline == "" {
-			headline = s.Title
-		}
+		// SUBJECT is the topic — the subject bead's title, so the row says what
+		// it is about and not just which id it stands on. HEADLINE is what the
+		// sitting concluded (the takeaway), falling back to that same topic
+		// rather than the visit bead's own generic title. Both are the model's
+		// derivation, shared with the web renderer.
 		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
-			rpad(s.Subject, subjW)+rpad(shortAge(since, now), colAge)+
-			rpad(outcome, outW)+clip(headline, colHeadlineMax)+"\n")
+			rpad(clip(s.Topic(), colSubjectMax), subjW)+rpad(shortAge(since, now), colAge)+
+			rpad(outcome, outW)+clip(s.Headline(), colHeadlineMax)+"\n")
 	}
 
 	if dropped > 0 {

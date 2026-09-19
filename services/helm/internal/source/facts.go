@@ -133,16 +133,19 @@ func newSitting(iss *beads.Issue, r rigRef) board.Sitting {
 	return st
 }
 
-// attributeTakeaways fills in the headline each sitting left, reading the
-// SUBJECT beads in one batch and keeping a takeaway only for the sitting whose
-// span contains its timestamp (see board.Sitting.Takeaway for why the span test
-// is the whole point).
+// attributeTakeaways fills in the two things a row reads off its SUBJECT bead,
+// from one batch read of those beads: the subject's TITLE, which is the row's
+// topic and is carried onto every sitting whose subject was read; and the
+// TAKEAWAY, which is kept only for the sitting whose span contains its timestamp
+// (see board.Sitting.Takeaway for why the span test is the whole point). The
+// title has no such span test — a subject's title is what it is about whenever
+// the sitting ran, not a thing one sitting authored — so it rides every row.
 //
 // Failure is silent in the board's usual direction: a subject that cannot be
-// read leaves its sittings showing an outcome and no headline, which is a
-// narrower row rather than a wrong one. It is still recorded as partial, since
-// a store that will not answer this read is a store the rest of the gather
-// should be doubted on too.
+// read leaves its sittings showing an outcome and neither a topic nor a
+// headline, which is a narrower row rather than a wrong one. It is still
+// recorded as partial, since a store that will not answer this read is a store
+// the rest of the gather should be doubted on too.
 func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r rigRef, g *gatherState, sittings []board.Sitting, now time.Time) {
 	var ids []string
 	for _, sit := range sittings {
@@ -168,10 +171,12 @@ func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r ri
 		at   time.Time
 	}
 	byID := make(map[string]stamped, len(subjects))
+	titleByID := make(map[string]string, len(subjects))
 	for _, iss := range subjects {
 		if iss == nil {
 			continue
 		}
+		titleByID[iss.ID] = iss.Title
 		md := decodeMetadata(iss.Metadata)
 		text := md["gc.takeaway"]
 		if text == "" {
@@ -190,6 +195,10 @@ func (s *BeadsSource) attributeTakeaways(ctx context.Context, st beadStore, r ri
 
 	for i := range sittings {
 		s := &sittings[i]
+		// The topic rides every row whose subject was read, before the span
+		// test the takeaway must pass: a row with no attributable takeaway still
+		// says what it is about.
+		s.SubjectTitle = titleByID[s.Subject]
 		got, ok := byID[s.Subject]
 		if !ok {
 			continue

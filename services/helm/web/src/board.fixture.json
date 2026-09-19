@@ -222,7 +222,8 @@
       "outcome": "",
       "session": "gc-toolkit__converse-1",
       "opened_at": "2026-08-11T14:40:00Z",
-      "takeaway": ""
+      "takeaway": "",
+      "subject_title": "Attention Canvas — spatial in-canvas operator dashboard"
     },
     {
       "id": "tk-vst02",
@@ -234,7 +235,8 @@
       "session": "gascity__converse-2",
       "opened_at": "2026-08-11T09:12:00Z",
       "closed_at": "2026-08-11T09:48:00Z",
-      "takeaway": "the roll-up was right; the convoy's own progress claim was stale"
+      "takeaway": "the roll-up was right; the convoy's own progress claim was stale",
+      "subject_title": ""
     }
   ],
   "partial": true,

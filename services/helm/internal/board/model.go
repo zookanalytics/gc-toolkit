@@ -477,6 +477,42 @@ type Sitting struct {
 	// serializes them in practice, and the failure is a duplicated headline
 	// rather than a wrong one.
 	Takeaway string `json:"takeaway"`
+
+	// SubjectTitle is the title of the SUBJECT bead — the row's topic, what the
+	// conversation is about. It is read in the same batch as the takeaway
+	// (source.attributeTakeaways), so a row can say what it concerns even when
+	// nothing was concluded on it. Empty when the subject could not be read,
+	// which the [Topic] and [Headline] helpers fall back on the id or the visit
+	// title for. It carries the whole title; a renderer clips it to its column.
+	SubjectTitle string `json:"subject_title"`
+}
+
+// Topic is what a sitting is about, for a surface that shows one cell of it: the
+// subject bead's title, falling back to the subject id when the gather could not
+// read the title. Never empty on a real sitting — the row always says at least
+// the id it stands on, so a bare id is the floor rather than the whole of it.
+func (s Sitting) Topic() string {
+	if s.SubjectTitle != "" {
+		return s.SubjectTitle
+	}
+	return s.Subject
+}
+
+// Headline is what a sitting CONCLUDED, or failing that what it is ABOUT. The
+// takeaway is the conversation's own one-line conclusion and wins whenever one
+// was attributed. Without one the row shows the subject's title — the topic —
+// rather than the visit bead's own title, which on an old-path first reaction is
+// the generic pool-offer line "first reaction ready: accept or redirect" and
+// says nothing. The visit title is the last resort, for a subject the gather
+// could not read at all.
+func (s Sitting) Headline() string {
+	if s.Takeaway != "" {
+		return s.Takeaway
+	}
+	if s.SubjectTitle != "" {
+		return s.SubjectTitle
+	}
+	return s.Title
 }
 
 // Facts are the CROSS-ANCHOR joins one gather pass produces alongside the

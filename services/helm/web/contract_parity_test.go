@@ -439,13 +439,14 @@ func fixtureBoard() board.Board {
 		// shape (no outcome, no close stamp) and the finished one.
 		Sittings: []board.Sitting{
 			{
-				ID:       "tk-vst01",
-				Rig:      "gc-toolkit",
-				Subject:  "tk-eemvf",
-				Title:    "visit: tk-eemvf — tile density",
-				Status:   "in_progress",
-				Session:  "gc-toolkit__converse-1",
-				OpenedAt: time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
+				ID:           "tk-vst01",
+				Rig:          "gc-toolkit",
+				Subject:      "tk-eemvf",
+				Title:        "visit: tk-eemvf — tile density",
+				SubjectTitle: "Attention Canvas — spatial in-canvas operator dashboard",
+				Status:       "in_progress",
+				Session:      "gc-toolkit__converse-1",
+				OpenedAt:     time.Date(2026, 8, 11, 14, 40, 0, 0, time.UTC),
 			},
 			{
 				ID:       "tk-vst02",
