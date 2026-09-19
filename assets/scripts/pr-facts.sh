@@ -888,12 +888,19 @@ CHILDREN_EOF
       fi
       # --- conversation position: where the exchange with the operator stands --
       # Read off the same watermarks, lists and head this block already has.
-      # quiet is nothing said; outstanding is an utterance above its space's
-      # watermark. A batch the city has dispositioned but the head has not moved
-      # past is the city still working it, which stays outstanding rather than
-      # collapsing to quiet. answered is every watermark at its space's high water
-      # with the head moved since — the transition --set-dated stamps when it
-      # re-pins a caught-up value to the new head.
+      # quiet is nothing said. outstanding is an utterance above its space's
+      # watermark, or a batch the city has dispositioned that the head has not
+      # moved past, which is the city still working it and holds outstanding
+      # rather than collapsing to quiet. answered is a position recorded
+      # outstanding that the head has moved past since, or one already recorded
+      # answered.
+      # A caught-up position with no prior outstanding to carry stays unknown.
+      # Every watermark is at its high water with nothing above it, so there is
+      # no utterance to call outstanding, and no recorded position proves the
+      # city answered and moved the head. An anchor whose watermarks predate this
+      # key reads unknown until a pass records a position, never a false
+      # outstanding. conv left empty records nothing, and the board renders an
+      # unrecorded position as unknown.
       have_cv=""; have_ch=""
       case "$have_c" in *@*@*) cvrest="${have_c%@*}"; have_cv="${cvrest%@*}"; have_ch="${cvrest#*@}" ;; esac
       if [ "$max_c" = 0 ] && [ "$max_r" = 0 ] && [ "$max_i" = 0 ]; then
@@ -904,8 +911,10 @@ CHILDREN_EOF
         conv="answered"
       elif [ "$have_cv" = "outstanding" ] && [ -n "$have_ch" ] && [ "$have_ch" != "$head_oid" ]; then
         conv="answered"
-      else
+      elif [ "$have_cv" = "outstanding" ]; then
         conv="outstanding"
+      else
+        conv=""
       fi
     fi
   fi

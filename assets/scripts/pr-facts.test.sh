@@ -891,6 +891,17 @@ printf '[{"id":7300,"user":{"login":"human1"},"body":"handled"}]' > "$GH_DIR/com
 out=$(run)
 eq "$(meta_pinned CA pr.conversation)" "answered@sha-73" "the watermark caught up and the head moved since reads answered"
 
+echo "# conversation axis — a caught-up anchor with no prior position reads unknown, never a false outstanding"
+# A rollout-era anchor: the comment watermark already covers the only utterance
+# (unanswered = 0) and no pr.conversation key was ever recorded. Nothing sits
+# above a watermark, so outstanding cannot be asserted and the position stays
+# unrecorded; the board renders an unrecorded position as unknown.
+store "[$(anchor CU 74 ',"pr_comment_watermark":"7400"')]"
+printf '%s' "$(prview 74 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_74.json"
+printf '[{"id":7400,"user":{"login":"human1"},"body":"historical"}]' > "$GH_DIR/comments_74.json"
+out=$(run)
+eq "$(meta CU pr.conversation)" "<absent>" "a caught-up anchor with no prior position records nothing, reading unknown on the board"
+
 echo "# each batch's range is recorded by the transition that routes it"
 store "[$(anchor P9 62)]"
 printf '%s' "$(prview 62 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_62.json"
