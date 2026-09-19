@@ -45,6 +45,13 @@
 # folds an unengaged self-login thread into `commented` — the merge-hold has to
 # be recorded before merge.sh runs — and the full pass files the one visit it
 # stands for.
+# A required check that has terminally FAILED, on a PR every arm above waved
+# through (no conflict, feedback answered, no unresolved-thread block), files ONE
+# rework child per head the same way — dedup keyed on anchor_bead, so an
+# in-flight review stands it down as well as a rework. It reads the same required
+# set merge.sh holds on (required_contexts_for) but routes on a terminal failure
+# only: a pending or missing required check has not failed, so it is left for a
+# later pass.
 # Such a batch also resets signoff.sh's review-round cap, once per batch: it is
 # review the branch has never been answered against, not a round of the loop the
 # cap measures. The reset retires the dispatch tally with it, and the cap's own
@@ -116,6 +123,32 @@ fi
 ORIGIN_REPO_Q="$ORIGIN_HOST/$ORIGIN_REPO"
 gh_api_origin() { gh api --hostname "$ORIGIN_HOST" "$@"; }
 SELF_LOGIN=$(gh_api_origin user --jq '.login' 2>/dev/null)
+
+# Which status checks actually gate <branch>. The red-check arm routes on the
+# same set merge.sh holds a merge on, so this is a byte-identical copy of
+# merge.sh's function between the markers below; a test proves the two never
+# drift.
+REQ_STATE=""; REQ_CONTEXTS=""
+# >>> required-contexts-for
+required_contexts_for() { # <branch>
+  local b="$1" rules branch rrc brc
+  REQ_STATE=""; REQ_CONTEXTS=""
+  rules=$(gh_api_origin "repos/$ORIGIN_REPO/rules/branches/$b" 2>/dev/null); rrc=$?
+  branch=$(gh_api_origin "repos/$ORIGIN_REPO/branches/$b" 2>/dev/null); brc=$?
+  if [ "$rrc" -ne 0 ] || ! printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1 \
+     || [ "$brc" -ne 0 ] || ! printf '%s' "$branch" | jq -e 'type == "object" and has("name")' >/dev/null 2>&1; then
+    REQ_STATE="unknown"; return 0
+  fi
+  REQ_CONTEXTS=$( { printf '%s' "$rules" | jq -r '
+      [ .[] | select(type == "object") | select((.type // "") == "required_status_checks")
+        | (.parameters.required_status_checks // [])[] | (.context // empty) ] | .[]' 2>/dev/null
+    printf '%s' "$branch" | jq -r '
+      [ (.protection.required_status_checks.contexts // [])[],
+        ((.protection.required_status_checks.checks // [])[] | (.context // empty)) ] | .[]' 2>/dev/null
+  } | sed '/^$/d' | sort -u)
+  REQ_STATE="known"
+}
+# <<< required-contexts-for
 
 url_repo_q() {
   printf '%s' "${1:-}" \
@@ -1602,6 +1635,172 @@ GATES
       fi
     fi
   fi
+
+  # --- red required check: file ONE rework child --------------------------------
+  # Reached only when every arm above waved this anchor through: no conflict, no
+  # unanswered feedback, no unresolved-thread block. A required check that has
+  # FAILED still holds the merge, so this arm routes it: ONE rework child to fix
+  # the failing check(s), deduped so a reconcile every couple of minutes files one.
+  #
+  # merge.sh holds a merge on the same required set (its UNSTABLE arm), but its
+  # `green` test also holds on a PENDING or MISSING check — right for a gate,
+  # wrong for a dispatch. A check still running has not failed, and a required
+  # context with no run yet cannot be told from one not started; a code-fix
+  # rework for either sends a polecat to fix nothing. So this routes on a
+  # TERMINAL failure only (a completed check concluded failure, or a status
+  # context in state failure/error) and leaves pending/missing to the next pass,
+  # which sees the failure once it lands.
+  case "$merge_state" in
+    UNSTABLE|BLOCKED)
+      rc_fix_branch="${head_ref:-$branch}"
+      rc_why=""
+      [ -n "$rc_fix_branch" ] || rc_why="the PR head branch is unresolved"
+      [ -n "$FIX_POOL" ]      || rc_why="no fix pool is configured"
+      is_held "$rhold"          && rc_why="rebase_hold freezes the branch"
+      is_held "$hold"           && rc_why="merge_hold is set"
+      [ "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')" = "human" ] \
+        && rc_why="the anchor is already routed to a human"
+      takeaway_is_holding "$id" && rc_why="a sitting holds it for an operator ruling"
+      # A held or human-steered anchor is theirs; file nothing under it, exactly
+      # as the conflict and feedback arms stand down on the same gates.
+      if [ -z "$rc_why" ]; then
+        required_contexts_for "$base"
+        if [ "$REQ_STATE" = "known" ] && [ -n "$REQ_CONTEXTS" ]; then
+          rc_rollup=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json statusCheckRollup 2>/dev/null)
+          rc_req_json=$(printf '%s\n' "$REQ_CONTEXTS" | jq -Rs 'split("\n") | map(select(length > 0))' 2>/dev/null)
+          # One {name,url} per failing required check. A CheckRun carries
+          # detailsUrl, a StatusContext targetUrl; either may be absent.
+          rc_fail_json=$(printf '%s' "$rc_rollup" | jq -c --argjson req "${rc_req_json:-[]}" '
+            def name_of: (.name // .context // "");
+            def failed:
+              if ((.conclusion // "") | tostring | length) > 0
+                then ((.conclusion | ascii_upcase) as $c
+                      | $c == "FAILURE" or $c == "TIMED_OUT" or $c == "CANCELLED"
+                        or $c == "ACTION_REQUIRED" or $c == "STARTUP_FAILURE")
+              elif ((.state // "") | tostring | length) > 0
+                then ((.state | ascii_upcase) as $s | $s == "FAILURE" or $s == "ERROR")
+              else false end;
+            (.statusCheckRollup // []) as $r
+            | [ $req[] as $c
+                | ( [ $r[] | select(type == "object") | select(name_of == $c) | select(failed) ] ) as $bad
+                | if ($bad | length) > 0
+                  then { name: $c, url: (($bad[0].detailsUrl // $bad[0].targetUrl // "") | tostring) }
+                  else empty end ]' 2>/dev/null)
+          rc_nfail=$(printf '%s' "$rc_fail_json" | jq 'length' 2>/dev/null)
+          case "$rc_nfail" in ''|*[!0-9]*) rc_nfail=0 ;; esac
+          # Route only on a positively-read failure: an empty or unreadable rollup
+          # is "cannot tell", which stands the anchor down rather than dispatching.
+          if [ -n "$rc_rollup" ] && [ -n "$rc_req_json" ] && [ "$rc_nfail" -gt 0 ]; then
+            rc_names=$(printf '%s' "$rc_fail_json" | jq -r 'map(.name) | join(" ")' 2>/dev/null)
+            rc_urls=$(printf '%s' "$rc_fail_json" | jq -r '[ .[] | .url | select(. != "") ] | join(" ")' 2>/dev/null)
+            # Dedup like the conflict arm, but keyed on anchor_bead so it also
+            # stands down for an in-flight REVIEW child (a re-review that will move
+            # the head), not only a rework: any LIVE child of this anchor means
+            # work already covers it, and any child (closed included) whose
+            # rejection_reason names THIS head means this head was already routed —
+            # re-dispatching it would loop on a head nothing moved.
+            rc_kids=$(bd_list --metadata-field anchor_bead="$id" --status="$ALL_STATUSES") || {
+              echo "$PROG: $id — PR#$num has a red required check but the child probe failed; nothing dispatched (retry next pass)" >&2
+              skipped=$((skipped + 1)); continue
+            }
+            # A strand: MY OWN prior red-check child, open/unclaimed/unrouted at
+            # this head, whose route stamp exited 0 without landing. It matches the
+            # live dedup below and would veto its own rescue, so exclude it from
+            # its own dedup and re-route it instead of twinning.
+            rc_stranded=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" '
+              [ .[] | select(.id != $id)
+                | select(((.status // "open") | ascii_downcase) == "open")
+                | select(((.assignee // "") | tostring) == "")
+                | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+                | select(((.metadata.merge_result // "") | tostring) == "")
+                | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
+                | .id ] | .[0] // empty' 2>/dev/null)
+            rc_dup=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg s "$rc_stranded" --arg h "$head_oid" --arg live "$LIVE_STATUSES" '
+              ($live | split(",")) as $ls
+              | [ .[] | select(.id != $id) | select(.id != $s)
+                  | ((.status // "open") | ascii_downcase) as $st
+                  | ((.metadata.rejection_reason // "") | tostring) as $rr
+                  | select((($ls | index($st)) != null)
+                           or (($h != "") and ($rr | contains("head " + $h))))
+                  | .id ] | .[0] // empty' 2>/dev/null)
+            if [ -n "$rc_dup" ]; then
+              echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); child $rc_dup already covers this head, no new child"
+              skipped=$((skipped + 1)); continue
+            fi
+            # Same allowlist as the conflict arm's stale-base-dispatch-mode: only
+            # polecat/* is disposable enough to rewrite; a graduation on one is not.
+            case "$rc_fix_branch" in
+              polecat/*) rc_prepare=rebase ;;
+              *)         rc_prepare=merge ;;
+            esac
+            [ "$grad" = "true" ] && rc_prepare=merge
+            RC_REASON="Required check(s) failing on PR#$num at head $head_oid: $rc_names.${rc_urls:+ Run log(s): $rc_urls.} Fix the failing check(s) and push to '$rc_fix_branch'. Do NOT open a new PR: this reworks PR#$num."
+            RC_TITLE="Fix failing required check(s) on PR#$num:"
+            if [ -n "$rc_stranded" ]; then
+              RCFIX="$rc_stranded"
+              echo "$PROG: $id re-routing stranded red-check rework $RCFIX for PR#$num (a prior pass's route stamp did not land)"
+            else
+              # Adopt a created-but-unstamped orphan (title set, anchor_bead never
+              # landed) before minting, or a prior pass twins one per cycle.
+              if ! rc_orphans=$(bd_list --status=open --title-contains "$RC_TITLE"); then
+                echo "$PROG: $id — PR#$num has a red required check but the orphan probe failed; nothing dispatched (retry next pass)" >&2
+                skipped=$((skipped + 1)); continue
+              fi
+              RCFIX=$(printf '%s' "$rc_orphans" | jq -r '
+                [ .[] | select(((.metadata.anchor_bead // "") | tostring) == "") | .id ] | .[0] // empty' 2>/dev/null)
+              if [ -n "$RCFIX" ]; then
+                echo "$PROG: $id adopting unstamped red-check rework orphan $RCFIX for PR#$num (created by a prior pass whose stamp failed)"
+              else
+                RCFIX=$(gc bd create "$RC_TITLE required check red at head $head_oid" -t task --json 2>/dev/null \
+                  | jq -r '.id // empty' 2>/dev/null)
+              fi
+            fi
+            if [ -z "$RCFIX" ]; then
+              echo "$PROG: $id could not file the red-check rework for PR#$num; retry next pass" >&2
+              skipped=$((skipped + 1)); continue
+            fi
+            gc bd update "$RCFIX" \
+              --set-metadata task_kind=rework \
+              --set-metadata anchor_bead="$id" \
+              --set-metadata branch="$rc_fix_branch" \
+              --set-metadata target="$base" \
+              --set-metadata rejection_reason="$RC_REASON" \
+              --set-metadata prepare_mode="$rc_prepare" \
+              --set-metadata merge_strategy=mr \
+              --set-metadata existing_pr="$live_url" \
+              --set-metadata pr_url="$live_url" \
+              --set-metadata pr_number="$num" >/dev/null 2>&1 \
+              || echo "$PROG: WARN red-check rework $RCFIX created but not fully stamped; route it to $FIX_POOL by hand" >&2
+            gc bd dep "$RCFIX" --blocks "$id" >/dev/null 2>&1 \
+              || echo "$PROG: WARN could not attach red-check rework $RCFIX as a blocks-dep of $id" >&2
+            # Read the role marker + mode back before routing, as the conflict arm
+            # does: `gc bd update` returns 0 without writing (the claim guard is one
+            # such path), a child routed without anchor_bead is one the next pass's
+            # dedup cannot see, and one without prepare_mode resumes as rebase on a
+            # branch this may have classified shared.
+            rc_got=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // "") + "|" + (.prepare_mode // ""))')
+            if [ "$rc_got" != "rework|$id|$rc_prepare" ]; then
+              gc bd update "$RCFIX" --set-metadata task_kind=rework --set-metadata anchor_bead="$id" --set-metadata prepare_mode="$rc_prepare" >/dev/null 2>&1 || true
+              rc_got=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata | ((.task_kind // "") + "|" + (.anchor_bead // "") + "|" + (.prepare_mode // ""))')
+            fi
+            if [ "$rc_got" != "rework|$id|$rc_prepare" ]; then
+              echo "$PROG: WARN red-check rework $RCFIX did not record task_kind/anchor_bead/prepare_mode; left unrouted (retry next pass)" >&2
+              skipped=$((skipped + 1)); continue
+            fi
+            gc bd update "$RCFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+            rc_rgot=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+            if [ "$rc_rgot" != "$FIX_POOL" ]; then
+              echo "$PROG: WARN red-check rework $RCFIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
+              skipped=$((skipped + 1)); continue
+            fi
+            gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
+            reworked=$((reworked + 1))
+            echo "$PROG: $id — PR#$num required check(s) failing ($rc_names); filed $rc_prepare-mode rework $RCFIX routed to $FIX_POOL"
+            continue
+          fi
+        fi
+      fi ;;
+  esac
 done <<ROWS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null)
 ROWS_EOF
