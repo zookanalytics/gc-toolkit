@@ -4,11 +4,12 @@
 # before any work, and this answers that prime in a single call.
 #
 # Given a bead id it returns, and nothing outside this:
-#   A. Subject core — status, priority, issue_type, task_kind, assignee; routing
-#      (gc.routed_to, gc.execution_routed_to); anchor state when the bead carries
-#      a merge_result (merge_result, pr_number, branch, merged_target); the
-#      first_reaction fields; gc.origin; and the distilled gc.takeaway headline
-#      (with gc.takeaway_settled). The free-text body is never parsed.
+#   A. Subject core — title, status, priority, issue_type, task_kind, assignee;
+#      routing (gc.routed_to, gc.execution_routed_to); anchor state when the
+#      bead carries a merge_result (merge_result, pr_number, branch,
+#      merged_target); the first_reaction fields; gc.origin; and the distilled
+#      gc.takeaway headline (with gc.takeaway_settled). The free-text body is
+#      never parsed.
 #   D. Context edges, shown but never gating — the parent, the relates-to edges,
 #      the tracked-by visits, and a count per class.
 #   E. Store — the store that answered, and the db it read.
@@ -68,7 +69,7 @@ usage() {
 usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads]
                                  [--frontier] [--horizon] [--json]
 
-Rebuilds one bead's working context in a single call: its core (status,
+Rebuilds one bead's working context in a single call: its core (title, status,
 priority, type, task_kind, assignee, routing, anchor state, first_reaction,
 origin, takeaway), its context edges (parent, relates-to, tracked-by visits,
 with a count per class), and the store that answered. --frontier adds the
@@ -210,7 +211,9 @@ SUBJ=$(printf '%s' "$RAW" | jq -c '.[0]')
 # takeaway) reads as the empty string it is, distinct from an absent key.
 SUBJECT_CORE=$(printf '%s' "$SUBJ" | jq -c '
   (.metadata // {}) as $m | {
-    id, status,
+    id,
+    title: (.title // null),
+    status,
     priority: (.priority // null),
     issue_type: (.issue_type // null),
     task_kind: ($m["task_kind"] // null),
@@ -330,6 +333,7 @@ g() { printf '%s' "$FINAL" | jq -r "$1" 2>/dev/null; }
 val() { case "$1" in ""|null) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
 
 printf '%s: %s\n\n' "$PROG" "$(g '.subject.id')"
+printf '  Title       %s\n' "$(val "$(g '.subject.title // ""')" '(untitled)')"
 printf '  Status      %s\n' "$(g '.subject.status')"
 printf '  Priority    %s\n' "$(val "$(g '.subject.priority // ""')" '(none)')"
 printf '  Type        %s\n' "$(val "$(g '.subject.issue_type // ""')" '(none)')"

@@ -50,10 +50,13 @@ bead() { cat > "$1/.beads/$2.json"; }   # bead <store-repo> <id>  (object on std
 # edges (D) are the parent tk-epic, two relates deps in each spelling, and a
 # reverse `tracks` visit (tk-visit, below). Its blocks are all closed — one
 # same-store (embedded status), one FOREIGN in the otherrig store (no embedded
-# status, the cross-store fold) — so its frontier verdict is ready.
+# status, the cross-store fold) — so its frontier verdict is ready. It also
+# carries a description and notes; the read returns its title but never that body.
 bead "$R_TK" tk-anchor <<'J'
 {"id":"tk-anchor","title":"rich anchor","status":"open","issue_type":"task","priority":1,
  "assignee":"gc-toolkit/gc-toolkit.refinery","parent":"tk-epic",
+ "description":"subject body prose the read must never surface",
+ "notes":"## Current state\noperational notes the read must never surface",
  "metadata":{"task_kind":"rework","gc.routed_to":"","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
    "merge_result":"pull_request","pr_number":"9","branch":"polecat/tk-anchor","merged_target":"main","target":"main",
    "gc.first_reaction":"ruling","gc.first_reaction_at":"2026-09-02T22:23:04Z",
@@ -259,6 +262,7 @@ runb() { OUT=$(timeout 10 "$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"
 # --- A. Subject core --------------------------------------------------------
 run tk-anchor
 eq "$RC" 0 "a resolvable bead reports (rc)"
+has "$OUT" "Title       rich anchor"             "  ... the subject's own title"
 has "$OUT" "Status      open"                    "  ... status"
 has "$OUT" "Type        task"                    "  ... type from issue_type"
 has "$OUT" "Task kind   rework"                  "  ... task_kind"
@@ -269,6 +273,7 @@ has "$OUT" "[settled]"                           "  ... a settled takeaway is ma
 has "$(cat "$FAKE_GC_LOG")" "show tk-anchor --brief-deps" \
   "  ... via a --brief-deps read, so a hub bead's dependency bodies are never fetched"
 
+JQF='.subject.title'                  runj tk-anchor; eq "$JQ" "rich anchor" "subject.title — section A returns the subject's own title"
 JQF='.subject.status'                 runj tk-anchor; eq "$JQ" open        "subject.status"
 JQF='.subject.priority'               runj tk-anchor; eq "$JQ" 1           "subject.priority (top-level)"
 JQF='.subject.task_kind'              runj tk-anchor; eq "$JQ" rework      "subject.task_kind"
