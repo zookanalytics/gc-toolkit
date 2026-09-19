@@ -1319,6 +1319,46 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 	}
 }
 
+// TestSittingTopicAndHeadlineFallback pins the two derivations a row reads off
+// its subject: the topic is the subject's title, and the headline prefers the
+// takeaway but falls back to that same title before it ever shows the visit
+// bead's own generic name. Both degrade to the id and the visit title only when
+// the gather could not read the subject at all.
+func TestSittingTopicAndHeadlineFallback(t *testing.T) {
+	const (
+		subjTitle = "the raw script path the launcher took"
+		visit     = "visit: tk-anchor — first reaction ready: accept or redirect"
+		takeaway  = "routed the fix to the pool; nothing further here"
+	)
+
+	// A concluded sitting: the takeaway is the headline, the subject title the topic.
+	concluded := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit, Takeaway: takeaway}
+	if got := concluded.Headline(); got != takeaway {
+		t.Errorf("a takeaway is the headline: got %q, want %q", got, takeaway)
+	}
+	if got := concluded.Topic(); got != subjTitle {
+		t.Errorf("the topic is the subject title: got %q, want %q", got, subjTitle)
+	}
+
+	// No takeaway, subject read: the headline is the topic, NOT the visit title.
+	bare := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit}
+	if got := bare.Headline(); got != subjTitle {
+		t.Errorf("no takeaway falls back to the subject title, not the visit title: got %q, want %q", got, subjTitle)
+	}
+	if got := bare.Topic(); got != subjTitle {
+		t.Errorf("topic is the subject title: got %q, want %q", got, subjTitle)
+	}
+
+	// Subject unread: the last resorts are the visit title and the bare id.
+	unread := Sitting{Subject: "tk-anchor", Title: visit}
+	if got := unread.Headline(); got != visit {
+		t.Errorf("an unread subject falls back to the visit title: got %q, want %q", got, visit)
+	}
+	if got := unread.Topic(); got != "tk-anchor" {
+		t.Errorf("an unread subject topic falls back to the id: got %q, want %q", got, "tk-anchor")
+	}
+}
+
 // TestParkedChildIsNotIdleWork: an epic whose child is finished and waiting on
 // a ruling must not report that child as idle work. "Assign or visit" names the
 // wrong bead — the child is already assigned, to the operator.

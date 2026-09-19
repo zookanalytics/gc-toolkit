@@ -276,6 +276,14 @@ export interface Sitting {
    * subject visited three times has two sittings that did not write it.
    */
   takeaway: string;
+  /**
+   * The subject bead's title — the row's topic, what the conversation is about.
+   * Read in the same batch as the takeaway, so a row says what it concerns even
+   * with nothing concluded on it. `''` when the subject could not be read, which
+   * the render falls back on the subject id (topic) or the visit title
+   * (headline) for.
+   */
+  subject_title: string;
 }
 
 /**

@@ -1707,6 +1707,27 @@ func TestSittingTakeawayIsAttributedBySpan(t *testing.T) {
 	}
 }
 
+// TestSittingCarriesSubjectTitle: the row's topic is the subject bead's title,
+// carried onto every sitting that names it — the two with no attributable
+// takeaway included, which is the whole point. Unlike the takeaway, the title
+// has no span test: it is what the subject is about whenever the sitting ran.
+func TestSittingCarriesSubjectTitle(t *testing.T) {
+	got := sittingsByID(gatherSittings(t))
+	const topic = "the subject three sittings talked about"
+	for _, id := range []string{"tk-sit-open", "tk-sit-recent", "tk-sit-earlier"} {
+		if s := got[id]; s.SubjectTitle != topic {
+			t.Errorf("%s: SubjectTitle = %q, want the subject's title %q", id, s.SubjectTitle, topic)
+		}
+	}
+	// The two that carry the topic but NO takeaway are the rows the change
+	// exists for: without the title their headline would be a bare id.
+	for _, id := range []string{"tk-sit-open", "tk-sit-earlier"} {
+		if s := got[id]; s.Takeaway != "" {
+			t.Errorf("guard: %s should carry no takeaway, got %q", id, s.Takeaway)
+		}
+	}
+}
+
 // TestSittingWindowIsConfigurable: the knob widens the closed half, and zero
 // turns it off without touching the running half.
 func TestSittingWindowIsConfigurable(t *testing.T) {
@@ -1763,6 +1784,9 @@ func TestSittingPassesDegradeIndependently(t *testing.T) {
 	}
 	if s := got["tk-sit-recent"]; s.Takeaway != "" || s.Outcome != "diagnosed" {
 		t.Errorf("the sitting keeps what it owns and loses only the joined headline: %+v", s)
+	}
+	if s := got["tk-sit-recent"]; s.SubjectTitle != "" {
+		t.Errorf("an unreadable subject leaves the topic empty, not guessed: %q", s.SubjectTitle)
 	}
 	if !res.Partial {
 		t.Error("a failed subject read is reported as partial")

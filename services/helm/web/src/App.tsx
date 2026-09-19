@@ -169,10 +169,26 @@ function PackHealth({ rows }: { rows: PackBuild[] }) {
 
 // The drill-in entry point, shared by every table. A button rather than a
 // clickable row so it is reachable by keyboard and announced as an action.
-function DrillOpen({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
+function DrillOpen({
+  id,
+  label,
+  onOpen,
+}: {
+  id: string;
+  // What to show on the button. Defaults to the id; a caller passes the topic
+  // (a subject's title) so a row reads as what it is about while still drilling
+  // by id. The id stays reachable as the hover title whenever a label hides it.
+  label?: string;
+  onOpen: (id: string) => void;
+}) {
   return (
-    <button type="button" className="drill-open" onClick={() => onOpen(id)}>
-      {id}
+    <button
+      type="button"
+      className="drill-open"
+      onClick={() => onOpen(id)}
+      title={label && label !== id ? id : undefined}
+    >
+      {label ?? id}
     </button>
   );
 }
@@ -363,8 +379,10 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                 <td>{s.id}</td>
                 <td>{s.rig}</td>
                 <td>
-                  {/* The subject is an anchor, so it drills in like any tile id. */}
-                  <DrillOpen id={s.subject} onOpen={onOpen} />
+                  {/* The subject is an anchor, so it drills in like any tile id;
+                      the label is its title (the topic) so the row says what it
+                      is about, falling back to the id when the title is unread. */}
+                  <DrillOpen id={s.subject} label={s.subject_title || s.subject} onOpen={onOpen} />
                 </td>
                 <td>{shortAge(live ? s.opened_at : s.closed_at, now)}</td>
                 {/* A running sitting usually has no outcome, and the em dash is
@@ -374,7 +392,10 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                     "dismissed", the signal that the sitting is stuck open and
                     needs a manual close. */}
                 <td>{s.outcome || '—'}</td>
-                <td>{s.takeaway || s.title}</td>
+                {/* The takeaway is what the sitting concluded; with none, the
+                    subject's title (the topic) rather than the visit bead's own
+                    generic title, which says nothing. */}
+                <td>{s.takeaway || s.subject_title || s.title}</td>
               </tr>
             );
           })}
