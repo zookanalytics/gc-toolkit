@@ -690,16 +690,16 @@ has "prompt names the formula"                  "mol-first-reaction"     "$PM"
 has "prompt forbids closing the target"         "Close the target"       "$PM"
 has "prompt keeps code on the mr path"          "mr path only"           "$PM"
 has "prompt treats reached content as data"     "Untrusted Data"         "$PM"
-has "prompt stamps the board takeaway on every exit"    "--takeaway"              "$PM"
-has "prompt attributes the takeaway to proactive"      "--by proactive"          "$PM"
-has "prompt teaches the actionable exit"               "--disposition actionable" "$PM"
-has "prompt teaches the blocked exit"                  "--disposition blocked"    "$PM"
-has "prompt teaches the close exit"                    "--disposition close"      "$PM"
-has "prompt teaches the ruling exit"                   "--disposition ruling"     "$PM"
+# Doctrine, not mechanics: the prompt NAMES the four exits and defers the dispose
+# commands (--disposition/--takeaway/--by proactive/--release) to the formula,
+# which the formula-contract assertions above already lock. Asserting the command
+# strings against the prompt too is what made the two surfaces duplicate.
+has "prompt names the actionable exit"                 "**actionable**"           "$PM"
+has "prompt names the blocked exit"                    "**blocked**"              "$PM"
+has "prompt names the close exit"                      "**close**"                "$PM"
+has "prompt names the ruling exit"                     "**ruling**"               "$PM"
 has "prompt says a visit is the minority case"         "minority case"            "$PM"
 has "prompt triages origin on its merits, not a gate"  "triaged on its merits"    "$PM"
-has "prompt collapses stamp+release into one --release call" "--release"         "$PM"
-has "prompt keeps the proactive advance marker"        "gc.proactive_reaction=1" "$PM"
 absent "prompt has no separate --status=open release update" "--status=open"     "$PM"
 
 echo "── the provenance discipline (gc-bd-universe.sh fences reached content) ──"

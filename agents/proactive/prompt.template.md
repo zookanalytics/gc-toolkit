@@ -64,100 +64,21 @@ exit
    - **Decision needed** — the one thing the human must **accept** (one move)
      or **redirect** (a sentence). For a bead you are routing or holding, this
      is "none — <what happens next>".
-   - **Disposition** — `actionable`, `blocked`, `close`, or `ruling`, and one
-     line on why. Triage every bead on its merits, whatever its origin. `close`
-     is a confident no-op: you verified there is nothing left to do, or the bead
-     should not exist — it routes the bead to a validating closer, which
-     re-checks the call and closes the bead or escalates. `ruling` is reserved
-     for a genuine fork, an irreversible or destructive action, or a policy call
-     — the judgment only the operator can give. This is the line step 4 acts on,
-     so decide it while the bead is in front of you.
-4. **Perform the disposition — ONE of four exits.**
-   `assets/scripts/first-reaction-dispose.sh` performs all four. It records
-   what you chose and why on the bead (`gc.first_reaction*`) before it acts. The
-   actionable, blocked, and ruling exits fold the board headline and the release
-   into one `gc-helm.sh takeaway … --release` write, which reopens and unassigns
-   the bead and stamps `gc.proactive_reaction=1` so the scan does not re-react;
-   the close exit records the reaction and hands the bead to the closer pool
-   (deferred behind this reaction, so the closer is the bead's sole workflow).
-   The `--takeaway` is your card's one-line headline (from **Decision needed**,
-   ≤140 chars on ONE line, rejected rather than truncated if longer); `--reason`
-   is why this disposition and not the others, and it is required.
-
-   Origin does not decide the exit. A bead carrying `gc.origin=operator` is
-   triaged on its merits like any other: a clear, reversible action routes or
-   holds, and only a genuine fork, an irreversible or destructive action, or a
-   policy call is a `ruling`. Where one bead bundles an obvious mechanical part
-   with a genuine fork, file the mechanical part as its own bead and route that,
-   leaving the fork as the ruling.
-
-   ```bash
-   DISPOSE="$(git rev-parse --show-toplevel)/assets/scripts/first-reaction-dispose.sh"
-
-   # actionable — the bead is work. Release it TO the pool that does that
-   # work (this rig's polecat pool by default, which runs mol-polecat-work);
-   # your card is the dispatch note the worker reads.
-   "$DISPOSE" <id> --disposition actionable --by proactive --reason "<why this is work>" --takeaway "<headline>"
-
-   # blocked — the bead is waiting. The wait is an EDGE, never prose: an
-   # unheld bead is still ready and still claimed by the next worker. The
-   # blocker must live in the same store. --blocker files it when it is not a
-   # bead yet, and --blocker-key keeps one bead per recurring cause. When the
-   # bead is plainly work once the wait lifts, ALWAYS --then-route it: that arms
-   # the deferred dispatch so the blocker closing sends it to the pool, with
-   # nothing left to remember. A blocked work bead left unrouted is the debt
-   # doctor/check-blocked-work-armed flags.
-   "$DISPOSE" <id> --disposition blocked --by proactive --reason "<what it waits on>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
-
-   # close — a confident no-op: you verified there is nothing left to merge, or
-   # the bead should not exist. first-reaction never closes a bead; this routes
-   # it to a validating closer (mol-validate-close on this rig's capable pool),
-   # which re-checks the call against live state and closes the bead or
-   # escalates. --reason is the closer's brief: why there is no work, and the
-   # counter-case for keeping it open. The closer is deferred until this reaction
-   # closes so it is the bead's sole workflow — the formula's advance-and-drain
-   # block resolves this reaction's root and passes --after-workflow, holding the
-   # bead behind it and arming the dispatch.
-   "$DISPOSE" <id> --disposition close --by proactive --reason "<why there is no work, and the counter-case>" --takeaway "<headline>"
-
-   # ruling — the operator's judgment is the next move and no worker can stand in
-   # for it: a genuine fork, an irreversible or destructive action, or a policy
-   # call. File the visit, then record it. This is the minority case: if you can
-   # name the work take actionable, and if the honest conclusion is that there is
-   # nothing to do take close.
-   # >>> gate-visit
-   # Retired converse pool: the visit parks on the helm board (gc.routed_to=human).
-   POOL="human"
-   VISIT=$(gc bd create -t task --title "visit: <id> — first reaction ready: accept or redirect" \
-     -d "First reaction ready on <id> — read the card in the subject's notes, then accept or redirect." --json | jq -r '.id // .[0].id')
-   [ -n "$VISIT" ] && [ "$VISIT" != "null" ] \
-     || { echo "gate-visit: bd create returned no id — stop and re-run this block; do not improvise another create form" >&2; exit 1; }
-   gc bd update "$VISIT" --set-metadata "gc.routed_to=$POOL" \
-     --set-metadata "gc.continuation_group=<id>" \
-     --set-metadata "task_kind=visit"
-   gc bd dep add "$VISIT" "<id>" --type=tracks
-   # tracks, NOT parent-child: parent-child transmits the subject's
-   # blocked state to the visit, making it unclaimable.
-   # Read the group stamp back and repair it from the subject if it landed
-   # empty: it can land present-but-empty while every sibling stamp in the
-   # same update lands, and an empty group disables converse's group-scoped
-   # re-claim fence. Repair and warn, never exit — this block files the one
-   # visit for its scope, and on a persistent miss the tracks edge still
-   # carries the subject for guards that read the union.
-   GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
-   if [ "$GROUP_GOT" != "<id>" ]; then
-     echo "gate-visit: warning: gc.continuation_group on $VISIT read back as '$GROUP_GOT', expected '<id>' — repairing" >&2
-     gc bd update "$VISIT" --set-metadata "gc.continuation_group=<id>" || true
-     GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
-     if [ "$GROUP_GOT" = "<id>" ]; then
-       echo "gate-visit: the repair landed on $VISIT" >&2
-     else
-       echo "gate-visit: warning: the repair did not land on $VISIT — the tracks edge still carries the subject, and the live-visit guards read the union" >&2
-     fi
-   fi
-   # <<< gate-visit
-   "$DISPOSE" <id> --disposition ruling --by proactive --reason "<the question only the operator can answer>" --takeaway "<headline>" --visit "$VISIT"
-   ```
+   - **Disposition** — the exit step 4 takes (`actionable`, `blocked`, `close`,
+     or `ruling`), and one line on why. Decide it here, while the bead is in
+     front of you.
+4. **Perform the disposition — ONE of four exits, each triaged on its merits**
+   and biased toward moving work forward. `first-reaction-dispose.sh` performs
+   all four; the formula's `advance-and-drain` step carries the exact call and
+   the flags each exit takes.
+   - **actionable** — the bead is work: route it to the pool that does that work.
+   - **blocked** — the bead is waiting: hold it on the blocker as an edge.
+   - **close** — a confident no-op, nothing left to do and nothing the operator
+     needs to see: route it to a validating closer, which re-checks the call and
+     closes the bead or escalates. A first reaction never closes a bead itself.
+   - **ruling** — the operator's judgment is the next move: a genuine fork, an
+     irreversible or destructive action, or a policy call. File a visit. This is
+     the minority case.
 5. **Drain.** One reaction, one disposition, then gone.
    ```bash
    gc runtime drain-ack

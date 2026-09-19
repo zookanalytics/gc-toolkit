@@ -160,22 +160,20 @@ EOF
 ```
 
 **Disposition** is the line step 3 acts on, so decide it here, while the bead
-is in front of you. Triage every bead the same way, whatever its origin: an
-operator capture is judged on its merits like any other bead. The bias is to
-move work forward, so a human card is the minority exit. It is one of exactly
-four:
+is in front of you. Triage on the bead's merits, biased to move work forward, so
+a human card is the minority exit. It is one of exactly four:
 
 - **actionable** — the bead names work someone can pick up: a done condition
   you can state, and no unanswered question in front of it. The exit routes it
   to the pool that does that work.
 - **blocked** — the bead cannot move until something else does. Name that
   something. The exit records it as an edge.
-- **close** — you are confident there is nothing to do: you verified the thing
-  is already fixed with nothing left to merge, or the bead should not exist.
-  The exit routes the bead to a validating closer — a capable pool that
-  re-checks the conclusion and closes the bead when it agrees, or escalates to
-  the operator when it does not. A first reaction never closes a bead itself;
-  it routes, and the closer closes.
+- **close** — you are confident there is nothing to do and nothing the operator
+  needs to see: you verified the thing is already fixed with nothing left to
+  merge, or the bead should not exist. The exit routes the bead to a validating
+  closer — a capable pool that re-checks the conclusion and closes the bead when
+  it agrees, or escalates to the operator when it does not. A first reaction
+  never closes a bead itself; it routes, and the closer closes.
 - **ruling** — the operator's judgment is the next move and no worker can stand
   in for it: a genuine fork with several reasonable directions, an irreversible
   or destructive action, or a policy call. The exit files a visit.
