@@ -12,12 +12,15 @@
 #   (NOARG)   a missing bead-id is refused (exit 2)
 #   (VISIT)   engaging an OPEN visit spawns converse-opus --alias <visit>
 #             --no-attach and binds the visit to the session's runtime name
-#   (KICK)    a bound sitting is sent its START-directive opening turn — a manual
-#             converse session holds until a user turn — and (KICK-ORDER) that
-#             turn precedes the attach; a lost/failed bind never kicks
+#   (NO-KICK) an opus/fable (claude) sitting self-starts from its argv prompt and
+#             is NOT kicked — a kick would land as a stale deferred reminder
+#   (KICK-CODEX) a codex sitting, whose CLI is not trusted to consume the argv
+#             prompt, keeps the START-directive kick, and (KICK-ORDER) that turn
+#             precedes the attach; a lost/failed bind never kicks
 #   (SUBJECT) engaging a subject resolves the one open visit tracking it
 #   (REASON-NEW) a subject that already has a visit, engaged WITH --reason, gets
-#             a SECOND new visit carrying the reason (title + body), then kicked
+#             a SECOND new visit carrying the reason (title + body); the reason
+#             reaches the sitting through that body, and rides the kick for codex
 #   (NOREASON-EXISTING) the same subject with NO reason engages the existing
 #             visit, filing nothing
 #   (VISITID-REASON) --reason on an explicit visit id is refused (exit 2): a fresh
@@ -200,16 +203,19 @@ eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(BIND) the visit is assigned t
 has "$CALLED" "bd update tk-vis --if-assignee" "(BIND) …conditionally, on the open+unassigned state the guards read"
 has "$CALLED" "--if-status open" "(BIND) …and on the open status, so a lost race writes nothing"
 has "$CALLED" "--assignee gc-toolkit__converse-1" "(BIND) …by name, the identity the claim adopts"
-# A manual converse sitting holds until it receives a user turn, so a bound
-# visit alone leaves the operator on a blank pane. engage sends the sitting its
-# opening turn after the bind — on the --no-attach (board picker) path too, so
-# the sitting starts for whoever attaches later.
-has "$CALLED" "session nudge gc-77" "(KICK) the bound sitting is sent its opening turn"
-has "$CALLED" "Begin now" "(KICK) …as a START directive, not a bare poke the agent reads as a connectivity check"
+# An opus (claude) sitting self-starts from the prompt its launch delivers on
+# argv, so engage sends it no kick. A kick here would land as a deferred reminder
+# after the sitting has already framed — the stale "begin now" this removes.
+hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
 
-echo "# --model selects the tier"
+echo "# --model selects the tier; codex is the one provider that keeps the kick"
 run_engage tk-vis --model codex --no-attach
 has "$CALLED" "session new converse-codex --alias tk-vis" "(MODELFLAG) --model codex spawns converse-codex"
+# The codex CLI is not trusted to consume its argv prompt at launch, so a codex
+# sitting can wake idle; it keeps the START-directive kick. An idle session takes
+# it immediately, so no turn is in flight for the harness to defer it behind.
+has "$CALLED" "session nudge gc-77" "(KICK-CODEX) a codex sitting is sent its START-directive opening turn"
+has "$CALLED" "Begin now" "(KICK-CODEX) …as a START directive, not a bare poke read as a connectivity check"
 
 echo "# engage supplies the subject's rig context so a bare template resolves"
 # The converse templates are rig-scoped — there is no city-scoped bare
@@ -236,9 +242,9 @@ unset HAVE_VISIT
 
 echo "# --reason files a fresh visit for a distinct concern, even when one exists"
 # A reason typed at engage time is a likely-distinct concern, so it gets its OWN
-# new visit rather than folding into an existing one — and the reason reaches the
-# sitting: recorded as the new visit's body (its claim-time brief) and carried in
-# the opening-turn kick.
+# new visit rather than folding into an existing one. The reason reaches the
+# sitting through the new visit's body (its claim-time brief), which every
+# sitting reads when it claims; for codex it also rides the kick.
 export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
 printf 'open' > "$VIS_STATUS"
 run_engage tk-subj --reason "a distinct concern" --no-attach
@@ -248,7 +254,13 @@ has "$CALLED" "visit: tk-subj — a distinct concern" "(REASON-NEW) …its title
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and its body (the claim-time brief) too"
 hasnt "$OUT" "already open" "(REASON-NEW) …bypassing the one-visit-per-subject dedup on purpose"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(REASON-NEW) …then spawns a sitting for the new visit"
-has "$CALLED" "The operator's reason: a distinct concern" "(REASON-NEW) …and the reason rides the opening-turn kick"
+hasnt "$CALLED" "session nudge" "(REASON-NEW) …and the opus sitting is not kicked; it reads the reason from the body"
+# codex keeps the kick, so the reason also rides it — the sitting has it without
+# waiting to read the body.
+export BEAD_KIND=task HAVE_VISIT=1 VIS_OWNER=""
+printf 'open' > "$VIS_STATUS"
+run_engage tk-subj --reason "a distinct concern" --model codex --no-attach
+has "$CALLED" "The operator's reason: a distinct concern" "(REASON-CODEX) the reason rides the codex opening-turn kick"
 unset HAVE_VISIT
 
 echo "# with NO reason, a subject-with-visit engages the EXISTING visit, filing nothing"
@@ -330,16 +342,19 @@ echo "# a lost bind race: the visit was taken in the spawn window — do not ove
 # writes nothing and exits 13. It must NOT overwrite the winner, must suspend the
 # sitting it spawned (which holds nothing), and must point the operator at the
 # winner. The stub rejects the guarded update and records the winner as the owner.
+# Run on codex, the one provider engage kicks: the loser aborts before the kick
+# block, so "never kicked" here proves the abort precedes it rather than passing
+# vacuously the way an un-kicked claude sitting would.
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 export RACE_LOST=1 RACE_WINNER="gc-toolkit__converse-8"
-run_engage tk-vis --no-attach
+run_engage tk-vis --model codex --no-attach
 eq "$RC" 4 "(RACE) a lost bind race exits 4"
 has "$CALLED" "session new" "(RACE) …the sitting did spawn — the race is in the bind window, past the pre-spawn guards"
 has "$CALLED" "bd update tk-vis --if-assignee" "(RACE) …the bind is conditional, so the store rejects the loser (exit 13)"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-8" "(RACE) …the assignee stays the winner, never the loser"
 has "$CALLED" "session close gc-77" "(RACE) …the stranded loser sitting is closed"
 has "$OUT" "not overwriting" "(RACE) …and the operator is told the winner was not overwritten"
-hasnt "$CALLED" "session nudge" "(RACE) …and the loser sitting is never kicked — the kick is past the bind"
+hasnt "$CALLED" "session nudge" "(RACE) …and the loser codex sitting is never kicked — the abort precedes the kick"
 unset RACE_LOST RACE_WINNER
 
 echo "# a failed bind (not the race): the sitting spawned but nothing holds the visit"
@@ -348,15 +363,16 @@ echo "# a failed bind (not the race): the sitting spawned but nothing holds the 
 # spawned. It must be suspended — a converse slot sets nudge=\"\"/idle_timeout=0
 # and has no idle-claim rescue — and the operator told to re-run, not to
 # hand-assign a visit to a suspended sitting.
+# codex again, so "never kicked" proves the abort precedes the kick block.
 export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
 export BIND_FAIL=1
-run_engage tk-vis --no-attach
+run_engage tk-vis --model codex --no-attach
 eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session new" "(BIND-FAIL) …the sitting did spawn"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(cat "$ASSIGNEE")" "" "(BIND-FAIL) …the visit stays unassigned"
 hasnt "$OUT" "Assign by hand" "(BIND-FAIL) …the operator is not told to hand-assign to a suspended sitting"
-hasnt "$CALLED" "session nudge" "(BIND-FAIL) …and the closed sitting is never kicked into a turn it cannot serve"
+hasnt "$CALLED" "session nudge" "(BIND-FAIL) …and the closed codex sitting is never kicked into a turn it cannot serve"
 unset BIND_FAIL
 
 echo "# a bind another writer stomps: read-back shows a different holder"
@@ -448,13 +464,17 @@ run_engage tk-vis --no-attach
 hasnt "$CALLED" "session attach" "(ATTACH) --no-attach does not attach"
 run_engage tk-vis
 has "$CALLED" "session attach gc-77" "(ATTACH) the default attaches to the captured session id"
-# attach is a foreground handoff to the pane — nothing after it in cmd_engage
-# runs until the operator detaches — so the opening turn must be sent first for
-# the operator to land on a live, framed sitting rather than a blank one.
+hasnt "$CALLED" "session nudge" "(ATTACH) …and an opus sitting is not kicked; it self-starts before the operator lands"
+
+echo "# for codex (the kicked provider), the kick precedes the attach"
+# attach is a foreground handoff to the pane: nothing after it in cmd_engage runs
+# until the operator detaches, so a codex kick sent after the attach would never
+# fire and the operator would land on a blank pane.
+run_engage tk-vis --model codex
 nudge_line=$(printf '%s\n' "$CALLED" | grep -n "session nudge" | head -1 | cut -d: -f1)
 attach_line=$(printf '%s\n' "$CALLED" | grep -n "session attach" | head -1 | cut -d: -f1)
 if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
-  ok "(KICK-ORDER) the opening turn is sent before the attach"
+  ok "(KICK-ORDER) the codex opening turn is sent before the attach"
 else
   bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
 fi

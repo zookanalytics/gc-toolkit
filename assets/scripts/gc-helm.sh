@@ -2398,28 +2398,39 @@ cmd_engage() {
 
     echo "$PROG: engage: sitting $sname ($template) holds visit $VISIT on $bead"
 
-    # Kick the sitting's first turn. A manual (origin=manual) converse session
-    # is not driven by the pool dispatcher, and the converse role does not act
-    # on a loaded system prompt alone — it holds until a user turn arrives, then
-    # runs its opening contract (claim the visit, re-check the premise, prep,
-    # post its framing, hold). Without this turn the operator attaches to a blank
-    # pane and the sitting never starts. The kick must read as a START directive:
-    # a bare poke is taken for a connectivity check and does not begin the loop,
-    # so it names the action. `gc session nudge` delivers the text as the
-    # session's input, the same path as typing into the pane, and its wait-idle
-    # default lands the turn once the fresh session is ready to take it. Ordered
-    # bind -> kick -> attach so the operator lands on a live, framed sitting; on
-    # the --no-attach board-picker path the kick still starts the sitting for
-    # whoever attaches later. A failed kick is not fatal: the visit is bound, so
-    # report it and let the operator start it by hand.
-    kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
-    # A reason typed at engage time is the operator's framing for this sitting;
-    # carry it into the opening turn so the sitting has it without waiting to read
-    # the visit body. It reaches only the --reason path, which files a fresh visit
-    # whose body also records it.
-    [ -n "$engage_reason" ] && kick="$kick The operator's reason: $engage_reason"
-    gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
-        || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
+    # A freshly spawned sitting self-starts from the prompt its launch delivers.
+    # `gc session new` puts the rendered converse prompt on argv (every converse
+    # provider resolves to prompt_mode=arg) and step 1 of that prompt is the claim
+    # block, so a claude sitting (opus, fable) claims its visit, re-checks the
+    # premise, preps, and posts its framing with no keystrokes. Sending it a kick
+    # as well is worse than redundant. engage would deliver the kick while that
+    # self-started turn is still running, so the harness holds it as a deferred
+    # reminder and releases it after the framing lands, and the operator reads a
+    # stale "begin now" once per engage.
+    #
+    # codex is the exception. gascity delivers its prompt the same way, but the
+    # codex CLI is not trusted to consume an argv prompt at launch: its pool slots
+    # carry no prompt template and are primed by an explicit nudge instead. A
+    # codex sitting can wake idle at its prompt, so it keeps a START directive
+    # kick. A bare poke reads as a connectivity check and does not begin the loop,
+    # so the kick names the action. An idle session takes it at once, with no
+    # in-flight turn for the harness to defer it behind. The kick precedes the
+    # attach so the operator lands on a started sitting, and on the --no-attach
+    # board-picker path it starts the sitting for whoever attaches later. A failed
+    # kick is not fatal: the visit is bound, so report it and let the operator
+    # start it by hand.
+    #
+    # A --reason is filed into the visit body by cmd_open, so every sitting reads
+    # it when it claims. The kick also carries it, for the one provider kicked.
+    case "$engage_model" in
+        opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
+        *)
+            kick="The operator engaged this sitting. Begin now: claim your visit ($VISIT), re-check its premise, prep, and post your framing, then hold for the operator."
+            [ -n "$engage_reason" ] && kick="$kick The operator's reason: $engage_reason"
+            gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
+                || echo "$PROG: engage: spawned and bound $VISIT, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
+            ;;
+    esac
 
     if [ "$engage_attach" = "1" ]; then
         gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
