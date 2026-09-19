@@ -434,9 +434,8 @@ func ruled(a Anchor, takeaway string, waitingOpen []string) bool {
 // operator decided and is owed nothing right now — but not settled, because a
 // recorded wait has not landed. [ruled] holds the band for the settled case,
 // where a disposition is owed; this holds it for the in-flight one, so a
-// ruled-and-slung row reads as work in progress instead of as an un-answered
-// human gate reading "no agent will take it" while NEEDS carries the ruling
-// (tk-6llp0t).
+// ruled-and-slung row bands as work in progress rather than as an un-ruled
+// human gate.
 //
 // It shares [ruled]'s guards for the same reasons: a demand's takeaway is the
 // question, not an answer, and an unread wait graph cannot prove work is in
@@ -537,8 +536,7 @@ func severity(a Anchor, r rollup, held bool, stale int, dispDue, isRuled, isRule
 	// un-answered gate: it bands as in-flight work, below the ELEVATED an
 	// un-ruled human gate gets and above the LOW a settled ruling sinks to.
 	// Childless like the settled arm; a decomposed one is banded by its roll-up
-	// through the count branches, exactly as a decomposed ruled row is
-	// (tk-6llp0t).
+	// through the count branches, exactly as a decomposed ruled row is.
 	case isRuledInFlight && r.mTotal == 0:
 		sev0 = SevNormal
 	case !isRuled && !isRuledInFlight && humanGated(a):
@@ -634,10 +632,8 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "ruled — takeaway recorded"
 	// A ruled row whose slung work is still open reports that its ruling is
 	// being acted on — distinct from the settled phrase above and from the
-	// un-ruled arm below. That arm disagreeing with NEEDS is the contradiction
-	// this fixes: the row read "no agent will take it" while NEEDS carried the
-	// ruling. Childless like the settled case; a decomposed one reports its
-	// counts (tk-6llp0t).
+	// un-ruled arm below. Childless like the settled case; a decomposed one
+	// reports its counts.
 	case isRuledInFlight && r.mTotal == 0:
 		return "ruled — work in flight"
 	case !isRuled && !isRuledInFlight && a.Source == "decision":

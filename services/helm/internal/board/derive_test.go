@@ -909,15 +909,14 @@ func TestRuledStandsDown(t *testing.T) {
 	}
 }
 
-// TestRuledInFlightIsInProgress is the case tk-6llp0t fixes. "Answered" is not
+// TestRuledInFlightIsInProgress covers the in-flight ruling. "Answered" is not
 // "answered and the work landed", so a human-gated row whose ruling slung work
 // still open is not settled — [ruled] does not fire. But it is not un-ruled
 // either: the operator decided and an agent now holds the next move. It reads as
 // work in progress — NORMAL, below the ELEVATED an un-answered gate gets and
 // above the LOW a settled ruling sinks to — and frontier agrees with NEEDS
-// instead of contradicting it. That contradiction was the bug: the row read
-// "no agent will take it" (or, for a decision, "human-gated decision") while
-// NEEDS carried the ruling.
+// rather than reporting the un-ruled "no agent will take it" (or, for a
+// decision, "human-gated decision") on a row that already carries its ruling.
 //
 // The wait clause is only non-vacuous because the gather reads waiting edges for
 // these kinds at all — see source.needsWaitingEdges. Both human-gated shapes are

@@ -394,7 +394,7 @@ flight** while a `blocks` wait is still open — an agent holds the next move �
 | no takeaway | ELEVATED, frontier "human-gated decision" or "routed to the operator — no agent will take it"; NEEDS names the silence (below) |
 | takeaway, waits unreadable | as un-ruled — an unread graph proves nothing |
 | open demand (`gc.demand_for`) | as un-ruled — its takeaway is the question, not an answer to it |
-| takeaway, a wait still open, no children | NORMAL, "ruled — work in flight": answered, but an agent holds the slung work — neither the settled stand-down below nor an un-ruled gate (tk-6llp0t) |
+| takeaway, a wait still open, no children | NORMAL, "ruled — work in flight": answered, but an agent holds the slung work — neither the settled stand-down below nor an un-ruled gate |
 | takeaway, every wait landed, no children | LOW, "ruled — takeaway recorded", NEEDS "ruled — close or extend" |
 | takeaway, *with* children (wait open or landed) | banded by the roll-up, like a decomposed `parked` subject |
 
