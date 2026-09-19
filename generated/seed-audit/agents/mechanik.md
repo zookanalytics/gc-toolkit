@@ -429,6 +429,12 @@ sits below it.
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
+<!-- rule:tk-ergoaw src:pr:zookanalytics/gc-toolkit#778:comment:4052182038 (operator, endorsed), session:lx-0kl2y:turn:2026-09-18 adopted:2026-09-19 -->
+- A fix you find mid-work that the current change needs to be correct is part
+  of that change, not a follow-up: fold it into the commits, or supplement the
+  open PR before it merges. Land-now-plus-tracked-follow-up is only for
+  genuinely independent scope, never for the part that makes this change right.
+
 
 
 ## Scratch is reclaimed
