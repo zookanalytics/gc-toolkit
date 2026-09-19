@@ -678,6 +678,50 @@ while IFS= read -r row; do
     case "$disp_kind" in re-homed|folded|fixed-upstream|duplicate|not-needed)
       if [ -n "$disp_succ" ]; then
         STORE_ARG=(); [ -n "$disp_store" ] && STORE_ARG=(--successor-store "$disp_store")
+        # Dispose the branch's parked rework/rebase children BEFORE the anchor's
+        # own close below, not after it. A rework child holds a `blocks` edge on
+        # the anchor, so while one is open bead-rehome's non-force close of the
+        # anchor is refused and the anchor strands OPEN with its pointer already
+        # stamped — the whole failure this arm exists to prevent. Closing the
+        # children first clears that hold, so the anchor's close below succeeds in
+        # the same pass. These children exist only to carry this branch to a merge
+        # the now-closed PR will never reach; left open they re-offer to the fix
+        # pool, which re-derives the close one claim at a time. Dispose each
+        # through the same sanctioned terminal close the anchor takes —
+        # bead-rehome.sh, pointed at the anchor's successor — so the branch leaves
+        # no husk. A child here is a PARKED (open, so unclaimed) bead on this
+        # branch that carries a rework resume (prepare_mode) and is not itself an
+        # anchor (no merge_result): a child a worker holds is in_progress and left
+        # alone, and a review bead on the branch carries no prepare_mode and is
+        # left to signoff. A rebase_hold is an operator's freeze on the branch, so
+        # a held child is reported, never closed out from under them.
+        anchor_branch=$(printf '%s' "$fresh" | jq -r '.[0].metadata.branch // ""')
+        if [ -n "$anchor_branch" ]; then
+          if kids=$(bd_list --status=open --metadata-field branch="$anchor_branch"); then
+            while IFS=$'\t' read -r kid khold; do
+              [ -n "$kid" ] || continue
+              if is_held "$khold"; then
+                echo "$PROG: $id — parked child $kid on '$anchor_branch' is frozen (rebase_hold); left for the operator" >&2
+                continue
+              fi
+              if [ -x "$REHOME" ] && "$REHOME" --origin "$kid" --successor "$disp_succ" --kind not-needed \
+                   ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
+                   --note "Parked rework child of $id on '$anchor_branch'; moot once PR#$num closed $disp_kind" >/dev/null 2>&1; then
+                echo "$PROG: $id — dropped parked child $kid ('$anchor_branch' is moot once the PR is disposed)"
+              else
+                echo "$PROG: $id — could not drop parked child $kid; dispose it by hand: bead-rehome.sh --origin $kid --successor $disp_succ --kind not-needed" >&2
+              fi
+            done <<CHILDREN_EOF
+$(printf '%s' "$kids" | jq -r --arg a "$id" --arg succ "$disp_succ" '
+  .[] | select(.id != $a) | select(.id != $succ)
+      | select(((.metadata.merge_result // "") | tostring) == "")
+      | select(((.metadata.prepare_mode // "") | tostring) != "")
+      | [ .id, ((.metadata.rebase_hold // "") | tostring) ] | @tsv')
+CHILDREN_EOF
+          else
+            echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
+          fi
+        fi
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
                    ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
@@ -696,45 +740,6 @@ while IFS= read -r row; do
               echo "$PROG: $id — retired stale visit $vid (disposition was pre-recorded)"
             else
               echo "$PROG: $id — could not retire stale visit $vid; leaving it for the operator" >&2
-            fi
-          fi
-          # The rebase and rework children parked on this branch exist only to
-          # carry it to a merge the now-closed PR will never reach. Left open
-          # they re-offer to the fix pool, which re-derives the close one claim
-          # at a time. Dispose each the sanctioned way the anchor went — a
-          # terminal close through bead-rehome.sh, pointed at the successor the
-          # anchor got — so the branch leaves no husk. A child here is a PARKED
-          # (open, so unclaimed) bead on this branch that carries a rework resume
-          # (prepare_mode) and is not itself an anchor (no merge_result): a child
-          # a worker holds is in_progress and left alone, and a review bead on the
-          # branch carries no prepare_mode and is left to signoff. A rebase_hold
-          # is an operator's freeze on the branch, so a held child is reported,
-          # never closed out from under them.
-          anchor_branch=$(printf '%s' "$fresh" | jq -r '.[0].metadata.branch // ""')
-          if [ -n "$anchor_branch" ]; then
-            if kids=$(bd_list --status=open --metadata-field branch="$anchor_branch"); then
-              while IFS=$'\t' read -r kid khold; do
-                [ -n "$kid" ] || continue
-                if is_held "$khold"; then
-                  echo "$PROG: $id — parked child $kid on '$anchor_branch' is frozen (rebase_hold); left for the operator" >&2
-                  continue
-                fi
-                if [ -x "$REHOME" ] && "$REHOME" --origin "$kid" --successor "$disp_succ" --kind not-needed \
-                     ${STORE_ARG[@]+"${STORE_ARG[@]}"} \
-                     --note "Parked rework child of $id on '$anchor_branch'; moot once PR#$num closed $disp_kind" >/dev/null 2>&1; then
-                  echo "$PROG: $id — dropped parked child $kid ('$anchor_branch' is moot once the PR is disposed)"
-                else
-                  echo "$PROG: $id — could not drop parked child $kid; dispose it by hand: bead-rehome.sh --origin $kid --successor $disp_succ --kind not-needed" >&2
-                fi
-              done <<CHILDREN_EOF
-$(printf '%s' "$kids" | jq -r --arg a "$id" --arg succ "$disp_succ" '
-  .[] | select(.id != $a) | select(.id != $succ)
-      | select(((.metadata.merge_result // "") | tostring) == "")
-      | select(((.metadata.prepare_mode // "") | tostring) != "")
-      | [ .id, ((.metadata.rebase_hold // "") | tostring) ] | @tsv')
-CHILDREN_EOF
-            else
-              echo "$PROG: $id — could not enumerate parked children on '$anchor_branch'; any are left for the operator" >&2
             fi
           fi
           echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
