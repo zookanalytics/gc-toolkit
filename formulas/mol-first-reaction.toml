@@ -264,9 +264,10 @@ you chose and why on the bead (`gc.first_reaction*`) before it acts. The
 actionable, blocked, and ruling exits fold the board takeaway and the release
 into one `gc-helm.sh takeaway … --release` write, which also stamps
 `gc.proactive_reaction=1` so the scan does not re-react; the close exit records
-the reaction and slings the bead to the closer pool. Each block below resolves
-it and re-derives the bead in its own shell, because that is the only thing a
-block can rely on.
+the reaction and hands the bead to the closer pool, deferred behind this
+reaction's own workflow so the closer is the bead's sole dispatch surface. Each
+block below resolves it and re-derives the bead in its own shell, because that is
+the only thing a block can rely on.
 
 The **takeaway** in every exit below is your card's one-line headline, derived
 from **## Decision needed**, ≤140 chars on ONE line — the wrapper rejects a
@@ -334,8 +335,12 @@ closes a bead; it hands the conclusion to a capable pool that re-checks it
 against live state and closes the bead when it agrees, or escalates to the
 operator when it does not. Your `--reason` is the closer's brief: why there is
 no work, and the counter-case for keeping the bead open, so the closer can
-disagree. The bead is slung to this rig's capable pool carrying
-mol-validate-close (pass `--route` for another pool).
+disagree. The closer runs mol-validate-close on this rig's capable pool (pass
+`--route` for another pool). It is not poured now: this reaction is still a live
+workflow on the bead, and the closer must be the bead's sole workflow, so
+`--after-workflow` names this reaction's root and the closer is deferred — held
+behind that root and armed, then slung by the deferred-dispatch reconcile pass
+once the reaction closes.
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -345,7 +350,11 @@ DISPOSE=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
   [ -x "$c/assets/scripts/first-reaction-dispose.sh" ] && { DISPOSE="$c/assets/scripts/first-reaction-dispose.sh"; break; }
 done
 [ -n "$DISPOSE" ] || { echo "first-reaction-dispose.sh not found in the pack" >&2; exit 1; }
-"$DISPOSE" "$WORK_BEAD_ID" --disposition close --by proactive --reason "<why there is no work, and the counter-case for keeping it open>" --takeaway "<the ≤140-char headline>"
+# This reaction's own workflow root, so the closer is deferred until it closes
+# rather than poured as a second live workflow on the bead. The root is the
+# kind=workflow bead launched from this workflow's input convoy.
+REACTION_ROOT=$(gc bd list --status open,in_progress --metadata-field gc.input_convoy_id={{convoy_id}} --metadata-field gc.kind=workflow --json --limit 0 | tr -d '[:cntrl:]' | jq -r '.[0].id // empty')
+"$DISPOSE" "$WORK_BEAD_ID" --disposition close --by proactive --reason "<why there is no work, and the counter-case for keeping it open>" --takeaway "<the ≤140-char headline>" ${REACTION_ROOT:+--after-workflow "$REACTION_ROOT"}
 ```
 
 A high-confidence "nothing to do" takes this exit, not a card: the closer

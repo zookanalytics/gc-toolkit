@@ -46,8 +46,13 @@ case "$1 ${2:-}" in
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
-    # `dep list --json` answers with what the store holds AFTER the helm call.
-    case "${3:-}" in list) printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;; esac ;;
+    # `dep list --json` answers with what the store holds AFTER the helm call;
+    # `dep add` is the close exit's gate edge, and FAKE_DEP_FAILS models a hold
+    # that did not land.
+    case "${3:-}" in
+      add)  [ -n "${FAKE_DEP_FAILS:-}" ] && exit 1 ;;
+      list) printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
+    esac ;;
   "bd close") printf 'CLOSE %s\n' "$*" >> "$FAKE_LOG" ;;
   "sling "*) printf 'SLING %s\n' "$*" >> "$FAKE_LOG"
     [ -n "${FAKE_SLING_FAILS:-}" ] && exit 1 ;;
@@ -84,6 +89,7 @@ chmod +x "$TMP/proactive"
 cat > "$TMP/deferred" <<'DD'
 #!/usr/bin/env bash
 printf 'DEFERRED %s\n' "$*" >> "$FAKE_LOG"
+[ -n "${FAKE_DEFERRED_FAILS:-}" ] && exit 1
 # deferred-dispatch.sh arm keys on gc.routed_to and status, NOT on
 # gc.execution_routed_to — that stamp is a finished pour's provenance, not a live
 # queue. A first-reaction subject carries only the stamp and no gc.routed_to, so
@@ -349,10 +355,14 @@ eq "$RC" "0" "(ORIGIN) …and the ruling exit, when the agent chooses it"
 export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
 unset FAKE_SHOW_JSON
 
-# ── close: route to a validating closer, never close here ────────────────────
+# ── close: hand the bead to a validating closer, never close here ────────────
 # The reaction concluded there is nothing to do. It does not close the bead — a
-# cheap model must not have the last word — it slings the bead to a capable pool
+# cheap model must not have the last word — it hands the bead to a capable pool
 # carrying mol-validate-close, which re-checks the call and closes or escalates.
+# Called by hand on a bead with no live workflow (no --after-workflow), the
+# closer is slung now; run from inside a live reaction (--after-workflow), it is
+# deferred (held on the reaction root, dispatch armed) so it is the bead's sole
+# workflow — that path is covered further below.
 # GC_RIG is set on every run: the proactive pool is rig-scoped, and it is what
 # both defaults the pool target and pins the sling with --rig.
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "already fixed, nothing to merge" --takeaway "close: fixed in #123"
@@ -400,6 +410,53 @@ eq "$RC" "4" "(CLOSE) a failed sling is a runtime failure"
 has "gc.first_reaction=close" "$LOG" "(CLOSE) …the record was written first and stands"
 hasnt "gc.proactive_reaction=1" "$LOG" "(CLOSE) …and the landed marker is not stamped"
 unset FAKE_SLING_FAILS
+
+# ── close --after-workflow: DEFER behind the reaction, never a second workflow ─
+# Run from inside a live reaction, the closer must be the bead's SOLE dispatch
+# surface (formula-spec-v2 §3), so the close exit does NOT sling now: it holds
+# the bead on the reaction's own workflow root and arms a deferred dispatch, and
+# the deferred-dispatch reconcile pass slings mol-validate-close once that root
+# closes. The arm carries the exact sling reconcile replays, so the closer
+# FORMULA is asserted here rather than a bare "something was slung" — the gap the
+# review flagged in the stubbed immediate-sling path.
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "already fixed" --takeaway "close: fixed in #123" --after-workflow tk-root
+eq "$RC" "0" "(CLOSEDEFER) the deferred close exit succeeds"
+has "UPDATE bd update tk-sub --set-metadata gc.first_reaction=close" "$LOG" "(CLOSEDEFER) it records the disposition first"
+has "DEP bd dep add tk-sub tk-root -t blocks" "$LOG" "(CLOSEDEFER) …holds the bead on the reaction root so reconcile waits for it to close"
+has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close" "$LOG" \
+   "(CLOSEDEFER) …and arms a deferred dispatch carrying the exact --on mol-validate-close sling reconcile replays"
+hasnt "SLING" "$LOG" "(CLOSEDEFER) …and slings nothing now — the reconcile pass does it once the reaction closes"
+has "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and stamps the landed marker so a re-offer does not queue a second closer"
+hasnt "CLOSE bd close" "$LOG" "(CLOSEDEFER) …and never closes the bead itself"
+
+# The record precedes the act here too: the record lands before the arm.
+REC_LINE=$(printf '%s\n' "$LOG" | grep -n 'gc.first_reaction=close' | head -1 | cut -d: -f1)
+ARM_LINE=$(printf '%s\n' "$LOG" | grep -n 'DEFERRED arm' | head -1 | cut -d: -f1)
+{ [ -n "$REC_LINE" ] && [ -n "$ARM_LINE" ] && [ "$REC_LINE" -lt "$ARM_LINE" ]; } \
+  && ok "(CLOSEDEFER) the record is written before the arm" \
+  || bad "(CLOSEDEFER) the record is written before the arm (rec=$REC_LINE arm=$ARM_LINE)"
+
+# The gate is best-effort: a hold that does not land still arms the dispatch
+# (reconcile slings when the routing layer permits it, or retries), so a missing
+# hold is never a lost dispatch.
+FAKE_DEP_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow tk-root
+eq "$RC" "0" "(CLOSEDEFER) a hold that did not land still arms the dispatch"
+has "DEFERRED arm tk-sub" "$LOG" "(CLOSEDEFER) …the deferred dispatch is armed regardless"
+unset FAKE_DEP_FAILS
+
+# An arm that fails to record IS a runtime failure: no closer would be
+# dispatched, so the documented re-run resumes (the landed marker is unstamped).
+FAKE_DEFERRED_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow tk-root
+eq "$RC" "4" "(CLOSEDEFER) a failed arm is a runtime failure"
+has "gc.first_reaction=close" "$LOG" "(CLOSEDEFER) …the record was written first and stands"
+hasnt "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and the landed marker is not stamped"
+unset FAKE_DEFERRED_FAILS
+
+# --after-workflow belongs to close only, and must be same-store as the subject.
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --after-workflow tk-root
+eq "$RC" "2" "(CLOSEDEFER) --after-workflow is refused on a non-close exit"
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow zz-root
+eq "$RC" "2" "(CLOSEDEFER) a cross-store --after-workflow is refused (the hold would hold nothing)"
 
 # ── A LANDED first reaction refuses a second dispose ─────────────────────────
 # gc-helm.sh takeaway --release stamps gc.proactive_reaction=1 in the write that

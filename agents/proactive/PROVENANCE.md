@@ -11,7 +11,8 @@ of the Bead-Universe Operating Model (specs/bead-universe/design-doc.md — Key
 Components 5-6). A proactive worker takes one bead, gives it a cheap first
 reaction (read the body, write a first-reaction card to the notes, then
 dispose: route the bead to the pool that does that work, hold it on the bead it
-waits for, or file a visit), and drains. It is the city's first-level triage:
+waits for, route a confident no-op to a validating closer, or file a visit), and
+drains. It is the city's first-level triage:
 it makes the human arrive at *advanced* work — a bead that already moved one
 step — and it keeps the beads it can schedule out of the human's queue
 entirely.
@@ -69,20 +70,25 @@ Triggered by `gc sling <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
 (process-scan). NOT a resident loop either way.
 
 The first reaction NEVER closes the target work bead — every disposition
-advances it and leaves it open. `assets/scripts/first-reaction-dispose.sh`
-performs the three and records which one and why (`gc.first_reaction*`), so a
-wrong call is visible rather than silent. The `gc.proactive_reaction` marker
-stops the scan from re-reacting. The card shape (Understanding · Found ·
-Proposal · Decision needed · Disposition) is the same one a converse session
-opens with and the board's pick-a-row visit lands the human on.
+advances it and leaves it open, the `close` disposition included: it routes the
+bead to a validating closer (mol-validate-close), which re-checks the no-work
+call and closes the bead on its own confident check or escalates.
+`assets/scripts/first-reaction-dispose.sh` performs the four and records which
+one and why (`gc.first_reaction*`), so a wrong call is visible rather than
+silent. The `gc.proactive_reaction` marker stops the scan from re-reacting. The
+card shape (Understanding · Found · Proposal · Decision needed · Disposition) is
+the same one a converse session opens with and the board's pick-a-row visit
+lands the human on.
 
-One bead is never triaged on its merits: a subject carrying `gc.origin=operator`
-came from `gc-visit-open`, where a human typed a topic and is waiting to talk
-about it, so the visit is the only disposition the script will perform on it.
+Every bead is triaged on its merits, whatever its origin. A subject carrying
+`gc.origin=operator` is weighed like any other: a clear, reversible action
+routes or holds, and only a genuine fork, an irreversible or destructive action,
+or a policy call is a ruling. The guardrail lives in the reacting agent's rubric
+(`formulas/mol-first-reaction.toml`), not in an origin gate on the script.
 
 Gate: `tools/proactive-first-reaction-fixture.sh` (hermetic) — demand flows
 unconditionally; the mr-invariant refuses `direct`; the formula writes the card
-and ends in one of three recorded dispositions without closing; one `scan
+and ends in one of four recorded dispositions without closing; one `scan
 --sling` sweep is capped; the slice tool fences reached content.
 `assets/scripts/first-reaction-dispose.test.sh` covers the exits themselves.
 Design refs: design-doc.md Key Components 5-6, Phase 4.

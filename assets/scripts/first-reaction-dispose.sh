@@ -10,9 +10,12 @@
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts.
-#   close       there is nothing to do -> sling the bead to a validating-closer
+#   close       there is nothing to do -> hand the bead to a validating-closer
 #               pool (mol-validate-close), which re-checks the call and closes
-#               the bead or escalates. A first reaction never closes a bead.
+#               the bead or escalates. A first reaction never closes a bead. Run
+#               from inside a live reaction (--after-workflow), the closer is
+#               deferred until that workflow closes, so it is the bead's sole
+#               dispatch surface rather than a second one stacked on the reaction.
 #   ruling      only the operator can answer -> the visit its caller filed.
 #
 # The route/edge/visit is the act; gc.first_reaction* is the record of it, and
@@ -49,7 +52,7 @@ Usage:
                             (--waiting-on <bead-id> | --blocker "<title>" [--blocker-key <key>])...
                             [--then-route <rig>/<agent>]
   first-reaction-dispose.sh <bead> --disposition close --reason "<why nothing to do>" --takeaway "<headline>"
-                            [--route <rig>/<agent>]
+                            [--route <rig>/<agent>] [--after-workflow <root-bead-id>]
   first-reaction-dispose.sh <bead> --disposition ruling --reason "<why>" --takeaway "<headline>"
                             --visit <visit-bead-id>
   common: [--by <who>] [--db <path>] [--dry-run]
@@ -59,8 +62,14 @@ Usage:
   --takeaway is the board headline (≤140 chars, enforced by gc-helm.sh).
   --route (actionable, close) defaults to ${GC_RIG}/gc-toolkit.polecat, and
   fails closed when the target cannot be rig-qualified. On close it is the
-  validating-closer pool: the bead is slung there carrying mol-validate-close,
-  which re-checks the no-work conclusion and closes the bead or escalates.
+  validating-closer pool that runs mol-validate-close, which re-checks the
+  no-work conclusion and closes the bead or escalates.
+  --after-workflow (close) names the live workflow this close runs inside — a
+  first reaction's own root. The closer is then DEFERRED, not slung now: the
+  bead is held on that root and a deferred dispatch is armed, so the reconcile
+  pass slings mol-validate-close once the root closes and the bead is the sole
+  live workflow's target. Omit it to sling the closer immediately (a bead with
+  no live workflow, e.g. an operator running this by hand).
   --blocker files (once) the bead the subject is waiting on, when the wait is
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
@@ -71,7 +80,7 @@ EOF
 
 BEAD=""; DISPOSITION=""; REASON=""; TAKEAWAY=""; BY="proactive"
 ROUTE=""; VISIT=""; THEN_ROUTE=""; BLOCKER_TITLE=""; BLOCKER_KEY=""
-DB=""; DRY=""
+DB=""; DRY=""; AFTER_WORKFLOW=""
 WAITING=""          # space-separated bead ids
 
 while [ $# -gt 0 ]; do
@@ -96,6 +105,8 @@ while [ $# -gt 0 ]; do
         --blocker-key=*) BLOCKER_KEY="${1#--blocker-key=}"; shift ;;
         --visit)    shift; [ $# -gt 0 ] || usage_die "--visit needs a bead id"; VISIT="$1"; shift ;;
         --visit=*)  VISIT="${1#--visit=}"; shift ;;
+        --after-workflow)   shift; [ $# -gt 0 ] || usage_die "--after-workflow needs a bead id"; AFTER_WORKFLOW="$1"; shift ;;
+        --after-workflow=*) AFTER_WORKFLOW="${1#--after-workflow=}"; shift ;;
         --db)       shift; [ $# -gt 0 ] || usage_die "--db needs a path"; DB="$1"; shift ;;
         --db=*)     DB="${1#--db=}"; shift ;;
         --dry-run|-n) DRY=1; shift ;;
@@ -122,8 +133,8 @@ same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
 
 case "$DISPOSITION" in
     actionable)
-        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE" ] \
-            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
+        [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$AFTER_WORKFLOW" ] \
+            || usage_die "actionable takes --route only (--waiting-on/--blocker/--then-route/--visit/--after-workflow belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
@@ -133,16 +144,25 @@ case "$DISPOSITION" in
     close)
         # close routes to a validating closer, so it takes --route like
         # actionable; the closer re-checks the no-work call and closes the bead.
+        # --after-workflow names the live workflow this close is performed from
+        # (a first reaction's own root): the closer is deferred until that root
+        # closes, so it is poured as the bead's sole dispatch surface, never a
+        # second one stacked on the live reaction.
         [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE" ] \
-            || usage_die "close takes --route only (--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
+            || usage_die "close takes --route and --after-workflow only (--waiting-on/--blocker/--then-route/--visit belong to the other exits)"
         [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
         case "$ROUTE" in
             */*) : ;;
             *) usage_die "cannot rig-qualify the closer target '$ROUTE': set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody." ;;
         esac
+        if [ -n "$AFTER_WORKFLOW" ]; then
+            [ "$AFTER_WORKFLOW" != "$BEAD" ] || usage_die "--after-workflow $AFTER_WORKFLOW is the bead itself"
+            same_store "$AFTER_WORKFLOW" "$BEAD" \
+                || usage_die "--after-workflow $AFTER_WORKFLOW is in another store than $BEAD; the gating hold is a blocks edge, which holds nothing across stores (component-model I1)."
+        fi
         ;;
     blocked)
-        [ -z "$ROUTE$VISIT" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route and --visit belong to the other exits)"
+        [ -z "$ROUTE$VISIT$AFTER_WORKFLOW" ] || usage_die "blocked takes --waiting-on/--blocker/--then-route (--route/--visit/--after-workflow belong to the other exits)"
         [ -n "$WAITING" ] || [ -n "$BLOCKER_TITLE" ] \
             || usage_die "blocked needs --waiting-on <bead-id> or --blocker \"<title>\": the wait IS the edge, and prose about it holds nothing"
         if [ -n "$BLOCKER_TITLE" ]; then
@@ -162,7 +182,7 @@ case "$DISPOSITION" in
         fi
         ;;
     ruling)
-        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE" ] || usage_die "ruling takes --visit only"
+        [ -z "$ROUTE$WAITING$BLOCKER_TITLE$THEN_ROUTE$AFTER_WORKFLOW" ] || usage_die "ruling takes --visit only"
         [ -n "$VISIT" ] || usage_die "ruling needs --visit <visit-bead-id>: file the visit first (the gate-visit block), then record it here"
         [ "$VISIT" != "$BEAD" ] || usage_die "--visit $VISIT is the bead itself"
         same_store "$VISIT" "$BEAD" \
@@ -265,7 +285,11 @@ if [ -n "$DRY" ]; then
     case "$DISPOSITION" in
         actionable) printf 'would release %s to %s\n' "$BEAD" "$ROUTE" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" ;;
-        close)      printf 'would sling %s to validating closer %s (mol-validate-close)\n' "$BEAD" "$ROUTE" ;;
+        close)      if [ -n "$AFTER_WORKFLOW" ]; then
+                        printf 'would hold %s on %s, then arm a deferred dispatch to validating closer %s (mol-validate-close) for when %s closes\n' "$BEAD" "$AFTER_WORKFLOW" "$ROUTE" "$AFTER_WORKFLOW"
+                    else
+                        printf 'would sling %s to validating closer %s (mol-validate-close)\n' "$BEAD" "$ROUTE"
+                    fi ;;
         ruling)     printf 'would record visit %s on %s\n' "$VISIT" "$BEAD" ;;
     esac
     exit 0
@@ -320,30 +344,52 @@ gc_bd update "$BEAD" \
     --set-metadata "gc.first_reaction_at=$(now_utc)" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
 
-# ── The close exit: route to a validating closer, never close here ────
+# ── The close exit: hand the bead to a validating closer, never close here ────
 # The reaction concluded there is nothing to do. first-reaction never closes a
-# bead — a cheap model must not have the last word on a close — so this hands
-# the bead to a capable pool running mol-validate-close, which re-checks the
+# bead — a cheap model must not have the last word on a close — so the bead is
+# handed to a capable pool running mol-validate-close, which re-checks the
 # conclusion against live state and closes the bead only when it agrees,
-# escalating to a human or re-routing when it does not. Slinging the formula
-# pours its workflow onto the subject and routes the workflow root to the pool;
-# the subject is claimed there as the workflow's tracked member, not via a raw
-# pool route — a raw route runs mol-polecat-work, which never closes a bead.
+# escalating to a human or re-routing when it does not. mol-validate-close reads
+# its subject as its input convoy's single tracked member, so the bead is claimed
+# there as the workflow's member, not via a raw pool route — a raw route runs
+# mol-polecat-work, which never closes a bead.
+#
+# --after-workflow names the live reaction workflow this close runs inside. The
+# closer must be the bead's SOLE dispatch surface, never a second workflow
+# stacked on the still-live reaction (docs/reference/specs/formula-spec-v2.md §3,
+# "one live dispatch surface per unit of work"). So the sling is DEFERRED: the
+# bead is held on the reaction's own workflow root and a deferred dispatch is
+# armed, and the deferred-dispatch reconcile pass slings mol-validate-close once
+# that root closes and bd reports the bead ready. Called by hand on a bead with
+# no live workflow, --after-workflow is absent and the closer is slung now.
 if [ "$DISPOSITION" = "close" ]; then
-    SLING_RIG_ARG=""
-    [ -n "${GC_RIG:-}" ] && SLING_RIG_ARG="--rig $GC_RIG"
-    # shellcheck disable=SC2086  # $SLING_RIG_ARG expands to 0 or 2 space-free fields
-    gc sling $SLING_RIG_ARG "$ROUTE" "$BEAD" --on mol-validate-close >/dev/null 2>&1 \
-        || die "could not sling $BEAD to the validating closer $ROUTE (gc sling --on mol-validate-close failed). The disposition record stands — clear the cause and re-run this command."
+    if [ -n "$AFTER_WORKFLOW" ]; then
+        # Gate the deferred dispatch: hold the bead on the live reaction root so
+        # reconcile does not sling until it closes. Best-effort — a missing hold
+        # only means reconcile may attempt the sling before the reaction retires,
+        # which the routing layer either permits as concurrent work or refuses and
+        # retries the next pass; it is never a lost dispatch.
+        gc_bd dep add "$BEAD" "$AFTER_WORKFLOW" -t blocks >/dev/null 2>&1 \
+            || note "could not hold $BEAD on the reaction root $AFTER_WORKFLOW; the closer dispatch is armed ungated and reconcile will sling it once $BEAD is ready"
+        # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
+        "$DEFERRED" arm "$BEAD" --target "$ROUTE" --sling-arg --on --sling-arg mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
+            || die "could not arm the validating-closer dispatch on $BEAD (deferred-dispatch arm --on mol-validate-close failed). The disposition record stands — clear the cause and re-run this command."
+    else
+        SLING_RIG_ARG=""
+        [ -n "${GC_RIG:-}" ] && SLING_RIG_ARG="--rig $GC_RIG"
+        # shellcheck disable=SC2086  # $SLING_RIG_ARG expands to 0 or 2 space-free fields
+        gc sling $SLING_RIG_ARG "$ROUTE" "$BEAD" --on mol-validate-close >/dev/null 2>&1 \
+            || die "could not sling $BEAD to the validating closer $ROUTE (gc sling --on mol-validate-close failed). The disposition record stands — clear the cause and re-run this command."
+    fi
     # The reaction has landed. gc.proactive_reaction=1 is what the second-dispose
     # guard above and the scan read; the other exits get it from takeaway
     # --release, but this exit does not release, so it stamps it here — without
-    # it a re-offered advance-and-drain would sling a second closer.
+    # it a re-offered advance-and-drain would dispatch a second closer.
     gc_bd update "$BEAD" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 \
-        || die "slung $BEAD to $ROUTE but could not stamp gc.proactive_reaction=1; a re-run would sling a second closer. Stamp it by hand: gc bd update $BEAD --set-metadata gc.proactive_reaction=1"
+        || die "dispatched the closer for $BEAD but could not stamp gc.proactive_reaction=1; a re-run would dispatch a second closer. Stamp it by hand: gc bd update $BEAD --set-metadata gc.proactive_reaction=1"
     # The board headline, for the moment the closer escalates back to a visit.
     "$HELM" takeaway "$BEAD" "$TAKEAWAY" --by "$BY" >/dev/null 2>&1 \
-        || note "slung $BEAD to $ROUTE but the board takeaway did not set; the closer holds the bead regardless"
+        || note "dispatched the closer for $BEAD but the board takeaway did not set; the closer holds the bead regardless"
     printf '%s: %s disposed as %s (%s)\n' "$PROG" "$BEAD" "$DISPOSITION" "${TARGET:-no target}"
     exit 0
 fi

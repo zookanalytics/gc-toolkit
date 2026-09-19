@@ -68,12 +68,36 @@ The `actionable` exit routes a raw bead with `gc-helm takeaway --release
 `mol-polecat-work`. That formula implements code and hands to the refinery; its
 store-only arm names a disposition for someone else to close, and it never
 closes a bead. So a no-op routed as actionable would not be closed. The close
-disposition therefore pours a dedicated formula with `gc sling <pool> <bead>
---on mol-validate-close` — the mechanism the merge cadence already uses to sling
-`mol-review` to the codex pool — and reuses the rig's capable `polecat` pool as
-the closer. No new pool is defined: a dedicated closer pool would need
-city-level config outside this pack, and the operator's model (cheap triage →
-capable worker closes) is satisfied by the pool the city already runs.
+disposition therefore hands the bead to a dedicated formula, `mol-validate-close`,
+on the rig's capable `polecat` pool. No new pool is defined: a dedicated closer
+pool would need city-level config outside this pack, and the operator's model
+(cheap triage → capable worker closes) is satisfied by the pool the city already
+runs.
+
+### The closer is deferred, not poured beside the live reaction
+
+`first-reaction-dispose.sh`'s close exit runs from `mol-first-reaction`'s own
+terminal step, so the subject is still tracked by a live reaction workflow.
+Pouring `mol-validate-close` onto it there would leave the bead driven by two
+dispatch surfaces at once, against `docs/reference/specs/formula-spec-v2.md` §3
+("one live dispatch surface per unit of work"). So the close exit DEFERS: the
+formula's `advance-and-drain` block resolves this reaction's own workflow root
+and passes it as `--after-workflow`, the script holds the bead on that root and
+arms a deferred dispatch (`deferred-dispatch.sh`), and the deferred-dispatch
+reconcile pass slings `gc sling <pool> <bead> --on mol-validate-close` once the
+root closes and the bead is the sole live workflow's target. Run by hand on a
+bead with no live workflow, `--after-workflow` is omitted and the closer is
+slung immediately.
+
+The installed gc (v1.4.1) would not refuse the immediate sling: its
+convoy-tracked-workflow guard is scoped to `(formula, bead)`, so distinct
+formulas on one bead are permitted concurrent work
+(`checkLegacySourceWorkflowConflict` → `liveConvoyTrackedWorkflowRoots`,
+`internal/sling/sling_attachment.go`). Deferring is what keeps the
+one-live-surface invariant regardless of gc version, and it matches the stricter
+convoy-first guard `docs/gascity-routing-model.md` describes, under which the
+immediate sling would be refused (`already has live workflow`) and the terminal
+step would re-offer into that refusal.
 
 ### Close authority, and its guardrail
 
@@ -87,10 +111,12 @@ reaction's `gc.first_reaction_reason` as a claim to verify, not a verdict.
 
 ### Never a double-sling
 
-`close` records `gc.first_reaction=close` before the act, slings the closer, and
-only then stamps `gc.proactive_reaction=1` — the marker the second-dispose guard
-and the scan read. A sling that fails leaves the record without that marker, so
-the documented re-run resumes rather than pouring a second closer.
+`close` records `gc.first_reaction=close` before the act, hands off the closer
+(arms the deferred dispatch, or slings directly when run by hand with no live
+workflow), and only then stamps `gc.proactive_reaction=1` — the marker the
+second-dispose guard and the scan read. A handoff that fails leaves the record
+without that marker, so the documented re-run resumes rather than queuing a
+second closer.
 
 ## Acceptance mapping
 
