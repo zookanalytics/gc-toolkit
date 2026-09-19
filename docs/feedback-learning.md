@@ -162,16 +162,23 @@ taste, a cluster with no `obs.source=operator` observation cannot claim it.
 Hard cap **12 entries**. `specs/tk-awa7hv/operator-profile-audit.md` records
 the audit that populated it.
 
-**`work-quality` — standards for what you produce.**
-`template-fragments/work-quality.template.md`
-(`{{ define "work-quality" }}`), a "Standards for what you produce" section.
-Its entries fire while an artifact is being written: the evidence a
-load-bearing claim rests on, whether a fix reaches the cause, how prose and
-documentation read. It is elected by the roles that author durable output,
-which is a wider set than the profile's — a role that never addresses the
-operator still writes code, docs, and bead bodies someone else reads.
-`formulas/mol-review.toml` resolves this fragment during a review and holds
-the diff's output to it. Hard cap **12 entries**.
+**`work-quality` — standards for what you produce.** A shared base,
+`template-fragments/work-quality-base.template.md`
+(`{{ define "work-quality-base" }}`), plus one per-class fragment —
+`work-quality-polecats`, `work-quality-human`, `work-quality-system` — that
+render together under a single "Standards for what you produce" section. Its
+entries fire while an artifact is being written: the evidence a load-bearing
+claim rests on, whether a fix reaches the cause, how prose and documentation
+read. It is elected by the roles that author durable output, which is a wider
+set than the profile's — a role that never addresses the operator still writes
+code, docs, and bead bodies someone else reads. Each such role composes the base
+and its class fragment, so a universal standard lives in the base once while a
+class-specific one reaches only the classes it impacts — a standard about
+changing a repo does not reach the human converse class. The classes: polecats
+(polecat, polecat-codex), human (converse and its per-model variants), system
+(deacon, mechanik, proactive, witness, refinery, keeper).
+`formulas/mol-review.toml` resolves these fragments during a review and holds
+the diff's output to them. Hard cap **12 entries per fragment**.
 
 **`convention` — learned conventions, per role.**
 `template-fragments/learned-conventions-<role>` fragments — one per role,

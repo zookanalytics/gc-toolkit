@@ -608,7 +608,9 @@ Rules:
 
 {{ template "operator-profile" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-human" . }}
 
 {{ template "scratch-reclaim" . }}
 

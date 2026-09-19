@@ -684,10 +684,6 @@ visit, say) keeps that format. Operator-initiated form: the
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -702,6 +698,14 @@ visit, say) keeps that format. Operator-initiated form: the
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
+
+<!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
+<!-- Composed after work-quality-base by the human-facing converse class
+     (converse and its per-model variants). Seeded empty: every current
+     work-quality standard is either universal (work-quality-base) or specific
+     to the polecat and system classes, which fix defects and run the work and
+     audit passes converse does not. Holds a standard that applies to converse
+     but not to every authoring role. -->
 
 
 

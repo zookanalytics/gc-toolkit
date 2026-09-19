@@ -119,7 +119,9 @@ main. Never `--merge direct`. The pool already defaults
 
 {{ template "operator-profile" . }}
 
-{{ template "work-quality" . }}
+{{ template "work-quality-base" . }}
+
+{{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}
 

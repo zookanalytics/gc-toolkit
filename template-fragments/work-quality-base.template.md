@@ -1,5 +1,10 @@
-{{ define "work-quality" }}
-{{/* Elected by roles that author durable output: artifacts that outlive the
+{{ define "work-quality-base" }}
+{{/* The shared base of the work-quality carrier: the authoring standards that
+     hold for every role that produces durable output, whatever class it sits
+     in. Each such role composes this fragment AND its per-class fragment
+     (work-quality-polecats / work-quality-human / work-quality-system), so a
+     universal standard lives here once instead of in each class.
+     Elected by roles that author durable output: artifacts that outlive the
      turn and that someone else reads — code, docs, specs, PR and bead bodies,
      findings and reports. A role whose only outputs are its own control flow
      (a claim, a close, a formula-emitted escalation) does not elect it.
@@ -23,10 +28,6 @@
   find what allowed it to happen, and prefer a design in which it cannot
   happen again over a patch for the instance.
 
-<!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
-- File work as a bead in the pass that names it, and put the bead id in the
-  row that proposed it. A prose promise loses members of a set.
-
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv adopted:2026-08-26 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
@@ -41,4 +42,4 @@
 - Write plain sentences. No arrow chains, no em-dash pileups, no
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
-{{ end }}
+{{- end }}

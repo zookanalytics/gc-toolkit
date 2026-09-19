@@ -34,20 +34,20 @@ covers that dimension.
 | [`claude`](agents/claude.md) | 5,876 | 1,469 |
 | [`codex`](agents/codex.md) | 5,876 | 1,469 |
 | [`control-dispatcher`](agents/control-dispatcher.md) | 5,326 | 1,331 |
-| [`converse`](agents/converse.md) | 43,097 | 10,774 |
-| [`converse-codex`](agents/converse-codex.md) | 43,097 | 10,774 |
-| [`converse-fable`](agents/converse-fable.md) | 43,097 | 10,774 |
-| [`converse-opus`](agents/converse-opus.md) | 43,097 | 10,774 |
-| [`deacon`](agents/deacon.md) | 11,796 | 2,949 |
+| [`converse`](agents/converse.md) | 43,402 | 10,850 |
+| [`converse-codex`](agents/converse-codex.md) | 43,402 | 10,850 |
+| [`converse-fable`](agents/converse-fable.md) | 43,402 | 10,850 |
+| [`converse-opus`](agents/converse-opus.md) | 43,402 | 10,850 |
+| [`deacon`](agents/deacon.md) | 12,123 | 3,030 |
 | [`dog`](agents/dog.md) | 2,359 | 589 |
 | [`gemini`](agents/gemini.md) | 5,876 | 1,469 |
-| [`keeper`](agents/keeper.md) | 22,726 | 5,681 |
-| [`mechanik`](agents/mechanik.md) | 26,648 | 6,662 |
-| [`polecat`](agents/polecat.md) | 22,948 | 5,737 |
-| [`polecat-codex`](agents/polecat-codex.md) | 22,978 | 5,744 |
-| [`proactive`](agents/proactive.md) | 9,335 | 2,333 |
-| [`refinery`](agents/refinery.md) | 10,107 | 2,526 |
-| [`witness`](agents/witness.md) | 14,348 | 3,587 |
+| [`keeper`](agents/keeper.md) | 23,053 | 5,763 |
+| [`mechanik`](agents/mechanik.md) | 26,975 | 6,743 |
+| [`polecat`](agents/polecat.md) | 23,256 | 5,814 |
+| [`polecat-codex`](agents/polecat-codex.md) | 23,286 | 5,821 |
+| [`proactive`](agents/proactive.md) | 9,662 | 2,415 |
+| [`refinery`](agents/refinery.md) | 10,434 | 2,608 |
+| [`witness`](agents/witness.md) | 14,675 | 3,668 |
 
 ## Formula recipes
 
@@ -63,7 +63,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-do-work`](formulas/mol-do-work.md) | `city` | 1,439 | 359 |
 | [`mol-dog-shutdown-dance`](formulas/mol-dog-shutdown-dance.md) | `city` | 3,212 | 803 |
 | [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` | 3,215 | 803 |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,470 | 1,117 |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` | 4,516 | 1,129 |
 | [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` | 2,687 | 671 |
 | [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` | 2,220 | 555 |
 | [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` | 3,589 | 897 |

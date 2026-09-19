@@ -119,7 +119,7 @@ target file, the budget, and what the adoption costs to keep.
 |---|---|---|---|
 | `convention` | `template-fragments/learned-conventions-<role>.template.md` | `fragment_bullet_cap` bullets | every turn of that role |
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
-| `work-quality` | `template-fragments/work-quality.template.md` | `work_quality_entry_cap` entries | every turn of every role that renders it |
+| `work-quality` | `template-fragments/work-quality-base.template.md` + one `work-quality-<class>` | `work_quality_entry_cap` entries per fragment | every turn of every role that renders it |
 | `review-rubric` | `formulas/mol-review.toml`, step `review`, "What to check" | one dimension per amendment | every review |
 | `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | per review, resolved on demand |
 
@@ -136,7 +136,10 @@ Choose by what the learning *is*:
   being written rather than while a person is being addressed, so it
   reaches roles that never talk to the operator. Prefer `review-rubric`
   when a reader catches the failure in the diff; use this carrier when the
-  author must hold the standard as they write.
+  author must hold the standard as they write. Route a universal standard to
+  the shared base (`work-quality-base`) and a class-specific one to the
+  fragment(s) of the class(es) it impacts — polecats, human, or system; a
+  standard about changing a repo does not reach the human converse class.
 - **`review-rubric`** when the failure is **visible in a diff**. Prefer this
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a
@@ -268,7 +271,7 @@ verification gap, so the exemplar route is not open to it either.
 Promotion without pruning is how prompts rot. Walk the adopted entries in
 **every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
 one row per anchored entry across all five — the conventions fragments, the
-profile, the work-quality fragment, the exemplar corpus, and the
+profile, the work-quality fragments, the exemplar corpus, and the
 `review-rubric` ledger in `formulas/mol-review.toml`. Of each entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose

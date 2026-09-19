@@ -229,8 +229,8 @@ finding this diff carries, not the first one that appears.
   section naming more than the anchor means the branch carries work from more
   than one bead, and your verdict covers every one of them. Pre-open there is
   no page — your verdict becomes its opening comment instead.
-- **Work-quality standards** — resolve the work-quality fragment from the
-  pack checkout and hold the diff's output (code, comments, docs) to its
+- **Work-quality standards** — resolve the work-quality fragments from the
+  pack checkout and hold the diff's output (code, comments, docs) to their
   "Standards for what you produce" entries. A violation is a blocking
   (request-changes) finding. The operator profile is not read here: its
   entries govern how a role addresses the operator at runtime, which is a
@@ -240,14 +240,16 @@ finding this diff carries, not the first one that appears.
 ```bash
 # Resolve on the directory, not on one fragment: a checkout lagging the commit
 # that added a fragment still resolves the pack, so a miss costs that fragment
-# and not the whole read.
+# and not the whole read. The carrier is a set of fragments — the shared base
+# plus one per role class — so glob them all: work-quality-base holds the
+# universal standards and each work-quality-<class> holds its class's.
 PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -d "$c/template-fragments" ] && { PACK="$c"; break; }
 done
-if [ -n "$PACK" ] && [ -r "$PACK/template-fragments/work-quality.template.md" ]; then
-  cat "$PACK/template-fragments/work-quality.template.md"
+if [ -n "$PACK" ] && ls "$PACK"/template-fragments/work-quality-*.template.md >/dev/null 2>&1; then
+  cat "$PACK"/template-fragments/work-quality-*.template.md
 else
-  echo "work-quality fragment not found in this checkout; note that in the verdict's coverage line"
+  echo "work-quality fragments not found in this checkout; note that in the verdict's coverage line"
 fi
 # Absent on an older pack pin, and empty until the first exemplar is adopted.
 [ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.template.md" ] && cat "$PACK/template-fragments/learning-exemplars.template.md"
