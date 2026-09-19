@@ -2124,6 +2124,87 @@ out=$(STUB_ISSUE_LIST_RC=1 run)
 has "$out" "feedback history unreadable" "the unreadable Conversation read defers the pass"
 eq "$(meta IC3 pr_posture)" "<absent>" "…and records no clean posture over the unread comment"
 
+echo "# required-contexts-for is one block, shared byte-for-byte with merge.sh"
+# The red-check arm routes on the same gating set merge.sh holds a merge on, so
+# the two carry one copy of the resolver between markers; drift would let the
+# cadence route on a different set than the merge holds on.
+rcf() { awk '/^[[:space:]]*# >>> required-contexts-for[[:space:]]*$/{inb=1;next} /^[[:space:]]*# <<< required-contexts-for[[:space:]]*$/{inb=0} inb' "$1"; }
+[ -n "$(rcf "$HERE/pr-facts.sh")" ] && ok "block present here" || bad "block missing from pr-facts.sh"
+eq "$(rcf "$HERE/pr-facts.sh")" "$(rcf "$HERE/merge.sh")" "…byte-identical to merge.sh's copy"
+
+echo "# a red required check with nothing routing it -> ONE rework child to the fix pool"
+# The finding (tk-m130pj): a conflict-free, answered-up PR whose required CI is
+# red sits in pull_request until a person notices, because no arm turns a failing
+# required check into work. This is that arm. `test` is required by branch
+# protection and has terminally FAILED at the head; no feedback is unanswered.
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
+store "[$(anchor RC1 50)]"
+printf '%s' "$(prview 50 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/zook/gc-toolkit/actions/runs/999"}]')" > "$GH_DIR/pr_view_50.json"
+out=$(run)
+has "$out" "required check(s) failing (test); filed rebase-mode rework new-2 routed to $FIX" "the red required check is turned into a routed rework child"
+eq "$(meta new-2 task_kind)" "rework" "child carries the rework role marker"
+eq "$(meta new-2 anchor_bead)" "RC1" "child names the anchor it belongs to"
+eq "$(meta RC1 task_kind)" "<absent>" "…and the anchor carries none, so the marker discriminates"
+eq "$(meta new-2 branch)" "polecat/x50" "child resumes the head branch"
+eq "$(meta new-2 target)" "main" "child targets the base"
+eq "$(meta new-2 merge_strategy)" "mr" "child is mr-mode"
+eq "$(meta new-2 existing_pr)" "https://github.com/zook/gc-toolkit/pull/50" "child reworks THIS PR, opening no second one"
+eq "$(meta new-2 prepare_mode)" "rebase" "a polecat/* head is classified rebase"
+eq "$(meta new-2 'gc.routed_to')" "$FIX" "child routed to the fix pool"
+has "$(meta new-2 rejection_reason)" "head sha-50" "the rejection reason names the head (the dedup key)"
+has "$(meta new-2 rejection_reason)" "test" "…names the failing check"
+has "$(meta new-2 rejection_reason)" "actions/runs/999" "…and carries the run log url"
+grep -qxF "new-2|blocks|RC1" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
+eq "$(meta RC1 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
+
+echo "# …dedup: an open child at this head suppresses a twin (rework OR review)"
+out=$(run)
+has "$out" "already covers this head, no new child" "the second pass files nothing"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1" "still exactly one child"
+
+echo "# …a live review child (keyed on anchor_bead, not this branch) also stands the arm down"
+# Built inline, not via child(): a later block reuses that name for a 2-arg
+# helper, and this dedup keys on anchor_bead, which that shape does not carry.
+RCK_REVIEW='{"id":"RCK","status":"in_progress","assignee":"rig/gc-toolkit.polecat-codex","notes":"","title":"Review PR#51","metadata":{"anchor_bead":"RC2","task_kind":"review","branch":"polecat/x51","gc.routed_to":"rig/gc-toolkit.polecat-codex"}}'
+store "[$(anchor RC2 51),$RCK_REVIEW]"
+printf '%s' "$(prview 51 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_51.json"
+out=$(run)
+has "$out" "child RCK already covers this head, no new child" "an in-flight review on the anchor suppresses the red-check dispatch"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+
+echo "# …a PENDING required check has not failed — nothing is routed"
+store "[$(anchor RC3 52)]"
+printf '%s' "$(prview 52 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"IN_PROGRESS","conclusion":null,"detailsUrl":"https://x/runs/2"}]')" > "$GH_DIR/pr_view_52.json"
+out=$(run)
+hasnt "$out" "required check(s) failing" "a still-running required check is left for a later pass"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
+
+echo "# …a MISSING required check is ambiguous with not-started — nothing is routed"
+store "[$(anchor RC4 53)]"
+printf '%s' "$(prview 53 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[]')" > "$GH_DIR/pr_view_53.json"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "a required context with no run files no rework"
+
+echo "# …a GREEN required check files nothing, even with an advisory check red"
+store "[$(anchor RC5 54)]"
+printf '%s' "$(prview 54 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"},{"name":"lint","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_54.json"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "only a failing REQUIRED check routes; the advisory one is left alone"
+
+echo "# …an operator merge_hold files no red-check rework (the anchor is theirs)"
+store "[$(anchor RC6 55 ',"merge_hold":"true"')]"
+printf '%s' "$(prview 55 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_55.json"
+out=$(run)
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "a held anchor dispatches nothing"
+
+echo "# …a BLOCKED PR on a red required check routes too (the filed incident's state)"
+store "[$(anchor RC8 57)]"
+printf '%s' "$(prview 57 OPEN BLOCKED MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://x/runs/5"}]')" > "$GH_DIR/pr_view_57.json"
+out=$(run)
+has "$out" "required check(s) failing (test); filed" "a BLOCKED PR whose block is a red required check is routed, not left to idle"
+eq "$(meta new-2 anchor_bead)" "RC8" "…as a rework child of the blocked anchor"
+rm -f "$GH_DIR/rules_main.json"
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

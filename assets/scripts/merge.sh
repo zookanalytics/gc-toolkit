@@ -239,7 +239,11 @@ LANES
 
 # Which status checks actually gate <branch>: rulesets + classic protection via
 # the branch object (the protection endpoint needs admin and 404s ambiguously).
+# pr-facts.sh's red-check arm routes on the same gating set this holds on, so it
+# carries a byte-identical copy between the markers below; a test proves the two
+# never drift.
 REQ_STATE=""; REQ_CONTEXTS=""
+# >>> required-contexts-for
 required_contexts_for() { # <branch>
   local b="$1" rules branch rrc brc
   REQ_STATE=""; REQ_CONTEXTS=""
@@ -258,6 +262,7 @@ required_contexts_for() { # <branch>
   } | sed '/^$/d' | sort -u)
   REQ_STATE="known"
 }
+# <<< required-contexts-for
 
 ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than merging on a partial view" >&2
