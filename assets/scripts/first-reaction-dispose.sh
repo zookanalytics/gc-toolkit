@@ -304,7 +304,10 @@ fi
 # ruling that recommends an execution stamps gc.recommended_formula in the same
 # write: it is the field that turns a plain visit into a recommendation visit
 # (the operator's Accept reads it), so a half-written recommendation stays
-# visible rather than leaving a bare visit that lost its recommendation.
+# visible rather than leaving a bare visit that lost its recommendation. Any
+# disposition that names no recommendation clears a stale one a prior ruling
+# left, so the record states the current recommendation and never a superseded
+# one the operator could still Accept.
 TARGET=""
 case "$DISPOSITION" in
     actionable) TARGET="$ROUTE" ;;
@@ -315,7 +318,11 @@ set -- --set-metadata "gc.first_reaction=$DISPOSITION" \
        --set-metadata "gc.first_reaction_reason=$REASON" \
        --set-metadata "gc.first_reaction_target=$TARGET" \
        --set-metadata "gc.first_reaction_at=$(now_utc)"
-[ -n "$RECOMMENDED_FORMULA" ] && set -- "$@" --set-metadata "gc.recommended_formula=$RECOMMENDED_FORMULA"
+if [ -n "$RECOMMENDED_FORMULA" ]; then
+    set -- "$@" --set-metadata "gc.recommended_formula=$RECOMMENDED_FORMULA"
+elif [ -n "$(subject_meta gc.recommended_formula)" ]; then
+    set -- "$@" --unset-metadata "gc.recommended_formula"
+fi
 gc_bd update "$BEAD" "$@" >/dev/null 2>&1 \
     || die "could not record the disposition on $BEAD (does it exist${DB:+ in $DB}?) — nothing else was written"
 

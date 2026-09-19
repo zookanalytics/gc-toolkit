@@ -349,6 +349,29 @@ run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
 eq "$RC" "0" "(RECO) a Discuss-only ruling succeeds"
 hasnt "gc.recommended_formula" "$LOG" "(RECO) …and stamps no recommendation, so the visit offers no Accept"
 
+# A partial record can already carry a recommendation a prior ruling stamped: the
+# record was written, the act did not land (no gc.proactive_reaction=1), and this
+# retry resumes it. A retry that names no recommendation clears that stale stamp
+# in the record write, so the visit never offers Accept for a formula the current
+# ruling did not recommend.
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.first_reaction":"ruling","gc.recommended_formula":"mol-old"}}]'
+run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
+    --takeaway "needs a ruling: which default" --visit tk-visit1
+eq "$RC" "0" "(RECO) a Discuss-only retry over a partial recommendation succeeds"
+has "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …and clears the stale recommendation the prior ruling left"
+hasnt "gc.recommended_formula=" "$LOG" "(RECO) …stamping no new one, so the record states the current ruling"
+
+# The same partial record retried with a different recommendation replaces the
+# stale formula rather than clearing it — the record always states the current
+# one, whichever direction it moves.
+run tk-sub --disposition ruling --reason "the newer mol is the right execution" \
+    --takeaway "recommend: execute via mol-new — Accept or Discuss" \
+    --visit tk-visit1 --recommended-formula mol-new
+eq "$RC" "0" "(RECO) a retry that re-recommends succeeds"
+has "gc.recommended_formula=mol-new" "$LOG" "(RECO) …and the record carries the new recommendation"
+hasnt "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …with no stale-clear, because the ruling names one"
+unset FAKE_SHOW_JSON
+
 # --recommended-formula belongs to the ruling exit only: the other two route or
 # hold the bead, neither gates a visit the operator Accepts.
 run tk-sub --disposition actionable --reason "r" --takeaway "t" \
