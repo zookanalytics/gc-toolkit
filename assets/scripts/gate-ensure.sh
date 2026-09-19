@@ -189,19 +189,31 @@ open_rework_child() { # <anchor-id>
         | .id ] | (.[0] // empty)' 2>/dev/null
 }
 
-# An open validation pass on <anchor>? Echoes its id, else empty. A validation
-# pass is a task_kind=validation bead (a mol-validate pour) whose anchor_bead is
-# this anchor; while one is open every lane derives validating and no review may
-# be dispatched — the validator rules the whole diff, so a review that read it
-# now would read a state no one intends to ship. Non-zero rc = the ledger could
-# not answer; the caller holds the dispatch, the same as an unreadable in-flight
-# lookup.
-open_validation_pass() { # <anchor-id>
+# The open validation passes on <anchor>, one id per line (empty when none). A
+# validation pass is a task_kind=validation bead (a mol-validate pour) whose
+# anchor_bead is this anchor; while any is open every lane derives validating and
+# no review may be dispatched — the validator rules the whole diff, so a review
+# that read it now would read a state no one intends to ship. More than one can
+# be live at once: pr-facts.sh opens a human-lane pass beside a codex pass,
+# because a codex pass holds the merge but cannot rule human findings. Non-zero
+# rc = the ledger could not answer; the caller holds the dispatch, the same as an
+# unreadable in-flight lookup.
+open_validation_passes() { # <anchor-id>
   local raw
   raw=$(bd_list --metadata-field anchor_bead="$1" --status="$LIVE_STATUSES") || return 1
   printf '%s' "$raw" | jq -r '
-    [ .[] | select(((.metadata.task_kind // "") | tostring) == "validation") ]
-    | (.[0].id // empty)' 2>/dev/null
+    .[] | select(((.metadata.task_kind // "") | tostring) == "validation") | .id' 2>/dev/null
+}
+
+# The first open validation pass on <anchor> (empty when none). Quiescence needs
+# only existence — any open pass holds every review off the anchor — so it reads
+# the first; the dispatch arm iterates open_validation_passes instead, so an
+# already-dispatched first pass cannot shadow a sibling still needing one.
+# Non-zero rc = unreadable, propagated so the caller fails closed.
+open_validation_pass() { # <anchor-id>
+  local all
+  all=$(open_validation_passes "$1") || return 1
+  printf '%s\n' "$all" | head -1
 }
 
 # Quiescence — the anchor-wide half of "no review while anything acts on the
@@ -765,44 +777,52 @@ STRAY
 $gates
 GATES
 
-  # --- dispatch the validator onto an open, undispatched validation pass --------
+  # --- dispatch the validator onto every open, undispatched validation pass -----
   # A lane enters validating when an open task_kind=validation bead sits on the
   # anchor — opened by pr-facts.sh on a human feedback batch (or the machine-
   # review path), and detected by open_validation_pass above for quiescence
-  # clause (c), which holds every review off the anchor while it is open. That
+  # clause (c), which holds every review off the anchor while any is open. Such a
   # pass IS the fresh whole-diff review; this arm dispatches mol-validate ONTO it
   # so the validator runs and rules the batch's findings, a second dispatch shape
-  # in the same authority rather than a second authority. The pass carries its
-  # own dispatch note (its opener built it from validate-dispatch-body.sh) and
-  # its shape (anchor_bead, check_name, reviewed_oid), and the sling attaches the
-  # method, so nothing is created or re-noted here. It slings exactly once: the
-  # pour retires gc.routed_to and stamps gc.execution_routed_to (pour_ok), so a
-  # pass already carrying that stamp was poured by a prior pass and a re-sling
-  # would mint a second workflow root. With no --validate-pool the pass holds the
-  # merge with nothing to release it — the same stuck shape an armed gate has
-  # with no --review-pool — so it warns rather than dispatching blind.
-  if ! VPASS_D=$(open_validation_pass "$id"); then
+  # in the same authority rather than a second authority. More than one pass can
+  # be live at once — pr-facts.sh opens a human-lane pass beside a codex pass,
+  # because a codex pass holds the merge but cannot rule human findings — so this
+  # iterates every open pass rather than the first: a first pass already
+  # dispatched must not shadow a newer sibling that still needs a validator. Each
+  # pass carries its own dispatch note (its opener built it from
+  # validate-dispatch-body.sh) and its shape (anchor_bead, check_name,
+  # reviewed_oid), and the sling attaches the method, so nothing is created or
+  # re-noted here. Each pass slings exactly once: the pour retires gc.routed_to
+  # and stamps gc.execution_routed_to (pour_ok), so a pass already carrying that
+  # stamp was poured by a prior pass and a re-sling would mint a second workflow
+  # root. With no --validate-pool a pass holds the merge with nothing to release
+  # it — the same stuck shape an armed gate has with no --review-pool — so it
+  # warns rather than dispatching blind.
+  if ! VPASSES=$(open_validation_passes "$id"); then
     echo "$PROG: $id validation-pass probe unreadable; no validator dispatched this pass (merge stays held, retry next pass)" >&2
     skipped=$((skipped + 1))
-  elif [ -n "$VPASS_D" ]; then
-    vp_exec=$(gc bd show "$VPASS_D" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.execution_routed_to"] // empty' 2>/dev/null)
-    if [ -n "$vp_exec" ]; then
-      echo "$PROG: $id validation pass $VPASS_D already dispatched (poured to $vp_exec); no re-sling"
-    elif [ -z "$VALIDATE_POOL" ]; then
-      echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
-      skipped=$((skipped + 1))
-    else
-      gc sling ${GC_RIG:+--rig "$GC_RIG"} "$VALIDATE_POOL" "$VPASS_D" --on "$VALIDATE_FORMULA" >/dev/null 2>&1
-      if pour_ok "$VPASS_D" "$VALIDATE_POOL"; then
-        gc session wake "$VALIDATE_POOL" >/dev/null 2>&1 || true
-        gc session nudge "$VALIDATE_POOL" "Validation pass $VPASS_D for anchor $id" >/dev/null 2>&1 || true
-        validated=$((validated + 1))
-        echo "$PROG: $id dispatched validation pass $VPASS_D to $VALIDATE_POOL — $VALIDATE_FORMULA"
-      else
-        echo "$PROG: WARN $id validation pass $VPASS_D pour did not read back; merge stays held, retry next pass" >&2
+  else
+    while IFS= read -r VPASS_D; do
+      [ -n "$VPASS_D" ] || continue
+      vp_exec=$(gc bd show "$VPASS_D" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.execution_routed_to"] // empty' 2>/dev/null)
+      if [ -n "$vp_exec" ]; then
+        echo "$PROG: $id validation pass $VPASS_D already dispatched (poured to $vp_exec); no re-sling"
+      elif [ -z "$VALIDATE_POOL" ]; then
+        echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
         skipped=$((skipped + 1))
+      else
+        gc sling ${GC_RIG:+--rig "$GC_RIG"} "$VALIDATE_POOL" "$VPASS_D" --on "$VALIDATE_FORMULA" >/dev/null 2>&1
+        if pour_ok "$VPASS_D" "$VALIDATE_POOL"; then
+          gc session wake "$VALIDATE_POOL" >/dev/null 2>&1 || true
+          gc session nudge "$VALIDATE_POOL" "Validation pass $VPASS_D for anchor $id" >/dev/null 2>&1 || true
+          validated=$((validated + 1))
+          echo "$PROG: $id dispatched validation pass $VPASS_D to $VALIDATE_POOL — $VALIDATE_FORMULA"
+        else
+          echo "$PROG: WARN $id validation pass $VPASS_D pour did not read back; merge stays held, retry next pass" >&2
+          skipped=$((skipped + 1))
+        fi
       fi
-    fi
+    done <<< "$VPASSES"
   fi
 
   # --- record the pass's own verdict on the anchor ------------------------------

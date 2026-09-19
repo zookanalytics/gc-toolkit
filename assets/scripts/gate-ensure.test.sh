@@ -338,6 +338,19 @@ out=$(run_val)
 has "$out" "validation pass vp-2 already dispatched" "an already-poured pass is not re-slung"
 has "$out" "0 validation passes dispatched" "…so no second dispatch"
 
+echo "# a dispatched codex pass does not shadow an undispatched human pass beside it"
+# pr-facts.sh opens a human-lane pass beside a codex pass — a codex pass holds the
+# merge but cannot rule human findings. The codex pass is already dispatched and
+# lists first; iterating every pass is what still reaches the human one, which a
+# first-only read would leave blocked forever.
+store "[$(anchor VD5 pull_request codex "" polecat/vd5), {\"id\":\"vp-5c\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"validation\",\"anchor_bead\":\"VD5\",\"check_name\":\"codex\",\"gc.execution_routed_to\":\"$VALP\"}}, $(validation vp-5h VD5 human)]"
+oid vd5 > "$GH_DIR/head_polecat_vd5"
+out=$(run_val)
+has "$out" "validation pass vp-5c already dispatched" "the already-poured codex pass is recognised, not re-slung"
+has "$out" "dispatched validation pass vp-5h to $VALP" "…and the undispatched human pass beside it is still dispatched"
+eq "$(meta vp-5h 'gc.execution_routed_to')" "$VALP" "…its pour read back"
+has "$out" "1 validation passes dispatched" "…exactly one new dispatch this pass"
+
 echo "# an open validation pass with no --validate-pool holds — nothing releases it"
 # The same stuck shape an armed gate has with no --review-pool: the pass blocks
 # the merge and there is no pool to dispatch the validator to.
