@@ -582,6 +582,18 @@ Do the actual implementation work.
 from load-context. Focus on fixing the specific issue that caused
 rejection — don't redo everything.
 
+**If the rework turns out already satisfied:** a resumed rework can need no
+change, because the feedback was addressed on the branch already or the
+dispatch was spurious. Hand it back anyway through the normal path: run
+self-review, then submit-and-exit. The branch is unchanged, so its `git push
+origin HEAD` is a safe no-op ("Everything up-to-date"), and the atomic handoff
+is what routes the bead to the refinery and clears your
+`gc.session_id`/`gc.session_name`. The refinery closes it as a rework hand-back
+landed-on-branch. Never improvise the hand-back with a bare `gc bd update
+--assignee=<refinery>`: it leaves your session identity stamped on the bead,
+which `doctor/executor-identity-residue` reports and the witness owner filter
+(which ranks `gc.session_id` ahead of the assignee) reads as a false orphan.
+
 Derive your work bead in this shell context:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
